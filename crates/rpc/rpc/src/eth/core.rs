@@ -184,7 +184,7 @@ where
 impl<N, Rpc> EthApiTypes for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert<Error = EthApiError>,
 {
     type Error = EthApiError;
     type NetworkTypes = Rpc::Network;
@@ -247,7 +247,7 @@ where
 impl<N, Rpc> SpawnBlocking for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert<Error = EthApiError>,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {

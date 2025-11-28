@@ -188,7 +188,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
 
                     parent = result.block.clone_sealed_header();
 
-                    let block = simulate::build_simulated_block(
+                    let block = simulate::build_simulated_block::<Self::Error, _>(
                         result.block,
                         results,
                         return_full_transactions.into(),

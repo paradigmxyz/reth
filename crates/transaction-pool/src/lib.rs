@@ -354,14 +354,19 @@ where
         Self { pool: Arc::new(PoolInner::new(validator, ordering, blob_store, config)) }
     }
 
-    /// Returns the wrapped pool.
-    pub(crate) fn inner(&self) -> &PoolInner<V, T, S> {
+    /// Returns the wrapped pool internals.
+    pub fn inner(&self) -> &PoolInner<V, T, S> {
         &self.pool
     }
 
     /// Get the config the pool was configured with.
     pub fn config(&self) -> &PoolConfig {
         self.inner().config()
+    }
+
+    /// Get the validator reference.
+    pub fn validator(&self) -> &V {
+        self.inner().validator()
     }
 
     /// Validates the given transaction
@@ -527,7 +532,7 @@ where
     }
 
     fn pooled_transaction_hashes_max(&self, max: usize) -> Vec<TxHash> {
-        self.pooled_transaction_hashes().into_iter().take(max).collect()
+        self.pool.pooled_transactions_hashes_max(max)
     }
 
     fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {

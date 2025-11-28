@@ -3,9 +3,8 @@
 use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    executor::WorkloadExecutor,
     instrumented_state::InstrumentedStateProvider,
-    payload_processor::PayloadProcessor,
+    payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
@@ -15,7 +14,7 @@ use alloy_consensus::transaction::Either;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
-use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
+use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -40,7 +39,12 @@ use reth_provider::{
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::HashMap,
+    panic::{self, AssertUnwindSafe},
+    sync::Arc,
+    time::Instant,
+};
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -522,12 +526,14 @@ where
         // terminate prewarming task with good state output
         handle.terminate_caching(Some(&output.state));
 
-        Ok(ExecutedBlock {
-            recovered_block: Arc::new(block),
-            execution_output: Arc::new(ExecutionOutcome::from((output, block_num_hash.number))),
-            hashed_state: Arc::new(hashed_state.into_sorted()),
-            trie_updates: Arc::new(trie_output.into_sorted()),
-        })
+        Ok(self.spawn_deferred_trie_task(
+            block,
+            output,
+            block_num_hash.number,
+            &ctx,
+            hashed_state,
+            trie_output,
+        ))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -766,11 +772,6 @@ where
                 let trie_input_start = Instant::now();
                 let (trie_input, block_hash) = self.compute_trie_input(parent_hash, state)?;
 
-                self.metrics
-                    .block_validation
-                    .trie_input_duration
-                    .record(trie_input_start.elapsed().as_secs_f64());
-
                 // Create OverlayStateProviderFactory with sorted trie data for multiproofs
                 let TrieInputSorted { nodes, state, .. } = trie_input;
 
@@ -780,8 +781,7 @@ where
                         .with_trie_overlay(Some(nodes))
                         .with_hashed_state_overlay(Some(state));
 
-                // Use state root task only if prefix sets are empty, otherwise proof generation is
-                // too expensive because it requires walking all paths in every proof.
+                // Record trie input duration including OverlayStateProviderFactory setup
                 self.metrics
                     .block_validation
                     .trie_input_duration
@@ -852,6 +852,9 @@ where
     }
 
     /// Determines the state root computation strategy based on configuration.
+    ///
+    /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
+    /// too expensive because it requires walking all paths in every proof.
     const fn plan_state_root_computation(&self) -> StateRootStrategy {
         if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
@@ -878,19 +881,22 @@ where
         self.invalid_block_hook.on_invalid_block(parent_header, block, output, trie_updates);
     }
 
-    /// Computes the trie input at the provided parent hash, as well as the block number of the
-    /// highest persisted ancestor.
+    /// Computes [`TrieInputSorted`] for the provided parent hash by combining database state
+    /// with in-memory overlays.
     ///
     /// The goal of this function is to take in-memory blocks and generate a [`TrieInputSorted`]
-    /// that serves as an overlay to the database blocks.
+    /// that extends from the highest persisted ancestor up through the parent. This enables state
+    /// root computation and proof generation without requiring all blocks to be persisted
+    /// first.
     ///
     /// It works as follows:
-    /// 1. Collect in-memory blocks that are descendants of the provided parent hash using
-    ///    [`crate::tree::TreeState::blocks_by_hash`]. This returns the highest persisted ancestor
-    ///    hash (`block_hash`) and the list of in-memory descendant blocks.
-    /// 2. Extend the `TrieInputSorted` with the contents of these in-memory blocks (from oldest to
-    ///    newest) to build the overlay state and trie updates that sit on top of the database view
-    ///    anchored at `block_hash`.
+    /// 1. Collect in-memory overlay blocks using [`crate::tree::TreeState::blocks_by_hash`]. This
+    ///    returns the highest persisted ancestor hash (`block_hash`) and the list of in-memory
+    ///    blocks building on top of it.
+    /// 2. Fast path: If the tip in-memory block's trie input is already anchored to `block_hash`
+    ///    (its `anchor_hash` matches `block_hash`), reuse it directly.
+    /// 3. Slow path: Build a new [`TrieInputSorted`] by aggregating the overlay blocks (from oldest
+    ///    to newest) on top of the database state at `block_hash`.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_validator",
@@ -902,8 +908,27 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
     ) -> ProviderResult<(TrieInputSorted, B256)> {
+        let wait_start = Instant::now();
         let (block_hash, blocks) =
             state.tree_state.blocks_by_hash(parent_hash).unwrap_or_else(|| (parent_hash, vec![]));
+
+        // Fast path: if the tip block's anchor matches the persisted ancestor hash, reuse its
+        // TrieInput. This means the TrieInputSorted already aggregates all in-memory overlays
+        // from that ancestor, so we can avoid re-aggregation.
+        if let Some(tip_block) = blocks.first() {
+            let data = tip_block.trie_data();
+            if let (Some(anchor_hash), Some(trie_input)) =
+                (data.anchor_hash(), data.trie_input().cloned()) &&
+                anchor_hash == block_hash
+            {
+                trace!(target: "engine::tree::payload_validator", %block_hash,"Reusing trie input with matching anchor hash");
+                self.metrics
+                    .block_validation
+                    .deferred_trie_wait_duration
+                    .record(wait_start.elapsed().as_secs_f64());
+                return Ok(((*trie_input).clone(), block_hash));
+            }
+        }
 
         if blocks.is_empty() {
             debug!(target: "engine::tree::payload_validator", "Parent found on disk");
@@ -912,25 +937,118 @@ where
         }
 
         // Extend with contents of parent in-memory blocks directly in sorted form.
+        let input = Self::merge_overlay_trie_input(&blocks);
+
+        self.metrics
+            .block_validation
+            .deferred_trie_wait_duration
+            .record(wait_start.elapsed().as_secs_f64());
+        Ok((input, block_hash))
+    }
+
+    /// Aggregates multiple in-memory blocks into a single [`TrieInputSorted`] by combining their
+    /// state changes.
+    ///
+    /// The input `blocks` vector is ordered newest -> oldest (see `TreeState::blocks_by_hash`).
+    /// We iterate it in reverse so we start with the oldest block's trie data and extend forward
+    /// toward the newest, ensuring newer state takes precedence.
+    fn merge_overlay_trie_input(blocks: &[ExecutedBlock<N>]) -> TrieInputSorted {
         let mut input = TrieInputSorted::default();
         let mut blocks_iter = blocks.iter().rev().peekable();
 
         if let Some(first) = blocks_iter.next() {
-            input.state = Arc::clone(&first.hashed_state);
-            input.nodes = Arc::clone(&first.trie_updates);
+            let data = first.trie_data();
+            input.state = data.hashed_state;
+            input.nodes = data.trie_updates;
 
             // Only clone and mutate if there are more in-memory blocks.
             if blocks_iter.peek().is_some() {
                 let state_mut = Arc::make_mut(&mut input.state);
                 let nodes_mut = Arc::make_mut(&mut input.nodes);
                 for block in blocks_iter {
-                    state_mut.extend_ref(block.hashed_state());
-                    nodes_mut.extend_ref(block.trie_updates());
+                    let data = block.trie_data();
+                    state_mut.extend_ref(data.hashed_state.as_ref());
+                    nodes_mut.extend_ref(data.trie_updates.as_ref());
                 }
             }
         }
 
-        Ok((input, block_hash))
+        input
+    }
+
+    /// Spawns a background task to compute and sort trie data for the executed block.
+    ///
+    /// This function creates a [`DeferredTrieData`] handle with fallback inputs and spawns a
+    /// blocking task that calls `wait_cloned()` to:
+    /// 1. Sort the block's hashed state and trie updates
+    /// 2. Merge ancestor overlays and extend with the sorted data
+    /// 3. Create an [`AnchoredTrieInput`](reth_chain_state::AnchoredTrieInput) for efficient future
+    ///    trie computations
+    /// 4. Cache the result so subsequent calls return immediately
+    ///
+    /// If the background task hasn't completed when `trie_data()` is called, `wait_cloned()`
+    /// computes from the stored inputs, eliminating deadlock risk and duplicate computation.
+    ///
+    /// The validation hot path can return immediately after state root verification,
+    /// while consumers (DB writes, overlay providers, proofs) get trie data either
+    /// from the completed task or via fallback computation.
+    fn spawn_deferred_trie_task(
+        &self,
+        block: RecoveredBlock<N::Block>,
+        output: BlockExecutionOutput<N::Receipt>,
+        block_number: u64,
+        ctx: &TreeCtx<'_, N>,
+        hashed_state: HashedPostState,
+        trie_output: TrieUpdates,
+    ) -> ExecutedBlock<N> {
+        // Capture parent hash and ancestor overlays for deferred trie input construction.
+        let (anchor_hash, overlay_blocks) = ctx
+            .state()
+            .tree_state
+            .blocks_by_hash(block.parent_hash())
+            .unwrap_or_else(|| (block.parent_hash(), Vec::new()));
+
+        // Collect lightweight ancestor trie data handles. We don't call trie_data() here;
+        // the merge and any fallback sorting happens in the compute_trie_input_task.
+        let ancestors: Vec<DeferredTrieData> =
+            overlay_blocks.iter().rev().map(|b| b.trie_data_handle()).collect();
+
+        // Create deferred handle with fallback inputs in case the background task hasn't completed.
+        let deferred_trie_data = DeferredTrieData::pending(
+            Arc::new(hashed_state),
+            Arc::new(trie_output),
+            anchor_hash,
+            ancestors,
+        );
+        let deferred_handle_task = deferred_trie_data.clone();
+        let deferred_compute_duration =
+            self.metrics.block_validation.deferred_trie_compute_duration.clone();
+
+        // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
+        // the stored inputs and cache the result, so subsequent calls return immediately.
+        let compute_trie_input_task = move || {
+            let result = panic::catch_unwind(AssertUnwindSafe(|| {
+                let compute_start = Instant::now();
+                let _ = deferred_handle_task.wait_cloned();
+                deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
+            }));
+
+            if result.is_err() {
+                error!(
+                    target: "engine::tree::payload_validator",
+                    "Deferred trie task panicked; fallback computation will be used when trie data is accessed"
+                );
+            }
+        };
+
+        // Spawn task that computes trie data asynchronously.
+        self.payload_processor.executor().spawn_blocking(compute_trie_input_task);
+
+        ExecutedBlock::with_deferred_trie_data(
+            Arc::new(block),
+            Arc::new(ExecutionOutcome::from((output, block_number))),
+            deferred_trie_data,
+        )
     }
 }
 

@@ -1,6 +1,6 @@
 //! Command that initializes the node from a genesis file.
 
-use crate::common::{AccessRights, CliHeader, CliNodeTypes, Environment, EnvironmentArgs};
+use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use alloy_consensus::BlockHeader as AlloyBlockHeader;
 use alloy_primitives::{Sealable, B256};
 use clap::Parser;
@@ -8,7 +8,7 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_db_common::init::init_from_state_dump;
 use reth_node_api::NodePrimitives;
-use reth_primitives_traits::{BlockHeader, SealedHeader};
+use reth_primitives_traits::{header::HeaderMut, SealedHeader};
 use reth_provider::{
     BlockNumReader, DBProvider, DatabaseProviderFactory, StaticFileProviderFactory,
     StaticFileWriter,
@@ -69,7 +69,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> InitStateC
     where
         N: CliNodeTypes<
             ChainSpec = C::ChainSpec,
-            Primitives: NodePrimitives<BlockHeader: BlockHeader + CliHeader>,
+            Primitives: NodePrimitives<BlockHeader: HeaderMut>,
         >,
     {
         info!(target: "reth::cli", "Reth init-state starting");
