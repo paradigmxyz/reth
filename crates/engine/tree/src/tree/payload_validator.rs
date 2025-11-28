@@ -20,7 +20,7 @@ use alloy_evm::Evm;
 use alloy_primitives::{Bytes, B256, U256};
 use alloy_rlp::Decodable;
 use reth_chain_state::{
-    CanonicalInMemoryState, ExecutedBlock, ExecutedBlockWithTrieUpdates, ExecutedTrieUpdates,
+    CanonicalInMemoryState, ExecutedBlock,
 };
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{

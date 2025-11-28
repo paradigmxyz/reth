@@ -286,6 +286,7 @@ impl NewPayloadStatusMetrics {
                 PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
                 PayloadStatusEnum::Accepted => self.new_payload_accepted.increment(1),
                 PayloadStatusEnum::Invalid { .. } => self.new_payload_invalid.increment(1),
+                PayloadStatusEnum::InclusionListUnsatisfied => self.new_payload_invalid.increment(1),
             },
             Err(_) => self.new_payload_error.increment(1),
         }

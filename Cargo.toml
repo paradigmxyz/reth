@@ -624,6 +624,7 @@ tower-http = "0.6"
 # p2p
 discv5 = "0.10"
 if-addrs = "0.14"
+ipnet = "2.11"
 
 # rpc
 jsonrpsee = "0.26.0"
@@ -763,9 +764,6 @@ alloy-transport-ws = { git = "https://github.com/pellekrab/alloy", branch = "foc
 alloy-hardforks = { git = "https://github.com/PelleKrab/hardforks.git", branch = "focil" }
 alloy-op-hardforks = { git = "https://github.com/PelleKrab/hardforks.git", branch = "focil" }
 alloy-evm = { git = "https://github.com/PelleKrab/evm.git", branch = "focil" }
-
-# networking
-ipnet = "2.11"
 
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }

@@ -10,10 +10,9 @@ use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
 use reth_ethereum_primitives::TransactionSigned;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie_common::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted,

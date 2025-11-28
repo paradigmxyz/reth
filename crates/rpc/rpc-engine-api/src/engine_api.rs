@@ -272,8 +272,7 @@ where
             .inner
             .beacon_consensus
             .new_payload(payload)
-            .await
-            .inspect(|_| self.inner.on_new_payload_response())?)
+            .await?)
     }
 
     /// Metrics version of `new_payload_v5`
@@ -282,13 +281,11 @@ where
         payload: PayloadT::ExecutionData,
     ) -> RpcResult<PayloadStatus> {
         let start = Instant::now();
-        let gas_used = payload.gas_used();
 
         let res = Self::new_payload_v5(self, payload).await;
 
         let elapsed = start.elapsed();
         self.inner.metrics.latency.new_payload_v5.record(elapsed);
-        self.inner.metrics.new_payload_response.update_response_metrics(&res, gas_used, elapsed);
         Ok(res?)
     }
 
@@ -406,7 +403,6 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v4(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
-        self.inner.metrics.fcu_response.update_response_metrics(&res);
         res
     }
 
@@ -1218,7 +1214,7 @@ where
         // Try to resolve the parent header. If available, use the parent's base fee to request
         // the best transactions from the pool; otherwise return an UNKNOWN_PARENT error or an
         // internal error if the provider call failed.
-        let il = match self.inner.provider.header(&parent_hash) {
+        let il = match self.inner.provider.header(parent_hash) {
             Ok(Some(parent_header)) => {
                 let base_fee = parent_header.base_fee_per_gas().unwrap_or_default();
 

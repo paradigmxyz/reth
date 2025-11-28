@@ -13,7 +13,6 @@ use alloy_rpc_types_engine::{
     ForkchoiceState, PayloadStatus, PayloadStatusEnum, PayloadValidationError,
 };
 use error::{InsertBlockError, InsertBlockFatalError, InsertBlockValidationError};
-use persistence_state::CurrentPersistenceAction;
 use reth_chain_state::{
     CanonicalInMemoryState, ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
@@ -35,8 +34,6 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_trie::{HashedPostState, TrieInput};
-use reth_trie_db::DatabaseHashedPostState;
 
 use revm::state::EvmState;
 use state::TreeState;
