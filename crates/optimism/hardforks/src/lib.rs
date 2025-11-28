@@ -222,10 +222,20 @@ pub static BASE_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
     ])
 });
 
+/// X Layer mainnet Jovian hardfork activation timestamp, 2025-12-02 16:00:01 UTC
+pub const XLAYER_MAINNET_JOVIAN_TIMESTAMP: u64 = 1764691201;
+/// X Layer testnet Jovian hardfork activation timestamp, 2025-11-28 11:00:00 UTC
+pub const XLAYER_TESTNET_JOVIAN_TIMESTAMP: u64 = 1764327600;
+
 /// X Layer mainnet list of hardforks.
 ///
 /// All time-based hardforks are activated at genesis (timestamp 0).
 pub static XLAYER_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
+    #[cfg(feature = "std")]
+    println!(
+        "X Layer mainnet Jovian hardfork activated at timestamp: {}",
+        XLAYER_MAINNET_JOVIAN_TIMESTAMP
+    );
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
@@ -259,6 +269,7 @@ pub static XLAYER_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(||
         (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(0)),
         (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(0)),
         (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(0)),
+        (OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(XLAYER_MAINNET_JOVIAN_TIMESTAMP)),
     ])
 });
 
@@ -266,6 +277,11 @@ pub static XLAYER_MAINNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(||
 ///
 /// All time-based hardforks are activated at genesis (timestamp 0).
 pub static XLAYER_TESTNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(|| {
+    #[cfg(feature = "std")]
+    println!(
+        "X Layer testnet Jovian hardfork activated at timestamp: {}",
+        XLAYER_TESTNET_JOVIAN_TIMESTAMP
+    );
     ChainHardforks::new(vec![
         (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
         (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
@@ -299,5 +315,90 @@ pub static XLAYER_TESTNET_HARDFORKS: LazyLock<ChainHardforks> = LazyLock::new(||
         (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(0)),
         (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(0)),
         (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(0)),
+        (OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(XLAYER_TESTNET_JOVIAN_TIMESTAMP)),
     ])
 });
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_xlayer_testnet_jovian_timestamp() {
+        // Verify the timestamp constant is correctly defined
+        // 2025-11-28 11:00:00 UTC = 1764327600
+        assert_eq!(XLAYER_TESTNET_JOVIAN_TIMESTAMP, 1764327600);
+    }
+
+    #[test]
+    fn test_xlayer_mainnet_jovian_uses_op_timestamp() {
+        // Verify XLayer mainnet uses the same timestamp as OP mainnet
+        let xlayer_mainnet = &*XLAYER_MAINNET_HARDFORKS;
+        let op_mainnet = &*OP_MAINNET_HARDFORKS;
+
+        let xlayer_jovian = xlayer_mainnet
+            .get(OpHardfork::Jovian)
+            .expect("XLayer mainnet should have Jovian fork");
+        let op_jovian = op_mainnet
+            .get(OpHardfork::Jovian)
+            .expect("OP mainnet should have Jovian fork");
+
+        match (xlayer_jovian, op_jovian) {
+            (
+                ForkCondition::Timestamp(xlayer_ts),
+                ForkCondition::Timestamp(op_ts),
+            ) => {
+                assert_eq!(
+                    xlayer_ts, op_ts,
+                    "XLayer mainnet Jovian timestamp should match OP mainnet"
+                );
+                assert_eq!(
+                    xlayer_ts, XLAYER_MAINNET_JOVIAN_TIMESTAMP,
+                    "XLayer mainnet should use XLAYER_MAINNET_JOVIAN_TIMESTAMP"
+                );
+                assert_eq!(
+                    xlayer_ts, OP_MAINNET_JOVIAN_TIMESTAMP,
+                    "XLayer mainnet Jovian timestamp should match OP mainnet"
+                );
+            }
+            _ => panic!("Both forks should use timestamp condition"),
+        }
+    }
+
+    #[test]
+    fn test_xlayer_testnet_jovian_timestamp_condition() {
+        let xlayer_testnet = &*XLAYER_TESTNET_HARDFORKS;
+
+        let jovian_fork = xlayer_testnet
+            .get(OpHardfork::Jovian)
+            .expect("XLayer testnet should have Jovian fork");
+
+        match jovian_fork {
+            ForkCondition::Timestamp(ts) => {
+                assert_eq!(
+                    ts, XLAYER_TESTNET_JOVIAN_TIMESTAMP,
+                    "Jovian fork should use XLAYER_TESTNET_JOVIAN_TIMESTAMP"
+                );
+            }
+            _ => panic!("Jovian fork should use timestamp condition"),
+        }
+    }
+
+    #[test]
+    fn test_xlayer_mainnet_jovian_included() {
+        let hardforks = &*XLAYER_MAINNET_HARDFORKS;
+        assert!(
+            hardforks.get(OpHardfork::Jovian).is_some(),
+            "XLayer mainnet hardforks should include Jovian"
+        );
+    }
+
+    #[test]
+    fn test_xlayer_testnet_jovian_included() {
+        let hardforks = &*XLAYER_TESTNET_HARDFORKS;
+        assert!(
+            hardforks.get(OpHardfork::Jovian).is_some(),
+            "XLayer testnet hardforks should include Jovian"
+        );
+    }
+}

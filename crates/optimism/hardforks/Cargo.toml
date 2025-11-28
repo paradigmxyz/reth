@@ -21,6 +21,7 @@ alloy-primitives.workspace = true
 
 # misc
 once_cell.workspace = true
+tracing.workspace = true
 
 [features]
 default = ["std"]
@@ -28,6 +29,7 @@ std = [
     "alloy-primitives/std",
     "once_cell/std",
     "reth-ethereum-forks/std",
+    "tracing/std",
 ]
 serde = [
     "alloy-primitives/serde",

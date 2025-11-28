@@ -182,6 +182,41 @@ mod tests {
         assert!(spec.fork(OpHardfork::Granite).active_at_timestamp(ts));
         assert!(spec.fork(OpHardfork::Holocene).active_at_timestamp(ts));
         assert!(spec.fork(OpHardfork::Isthmus).active_at_timestamp(ts));
+        // Jovian is configured but not active at genesis timestamp, it activates at a future timestamp
+        // Verify Jovian is configured (not ForkCondition::Never)
+        assert!(!matches!(spec.fork(OpHardfork::Jovian), reth_ethereum_forks::ForkCondition::Never));
+        // Verify it's not active at genesis timestamp
+        assert!(!spec.fork(OpHardfork::Jovian).active_at_timestamp(ts));
+    }
+
+    #[test]
+    fn test_xlayer_mainnet_jovian_activation() {
+        use alloy_op_hardforks::OP_MAINNET_JOVIAN_TIMESTAMP;
+        use reth_optimism_forks::{XLAYER_MAINNET_HARDFORKS, XLAYER_MAINNET_JOVIAN_TIMESTAMP};
+
+        let spec = &*XLAYER_MAINNET;
+        let hardforks = &*XLAYER_MAINNET_HARDFORKS;
+
+        // Verify Jovian is configured with XLAYER_MAINNET_JOVIAN_TIMESTAMP
+        let jovian_fork = hardforks
+            .get(OpHardfork::Jovian)
+            .expect("Jovian fork should be configured");
+        assert!(matches!(
+            jovian_fork,
+            reth_ethereum_forks::ForkCondition::Timestamp(ts) if ts == XLAYER_MAINNET_JOVIAN_TIMESTAMP
+        ));
+
+        // Verify XLayer mainnet uses the same timestamp as OP mainnet
+        assert_eq!(XLAYER_MAINNET_JOVIAN_TIMESTAMP, OP_MAINNET_JOVIAN_TIMESTAMP);
+
+        // Test activation before Jovian timestamp
+        assert!(!spec.fork(OpHardfork::Jovian).active_at_timestamp(XLAYER_MAINNET_JOVIAN_TIMESTAMP - 1));
+
+        // Test activation at Jovian timestamp
+        assert!(spec.fork(OpHardfork::Jovian).active_at_timestamp(XLAYER_MAINNET_JOVIAN_TIMESTAMP));
+
+        // Test activation after Jovian timestamp
+        assert!(spec.fork(OpHardfork::Jovian).active_at_timestamp(XLAYER_MAINNET_JOVIAN_TIMESTAMP + 1));
     }
 
     #[test]
