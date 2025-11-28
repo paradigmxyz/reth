@@ -22,6 +22,11 @@ pub struct EngineArgs {
     pub persistence_threshold: u64,
 
     /// Configure the target number of blocks to keep in memory.
+    ///
+    /// This represents the number of most recent blocks to keep in memory for quick access and reorgs.
+    ///
+    /// This target is maintained after flushing canonical blocks to disk (controlled by
+    /// --engine.persistence-threshold).
     #[arg(long = "engine.memory-block-buffer-target", default_value_t = DEFAULT_MEMORY_BLOCK_BUFFER_TARGET)]
     pub memory_block_buffer_target: u64,
 
