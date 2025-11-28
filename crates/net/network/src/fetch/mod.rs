@@ -399,7 +399,7 @@ impl Peer {
     /// 2. None can fully cover the range, but this peer has lower start value
     /// 3. If a peer doesnt announce a range we assume it has full history, but check the other's
     ///    range and treat that as better if it can cover the range
-    fn has_better_range(&self, other: &Self, range: RangeInclusive<u64>) -> bool {
+    fn has_better_range(&self, other: &Self, range: &RangeInclusive<u64>) -> bool {
         let self_range = self.range();
         let other_range = other.range();
 
@@ -439,7 +439,7 @@ impl Peer {
         match requirement {
             BestPeerRequirements::None => false,
             BestPeerRequirements::FullBlockRange(range) => {
-                self.has_better_range(other, range.clone())
+                self.has_better_range(other, range)
             }
             BestPeerRequirements::FullBlock => self.has_full_history() && !other.has_full_history(),
         }
