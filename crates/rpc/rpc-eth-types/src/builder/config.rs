@@ -272,7 +272,7 @@ impl Default for EthFilterConfig {
             max_blocks_per_filter: None,
             max_logs_per_response: None,
             // 5min
-            stale_filter_ttl: Duration::from_secs(5 * 60),
+            stale_filter_ttl: DEFAULT_STALE_FILTER_TTL,
         }
     }
 }
