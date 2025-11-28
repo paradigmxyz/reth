@@ -438,9 +438,7 @@ impl Peer {
     fn is_better(&self, other: &Self, requirement: &BestPeerRequirements) -> bool {
         match requirement {
             BestPeerRequirements::None => false,
-            BestPeerRequirements::FullBlockRange(range) => {
-                self.has_better_range(other, range)
-            }
+            BestPeerRequirements::FullBlockRange(range) => self.has_better_range(other, range),
             BestPeerRequirements::FullBlock => self.has_full_history() && !other.has_full_history(),
         }
     }
