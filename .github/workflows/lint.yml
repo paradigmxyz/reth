@@ -187,9 +187,10 @@ jobs:
         with:
           cache-on-failure: true
       - run: cargo build --bin reth --workspace --features ethereum
+      - run: cargo build --bin op-reth -p op-reth --workspace --features ethereum
         env:
           RUSTFLAGS: -D warnings
-      - run: ./docs/cli/update.sh target/debug/reth
+      - run: ./docs/cli/update.sh target/debug/reth target/debug/op-reth
       - name: Check docs changes
         run: git diff --exit-code
 
