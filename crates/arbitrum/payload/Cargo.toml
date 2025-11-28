@@ -20,6 +20,7 @@ reth-arbitrum-primitives = { path = "../primitives", default-features = false, f
 alloy-primitives = { workspace = true, features = ["std"] }
 alloy-eips = { workspace = true }
 alloy-rpc-types-engine = { workspace = true }
+alloy-serde = { workspace = true }
 serde = { version = "1", default-features = false, features = ["derive"] }
 reth-payload-primitives = { path = "../../payload/primitives", default-features = false }
 reth-primitives-traits = { workspace = true }

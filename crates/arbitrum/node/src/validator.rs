@@ -46,18 +46,48 @@ where
         tracing::info!(target: "arb-reth::engine", txs_len, has_pbbr, "arb engine: arb payload summary before decode");
 
         let sealed_block = {
-            exec_data
+            let block = exec_data
                 .try_into_block_with_sidecar(&exec_data.sidecar)
                 .map_err(|e| {
                     tracing::warn!(target: "arb-reth::engine", err=%e, "arb engine: failed to decode arb payload");
                     NewPayloadError::Other(format!("failed to decode arb payload: {e}").into())
-                })?
-                .seal_slow()
+                })?;
+            // Debug: log header fields before sealing
+            tracing::info!(
+                target: "arb-reth::engine",
+                txs_root=%block.header.transactions_root,
+                state_root=%block.header.state_root,
+                receipts_root=%block.header.receipts_root,
+                gas_used=%block.header.gas_used,
+                gas_limit=%block.header.gas_limit,
+                block_num=%block.header.number,
+                timestamp=%block.header.timestamp,
+                extra_len=%block.header.extra_data.len(),
+                "arb engine: block header before sealing"
+            );
+            block.seal_slow()
         };
 
         let got_hash = sealed_block.hash();
         if expected_hash != got_hash {
-            tracing::warn!(target: "arb-reth::engine", got=%got_hash, expected=%expected_hash, "arb engine: block hash mismatch");
+            // Debug: log all header fields to understand difference
+            let hdr = sealed_block.header();
+            tracing::warn!(
+                target: "arb-reth::engine",
+                got=%got_hash,
+                expected=%expected_hash,
+                txs_root=%hdr.transactions_root,
+                state_root=%hdr.state_root,
+                receipts_root=%hdr.receipts_root,
+                gas_used=%hdr.gas_used,
+                gas_limit=%hdr.gas_limit,
+                parent=%hdr.parent_hash,
+                beneficiary=%hdr.beneficiary,
+                base_fee=?hdr.base_fee_per_gas,
+                mix_hash=%hdr.mix_hash,
+                nonce=%hdr.nonce,
+                "arb engine: block hash mismatch"
+            );
             return Err(NewPayloadError::Other(format!(
                 "block hash mismatch: execution={} consensus={}",
                 got_hash,

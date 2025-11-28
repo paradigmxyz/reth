@@ -32,8 +32,15 @@ fn storage_key_map(storage_key: &[u8], offset: u64) -> U256 {
 /// which can cause non-determinism between assembly and validation. However, we MUST read
 /// the original account info from the database to preserve the genesis nonce (which is 1).
 ///
-/// IMPORTANT: We use AccountStatus::Loaded (not Changed) because we're not modifying the
-/// account info itself - only the storage. The account already exists in the trie from genesis.
+/// IMPORTANT: We use AccountStatus::Changed because:
+/// 1. is_storage_known() must return FALSE for proper cross-block state lookups
+/// 2. When looking up storage from MemoryOverlayStateProvider, BundleAccount::storage_slot()
+///    returns Some(ZERO) for unknown slots if is_storage_known() is true - this would break
+///    lookups for genesis storage (like ArbOS VERSION) that aren't in the bundle
+/// 3. Changed status makes is_storage_known() return false, so unknown slots return None,
+///    allowing fallback to historical/database storage (genesis state)
+/// 4. InMemoryChange was WRONG - it caused VERSION=0 for block 2 because genesis slots
+///    weren't in the bundle and storage_slot returned ZERO instead of falling back
 fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State<D>) {
     use revm_database::{BundleAccount, AccountStatus};
     use revm_state::AccountInfo;
@@ -58,13 +65,14 @@ fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State
             code: original_info.code.clone(),
         });
 
-        // Use Loaded status because this account already exists in the trie from genesis.
-        // We're only modifying storage, not the account info itself.
+        // Use Changed status so that is_storage_known() returns false.
+        // This allows unknown storage slots to return None (not ZERO), enabling
+        // fallback to historical/database for genesis storage like ArbOS VERSION.
         let acc = BundleAccount {
             info,
             storage: HashMap::default(),
             original_info: Some(original_info),
-            status: AccountStatus::Loaded,
+            status: AccountStatus::Changed,
         };
         state.bundle_state.state.insert(ARBOS_STATE_ADDRESS, acc);
     }
@@ -98,11 +106,27 @@ fn write_arbos_storage<D: Database>(
         state.database.storage(ARBOS_STATE_ADDRESS, slot).unwrap_or(U256::ZERO)
     };
 
+    tracing::warn!(
+        target: "arb::storage::write",
+        "[STATE_WRITE] slot={} value={} original_value={} arbos_addr={:?}",
+        slot, value, original_value, ARBOS_STATE_ADDRESS
+    );
+
     // Write directly to bundle_state.state
     if let Some(acc) = state.bundle_state.state.get_mut(&ARBOS_STATE_ADDRESS) {
         acc.storage.insert(
             slot,
             EvmStorageSlot::new_changed(original_value, value, 0).into(),
+        );
+        tracing::warn!(
+            target: "arb::storage::write",
+            "[STATE_WRITE] Successfully inserted into bundle_state.state, storage_len={}",
+            acc.storage.len()
+        );
+    } else {
+        tracing::error!(
+            target: "arb::storage::write",
+            "[STATE_WRITE] FAILED - ArbOS account not in bundle_state!"
         );
     }
 }
@@ -380,5 +404,125 @@ impl<D: Database> StorageBackedAddress<D> {
             write_arbos_storage(state, self.slot, value_u256);
             Ok(())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use revm::database::State;
+    use revm_state::{AccountInfo, Bytecode};
+    use core::convert::Infallible;
+
+    /// Simple mock Database implementation for testing
+    struct MockDatabase {
+        accounts: std::collections::HashMap<Address, AccountInfo>,
+        storage: std::collections::HashMap<(Address, U256), U256>,
+    }
+
+    impl MockDatabase {
+        fn new() -> Self {
+            Self {
+                accounts: std::collections::HashMap::new(),
+                storage: std::collections::HashMap::new(),
+            }
+        }
+    }
+
+    impl revm::Database for MockDatabase {
+        type Error = Infallible;
+
+        fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
+            Ok(self.accounts.get(&address).cloned())
+        }
+
+        fn code_by_hash(&mut self, _code_hash: B256) -> Result<Bytecode, Self::Error> {
+            Ok(Bytecode::default())
+        }
+
+        fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
+            Ok(self.storage.get(&(address, index)).copied().unwrap_or(U256::ZERO))
+        }
+
+        fn block_hash(&mut self, _number: u64) -> Result<B256, Self::Error> {
+            Ok(B256::ZERO)
+        }
+    }
+
+    #[test]
+    fn test_storage_writes_persisted_to_bundle_state() {
+        // Create mock database
+        let db = MockDatabase::new();
+
+        // Create revm State with bundle updates enabled
+        let mut state = State::builder()
+            .with_database(db)
+            .with_bundle_update()
+            .build();
+
+        // Define test data
+        let test_slot = U256::from(42u64);
+        let test_value = U256::from(0x1234567890abcdefu64);
+
+        // Write to ArbOS storage using write_arbos_storage
+        write_arbos_storage(&mut state, test_slot, test_value);
+
+        // Verify the write is in bundle_state.state
+        assert!(
+            state.bundle_state.state.contains_key(&ARBOS_STATE_ADDRESS),
+            "ARBOS account should be in bundle_state"
+        );
+
+        let arbos_account = &state.bundle_state.state[&ARBOS_STATE_ADDRESS];
+        assert!(
+            arbos_account.storage.contains_key(&test_slot),
+            "Storage slot should be in account storage"
+        );
+
+        let slot_entry = &arbos_account.storage[&test_slot];
+        assert_eq!(
+            slot_entry.present_value, test_value,
+            "Storage value should match written value"
+        );
+    }
+
+    #[test]
+    fn test_storage_backed_uint64_write_persisted() {
+        // Create mock database
+        let db = MockDatabase::new();
+
+        // Create revm State with bundle updates enabled
+        let mut state = State::builder()
+            .with_database(db)
+            .with_bundle_update()
+            .build();
+        let state_ptr = &mut state as *mut State<_>;
+
+        // Create StorageBackedUint64 at root storage
+        let storage_uint = StorageBackedUint64::new(state_ptr, B256::ZERO, 0u64);
+
+        // Write a u64 value
+        let test_value = 0xdeadbeefu64;
+        storage_uint.set(test_value).expect("set should succeed");
+
+        // Verify the value is in bundle_state
+        let computed_slot = storage_uint.slot;
+        assert!(
+            state.bundle_state.state.contains_key(&ARBOS_STATE_ADDRESS),
+            "ARBOS account should exist in bundle_state"
+        );
+
+        let arbos_account = &state.bundle_state.state[&ARBOS_STATE_ADDRESS];
+        assert!(
+            arbos_account.storage.contains_key(&computed_slot),
+            "Storage slot should exist"
+        );
+
+        let slot_entry = &arbos_account.storage[&computed_slot];
+        let stored_value = u64::try_from(slot_entry.present_value).unwrap_or(0);
+        assert_eq!(
+            stored_value, test_value,
+            "Stored u64 value should match written value"
+        );
     }
 }

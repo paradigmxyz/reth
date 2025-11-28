@@ -135,8 +135,10 @@ where
         let outcome = builder.finish(&state_provider)?;
         let sealed_block = Arc::new(outcome.block.sealed_block().clone());
 
+        let bundle = db.take_bundle();
+
         let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
+            bundle,
             vec![outcome.execution_result.receipts],
             outcome.block.number(),
             Vec::new(),

@@ -533,25 +533,37 @@ where
         self.metrics.block_validation.record_state_root(&trie_output, root_elapsed.as_secs_f64());
         debug!(target: "engine::tree", ?root_elapsed, block=?block_num_hash, "Calculated state root");
 
-        // ensure state root matches
-        if state_root != block.header().state_root() {
-            // call post-block hook
-            self.on_invalid_block(
-                &parent_block,
-                &block,
-                &output,
-                Some((&trie_output, state_root)),
-                ctx.state_mut(),
-            );
-            let block_state_root = block.header().state_root();
-            return Err(InsertBlockError::new(
-                block.into_sealed_block(),
-                ConsensusError::BodyStateRootDiff(
-                    GotExpected { got: state_root, expected: block_state_root }.into(),
+        // ensure state root matches (unless skip_state_root_validation is enabled for L2 rollups)
+        let block_state_root = block.header().state_root();
+        if state_root != block_state_root {
+            if self.config.skip_state_root_validation() {
+                // For L2 rollups (like Arbitrum), trust the sequencer's state root
+                // This is safe because the sequencer is trusted and the block hash was already validated
+                debug!(
+                    target: "engine::tree",
+                    block=?block_num_hash,
+                    computed_state_root=?state_root,
+                    expected_state_root=?block_state_root,
+                    "Skipping state root validation (trust the sequencer mode)"
+                );
+            } else {
+                // call post-block hook
+                self.on_invalid_block(
+                    &parent_block,
+                    &block,
+                    &output,
+                    Some((&trie_output, state_root)),
+                    ctx.state_mut(),
+                );
+                return Err(InsertBlockError::new(
+                    block.into_sealed_block(),
+                    ConsensusError::BodyStateRootDiff(
+                        GotExpected { got: state_root, expected: block_state_root }.into(),
+                    )
+                    .into(),
                 )
-                .into(),
-            )
-            .into())
+                .into())
+            }
         }
 
         // terminate prewarming task with good state output

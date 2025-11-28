@@ -1317,7 +1317,7 @@ pub struct ArbAddOns<
     EthB: EthApiBuilder<N> = reth_arbitrum_rpc::ArbEthApiBuilder,
     PVB = (),
     EB = ArbEngineApiBuilder<PVB>,
-    EVB = BasicEngineValidatorBuilder<crate::engine::ArbEngineValidatorBuilder>,
+    EVB = crate::engine::ArbEngineValidatorBuilder,
     RpcM = Identity,
 > {
     pub rpc_add_ons: RpcAddOns<N, EthB, PVB, EB, EVB, RpcM>,
@@ -1472,7 +1472,7 @@ where
             reth_arbitrum_rpc::ArbEthApiBuilder,
             (),
             ArbEngineApiBuilder<crate::validator::ArbPayloadValidatorBuilder>,
-            BasicEngineValidatorBuilder<crate::engine::ArbEngineValidatorBuilder>,
+            crate::engine::ArbEngineValidatorBuilder,
             Identity,
         >;
 
