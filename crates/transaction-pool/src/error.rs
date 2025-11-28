@@ -396,6 +396,23 @@ impl InvalidPoolTransactionError {
         }
     }
 
+    /// Returns true if this is a [`Self::Consensus`] variant.
+    pub const fn as_consensus(&self) -> Option<&InvalidTransactionError> {
+        match self {
+            Self::Consensus(err) => Some(err),
+            _ => None,
+        }
+    }
+
+    /// Returns true if this is [`InvalidTransactionError::NonceNotConsistent`] and the
+    /// transaction's nonce is lower than the state's.
+    pub fn is_nonce_too_low(&self) -> bool {
+        match self {
+            Self::Consensus(err) => err.is_nonce_too_low(),
+            _ => false,
+        }
+    }
+
     /// Returns `true` if an import failed due to an oversized transaction
     pub const fn is_oversized(&self) -> bool {
         matches!(self, Self::OversizedData { .. })

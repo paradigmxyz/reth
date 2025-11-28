@@ -64,7 +64,7 @@ pub mod metrics;
 pub mod test_utils;
 
 /// Collection of mock types for testing.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub mod mock;
 
 /// Verification of existing stored trie nodes against state data.

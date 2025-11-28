@@ -42,6 +42,9 @@ jemalloc = ["dep:tikv-jemallocator"]
 # Enables jemalloc profiling features
 jemalloc-prof = ["jemalloc", "tikv-jemallocator?/profiling"]
 
+# Enables unprefixed malloc (reproducible builds support)
+jemalloc-unprefixed = ["jemalloc", "tikv-jemallocator?/unprefixed_malloc_on_supported_platforms"]
+
 # Wraps the selected allocator in the tracy profiling allocator
 tracy-allocator = ["dep:tracy-client"]
 

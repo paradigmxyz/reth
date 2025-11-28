@@ -14,7 +14,7 @@ use reth_ethereum::{
         NewPayloadError, NodePrimitives, PayloadAttributes, PayloadBuilderAttributes,
         PayloadOrAttributes, PayloadTypes, PayloadValidator,
     },
-    primitives::{RecoveredBlock, SealedBlock},
+    primitives::SealedBlock,
     storage::StateProviderFactory,
     trie::{KeccakKeyHasher, KeyHasher},
 };
@@ -241,23 +241,6 @@ where
 {
     type Block = crate::primitives::block::Block;
 
-    fn ensure_well_formed_payload(
-        &self,
-        payload: CustomExecutionData,
-    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block = PayloadValidator::<OpEngineTypes>::ensure_well_formed_payload(
-            &self.inner,
-            payload.inner,
-        )?;
-        let (block, senders) = sealed_block.split_sealed();
-        let (header, body) = block.split_sealed_header_body();
-        let header = CustomHeader { inner: header.into_header(), extension: payload.extension };
-        let body = body.map_ommers(|_| CustomHeader::default());
-        let block = SealedBlock::<Self::Block>::from_parts_unhashed(header, body);
-
-        Ok(block.with_senders(senders))
-    }
-
     fn validate_payload_attributes_against_header(
         &self,
         _attr: &CustomPayloadAttributes,
@@ -265,6 +248,20 @@ where
     ) -> Result<(), InvalidPayloadAttributesError> {
         // skip default timestamp validation
         Ok(())
+    }
+
+    fn convert_payload_to_block(
+        &self,
+        payload: CustomExecutionData,
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = PayloadValidator::<OpEngineTypes>::convert_payload_to_block(
+            &self.inner,
+            payload.inner,
+        )?;
+        let (header, body) = sealed_block.split_sealed_header_body();
+        let header = CustomHeader { inner: header.into_header(), extension: payload.extension };
+        let body = body.map_ommers(|_| CustomHeader::default());
+        Ok(SealedBlock::<Self::Block>::from_parts_unhashed(header, body))
     }
 }
 
