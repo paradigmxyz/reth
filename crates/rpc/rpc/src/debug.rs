@@ -1172,7 +1172,7 @@ where
         key_start: B256,
         max_result: u64,
     ) -> RpcResult<RpcStorageRangeResult> {
-        self.storage_range_at(block_hash, tx_idx, contract_address, key_start, max_result)
+        Self::storage_range_at(self, block_hash, tx_idx, contract_address, key_start, max_result)
             .await
             .map_err(Into::into)
     }
