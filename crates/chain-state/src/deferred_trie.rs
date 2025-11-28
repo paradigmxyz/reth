@@ -11,16 +11,6 @@ use std::{
 };
 use tracing::instrument;
 
-/// Metrics for deferred trie computation.
-#[derive(Metrics)]
-#[metrics(scope = "sync.block_validation")]
-struct DeferredTrieMetrics {
-    /// Number of times deferred trie data was ready (async task completed first).
-    deferred_trie_async_ready: Counter,
-    /// Number of times deferred trie data required synchronous computation (fallback path).
-    deferred_trie_sync_fallback: Counter,
-}
-
 /// Shared handle to asynchronously populated trie data.
 ///
 /// Uses a try-lock + fallback computation approach for deadlock-free access.
@@ -30,6 +20,40 @@ struct DeferredTrieMetrics {
 pub struct DeferredTrieData {
     /// Shared deferred state holding either raw inputs (pending) or computed result (ready).
     state: Arc<Mutex<DeferredState>>,
+}
+
+/// Sorted trie data computed for an executed block.
+/// These represent the complete set of sorted trie data required to persist
+/// block state for, and generate proofs on top of, a block.
+#[derive(Clone, Debug, Default)]
+pub struct ComputedTrieData {
+    /// Sorted hashed post-state produced by execution.
+    pub hashed_state: Arc<HashedPostStateSorted>,
+    /// Sorted trie updates produced by state root computation.
+    pub trie_updates: Arc<TrieUpdatesSorted>,
+    /// Trie input bundled with its anchor hash, if available.
+    pub anchored_trie_input: Option<AnchoredTrieInput>,
+}
+
+/// Trie input bundled with its anchor hash.
+///
+/// This is used to store the trie input and anchor hash for a block together.
+#[derive(Clone, Debug)]
+pub struct AnchoredTrieInput {
+    /// The persisted ancestor hash this trie input is anchored to.
+    pub anchor_hash: B256,
+    /// Trie input constructed from in-memory overlays.
+    pub trie_input: Arc<TrieInputSorted>,
+}
+
+/// Metrics for deferred trie computation.
+#[derive(Metrics)]
+#[metrics(scope = "sync.block_validation")]
+struct DeferredTrieMetrics {
+    /// Number of times deferred trie data was ready (async task completed first).
+    deferred_trie_async_ready: Counter,
+    /// Number of times deferred trie data required synchronous computation (fallback path).
+    deferred_trie_sync_fallback: Counter,
 }
 
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =

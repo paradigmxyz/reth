@@ -732,7 +732,9 @@ pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
     /// Deferred trie data produced by execution.
-    /// These are computed in a background task to unblock the validation hot path
+    ///
+    /// This allows deferring the computation of the trie data which can be expensive.
+    /// The data can be populated asynchronously after the block was validated.
     pub trie_data: DeferredTrieData,
 }
 
