@@ -572,7 +572,7 @@ mod tests {
                 Ok(BranchNode::Storage(account, path, _)) => {
                     storage_paths_by_account.entry(account).or_default().push(path);
                 }
-                Err(e) => panic!("Unexpected error: {:?}", e),
+                Err(e) => panic!("Unexpected error: {e:?}"),
             }
         }
 
@@ -589,8 +589,7 @@ mod tests {
             for i in 1..paths.len() {
                 assert!(
                     paths[i - 1] < paths[i],
-                    "Storage paths for account {:?} should be in ascending order",
-                    account
+                    "Storage paths for account {account:?} should be in ascending order"
                 );
             }
         }
@@ -644,8 +643,7 @@ mod tests {
                         // Verify we don't revisit a storage account
                         assert!(
                             !seen_storage_accounts.contains(&account),
-                            "Should not revisit storage account {:?}",
-                            account
+                            "Should not revisit storage account {account:?}"
                         );
                         seen_storage_accounts.push(account);
                         current_storage_account = Some(account);
@@ -654,7 +652,7 @@ mod tests {
                 Ok(BranchNode::Account(_, _)) => {
                     // Account nodes are fine
                 }
-                Err(e) => panic!("Unexpected error: {:?}", e),
+                Err(e) => panic!("Unexpected error: {e:?}"),
             }
         }
 
@@ -776,7 +774,7 @@ mod tests {
         if outputs.len() != 2 {
             eprintln!("Expected 2 outputs, got {}:", outputs.len());
             for inc in &outputs {
-                eprintln!("  {:?}", inc);
+                eprintln!("  {inc:?}");
             }
         }
         assert_eq!(outputs.len(), 2);
@@ -920,7 +918,7 @@ mod tests {
                 outputs.len()
             );
             for inc in &outputs {
-                eprintln!("  {:?}", inc);
+                eprintln!("  {inc:?}");
             }
         }
         assert!(outputs.is_empty());
@@ -1003,7 +1001,7 @@ mod tests {
                 outputs.len()
             );
             for inc in &outputs {
-                eprintln!("  {:?}", inc);
+                eprintln!("  {inc:?}");
             }
         }
         assert!(outputs.is_empty());

@@ -19,7 +19,7 @@ use alloy_eips::{
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip7594::BlobTransactionSidecarVariant,
 };
-use alloy_primitives::{Address, TxHash, B256, U256};
+use alloy_primitives::{Address, Bytes, TxHash, B256, U256};
 use reth_eth_wire_types::HandleMempoolData;
 use reth_primitives_traits::Recovered;
 use std::{collections::HashSet, marker::PhantomData, sync::Arc};
@@ -173,6 +173,10 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         _: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>> {
         Box::new(std::iter::empty())
+    }
+
+    fn build_inclusion_list(&self, _base_fee: u64, _max_size: usize) -> Vec<Bytes> {
+        vec![]
     }
 
     fn pending_transactions(&self) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>> {

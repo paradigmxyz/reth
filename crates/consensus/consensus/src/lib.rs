@@ -396,6 +396,11 @@ pub enum ConsensusError {
         /// The block's timestamp.
         timestamp: u64,
     },
+
+    /// Error when the block does not comply with the inclusion list (IL).
+    #[error("block did not satisfy inclusion list")]
+    InclusionList,
+
     /// Error when the block is too large.
     #[error("block is too large: {rlp_length} > {max_rlp_length}")]
     BlockTooLarge {

@@ -369,6 +369,16 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         best_transactions_attributes: BestTransactionsAttributes,
     ) -> Box<dyn BestTransactions<Item = Arc<ValidPoolTransaction<Self::Transaction>>>>;
 
+    /// Builds an inclusion list of transactions for the given base fee and size limit.
+    ///
+    /// The inclusion list contains transactions that are:
+    /// - Ready for execution (from pending pool)
+    /// - Not blob transactions (EIP-4844)
+    /// - Fit within the specified size limit
+    ///
+    /// Consumer: Engine API
+    fn build_inclusion_list(&self, base_fee: u64, max_size: usize) -> Vec<Bytes>;
+
     /// Returns all transactions that can be included in the next block.
     ///
     /// This is primarily used for the `txpool_` RPC namespace:

@@ -20,6 +20,8 @@ pub const INVALID_PAYLOAD_ATTRIBUTES: i32 = -38003;
 pub const UNSUPPORTED_FORK_CODE: i32 = -38005;
 /// Payload unknown error code.
 pub const UNKNOWN_PAYLOAD_CODE: i32 = -38001;
+/// Parent Hash unknown error code.
+pub const UNKNOWN_PARENT_CODE: i32 = -38006;
 /// Request too large error code.
 pub const REQUEST_TOO_LARGE_CODE: i32 = -38004;
 

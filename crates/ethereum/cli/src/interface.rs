@@ -480,13 +480,11 @@ mod tests {
         // The error should mention it's an unknown module
         assert!(
             err_msg.contains("Unknown RPC module"),
-            "Error should mention unknown module: {}",
-            err_msg
+            "Error should mention unknown module: {err_msg}"
         );
         assert!(
             err_msg.contains("'unknownmodule'"),
-            "Error should mention the module name: {}",
-            err_msg
+            "Error should mention the module name: {err_msg}"
         );
     }
 

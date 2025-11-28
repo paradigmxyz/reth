@@ -1,18 +1,20 @@
 use crate::{
-    capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
+    capabilities::EngineCapabilities, error::UNKNOWN_PARENT_CODE, metrics::EngineApiMetrics,
+    EngineApiError, EngineApiResult,
 };
+
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
     eip4844::{BlobAndProofV1, BlobAndProofV2},
     eip4895::Withdrawals,
     eip7685::RequestsOrHash,
 };
-use alloy_primitives::{BlockHash, BlockNumber, B256, U64};
+use alloy_primitives::{BlockHash, BlockNumber, Bytes, B256, U64};
 use alloy_rpc_types_engine::{
-    CancunPayloadFields, ClientVersionV1, ExecutionData, ExecutionPayloadBodiesV1,
-    ExecutionPayloadBodyV1, ExecutionPayloadInputV2, ExecutionPayloadSidecar, ExecutionPayloadV1,
-    ExecutionPayloadV3, ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
-    PraguePayloadFields,
+    AmsterdamPayloadFields, CancunPayloadFields, ClientVersionV1, ExecutionData,
+    ExecutionPayloadBodiesV1, ExecutionPayloadBodyV1, ExecutionPayloadInputV2,
+    ExecutionPayloadSidecar, ExecutionPayloadV1, ExecutionPayloadV3, ForkchoiceState,
+    ForkchoiceUpdated, PayloadId, PayloadStatus, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use jsonrpsee_core::{server::RpcModule, RpcResult};
@@ -23,7 +25,7 @@ use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
     PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, BlockBody};
+use reth_primitives_traits::{AlloyBlockHeader, Block, BlockBody};
 use reth_rpc_api::{EngineApiServer, IntoEngineApiRpcModule};
 use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
@@ -33,7 +35,7 @@ use std::{
     time::{Instant, SystemTime},
 };
 use tokio::sync::oneshot;
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 /// The Engine API response sender.
 pub type EngineApiSender<Ok> = oneshot::Sender<EngineApiResult<Ok>>;
@@ -43,6 +45,9 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
+
+/// The upper limit for Inclusion List size
+const MAX_BYTES_PER_IL: usize = 8192;
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
@@ -248,6 +253,42 @@ where
         Ok(res?)
     }
 
+    /// TODO: Update Link
+    /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
+    pub async fn new_payload_v5(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> EngineApiResult<PayloadStatus> {
+        let payload_or_attrs = PayloadOrAttributes::<
+            '_,
+            PayloadT::ExecutionData,
+            PayloadT::PayloadAttributes,
+        >::from_execution_payload(&payload);
+        self.inner
+            .validator
+            .validate_version_specific_fields(EngineApiMessageVersion::V6, payload_or_attrs)?;
+
+        Ok(self
+            .inner
+            .beacon_consensus
+            .new_payload(payload)
+            .await?)
+    }
+
+    /// Metrics version of `new_payload_v5`
+    pub async fn new_payload_v5_metered(
+        &self,
+        payload: PayloadT::ExecutionData,
+    ) -> RpcResult<PayloadStatus> {
+        let start = Instant::now();
+
+        let res = Self::new_payload_v5(self, payload).await;
+
+        let elapsed = start.elapsed();
+        self.inner.metrics.latency.new_payload_v5.record(elapsed);
+        Ok(res?)
+    }
+
     /// Returns whether the engine accepts execution requests hash.
     pub fn accept_execution_requests_hash(&self) -> bool {
         self.inner.accept_execution_requests_hash
@@ -337,6 +378,31 @@ where
         let start = Instant::now();
         let res = Self::fork_choice_updated_v3(self, state, payload_attrs).await;
         self.inner.metrics.latency.fork_choice_updated_v3.record(start.elapsed());
+        res
+    }
+
+    /// This behaves like previous fork choice handlers but validates attributes according to the
+    /// Amsterdam rules and updates blocks based on inclusion list.
+    ///
+    /// See also  <https://github.com/ethereum/execution-apis/blob/main/src/engine/.md#engine_forkchoiceupdatedv4>
+    pub async fn fork_choice_updated_v4(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        self.validate_and_execute_forkchoice(EngineApiMessageVersion::V6, state, payload_attrs)
+            .await
+    }
+
+    /// Metrics version of `fork_choice_updated_v4`
+    pub async fn fork_choice_updated_v4_metered(
+        &self,
+        state: ForkchoiceState,
+        payload_attrs: Option<EngineT::PayloadAttributes>,
+    ) -> EngineApiResult<ForkchoiceUpdated> {
+        let start = Instant::now();
+        let res = Self::fork_choice_updated_v4(self, state, payload_attrs).await;
+        self.inner.metrics.latency.fork_choice_updated_v4.record(start.elapsed());
         res
     }
 
@@ -909,6 +975,36 @@ where
         Ok(self.new_payload_v4_metered(payload).await?)
     }
 
+    /// Handler for `engine_newPayloadV5`
+    /// TODO: Update link
+    /// See also <https://github.com/ethereum/execution-apis/blob/03911ffc053b8b806123f1fc237184b0092a485a/src/engine/prague.md#engine_newpayloadv4>
+    async fn new_payload_v5(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        requests: RequestsOrHash,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> RpcResult<PayloadStatus> {
+        info!(target: "rpc::engine", il = %inclusion_list_transactions.len(), "Serving engine_newPayloadV5");
+
+        // Accept requests as a hash only if it is explicitly allowed
+        if requests.is_hash() && !self.inner.accept_execution_requests_hash {
+            return Err(EngineApiError::UnexpectedRequestsHash.into());
+        }
+
+        let payload = ExecutionData {
+            payload: payload.into(),
+            sidecar: ExecutionPayloadSidecar::v5(
+                CancunPayloadFields { versioned_hashes, parent_beacon_block_root },
+                PraguePayloadFields { requests },
+                AmsterdamPayloadFields { inclusion_list_transactions },
+            ),
+        };
+
+        Ok(self.new_payload_v5_metered(payload).await?)
+    }
+
     /// Handler for `engine_forkchoiceUpdatedV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/3d627c95a4d3510a8187dd02e0250ecb4331d27e/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
@@ -933,7 +1029,7 @@ where
         Ok(self.fork_choice_updated_v2_metered(fork_choice_state, payload_attributes).await?)
     }
 
-    /// Handler for `engine_forkchoiceUpdatedV2`
+    /// Handler for `engine_forkchoiceUpdatedV3`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     async fn fork_choice_updated_v3(
@@ -943,6 +1039,18 @@ where
     ) -> RpcResult<ForkchoiceUpdated> {
         trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
         Ok(self.fork_choice_updated_v3_metered(fork_choice_state, payload_attributes).await?)
+    }
+
+    /// Handler for `engine_forkchoiceUpdatedV4`
+    ///
+    /// See also <https://github.com/jihoonsong/execution-apis/blob/ae719c0587a66e8d8196bfebfb7c4eaa6bc3f6fb/src/engine/experimental/eip7805.md#engine_forkchoiceupdatedv4>
+    async fn fork_choice_updated_v4(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<EngineT::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated> {
+        trace!(target: "rpc::engine", "Serving engine_forkchoiceUpdatedV3");
+        Ok(self.fork_choice_updated_v4_metered(fork_choice_state, payload_attributes).await?)
     }
 
     /// Handler for `engine_getPayloadV1`
@@ -1099,6 +1207,36 @@ where
         trace!(target: "rpc::engine", "Serving engine_getBlobsV2");
         Ok(self.get_blobs_v2_metered(versioned_hashes)?)
     }
+
+    async fn get_inclusion_list_v1(&self, parent_hash: B256) -> RpcResult<Vec<Bytes>> {
+        info!(target: "rpc::engine", "Serving engine_getInclusionListV1");
+
+        // Try to resolve the parent header. If available, use the parent's base fee to request
+        // the best transactions from the pool; otherwise return an UNKNOWN_PARENT error or an
+        // internal error if the provider call failed.
+        let il = match self.inner.provider.header(parent_hash) {
+            Ok(Some(parent_header)) => {
+                let base_fee = parent_header.base_fee_per_gas().unwrap_or_default();
+
+                // Use the pool's build_inclusion_list method
+                self.inner.tx_pool.build_inclusion_list(base_fee, MAX_BYTES_PER_IL)
+            }
+            Ok(None) => {
+                return Err(EngineApiError::other(jsonrpsee_types::error::ErrorObject::owned(
+                    UNKNOWN_PARENT_CODE,
+                    "Parent hash unknown, Parent Hash: ",
+                    Some(parent_hash.to_string()),
+                ))
+                .into());
+            }
+            Err(err) => {
+                return Err(EngineApiError::Internal(Box::new(err)).into());
+            }
+        };
+
+        info!(target: "rpc::engine", il = %il.len(), "getInclusionListV1");
+        Ok(il)
+    }
 }
 
 impl<Provider, EngineT, Pool, Validator, ChainSpec> IntoEngineApiRpcModule
@@ -1160,6 +1298,7 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use alloy_rpc_types_engine::{ClientCode, ClientVersionV1};
     use assert_matches::assert_matches;
     use reth_chainspec::{ChainSpec, MAINNET};
@@ -1171,6 +1310,7 @@ mod tests {
     use reth_provider::test_utils::MockEthProvider;
     use reth_tasks::TokioTaskExecutor;
     use reth_transaction_pool::noop::NoopTransactionPool;
+    use std::sync::Arc;
     use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 
     fn setup_engine_api() -> (

@@ -22,12 +22,16 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) new_payload_v3: Histogram,
     /// Latency for `engine_newPayloadV4`
     pub(crate) new_payload_v4: Histogram,
+    /// Latency for `engine_newPayloadV5`
+    pub(crate) new_payload_v5: Histogram,
     /// Latency for `engine_forkchoiceUpdatedV1`
     pub(crate) fork_choice_updated_v1: Histogram,
     /// Latency for `engine_forkchoiceUpdatedV2`
     pub(crate) fork_choice_updated_v2: Histogram,
     /// Latency for `engine_forkchoiceUpdatedV3`
     pub(crate) fork_choice_updated_v3: Histogram,
+    /// Latency for `engine_forkchoiceUpdatedV4`
+    pub(crate) fork_choice_updated_v4: Histogram,
     /// Latency for `engine_getPayloadV1`
     pub(crate) get_payload_v1: Histogram,
     /// Latency for `engine_getPayloadV2`
@@ -59,8 +63,8 @@ pub(crate) struct BlobMetrics {
     pub(crate) get_blobs_requests_blobs_total: Counter,
     /// Number of blobs requested via getBlobsV2 that are present in the blobpool
     pub(crate) get_blobs_requests_blobs_in_blobpool_total: Counter,
-    /// Number of times getBlobsV2 responded with “hit”
+    /// Number of times getBlobsV2 responded with "hit"
     pub(crate) get_blobs_requests_success_total: Counter,
-    /// Number of times getBlobsV2 responded with “miss”
+    /// Number of times getBlobsV2 responded with "miss"
     pub(crate) get_blobs_requests_failure_total: Counter,
 }

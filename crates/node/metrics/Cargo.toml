@@ -23,6 +23,7 @@ http.workspace = true
 tower.workspace = true
 reqwest.workspace = true
 
+parking_lot.workspace = true
 tracing.workspace = true
 eyre.workspace = true
 

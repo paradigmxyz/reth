@@ -17,6 +17,7 @@ use op_alloy_rpc_types_engine::{
     OpExecutionPayloadEnvelopeV3, OpExecutionPayloadEnvelopeV4, OpExecutionPayloadV4,
 };
 use reth_chainspec::EthChainSpec;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_optimism_evm::OpNextBlockEnvAttributes;
 use reth_optimism_forks::OpHardforks;
 use reth_payload_builder::{EthPayloadBuilderAttributes, PayloadBuilderError};
@@ -24,7 +25,7 @@ use reth_payload_primitives::{
     BuildNextEnv, BuiltPayload, BuiltPayloadExecutedBlock, PayloadBuilderAttributes,
 };
 use reth_primitives_traits::{
-    NodePrimitives, SealedBlock, SealedHeader, SignedTransaction, WithEncoded,
+    NodePrimitives, Recovered, SealedBlock, SealedHeader, SignedTransaction, WithEncoded,
 };
 
 /// Re-export for use in downstream arguments.
@@ -120,6 +121,8 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
             prev_randao: attributes.payload_attributes.prev_randao,
             withdrawals: attributes.payload_attributes.withdrawals.unwrap_or_default().into(),
             parent_beacon_block_root: attributes.payload_attributes.parent_beacon_block_root,
+            // TODO: impl IL into OP
+            il: None,
         };
 
         Ok(Self {
@@ -148,6 +151,10 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
         self.payload_attributes.parent_beacon_block_root
     }
 
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>> {
+        self.payload_attributes.il()
+    }
+
     fn suggested_fee_recipient(&self) -> Address {
         self.payload_attributes.suggested_fee_recipient
     }
@@ -158,6 +165,10 @@ impl<T: Decodable2718 + Send + Sync + Debug + Unpin + 'static> PayloadBuilderAtt
 
     fn withdrawals(&self) -> &Withdrawals {
         &self.payload_attributes.withdrawals
+    }
+
+    fn clone_with_il(&self, _il: Vec<Bytes>) -> Self {
+        todo!()
     }
 }
 
@@ -464,6 +475,8 @@ mod tests {
                 suggested_fee_recipient: address!("0x4200000000000000000000000000000000000011"),
                 withdrawals: Some([].into()),
                 parent_beacon_block_root: b256!("0x8fe0193b9bf83cb7e5a08538e494fecc23046aab9a497af3704f4afdae3250ff").into(),
+                // TODO: add a dummy IL
+                inclusion_list_transactions: None,
             },
             transactions: Some([bytes!("7ef8f8a0dc19cfa777d90980e4875d0a548a881baaa3f83f14d1bc0d3038bc329350e54194deaddeaddeaddeaddeaddeaddeaddeaddead00019442000000000000000000000000000000000000158080830f424080b8a4440a5e20000f424000000000000000000000000300000000670d6d890000000000000125000000000000000000000000000000000000000000000000000000000000000700000000000000000000000000000000000000000000000000000000000000014bf9181db6e381d4384bbf69c48b0ee0eed23c6ca26143c6d2544f9d39997a590000000000000000000000007f83d659683caf2767fd3c720981d51f5bc365bc")].into()),
             no_tx_pool: None,

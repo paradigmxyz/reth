@@ -73,6 +73,23 @@ pub trait EngineApi<Engine: EngineTypes> {
         execution_requests: RequestsOrHash,
     ) -> RpcResult<PayloadStatus>;
 
+    /// Post Amsterdam payload handler
+    ///
+    /// TODO: Update Link
+    /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/amsterdam.md#engine_newpayloadv5>
+    ///
+    /// Note: the additional parameter here represents the inclusion list of transactions
+    /// and is named `inclusion_list_transactions` to match EIP-7805 terminology.
+    #[method(name = "newPayloadV5")]
+    async fn new_payload_v5(
+        &self,
+        payload: ExecutionPayloadV3,
+        versioned_hashes: Vec<B256>,
+        parent_beacon_block_root: B256,
+        execution_requests: RequestsOrHash,
+        inclusion_list_transactions: Vec<Bytes>,
+    ) -> RpcResult<PayloadStatus>;
+
     /// See also <https://github.com/ethereum/execution-apis/blob/6709c2a795b707202e93c4f2867fa0bf2640a84f/src/engine/paris.md#engine_forkchoiceupdatedv1>
     ///
     /// Caution: This should not accept the `withdrawals` field in the payload attributes.
@@ -108,6 +125,19 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     #[method(name = "forkchoiceUpdatedV3")]
     async fn fork_choice_updated_v3(
+        &self,
+        fork_choice_state: ForkchoiceState,
+        payload_attributes: Option<Engine::PayloadAttributes>,
+    ) -> RpcResult<ForkchoiceUpdated>;
+
+    /// Post Amsterdam forkchoice update handler.
+    ///
+    /// This is the same as `forkchoiceUpdatedV3`, but expects an additional
+    /// `InclusionListTransactions` field in the `payloadAttributes`.
+    ///
+    /// TODO: Update link
+    #[method(name = "forkchoiceUpdatedV4")]
+    async fn fork_choice_updated_v4(
         &self,
         fork_choice_state: ForkchoiceState,
         payload_attributes: Option<Engine::PayloadAttributes>,
@@ -240,6 +270,10 @@ pub trait EngineApi<Engine: EngineTypes> {
         &self,
         versioned_hashes: Vec<B256>,
     ) -> RpcResult<Option<Vec<BlobAndProofV2>>>;
+
+    /// Fetch the inclusion list (IL).
+    #[method(name = "getInclusionListV1")]
+    async fn get_inclusion_list_v1(&self, parent_hash: B256) -> RpcResult<Vec<Bytes>>;
 }
 
 /// A subset of the ETH rpc interface: <https://ethereum.github.io/execution-apis/api-documentation>

@@ -11,16 +11,23 @@ use crate::tree::{
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
     StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::transaction::Either;
+use alloy_consensus::{
+    transaction::{Either, SignerRecoverable},
+    Transaction,
+};
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::B256;
-use reth_chain_state::{CanonicalInMemoryState, ExecutedBlock};
+use alloy_primitives::{Bytes, B256, U256};
+use alloy_rlp::Decodable;
+use reth_chain_state::{
+    CanonicalInMemoryState, ExecutedBlock,
+};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
 };
-use reth_errors::{BlockExecutionError, ProviderResult};
+use reth_errors::{BlockExecutionError, BlockValidationError, ProviderResult};
+use reth_ethereum_primitives::TransactionSigned;
 use reth_evm::{
     block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
     SpecFor,
@@ -29,7 +36,8 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
+    transaction::TxHashRef, AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, Recovered,
+    RecoveredBlock, SealedHeader,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
@@ -40,7 +48,11 @@ use reth_provider::{
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use std::{collections::HashMap, sync::Arc, time::Instant};
+use std::{
+    collections::{BTreeSet, HashMap},
+    sync::Arc,
+    time::Instant,
+};
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 
 /// Context providing access to tree state during validation.
@@ -413,7 +425,47 @@ where
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
 
+        // NOTE
+        //
+        // we may not want to `flat_map` here so that IL indices of invalid transactions are
+        // preserved.
+        let il: Option<Vec<Recovered<TransactionSigned>>> = input.inclusion_list().map(|il| {
+            let parsed_transactions: Vec<Recovered<TransactionSigned>> = il
+                .iter()
+                .filter_map(|tx| {
+                    let signed = TransactionSigned::decode(&mut tx.as_ref()).ok()?;
+                    let signer = signed.recover_signer().ok()?;
+                    Some(Recovered::new_unchecked(signed, signer))
+                })
+                .collect();
+
+            parsed_transactions
+        });
+
         let block = self.convert_to_block(input)?;
+
+        // Inclusion list verification
+        if let Some(il) = &il {
+            let validation_start = Instant::now();
+            match self.validate_block_inclusion_list(&state_provider, &block, il) {
+                Ok(()) => {
+                    // Record successful validation time
+                    self.metrics
+                        .ef_excution
+                        .record_inclusion_list_block_validation_time(validation_start.elapsed());
+                }
+                Err(err) => {
+                    // Record failed validation time
+                    self.metrics
+                        .ef_excution
+                        .record_inclusion_list_block_validation_time(validation_start.elapsed());
+
+                    warn!("Block failed inclusionlist test.");
+                    self.on_invalid_block(&parent_block, &block, &output, None, ctx.state_mut());
+                    return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into())
+                }
+            }
+        }
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(&block, &parent_block, &output, &mut ctx),
@@ -928,6 +980,106 @@ where
 
         Ok((input, block_hash))
     }
+
+    fn validate_block_inclusion_list<S>(
+        &self,
+        state_provider: S,
+        block: &RecoveredBlock<N::Block>,
+        il: impl AsRef<[Recovered<TransactionSigned>]>,
+    ) -> Result<(), BlockExecutionError>
+    where
+        S: StateProvider,
+    {
+        // Gather all tx hashes already in the block
+        let included: BTreeSet<_> =
+            block.transactions_recovered().map(|tx| *tx.inner().tx_hash()).collect();
+
+        // Compute remaining gas after block execution
+        let remaining = block.header().gas_limit().saturating_sub(block.gas_used());
+
+        // Total number of transactions in the inclusion list
+        let il_len = il.as_ref().len();
+
+        // Check each inclusion-list transaction
+        for (idx, recovered) in il.as_ref().iter().enumerate() {
+            let tx = recovered.inner();
+            let h = tx.tx_hash();
+
+            // Skip if already included
+            if included.contains(h) {
+                self.metrics.ef_excution.record_inclusion_list_transaction_included();
+                continue
+            }
+
+            // Skip blob (EIP-4844) transactions (reason: blob_transaction)
+            if tx.is_eip4844() {
+                self.metrics.ef_excution.record_inclusion_list_transaction_excluded("blob_tx");
+                continue
+            }
+
+            // Skip if not enough gas (reason: gas_limit)
+            if tx.gas_limit() > remaining {
+                self.metrics
+                    .ef_excution
+                    .record_inclusion_list_transaction_excluded("gas_limit_exceeded");
+                continue
+            }
+
+            // Get sender address
+            let sender = recovered.signer();
+
+            // Get nonce
+            let account_nonce = match state_provider.account_nonce(&sender) {
+                Ok(Some(nonce)) => nonce,
+                // account does not exist or error reading nonce (reason: unknown)
+                Ok(None) | Err(_) => {
+                    self.metrics.ef_excution.record_inclusion_list_transaction_excluded("unknown");
+                    continue
+                }
+            };
+
+            // Check nonce matches - if not, it's excluded due to nonce mismatch
+            if account_nonce != tx.nonce() {
+                self.metrics
+                    .ef_excution
+                    .record_inclusion_list_transaction_excluded("invalid_nonce");
+                continue
+            }
+
+            // Check balance (value + gas_limit * max_fee_per_gas)
+            let max_cost = tx.value().saturating_add(
+                U256::from(tx.gas_limit()).saturating_mul(U256::from(tx.max_fee_per_gas())),
+            );
+
+            let account_balance = match state_provider.account_balance(&sender) {
+                Ok(Some(balance)) => balance,
+                // account does not exist or error reading balance (reason: unknown)
+                Ok(None) | Err(_) => {
+                    self.metrics.ef_excution.record_inclusion_list_transaction_excluded("unknown");
+                    continue
+                }
+            };
+
+            if account_balance >= max_cost {
+                // Transaction would still be valid - inclusion list violation
+                info!("Failed on TX: {:?}", recovered);
+
+                // Number of unchecked transactions plus the current tx
+                let unknown_count = (il_len - idx) as u64;
+                self.metrics
+                    .ef_excution
+                    .record_inclusion_list_transaction_excluded_unknown(unknown_count);
+
+                return Err(BlockExecutionError::Validation(
+                    BlockValidationError::InvalidInclusionList,
+                ));
+            }
+            // Insufficient balance (reason: balance)
+            self.metrics.ef_excution.record_inclusion_list_transaction_excluded("invalid_balance");
+        }
+
+        Ok(())
+    }
 }
 
 /// Output of block or payload validation.
@@ -1082,6 +1234,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.block_with_parent(),
             Self::Block(block) => block.block_with_parent(),
+        }
+    }
+
+    /// Returns inclusion list for payload.
+    pub fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
+        match self {
+            Self::Payload(payload) => payload.inclusion_list(),
+            Self::Block(_block) => None,
         }
     }
 

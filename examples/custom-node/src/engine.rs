@@ -17,13 +17,17 @@ use reth_ethereum::{
     primitives::SealedBlock,
     storage::StateProviderFactory,
     trie::{KeccakKeyHasher, KeyHasher},
+    TransactionSigned,
 };
 use reth_node_builder::{rpc::PayloadValidatorBuilder, InvalidPayloadAttributesError};
-use reth_op::node::{
-    engine::OpEngineValidator, payload::OpAttributes, OpBuiltPayload, OpEngineTypes,
-    OpPayloadAttributes, OpPayloadBuilderAttributes,
+use reth_op::{
+    node::{
+        engine::OpEngineValidator, payload::OpAttributes, OpBuiltPayload, OpEngineTypes,
+        OpPayloadAttributes, OpPayloadBuilderAttributes,
+    },
+    primitives::Recovered,
 };
-use revm_primitives::U256;
+use revm_primitives::{Bytes, U256};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 use thiserror::Error;
@@ -65,6 +69,10 @@ impl ExecutionPayload for CustomExecutionData {
     fn gas_used(&self) -> u64 {
         self.inner.gas_used()
     }
+
+    fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
+        self.inner.inclusion_list()
+    }
 }
 
 impl TryFrom<&reth_optimism_flashblocks::FlashBlockCompleteSequence> for CustomExecutionData {
@@ -96,6 +104,10 @@ impl PayloadAttributes for CustomPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<revm_primitives::B256> {
         self.inner.parent_beacon_block_root()
+    }
+
+    fn il(&self) -> Option<&Vec<Bytes>> {
+        self.inner.il()
     }
 }
 
@@ -138,6 +150,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
         self.inner.parent_beacon_block_root()
     }
 
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>> {
+        self.inner.il()
+    }
+
     fn suggested_fee_recipient(&self) -> revm_primitives::Address {
         self.inner.suggested_fee_recipient()
     }
@@ -148,6 +164,10 @@ impl PayloadBuilderAttributes for CustomPayloadBuilderAttributes {
 
     fn withdrawals(&self) -> &alloy_eips::eip4895::Withdrawals {
         self.inner.withdrawals()
+    }
+
+    fn clone_with_il(&self, _il: Vec<Bytes>) -> Self {
+        todo!()
     }
 }
 

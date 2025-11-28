@@ -3,7 +3,7 @@
 use crate::{MessageValidationKind, PayloadAttributes};
 use alloc::vec::Vec;
 use alloy_eips::{eip1898::BlockWithParent, eip4895::Withdrawal, eip7685::Requests, BlockNumHash};
-use alloy_primitives::B256;
+use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::ExecutionData;
 use core::fmt::Debug;
 use serde::{de::DeserializeOwned, Serialize};
@@ -50,6 +50,9 @@ pub trait ExecutionPayload:
 
     /// Returns the total gas consumed by all transactions in this block.
     fn gas_used(&self) -> u64;
+
+    /// Returns the (optional) inclusion list for the block.
+    fn inclusion_list(&self) -> Option<&Vec<Bytes>>;
 }
 
 impl ExecutionPayload for ExecutionData {
@@ -79,6 +82,10 @@ impl ExecutionPayload for ExecutionData {
 
     fn gas_used(&self) -> u64 {
         self.payload.as_v1().gas_used
+    }
+
+    fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
+        self.sidecar.inclusion_list_transactions()
     }
 }
 
@@ -142,6 +149,14 @@ where
             Self::PayloadAttributes(_) => MessageValidationKind::PayloadAttributes,
         }
     }
+
+    /// Returns the IL for the payload or attributes.
+    pub fn il(&self) -> Option<&Vec<Bytes>> {
+        match self {
+            Self::ExecutionPayload { .. } => None,
+            Self::PayloadAttributes(attributes) => attributes.il(),
+        }
+    }
 }
 
 impl<'a, Payload, AttributesType> From<&'a AttributesType>
@@ -182,6 +197,11 @@ impl ExecutionPayload for op_alloy_rpc_types_engine::OpExecutionData {
 
     fn gas_used(&self) -> u64 {
         self.payload.as_v1().gas_used
+    }
+
+    // TODO Pelle: Impl the OP payloads
+    fn inclusion_list(&self) -> Option<&Vec<Bytes>> {
+        None
     }
 }
 

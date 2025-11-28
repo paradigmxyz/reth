@@ -15,6 +15,7 @@ workspace = true
 # reth
 reth-primitives-traits.workspace = true
 reth-chainspec.workspace = true
+reth-ethereum-primitives.workspace = true
 reth-errors.workspace = true
 reth-chain-state.workspace = true
 reth-execution-types.workspace = true
@@ -50,6 +51,7 @@ std = [
     "serde/std",
     "thiserror/std",
     "reth-primitives-traits/std",
+    "reth-ethereum-primitives/std",
     "either/std",
     "alloy-consensus/std",
 ]

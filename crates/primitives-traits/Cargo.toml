@@ -145,16 +145,7 @@ serde = [
     "rand_08/serde",
     "alloy-rpc-types-eth?/serde",
 ]
-reth-codec = [
-    "dep:reth-codecs",
-    "dep:modular-bitfield",
-    "dep:byteorder",
-]
-op = [
-    "dep:op-alloy-consensus",
-    "reth-codecs?/op",
-]
-rayon = [
-    "dep:rayon",
-]
+reth-codec = ["dep:reth-codecs", "dep:modular-bitfield", "dep:byteorder"]
+op = ["dep:op-alloy-consensus", "reth-codecs?/op"]
+rayon = ["dep:rayon"]
 rpc-compat = ["alloy-rpc-types-eth"]

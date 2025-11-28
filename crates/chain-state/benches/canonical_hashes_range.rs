@@ -16,7 +16,7 @@ fn bench_canonical_hashes_range(c: &mut Criterion) {
     let scenarios = [("small", 10), ("medium", 100), ("large", 1000)];
 
     for (name, num_blocks) in scenarios {
-        group.bench_function(format!("{}_blocks_{}", name, num_blocks), |b| {
+        group.bench_function(format!("{name}_blocks_{num_blocks}"), |b| {
             let (provider, blocks) = setup_provider_with_blocks(num_blocks);
             let start_block = blocks[0].recovered_block().number;
             let end_block = blocks[num_blocks / 2].recovered_block().number;
@@ -36,7 +36,7 @@ fn bench_canonical_hashes_range(c: &mut Criterion) {
 
     let range_sizes = [1, 10, 50, 100, 250];
     for range_size in range_sizes {
-        group.bench_function(format!("range_size_{}", range_size), |b| {
+        group.bench_function(format!("range_size_{range_size}"), |b| {
             let end_block = base_block + range_size;
 
             b.iter(|| {

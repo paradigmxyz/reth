@@ -6,12 +6,13 @@ use alloy_eips::{
     eip4895::{Withdrawal, Withdrawals},
     eip7685::Requests,
 };
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, Bytes, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{NodePrimitives, Recovered, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie_common::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted,
@@ -141,6 +142,12 @@ pub trait PayloadBuilderAttributes: Send + Sync + Unpin + fmt::Debug + 'static {
 
     /// Returns the list of withdrawals to be processed in this block.
     fn withdrawals(&self) -> &Withdrawals;
+
+    /// Returns the inclusion list (IL) for the running payload job.
+    fn il(&self) -> Option<&Vec<Option<Recovered<TransactionSigned>>>>;
+
+    /// Returns a clone of the attributes with an updated inclusion list (IL) given by `il`.
+    fn clone_with_il(&self, il: Vec<Bytes>) -> Self;
 }
 
 /// Basic attributes required to initiate payload construction.
@@ -162,6 +169,9 @@ pub trait PayloadAttributes:
     ///
     /// `Some` for post-merge blocks, `None` for pre-merge blocks.
     fn parent_beacon_block_root(&self) -> Option<B256>;
+
+    /// Returns the inclusion list for the payload attributes.
+    fn il(&self) -> Option<&Vec<Bytes>>;
 }
 
 impl PayloadAttributes for EthPayloadAttributes {
@@ -175,6 +185,10 @@ impl PayloadAttributes for EthPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.parent_beacon_block_root
+    }
+
+    fn il(&self) -> Option<&Vec<Bytes>> {
+        self.inclusion_list_transactions.as_ref()
     }
 }
 
@@ -190,6 +204,10 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 
     fn parent_beacon_block_root(&self) -> Option<B256> {
         self.payload_attributes.parent_beacon_block_root
+    }
+
+    fn il(&self) -> Option<&Vec<Bytes>> {
+        None
     }
 }
 
