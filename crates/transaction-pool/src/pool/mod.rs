@@ -604,16 +604,8 @@ where
     /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
     /// [`TransactionPool::pending_transactions_listener_for`](crate::TransactionPool).
     pub fn on_new_pending_transaction(&self, pending: &AddedPendingTransaction<T::Transaction>) {
-        let propagate_allowed = pending.is_propagate_allowed();
-
         let mut transaction_listeners = self.pending_transaction_listener.lock();
         transaction_listeners.retain_mut(|listener| {
-            if listener.kind.is_propagate_only() && !propagate_allowed {
-                // only emit this hash to listeners that are only allowed to receive propagate only
-                // transactions, such as network
-                return !listener.sender.is_closed()
-            }
-
             // broadcast all pending transactions to the listener
             listener.send_all(pending.pending_transactions(listener.kind))
         });
@@ -1124,11 +1116,6 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
     ) -> impl Iterator<Item = B256> + '_ {
         let iter = std::iter::once(&self.transaction).chain(self.promoted.iter());
         PendingTransactionIter { kind, iter }
-    }
-
-    /// Returns if the transaction should be propagated.
-    pub(crate) fn is_propagate_allowed(&self) -> bool {
-        self.transaction.propagate
     }
 }
 
