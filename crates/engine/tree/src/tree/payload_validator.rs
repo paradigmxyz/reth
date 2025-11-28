@@ -1115,6 +1115,12 @@ pub trait EngineValidator<
         block: RecoveredBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N>;
+
+    /// Hook called after an executed block is inserted directly into the tree.
+    ///
+    /// This is invoked when blocks are inserted via `InsertExecutedBlock` (e.g., locally built
+    /// blocks by sequencers) to allow implementations to update internal state such as caches.
+    fn on_inserted_executed_block(&self, block: ExecutedBlock<N>);
 }
 
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
@@ -1162,6 +1168,13 @@ where
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
         self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
+    }
+
+    fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {
+        self.payload_processor.on_inserted_executed_block(
+            block.recovered_block.block_with_parent(),
+            block.execution_output.state(),
+        );
     }
 }
 
