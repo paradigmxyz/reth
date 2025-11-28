@@ -30,7 +30,7 @@ pub trait EthApiTypes: Send + Sync + Clone {
     type RpcConvert: RpcConvert<Network = Self::NetworkTypes>;
 
     /// Returns reference to transaction response builder.
-    fn tx_resp_builder(&self) -> &Self::RpcConvert;
+    fn converter(&self) -> &Self::RpcConvert;
 }
 
 /// Adapter for network specific block type.

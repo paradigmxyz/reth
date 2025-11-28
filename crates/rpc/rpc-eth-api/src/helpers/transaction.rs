@@ -290,7 +290,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     };
 
                     return Ok(Some(
-                        self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)?,
+                        self.converter().fill(tx.clone().with_signer(*signer), tx_info)?,
                     ))
                 }
             }
@@ -316,7 +316,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
             {
                 let transaction = tx.transaction.clone_into_consensus();
-                return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
+                return Ok(Some(self.converter().fill_pending(transaction)?));
             }
 
             // Note: we can't optimize for contracts (account with code) and cannot shortcircuit if
@@ -364,9 +364,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                                 base_fee: base_fee_per_gas,
                                 index: Some(index as u64),
                             };
-                            Ok(self
-                                .tx_resp_builder()
-                                .fill(tx.clone().with_signer(*signer), tx_info)?)
+                            Ok(self.converter().fill(tx.clone().with_signer(*signer), tx_info)?)
                         })
                 })
                 .ok_or(EthApiError::HeaderNotFound(block_id))?
@@ -509,7 +507,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 }
             }
 
-            let tx = self.tx_resp_builder().build_simulate_v1_transaction(request)?;
+            let tx = self.converter().build_simulate_v1_transaction(request)?;
 
             let raw = tx.encoded_2718().into();
 
