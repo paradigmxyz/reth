@@ -87,6 +87,9 @@ build-%-reproducible:
 .PHONY: build-debug
 build-debug: ## Build the reth binary into `target/debug` directory.
 	cargo build --bin reth --features "$(FEATURES)"
+.PHONY: build-debug-op
+build-debug-op: ## Build the op-reth binary into `target/debug` directory.
+	cargo build --bin op-reth --features "$(FEATURES)" --manifest-path crates/optimism/bin/Cargo.toml
 
 .PHONY: build-op
 build-op: ## Build the op-reth binary into `target` directory.
@@ -387,9 +390,9 @@ db-tools: ## Compile MDBX debugging tools.
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
 
 .PHONY: update-book-cli
-update-book-cli: build-debug ## Update book cli documentation.
+update-book-cli: build-debug build-debug-op## Update book cli documentation.
 	@echo "Updating book cli doc..."
-	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
+	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth $(CARGO_TARGET_DIR)/debug/op-reth
 
 .PHONY: profiling
 profiling: ## Builds `reth` with optimisations, but also symbols.
