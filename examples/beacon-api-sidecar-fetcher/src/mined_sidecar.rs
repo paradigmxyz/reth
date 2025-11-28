@@ -269,11 +269,10 @@ async fn fetch_blobs_for_block(
     let mut sidecar_iterator = SidecarIterator::new(blobs_bundle);
 
     let sidecars: Vec<BlobTransactionEvent> = txs
-        .iter()
+        .into_iter()
         .filter_map(|(tx, blob_len)| {
-            sidecar_iterator.next_sidecar(*blob_len).and_then(|sidecar| {
+            sidecar_iterator.next_sidecar(blob_len).and_then(|sidecar| {
                 if let PooledTransactionVariant::Eip4844(transaction) = tx
-                    .clone()
                     .try_into_pooled_eip4844(BlobTransactionSidecarVariant::Eip4844(sidecar))
                     .expect("should not fail to convert blob tx if it is already eip4844")
                 {
