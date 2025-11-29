@@ -22,7 +22,7 @@ pub struct Discv5BootNode(pub discv5::Enr);
 
 impl Discv5BootNode {
     /// Returns a reference to the underlying ENR.
-    pub fn as_enr(&self) -> &discv5::Enr {
+    pub const fn as_enr(&self) -> &discv5::Enr {
         &self.0
     }
 

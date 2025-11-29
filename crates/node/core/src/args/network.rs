@@ -265,7 +265,7 @@ impl NetworkArgs {
     ///
     /// Returns the bootnodes to use for discv4 discovery, following the priority order:
     /// 1. CLI bootnodes (if provided)
-    /// 2. Config file bootnodes_v4 (if not empty)
+    /// 2. Config file `bootnodes_v4` (if not empty)
     /// 3. Chain spec default bootnodes
     fn resolve_discv4_bootnodes(
         cli_bootnodes: Option<Vec<NodeRecord>>,
@@ -327,11 +327,7 @@ impl NetworkArgs {
                 .map(|bootnode| bootnode.as_enr().to_base64())
                 .collect();
 
-            if !enr_strings.is_empty() {
-                Some(enr_strings.join(","))
-            } else {
-                None
-            }
+            (!enr_strings.is_empty()).then(|| enr_strings.join(","))
         } else {
             None
         };
@@ -602,7 +598,7 @@ impl DiscoveryArgs {
         self.apply_to_builder_with_discv5_bootnodes(
             network_config_builder,
             rlpx_tcp_socket,
-            boot_nodes.clone(),
+            boot_nodes,
             None,
         )
     }

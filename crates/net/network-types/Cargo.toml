@@ -34,5 +34,6 @@ serde = [
     "dep:serde",
     "dep:humantime-serde",
     "alloy-eip2124/serde",
+    "discv5/serde",
 ]
 test-utils = []

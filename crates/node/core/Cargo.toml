@@ -33,7 +33,6 @@ reth-discv5.workspace = true
 reth-net-nat.workspace = true
 reth-net-banlist.workspace = true
 reth-network-peers.workspace = true
-reth-network-types.workspace = true
 reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-ethereum-forks.workspace = true
