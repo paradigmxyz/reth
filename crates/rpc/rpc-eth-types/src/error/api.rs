@@ -84,7 +84,10 @@ impl AsEthApiError for EthApiError {
 
 /// Helper trait to convert from revm errors.
 pub trait FromEvmError<Evm: ConfigureEvm>:
-    From<EvmErrorFor<Evm, ProviderError>> + FromEvmHalt<HaltReasonFor<Evm>> + FromRevert
+    From<EvmErrorFor<Evm, ProviderError>>
+    + FromEvmHalt<HaltReasonFor<Evm>>
+    + From<Evm::Error>
+    + FromRevert
 {
     /// Converts from EVM error to this type.
     fn from_evm_err(err: EvmErrorFor<Evm, ProviderError>) -> Self {
@@ -105,7 +108,10 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
 
 impl<T, Evm> FromEvmError<Evm> for T
 where
-    T: From<EvmErrorFor<Evm, ProviderError>> + FromEvmHalt<HaltReasonFor<Evm>> + FromRevert,
+    T: From<EvmErrorFor<Evm, ProviderError>>
+        + FromEvmHalt<HaltReasonFor<Evm>>
+        + From<Evm::Error>
+        + FromRevert,
     Evm: ConfigureEvm,
 {
 }

@@ -9,12 +9,12 @@ use futures::Future;
 use reth_chainspec::ChainSpecProvider;
 use reth_errors::ProviderError;
 use reth_evm::{
-    evm::EvmFactoryExt, system_calls::SystemCaller, tracing::TracingCtx, ConfigureEvm, Database,
-    Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
+    evm::EvmFactoryExt, execute::BlockExecutor, system_calls::SystemCaller, tracing::TracingCtx,
+    ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, HaltReasonFor, InspectorFor, TxEnvFor,
 };
 use reth_primitives_traits::{BlockBody, Recovered, RecoveredBlock};
 use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_rpc_eth_types::{cache::db::StateCacheDb, EthApiError};
+use reth_rpc_eth_types::{cache::db::StateCacheDb, error::FromEthApiError, EthApiError};
 use reth_storage_api::{ProviderBlock, ProviderTx};
 use revm::{context::Block, context_interface::result::ResultAndState, DatabaseCommit};
 use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
@@ -168,22 +168,16 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
             };
             let (tx, tx_info) = transaction.split();
 
-            let (evm_env, _) = self.evm_env_at(block.hash().into()).await?;
-
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in
             let parent_block = block.parent_hash();
 
             self.spawn_with_state_at_block(parent_block, move |this, mut db| {
-                let block_txs = block.transactions_recovered();
+                let res = this
+                    .executor_at_tx_with_inspector(&mut db, &block, *tx.tx_hash(), &mut inspector)?
+                    .execute_transaction_without_commit(tx)
+                    .map_err(Self::Error::from_eth_err)?;
 
-                this.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
-
-                // replay all transactions prior to the targeted transaction
-                this.replay_transactions_until(&mut db, evm_env.clone(), block_txs, *tx.tx_hash())?;
-
-                let tx_env = this.evm_config().tx_env(tx);
-                let res = this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
                 f(tx_info, inspector, res, db)
             })
             .await
