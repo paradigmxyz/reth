@@ -14,6 +14,7 @@ cmd=(
   --root-dir "$DOCS_ROOT/"
   --root-indentation 2
   --root-summary
+  --sidebar
   --verbose
   --out-dir "$VOCS_PAGES_ROOT/cli/"
   "$RETH" "$OP_RETH"
