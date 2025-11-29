@@ -4,8 +4,6 @@ use clap::Parser;
 use eyre::WrapErr;
 use reth_tracing::{tracing_subscriber::EnvFilter, Layers};
 use reth_tracing_otlp::OtlpProtocol;
-#[cfg(feature = "otlp")]
-use reth_tracing_otlp::OtlpConfig;
 use url::Url;
 
 /// CLI arguments for configuring `Opentelemetry` trace and span export.
