@@ -16,6 +16,7 @@
 //! to the local node. Once a (tcp) connection is established, both peers start to authenticate a [RLPx session](https://github.com/ethereum/devp2p/blob/master/rlpx.md) via a handshake. If the handshake was successful, both peers announce their capabilities and are now ready to exchange sub-protocol messages via the `RLPx` session.
 
 use crate::{
+    announce::{BlockAnnounce, BlockAnnounceRequest, PropagationStrategy},
     budget::{DEFAULT_BUDGET_TRY_DRAIN_NETWORK_HANDLE_CHANNEL, DEFAULT_BUDGET_TRY_DRAIN_SWARM},
     config::NetworkConfig,
     discovery::Discovery,
@@ -66,7 +67,7 @@ use std::{
 };
 use tokio::sync::mpsc::{self, error::TrySendError};
 use tokio_stream::wrappers::UnboundedReceiverStream;
-use tracing::{debug, error, trace, warn};
+use tracing::{debug, error, trace};
 
 #[cfg_attr(doc, aquamarine::aquamarine)]
 // TODO: Inlined diagram due to a bug in aquamarine library, should become an include when it's
@@ -111,6 +112,14 @@ pub struct NetworkManager<N: NetworkPrimitives = EthNetworkPrimitives> {
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage<N>>,
     /// Handles block imports according to the `eth` protocol.
     block_import: Box<dyn BlockImport<N::NewBlockPayload>>,
+    /// Handles block announcements to the network.
+    ///
+    /// This is the symmetric counterpart to `block_import`. While `block_import` processes
+    /// incoming blocks from peers, `block_announce` polls for outgoing block announcements.
+    ///
+    /// For Proof-of-Stake chains, this should remain `None` as block propagation over devp2p
+    /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+    block_announce: Box<dyn BlockAnnounce<N::NewBlockPayload>>,
     /// Sender for high level network events.
     event_sender: EventSender<NetworkEvent<PeerRequest<N>>>,
     /// Sender half to send events to the
@@ -191,6 +200,26 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         self.to_eth_request_handler = Some(tx);
     }
 
+    /// Sets the [`BlockAnnounce`] implementation for announcing blocks to the network.
+    ///
+    /// For Proof-of-Stake chains, this should remain unset as block propagation over devp2p
+    /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+    pub fn with_block_announce(
+        mut self,
+        announcer: Box<dyn BlockAnnounce<N::NewBlockPayload>>,
+    ) -> Self {
+        self.set_block_announce(announcer);
+        self
+    }
+
+    /// Sets the [`BlockAnnounce`] implementation for announcing blocks to the network.
+    ///
+    /// For Proof-of-Stake chains, this should remain unset as block propagation over devp2p
+    /// is invalid per [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p).
+    pub fn set_block_announce(&mut self, announcer: Box<dyn BlockAnnounce<N::NewBlockPayload>>) {
+        self.block_announce = announcer;
+    }
+
     /// Adds an additional protocol handler to the `RLPx` sub-protocol list.
     pub fn add_rlpx_sub_protocol(&mut self, protocol: impl IntoRlpxSubProtocol) {
         self.swarm.add_rlpx_sub_protocol(protocol)
@@ -239,6 +268,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             sessions_config,
             chain_id,
             block_import,
+            block_announce,
             network_mode,
             boot_nodes,
             executor,
@@ -348,6 +378,7 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
             handle,
             from_handle_rx: UnboundedReceiverStream::new(from_handle_rx),
             block_import,
+            block_announce,
             event_sender,
             to_transactions_manager: None,
             to_eth_request_handler: None,
@@ -580,6 +611,33 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         }
     }
 
+    /// Invoked when a block is ready to be announced to peers
+    fn on_block_announce_request(&mut self, event: BlockAnnounceRequest<N::NewBlockPayload>) {
+        match event {
+            BlockAnnounceRequest::Announce { block, hash, strategy } => {
+                let msg = NewBlockMessage { hash, block: Arc::new(block.clone()) };
+
+                match strategy {
+                    PropagationStrategy::FullBlock => {
+                        // Announce full block to √n peers
+                        self.swarm.state_mut().announce_new_block(msg);
+                    }
+                    PropagationStrategy::HashOnly => {
+                        // Announce hash to all peers
+                        self.swarm.state_mut().announce_new_block_hash(msg);
+                    }
+                    PropagationStrategy::Both => {
+                        // Standard: full block to √n + hash to all
+                        self.swarm.state_mut().announce_new_block(msg.clone());
+                        self.swarm.state_mut().announce_new_block_hash(msg);
+                    }
+                }
+
+                self.block_announce.on_announced_block(block);
+            }
+        }
+    }
+
     /// Enforces [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p) consensus rules for the network protocol
     ///
     /// Depending on the mode of the network:
@@ -648,15 +706,6 @@ impl<N: NetworkPrimitives> NetworkManager<N> {
         match msg {
             NetworkHandleMessage::DiscoveryListener(tx) => {
                 self.swarm.state_mut().discovery_mut().add_listener(tx);
-            }
-            NetworkHandleMessage::AnnounceBlock(block, hash) => {
-                if self.handle.mode().is_stake() {
-                    // See [EIP-3675](https://eips.ethereum.org/EIPS/eip-3675#devp2p)
-                    warn!(target: "net", "Peer performed block propagation, but it is not supported in proof of stake (EIP-3675)");
-                    return
-                }
-                let msg = NewBlockMessage { hash, block: Arc::new(block) };
-                self.swarm.state_mut().announce_new_block(msg);
             }
             NetworkHandleMessage::EthRequest { peer_id, request } => {
                 self.swarm.sessions_mut().send_message(&peer_id, PeerMessage::EthRequest(request))
@@ -1096,9 +1145,15 @@ impl<N: NetworkPrimitives> Future for NetworkManager<N> {
 
         let this = self.get_mut();
 
-        // poll new block imports (expected to be a noop for POS)
-        while let Poll::Ready(outcome) = this.block_import.poll(cx) {
-            this.on_block_import_result(outcome);
+        // Skip block imports and announcements for POS chains
+        if !this.handle.mode().is_stake() {
+            while let Poll::Ready(outcome) = this.block_import.poll(cx) {
+                this.on_block_import_result(outcome);
+            }
+
+            while let Poll::Ready(outcome) = this.block_announce.poll(cx) {
+                this.on_block_announce_request(outcome);
+            }
         }
 
         // These loops drive the entire state of network and does a lot of work. Under heavy load
