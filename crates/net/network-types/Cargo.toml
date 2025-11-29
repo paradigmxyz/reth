@@ -23,6 +23,9 @@ serde = { workspace = true, optional = true }
 humantime-serde = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"] }
 
+# discv5
+discv5 = { workspace = true }
+
 # misc
 tracing.workspace = true
 

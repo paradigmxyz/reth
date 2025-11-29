@@ -8997,6 +8997,7 @@ name = "reth-network-types"
 version = "1.9.3"
 dependencies = [
  "alloy-eip2124",
+ "discv5",
  "humantime-serde",
  "reth-net-banlist",
  "reth-network-peers",

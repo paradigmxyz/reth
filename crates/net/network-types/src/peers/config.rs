@@ -14,34 +14,72 @@ use tracing::info;
 
 use crate::{BackoffKind, ReputationChangeWeights};
 
-/// A bootnode for Discv5 discovery that can be either an enode (`TrustedPeer`) or an ENR string.
+/// A bootnode for Discv5 discovery (ENR only).
+///
+/// This is a newtype wrapper around [`discv5::Enr`] to provide a clearer API.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(feature = "serde", serde(untagged))]
-pub enum Discv5BootNode {
-    /// An enode URL (enode://...)
-    Enode(TrustedPeer),
-    /// An ENR string (enr:...)
-    Enr(String),
-}
+pub struct Discv5BootNode(pub discv5::Enr);
 
-impl FromStr for Discv5BootNode {
-    type Err = <TrustedPeer as FromStr>::Err;
+impl Discv5BootNode {
+    /// Returns a reference to the underlying ENR.
+    pub fn as_enr(&self) -> &discv5::Enr {
+        &self.0
+    }
 
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        // Check if it's an ENR (starts with "enr:")
-        if s.starts_with("enr:") {
-            Ok(Self::Enr(s.to_string()))
-        } else {
-            // Try to parse as enode
-            TrustedPeer::from_str(s).map(Discv5BootNode::Enode)
-        }
+    /// Consumes the bootnode and returns the underlying ENR.
+    pub fn into_enr(self) -> discv5::Enr {
+        self.0
+    }
+
+    /// Returns the ENR as a base64-encoded string.
+    pub fn to_base64(&self) -> String {
+        self.0.to_base64()
     }
 }
 
-impl From<TrustedPeer> for Discv5BootNode {
-    fn from(peer: TrustedPeer) -> Self {
-        Self::Enode(peer)
+impl From<discv5::Enr> for Discv5BootNode {
+    fn from(enr: discv5::Enr) -> Self {
+        Self(enr)
+    }
+}
+
+impl From<Discv5BootNode> for discv5::Enr {
+    fn from(bootnode: Discv5BootNode) -> Self {
+        bootnode.0
+    }
+}
+
+impl FromStr for Discv5BootNode {
+    type Err = <discv5::Enr as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        s.parse::<discv5::Enr>().map(Self)
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use super::Discv5BootNode;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    impl Serialize for Discv5BootNode {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            // Serialize as ENR string with "enr:" prefix
+            serializer.serialize_str(&format!("enr:{}", self.0.to_base64()))
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Discv5BootNode {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = String::deserialize(deserializer)?;
+            s.parse().map_err(serde::de::Error::custom)
+        }
     }
 }
 
@@ -210,10 +248,10 @@ pub struct PeersConfig {
     /// discovery protocol.
     #[cfg_attr(feature = "serde", serde(default))]
     pub bootnodes_v4: Vec<TrustedPeer>,
-    /// Bootnodes for Discv5 discovery (enode:// or enr: format).
+    /// Bootnodes for Discv5 discovery (ENR format only).
     ///
     /// Similar to geth's `BootstrapNodesV5`. These nodes are used to bootstrap the Discv5
-    /// discovery protocol. Can be either enode URLs (enode://...) or ENR strings (enr:...).
+    /// discovery protocol. Must be ENR strings (enr:...).
     #[cfg_attr(feature = "serde", serde(default))]
     pub bootnodes_v5: Vec<Discv5BootNode>,
 }

@@ -1191,28 +1191,17 @@ bootnodes_v4 = [
     }
 
     #[test]
-    fn test_bootnodes_v5_config_enode() {
+    fn test_bootnodes_v5_config_enode_rejected() {
         let reth_toml = r#"
 [peers]
 bootnodes_v5 = [
-    "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303",
-    "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303"
+    "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303"
 ]
 "#;
 
-        let conf: Config = toml::from_str(reth_toml).unwrap();
-        assert_eq!(conf.peers.bootnodes_v5.len(), 2);
-
-        let expected_enodes = vec![
-            "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303",
-            "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303",
-        ];
-
-        for enode in expected_enodes {
-            let node = TrustedPeer::from_str(enode).unwrap();
-            let bootnode = Discv5BootNode::Enode(node);
-            assert!(conf.peers.bootnodes_v5.contains(&bootnode));
-        }
+        // Enode strings should be rejected when parsing Discv5BootNode
+        let result: Result<Config, _> = toml::from_str(reth_toml);
+        assert!(result.is_err(), "Enode strings should be rejected for Discv5 bootnodes");
     }
 
     #[test]
@@ -1228,33 +1217,33 @@ bootnodes_v5 = [
         assert_eq!(conf.peers.bootnodes_v5.len(), 1);
 
         let expected_enr = "enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg";
-        let bootnode = Discv5BootNode::Enr(expected_enr.to_string());
+        let bootnode = Discv5BootNode::from_str(expected_enr).unwrap();
         assert!(conf.peers.bootnodes_v5.contains(&bootnode));
+        // Verify the ENR was correctly parsed - to_base64() returns the full "enr:..." string
+        let stored_enr = &conf.peers.bootnodes_v5[0];
+        assert_eq!(stored_enr.as_enr().to_base64(), expected_enr);
     }
 
     #[test]
-    fn test_bootnodes_v5_config_mixed() {
+    fn test_bootnodes_v5_config_multiple_enr() {
         let reth_toml = r#"
 [peers]
 bootnodes_v5 = [
-    "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303",
-    "enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg"
+    "enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg",
+    "enr:-J64QFa3qMsONLGphfjEkeYyF6Jkil_jCuJmm7_a42ckZeUQGLVzrzstZNb1dgBp1GGx9bzImq5VxJLP-BaptZThGiWGAYrTytOvgmlkgnY0gmlwhGsV-zeHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDahfSECTIS_cXyZ8IyNf4leANlZnrsMEWTkEYxf4GMCmDdGNwgiQGg3VkcIIkBg"
 ]
 "#;
 
         let conf: Config = toml::from_str(reth_toml).unwrap();
         assert_eq!(conf.peers.bootnodes_v5.len(), 2);
 
-        let enode_node = TrustedPeer::from_str(
-            "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303",
-        )
-        .unwrap();
-        let enode_bootnode = Discv5BootNode::Enode(enode_node);
-        assert!(conf.peers.bootnodes_v5.contains(&enode_bootnode));
-
-        let enr_string = "enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg";
-        let enr_bootnode = Discv5BootNode::Enr(enr_string.to_string());
-        assert!(conf.peers.bootnodes_v5.contains(&enr_bootnode));
+        let enr1 = "enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg";
+        let enr2 = "enr:-J64QFa3qMsONLGphfjEkeYyF6Jkil_jCuJmm7_a42ckZeUQGLVzrzstZNb1dgBp1GGx9bzImq5VxJLP-BaptZThGiWGAYrTytOvgmlkgnY0gmlwhGsV-zeHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDahfSECTIS_cXyZ8IyNf4leANlZnrsMEWTkEYxf4GMCmDdGNwgiQGg3VkcIIkBg";
+        
+        let bootnode1 = Discv5BootNode::from_str(enr1).unwrap();
+        let bootnode2 = Discv5BootNode::from_str(enr2).unwrap();
+        assert!(conf.peers.bootnodes_v5.contains(&bootnode1));
+        assert!(conf.peers.bootnodes_v5.contains(&bootnode2));
     }
 
     #[test]
@@ -1265,7 +1254,7 @@ bootnodes_v4 = [
     "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303"
 ]
 bootnodes_v5 = [
-    "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303"
+    "enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg"
 ]
 "#;
 
@@ -1277,15 +1266,12 @@ bootnodes_v5 = [
             "enode://d860a01f9722d78051619d1e2351aba3f43f943f6f00718d1b9baa4101932a1f5011f16bb2b1bb35db20d6fe28fa0bf09636d26a87d31de9ec6203eeedb1f666@18.138.108.67:30303",
         )
         .unwrap();
-        let v5_node = TrustedPeer::from_str(
-            "enode://22a8232c3abc76a16ae9d6c3b164f98775fe226f0917b0ca871128a74a8e9630b458460865bab457221f1d448dd9791d24c4e5d88786180ac185df813a68d4de@3.209.45.79:30303",
-        )
-        .unwrap();
-        let v5_bootnode = Discv5BootNode::Enode(v5_node.clone());
+        let v5_enr = "enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg";
+        let v5_bootnode = Discv5BootNode::from_str(v5_enr).unwrap();
 
         assert!(conf.peers.bootnodes_v4.contains(&v4_node));
         assert!(conf.peers.bootnodes_v5.contains(&v5_bootnode));
-        assert!(!conf.peers.bootnodes_v4.contains(&v5_node));
+        assert_eq!(conf.peers.bootnodes_v5[0].as_enr().to_base64(), v5_enr);
     }
 
     #[test]

@@ -39,7 +39,6 @@ use reth_network::{
     HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
-use reth_network_types::peers::Discv5BootNode;
 use secp256k1::SecretKey;
 use std::str::FromStr;
 use tracing::error;
@@ -262,6 +261,29 @@ impl NetworkArgs {
         }
     }
 
+    /// Resolves discv4 bootnodes based on priority: CLI > Config file > Chain spec > Default
+    ///
+    /// Returns the bootnodes to use for discv4 discovery, following the priority order:
+    /// 1. CLI bootnodes (if provided)
+    /// 2. Config file bootnodes_v4 (if not empty)
+    /// 3. Chain spec default bootnodes
+    fn resolve_discv4_bootnodes(
+        cli_bootnodes: Option<Vec<NodeRecord>>,
+        config_bootnodes_v4: &[TrustedPeer],
+        chain_bootnodes_default: Vec<NodeRecord>,
+    ) -> Vec<NodeRecord> {
+        if let Some(cli_nodes) = cli_bootnodes {
+            cli_nodes
+        } else if !config_bootnodes_v4.is_empty() {
+            config_bootnodes_v4
+                .iter()
+                .filter_map(|peer| peer.resolve_blocking().ok())
+                .collect()
+        } else {
+            chain_bootnodes_default
+        }
+    }
+
     /// Build a [`NetworkConfigBuilder`] from a [`Config`] and a [`EthChainSpec`], in addition to
     /// the values in this option struct.
     ///
@@ -289,50 +311,32 @@ impl NetworkArgs {
         let chain_bootnodes_default = chain_spec.bootnodes().unwrap_or_else(mainnet_nodes);
 
         // For discv4: CLI > Config file > Chain spec > Default
-        let discv4_bootnodes = if let Some(cli_nodes) = &cli_bootnodes {
-            cli_nodes.clone()
-        } else if !config.peers.bootnodes_v4.is_empty() {
-            config
-                .peers
-                .bootnodes_v4
-                .iter()
-                .filter_map(|peer| peer.resolve_blocking().ok())
-                .collect()
-        } else {
-            chain_bootnodes_default
-        };
+        let discv4_bootnodes = Self::resolve_discv4_bootnodes(
+            cli_bootnodes.clone(),
+            &config.peers.bootnodes_v4,
+            chain_bootnodes_default,
+        );
 
         // For discv5: CLI > Config file > Chain spec > Default
-        // Separate enode and enr bootnodes for discv5
-        let (discv5_bootnodes_enode, discv5_bootnodes_enr) = if let Some(cli_nodes) = &cli_bootnodes
-        {
-            (cli_nodes.clone(), None)
+        // Discv5 only supports ENR strings
+        let discv5_bootnodes_enr = if let Some(_cli_nodes) = &cli_bootnodes {
+            // CLI bootnodes are enode format, not supported for discv5
+            None
         } else if !config.peers.bootnodes_v5.is_empty() {
-            let mut enode_nodes = Vec::new();
-            let mut enr_strings = Vec::new();
-
-            for bootnode in &config.peers.bootnodes_v5 {
-                match bootnode {
-                    Discv5BootNode::Enode(peer) => {
-                        if let Ok(node) = peer.resolve_blocking() {
-                            enode_nodes.push(node);
-                        }
-                    }
-                    Discv5BootNode::Enr(enr_str) => {
-                        enr_strings.push(enr_str.clone());
-                    }
-                }
-            }
+            let enr_strings: Vec<String> = config
+                .peers
+                .bootnodes_v5
+                .iter()
+                .map(|bootnode| bootnode.as_enr().to_base64())
+                .collect();
 
             if !enr_strings.is_empty() {
-                (enode_nodes, Some(enr_strings.join(",")))
-            } else if !enode_nodes.is_empty() {
-                (enode_nodes, None)
+                Some(enr_strings.join(","))
             } else {
-                (discv4_bootnodes.clone(), None)
+                None
             }
         } else {
-            (discv4_bootnodes.clone(), None)
+            None
         };
 
         // Use discv4 bootnodes for the general boot_nodes (for backward compatibility)
@@ -377,7 +381,6 @@ impl NetworkArgs {
                     builder,
                     rlpx_socket,
                     chain_bootnodes,
-                    discv5_bootnodes_enode,
                     discv5_bootnodes_enr,
                 )
             })
@@ -603,7 +606,6 @@ impl DiscoveryArgs {
             network_config_builder,
             rlpx_tcp_socket,
             boot_nodes.clone(),
-            boot_nodes,
             None,
         )
     }
@@ -615,7 +617,6 @@ impl DiscoveryArgs {
         mut network_config_builder: NetworkConfigBuilder<N>,
         rlpx_tcp_socket: SocketAddr,
         _discv4_boot_nodes: impl IntoIterator<Item = NodeRecord>,
-        discv5_boot_nodes_enode: impl IntoIterator<Item = NodeRecord>,
         discv5_boot_nodes_enr: Option<String>,
     ) -> NetworkConfigBuilder<N>
     where
@@ -638,7 +639,6 @@ impl DiscoveryArgs {
             network_config_builder =
                 network_config_builder.discovery_v5(self.discovery_v5_builder_with_enr(
                     rlpx_tcp_socket,
-                    discv5_boot_nodes_enode,
                     discv5_boot_nodes_enr,
                 ));
         }
@@ -650,17 +650,17 @@ impl DiscoveryArgs {
     pub fn discovery_v5_builder(
         &self,
         rlpx_tcp_socket: SocketAddr,
-        boot_nodes: impl IntoIterator<Item = NodeRecord>,
+        _boot_nodes: impl IntoIterator<Item = NodeRecord>,
     ) -> reth_discv5::ConfigBuilder {
-        self.discovery_v5_builder_with_enr(rlpx_tcp_socket, boot_nodes, None)
+        // Discv5 only supports ENR bootnodes, so we ignore enode bootnodes
+        self.discovery_v5_builder_with_enr(rlpx_tcp_socket, None)
     }
 
     /// Creates a [`reth_discv5::ConfigBuilder`] filling it with the values from this struct,
-    /// supporting both enode and ENR bootnodes.
+    /// supporting ENR bootnodes only.
     pub fn discovery_v5_builder_with_enr(
         &self,
         rlpx_tcp_socket: SocketAddr,
-        boot_nodes_enode: impl IntoIterator<Item = NodeRecord>,
         boot_nodes_enr: Option<String>,
     ) -> reth_discv5::ConfigBuilder {
         let Self {
@@ -692,7 +692,6 @@ impl DiscoveryArgs {
                 ))
                 .build(),
             )
-            .add_unsigned_boot_nodes(boot_nodes_enode)
             .lookup_interval(*discv5_lookup_interval)
             .bootstrap_lookup_interval(*discv5_bootstrap_lookup_interval)
             .bootstrap_lookup_countdown(*discv5_bootstrap_lookup_countdown);
