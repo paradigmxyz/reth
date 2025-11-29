@@ -20,7 +20,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpExecutionPayloadValidator, OpPayloadTypes};
 use reth_optimism_primitives::{OpBlock, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SignedTransaction};
-use reth_provider::StateProviderFactory;
+use reth_provider::{ProviderError, StateProviderFactory};
 use reth_trie_common::{HashedPostState, KeyHasher};
 use std::{marker::PhantomData, sync::Arc};
 
@@ -127,11 +127,23 @@ where
         block: &RecoveredBlock<Self::Block>,
     ) -> Result<(), ConsensusError> {
         if self.chain_spec().is_isthmus_active_at_timestamp(block.timestamp()) {
-            let Ok(state) = self.provider.state_by_block_hash(block.parent_hash()) else {
-                // FIXME: we don't necessarily have access to the parent block here because the
-                // parent block isn't necessarily part of the canonical chain yet. Instead this
-                // function should receive the list of in memory blocks as input
-                return Ok(())
+            let parent_hash = block.parent_hash();
+            let state = match self.provider.state_by_block_hash(parent_hash) {
+                Ok(state) => state,
+                Err(ProviderError::StateForHashNotFound(_)) => self
+                    .provider
+                    .pending_state_by_hash(parent_hash)
+                    .map_err(|err| {
+                        ConsensusError::Other(format!(
+                            "failed to access pending parent state {parent_hash:?}: {err}"
+                        ))
+                    })?
+                    .ok_or(ConsensusError::ParentUnknown { hash: parent_hash })?,
+                Err(err) => {
+                    return Err(ConsensusError::Other(format!(
+                        "failed to access parent state {parent_hash:?}: {err}"
+                    )))
+                }
             };
             let predeploy_storage_updates = state_updates
                 .storages
