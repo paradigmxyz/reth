@@ -403,7 +403,7 @@ fn build_sidebar_item(
     let indent = "        ".repeat(depth);
     let mut item_str = String::new();
     
-    item_str.push_str(&format!("{} {{\n", indent));
+    item_str.push_str(&format!("{}{{\n", indent));
     item_str.push_str(&format!("{}    text: \"{}\",\n", indent, full_cmd_name));
     item_str.push_str(&format!("{}    link: \"{}\"", indent, link_path));
     
