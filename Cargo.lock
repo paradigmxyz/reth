@@ -10390,6 +10390,7 @@ dependencies = [
  "alloy-rpc-types-eth",
  "alloy-sol-types",
  "alloy-transport",
+ "data-encoding",
  "derive_more",
  "futures",
  "itertools 0.14.0",
