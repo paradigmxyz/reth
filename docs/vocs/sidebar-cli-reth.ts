@@ -66,7 +66,7 @@ export const rethCliSidebar: SidebarItem = {
                         {
                             text: "reth db get static-file",
                             link: "/cli/reth/db/get/static-file"
-                        },
+                        }
                     ]
                 },
                 {
@@ -85,7 +85,7 @@ export const rethCliSidebar: SidebarItem = {
                         {
                             text: "reth db clear static-file",
                             link: "/cli/reth/db/clear/static-file"
-                        },
+                        }
                     ]
                 },
                 {
@@ -104,7 +104,7 @@ export const rethCliSidebar: SidebarItem = {
                         {
                             text: "reth db static-file-header path",
                             link: "/cli/reth/db/static-file-header/path"
-                        },
+                        }
                     ]
                 },
                 {
@@ -136,15 +136,15 @@ export const rethCliSidebar: SidebarItem = {
                                 {
                                     text: "reth db settings set transaction_senders_in_static_files",
                                     link: "/cli/reth/db/settings/set/transaction_senders_in_static_files"
-                                },
+                                }
                             ]
-                        },
+                        }
                     ]
                 },
                 {
                     text: "reth db account-storage",
                     link: "/cli/reth/db/account-storage"
-                },
+                }
             ]
         },
         {
@@ -184,7 +184,7 @@ export const rethCliSidebar: SidebarItem = {
                         {
                             text: "reth stage dump merkle",
                             link: "/cli/reth/stage/dump/merkle"
-                        },
+                        }
                     ]
                 },
                 {
@@ -199,9 +199,9 @@ export const rethCliSidebar: SidebarItem = {
                         {
                             text: "reth stage unwind num-blocks",
                             link: "/cli/reth/stage/unwind/num-blocks"
-                        },
+                        }
                     ]
-                },
+                }
             ]
         },
         {
@@ -225,13 +225,13 @@ export const rethCliSidebar: SidebarItem = {
                         {
                             text: "reth p2p rlpx ping",
                             link: "/cli/reth/p2p/rlpx/ping"
-                        },
+                        }
                     ]
                 },
                 {
                     text: "reth p2p bootnode",
                     link: "/cli/reth/p2p/bootnode"
-                },
+                }
             ]
         },
         {
@@ -245,6 +245,6 @@ export const rethCliSidebar: SidebarItem = {
         {
             text: "reth re-execute",
             link: "/cli/reth/re-execute"
-        },
+        }
     ]
 };

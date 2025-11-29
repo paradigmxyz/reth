@@ -62,7 +62,7 @@ export const opRethCliSidebar: SidebarItem = {
                         {
                             text: "op-reth db get static-file",
                             link: "/cli/op-reth/db/get/static-file"
-                        },
+                        }
                     ]
                 },
                 {
@@ -81,7 +81,7 @@ export const opRethCliSidebar: SidebarItem = {
                         {
                             text: "op-reth db clear static-file",
                             link: "/cli/op-reth/db/clear/static-file"
-                        },
+                        }
                     ]
                 },
                 {
@@ -100,7 +100,7 @@ export const opRethCliSidebar: SidebarItem = {
                         {
                             text: "op-reth db static-file-header path",
                             link: "/cli/op-reth/db/static-file-header/path"
-                        },
+                        }
                     ]
                 },
                 {
@@ -132,15 +132,15 @@ export const opRethCliSidebar: SidebarItem = {
                                 {
                                     text: "op-reth db settings set transaction_senders_in_static_files",
                                     link: "/cli/op-reth/db/settings/set/transaction_senders_in_static_files"
-                                },
+                                }
                             ]
-                        },
+                        }
                     ]
                 },
                 {
                     text: "op-reth db account-storage",
                     link: "/cli/op-reth/db/account-storage"
-                },
+                }
             ]
         },
         {
@@ -176,7 +176,7 @@ export const opRethCliSidebar: SidebarItem = {
                         {
                             text: "op-reth stage dump merkle",
                             link: "/cli/op-reth/stage/dump/merkle"
-                        },
+                        }
                     ]
                 },
                 {
@@ -191,9 +191,9 @@ export const opRethCliSidebar: SidebarItem = {
                         {
                             text: "op-reth stage unwind num-blocks",
                             link: "/cli/op-reth/stage/unwind/num-blocks"
-                        },
+                        }
                     ]
-                },
+                }
             ]
         },
         {
@@ -217,13 +217,13 @@ export const opRethCliSidebar: SidebarItem = {
                         {
                             text: "op-reth p2p rlpx ping",
                             link: "/cli/op-reth/p2p/rlpx/ping"
-                        },
+                        }
                     ]
                 },
                 {
                     text: "op-reth p2p bootnode",
                     link: "/cli/op-reth/p2p/bootnode"
-                },
+                }
             ]
         },
         {
@@ -237,6 +237,6 @@ export const opRethCliSidebar: SidebarItem = {
         {
             text: "op-reth re-execute",
             link: "/cli/op-reth/re-execute"
-        },
+        }
     ]
 };

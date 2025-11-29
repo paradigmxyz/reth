@@ -346,8 +346,9 @@ fn generate_sidebar_ts(
     ts_code.push_str("    collapsed: false,\n");
     ts_code.push_str("    items: [\n");
     
-    for cmd in top_level_commands {
-        if let Some(item_str) = build_sidebar_item(root_name, cmd, &commands, 1, help_map) {
+    for (idx, cmd) in top_level_commands.iter().enumerate() {
+        let is_last = idx == top_level_commands.len() - 1;
+        if let Some(item_str) = build_sidebar_item(root_name, cmd, &commands, 1, help_map, is_last) {
             ts_code.push_str(&item_str);
         }
     }
@@ -366,6 +367,7 @@ fn build_sidebar_item(
     all_commands: &[&Cmd],
     depth: usize,
     help_map: &std::collections::HashMap<String, String>,
+    is_last: bool,
 ) -> Option<String> {
     let full_cmd_name = cmd.to_string();
     let link_path = format!("/cli/{}", full_cmd_name.replace(" ", "/"));
@@ -412,17 +414,26 @@ fn build_sidebar_item(
         item_str.push_str(&format!("{}    collapsed: true,\n", indent));
         item_str.push_str(&format!("{}    items: [\n", indent));
         
-        for child_cmd in children {
-            if let Some(child_str) = build_sidebar_item(root_name, child_cmd, all_commands, depth + 1, help_map) {
+        for (idx, child_cmd) in children.iter().enumerate() {
+            let child_is_last = idx == children.len() - 1;
+            if let Some(child_str) = build_sidebar_item(root_name, child_cmd, all_commands, depth + 1, help_map, child_is_last) {
                 item_str.push_str(&child_str);
             }
         }
         
         item_str.push_str(&format!("{}    ]\n", indent));
-        item_str.push_str(&format!("{}}},\n", indent));
+        if is_last {
+            item_str.push_str(&format!("{}}}\n", indent));
+        } else {
+            item_str.push_str(&format!("{}}},\n", indent));
+        }
     } else {
         item_str.push_str("\n");
-        item_str.push_str(&format!("{}}},\n", indent));
+        if is_last {
+            item_str.push_str(&format!("{}}}\n", indent));
+        } else {
+            item_str.push_str(&format!("{}}},\n", indent));
+        }
     }
 
     Some(item_str)
