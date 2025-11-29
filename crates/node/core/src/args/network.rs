@@ -275,10 +275,7 @@ impl NetworkArgs {
         if let Some(cli_nodes) = cli_bootnodes {
             cli_nodes
         } else if !config_bootnodes_v4.is_empty() {
-            config_bootnodes_v4
-                .iter()
-                .filter_map(|peer| peer.resolve_blocking().ok())
-                .collect()
+            config_bootnodes_v4.iter().filter_map(|peer| peer.resolve_blocking().ok()).collect()
         } else {
             chain_bootnodes_default
         }
@@ -636,11 +633,9 @@ impl DiscoveryArgs {
         }
 
         if self.should_enable_discv5() {
-            network_config_builder =
-                network_config_builder.discovery_v5(self.discovery_v5_builder_with_enr(
-                    rlpx_tcp_socket,
-                    discv5_boot_nodes_enr,
-                ));
+            network_config_builder = network_config_builder.discovery_v5(
+                self.discovery_v5_builder_with_enr(rlpx_tcp_socket, discv5_boot_nodes_enr),
+            );
         }
 
         network_config_builder
