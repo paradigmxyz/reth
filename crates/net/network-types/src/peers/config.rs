@@ -16,44 +16,32 @@ use crate::{BackoffKind, ReputationChangeWeights};
 
 /// A bootnode for Discv5 discovery (ENR only).
 ///
-/// This is a newtype wrapper around [`discv5::Enr`] to provide a clearer API.
+/// This is a newtype wrapper around a string to provide a clearer API.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct Discv5BootNode(pub discv5::Enr);
+pub struct Discv5BootNode(pub String);
 
 impl Discv5BootNode {
-    /// Returns a reference to the underlying ENR.
-    pub const fn as_enr(&self) -> &discv5::Enr {
+    /// Returns a reference to the underlying ENR string.
+    pub fn as_str(&self) -> &str {
         &self.0
-    }
-
-    /// Consumes the bootnode and returns the underlying ENR.
-    pub fn into_enr(self) -> discv5::Enr {
-        self.0
     }
 
     /// Returns the ENR as a base64-encoded string.
     pub fn to_base64(&self) -> String {
-        self.0.to_base64()
-    }
-}
-
-impl From<discv5::Enr> for Discv5BootNode {
-    fn from(enr: discv5::Enr) -> Self {
-        Self(enr)
-    }
-}
-
-impl From<Discv5BootNode> for discv5::Enr {
-    fn from(bootnode: Discv5BootNode) -> Self {
-        bootnode.0
+        // Remove "enr:" prefix if present
+        self.0.strip_prefix("enr:").unwrap_or(&self.0).to_string()
     }
 }
 
 impl FromStr for Discv5BootNode {
-    type Err = <discv5::Enr as FromStr>::Err;
+    type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        s.parse::<discv5::Enr>().map(Self)
+        // Basic validation: should start with "enr:" and be non-empty
+        if !s.starts_with("enr:") || s.len() <= 4 {
+            return Err("Invalid ENR string: must start with 'enr:'".to_string());
+        }
+        Ok(Self(s.to_string()))
     }
 }
 
@@ -67,8 +55,9 @@ mod serde_impl {
         where
             S: Serializer,
         {
-            // Serialize as ENR string with "enr:" prefix
-            serializer.serialize_str(&format!("enr:{}", self.0.to_base64()))
+            // Serialize as ENR string (ensure "enr:" prefix)
+            let s = if self.0.starts_with("enr:") { &self.0 } else { &format!("enr:{}", self.0) };
+            serializer.serialize_str(s)
         }
     }
 

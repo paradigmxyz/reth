@@ -320,12 +320,8 @@ impl NetworkArgs {
             // CLI bootnodes are enode format, not supported for discv5
             None
         } else if !config.peers.bootnodes_v5.is_empty() {
-            let enr_strings: Vec<String> = config
-                .peers
-                .bootnodes_v5
-                .iter()
-                .map(|bootnode| bootnode.as_enr().to_base64())
-                .collect();
+            let enr_strings: Vec<String> =
+                config.peers.bootnodes_v5.iter().map(|bootnode| bootnode.to_base64()).collect();
 
             (!enr_strings.is_empty()).then(|| enr_strings.join(","))
         } else {

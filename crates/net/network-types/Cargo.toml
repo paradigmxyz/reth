@@ -23,8 +23,6 @@ serde = { workspace = true, optional = true }
 humantime-serde = { workspace = true, optional = true }
 serde_json = { workspace = true, features = ["std"] }
 
-# discv5
-discv5 = { workspace = true }
 
 # misc
 tracing.workspace = true
@@ -34,6 +32,5 @@ serde = [
     "dep:serde",
     "dep:humantime-serde",
     "alloy-eip2124/serde",
-    "discv5/serde",
 ]
 test-utils = []

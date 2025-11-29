@@ -1219,9 +1219,9 @@ bootnodes_v5 = [
         let expected_enr = "enr:-J64QBwRIWAco7lv6jImSOjPU_W266lHXzpAS5YOh7WmgTyBZkgLgOwo_mxKJq3wz2XRbsoBItbv1dCyjIoNq67mFguGAYrTxM42gmlkgnY0gmlwhBLSsHKHb3BzdGFja4S0lAUAiXNlY3AyNTZrMaEDmoWSi8hcsRpQf2eJsNUx-sqv6fH4btmo2HsAzZFAKnKDdGNwgiQGg3VkcIIkBg";
         let bootnode = Discv5BootNode::from_str(expected_enr).unwrap();
         assert!(conf.peers.bootnodes_v5.contains(&bootnode));
-        // Verify the ENR was correctly parsed - to_base64() returns the full "enr:..." string
+        // Verify the ENR was correctly parsed
         let stored_enr = &conf.peers.bootnodes_v5[0];
-        assert_eq!(stored_enr.as_enr().to_base64(), expected_enr);
+        assert_eq!(stored_enr.as_str(), expected_enr);
     }
 
     #[test]
@@ -1271,7 +1271,7 @@ bootnodes_v5 = [
 
         assert!(conf.peers.bootnodes_v4.contains(&v4_node));
         assert!(conf.peers.bootnodes_v5.contains(&v5_bootnode));
-        assert_eq!(conf.peers.bootnodes_v5[0].as_enr().to_base64(), v5_enr);
+        assert_eq!(conf.peers.bootnodes_v5[0].as_str(), v5_enr);
     }
 
     #[test]
