@@ -814,6 +814,24 @@ where
     }
 }
 
+impl<V, T, S> TransactionPoolExtExt for Pool<V, T, S>
+where
+    V: TransactionValidator,
+    <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    T: TransactionOrdering<Transaction = <V as TransactionValidator>::Transaction>,
+    S: BlobStore,
+{
+    fn filter_pooled_txs<F>(
+        &self,
+        predicate: F,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>
+    where
+        F: FnMut(&Arc<ValidPoolTransaction<Self::Transaction>>) -> bool,
+    {
+        self.pool.filter_pooled_txs(predicate)
+    }
+}
+
 impl<V, T: TransactionOrdering, S> Clone for Pool<V, T, S> {
     fn clone(&self) -> Self {
         Self { pool: Arc::clone(&self.pool) }
