@@ -23,6 +23,8 @@ pub struct MetricServerConfig {
     hooks: Hooks,
     push_gateway_url: Option<String>,
     push_gateway_interval: Duration,
+    push_gateway_username: Option<String>,
+    push_gateway_password: Option<String>,
 }
 
 impl MetricServerConfig {
@@ -42,13 +44,23 @@ impl MetricServerConfig {
             chain_spec_info,
             push_gateway_url: None,
             push_gateway_interval: Duration::from_secs(5),
+            push_gateway_username: None,
+            push_gateway_password: None,
         }
     }
 
     /// Set the gateway URL and interval for pushing metrics
-    pub fn with_push_gateway(mut self, url: Option<String>, interval: Duration) -> Self {
+    pub fn with_push_gateway(
+        mut self,
+        url: Option<String>,
+        interval: Duration,
+        username: Option<String>,
+        password: Option<String>,
+    ) -> Self {
         self.push_gateway_url = url;
         self.push_gateway_interval = interval;
+        self.push_gateway_username = username;
+        self.push_gateway_password = password;
         self
     }
 }
@@ -75,6 +87,8 @@ impl MetricServer {
             chain_spec_info,
             push_gateway_url,
             push_gateway_interval,
+            push_gateway_username,
+            push_gateway_password,
         } = &self.config;
 
         let hooks_for_endpoint = hooks.clone();
@@ -91,6 +105,8 @@ impl MetricServer {
             self.start_push_gateway_task(
                 url.clone(),
                 *push_gateway_interval,
+                push_gateway_username.clone(),
+                push_gateway_password.clone(),
                 hooks.clone(),
                 task_executor.clone(),
             )?;
@@ -171,6 +187,8 @@ impl MetricServer {
         &self,
         url: String,
         interval: Duration,
+        username: Option<String>,
+        password: Option<String>,
         hooks: Hooks,
         task_executor: TaskExecutor,
     ) -> eyre::Result<()> {
@@ -190,7 +208,15 @@ impl MetricServer {
                         _ = tokio::time::sleep(interval) => {
                             hooks.iter().for_each(|hook| hook());
                             let metrics = handle.handle().render();
-                            match client.put(&url).header("Content-Type", "text/plain").body(metrics).send().await {
+
+                            let mut request = client.put(&url).header("Content-Type", "text/plain").body(metrics);
+
+                            // Add authentication header if credentials are provided
+                            if let (Some(username), Some(password)) = (&username, &password) {
+                                request = request.basic_auth(username, Some(password));
+                            }
+
+                            match request.send().await {
                                 Ok(response) => {
                                     if !response.status().is_success() {
                                         tracing::warn!(
