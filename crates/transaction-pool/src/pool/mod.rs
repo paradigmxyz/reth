@@ -312,6 +312,26 @@ where
             .collect()
     }
 
+    /// Returns transactions in the pool that can be propagated and match the given predicate.
+    ///
+    /// This is more efficient than [`Self::pooled_transactions`] when you need to filter
+    /// transactions, as it applies the predicate during iteration rather than collecting all
+    /// transactions first.
+    pub fn filter_pooled_txs<F>(
+        &self,
+        mut predicate: F,
+    ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>>
+    where
+        F: FnMut(&Arc<ValidPoolTransaction<T::Transaction>>) -> bool,
+    {
+        self.get_pool_data()
+            .all()
+            .transactions_iter()
+            .filter(|tx| tx.propagate && predicate(tx))
+            .cloned()
+            .collect()
+    }
+
     /// Converts the internally tracked transaction to the pooled format.
     ///
     /// If the transaction is an EIP-4844 transaction, the blob sidecar is fetched from the blob
