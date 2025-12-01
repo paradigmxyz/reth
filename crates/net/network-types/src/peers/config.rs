@@ -4,6 +4,7 @@ use std::{
     collections::HashSet,
     io::{self, ErrorKind},
     path::Path,
+    str::FromStr,
     time::Duration,
 };
 
@@ -12,6 +13,64 @@ use reth_network_peers::{NodeRecord, TrustedPeer};
 use tracing::info;
 
 use crate::{BackoffKind, ReputationChangeWeights};
+
+/// A bootnode for Discv5 discovery (ENR only).
+///
+/// This is a newtype wrapper around a string to provide a clearer API.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Discv5BootNode(pub String);
+
+impl Discv5BootNode {
+    /// Returns a reference to the underlying ENR string.
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// Returns the ENR as a base64-encoded string.
+    pub fn to_base64(&self) -> String {
+        // Remove "enr:" prefix if present
+        self.0.strip_prefix("enr:").unwrap_or(&self.0).to_string()
+    }
+}
+
+impl FromStr for Discv5BootNode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        // Basic validation: should start with "enr:" and be non-empty
+        if !s.starts_with("enr:") || s.len() <= 4 {
+            return Err("Invalid ENR string: must start with 'enr:'".to_string());
+        }
+        Ok(Self(s.to_string()))
+    }
+}
+
+#[cfg(feature = "serde")]
+mod serde_impl {
+    use super::Discv5BootNode;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    impl Serialize for Discv5BootNode {
+        fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            // Serialize as ENR string (ensure "enr:" prefix)
+            let s = if self.0.starts_with("enr:") { &self.0 } else { &format!("enr:{}", self.0) };
+            serializer.serialize_str(s)
+        }
+    }
+
+    impl<'de> Deserialize<'de> for Discv5BootNode {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            let s = String::deserialize(deserializer)?;
+            s.parse().map_err(serde::de::Error::custom)
+        }
+    }
+}
 
 /// Maximum number of available slots for outbound sessions.
 pub const DEFAULT_MAX_COUNT_PEERS_OUTBOUND: u32 = 100;
@@ -172,6 +231,18 @@ pub struct PeersConfig {
     /// IPs within the specified CIDR ranges will be allowed.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ip_filter: IpFilter,
+    /// Bootnodes for Discv4 discovery (enode:// format).
+    ///
+    /// Similar to geth's `BootstrapNodes`. These nodes are used to bootstrap the Discv4
+    /// discovery protocol.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub bootnodes_v4: Vec<TrustedPeer>,
+    /// Bootnodes for Discv5 discovery (ENR format only).
+    ///
+    /// Similar to geth's `BootstrapNodesV5`. These nodes are used to bootstrap the Discv5
+    /// discovery protocol. Must be ENR strings (enr:...).
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub bootnodes_v5: Vec<Discv5BootNode>,
 }
 
 impl Default for PeersConfig {
@@ -191,6 +262,8 @@ impl Default for PeersConfig {
             max_backoff_count: 5,
             incoming_ip_throttle_duration: INBOUND_IP_THROTTLE_DURATION,
             ip_filter: IpFilter::default(),
+            bootnodes_v4: Default::default(),
+            bootnodes_v5: Default::default(),
         }
     }
 }
@@ -311,6 +384,18 @@ impl PeersConfig {
     /// Configure the IP filter for restricting network connections to specific IP ranges.
     pub fn with_ip_filter(mut self, ip_filter: IpFilter) -> Self {
         self.ip_filter = ip_filter;
+        self
+    }
+
+    /// Sets the bootnodes for Discv4 discovery.
+    pub fn with_bootnodes_v4(mut self, bootnodes: Vec<TrustedPeer>) -> Self {
+        self.bootnodes_v4 = bootnodes;
+        self
+    }
+
+    /// Sets the bootnodes for Discv5 discovery.
+    pub fn with_bootnodes_v5(mut self, bootnodes: Vec<Discv5BootNode>) -> Self {
+        self.bootnodes_v5 = bootnodes;
         self
     }
 
