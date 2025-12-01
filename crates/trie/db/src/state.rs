@@ -344,13 +344,20 @@ impl<TX: DbTx> DatabaseHashedPostStateSorted<TX> for HashedPostStateSorted {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{hex, map::HashMap, Address, U256};
+    use alloy_primitives::{hex, map::HashMap, Address, B256, U256};
     use reth_db::test_utils::create_test_rw_db;
-    use reth_db_api::database::Database;
+    use reth_db_api::{
+        database::Database,
+        models::{AccountBeforeTx, BlockNumberAddress},
+        tables,
+        transaction::DbTxMut,
+    };
+    use reth_primitives_traits::{Account, StorageEntry};
     use reth_trie::KeccakKeyHasher;
     use revm::state::AccountInfo;
     use revm_database::BundleState;
 
+    /// Builds hashed state from a bundle and checks the known state root.
     #[test]
     fn from_bundle_state_with_rayon() {
         let address1 = Address::with_last_byte(1);
@@ -379,5 +386,67 @@ mod tests {
             StateRoot::overlay_root(&tx, post_state).unwrap(),
             hex!("b464525710cafcf5d4044ac85b72c08b1e76231b8d91f288fe438cc41d8eaafd")
         );
+    }
+
+    /// Sorted reverts match unsorted->sorted and preserve ordering guarantees.
+    #[test]
+    fn sorted_reverts_match_unsorted() {
+        let db = create_test_rw_db();
+        let tx = db.tx_mut().expect("failed to create rw tx");
+
+        let address1 = Address::with_last_byte(1);
+        let address2 = Address::with_last_byte(2);
+        let slot1 = B256::from(U256::from(11));
+        let slot2 = B256::from(U256::from(22));
+
+        // Account changesets: only first occurrence per address should be kept.
+        tx.put::<tables::AccountChangeSets>(
+            1,
+            AccountBeforeTx { address: address1, info: Some(Account { nonce: 1, ..Default::default() }) },
+        )
+        .unwrap();
+        tx.put::<tables::AccountChangeSets>(
+            2,
+            AccountBeforeTx { address: address1, info: Some(Account { nonce: 2, ..Default::default() }) },
+        )
+        .unwrap();
+        tx.put::<tables::AccountChangeSets>(
+            3,
+            AccountBeforeTx { address: address2, info: None },
+        )
+        .unwrap();
+
+        // Storage changesets: only first occurrence per slot should be kept, and slots sorted.
+        tx.put::<tables::StorageChangeSets>(
+            BlockNumberAddress((1, address1)).into(),
+            StorageEntry { key: slot2, value: U256::from(200) },
+        )
+        .unwrap();
+        tx.put::<tables::StorageChangeSets>(
+            BlockNumberAddress((2, address1)).into(),
+            StorageEntry { key: slot1, value: U256::from(100) },
+        )
+        .unwrap();
+        tx.put::<tables::StorageChangeSets>(
+            BlockNumberAddress((3, address1)).into(),
+            StorageEntry { key: slot1, value: U256::from(999) }, // should be ignored
+        )
+        .unwrap();
+
+        tx.commit().unwrap();
+        let tx = db.tx().expect("failed to create ro tx");
+
+        let unsorted =
+            HashedPostState::from_reverts::<KeccakKeyHasher>(&tx, 1..=3).unwrap().into_sorted();
+        let sorted = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&tx, 1..=3).unwrap();
+
+        // Parity with unsorted path
+        assert_eq!(sorted, unsorted);
+
+        // Ordering guarantees
+        assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
+        for storage in sorted.storages.values() {
+            assert!(storage.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
+        }
     }
 }
