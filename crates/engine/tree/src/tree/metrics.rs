@@ -73,28 +73,29 @@ impl EngineApiMetrics {
         // they are globally registered so that the data recorded in the hook will
         // be accessible.
         let wrapper = MeteredStateHook { metrics: self.executor.clone(), inner_hook: state_hook };
+        let executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
-        let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
+        let execute_block = || {
+            executor.execute_block_with_transaction_closure(
+                transactions,
+                |executor, tx| {
+                    let span =
+                        debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
+                    let enter = span.entered();
+                    trace!(target: "engine::tree", "Executing transaction");
+                    let gas_used = executor.execute_transaction(tx)?;
 
-        let f = || {
-            executor.apply_pre_execution_changes()?;
-            for tx in transactions {
-                let tx = tx?;
-                let span =
-                    debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
-                let enter = span.entered();
-                trace!(target: "engine::tree", "Executing transaction");
-                let gas_used = executor.execute_transaction(tx)?;
+                    // record the tx gas used
+                    enter.record("gas_used", gas_used);
 
-                // record the tx gas used
-                enter.record("gas_used", gas_used);
-            }
-            executor.finish().map(|(evm, result)| (evm.into_db(), result))
+                    Ok(gas_used)
+                }
+            ).map(|(evm, result)| (evm.into_db(), result))
         };
 
         // Use metered to execute and track timing/gas metrics
         let (mut db, result) = self.metered(|| {
-            let res = f();
+            let res = execute_block();
             let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
             (gas_used, res)
         })?;
