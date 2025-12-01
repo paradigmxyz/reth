@@ -433,9 +433,11 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 <<Self as RpcNodeCore>::Pool as TransactionPool>::Transaction::try_from_consensus(
                     transaction,
                 )
-                .map_err(|e| Self::Error::from_eth_err(
-                    TransactionConversionError::FromConsensus(e.to_string())
-                ))?;
+                .map_err(|e| {
+                    Self::Error::from_eth_err(TransactionConversionError::FromConsensus(
+                        e.to_string(),
+                    ))
+                })?;
 
             // submit the transaction to the pool with a `Local` origin
             let AddedTransactionOutcome { hash, .. } = self
