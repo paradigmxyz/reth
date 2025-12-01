@@ -287,8 +287,7 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
 impl<TX: DbTx> DatabaseHashedPostStateSorted<TX> for HashedPostStateSorted {
     /// Builds a sorted hashed post-state from reverts.
     ///
-    /// - Reads the first occurrence of each changed account/storage slot in the range (same
-    ///   semantics as the unsorted `HashedPostState::from_reverts`).
+    /// - Reads the first occurrence of each changed account/storage slot in the range.
     /// - Hashes keys and returns them already ordered for trie iteration.
     ///
     /// When to use:
