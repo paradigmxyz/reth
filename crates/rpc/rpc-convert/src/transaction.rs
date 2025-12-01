@@ -16,7 +16,6 @@ use reth_primitives_traits::{
     TxTy,
 };
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
-use thiserror::Error;
 
 /// Input for [`RpcConvert::convert_receipts`].
 #[derive(Debug, Clone)]
@@ -484,7 +483,7 @@ where
 }
 
 /// Conversion into transaction RPC response failed.
-#[derive(Debug, Clone, Error)]
+#[derive(Debug, thiserror::Error)]
 pub enum TransactionConversionError {
     /// Conversion from `TxReq` to `SimTx` failed
     #[error("Failed to convert RPC transaction request: {0}")]
