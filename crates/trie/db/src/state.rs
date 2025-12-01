@@ -13,8 +13,8 @@ use reth_db_api::{
 use reth_execution_errors::StateRootError;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,
-    StateRootProgress, TrieInput,
+    updates::TrieUpdates, HashedPostState, HashedPostStateSorted, HashedStorage,
+    HashedStorageSorted, KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress, TrieInput,
 };
 use std::{
     collections::HashMap,
@@ -129,6 +129,17 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
 pub trait DatabaseHashedPostState<TX>: Sized {
     /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts in the specified
     /// range and aggregates them into hashed state in reverse.
+    fn from_reverts<KH: KeyHasher>(
+        tx: &TX,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Self, DatabaseError>;
+}
+
+/// Extends [`HashedPostStateSorted`] with operations specific for working with a database
+/// transaction.
+pub trait DatabaseHashedPostStateSorted<TX>: Sized {
+    /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
+    /// specified range and aggregates them into sorted hashed state.
     fn from_reverts<KH: KeyHasher>(
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,
@@ -270,6 +281,51 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
             .collect();
 
         Ok(Self { accounts: hashed_accounts, storages: hashed_storages })
+    }
+}
+
+impl<TX: DbTx> DatabaseHashedPostStateSorted<TX> for HashedPostStateSorted {
+    #[instrument(target = "trie::db", skip(tx), fields(range))]
+    fn from_reverts<KH: KeyHasher>(
+        tx: &TX,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Self, DatabaseError> {
+        // Iterate over account changesets (using HashMap for O(1) insertion)
+        let account_range = (range.start_bound(), range.end_bound());
+        let mut accounts = HashMap::new();
+        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
+        for entry in account_changesets_cursor.walk_range(account_range)? {
+            let (_, AccountBeforeTx { address, info }) = entry?;
+            accounts.entry(address).or_insert(info);
+        }
+
+        // Iterate over storage changesets
+        let storage_range: BlockNumberAddressRange = range.into();
+        let mut storages = AddressMap::<B256Map<U256>>::default();
+        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
+        for entry in storage_changesets_cursor.walk_range(storage_range)? {
+            let (BlockNumberAddress((_, address)), storage) = entry?;
+            let account_storage = storages.entry(address).or_default();
+            account_storage.entry(storage.key).or_insert(storage.value);
+        }
+
+        // Hash and sort accounts
+        let mut hashed_accounts: Vec<_> =
+            accounts.into_iter().map(|(address, info)| (KH::hash_key(address), info)).collect();
+        hashed_accounts.sort_unstable_by_key(|(address, _)| *address);
+
+        // Hash and sort storages
+        let hashed_storages: B256Map<HashedStorageSorted> = storages
+            .into_iter()
+            .map(|(address, storage)| {
+                let mut slots: Vec<_> =
+                    storage.into_iter().map(|(slot, value)| (KH::hash_key(slot), value)).collect();
+                slots.sort_unstable_by_key(|(slot, _)| *slot);
+                (KH::hash_key(address), HashedStorageSorted { storage_slots: slots, wiped: false })
+            })
+            .collect();
+
+        Ok(Self::new(hashed_accounts, hashed_storages))
     }
 }
 
