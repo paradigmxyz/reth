@@ -31,6 +31,7 @@ reth-etl.workspace = true
 reth-evm.workspace = true
 reth-exex.workspace = true
 reth-fs-util.workspace = true
+reth-metrics.workspace = true
 reth-net-nat.workspace = true
 reth-network = { workspace = true, features = ["serde"] }
 reth-network-p2p.workspace = true
