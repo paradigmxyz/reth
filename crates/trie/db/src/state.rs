@@ -285,6 +285,18 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
 }
 
 impl<TX: DbTx> DatabaseHashedPostStateSorted<TX> for HashedPostStateSorted {
+    /// Builds a sorted hashed post-state from reverts.
+    ///
+    /// - Reads the first occurrence of each changed account/storage slot in the range (same
+    ///   semantics as the unsorted `HashedPostState::from_reverts`).
+    /// - Hashes keys and returns them already ordered for trie iteration.
+    ///
+    /// When to use:
+    /// - Prefer this over the unsorted variant if the next consumer needs sorted data
+    ///   (`HashedPostStateSorted`) for cursors or trie iteration (e.g. overlay state roots,
+    ///   parallel state root, proof generation). This skips the intermediate HashMap
+    ///   allocation and sort done by `into_sorted`.
+    /// - Keep using the unsorted variant if you need to mutate/merge in map form first.
     #[instrument(target = "trie::db", skip(tx), fields(range))]
     fn from_reverts<KH: KeyHasher>(
         tx: &TX,
