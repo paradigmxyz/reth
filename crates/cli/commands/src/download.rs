@@ -5,14 +5,23 @@ use lz4::Decoder;
 use reqwest::Client;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_runner::CliContext;
 use reth_fs_util as fs;
 use reth_metrics::{
     metrics::{self, Counter, Gauge, Histogram},
     Metrics,
 };
+use reth_node_core::version::version_metadata;
+use reth_node_metrics::{
+    chain::ChainSpecInfo,
+    hooks::Hooks,
+    server::{MetricServer, MetricServerConfig},
+    version::VersionInfo,
+};
 use std::{
     borrow::Cow,
     io::{self, Read, Write},
+    net::SocketAddr,
     path::Path,
     sync::{Arc, OnceLock},
     time::{Duration, Instant},
@@ -153,12 +162,39 @@ pub struct DownloadCommand<C: ChainSpecParser> {
     /// Custom URL to download the snapshot from
     #[arg(long, short, long_help = DownloadDefaults::get_global().long_help())]
     url: Option<String>,
+
+    /// Enable Prometheus metrics.
+    ///
+    /// The metrics will be served at the given interface and port.
+    #[arg(long, value_name = "SOCKET")]
+    metrics: Option<SocketAddr>,
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
-    pub async fn execute<N>(self) -> Result<()> {
+    pub async fn execute(self, ctx: CliContext) -> Result<()> {
         let data_dir = self.env.datadir.resolve_datadir(self.env.chain.chain());
         fs::create_dir_all(&data_dir)?;
+
+        // Start metrics server if requested
+        if let Some(listen_addr) = self.metrics {
+            let config = MetricServerConfig::new(
+                listen_addr,
+                VersionInfo {
+                    version: version_metadata().cargo_pkg_version.as_ref(),
+                    build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
+                    cargo_features: version_metadata().vergen_cargo_features.as_ref(),
+                    git_sha: version_metadata().vergen_git_sha.as_ref(),
+                    target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
+                    build_profile: version_metadata().build_profile_name.as_ref(),
+                },
+                ChainSpecInfo { name: self.env.chain.chain().to_string() },
+                ctx.task_executor,
+                Hooks::builder().build(),
+            );
+
+            MetricServer::new(config).serve().await?;
+            info!(target: "reth::cli", "Metrics server started at {}", listen_addr);
+        }
 
         let url = match self.url {
             Some(url) => url,
