@@ -449,4 +449,35 @@ mod tests {
             assert!(storage.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
         }
     }
+
+    /// Empty block range returns empty state.
+    #[test]
+    fn from_reverts_empty_range() {
+        let db = create_test_rw_db();
+
+        // Insert data outside the query range
+        db.update(|tx| {
+            tx.put::<tables::AccountChangeSets>(
+                100,
+                AccountBeforeTx {
+                    address: Address::with_last_byte(1),
+                    info: Some(Account { nonce: 1, ..Default::default() }),
+                },
+            )
+            .unwrap();
+        })
+        .unwrap();
+
+        let tx = db.tx().unwrap();
+
+        // Query a range with no data
+        let sorted = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&tx, 1..=10).unwrap();
+        assert!(sorted.accounts.is_empty());
+        assert!(sorted.storages.is_empty());
+
+        // Verify equivalence with unsorted path
+        let unsorted =
+            HashedPostState::from_reverts::<KeccakKeyHasher>(&tx, 1..=10).unwrap().into_sorted();
+        assert_eq!(sorted, unsorted);
+    }
 }
