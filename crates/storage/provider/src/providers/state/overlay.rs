@@ -17,7 +17,7 @@ use reth_trie::{
     HashedPostStateSorted, KeccakKeyHasher,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseHashedPostStateSorted, DatabaseTrieCursorFactory,
+    DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
 use std::{
     collections::{hash_map::Entry, HashMap},

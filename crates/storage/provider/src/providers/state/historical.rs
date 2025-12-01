@@ -25,7 +25,7 @@ use reth_trie::{
     MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
-    DatabaseHashedPostStateSorted, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
+    DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
 

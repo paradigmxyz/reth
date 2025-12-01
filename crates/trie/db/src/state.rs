@@ -14,9 +14,8 @@ use reth_execution_errors::StateRootError;
 use reth_primitives_traits::Account;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    updates::TrieUpdates, HashedPostState, HashedPostStateSorted, HashedStorage,
-    HashedStorageSorted, KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress, TrieInput,
-    TrieInputSorted,
+    updates::TrieUpdates, HashedPostState, HashedPostStateSorted, HashedStorageSorted,
+    KeccakKeyHasher, KeyHasher, StateRoot, StateRootProgress, TrieInput, TrieInputSorted,
 };
 use std::{
     collections::HashMap,
@@ -155,25 +154,15 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
     ) -> Result<(B256, TrieUpdates), StateRootError>;
 }
 
-/// Extends [`HashedPostState`] with operations specific for working with a database transaction.
-pub trait DatabaseHashedPostState<TX>: Sized {
-    /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts in the specified
-    /// range and aggregates them into hashed state in reverse.
-    fn from_reverts<KH: KeyHasher>(
-        tx: &TX,
-        range: impl RangeBounds<BlockNumber>,
-    ) -> Result<Self, DatabaseError>;
-}
-
 /// Extends [`HashedPostStateSorted`] with operations specific for working with a database
 /// transaction.
-pub trait DatabaseHashedPostStateSorted<TX>: Sized {
+pub trait DatabaseHashedPostState<TX>: Sized {
     /// Initializes [`HashedPostStateSorted`] from reverts. Iterates over state reverts in the
     /// specified range and aggregates them into sorted hashed state.
     fn from_reverts<KH: KeyHasher>(
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,
-    ) -> Result<Self, DatabaseError>;
+    ) -> Result<HashedPostStateSorted, DatabaseError>;
 }
 
 impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
@@ -362,49 +351,11 @@ fn read_reverts_from_changesets<TX: DbTx>(
     Ok((accounts, storages))
 }
 
-impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
-    #[instrument(target = "trie::db", skip(tx), fields(range))]
-    fn from_reverts<KH: KeyHasher>(
-        tx: &TX,
-        range: impl RangeBounds<BlockNumber>,
-    ) -> Result<Self, DatabaseError> {
-        let (accounts, storages) = read_reverts_from_changesets(tx, range)?;
-
-        let hashed_accounts =
-            accounts.into_iter().map(|(address, info)| (KH::hash_key(address), info)).collect();
-
-        let hashed_storages = storages
-            .into_iter()
-            .map(|(address, storage)| {
-                (
-                    KH::hash_key(address),
-                    HashedStorage::from_iter(
-                        // The `wiped` flag indicates only whether previous storage entries
-                        // should be looked up in db or not. For reverts it's a noop since all
-                        // wiped changes had been written as storage reverts.
-                        false,
-                        storage.into_iter().map(|(slot, value)| (KH::hash_key(slot), value)),
-                    ),
-                )
-            })
-            .collect();
-
-        Ok(Self { accounts: hashed_accounts, storages: hashed_storages })
-    }
-}
-
-impl<TX: DbTx> DatabaseHashedPostStateSorted<TX> for HashedPostStateSorted {
+impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostStateSorted {
     /// Builds a sorted hashed post-state from reverts.
     ///
     /// - Reads the first occurrence of each changed account/storage slot in the range.
     /// - Hashes keys and returns them already ordered for trie iteration.
-    ///
-    /// When to use:
-    /// - Prefer this over the unsorted variant if the next consumer needs sorted data
-    ///   (`HashedPostStateSorted`) for cursors or trie iteration (e.g. overlay state roots,
-    ///   parallel state root, proof generation). This skips the intermediate `HashMap` allocation
-    ///   and sort done by `into_sorted`.
-    /// - Keep using the unsorted variant if you need to mutate/merge in map form first.
     #[instrument(target = "trie::db", skip(tx), fields(range))]
     fn from_reverts<KH: KeyHasher>(
         tx: &TX,
@@ -444,7 +395,7 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_primitives_traits::{Account, StorageEntry};
-    use reth_trie::KeccakKeyHasher;
+    use reth_trie::{HashedStorage, KeccakKeyHasher};
     use revm::state::AccountInfo;
     use revm_database::BundleState;
 
@@ -503,9 +454,9 @@ mod tests {
         );
     }
 
-    /// Sorted reverts match unsorted->sorted and preserve ordering guarantees.
+    /// Verifies `from_reverts` keeps first occurrence per key and preserves ordering guarantees.
     #[test]
-    fn sorted_reverts_match_unsorted() {
+    fn from_reverts_keeps_first_occurrence_and_ordering() {
         let db = create_test_rw_db();
         let tx = db.tx_mut().expect("failed to create rw tx");
 
@@ -554,15 +505,18 @@ mod tests {
         tx.commit().unwrap();
         let tx = db.tx().expect("failed to create ro tx");
 
-        let unsorted =
-            HashedPostState::from_reverts::<KeccakKeyHasher>(&tx, 1..=3).unwrap().into_sorted();
         let sorted = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&tx, 1..=3).unwrap();
 
-        // Parity with unsorted path
-        assert_eq!(sorted, unsorted);
+        // Verify first occurrences were kept (nonce 1, not 2)
+        assert_eq!(sorted.accounts.len(), 2);
+        let hashed_addr1 = KeccakKeyHasher::hash_key(address1);
+        let account1 = sorted.accounts.iter().find(|(addr, _)| *addr == hashed_addr1).unwrap();
+        assert_eq!(account1.1.unwrap().nonce, 1);
 
-        // Ordering guarantees
+        // Ordering guarantees - accounts sorted by hashed address
         assert!(sorted.accounts.windows(2).all(|w| w[0].0 <= w[1].0));
+
+        // Ordering guarantees - storage slots sorted by hashed slot
         for storage in sorted.storages.values() {
             assert!(storage.storage_slots.windows(2).all(|w| w[0].0 <= w[1].0));
         }
@@ -592,10 +546,5 @@ mod tests {
         let sorted = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(&tx, 1..=10).unwrap();
         assert!(sorted.accounts.is_empty());
         assert!(sorted.storages.is_empty());
-
-        // Verify equivalence with unsorted path
-        let unsorted =
-            HashedPostState::from_reverts::<KeccakKeyHasher>(&tx, 1..=10).unwrap().into_sorted();
-        assert_eq!(sorted, unsorted);
     }
 }
