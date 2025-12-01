@@ -4,10 +4,14 @@
 
 use alloy_primitives::{Address, B256, U256};
 use reth_errors::ProviderResult;
+use reth_evm::{block::BlockExecutorFor, ConfigureEvm, ExecFactoryFor, InspectorFor};
 use reth_revm::database::StateProviderDatabase;
 use reth_storage_api::{BytecodeReader, HashedPostStateProvider, StateProvider, StateProviderBox};
 use reth_trie::{HashedStorage, MultiProofTargets};
-use revm::database::{BundleState, State};
+use revm::{
+    database::{BundleState, State},
+    inspector::NoOpInspector,
+};
 
 /// Helper alias type for the state's [`State`]
 pub type StateCacheDb = State<StateProviderDatabase<StateProviderTraitObjWrapper>>;
@@ -177,4 +181,26 @@ impl BytecodeReader for StateProviderTraitObjWrapper {
     ) -> reth_errors::ProviderResult<Option<reth_primitives_traits::Bytecode>> {
         self.0.bytecode_by_hash(code_hash)
     }
+}
+
+/// A trait alias for [`reth_evm::block::BlockExecutor`] implementation used in RPC code.
+pub trait RpcBlockExecutor<'a, Evm, I = NoOpInspector>:
+    BlockExecutorFor<'a, ExecFactoryFor<Evm>, StateProviderDatabase<StateProviderTraitObjWrapper>, I>
+where
+    Evm: ConfigureEvm,
+    I: InspectorFor<Evm, &'a mut StateCacheDb> + 'a,
+{
+}
+
+impl<'a, Evm, I, T> RpcBlockExecutor<'a, Evm, I> for T
+where
+    Evm: ConfigureEvm,
+    I: InspectorFor<Evm, &'a mut StateCacheDb> + 'a,
+    T: BlockExecutorFor<
+        'a,
+        ExecFactoryFor<Evm>,
+        StateProviderDatabase<StateProviderTraitObjWrapper>,
+        I,
+    >,
+{
 }
