@@ -37,6 +37,7 @@ reth-node-metrics.workspace = true
 reth-optimism-primitives.workspace = true
 reth-optimism-chainspec = { workspace = true, features = ["superchain-configs"] }
 reth-optimism-consensus.workspace = true
+reth-optimism-trie.workspace = true
 
 reth-chainspec.workspace = true
 reth-node-events.workspace = true
@@ -86,15 +87,9 @@ asm-keccak = [
 ]
 
 # Jemalloc feature for vergen to generate correct env vars
-jemalloc = [
-    "reth-node-core/jemalloc",
-    "reth-node-metrics/jemalloc",
-]
+jemalloc = ["reth-node-core/jemalloc", "reth-node-metrics/jemalloc"]
 
-dev = [
-    "dep:proptest",
-    "reth-cli-commands/arbitrary",
-]
+dev = ["dep:proptest", "reth-cli-commands/arbitrary"]
 
 serde = [
     "alloy-consensus/serde",
