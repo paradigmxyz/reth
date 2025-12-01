@@ -211,9 +211,9 @@ impl MetricServer {
 
                             let mut request = client.put(&url).header("Content-Type", "text/plain").body(metrics);
 
-                            // Add authentication header if credentials are provided
-                            if let (Some(username), Some(password)) = (&username, &password) {
-                                request = request.basic_auth(username, Some(password));
+                            // Add authentication header if username is provided (password is optional)
+                            if let Some(username) = &username {
+                                request = request.basic_auth(username, password.as_deref());
                             }
 
                             match request.send().await {

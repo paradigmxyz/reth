@@ -31,21 +31,18 @@ pub struct MetricArgs {
 
     /// Username for HTTP Basic Authentication to the push gateway.
     ///
-    /// Must be used together with `--metrics.prometheus.push.password`.
-    /// Only applies when a push gateway URL is configured.
+    /// Only applies when push gateway URL is configured.
     #[arg(
         long = "metrics.prometheus.push.username",
         value_name = "USERNAME",
         requires = "push_gateway_url",
-        requires = "push_gateway_password",
         env = "RETH_METRICS_PUSH_USERNAME"
     )]
     pub push_gateway_username: Option<String>,
 
     /// Password for HTTP Basic Authentication to the push gateway.
     ///
-    /// Must be used together with `--metrics.prometheus.push.username`.
-    /// Only applies when a push gateway URL is configured.
+    /// Only applies when push gateway URL and username are configured.
     #[arg(
         long = "metrics.prometheus.push.password",
         value_name = "PASSWORD",
