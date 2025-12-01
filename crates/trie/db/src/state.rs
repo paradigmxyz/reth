@@ -421,17 +421,17 @@ mod tests {
 
         // Storage changesets: only first occurrence per slot should be kept, and slots sorted.
         tx.put::<tables::StorageChangeSets>(
-            BlockNumberAddress((1, address1)).into(),
+            BlockNumberAddress((1, address1)),
             StorageEntry { key: slot2, value: U256::from(200) },
         )
         .unwrap();
         tx.put::<tables::StorageChangeSets>(
-            BlockNumberAddress((2, address1)).into(),
+            BlockNumberAddress((2, address1)),
             StorageEntry { key: slot1, value: U256::from(100) },
         )
         .unwrap();
         tx.put::<tables::StorageChangeSets>(
-            BlockNumberAddress((3, address1)).into(),
+            BlockNumberAddress((3, address1)),
             StorageEntry { key: slot1, value: U256::from(999) }, // should be ignored
         )
         .unwrap();
