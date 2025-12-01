@@ -229,7 +229,7 @@ impl MerkleChangeSets {
             "Computing trie state at starting block",
         );
         let initial_state = compute_cumulative_state_revert(target_start);
-        let initial_prefix_sets = initial_state.construct_prefix_sets_sorted();
+        let initial_prefix_sets = initial_state.construct_prefix_sets();
         let initial_input =
             TrieInputSorted::new(Arc::default(), Arc::new(initial_state), initial_prefix_sets);
         // target_start will be >= 1, see `determine_target_range`.
@@ -250,7 +250,7 @@ impl MerkleChangeSets {
 
             // Construct prefix sets from only this block's `HashedPostStateSorted`, because we only
             // care about trie updates which occurred as a result of this block being processed.
-            let prefix_sets = get_block_state_revert(block_number).construct_prefix_sets_sorted();
+            let prefix_sets = get_block_state_revert(block_number).construct_prefix_sets();
 
             let input = TrieInputSorted::new(Arc::clone(&nodes), state, prefix_sets);
 

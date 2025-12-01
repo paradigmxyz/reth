@@ -60,7 +60,7 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
 
 impl<Provider: DBProvider + Sync> StateRootProvider for LatestStateProviderRef<'_, Provider> {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
-        StateRoot::overlay_root(self.tx(), hashed_state)
+        StateRoot::overlay_root(self.tx(), &hashed_state.into_sorted())
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -73,7 +73,7 @@ impl<Provider: DBProvider + Sync> StateRootProvider for LatestStateProviderRef<'
         &self,
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_with_updates(self.tx(), hashed_state)
+        StateRoot::overlay_root_with_updates(self.tx(), &hashed_state.into_sorted())
             .map_err(|err| ProviderError::Database(err.into()))
     }
 

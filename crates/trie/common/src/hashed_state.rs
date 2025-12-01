@@ -508,18 +508,11 @@ impl HashedPostStateSorted {
         self.accounts.len() + self.storages.values().map(|s| s.len()).sum::<usize>()
     }
 
-    /// Construct [`TriePrefixSetsMut`] directly from sorted hashed post state.
+    /// Construct [`TriePrefixSetsMut`] from hashed post state.
     ///
-    /// This mirrors [`HashedPostState::construct_prefix_sets`] but assumes the state is already
-    /// sorted, so it can avoid rebuilding hash maps or sorting keys a second time. This is the
-    /// fast-path for callers that already hold `HashedPostStateSorted` (e.g. `from_reverts`
-    /// sorted, sorted trie inputs).
-    ///
-    /// Behavior is identical to the unsorted path:
-    /// - destroyed accounts are tracked in `destroyed_accounts`
-    /// - storage wipes yield `PrefixSetMut::all()`
-    /// - storage overlays also register the account prefix to ensure trie walks cover it
-    pub fn construct_prefix_sets_sorted(&self) -> TriePrefixSetsMut {
+    /// The prefix sets contain the hashed account and storage keys that have been changed in the
+    /// post state.
+    pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
         let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
         let mut destroyed_accounts = HashSet::default();
         for (hashed_address, account) in &self.accounts {

@@ -290,7 +290,7 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
         let mut revert_state = self.revert_state()?;
         let hashed_state_sorted = hashed_state.into_sorted();
         revert_state.extend_ref(&hashed_state_sorted);
-        StateRoot::overlay_root_sorted(self.tx(), &revert_state)
+        StateRoot::overlay_root(self.tx(), &revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -307,7 +307,7 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
         let mut revert_state = self.revert_state()?;
         let hashed_state_sorted = hashed_state.into_sorted();
         revert_state.extend_ref(&hashed_state_sorted);
-        StateRoot::overlay_root_sorted_with_updates(self.tx(), &revert_state)
+        StateRoot::overlay_root_with_updates(self.tx(), &revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
