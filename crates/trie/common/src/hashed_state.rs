@@ -509,53 +509,6 @@ impl HashedPostStateSorted {
         self.accounts.len() + self.storages.values().map(|s| s.len()).sum::<usize>()
     }
 
-    /// Construct [`TriePrefixSetsMut`] directly from sorted hashed post state.
-    ///
-    /// This mirrors [`HashedPostState::construct_prefix_sets`] but assumes the state is already
-    /// sorted, so it can avoid rebuilding hash maps or sorting keys a second time. This is the
-    /// fast-path for callers that already hold `HashedPostStateSorted` (e.g. `from_reverts`
-    /// sorted, sorted trie inputs).
-    ///
-    /// Behavior is identical to the unsorted path:
-    /// - destroyed accounts are tracked in `destroyed_accounts`
-    /// - storage wipes yield `PrefixSetMut::all()`
-    /// - storage overlays also register the account prefix to ensure trie walks cover it
-    pub fn construct_prefix_sets_sorted(&self) -> TriePrefixSetsMut {
-        let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
-        let mut destroyed_accounts = HashSet::default();
-        for (hashed_address, account) in &self.accounts {
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
-            if account.is_none() {
-                destroyed_accounts.insert(*hashed_address);
-            }
-        }
-
-        let mut storage_prefix_sets =
-            B256Map::with_capacity_and_hasher(self.storages.len(), Default::default());
-        for (hashed_address, hashed_storage) in &self.storages {
-            // Ensure account trie covers storage overlays even if account map is empty.
-            account_prefix_set.insert(Nibbles::unpack(hashed_address));
-
-            let prefix_set = if hashed_storage.wiped {
-                PrefixSetMut::all()
-            } else {
-                let mut prefix_set =
-                    PrefixSetMut::with_capacity(hashed_storage.storage_slots.len());
-                prefix_set.extend_keys(
-                    hashed_storage
-                        .storage_slots
-                        .iter()
-                        .map(|(hashed_slot, _)| Nibbles::unpack(hashed_slot)),
-                );
-                prefix_set
-            };
-
-            storage_prefix_sets.insert(*hashed_address, prefix_set);
-        }
-
-        TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
-    }
-
     /// Extends this state with contents of another sorted state.
     /// Entries in `other` take precedence for duplicate keys.
     pub fn extend_ref(&mut self, other: &Self) {

@@ -21,11 +21,11 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     updates::TrieUpdates,
     witness::TrieWitness,
-    AccountProof, HashedPostState, HashedPostStateSorted, HashedStorage, KeccakKeyHasher,
-    MultiProof, MultiProofTargets, StateRoot, StorageMultiProof, StorageRoot, TrieInput,
+    AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
+    StateRoot, StorageMultiProof, StorageRoot, TrieInput,
 };
 use reth_trie_db::{
-    DatabaseHashedPostStateSorted, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
+    DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
 
@@ -118,7 +118,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
     }
 
     /// Retrieve revert hashed state for this history provider.
-    fn revert_state(&self) -> ProviderResult<HashedPostStateSorted> {
+    fn revert_state(&self) -> ProviderResult<HashedPostState> {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
             !self.lowest_available_blocks.is_storage_history_available(self.block_number)
         {
@@ -133,8 +133,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             );
         }
 
-        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(self.tx(), self.block_number..)
-            .map_err(ProviderError::from)
+        Ok(HashedPostState::from_reverts::<KeccakKeyHasher>(self.tx(), self.block_number..)?)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.
@@ -288,14 +287,13 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
-        let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref(&hashed_state_sorted);
-        StateRoot::overlay_root_sorted(self.tx(), &revert_state)
+        revert_state.extend(hashed_state);
+        StateRoot::overlay_root(self.tx(), revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
-        input.prepend(self.revert_state()?.into());
+        input.prepend(self.revert_state()?);
         StateRoot::overlay_root_from_nodes(self.tx(), input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
@@ -305,9 +303,8 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
         hashed_state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut revert_state = self.revert_state()?;
-        let hashed_state_sorted = hashed_state.into_sorted();
-        revert_state.extend_ref(&hashed_state_sorted);
-        StateRoot::overlay_root_sorted_with_updates(self.tx(), &revert_state)
+        revert_state.extend(hashed_state);
+        StateRoot::overlay_root_with_updates(self.tx(), revert_state)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -315,7 +312,7 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
         &self,
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        input.prepend(self.revert_state()?.into());
+        input.prepend(self.revert_state()?);
         StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
             .map_err(|err| ProviderError::Database(err.into()))
     }
@@ -370,7 +367,7 @@ impl<Provider: DBProvider + BlockNumReader> StateProofProvider
         address: Address,
         slots: &[B256],
     ) -> ProviderResult<AccountProof> {
-        input.prepend(self.revert_state()?.into());
+        input.prepend(self.revert_state()?);
         let proof = <Proof<_, _> as DatabaseProof>::from_tx(self.tx());
         proof.overlay_account_proof(input, address, slots).map_err(ProviderError::from)
     }
@@ -380,13 +377,13 @@ impl<Provider: DBProvider + BlockNumReader> StateProofProvider
         mut input: TrieInput,
         targets: MultiProofTargets,
     ) -> ProviderResult<MultiProof> {
-        input.prepend(self.revert_state()?.into());
+        input.prepend(self.revert_state()?);
         let proof = <Proof<_, _> as DatabaseProof>::from_tx(self.tx());
         proof.overlay_multiproof(input, targets).map_err(ProviderError::from)
     }
 
     fn witness(&self, mut input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>> {
-        input.prepend(self.revert_state()?.into());
+        input.prepend(self.revert_state()?);
         TrieWitness::overlay_witness(self.tx(), input, target)
             .map_err(ProviderError::from)
             .map(|hm| hm.into_values().collect())
