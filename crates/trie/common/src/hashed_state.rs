@@ -22,7 +22,9 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 use revm_database::{AccountStatus, BundleAccount};
 
-/// Representation of in-memory hashed state.
+/// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in hash maps
+/// For state root computation, convert to [`HashedPostStateSorted`] which enables efficient
+/// ordered iteration required by the Merkle Patricia Trie.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedPostState {
