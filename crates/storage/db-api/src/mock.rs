@@ -24,10 +24,11 @@ use std::{collections::BTreeMap, ops::RangeBounds};
 /// for testing scenarios where actual database operations are not required.
 #[derive(Clone, Debug, Default)]
 pub struct DatabaseMock {
-    /// Internal data storage using a `BTreeMap`.
-    ///
-    /// TODO: Make the mock database table-aware by properly utilizing
-    /// this data structure to simulate realistic database behavior during testing.
+    /// Unused placeholder; `DatabaseMock` is stateless and does not persist data.
+    /// Deprecated: will be removed in a future revision once a stateful mock is introduced.
+    #[deprecated(
+        note = "Unused placeholder; DatabaseMock is stateless and will remove this field."
+    )]
     pub data: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
@@ -60,10 +61,7 @@ impl DatabaseMetrics for DatabaseMock {}
 /// that return success or default values, suitable for testing database operations
 /// without side effects.
 #[derive(Debug, Clone, Default)]
-pub struct TxMock {
-    /// Internal table representation (currently unused).
-    _table: BTreeMap<Vec<u8>, Vec<u8>>,
-}
+pub struct TxMock {}
 
 impl DbTx for TxMock {
     type Cursor<T: Table> = CursorMock;
@@ -122,10 +120,9 @@ impl DbTx for TxMock {
 
     /// Returns the number of entries in the specified table.
     ///
-    /// **Mock behavior**: Returns the length of the internal `_table` `BTreeMap`,
-    /// which is typically 0 since no data is actually stored.
+    /// **Mock behavior**: Always returns `0` since no data is stored in the mock.
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
-        Ok(self._table.len())
+        Ok(0)
     }
 
     /// Disables long read transaction safety checks.
