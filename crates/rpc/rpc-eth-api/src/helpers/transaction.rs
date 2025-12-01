@@ -20,7 +20,7 @@ use futures::{Future, StreamExt};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_node_api::BlockBody;
 use reth_primitives_traits::{Recovered, RecoveredBlock, SignedTransaction, TxTy, WithEncoded};
-use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq};
+use reth_rpc_convert::{transaction::RpcConvert, RpcTxReq, TransactionConversionError};
 use reth_rpc_eth_types::{
     utils::{binary_search, recover_raw_transaction},
     EthApiError::{self, TransactionConfirmationTimeout},
@@ -433,7 +433,9 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 <<Self as RpcNodeCore>::Pool as TransactionPool>::Transaction::try_from_consensus(
                     transaction,
                 )
-                .map_err(|_| EthApiError::TransactionConversionError)?;
+                .map_err(|e| Self::Error::from_eth_err(
+                    TransactionConversionError::FromConsensus(e.to_string())
+                ))?;
 
             // submit the transaction to the pool with a `Local` origin
             let AddedTransactionOutcome { hash, .. } = self

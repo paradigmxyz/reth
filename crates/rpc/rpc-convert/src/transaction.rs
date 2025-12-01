@@ -485,8 +485,15 @@ where
 
 /// Conversion into transaction RPC response failed.
 #[derive(Debug, Clone, Error)]
-#[error("Failed to convert transaction into RPC response: {0}")]
-pub struct TransactionConversionError(String);
+pub enum TransactionConversionError {
+    /// Conversion from `TxReq` to `SimTx` failed
+    #[error("Failed to convert RPC transaction request: {0}")]
+    FromTxReq(String),
+
+    /// Conversion from `Consensus` type failed
+    #[error("Failed to convert transaction from consensus: {0}")]
+    FromConsensus(String),
+}
 
 /// Generic RPC response object converter for `Evm` and network `Network`.
 ///
@@ -826,7 +833,7 @@ where
         Ok(self
             .sim_tx_converter
             .convert_sim_tx(request)
-            .map_err(|e| TransactionConversionError(e.to_string()))?)
+            .map_err(|e| TransactionConversionError::FromTxReq(e.to_string()))?)
     }
 
     fn tx_env(
