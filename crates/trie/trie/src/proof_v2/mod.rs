@@ -98,46 +98,6 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
             rlp_encode_buf: Vec::<_>::with_capacity(RLP_ENCODE_BUF_SIZE),
         }
     }
-
-    /// Returns whether the given path lies within the lower/upper bound of a portion of the target
-    /// set (presumably obtained via `targets.peek()`. See [`Self::should_retain`] to understand
-    /// how the targets lower/upper bounds work.
-    ///
-    /// This method assumes depth-first ordering.
-    ///
-    /// # Returns
-    ///
-    /// - [`Ordering::Less`] if `path` is less than the lower bound.
-    /// - [`Ordering::Equal`] if `path` is greater-or-equal to the lower bound, and less than the
-    ///   upper bound (ie it is in-range).
-    /// - [`Ordering::Greater`] if `path` is greater-or-equal to the upper bound.
-    #[expect(unused)]
-    fn cmp_targets(path: &Nibbles, bounds: &(Nibbles, Option<Nibbles>)) -> Ordering {
-        debug_assert!(
-            bounds
-                .1
-                .as_ref()
-                .is_none_or(|upper| depth_first::cmp(&bounds.0, upper) != Ordering::Greater),
-            "lower bound {:?} is greater than upper bound {:?} (depth-first)",
-            bounds.0,
-            bounds.1,
-        );
-
-        match bounds {
-            (lower, _) if depth_first::cmp(path, lower) == Ordering::Less => Ordering::Less,
-            (_, None) => {
-                // None indicates no upper-bound. We've already determined that path is >= lower,
-                // so it must be in-range.
-                Ordering::Equal
-            }
-            (_, Some(upper)) if depth_first::cmp(path, upper) == Ordering::Less => {
-                // Upper bound is exclusive. If path is less the upper bound and not less than the
-                // lower bound then it is in-range.
-                Ordering::Equal
-            }
-            (_, _) => Ordering::Greater,
-        }
-    }
 }
 
 /// Helper type for the [`Iterator`] used to pass targets in from the caller.
@@ -212,34 +172,47 @@ where
     /// Because paths in the trie are visited in depth-first order, it's imperative that targets are
     /// given in depth-first order as well. If the targets were generated off of B256s, which is
     /// the common-case, then this is equivalent to lexicographical order.
+    ///
+    /// If `lexicographic` is true then ordering is checked using lexicographic order, not
+    /// depth-first. This is used when checking cached branch nodes, which we visit in lexicographic
+    /// order.
     fn should_retain(
         &self,
         targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
         path: &Nibbles,
+        lexicographic: bool,
     ) -> bool {
-        trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), "should_retain: called");
+        let cmp_fn = if lexicographic { std::cmp::Ord::cmp } else { depth_first::cmp };
+
+        trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), ?lexicographic, "should_retain: called");
         debug_assert!(self.retained_proofs.last().is_none_or(
                 |ProofTrieNode { path: last_retained_path, .. }| {
-                    depth_first::cmp(path, last_retained_path) == Ordering::Greater
+                    cmp_fn(path, last_retained_path) == Ordering::Greater
                 }
             ),
-            "should_retain called with path {path:?} which is not after previously retained node {:?} in depth-first order",
+            "should_retain called with path {path:?} which is not after previously retained node {:?} (lexicographic order:{lexicographic:?})",
             self.retained_proofs.last().map(|n| n.path),
         );
 
         let &(mut lower, mut upper) = targets.peek().expect("targets is never exhausted");
 
-        // If the path isn't in the current range then iterate forward until it is (or until there
-        // is no upper bound, indicating unbounded).
-        while upper.is_some_and(|upper| depth_first::cmp(path, &upper) != Ordering::Less) {
-            targets.next();
-            trace!(target: TRACE_TARGET, target = ?targets.peek(), "upper target <= path, next target");
-            let &(l, u) = targets.peek().expect("targets is never exhausted");
-            (lower, upper) = (l, u);
-        }
+        loop {
+            // If the node in question is a prefix of the target then we retain
+            if lower.starts_with(path) {
+                return true
+            }
 
-        // If the node in question is a prefix of the target then we retain
-        lower.starts_with(path)
+            // If the path isn't in the current range then iterate forward until it is (or until
+            // there is no upper bound, indicating unbounded).
+            if upper.is_some_and(|upper| cmp_fn(path, &upper) != Ordering::Less) {
+                targets.next();
+                trace!(target: TRACE_TARGET, target = ?targets.peek(), ?lexicographic, "upper target <= path, next target");
+                let &(l, u) = targets.peek().expect("targets is never exhausted");
+                (lower, upper) = (l, u);
+            } else {
+                return false
+            }
+        }
     }
 
     /// Takes a child which has been removed from the `child_stack` and converts it to an
@@ -259,7 +232,7 @@ where
         }
 
         // If we should retain the child then do so.
-        if self.should_retain(targets, &child_path) {
+        if self.should_retain(targets, &child_path, false) {
             trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
             // Convert to `ProofTrieNode`, which will be what is retained.
@@ -346,6 +319,9 @@ where
         }
 
         let child_path = self.last_child_path();
+        // TODO theoretically `commit_child` only needs to convert to an `RlpNode` if it's going to
+        // retain the proof, otherwise we could leave the child as-is on the stack and convert it
+        // when popping the branch, giving more time to the DeferredEncoder to do async work.
         let child_rlp_node = self.commit_child(targets, child_path, child)?;
 
         // Replace the child on the stack
@@ -513,10 +489,12 @@ where
         );
 
         // Collect children into an `RlpNode` Vec by committing and pushing each of them.
-        for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
+        for (idx, child) in
+            self.child_stack.drain(self.child_stack.len() - num_children..).enumerate()
+        {
             let ProofTrieBranchChild::RlpNode(child_rlp_node) = child else {
                 panic!(
-                    "all branch child must have been committed, found {}",
+                    "all branch children must have been committed, found {} at index {idx:?}",
                     std::any::type_name_of_val(&child)
                 );
             };
@@ -734,16 +712,29 @@ where
             );
 
             // TODO might be possible to move this out of the loop?
+            //
+            // TODO A lot of calculations start with something like:
+            // ```
+            // Returning key range to calculate in order to catch up to cached branch lower=Nibbles(0x) upper=Some(Nibbles(0x0))
+            // ```
+            // ...which is not strictly necessary, if 0x0 is a branch then there can't be children
+            // prior.
+            //
             // The current hashed key indicates the first key after the previous uncached range,
             // or None if this is the first call to this method. If the key is not caught up to
             // this cached branch it means there are portions of the trie prior to this branch
             // which need to be computed; return the range up to this branch to make that happen.
             if hashed_key_current.is_none_or(|k| k < &cached_path) {
-                return Ok((
-                    // If this is the first call to this method then start computation from zero
-                    hashed_key_current.copied().unwrap_or_else(Nibbles::new),
-                    Some(cached_path),
-                ));
+                // If this is the first call to this method then start computation from zero
+                let lower = hashed_key_current.copied().unwrap_or_else(Nibbles::new);
+                let upper = Some(cached_path);
+                trace!(
+                    target: TRACE_TARGET,
+                    ?lower,
+                    ?upper,
+                    "Returning key range to calculate in order to catch up to cached branch",
+                );
+                return Ok((lower, upper));
             }
 
             // All trie data prior to this cached branch has been computed. Any branches which were
@@ -766,8 +757,20 @@ where
             // top branch is the parent of this cached branch. Either way we push a branch
             // corresponding to the cached one onto the stack, so we can begin constructing it.
             if self.branch_path != cached_path {
+                // `commit_last_child` relies on the last set bit of the parent branch's
+                // `state_mask` to determine the path of the last child on the `child_stack`. Since
+                // we are about to change that mask we need to commit that last child first.
                 if !self.child_stack.is_empty() {
                     self.commit_last_child(targets)?;
+                }
+
+                // When pushing a new branch we need to set its child nibble in the `state_mask` of
+                // its parent, if there is one.
+                if let Some(parent_branch) = self.branch_stack.last_mut() {
+                    // We've asserted above that branch_path.len() < cached_path.len(), so this
+                    // `get_unchecked` is safe.
+                    let child_nibble = cached_path.get_unchecked(self.branch_path.len());
+                    parent_branch.state_mask.set_bit(child_nibble);
                 }
 
                 // The length of the extension will be the difference of the lengths of the cached
@@ -832,28 +835,45 @@ where
             //
             // If the child needs to be retained for a proof then we should not use the cached
             // hash, and instead continue on to calculate its node manually.
-            if cached_branch.hash_mask.is_bit_set(child_nibble) &&
-                !self.should_retain(targets, &child_path)
-            {
-                let hash_idx = cached_branch.hash_mask.count_ones() - curr_state_mask.count_ones();
-                let hash = cached_branch.hashes[hash_idx as usize];
+            if cached_branch.hash_mask.is_bit_set(child_nibble) {
+                // Commit the last child. We do this here for two reasons:
+                // - `commit_last_child` will check if the last child needs to be retained. We need
+                //   to check that before the subsequent `should_retain` call here to prevent
+                //   `targets` from being moved beyond the last child before it is checked.
+                // - If we do end up using the cached hash value, then we will need to commit the
+                //   last child before pushing a new one onto the stack anyway.
+                if !self.child_stack.is_empty() {
+                    self.commit_last_child(targets)?;
+                }
 
-                trace!(
-                    target: TRACE_TARGET,
-                    ?child_path,
-                    ?hash_idx,
-                    ?hash,
-                    "Using cached hash for child",
-                );
+                if !self.should_retain(targets, &child_path, false) {
+                    // Pull this child's hash out of the cached branch node. To get the hash's index
+                    // we first need to calculate which cached hash's have already been used by this
+                    // branch (if any), and subtract that count from the count of total cached
+                    // hashes.
+                    let curr_hashed_used_mask = cached_branch.hash_mask.get() & curr_state_mask;
+                    let hash_idx = cached_branch.hash_mask.count_ones() -
+                        curr_hashed_used_mask.count_ones() -
+                        1;
+                    let hash = cached_branch.hashes[hash_idx as usize];
 
-                self.child_stack.push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&hash)));
-                self.branch_stack
-                    .last_mut()
-                    .expect("already asserted there is a last branch")
-                    .state_mask
-                    .set_bit(child_nibble);
+                    trace!(
+                        target: TRACE_TARGET,
+                        ?child_path,
+                        ?hash_idx,
+                        ?hash,
+                        "Using cached hash for child",
+                    );
 
-                continue
+                    self.child_stack.push(ProofTrieBranchChild::RlpNode(RlpNode::word_rlp(&hash)));
+                    self.branch_stack
+                        .last_mut()
+                        .expect("already asserted there is a last branch")
+                        .state_mask
+                        .set_bit(child_nibble);
+
+                    continue
+                }
             }
 
             // We now want to check if there is a cached branch node at this child. The cached
@@ -890,7 +910,7 @@ where
                 target: TRACE_TARGET,
                 lower=?child_path,
                 upper=?child_path_upper,
-                "Returning key range to calculate",
+                "Returning sub-trie's key range to calculate",
             );
             return Ok((child_path, child_path_upper));
         }
@@ -1359,7 +1379,9 @@ mod tests {
             fn proptest_proof_with_targets(
                 (post_state, targets) in hashed_post_state_strategy()
                     .prop_flat_map(|post_state| {
-                        let account_keys: Vec<B256> = post_state.accounts.keys().copied().collect();
+                        let mut account_keys: Vec<B256> = post_state.accounts.keys().copied().collect();
+                        // Sort to ensure deterministic order when using PROPTEST_RNG_SEED
+                        account_keys.sort_unstable();
                         let targets_strategy = proof_targets_strategy(account_keys);
                         (Just(post_state), targets_strategy)
                     })
