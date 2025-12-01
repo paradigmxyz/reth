@@ -766,6 +766,10 @@ where
             // top branch is the parent of this cached branch. Either way we push a branch
             // corresponding to the cached one onto the stack, so we can begin constructing it.
             if self.branch_path != cached_path {
+                if !self.child_stack.is_empty() {
+                    self.commit_last_child(targets)?;
+                }
+
                 // The length of the extension will be the difference of the lengths of the cached
                 // branch and its parent if any.
                 let ext_len =
@@ -781,7 +785,7 @@ where
                     target: TRACE_TARGET,
                     branch=?self.branch_stack.last(),
                     branch_path=?self.branch_path,
-                    "pushed cached branch",
+                    "Pushed cached branch",
                 );
             }
 
@@ -831,8 +835,7 @@ where
             if cached_branch.hash_mask.is_bit_set(child_nibble) &&
                 !self.should_retain(targets, &child_path)
             {
-                let hash_idx =
-                    cached_branch.hash_mask.count_ones() - curr_state_mask.count_ones() - 1;
+                let hash_idx = cached_branch.hash_mask.count_ones() - curr_state_mask.count_ones();
                 let hash = cached_branch.hashes[hash_idx as usize];
 
                 trace!(
