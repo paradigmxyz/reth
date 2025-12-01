@@ -1,15 +1,15 @@
 use crate::{
     providers::{
-        state::latest::LatestStateProvider, NodeTypesForProvider, StaticFileProvider,
-        StaticFileProviderRWRefMut,
+        state::latest::LatestStateProvider, NodeTypesForProvider, RocksDBProvider,
+        StaticFileProvider, StaticFileProviderRWRefMut,
     },
     to_range,
     traits::{BlockSource, ReceiptProvider},
     BlockHashReader, BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory,
     EitherWriterDestination, HashedPostStateProvider, HeaderProvider, HeaderSyncGapProvider,
-    MetadataProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateProviderBox, StaticFileProviderFactory, StaticFileWriter, TransactionVariant,
-    TransactionsProvider,
+    MetadataProvider, ProviderError, PruneCheckpointReader, RocksDBProviderFactory,
+    StageCheckpointReader, StateProviderBox, StaticFileProviderFactory, StaticFileWriter,
+    TransactionVariant, TransactionsProvider,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::BlockHashOrNumber;
@@ -72,6 +72,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     storage: Arc<N::Storage>,
     /// Storage configuration settings for this node
     storage_settings: Arc<RwLock<StorageSettings>>,
+    /// `RocksDB` provider
+    rocksdb_provider: RocksDBProvider,
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
@@ -87,6 +89,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         db: N::DB,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
+        rocksdb_provider: RocksDBProvider,
     ) -> ProviderResult<Self> {
         // Load storage settings from database at init time. Creates a temporary provider
         // to read persisted settings, falling back to legacy defaults if none exist.
@@ -100,6 +103,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Default::default(),
             Default::default(),
             Arc::new(RwLock::new(legacy_settings)),
+            rocksdb_provider.clone(),
         )
         .storage_settings()?
         .unwrap_or(legacy_settings);
@@ -111,6 +115,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             prune_modes: PruneModes::default(),
             storage: Default::default(),
             storage_settings: Arc::new(RwLock::new(storage_settings)),
+            rocksdb_provider,
         })
     }
 }
@@ -144,6 +149,12 @@ impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
     }
 }
 
+impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
+    fn rocksdb_provider(&self) -> &RocksDBProvider {
+        &self.rocksdb_provider
+    }
+}
+
 impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
@@ -152,11 +163,13 @@ impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
+        rocksdb_provider: RocksDBProvider,
     ) -> RethResult<Self> {
         Self::new(
             Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
+            rocksdb_provider,
         )
         .map_err(RethError::Provider)
     }
@@ -178,6 +191,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.prune_modes.clone(),
             self.storage.clone(),
             self.storage_settings.clone(),
+            self.rocksdb_provider.clone(),
         ))
     }
 
@@ -194,6 +208,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.prune_modes.clone(),
             self.storage.clone(),
             self.storage_settings.clone(),
+            self.rocksdb_provider.clone(),
         )))
     }
 
@@ -595,8 +610,15 @@ where
     N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug, Storage: fmt::Debug>,
 {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let Self { db, chain_spec, static_file_provider, prune_modes, storage, storage_settings } =
-            self;
+        let Self {
+            db,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            storage,
+            storage_settings,
+            rocksdb_provider,
+        } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
             .field("chain_spec", &chain_spec)
@@ -604,6 +626,7 @@ where
             .field("prune_modes", &prune_modes)
             .field("storage", &storage)
             .field("storage_settings", &*storage_settings.read())
+            .field("rocksdb_provider", &rocksdb_provider)
             .finish()
     }
 }
@@ -617,6 +640,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             prune_modes: self.prune_modes.clone(),
             storage: self.storage.clone(),
             storage_settings: self.storage_settings.clone(),
+            rocksdb_provider: self.rocksdb_provider.clone(),
         }
     }
 }
@@ -635,7 +659,7 @@ mod tests {
     use reth_chainspec::ChainSpecBuilder;
     use reth_db::{
         mdbx::DatabaseArguments,
-        test_utils::{create_test_static_files_dir, ERROR_TEMPDIR},
+        test_utils::{create_test_rocksdb_dir, create_test_static_files_dir, ERROR_TEMPDIR},
     };
     use reth_db_api::tables;
     use reth_primitives_traits::SignerRecoverable;
@@ -674,11 +698,13 @@ mod tests {
     fn provider_factory_with_database_path() {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
+        let (_, rocksdb_path) = create_test_rocksdb_dir();
         let factory = ProviderFactory::<MockNodeTypesWithDB<DatabaseEnv>>::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
+            RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
         )
         .unwrap();
         let provider = factory.provider().unwrap();

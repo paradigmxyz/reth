@@ -33,12 +33,23 @@ const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 /// Default bloom filter bits per key (~1% false positive rate).
 const DEFAULT_BLOOM_FILTER_BITS: f64 = 10.0;
 
+/// Access mode on a `RocksDB` provider. RO/RW.
+#[derive(Debug, Default, PartialEq, Eq, Clone, Copy)]
+enum RocksDBAccess {
+    /// Read-only access.
+    RO,
+    /// Read-write access.
+    #[default]
+    RW,
+}
+
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
     path: PathBuf,
     column_families: Vec<String>,
     enable_metrics: bool,
     enable_statistics: bool,
+    access: RocksDBAccess,
     log_level: rocksdb::LogLevel,
     block_cache: Cache,
 }
@@ -62,6 +73,7 @@ impl RocksDBBuilder {
             column_families: Vec::new(),
             enable_metrics: false,
             enable_statistics: false,
+            access: RocksDBAccess::RW,
             log_level: rocksdb::LogLevel::Info,
             block_cache: cache,
         }
@@ -150,14 +162,25 @@ impl RocksDBBuilder {
     }
 
     /// Sets the log level from `DatabaseArgs` configuration.
-    pub const fn with_database_log_level(mut self, log_level: LogLevel) -> Self {
-        self.log_level = convert_log_level(log_level);
+    pub const fn with_database_log_level(mut self, log_level: Option<LogLevel>) -> Self {
+        if let Some(level) = log_level {
+            self.log_level = convert_log_level(level);
+        }
         self
     }
 
     /// Sets a custom block cache size.
     pub fn with_block_cache_size(mut self, capacity_bytes: usize) -> Self {
         self.block_cache = Cache::new_lru_cache(capacity_bytes);
+        self
+    }
+
+    /// Opens the database in read-only mode.
+    ///
+    /// This is useful for preventing accidental writes and can provide performance benefits
+    /// as read-only mode has lower overhead (no WAL, no compactions).
+    pub const fn read_only(mut self) -> Self {
+        self.access = RocksDBAccess::RO;
         self
     }
 
@@ -177,7 +200,13 @@ impl RocksDBBuilder {
             })
             .collect();
 
-        let db = DB::open_cf_descriptors(&options, &self.path, cf_descriptors).map_err(|e| {
+        let open_db_res = if self.access == RocksDBAccess::RO {
+            DB::open_cf_descriptors_read_only(&options, &self.path, cf_descriptors, false)
+        } else {
+            DB::open_cf_descriptors(&options, &self.path, cf_descriptors)
+        };
+
+        let db = open_db_res.map_err(|e| {
             ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -186,7 +215,7 @@ impl RocksDBBuilder {
 
         let metrics = self.enable_metrics.then(RocksDBMetrics::default);
 
-        Ok(RocksDBProvider(Arc::new(RocksDBProviderInner { db, metrics })))
+        Ok(RocksDBProvider(Arc::new(RocksDBProviderInner { db, metrics, access: self.access })))
     }
 }
 
@@ -215,6 +244,8 @@ struct RocksDBProviderInner {
     db: DB,
     /// Metrics latency & operations.
     metrics: Option<RocksDBMetrics>,
+    /// Access mode of the provider.
+    access: RocksDBAccess,
 }
 
 impl Clone for RocksDBProvider {
@@ -294,6 +325,10 @@ impl RocksDBProvider {
         key: &<T::Key as Encode>::Encoded,
         value: &T::Value,
     ) -> ProviderResult<()> {
+        if self.0.access == RocksDBAccess::RO {
+            return Err(ProviderError::ReadOnlyRocksDBAccess);
+        }
+
         self.execute_with_operation_metric(RocksDBOperation::Put, T::NAME, |this| {
             // for simplify the code, we need allocate buf here each time because `RocksDBProvider`
             // is thread safe if user want to avoid allocate buf each time, they can use
@@ -314,6 +349,10 @@ impl RocksDBProvider {
 
     /// Deletes a value from the specified table.
     pub fn delete<T: Table>(&self, key: T::Key) -> ProviderResult<()> {
+        if self.0.access == RocksDBAccess::RO {
+            return Err(ProviderError::ReadOnlyRocksDBAccess);
+        }
+
         self.execute_with_operation_metric(RocksDBOperation::Delete, T::NAME, |this| {
             this.0.db.delete_cf(this.get_cf_handle::<T>()?, key.encode().as_ref()).map_err(|e| {
                 ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
@@ -329,6 +368,10 @@ impl RocksDBProvider {
     where
         F: FnOnce(&mut RocksDBBatch<'_>) -> ProviderResult<()>,
     {
+        if self.0.access == RocksDBAccess::RO {
+            return Err(ProviderError::ReadOnlyRocksDBAccess);
+        }
+
         // Note: Using "Batch" as table name for batch operations across multiple tables
         self.execute_with_operation_metric(RocksDBOperation::BatchWrite, "Batch", |this| {
             let mut batch_handle =
@@ -563,5 +606,162 @@ mod tests {
         for i in 0..100 {
             assert!(provider.get::<TestTable>(i).unwrap().is_some(), "Data should be persisted");
         }
+    }
+
+    #[test]
+    fn test_read_only_allows_get() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // First create database and write multiple entries
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+            for i in 0..10u64 {
+                let value = format!("value_{i}").into_bytes();
+                provider.put::<TestTable>(i, &value).unwrap();
+            }
+        }
+
+        // Open in read-only mode
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<TestTable>()
+            .read_only()
+            .build()
+            .unwrap();
+
+        // Verify we can read all existing data
+        for i in 0..10u64 {
+            let expected_value = format!("value_{i}").into_bytes();
+            let result = provider.get::<TestTable>(i).unwrap();
+            assert_eq!(result, Some(expected_value), "Failed to read key {i}");
+        }
+
+        // Verify non-existent keys return None
+        assert_eq!(provider.get::<TestTable>(100).unwrap(), None);
+        assert_eq!(provider.get::<TestTable>(999).unwrap(), None);
+    }
+
+    #[test]
+    fn test_read_only_prevents_put() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // First create database and write some data
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+            provider.put::<TestTable>(1, &vec![1, 2, 3]).unwrap();
+        }
+
+        // Open in read-only mode
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<TestTable>()
+            .read_only()
+            .build()
+            .unwrap();
+
+        // Verify we can read existing data
+        assert_eq!(provider.get::<TestTable>(1).unwrap(), Some(vec![1, 2, 3]));
+
+        // Attempt to put should fail with ReadOnlyRocksDBAccess
+        let result = provider.put::<TestTable>(2, &vec![4, 5, 6]);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ProviderError::ReadOnlyRocksDBAccess => {
+                // Expected error
+            }
+            e => panic!("Expected ReadOnlyRocksDBAccess error, got: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_read_only_prevents_delete() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // First create database and write some data
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+            provider.put::<TestTable>(1, &vec![1, 2, 3]).unwrap();
+        }
+
+        // Open in read-only mode
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<TestTable>()
+            .read_only()
+            .build()
+            .unwrap();
+
+        // Verify data exists
+        assert!(provider.get::<TestTable>(1).unwrap().is_some());
+
+        // Attempt to delete should fail with ReadOnlyRocksDBAccess
+        let result = provider.delete::<TestTable>(1);
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ProviderError::ReadOnlyRocksDBAccess => {
+                // Expected error
+            }
+            e => panic!("Expected ReadOnlyRocksDBAccess error, got: {:?}", e),
+        }
+
+        // Verify data still exists
+        assert!(provider.get::<TestTable>(1).unwrap().is_some());
+    }
+
+    #[test]
+    fn test_read_only_prevents_write_batch() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // First create database
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+            provider.put::<TestTable>(1, &vec![1, 2, 3]).unwrap();
+        }
+
+        // Open in read-only mode
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<TestTable>()
+            .read_only()
+            .build()
+            .unwrap();
+
+        // Attempt to write batch should fail with ReadOnlyRocksDBAccess
+        let result = provider.write_batch(|batch| {
+            batch.put::<TestTable>(2, &vec![4, 5, 6])?;
+            Ok(())
+        });
+
+        assert!(result.is_err());
+        match result.unwrap_err() {
+            ProviderError::ReadOnlyRocksDBAccess => {
+                // Expected error
+            }
+            e => panic!("Expected ReadOnlyRocksDBAccess error, got: {:?}", e),
+        }
+    }
+
+    #[test]
+    fn test_read_write_mode_allows_all_operations() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create in default (read-write) mode
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // All operations should succeed
+        provider.put::<TestTable>(1, &vec![1, 2, 3]).unwrap();
+        assert_eq!(provider.get::<TestTable>(1).unwrap(), Some(vec![1, 2, 3]));
+
+        provider.delete::<TestTable>(1).unwrap();
+        assert_eq!(provider.get::<TestTable>(1).unwrap(), None);
+
+        provider
+            .write_batch(|batch| {
+                batch.put::<TestTable>(2, &vec![4, 5, 6])?;
+                Ok(())
+            })
+            .unwrap();
+        assert_eq!(provider.get::<TestTable>(2).unwrap(), Some(vec![4, 5, 6]));
     }
 }

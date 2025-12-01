@@ -4,6 +4,7 @@ use crate::{
     },
     providers::{
         database::{chain::ChainStorage, metrics},
+        rocksdb::RocksDBProvider,
         static_file::StaticFileWriter,
         NodeTypesForProvider, StaticFileProvider,
     },
@@ -16,10 +17,10 @@ use crate::{
     DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
-    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
-    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    TrieReader, TrieWriter,
+    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, RocksDBProviderFactory,
+    StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
+    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, TrieReader, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -164,6 +165,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage: Arc<N::Storage>,
     /// Storage configuration settings for this node
     storage_settings: Arc<RwLock<StorageSettings>>,
+    /// `RocksDB` provider
+    rocksdb_provider: RocksDBProvider,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
 }
@@ -251,6 +254,13 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     }
 }
 
+impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
+    /// Returns a reference to the `RocksDB` provider.
+    fn rocksdb_provider(&self) -> &RocksDBProvider {
+        &self.rocksdb_provider
+    }
+}
+
 impl<TX: Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
     for DatabaseProvider<TX, N>
 {
@@ -270,6 +280,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
+        rocksdb_provider: RocksDBProvider,
     ) -> Self {
         Self {
             tx,
@@ -278,6 +289,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             prune_modes,
             storage,
             storage_settings,
+            rocksdb_provider,
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
     }
@@ -523,6 +535,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
+        rocksdb_provider: RocksDBProvider,
     ) -> Self {
         Self {
             tx,
@@ -531,6 +544,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             prune_modes,
             storage,
             storage_settings,
+            rocksdb_provider,
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
     }
