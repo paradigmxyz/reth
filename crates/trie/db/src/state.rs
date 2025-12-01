@@ -1,7 +1,7 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, PrefixSetLoader};
 use alloy_primitives::{
     map::{AddressMap, B256Map},
-    BlockNumber, B256, U256,
+    Address, BlockNumber, B256, U256,
 };
 use reth_db_api::{
     cursor::DbCursorRO,
@@ -11,6 +11,7 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_execution_errors::StateRootError;
+use reth_primitives_traits::Account;
 use reth_trie::{
     hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
     updates::TrieUpdates, HashedPostState, HashedPostStateSorted, HashedStorage,
@@ -236,30 +237,47 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
     }
 }
 
+/// Reads account and storage reverts from database changesets.
+///
+/// Iterates over account and storage changesets in the given block range,
+/// keeping only the first occurrence of each account/slot (the value before
+/// any changes in that range).
+///
+/// Returns raw (unhashed) data for further processing.
+#[allow(clippy::type_complexity)]
+fn read_reverts_from_changesets<TX: DbTx>(
+    tx: &TX,
+    range: impl RangeBounds<BlockNumber>,
+) -> Result<(HashMap<Address, Option<Account>>, AddressMap<B256Map<U256>>), DatabaseError> {
+    // Iterate over account changesets and record value before first occurring account change.
+    let account_range = (range.start_bound(), range.end_bound());
+    let mut accounts = HashMap::new();
+    let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
+    for entry in account_changesets_cursor.walk_range(account_range)? {
+        let (_, AccountBeforeTx { address, info }) = entry?;
+        accounts.entry(address).or_insert(info);
+    }
+
+    // Iterate over storage changesets and record value before first occurring storage change.
+    let storage_range: BlockNumberAddressRange = range.into();
+    let mut storages = AddressMap::<B256Map<U256>>::default();
+    let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
+    for entry in storage_changesets_cursor.walk_range(storage_range)? {
+        let (BlockNumberAddress((_, address)), storage) = entry?;
+        let account_storage = storages.entry(address).or_default();
+        account_storage.entry(storage.key).or_insert(storage.value);
+    }
+
+    Ok((accounts, storages))
+}
+
 impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
     #[instrument(target = "trie::db", skip(tx), fields(range))]
     fn from_reverts<KH: KeyHasher>(
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Self, DatabaseError> {
-        // Iterate over account changesets and record value before first occurring account change.
-        let account_range = (range.start_bound(), range.end_bound()); // to avoid cloning
-        let mut accounts = HashMap::new();
-        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
-        for entry in account_changesets_cursor.walk_range(account_range)? {
-            let (_, AccountBeforeTx { address, info }) = entry?;
-            accounts.entry(address).or_insert(info);
-        }
-
-        // Iterate over storage changesets and record value before first occurring storage change.
-        let storage_range: BlockNumberAddressRange = range.into();
-        let mut storages = AddressMap::<B256Map<U256>>::default();
-        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
-        for entry in storage_changesets_cursor.walk_range(storage_range)? {
-            let (BlockNumberAddress((_, address)), storage) = entry?;
-            let account_storage = storages.entry(address).or_default();
-            account_storage.entry(storage.key).or_insert(storage.value);
-        }
+        let (accounts, storages) = read_reverts_from_changesets(tx, range)?;
 
         let hashed_accounts =
             accounts.into_iter().map(|(address, info)| (KH::hash_key(address), info)).collect();
@@ -293,32 +311,15 @@ impl<TX: DbTx> DatabaseHashedPostStateSorted<TX> for HashedPostStateSorted {
     /// When to use:
     /// - Prefer this over the unsorted variant if the next consumer needs sorted data
     ///   (`HashedPostStateSorted`) for cursors or trie iteration (e.g. overlay state roots,
-    ///   parallel state root, proof generation). This skips the intermediate HashMap
-    ///   allocation and sort done by `into_sorted`.
+    ///   parallel state root, proof generation). This skips the intermediate `HashMap` allocation
+    ///   and sort done by `into_sorted`.
     /// - Keep using the unsorted variant if you need to mutate/merge in map form first.
     #[instrument(target = "trie::db", skip(tx), fields(range))]
     fn from_reverts<KH: KeyHasher>(
         tx: &TX,
         range: impl RangeBounds<BlockNumber>,
     ) -> Result<Self, DatabaseError> {
-        // Iterate over account changesets (using HashMap for O(1) insertion)
-        let account_range = (range.start_bound(), range.end_bound());
-        let mut accounts = HashMap::new();
-        let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
-        for entry in account_changesets_cursor.walk_range(account_range)? {
-            let (_, AccountBeforeTx { address, info }) = entry?;
-            accounts.entry(address).or_insert(info);
-        }
-
-        // Iterate over storage changesets
-        let storage_range: BlockNumberAddressRange = range.into();
-        let mut storages = AddressMap::<B256Map<U256>>::default();
-        let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
-        for entry in storage_changesets_cursor.walk_range(storage_range)? {
-            let (BlockNumberAddress((_, address)), storage) = entry?;
-            let account_storage = storages.entry(address).or_default();
-            account_storage.entry(storage.key).or_insert(storage.value);
-        }
+        let (accounts, storages) = read_reverts_from_changesets(tx, range)?;
 
         // Hash and sort accounts
         let mut hashed_accounts: Vec<_> =
@@ -401,19 +402,22 @@ mod tests {
         // Account changesets: only first occurrence per address should be kept.
         tx.put::<tables::AccountChangeSets>(
             1,
-            AccountBeforeTx { address: address1, info: Some(Account { nonce: 1, ..Default::default() }) },
+            AccountBeforeTx {
+                address: address1,
+                info: Some(Account { nonce: 1, ..Default::default() }),
+            },
         )
         .unwrap();
         tx.put::<tables::AccountChangeSets>(
             2,
-            AccountBeforeTx { address: address1, info: Some(Account { nonce: 2, ..Default::default() }) },
+            AccountBeforeTx {
+                address: address1,
+                info: Some(Account { nonce: 2, ..Default::default() }),
+            },
         )
         .unwrap();
-        tx.put::<tables::AccountChangeSets>(
-            3,
-            AccountBeforeTx { address: address2, info: None },
-        )
-        .unwrap();
+        tx.put::<tables::AccountChangeSets>(3, AccountBeforeTx { address: address2, info: None })
+            .unwrap();
 
         // Storage changesets: only first occurrence per slot should be kept, and slots sorted.
         tx.put::<tables::StorageChangeSets>(
