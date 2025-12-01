@@ -12,8 +12,14 @@
 //! and `https://hoodi.era.nimbus.team/` for hoodi to keep the tests efficient.
 
 use reth_era::{
-    common::file_ops::{StreamReader, StreamWriter},
-    era::file::{EraReader, EraWriter},
+    common::file_ops::{EraFileFormat, StreamReader, StreamWriter},
+    era::{
+        file::{EraFile, EraReader, EraWriter},
+        types::{
+            consensus::{CompressedBeaconState, CompressedSignedBeaconBlock},
+            group::{EraGroup, EraId},
+        },
+    },
 };
 use std::io::Cursor;
 
@@ -112,7 +118,18 @@ async fn test_era_file_roundtrip(
             "Beacon block at slot {slot} data should be identical after roundtrip"
         );
 
-        println!("  Beacon block at slot {slot} verified: {} bytes", original_block_data.len());
+        let recompressed_block = CompressedSignedBeaconBlock::from_ssz(&original_block_data)?;
+        let recompressed_block_data = recompressed_block.decompress()?;
+
+        assert_eq!(
+            original_block_data, recompressed_block_data,
+            "Beacon block at slot {slot} data should be identical after re-compression cycle"
+        );
+
+        println!(
+            "  Beacon block at slot {slot} re-compression cycle verified: {} bytes",
+            recompressed_block_data.len()
+        );
     }
 
     // Test era state decompression
@@ -123,7 +140,60 @@ async fn test_era_file_roundtrip(
         original_state_data, roundtrip_state_data,
         "Era state data should be identical after roundtrip"
     );
-    println!("  Era state verified: {} bytes", original_state_data.len());
+
+    let recompressed_state = CompressedBeaconState::from_ssz(&roundtrip_state_data)?;
+    let recompressed_state_data = recompressed_state.decompress()?;
+
+    assert_eq!(
+        original_state_data, recompressed_state_data,
+        "Era state data should be identical after re-compression cycle"
+    );
+
+    let recompressed_blocks: Vec<CompressedSignedBeaconBlock> = roundtrip_file
+        .group
+        .blocks
+        .iter()
+        .map(|block| {
+            let data = block.decompress()?;
+            CompressedSignedBeaconBlock::from_ssz(&data)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let recompressed_era_state = CompressedBeaconState::from_ssz(&original_state_data)?;
+
+    let new_group = if let Some(ref block_index) = original_file.group.slot_index {
+        EraGroup::with_block_index(
+            recompressed_blocks,
+            recompressed_era_state,
+            block_index.clone(),
+            roundtrip_file.group.state_slot_index.clone(),
+        )
+    } else {
+        EraGroup::new(
+            recompressed_blocks,
+            recompressed_era_state,
+            roundtrip_file.group.state_slot_index.clone(),
+        )
+    };
+
+    let (start_slot, slot_count) = new_group.slot_range();
+    let new_file = EraFile::new(new_group, EraId::new(network, start_slot, slot_count));
+
+    let mut reconstructed_buffer = Vec::new();
+    {
+        let mut writer = EraWriter::new(&mut reconstructed_buffer);
+        writer.write_file(&new_file)?;
+    }
+
+    // Read it back and verify
+    let reader = EraReader::new(Cursor::new(&reconstructed_buffer));
+    let reconstructed_file = reader.read(network.to_string())?;
+
+    assert_eq!(
+        original_file.group.blocks.len(),
+        reconstructed_file.group.blocks.len(),
+        "Block count should match after full reconstruction"
+    );
 
     println!("File {filename} roundtrip successful");
     Ok(())
