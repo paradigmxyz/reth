@@ -571,8 +571,21 @@ impl HashedPostStateSorted {
     /// Sorted vectors (accounts, storage slots) use O(n + m) two-way merge.
     /// Storage maps are combined via O(1) amortized `HashMap` operations.
     pub fn prepend(&mut self, base: Self) {
+        // Fast path: base is empty
+        if base.accounts.is_empty() && base.storages.is_empty() {
+            return;
+        }
+
+        // Fast path: self is empty, just take base
+        if self.accounts.is_empty() && self.storages.is_empty() {
+            *self = base;
+            return;
+        }
+
         // Merge accounts - self takes precedence
-        self.accounts = merge_sorted_vecs(&base.accounts, &self.accounts);
+        if !base.accounts.is_empty() {
+            self.accounts = merge_sorted_vecs(&base.accounts, &self.accounts);
+        }
 
         // Merge storages
         for (hashed_address, base_storage) in base.storages {
@@ -654,16 +667,27 @@ impl HashedStorageSorted {
     ///
     /// If `self` is marked as wiped, base storage is ignored since wipe clears all previous state.
     pub fn prepend(&mut self, base: Self) {
+        // Fast path: self is wiped, ignore base entirely
         if self.wiped {
-            // Self is wiped, ignore base entirely - wipe clears all previous state
             return;
         }
 
+        // Handle base wipe flag
         if base.wiped {
             // Base was wiped, but self has new updates on top
             // The wipe still applies, but self's slots are the current state
             self.wiped = true;
-            // Keep self.storage_slots as-is since they're newer than the wipe
+            return;
+        }
+
+        // Fast path: base has no storage slots
+        if base.storage_slots.is_empty() {
+            return;
+        }
+
+        // Fast path: self has no storage slots, take base
+        if self.storage_slots.is_empty() {
+            self.storage_slots = base.storage_slots;
             return;
         }
 
