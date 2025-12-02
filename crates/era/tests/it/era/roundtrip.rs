@@ -159,20 +159,18 @@ async fn test_era_file_roundtrip(
         })
         .collect::<Result<Vec<_>, _>>()?;
 
-    let recompressed_era_state = CompressedBeaconState::from_ssz(&original_state_data)?;
-
-    let new_group = if let Some(ref block_index) = original_file.group.slot_index {
+    let new_group = if let Some(ref block_index) = roundtrip_file.group.slot_index {
         EraGroup::with_block_index(
             recompressed_blocks,
-            recompressed_era_state,
+            recompressed_state,
             block_index.clone(),
             roundtrip_file.group.state_slot_index.clone(),
         )
     } else {
         EraGroup::new(
             recompressed_blocks,
-            recompressed_era_state,
-            roundtrip_file.group.state_slot_index.clone(),
+            recompressed_state,
+            roundtrip_file.group.state_slot_index,
         )
     };
 
