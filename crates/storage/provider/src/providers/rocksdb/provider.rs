@@ -11,17 +11,14 @@ use std::{fmt, path::Path, sync::Arc};
 
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
 
-/// Converts Reth's [`LogLevel`] to RocksDB's [`rocksdb::LogLevel`].
-fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
+/// Converts Reth's [`LogLevel`] to `RocksDB`'s [`rocksdb::LogLevel`].
+const fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
     match level {
         LogLevel::Fatal => rocksdb::LogLevel::Fatal,
         LogLevel::Error => rocksdb::LogLevel::Error,
         LogLevel::Warn => rocksdb::LogLevel::Warn,
-        LogLevel::Notice => rocksdb::LogLevel::Info,
-        LogLevel::Verbose => rocksdb::LogLevel::Info,
-        LogLevel::Debug => rocksdb::LogLevel::Debug,
-        LogLevel::Trace => rocksdb::LogLevel::Debug,
-        LogLevel::Extra => rocksdb::LogLevel::Debug,
+        LogLevel::Notice | LogLevel::Verbose => rocksdb::LogLevel::Info,
+        LogLevel::Debug | LogLevel::Trace | LogLevel::Extra => rocksdb::LogLevel::Debug,
     }
 }
 
@@ -59,7 +56,7 @@ impl RocksDBBuilder {
         }
     }
 
-    /// Creates optimized RocksDB options per RocksDB wiki recommendations.
+    /// Creates optimized `RocksDB` options per `RocksDB` wiki recommendations.
     fn default_options(
         log_level: rocksdb::LogLevel,
         cache: &Cache,
@@ -134,19 +131,19 @@ impl RocksDBBuilder {
     }
 
     /// Enables metrics.
-    pub fn with_metrics(mut self) -> Self {
+    pub const fn with_metrics(mut self) -> Self {
         self.enable_metrics = true;
         self
     }
 
-    /// Enables RocksDB internal statistics collection.
-    pub fn with_statistics(mut self) -> Self {
+    /// Enables `RocksDB` internal statistics collection.
+    pub const fn with_statistics(mut self) -> Self {
         self.enable_statistics = true;
         self
     }
 
-    /// Sets the log level from DatabaseArgs configuration.
-    pub fn with_database_log_level(mut self, log_level: LogLevel) -> Self {
+    /// Sets the log level from `DatabaseArgs` configuration.
+    pub const fn with_database_log_level(mut self, log_level: LogLevel) -> Self {
         self.log_level = convert_log_level(log_level);
         self
     }
@@ -180,21 +177,20 @@ impl RocksDBBuilder {
             }))
         })?;
 
-        let metrics =
-            if self.enable_metrics { Some(Arc::new(RocksDBMetrics::default())) } else { None };
+        let metrics = self.enable_metrics.then(|| Arc::new(RocksDBMetrics::default()));
 
         Ok(RocksDBProvider(Arc::new(RocksDBProviderInner { db, metrics })))
     }
 }
 
-/// Inner state for RocksDB provider.
+/// Inner state for `RocksDB` provider.
 #[derive(Debug)]
 struct RocksDBProviderInner {
     db: DB,
     metrics: Option<Arc<RocksDBMetrics>>,
 }
 
-/// RocksDB provider for auxiliary storage layer beside main database MDBX.
+/// `RocksDB` provider for auxiliary storage layer beside main database MDBX.
 #[derive(Debug)]
 pub struct RocksDBProvider(Arc<RocksDBProviderInner>);
 
@@ -205,7 +201,7 @@ impl Clone for RocksDBProvider {
 }
 
 impl RocksDBProvider {
-    /// Creates a new RocksDB provider.
+    /// Creates a new `RocksDB` provider.
     pub fn new(path: impl AsRef<Path>) -> ProviderResult<Self> {
         RocksDBBuilder::new(path).build()
     }

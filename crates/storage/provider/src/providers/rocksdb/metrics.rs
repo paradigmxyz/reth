@@ -8,7 +8,7 @@ use strum::{EnumIter, IntoEnumIterator};
 
 const ROCKSDB_TABLES: &[&str] = &[Tables::TransactionHashNumbers.name()];
 
-/// Metrics for the RocksDB provider.
+/// Metrics for the `RocksDB` provider.
 #[derive(Debug)]
 pub(crate) struct RocksDBMetrics {
     operations: HashMap<(&'static str, RocksDBOperation), RocksDBOperationMetrics>,
@@ -60,7 +60,7 @@ impl RocksDBMetrics {
     }
 }
 
-/// RocksDB operations that are tracked
+/// `RocksDB` operations that are tracked
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, EnumIter)]
 pub(crate) enum RocksDBOperation {
     Get,
@@ -80,7 +80,7 @@ impl RocksDBOperation {
     }
 }
 
-/// Metrics for a specific RocksDB operation on a table
+/// Metrics for a specific `RocksDB` operation on a table
 #[derive(Metrics, Clone)]
 #[metrics(scope = "rocksdb.provider")]
 pub(crate) struct RocksDBOperationMetrics {
