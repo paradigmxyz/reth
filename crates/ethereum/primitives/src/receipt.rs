@@ -6,11 +6,10 @@ use alloy_consensus::{
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
 use alloy_eips::{
-    eip2718::{Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718},
-    Decodable2718,
+    eip2718::{Eip2718Error, Encodable2718, IsTyped2718},
 };
 use alloy_primitives::{Bloom, Log, B256};
-use alloy_rlp::{BufMut, Decodable, Encodable, Header};
+use alloy_rlp::{BufMut, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
 
 /// Helper trait alias with requirements for transaction type generic to be used within [`Receipt`].
@@ -50,7 +49,7 @@ pub type RpcReceipt<T = TxType> = EthereumReceipt<T, alloy_rpc_types_eth::Log>;
 
 /// Typed ethereum transaction receipt.
 /// Receipt containing result of transaction execution.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
@@ -141,44 +140,6 @@ impl<T: TxTy> Receipt<T> {
     pub fn calculate_receipt_root_no_memo(receipts: &[Self]) -> B256 {
         ordered_trie_root_with_encoder(receipts, |r, buf| r.with_bloom_ref().encode_2718(buf))
     }
-
-    /// Returns length of RLP-encoded receipt fields without the given [`Bloom`] without an RLP
-    /// header
-    pub fn rlp_encoded_fields_length_without_bloom(&self) -> usize {
-        self.success.length() + self.cumulative_gas_used.length() + self.logs.length()
-    }
-
-    /// RLP-encodes receipt fields without the given [`Bloom`] without an RLP header.
-    pub fn rlp_encode_fields_without_bloom(&self, out: &mut dyn BufMut) {
-        self.success.encode(out);
-        self.cumulative_gas_used.encode(out);
-        self.logs.encode(out);
-    }
-
-    /// Returns RLP header for inner encoding.
-    pub fn rlp_header_inner_without_bloom(&self) -> Header {
-        Header { list: true, payload_length: self.rlp_encoded_fields_length_without_bloom() }
-    }
-
-    /// RLP-decodes the receipt from the provided buffer. This does not expect a type byte or
-    /// network header.
-    pub fn rlp_decode_inner_without_bloom(buf: &mut &[u8], tx_type: T) -> alloy_rlp::Result<Self> {
-        let header = Header::decode(buf)?;
-        if !header.list {
-            return Err(alloy_rlp::Error::UnexpectedString);
-        }
-
-        let remaining = buf.len();
-        let success = Decodable::decode(buf)?;
-        let cumulative_gas_used = Decodable::decode(buf)?;
-        let logs = Decodable::decode(buf)?;
-
-        if buf.len() + header.payload_length != remaining {
-            return Err(alloy_rlp::Error::UnexpectedLength);
-        }
-
-        Ok(Self { tx_type, success, cumulative_gas_used, logs })
-    }
 }
 
 impl<T: TxTy> Eip2718EncodableReceipt for Receipt<T> {
@@ -240,48 +201,6 @@ impl<T: TxTy> RlpDecodableReceipt for Receipt<T> {
         }
 
         Ok(this)
-    }
-}
-
-impl<T: TxTy> Encodable2718 for Receipt<T> {
-    fn encode_2718_len(&self) -> usize {
-        (!self.tx_type.is_legacy() as usize) +
-            self.rlp_header_inner_without_bloom().length_with_payload()
-    }
-
-    // encode the header
-    fn encode_2718(&self, out: &mut dyn BufMut) {
-        if !self.tx_type.is_legacy() {
-            out.put_u8(self.tx_type.ty());
-        }
-        self.rlp_header_inner_without_bloom().encode(out);
-        self.rlp_encode_fields_without_bloom(out);
-    }
-}
-
-impl<T: TxTy> Decodable2718 for Receipt<T> {
-    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::rlp_decode_inner_without_bloom(buf, T::try_from(ty)?)?)
-    }
-
-    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::rlp_decode_inner_without_bloom(buf, T::try_from(0)?)?)
-    }
-}
-
-impl<T: TxTy> Encodable for Receipt<T> {
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.network_encode(out);
-    }
-
-    fn length(&self) -> usize {
-        self.network_len()
-    }
-}
-
-impl<T: TxTy> Decodable for Receipt<T> {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self::network_decode(buf)?)
     }
 }
 
