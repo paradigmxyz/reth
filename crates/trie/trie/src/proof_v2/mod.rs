@@ -278,6 +278,7 @@ where
 
     /// Returns the path of the child of the currently under-construction branch at the given
     /// nibble.
+    #[inline]
     fn child_path_at(&self, nibble: u8) -> Nibbles {
         let mut child_path = self.branch_path;
         debug_assert!(child_path.len() < 64);
@@ -965,6 +966,10 @@ where
                         .state_mask
                         .set_bit(child_nibble);
 
+                    // Update the `lower_bound` to indicate that the child whose bit was just set is
+                    // completely processed.
+                    lower_bound = self.child_path_at(child_nibble).increment();
+
                     continue
                 }
             }
@@ -1467,7 +1472,7 @@ mod tests {
         }
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(8000))]
+            #![proptest_config(ProptestConfig::with_cases(80000))]
 
             /// Tests that ProofCalculator produces valid proofs for randomly generated
             /// HashedPostState with proof targets.
