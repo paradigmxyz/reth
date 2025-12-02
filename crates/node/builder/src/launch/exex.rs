@@ -3,7 +3,6 @@
 use alloy_eips::{eip2124::Head, BlockNumHash};
 use futures::future;
 use reth_chain_state::ForkChoiceSubscriptions;
-use reth_chainspec::EthChainSpec;
 use reth_exex::{
     ExExContext, ExExHandle, ExExManager, ExExManagerHandle, ExExNotificationSource, Wal,
     DEFAULT_EXEX_MANAGER_CAPACITY,
@@ -51,12 +50,13 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
         }
 
         info!(target: "reth::cli", "Loading ExEx Write-Ahead Log...");
+        // Use spec-aware naming for ExEx WAL location
         let exex_wal = Wal::new(
             config_container
                 .config
                 .datadir
                 .clone()
-                .resolve_datadir(config_container.config.chain.chain())
+                .resolve_datadir(config_container.config.chain.as_ref())
                 .exex_wal(),
         )?;
 
