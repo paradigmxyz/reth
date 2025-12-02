@@ -4,7 +4,7 @@ use crate::{
     HeaderTerminalDifficulties,
 };
 use alloy_primitives::{Address, BlockHash};
-use reth_db_api::table::Table;
+use reth_db_api::{table::Table, AccountChangeSets};
 
 // HEADER MASKS
 add_static_file_mask! {
@@ -47,4 +47,10 @@ add_static_file_mask! {
 add_static_file_mask! {
     #[doc = "Mask for selecting a single transaction sender from `TransactionSenders` static file segment"]
     TransactionSenderMask, Address, 0b1
+}
+
+// ACCOUNT CHANGESET MASKS
+add_static_file_mask! {
+    #[doc = "Mask for selecting a single changeset from `AccountChangesets` static file segment"]
+    AccountChangesetMask, <AccountChangeSets as Table>::Value, 0b1
 }

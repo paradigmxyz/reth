@@ -8,11 +8,13 @@ use crate::{
     StaticFileProviderFactory,
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxNumber};
+use rayon::slice::ParallelSliceMut;
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbDupCursorRW},
+    models::AccountBeforeTx,
     static_file::TransactionSenderMask,
     table::Value,
-    transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut},
+    transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut, DupCursorMutTy},
 };
 use reth_db_api::{cursor::DbCursorRW, tables};
 use reth_errors::ProviderError;
@@ -26,6 +28,13 @@ use strum::{Display, EnumIs};
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<P, T> =
     EitherReader<CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
+
+/// Type alias for dup [`EitherWriter`] constructors.
+type DupEitherWriterTy<'a, P, T> = EitherWriter<
+    'a,
+    DupCursorMutTy<<P as DBProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
@@ -65,6 +74,49 @@ impl<'a> EitherWriter<'a, (), ()> {
         }
     }
 
+    /// Creates a new [`EitherWriter`] for senders based on storage settings.
+    pub fn new_senders<P>(
+        provider: &'a P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionSenders>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if EitherWriterDestination::senders(provider).is_static_file() {
+            Ok(EitherWriter::StaticFile(
+                provider
+                    .get_static_file_writer(block_number, StaticFileSegment::TransactionSenders)?,
+            ))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_write::<tables::TransactionSenders>()?,
+            ))
+        }
+    }
+
+    /// Creates a new [`EitherWriter`] for account changesets based on storage settings and prune
+    /// modes.
+    pub fn new_account_changesets<P>(
+        provider: &'a P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::AccountChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().account_changesets_in_static_files {
+            Ok(EitherWriter::StaticFile(
+                provider
+                    .get_static_file_writer(block_number, StaticFileSegment::AccountChangeSets)?,
+            ))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?,
+            ))
+        }
+    }
+
     /// Returns the destination for writing receipts.
     ///
     /// The rules are as follows:
@@ -89,24 +141,16 @@ impl<'a> EitherWriter<'a, (), ()> {
         }
     }
 
-    /// Creates a new [`EitherWriter`] for senders based on storage settings.
-    pub fn new_senders<P>(
-        provider: &'a P,
-        block_number: BlockNumber,
-    ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionSenders>>
-    where
-        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
-        P::Tx: DbTxMut,
-    {
-        if EitherWriterDestination::senders(provider).is_static_file() {
-            Ok(EitherWriter::StaticFile(
-                provider
-                    .get_static_file_writer(block_number, StaticFileSegment::TransactionSenders)?,
-            ))
+    /// Returns the destination for writing account changesets.
+    ///
+    /// This determines the destination based solely on storage settings.
+    pub fn account_changesets_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        if provider.cached_storage_settings().account_changesets_in_static_files {
+            EitherWriterDestination::StaticFile
         } else {
-            Ok(EitherWriter::Database(
-                provider.tx_ref().cursor_write::<tables::TransactionSenders>()?,
-            ))
+            EitherWriterDestination::Database
         }
     }
 }
@@ -205,6 +249,35 @@ where
                     .unwrap_or_default();
 
                 writer.prune_transaction_senders(to_delete, block)?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbDupCursorRW<tables::AccountChangeSets>,
+{
+    /// Append account changeset for a block.
+    ///
+    /// NOTE: This _sorts_ the changesets by address before appending
+    pub fn append_account_changeset(
+        &mut self,
+        block_number: BlockNumber,
+        mut changeset: Vec<AccountBeforeTx>,
+    ) -> ProviderResult<()> {
+        // First sort the changesets
+        changeset.par_sort_by_key(|a| a.address);
+        match self {
+            Self::Database(cursor) => {
+                for change in changeset {
+                    cursor.append_dup(block_number, change)?;
+                }
+            }
+            Self::StaticFile(writer) => {
+                writer.append_account_changeset(changeset, block_number)?;
             }
         }
 
