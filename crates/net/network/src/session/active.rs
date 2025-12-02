@@ -1073,7 +1073,10 @@ impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
 
 impl<N: NetworkPrimitives> From<EthSnapMessage<N>> for OutgoingMessage<N> {
     fn from(value: EthSnapMessage<N>) -> Self {
-        Self::SnapProtocolMessage(value)
+        match value {
+            EthSnapMessage::Eth(msg) => Self::Eth(msg),
+            EthSnapMessage::Snap(msg) => Self::SnapProtocolMessage(EthSnapMessage::Snap(msg)),
+        }
     }
 }
 

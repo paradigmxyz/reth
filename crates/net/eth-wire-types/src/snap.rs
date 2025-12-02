@@ -229,10 +229,10 @@ impl SnapProtocolMessage {
     pub const fn is_response(&self) -> bool {
         matches!(
             self,
-            Self::AccountRange(_)
-                | Self::StorageRanges(_)
-                | Self::ByteCodes(_)
-                | Self::TrieNodes(_)
+            Self::AccountRange(_) |
+                Self::StorageRanges(_) |
+                Self::ByteCodes(_) |
+                Self::TrieNodes(_)
         )
     }
 
