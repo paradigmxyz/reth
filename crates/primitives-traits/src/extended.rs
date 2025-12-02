@@ -404,21 +404,25 @@ where
         Buf: alloy_rlp::bytes::BufMut + AsMut<[u8]>,
     {
         buf.put_u8(self.ty());
-        match self {
+        let inner = match self {
             Self::BuiltIn(tx) => tx.to_compact(buf),
             Self::Other(tx) => tx.to_compact(buf),
-        }
+        };
+        1 + inner
     }
 
     fn from_compact(mut buf: &[u8], len: usize) -> (Self, &[u8]) {
         let type_byte = buf.get_u8();
 
+        // Adjust len after consuming the type byte (if len included the header).
+        let inner_len = if len > buf.len() { len.saturating_sub(1) } else { len };
+
         if <B as IsTyped2718>::is_type(type_byte) {
-            let (tx, remaining) = B::from_compact(buf, len);
+            let (tx, remaining) = B::from_compact(buf, inner_len);
             return (Self::BuiltIn(tx), remaining);
         }
 
-        let (tx, remaining) = T::from_compact(buf, len);
+        let (tx, remaining) = T::from_compact(buf, inner_len);
         (Self::Other(tx), remaining)
     }
 }
