@@ -466,41 +466,52 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         let request_id = self.next_id();
 
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let outgoing = match &request {
-            PeerRequest::SnapGetAccountRange { request, .. } => {
-                let mut req = request.clone();
-                req.request_id = request_id;
-                OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                    SnapProtocolMessage::GetAccountRange(req),
-                ))
+        let (outgoing, stored_request) = match request {
+            PeerRequest::SnapGetAccountRange { mut request, response } => {
+                request.request_id = request_id;
+                (
+                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
+                        SnapProtocolMessage::GetAccountRange(request.clone()),
+                    )),
+                    PeerRequest::SnapGetAccountRange { request, response },
+                )
             }
-            PeerRequest::SnapGetStorageRanges { request, .. } => {
-                let mut req = request.clone();
-                req.request_id = request_id;
-                OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                    SnapProtocolMessage::GetStorageRanges(req),
-                ))
+            PeerRequest::SnapGetStorageRanges { mut request, response } => {
+                request.request_id = request_id;
+                (
+                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
+                        SnapProtocolMessage::GetStorageRanges(request.clone()),
+                    )),
+                    PeerRequest::SnapGetStorageRanges { request, response },
+                )
             }
-            PeerRequest::SnapGetByteCodes { request, .. } => {
-                let mut req = request.clone();
-                req.request_id = request_id;
-                OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                    SnapProtocolMessage::GetByteCodes(req),
-                ))
+            PeerRequest::SnapGetByteCodes { mut request, response } => {
+                request.request_id = request_id;
+                (
+                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
+                        SnapProtocolMessage::GetByteCodes(request.clone()),
+                    )),
+                    PeerRequest::SnapGetByteCodes { request, response },
+                )
             }
-            PeerRequest::SnapGetTrieNodes { request, .. } => {
-                let mut req = request.clone();
-                req.request_id = request_id;
-                OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                    SnapProtocolMessage::GetTrieNodes(req),
-                ))
+            PeerRequest::SnapGetTrieNodes { mut request, response } => {
+                request.request_id = request_id;
+                (
+                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
+                        SnapProtocolMessage::GetTrieNodes(request.clone()),
+                    )),
+                    PeerRequest::SnapGetTrieNodes { request, response },
+                )
             }
-            _ => request.create_request_message(request_id).into(),
+            other => {
+                let msg = other.create_request_message(request_id);
+                (msg.into(), other)
+            }
         };
 
         self.queued_outgoing.push_back(outgoing);
         let req = InflightRequest {
-            request: RequestState::Waiting(request),
+            request: RequestState::Waiting(stored_request),
             timestamp: Instant::now(),
             deadline,
         };
