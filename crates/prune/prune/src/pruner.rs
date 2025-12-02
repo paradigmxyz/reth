@@ -202,7 +202,6 @@ where
                 .transpose()?
                 .flatten()
             {
-
                 // Check if segment has a required stage that must be finished first
                 if let Some(required_stage) = segment.required_stage() &&
                     !is_stage_finished(provider, required_stage)?
