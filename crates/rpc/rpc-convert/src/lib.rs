@@ -19,7 +19,7 @@ pub use block::TryFromBlockResponse;
 pub use receipt::TryFromReceiptResponse;
 pub use rpc::*;
 pub use transaction::{
-    FromConsensusError, FromTxReqError, RpcConvert, RpcConverter, TransactionConversionError,
+    FromConsensusError, RpcConvert, RpcConverter, TransactionConversionError,
     TryFromTransactionResponse, TryIntoSimTx, TxInfoMapper,
 };
 

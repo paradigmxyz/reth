@@ -485,21 +485,13 @@ where
 /// Conversion into transaction RPC response failed.
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionConversionError {
-    /// Conversion from `TxReq` to `SimTx` failed.
-    #[error(transparent)]
-    FromTxReq(#[from] FromTxReqError),
+    /// Required fields are missing from the transaction request.
+    #[error("required fields missing from transaction request")]
+    MissingRequiredFields,
 
     /// Conversion from `Consensus` failed.
     #[error(transparent)]
     FromConsensus(#[from] FromConsensusError),
-}
-
-/// Error when converting from RPC transaction request to simulated transaction.
-#[derive(Debug, thiserror::Error)]
-pub enum FromTxReqError {
-    /// Required fields are missing from the transaction request.
-    #[error("required fields missing from transaction request")]
-    MissingRequiredFields,
 }
 
 /// Error when converting from consensus transaction type.
@@ -855,7 +847,7 @@ where
         Ok(self
             .sim_tx_converter
             .convert_sim_tx(request)
-            .map_err(|_| TransactionConversionError::from(FromTxReqError::MissingRequiredFields))?)
+            .map_err(|_| TransactionConversionError::MissingRequiredFields)?)
     }
 
     fn tx_env(
