@@ -20,7 +20,10 @@ use reth_evm::{
     ConfigureEvm, Database,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_node_metrics::transaction_trace_xlayer::{get_global_tracer, TransactionProcessId};
+use reth_node_metrics::{
+    block_timing::{store_block_timing, BlockTimingMetrics, BuildTiming, DeliverTxsTiming},
+    transaction_trace_xlayer::{get_global_tracer, TransactionProcessId},
+};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::{transaction::OpTransaction, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
 use reth_optimism_txpool::{
@@ -41,10 +44,8 @@ use reth_revm::{
 use reth_storage_api::{errors::ProviderError, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::{Block, BlockEnv};
-use std::{marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, sync::Arc, time::Instant};
 use tracing::{debug, trace, warn};
-use reth_node_metrics::block_timing::{BlockTimingMetrics, BuildTiming, DeliverTxsTiming, store_block_timing};
-use std::time::Instant;
 
 /// Optimism's payload builder
 #[derive(Debug)]
@@ -413,7 +414,8 @@ impl<Txs> OpBuilder<'_, Txs> {
         timing_metrics.build.finish = finish_start.elapsed();
         timing_metrics.build.total = build_start.elapsed();
         // Calculate DeliverTxs total from BuildTiming to avoid duplication
-        timing_metrics.deliver_txs.total = timing_metrics.build.execute_sequencer_transactions + timing_metrics.build.execute_mempool_transactions;
+        timing_metrics.deliver_txs.total = timing_metrics.build.execute_sequencer_transactions +
+            timing_metrics.build.execute_mempool_transactions;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");

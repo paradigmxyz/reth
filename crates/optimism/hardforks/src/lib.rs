@@ -336,18 +336,13 @@ mod tests {
         let xlayer_mainnet = &*XLAYER_MAINNET_HARDFORKS;
         let op_mainnet = &*OP_MAINNET_HARDFORKS;
 
-        let xlayer_jovian = xlayer_mainnet
-            .get(OpHardfork::Jovian)
-            .expect("XLayer mainnet should have Jovian fork");
-        let op_jovian = op_mainnet
-            .get(OpHardfork::Jovian)
-            .expect("OP mainnet should have Jovian fork");
+        let xlayer_jovian =
+            xlayer_mainnet.get(OpHardfork::Jovian).expect("XLayer mainnet should have Jovian fork");
+        let op_jovian =
+            op_mainnet.get(OpHardfork::Jovian).expect("OP mainnet should have Jovian fork");
 
         match (xlayer_jovian, op_jovian) {
-            (
-                ForkCondition::Timestamp(xlayer_ts),
-                ForkCondition::Timestamp(op_ts),
-            ) => {
+            (ForkCondition::Timestamp(xlayer_ts), ForkCondition::Timestamp(op_ts)) => {
                 assert_eq!(
                     xlayer_ts, op_ts,
                     "XLayer mainnet Jovian timestamp should match OP mainnet"
@@ -369,9 +364,8 @@ mod tests {
     fn test_xlayer_testnet_jovian_timestamp_condition() {
         let xlayer_testnet = &*XLAYER_TESTNET_HARDFORKS;
 
-        let jovian_fork = xlayer_testnet
-            .get(OpHardfork::Jovian)
-            .expect("XLayer testnet should have Jovian fork");
+        let jovian_fork =
+            xlayer_testnet.get(OpHardfork::Jovian).expect("XLayer testnet should have Jovian fork");
 
         match jovian_fork {
             ForkCondition::Timestamp(ts) => {

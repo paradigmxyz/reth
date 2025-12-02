@@ -241,8 +241,10 @@ fn update_insert_timing_metrics(
     validate_and_execute: std::time::Duration,
     insert_to_tree: std::time::Duration,
 ) {
-    use reth_node_metrics::block_timing::{get_block_timing, store_block_timing, BlockTimingMetrics};
-    
+    use reth_node_metrics::block_timing::{
+        get_block_timing, store_block_timing, BlockTimingMetrics,
+    };
+
     let mut timing_metrics = if let Some(existing) = get_block_timing(&block_hash) {
         // Block was built locally, update insert timing
         existing
@@ -250,12 +252,13 @@ fn update_insert_timing_metrics(
         // Block was received from network, create timing metrics with insert timing only
         BlockTimingMetrics::default()
     };
-    
+
     timing_metrics.insert.validate_and_execute = validate_and_execute;
     timing_metrics.insert.insert_to_tree = insert_to_tree;
     // Total should be the sum of validate_and_execute + insert_to_tree
-    timing_metrics.insert.total = timing_metrics.insert.validate_and_execute + timing_metrics.insert.insert_to_tree;
-    
+    timing_metrics.insert.total =
+        timing_metrics.insert.validate_and_execute + timing_metrics.insert.insert_to_tree;
+
     store_block_timing(block_hash, timing_metrics);
 }
 
@@ -1423,13 +1426,18 @@ where
                         let insert_tree_elapsed = insert_tree_start.elapsed();
                         self.metrics.engine.inserted_already_executed_blocks.increment(1);
                         let elapsed = now.elapsed();
-                        
+
                         // X Layer: Update timing metrics for InsertExecutedBlock path
-                        // Note: validate_exec time is 0 because block was already executed during build
+                        // Note: validate_exec time is 0 because block was already executed during
+                        // build
                         use std::time::Duration;
                         let block_hash = block.recovered_block().hash();
-                        update_insert_timing_metrics(block_hash, Duration::from_nanos(0), insert_tree_elapsed);
-                        
+                        update_insert_timing_metrics(
+                            block_hash,
+                            Duration::from_nanos(0),
+                            insert_tree_elapsed,
+                        );
+
                         self.emit_event(EngineApiEvent::BeaconConsensus(
                             ConsensusEngineEvent::CanonicalBlockAdded(block, elapsed),
                         ));
@@ -2491,17 +2499,21 @@ where
                 // We now assume that we already have this block in the tree. However, we need to
                 // run the conversion to ensure that the block hash is valid.
                 convert_to_block(self, input)?;
-                
-                // X Layer: Even if block is already seen, update timing metrics if it was built locally
-                // Block was built locally but already exists in tree
+
+                // X Layer: Even if block is already seen, update timing metrics if it was built
+                // locally Block was built locally but already exists in tree
                 // Set insert timing to 0 for now, will be updated in event handler if elapsed > 0
                 use reth_node_metrics::block_timing::get_block_timing;
                 use std::time::Duration;
                 let block_hash = block_num_hash.hash;
                 if get_block_timing(&block_hash).is_some() {
-                    update_insert_timing_metrics(block_hash, Duration::from_nanos(0), Duration::from_nanos(0));
+                    update_insert_timing_metrics(
+                        block_hash,
+                        Duration::from_nanos(0),
+                        Duration::from_nanos(0),
+                    );
                 }
-                
+
                 return Ok(InsertPayloadOk::AlreadySeen(BlockStatus::Valid))
             }
             _ => {}
@@ -2567,7 +2579,7 @@ where
 
         // emit insert event
         let elapsed = start.elapsed();
-        
+
         // X Layer: Update timing metrics with insert timing
         let block_hash = executed.recovered_block().hash();
         update_insert_timing_metrics(block_hash, validate_exec_elapsed, insert_tree_elapsed);

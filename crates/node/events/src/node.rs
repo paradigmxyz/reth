@@ -253,15 +253,15 @@ impl NodeState {
                 if full.is_nan() {
                     full = 0.0;
                 }
-                
+
                 // X Layer: Get timing metrics for this block
                 use reth_node_metrics::block_timing::{get_block_timing, remove_block_timing};
                 let block_hash = block.hash();
-                
+
                 let timing_str = get_block_timing(&block_hash)
                     .map(|metrics| metrics.format_for_log())
                     .unwrap_or_default();
-                
+
                 info!(
                     number=block.number(),
                     hash=?block.hash(),
@@ -278,7 +278,7 @@ impl NodeState {
                     timing=%timing_str,
                     "Block added to canonical chain"
                 );
-                
+
                 // Clean up timing metrics after logging
                 remove_block_timing(&block.hash());
             }

@@ -168,9 +168,12 @@ mod tests {
         assert!(spec.fork(OpHardfork::Granite).active_at_timestamp(ts));
         assert!(spec.fork(OpHardfork::Holocene).active_at_timestamp(ts));
         assert!(spec.fork(OpHardfork::Isthmus).active_at_timestamp(ts));
-        // Jovian is configured but not active at genesis timestamp, it activates at a future timestamp
-        // Verify Jovian is configured (not ForkCondition::Never)
-        assert!(!matches!(spec.fork(OpHardfork::Jovian), reth_ethereum_forks::ForkCondition::Never));
+        // Jovian is configured but not active at genesis timestamp, it activates at a future
+        // timestamp Verify Jovian is configured (not ForkCondition::Never)
+        assert!(!matches!(
+            spec.fork(OpHardfork::Jovian),
+            reth_ethereum_forks::ForkCondition::Never
+        ));
         // Verify it's not active at genesis timestamp
         assert!(!spec.fork(OpHardfork::Jovian).active_at_timestamp(ts));
     }
@@ -183,22 +186,25 @@ mod tests {
         let hardforks = &*XLAYER_TESTNET_HARDFORKS;
 
         // Verify Jovian is configured with XLAYER_TESTNET_JOVIAN_TIMESTAMP
-        let jovian_fork = hardforks
-            .get(OpHardfork::Jovian)
-            .expect("Jovian fork should be configured");
+        let jovian_fork =
+            hardforks.get(OpHardfork::Jovian).expect("Jovian fork should be configured");
         assert!(matches!(
             jovian_fork,
             reth_ethereum_forks::ForkCondition::Timestamp(ts) if ts == XLAYER_TESTNET_JOVIAN_TIMESTAMP
         ));
 
         // Test activation before Jovian timestamp
-        assert!(!spec.fork(OpHardfork::Jovian).active_at_timestamp(XLAYER_TESTNET_JOVIAN_TIMESTAMP - 1));
+        assert!(!spec
+            .fork(OpHardfork::Jovian)
+            .active_at_timestamp(XLAYER_TESTNET_JOVIAN_TIMESTAMP - 1));
 
         // Test activation at Jovian timestamp
         assert!(spec.fork(OpHardfork::Jovian).active_at_timestamp(XLAYER_TESTNET_JOVIAN_TIMESTAMP));
 
         // Test activation after Jovian timestamp
-        assert!(spec.fork(OpHardfork::Jovian).active_at_timestamp(XLAYER_TESTNET_JOVIAN_TIMESTAMP + 1));
+        assert!(spec
+            .fork(OpHardfork::Jovian)
+            .active_at_timestamp(XLAYER_TESTNET_JOVIAN_TIMESTAMP + 1));
 
         // Verify timestamp matches expected value (2025-11-28 11:00:00 UTC)
         assert_eq!(XLAYER_TESTNET_JOVIAN_TIMESTAMP, 1764327600);

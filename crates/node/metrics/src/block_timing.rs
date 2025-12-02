@@ -34,13 +34,14 @@ pub struct InsertTiming {
 }
 
 /// Timing metrics for transaction execution
-/// 
+///
 /// Note: Individual transaction execution times (sequencer_txs, mempool_txs) are stored
 /// in `BuildTiming` to avoid duplication. This struct only stores the total time.
 #[derive(Debug, Clone, Default)]
 pub struct DeliverTxsTiming {
     /// Total transaction execution time
-    /// Note: Individual times are stored in BuildTiming (execute_sequencer_transactions, execute_mempool_transactions)
+    /// Note: Individual times are stored in BuildTiming (execute_sequencer_transactions,
+    /// execute_mempool_transactions)
     pub total: Duration,
 }
 
@@ -72,11 +73,12 @@ impl BlockTimingMetrics {
 
         // Check if block was built locally (has build timing) or received from network
         let is_locally_built = self.build.total.as_nanos() > 0;
-        
+
         if is_locally_built {
             // Block was built locally, show full timing including Build and DeliverTxs
             // Note: DeliverTxs only shows total to avoid duplication with Build's seqTxs/mempoolTxs
-            let deliver_txs_total_time = self.build.execute_sequencer_transactions + self.build.execute_mempool_transactions;
+            let deliver_txs_total_time =
+                self.build.execute_sequencer_transactions + self.build.execute_mempool_transactions;
 
             format!(
                 "Produce[Build[applyPreExec<{}>, seqTxs<{}>, mempoolTxs<{}>, finish<{}>, total<{}>], Insert[validateExec<{}>, insertTree<{}>, total<{}>]], DeliverTxs[total<{}>]",
@@ -103,7 +105,7 @@ impl BlockTimingMetrics {
 }
 
 /// Global storage for block timing metrics
-/// 
+///
 /// Uses IndexMap to maintain insertion order, allowing us to remove the oldest entries
 /// when the cache exceeds the limit.
 static BLOCK_TIMING_STORE: std::sync::OnceLock<Arc<Mutex<IndexMap<B256, BlockTimingMetrics>>>> =
@@ -111,28 +113,26 @@ static BLOCK_TIMING_STORE: std::sync::OnceLock<Arc<Mutex<IndexMap<B256, BlockTim
 
 /// Initialize the global block timing store
 fn get_timing_store() -> Arc<Mutex<IndexMap<B256, BlockTimingMetrics>>> {
-    BLOCK_TIMING_STORE
-        .get_or_init(|| Arc::new(Mutex::new(IndexMap::new())))
-        .clone()
+    BLOCK_TIMING_STORE.get_or_init(|| Arc::new(Mutex::new(IndexMap::new()))).clone()
 }
 
 /// Store timing metrics for a block
-/// 
+///
 /// If the block already exists, it will be updated and moved to the end (most recent).
 /// When the cache exceeds 1000 entries, the oldest entries are removed.
 pub fn store_block_timing(block_hash: B256, metrics: BlockTimingMetrics) {
     let store = get_timing_store();
     let mut map = store.lock().unwrap();
-    
+
     // If the block already exists, remove it first so it can be re-inserted at the end
     // This ensures that updated blocks are treated as the most recent
     if map.contains_key(&block_hash) {
         map.shift_remove(&block_hash);
     }
-    
+
     // Insert at the end (most recent position)
     map.insert(block_hash, metrics);
-    
+
     // Clean up old entries to prevent memory leak (keep last 1000 blocks)
     // IndexMap maintains insertion order, so we can safely remove from the front
     const MAX_ENTRIES: usize = 1000;
@@ -155,4 +155,3 @@ pub fn remove_block_timing(block_hash: &B256) {
     let mut map = store.lock().unwrap();
     map.remove(block_hash);
 }
-
