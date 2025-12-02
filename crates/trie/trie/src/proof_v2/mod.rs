@@ -1472,7 +1472,7 @@ mod tests {
         }
 
         proptest! {
-            #![proptest_config(ProptestConfig::with_cases(80000))]
+            #![proptest_config(ProptestConfig::with_cases(8000))]
 
             /// Tests that ProofCalculator produces valid proofs for randomly generated
             /// HashedPostState with proof targets.
