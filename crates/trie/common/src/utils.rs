@@ -11,35 +11,43 @@ where
     K: Clone + Ord,
     V: Clone,
 {
-    let mut result = Vec::with_capacity(base.len() + overlay.len());
-    let mut base_iter = base.iter().peekable();
-    let mut overlay_iter = overlay.iter().peekable();
+    // Fast paths for empty inputs
+    if base.is_empty() {
+        return overlay.to_vec();
+    }
+    if overlay.is_empty() {
+        return base.to_vec();
+    }
 
-    loop {
-        match (base_iter.peek(), overlay_iter.peek()) {
-            (Some(base_item), Some(overlay_item)) => {
-                match base_item.0.cmp(&overlay_item.0) {
-                    Ordering::Less => {
-                        result.push(base_iter.next().unwrap().clone());
-                    }
-                    Ordering::Greater => {
-                        result.push(overlay_iter.next().unwrap().clone());
-                    }
-                    Ordering::Equal => {
-                        // Overlay takes precedence, skip base
-                        base_iter.next();
-                        result.push(overlay_iter.next().unwrap().clone());
-                    }
-                }
+    let mut result = Vec::with_capacity(base.len() + overlay.len());
+    let mut base_idx = 0;
+    let mut overlay_idx = 0;
+
+    // Merge while both have elements
+    while base_idx < base.len() && overlay_idx < overlay.len() {
+        match base[base_idx].0.cmp(&overlay[overlay_idx].0) {
+            Ordering::Less => {
+                result.push(base[base_idx].clone());
+                base_idx += 1;
             }
-            (Some(_), None) => {
-                result.push(base_iter.next().unwrap().clone());
+            Ordering::Greater => {
+                result.push(overlay[overlay_idx].clone());
+                overlay_idx += 1;
             }
-            (None, Some(_)) => {
-                result.push(overlay_iter.next().unwrap().clone());
+            Ordering::Equal => {
+                // Overlay takes precedence, skip base
+                result.push(overlay[overlay_idx].clone());
+                base_idx += 1;
+                overlay_idx += 1;
             }
-            (None, None) => break,
         }
+    }
+
+    // Batch extend remaining elements (more efficient than one-by-one)
+    if base_idx < base.len() {
+        result.extend(base[base_idx..].iter().cloned());
+    } else if overlay_idx < overlay.len() {
+        result.extend(overlay[overlay_idx..].iter().cloned());
     }
 
     result

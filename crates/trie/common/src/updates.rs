@@ -570,8 +570,22 @@ impl TrieUpdatesSorted {
     /// Sorted vectors (account nodes, storage nodes) use O(n + m) two-way merge.
     /// Storage trie maps are combined via O(1) amortized `HashMap` operations.
     pub fn prepend(&mut self, base: Self) {
+        // Fast path: base is empty
+        if base.account_nodes.is_empty() && base.storage_tries.is_empty() {
+            return;
+        }
+
+        // Fast path: self is empty, just take base
+        if self.account_nodes.is_empty() && self.storage_tries.is_empty() {
+            *self = base;
+            return;
+        }
+
         // Merge account nodes - self takes precedence
-        self.account_nodes = merge_sorted_vecs(&base.account_nodes, &self.account_nodes);
+        // merge_sorted_vecs handles empty cases internally
+        if !base.account_nodes.is_empty() {
+            self.account_nodes = merge_sorted_vecs(&base.account_nodes, &self.account_nodes);
+        }
 
         // Merge storage tries
         for (hashed_address, base_storage) in base.storage_tries {
@@ -691,16 +705,27 @@ impl StorageTrieUpdatesSorted {
     /// If `self` is marked as deleted, base updates are ignored since deletion clears all previous
     /// state.
     pub fn prepend(&mut self, base: Self) {
+        // Fast path: self is deleted, ignore base entirely
         if self.is_deleted {
-            // Self is deleted, ignore base entirely - deletion clears all previous state
             return;
         }
 
+        // Handle base deletion flag
         if base.is_deleted {
             // Base was deleted, but self has new updates on top
             // The deletion still applies, but self's nodes are the current state
             self.is_deleted = true;
-            // Keep self.storage_nodes as-is since they're newer than the deletion
+            return;
+        }
+
+        // Fast path: base has no storage nodes
+        if base.storage_nodes.is_empty() {
+            return;
+        }
+
+        // Fast path: self has no storage nodes, take base
+        if self.storage_nodes.is_empty() {
+            self.storage_nodes = base.storage_nodes;
             return;
         }
 

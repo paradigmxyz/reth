@@ -180,21 +180,42 @@ impl TrieInputSorted {
     ///
     /// Sorted vectors (accounts, storage slots, trie nodes) use O(n + m) two-way merge.
     /// Storage/trie maps are combined via O(1) amortized `HashMap` operations.
-    pub fn prepend_self(&mut self, other: Self) {
+    pub fn prepend_self(&mut self, base: Self) {
         // Merge nodes - self takes precedence
-        let mut nodes = Arc::unwrap_or_clone(core::mem::take(&mut self.nodes));
-        nodes.prepend(Arc::unwrap_or_clone(other.nodes));
-        self.nodes = Arc::new(nodes);
+        if self.nodes.is_empty() && base.nodes.is_empty() {
+            // Both empty, nothing to do
+        } else if self.nodes.is_empty() {
+            // Self is empty, just take base
+            self.nodes = base.nodes;
+        } else if !base.nodes.is_empty() {
+            // Both have content, merge
+            let mut nodes = Arc::unwrap_or_clone(core::mem::take(&mut self.nodes));
+            nodes.prepend(Arc::unwrap_or_clone(base.nodes));
+            self.nodes = Arc::new(nodes);
+        }
+        // else: base is empty, keep self as-is
 
         // Merge state - self takes precedence
-        let mut state = Arc::unwrap_or_clone(core::mem::take(&mut self.state));
-        state.prepend(Arc::unwrap_or_clone(other.state));
-        self.state = Arc::new(state);
+        if self.state.is_empty() && base.state.is_empty() {
+            // Both empty, nothing to do
+        } else if self.state.is_empty() {
+            // Self is empty, just take base
+            self.state = base.state;
+        } else if !base.state.is_empty() {
+            // Both have content, merge
+            let mut state = Arc::unwrap_or_clone(core::mem::take(&mut self.state));
+            state.prepend(Arc::unwrap_or_clone(base.state));
+            self.state = Arc::new(state);
+        }
+        // else: base is empty, keep self as-is
 
-        // Merge prefix sets - other's prefix sets go first, then extend with self's
-        let mut merged_prefix_sets = other.prefix_sets;
-        merged_prefix_sets.extend(core::mem::take(&mut self.prefix_sets));
-        self.prefix_sets = merged_prefix_sets;
+        // Merge prefix sets - base's prefix sets go first, then extend with self's
+        if !base.prefix_sets.is_empty() {
+            let mut merged_prefix_sets = base.prefix_sets;
+            merged_prefix_sets.extend(core::mem::take(&mut self.prefix_sets));
+            self.prefix_sets = merged_prefix_sets;
+        }
+        // else: base prefix sets empty, keep self as-is
     }
 }
 
