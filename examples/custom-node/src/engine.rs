@@ -1,6 +1,7 @@
 use crate::{
     chainspec::CustomChainSpec,
     evm::CustomEvmConfig,
+    flashblock::CustomFlashblockPayload,
     primitives::{CustomHeader, CustomNodePrimitives, CustomTransaction},
     CustomNode,
 };
@@ -67,14 +68,15 @@ impl ExecutionPayload for CustomExecutionData {
     }
 }
 
-impl TryFrom<&reth_optimism_flashblocks::FlashBlockCompleteSequence> for CustomExecutionData {
+impl TryFrom<&reth_optimism_flashblocks::FlashBlockCompleteSequence<CustomFlashblockPayload>>
+    for CustomExecutionData
+{
     type Error = &'static str;
 
     fn try_from(
-        sequence: &reth_optimism_flashblocks::FlashBlockCompleteSequence,
+        _sequence: &reth_optimism_flashblocks::FlashBlockCompleteSequence<CustomFlashblockPayload>,
     ) -> Result<Self, Self::Error> {
-        let inner = OpExecutionData::try_from(sequence)?;
-        Ok(Self { inner, extension: sequence.last().diff.gas_used })
+        todo!("convert flashblock sequence to CustomExecutionData")
     }
 }
 

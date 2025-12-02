@@ -1,9 +1,7 @@
 use crate::{traits::FlashblockPayloadBase, PendingFlashBlock};
 use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag};
 use alloy_primitives::B256;
-use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::{ComputedTrieData, ExecutedBlock};
-use reth_chain_state::ExecutedBlock;
 use reth_errors::RethError;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
