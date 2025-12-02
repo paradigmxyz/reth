@@ -154,20 +154,6 @@ impl CompressedBeaconState {
 
         Ok(Self { data: entry.data.clone() })
     }
-
-    /// Decode the compressed beacon state into ssz bytes
-    pub fn decode_to_ssz(&self) -> Result<Vec<u8>, E2sError> {
-        self.decompress()
-    }
-}
-
-impl DecodeCompressedSsz for CompressedBeaconState {
-    fn decode<T: Decode>(&self) -> Result<T, E2sError> {
-        let ssz_bytes = self.decompress()?;
-        T::from_ssz_bytes(&ssz_bytes).map_err(|e| {
-            E2sError::Ssz(format!("Failed to decode SSZ data into target type: {e:?}"))
-        })
-    }
 }
 
 #[cfg(test)]
@@ -217,7 +203,7 @@ mod tests {
         assert_eq!(entry.entry_type, COMPRESSED_BEACON_STATE);
 
         let recovered = CompressedBeaconState::from_entry(&entry).unwrap();
-        let recovered_ssz = recovered.decode_to_ssz().unwrap();
+        let recovered_ssz = recovered.decompress().unwrap();
 
         assert_eq!(recovered_ssz, ssz_data);
     }
