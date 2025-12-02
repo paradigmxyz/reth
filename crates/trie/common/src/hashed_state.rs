@@ -3,7 +3,7 @@ use core::ops::Not;
 use crate::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSetMut, TriePrefixSetsMut},
-    utils::{extend_sorted_vec, merge_sorted_vecs},
+    utils::extend_sorted_vec,
     KeyHasher, MultiProofTargets, Nibbles,
 };
 use alloc::{borrow::Cow, vec::Vec};
@@ -563,43 +563,6 @@ impl HashedPostStateSorted {
         }
     }
 
-    /// Prepends another sorted state to this one.
-    ///
-    /// `base` is the older state that gets prepended, `self` is the overlay (newer) that takes
-    /// precedence for duplicate keys.
-    ///
-    /// Sorted vectors (accounts, storage slots) use O(n + m) two-way merge.
-    /// Storage maps are combined via O(1) amortized `HashMap` operations.
-    pub fn prepend(&mut self, base: Self) {
-        // Fast path: base is empty
-        if base.accounts.is_empty() && base.storages.is_empty() {
-            return;
-        }
-
-        // Fast path: self is empty, just take base
-        if self.accounts.is_empty() && self.storages.is_empty() {
-            *self = base;
-            return;
-        }
-
-        // Merge accounts - self takes precedence
-        if !base.accounts.is_empty() {
-            self.accounts = merge_sorted_vecs(&base.accounts, &self.accounts);
-        }
-
-        // Merge storages
-        for (hashed_address, base_storage) in base.storages {
-            match self.storages.entry(hashed_address) {
-                hash_map::Entry::Occupied(mut entry) => {
-                    entry.get_mut().prepend(base_storage);
-                }
-                hash_map::Entry::Vacant(entry) => {
-                    entry.insert(base_storage);
-                }
-            }
-        }
-    }
-
     /// Clears all accounts and storage data.
     pub fn clear(&mut self) {
         self.accounts.clear();
@@ -658,41 +621,6 @@ impl HashedStorageSorted {
 
         // Extend the sorted non-zero valued slots
         extend_sorted_vec(&mut self.storage_slots, &other.storage_slots);
-    }
-
-    /// Prepends another sorted storage to this one.
-    ///
-    /// `base` is the older state that gets prepended, `self` is the overlay (newer) that takes
-    /// precedence for duplicate keys. Uses O(n + m) two-way merge on storage slots.
-    ///
-    /// If `self` is marked as wiped, base storage is ignored since wipe clears all previous state.
-    pub fn prepend(&mut self, base: Self) {
-        // Fast path: self is wiped, ignore base entirely
-        if self.wiped {
-            return;
-        }
-
-        // Handle base wipe flag
-        if base.wiped {
-            // Base was wiped, but self has new updates on top
-            // The wipe still applies, but self's slots are the current state
-            self.wiped = true;
-            return;
-        }
-
-        // Fast path: base has no storage slots
-        if base.storage_slots.is_empty() {
-            return;
-        }
-
-        // Fast path: self has no storage slots, take base
-        if self.storage_slots.is_empty() {
-            self.storage_slots = base.storage_slots;
-            return;
-        }
-
-        // Merge base and self, with self taking precedence
-        self.storage_slots = merge_sorted_vecs(&base.storage_slots, &self.storage_slots);
     }
 }
 

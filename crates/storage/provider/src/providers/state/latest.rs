@@ -64,8 +64,8 @@ impl<Provider: DBProvider + Sync> StateRootProvider for LatestStateProviderRef<'
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_from_nodes(&self, input: TrieInputSorted) -> ProviderResult<B256> {
-        StateRoot::overlay_root_from_nodes(self.tx(), input)
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+        StateRoot::overlay_root_from_nodes(self.tx(), TrieInputSorted::from_unsorted(input))
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -79,10 +79,13 @@ impl<Provider: DBProvider + Sync> StateRootProvider for LatestStateProviderRef<'
 
     fn state_root_from_nodes_with_updates(
         &self,
-        input: TrieInputSorted,
+        input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        StateRoot::overlay_root_from_nodes_with_updates(self.tx(), input)
-            .map_err(|err| ProviderError::Database(err.into()))
+        StateRoot::overlay_root_from_nodes_with_updates(
+            self.tx(),
+            TrieInputSorted::from_unsorted(input),
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 

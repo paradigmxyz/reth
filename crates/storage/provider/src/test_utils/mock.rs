@@ -40,7 +40,7 @@ use reth_storage_errors::provider::{ConsistentViewError, ProviderError, Provider
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-    StorageProof, TrieInput, TrieInputSorted,
+    StorageProof, TrieInput,
 };
 use std::{
     collections::BTreeMap,
@@ -767,7 +767,7 @@ where
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 
-    fn state_root_from_nodes(&self, _input: TrieInputSorted) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         Ok(self.state_roots.lock().pop().unwrap_or_default())
     }
 
@@ -781,7 +781,7 @@ where
 
     fn state_root_from_nodes_with_updates(
         &self,
-        _input: TrieInputSorted,
+        _input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let state_root = self.state_roots.lock().pop().unwrap_or_default();
         Ok((state_root, Default::default()))

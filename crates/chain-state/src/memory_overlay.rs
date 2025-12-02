@@ -9,7 +9,7 @@ use reth_storage_api::{
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, TrieInput, TrieInputSorted,
+    MultiProofTargets, StorageMultiProof, TrieInput,
 };
 use revm_database::BundleState;
 use std::sync::OnceLock;
@@ -126,13 +126,11 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
     fn state_root(&self, state: HashedPostState) -> ProviderResult<B256> {
         let mut input = TrieInput::from_state(state);
         input.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes(TrieInputSorted::from_unsorted(input))
+        self.historical.state_root_from_nodes(input)
     }
 
-    fn state_root_from_nodes(&self, mut input: TrieInputSorted) -> ProviderResult<B256> {
-        // Sort internal state and merge with sorted input
-        let internal_sorted = TrieInputSorted::from_unsorted(self.trie_input().clone());
-        input.prepend_self(internal_sorted);
+    fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
+        input.prepend_self(self.trie_input().clone());
         self.historical.state_root_from_nodes(input)
     }
 
@@ -142,16 +140,14 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let mut input = TrieInput::from_state(state);
         input.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes_with_updates(TrieInputSorted::from_unsorted(input))
+        self.historical.state_root_from_nodes_with_updates(input)
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
-        mut input: TrieInputSorted,
+        mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        // Sort internal state and merge with sorted input
-        let internal_sorted = TrieInputSorted::from_unsorted(self.trie_input().clone());
-        input.prepend_self(internal_sorted);
+        input.prepend_self(self.trie_input().clone());
         self.historical.state_root_from_nodes_with_updates(input)
     }
 }

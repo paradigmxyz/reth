@@ -12,7 +12,7 @@ use reth_provider::{
 use reth_revm::db::BundleState;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::map::DefaultHashBuilder;
 use std::{sync::Arc, time::Duration};
@@ -184,7 +184,7 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
         self.state_provider.state_root(hashed_state)
     }
 
-    fn state_root_from_nodes(&self, input: TrieInputSorted) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
         self.state_provider.state_root_from_nodes(input)
     }
 
@@ -197,7 +197,7 @@ impl<S: StateRootProvider> StateRootProvider for CachedStateProvider<S> {
 
     fn state_root_from_nodes_with_updates(
         &self,
-        input: TrieInputSorted,
+        input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_from_nodes_with_updates(input)
     }

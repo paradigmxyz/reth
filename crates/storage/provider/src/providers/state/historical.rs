@@ -29,7 +29,6 @@ use reth_trie_db::{
     DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
-use std::sync::Arc;
 
 use std::fmt::Debug;
 
@@ -296,19 +295,9 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn state_root_from_nodes(&self, input: TrieInputSorted) -> ProviderResult<B256> {
-        // Prepend revert state to input state
-        let mut combined_state = self.revert_state()?;
-        combined_state.extend_ref(input.state.as_ref());
-
-        // Combine prefix sets
-        let mut combined_prefix_sets = combined_state.construct_prefix_sets();
-        combined_prefix_sets.extend(input.prefix_sets);
-
-        let sorted_input =
-            TrieInputSorted::new(input.nodes, Arc::new(combined_state), combined_prefix_sets);
-
-        StateRoot::overlay_root_from_nodes(self.tx(), sorted_input)
+    fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
+        input.prepend(self.revert_state()?.into());
+        StateRoot::overlay_root_from_nodes(self.tx(), TrieInputSorted::from_unsorted(input))
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
@@ -325,21 +314,14 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
 
     fn state_root_from_nodes_with_updates(
         &self,
-        input: TrieInputSorted,
+        mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        // Prepend revert state to input state
-        let mut combined_state = self.revert_state()?;
-        combined_state.extend_ref(input.state.as_ref());
-
-        // Combine prefix sets
-        let mut combined_prefix_sets = combined_state.construct_prefix_sets();
-        combined_prefix_sets.extend(input.prefix_sets);
-
-        let sorted_input =
-            TrieInputSorted::new(input.nodes, Arc::new(combined_state), combined_prefix_sets);
-
-        StateRoot::overlay_root_from_nodes_with_updates(self.tx(), sorted_input)
-            .map_err(|err| ProviderError::Database(err.into()))
+        input.prepend(self.revert_state()?.into());
+        StateRoot::overlay_root_from_nodes_with_updates(
+            self.tx(),
+            TrieInputSorted::from_unsorted(input),
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 }
 

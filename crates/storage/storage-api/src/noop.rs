@@ -37,7 +37,7 @@ use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-    StorageProof, TrieInput, TrieInputSorted,
+    StorageProof, TrieInput,
 };
 
 /// Supports various api interfaces for testing purposes.
@@ -403,7 +403,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateRootProvider for NoopProvider<C, N>
         Ok(B256::default())
     }
 
-    fn state_root_from_nodes(&self, _input: TrieInputSorted) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         Ok(B256::default())
     }
 
@@ -416,7 +416,7 @@ impl<C: Send + Sync, N: NodePrimitives> StateRootProvider for NoopProvider<C, N>
 
     fn state_root_from_nodes_with_updates(
         &self,
-        _input: TrieInputSorted,
+        _input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         Ok((B256::default(), TrieUpdates::default()))
     }

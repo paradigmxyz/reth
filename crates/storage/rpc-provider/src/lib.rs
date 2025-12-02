@@ -59,9 +59,7 @@ use reth_storage_api::{
     BlockBodyIndicesProvider, BlockReaderIdExt, BlockSource, DBProvider, NodePrimitivesProvider,
     ReceiptProviderIdExt, StatsReader,
 };
-use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput, TrieInputSorted,
-};
+use reth_trie::{updates::TrieUpdates, AccountProof, HashedPostState, MultiProof, TrieInput};
 use std::{
     collections::BTreeMap,
     future::{Future, IntoFuture},
@@ -1160,12 +1158,10 @@ where
     Node: NodeTypes,
 {
     fn state_root(&self, hashed_state: HashedPostState) -> Result<B256, ProviderError> {
-        self.state_root_from_nodes(TrieInputSorted::from_unsorted(TrieInput::from_state(
-            hashed_state,
-        )))
+        self.state_root_from_nodes(TrieInput::from_state(hashed_state))
     }
 
-    fn state_root_from_nodes(&self, _input: TrieInputSorted) -> Result<B256, ProviderError> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> Result<B256, ProviderError> {
         warn!("state_root_from_nodes is not implemented and will return zero");
         Ok(B256::ZERO)
     }
@@ -1192,7 +1188,7 @@ where
 
     fn state_root_from_nodes_with_updates(
         &self,
-        _input: TrieInputSorted,
+        _input: TrieInput,
     ) -> Result<(B256, TrieUpdates), ProviderError> {
         warn!("state_root_from_nodes_with_updates is not implemented and will return zero");
         Ok((B256::ZERO, TrieUpdates::default()))

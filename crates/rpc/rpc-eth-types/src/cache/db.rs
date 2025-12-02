@@ -31,7 +31,7 @@ impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper {
 
     fn state_root_from_nodes(
         &self,
-        input: reth_trie::TrieInputSorted,
+        input: reth_trie::TrieInput,
     ) -> reth_errors::ProviderResult<B256> {
         self.0.state_root_from_nodes(input)
     }
@@ -45,7 +45,7 @@ impl reth_storage_api::StateRootProvider for StateProviderTraitObjWrapper {
 
     fn state_root_from_nodes_with_updates(
         &self,
-        input: reth_trie::TrieInputSorted,
+        input: reth_trie::TrieInput,
     ) -> reth_errors::ProviderResult<(B256, reth_trie::updates::TrieUpdates)> {
         self.0.state_root_from_nodes_with_updates(input)
     }

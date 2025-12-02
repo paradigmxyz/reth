@@ -10,7 +10,7 @@ use reth_storage_api::{
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher,
-    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
+    MultiProof, MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 
 /// Mock state for testing
@@ -74,7 +74,7 @@ impl StateRootProvider for StateProviderTest {
         unimplemented!("state root computation is not supported")
     }
 
-    fn state_root_from_nodes(&self, _input: TrieInputSorted) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
         unimplemented!("state root computation is not supported")
     }
 
@@ -87,7 +87,7 @@ impl StateRootProvider for StateProviderTest {
 
     fn state_root_from_nodes_with_updates(
         &self,
-        _input: TrieInputSorted,
+        _input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         unimplemented!("state root computation is not supported")
     }
