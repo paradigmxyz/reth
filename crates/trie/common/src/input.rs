@@ -172,3 +172,6 @@ impl TrieInputSorted {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {}
