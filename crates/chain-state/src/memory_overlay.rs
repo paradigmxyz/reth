@@ -12,7 +12,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, TrieInput, TrieInputSorted,
 };
 use revm_database::BundleState;
-use std::sync::{Arc, OnceLock};
+use std::sync::OnceLock;
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
 /// reference of the historical state provider for fallback lookups.
@@ -129,13 +129,11 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         self.historical.state_root_from_nodes(TrieInputSorted::from_unsorted(input))
     }
 
-    fn state_root_from_nodes(&self, input: TrieInputSorted) -> ProviderResult<B256> {
-        // Convert sorted input to unsorted to combine with internal state
-        let state: HashedPostState = Arc::unwrap_or_clone(input.state).into();
-        let nodes: TrieUpdates = Arc::unwrap_or_clone(input.nodes).into();
-        let mut unsorted = TrieInput::new(nodes, state, input.prefix_sets);
-        unsorted.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes(TrieInputSorted::from_unsorted(unsorted))
+    fn state_root_from_nodes(&self, mut input: TrieInputSorted) -> ProviderResult<B256> {
+        // Sort internal state and merge with sorted input
+        let internal_sorted = TrieInputSorted::from_unsorted(self.trie_input().clone());
+        input.prepend_self(internal_sorted);
+        self.historical.state_root_from_nodes(input)
     }
 
     fn state_root_with_updates(
@@ -149,14 +147,12 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
 
     fn state_root_from_nodes_with_updates(
         &self,
-        input: TrieInputSorted,
+        mut input: TrieInputSorted,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        // Convert sorted input to unsorted to combine with internal state
-        let state: HashedPostState = Arc::unwrap_or_clone(input.state).into();
-        let nodes: TrieUpdates = Arc::unwrap_or_clone(input.nodes).into();
-        let mut unsorted = TrieInput::new(nodes, state, input.prefix_sets);
-        unsorted.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes_with_updates(TrieInputSorted::from_unsorted(unsorted))
+        // Sort internal state and merge with sorted input
+        let internal_sorted = TrieInputSorted::from_unsorted(self.trie_input().clone());
+        input.prepend_self(internal_sorted);
+        self.historical.state_root_from_nodes_with_updates(input)
     }
 }
 
