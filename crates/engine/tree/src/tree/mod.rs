@@ -1769,11 +1769,10 @@ where
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
     ///
-    /// NOTE: This cannot fetch [`ExecutedBlock`]s for _finalized_ blocks, instead it can only
-    /// fetch [`ExecutedBlock`]s for _canonical_ blocks, or blocks from sidechains that the node
-    /// has in memory.
-    ///
-    /// For finalized blocks, this will return `None`.
+    /// Note: This function attempts to fetch the `ExecutedBlock` from either in-memory state
+    /// or the database. If the required historical data (such as trie change sets) has been
+    /// pruned for a given block, this operation will return an error. On archive nodes, it
+    /// can retrieve any block.
     fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
