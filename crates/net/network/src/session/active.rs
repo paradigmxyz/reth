@@ -335,7 +335,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     accounts: Vec::new(),
                     proof: Vec::new(),
                 });
-                self.queued_outgoing.push_back(OutgoingMessage::Snap(EthSnapMessage::Snap(resp)));
+                self.queued_outgoing
+                    .push_back(OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(resp)));
                 OnIncomingMessageOutcome::Ok
             }
             SnapProtocolMessage::GetStorageRanges(req) => {
@@ -344,7 +345,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     slots: Vec::new(),
                     proof: Vec::new(),
                 });
-                self.queued_outgoing.push_back(OutgoingMessage::Snap(EthSnapMessage::Snap(resp)));
+                self.queued_outgoing
+                    .push_back(OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(resp)));
                 OnIncomingMessageOutcome::Ok
             }
             SnapProtocolMessage::GetByteCodes(req) => {
@@ -352,7 +354,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     request_id: req.request_id,
                     codes: Vec::new(),
                 });
-                self.queued_outgoing.push_back(OutgoingMessage::Snap(EthSnapMessage::Snap(resp)));
+                self.queued_outgoing
+                    .push_back(OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(resp)));
                 OnIncomingMessageOutcome::Ok
             }
             SnapProtocolMessage::GetTrieNodes(req) => {
@@ -360,7 +363,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     request_id: req.request_id,
                     nodes: Vec::new(),
                 });
-                self.queued_outgoing.push_back(OutgoingMessage::Snap(EthSnapMessage::Snap(resp)));
+                self.queued_outgoing
+                    .push_back(OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(resp)));
                 OnIncomingMessageOutcome::Ok
             }
             // Incoming responses to our previously sent snap requests
@@ -466,26 +470,30 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             PeerRequest::SnapGetAccountRange { request, .. } => {
                 let mut req = request.clone();
                 req.request_id = request_id;
-                OutgoingMessage::Snap(EthSnapMessage::Snap(SnapProtocolMessage::GetAccountRange(
-                    req,
-                )))
+                OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
+                    SnapProtocolMessage::GetAccountRange(req),
+                ))
             }
             PeerRequest::SnapGetStorageRanges { request, .. } => {
                 let mut req = request.clone();
                 req.request_id = request_id;
-                OutgoingMessage::Snap(EthSnapMessage::Snap(SnapProtocolMessage::GetStorageRanges(
-                    req,
-                )))
+                OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
+                    SnapProtocolMessage::GetStorageRanges(req),
+                ))
             }
             PeerRequest::SnapGetByteCodes { request, .. } => {
                 let mut req = request.clone();
                 req.request_id = request_id;
-                OutgoingMessage::Snap(EthSnapMessage::Snap(SnapProtocolMessage::GetByteCodes(req)))
+                OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
+                    SnapProtocolMessage::GetByteCodes(req),
+                ))
             }
             PeerRequest::SnapGetTrieNodes { request, .. } => {
                 let mut req = request.clone();
                 req.request_id = request_id;
-                OutgoingMessage::Snap(EthSnapMessage::Snap(SnapProtocolMessage::GetTrieNodes(req)))
+                OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
+                    SnapProtocolMessage::GetTrieNodes(req),
+                ))
             }
             _ => request.create_request_message(request_id).into(),
         };
@@ -806,7 +814,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         OutgoingMessage::Eth(msg) => {
                             this.conn.start_send_unpin(EthSnapMessage::Eth(msg))
                         }
-                        OutgoingMessage::Snap(msg) => this.conn.start_send_unpin(msg),
+                        OutgoingMessage::SnapProtocolMessage(msg) => {
+                            this.conn.start_send_unpin(msg)
+                        }
                         OutgoingMessage::Broadcast(msg) => this.conn.start_send_broadcast(msg),
                         OutgoingMessage::Raw(msg) => this.conn.start_send_raw(msg),
                     };
@@ -1033,8 +1043,8 @@ enum RequestState<R> {
 pub(crate) enum OutgoingMessage<N: NetworkPrimitives> {
     /// A message that is owned.
     Eth(EthMessage<N>),
-    /// A snap protocol message (wrapped in `EthSnapMessage`).
-    Snap(EthSnapMessage<N>),
+    /// A snap protocol message.
+    SnapProtocolMessage(EthSnapMessage<N>),
     /// A message that may be shared by multiple sessions.
     Broadcast(EthBroadcastMessage<N>),
     /// A raw capability message
@@ -1045,7 +1055,9 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
     /// Returns true if this is a response.
     const fn is_response(&self) -> bool {
         match self {
-            Self::Eth(msg) | Self::Snap(EthSnapMessage::Eth(msg)) => msg.is_response(),
+            Self::Eth(msg) | Self::SnapProtocolMessage(EthSnapMessage::Eth(msg)) => {
+                msg.is_response()
+            }
             _ => false,
         }
     }
@@ -1059,7 +1071,7 @@ impl<N: NetworkPrimitives> From<EthMessage<N>> for OutgoingMessage<N> {
 
 impl<N: NetworkPrimitives> From<EthSnapMessage<N>> for OutgoingMessage<N> {
     fn from(value: EthSnapMessage<N>) -> Self {
-        Self::Snap(value)
+        Self::SnapProtocolMessage(value)
     }
 }
 
