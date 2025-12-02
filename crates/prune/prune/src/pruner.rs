@@ -202,14 +202,6 @@ where
                 .transpose()?
                 .flatten()
             {
-                debug!(
-                    target: "pruner",
-                    segment = ?segment.segment(),
-                    purpose = ?segment.purpose(),
-                    %to_block,
-                    ?prune_mode,
-                    "Segment pruning started"
-                );
 
                 // Check if segment has a required stage that must be finished first
                 if let Some(required_stage) = segment.required_stage() &&
@@ -223,6 +215,15 @@ where
                     );
                     continue
                 }
+
+                debug!(
+                    target: "pruner",
+                    segment = ?segment.segment(),
+                    purpose = ?segment.purpose(),
+                    %to_block,
+                    ?prune_mode,
+                    "Segment pruning started"
+                );
 
                 let segment_start = Instant::now();
                 let previous_checkpoint = provider.get_prune_checkpoint(segment.segment())?;
