@@ -226,7 +226,7 @@ mod tests {
     use alloy_primitives::{map::B256Map, B256, U256};
     use reth_primitives_traits::Account;
 
-    /// Test prepend_self with disjoint accounts (no overlap)
+    /// Test `prepend_self` with disjoint accounts (no overlap)
     #[test]
     fn test_trie_input_sorted_prepend_self_disjoint_accounts() {
         let addr1 = B256::from([1; 32]);
@@ -267,7 +267,7 @@ mod tests {
         assert_eq!(input.state.accounts[2].0, addr3);
     }
 
-    /// Test prepend_self with overlapping accounts (self takes precedence)
+    /// Test `prepend_self` with overlapping accounts (self takes precedence)
     #[test]
     fn test_trie_input_sorted_prepend_self_overlapping_accounts() {
         let addr1 = B256::from([1; 32]);
@@ -308,7 +308,7 @@ mod tests {
         assert_eq!(input.state.accounts[1].1.unwrap().nonce, 20); // self takes precedence
     }
 
-    /// Test prepend_self with storage merging
+    /// Test `prepend_self` with storage merging
     #[test]
     fn test_trie_input_sorted_prepend_self_storage() {
         let addr1 = B256::from([1; 32]);
@@ -356,7 +356,7 @@ mod tests {
         assert_eq!(storage.storage_slots[2], (slot3, U256::from(300)));
     }
 
-    /// Test prepend_self with wiped storage
+    /// Test `prepend_self` with wiped storage
     #[test]
     fn test_trie_input_sorted_prepend_self_wiped_storage() {
         let addr1 = B256::from([1; 32]);
@@ -398,7 +398,7 @@ mod tests {
         assert_eq!(storage.storage_slots[0], (slot2, U256::from(200)));
     }
 
-    /// Test prepend_self with trie nodes
+    /// Test `prepend_self` with trie nodes
     #[test]
     fn test_trie_input_sorted_prepend_self_trie_nodes() {
         let nibbles1 = Nibbles::from_nibbles_unchecked([0x01]);
@@ -446,7 +446,7 @@ mod tests {
         assert!(nodes[2].1.is_some());
     }
 
-    /// Test prepend_self with empty inputs
+    /// Test `prepend_self` with empty inputs
     #[test]
     fn test_trie_input_sorted_prepend_self_empty() {
         let addr1 = B256::from([1; 32]);
@@ -482,7 +482,7 @@ mod tests {
         assert_eq!(input.state.accounts.len(), 1);
     }
 
-    /// Test prepend_self prefix sets merging
+    /// Test `prepend_self` prefix sets merging
     #[test]
     fn test_trie_input_sorted_prepend_self_prefix_sets() {
         let nibbles1 = Nibbles::from_nibbles_unchecked([0x01, 0x02]);
@@ -655,8 +655,8 @@ mod tests {
             .insert(addr1, HashedStorage::from_iter(false, [(slot2, U256::from(200))]));
 
         // Path 1: Unsorted prepend, then sort
-        let mut unsorted_input = TrieInput::default();
-        unsorted_input.state = overlay_unsorted.clone();
+        let mut unsorted_input =
+            TrieInput { state: overlay_unsorted.clone(), ..Default::default() };
         unsorted_input.prepend_self(TrieInput {
             nodes: TrieUpdates::default(),
             state: base_unsorted.clone(),
