@@ -466,11 +466,14 @@ where
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
                 // First try to get cached block and receipts, as it's likely they're already cached
-                let (maybe_block, maybe_receipts) =
-                    self.eth_cache().maybe_cached_block_and_receipts(block_hash).await?;
+                let Some((receipts, maybe_block)) =
+                    self.eth_cache().get_receipts_and_maybe_block(block_hash).await?
+                else {
+                    return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
+                };
 
                 // Get header - from cached block if available, otherwise from provider
-                let header = if let Some(ref block) = maybe_block {
+                let header = if let Some(block) = &maybe_block {
                     block.header().clone()
                 } else {
                     self.provider()
@@ -479,21 +482,6 @@ where
                 };
 
                 let block_num_hash = BlockNumHash::new(header.number(), block_hash);
-
-                // Get receipts - from cache if available, otherwise use
-                // get_receipts_and_maybe_block
-                let (receipts, maybe_block) = match maybe_receipts {
-                    Some(receipts) => (receipts, maybe_block),
-                    None => {
-                        // Not cached - use get_receipts_and_maybe_block as before
-                        let (receipts, maybe_block) = self
-                            .eth_cache()
-                            .get_receipts_and_maybe_block(block_num_hash.hash)
-                            .await?
-                            .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
-                        (receipts, maybe_block)
-                    }
-                };
 
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
