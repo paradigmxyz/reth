@@ -31,6 +31,17 @@ static TRACE_TARGET: &str = "trie::proof_v2";
 /// Number of bytes to pre-allocate for [`ProofCalculator`]'s `rlp_encode_buf` field.
 const RLP_ENCODE_BUF_SIZE: usize = 1024;
 
+/// A [`Nibbles`] which contains 64 zero nibbles.
+static PATH_ALL_ZEROS: Nibbles = {
+    let mut path = Nibbles::new();
+    let mut i = 0;
+    while i < 64 {
+        path.push_unchecked(0);
+        i += 1;
+    }
+    path
+};
+
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -344,8 +355,7 @@ where
         leaf_val: VE::DeferredEncoder,
     ) -> Result<(), StateProofError> {
         // Before pushing the new leaf onto the `child_stack` we need to commit the previous last
-        // child (ie the first child of this new branch), so that only `child_stack`'s final child
-        // is a non-RlpNode.
+        // child, so that only `child_stack`'s final child is a non-RlpNode.
         self.commit_last_child(targets)?;
 
         // Once the first child is committed we set the new child's bit on the top branch's
@@ -361,37 +371,25 @@ where
         Ok(())
     }
 
-    /// Pushes a new branch onto the `branch_stack`, while also pushing the given leaf onto the
-    /// `child_stack`.
+    /// Pushes a new branch onto the `branch_stack` based on the path and short key of the last
+    /// child on the `child_stack` and the path of the next child which will be pushed on to the
+    /// stack after this call.
     ///
-    /// This method expects that there already exists a child on the `child_stack`, and that that
-    /// child has a non-zero short key. The new branch is constructed based on the top child from
-    /// the `child_stack` and the given leaf.
-    fn push_new_branch(
-        &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
-        leaf_key: Nibbles,
-        leaf_val: VE::DeferredEncoder,
-    ) -> Result<(), StateProofError> {
-        // First determine the new leaf's shortkey relative to the current branch. If there is no
-        // current branch then the short key is the full key.
-        let leaf_short_key = if self.branch_stack.is_empty() {
-            leaf_key
+    /// Returns the nibble of the branch's `state_mask` which should be set for the new child, and
+    /// short key that the next child should use.
+    fn push_new_branch(&mut self, new_child_path: Nibbles) -> (u8, Nibbles) {
+        // First determine the new child's shortkey relative to the current branch. If there is no
+        // current branch then the short key is the full path.
+        let new_child_short_key = if self.branch_stack.is_empty() {
+            new_child_path
         } else {
             // When there is a current branch then trim off its path as well as the nibble that it
             // has set for this leaf.
-            trim_nibbles_prefix(&leaf_key, self.branch_path.len() + 1)
+            trim_nibbles_prefix(&new_child_path, self.branch_path.len() + 1)
         };
 
-        trace!(
-            target: TRACE_TARGET,
-            ?leaf_short_key,
-            branch_path = ?self.branch_path,
-            "push_new_branch: called",
-        );
-
         // Get the new branch's first child, which is the child on the top of the stack with which
-        // the new leaf shares the same nibble on the current branch.
+        // the new child shares the same nibble on the current branch.
         let first_child = self
             .child_stack
             .last_mut()
@@ -404,8 +402,8 @@ where
         );
 
         // Determine how many nibbles are shared between the new branch's first child and the new
-        // leaf. This common prefix will be the extension of the new branch
-        let common_prefix_len = first_child_short_key.common_prefix_length(&leaf_short_key);
+        // child. This common prefix will be the extension of the new branch
+        let common_prefix_len = first_child_short_key.common_prefix_length(&new_child_short_key);
 
         // Trim off the common prefix from the first child's short key, plus one nibble which will
         // stored by the new branch itself in its state mask.
@@ -413,23 +411,24 @@ where
         first_child.trim_short_key_prefix(common_prefix_len + 1);
 
         // Similarly, trim off the common prefix, plus one nibble for the new branch, from the new
-        // leaf's short key.
-        let leaf_nibble = leaf_short_key.get_unchecked(common_prefix_len);
-        let leaf_short_key = trim_nibbles_prefix(&leaf_short_key, common_prefix_len + 1);
+        // child's short key.
+        let new_child_nibble = new_child_short_key.get_unchecked(common_prefix_len);
+        let new_child_short_key = trim_nibbles_prefix(&new_child_short_key, common_prefix_len + 1);
 
         // Update the branch path to reflect the new branch about to be pushed. Its path will be
         // the path of the previous branch, plus the nibble shared by each child, plus the parent
         // extension (denoted by a non-zero `ext_len`). Since the new branch's path is a prefix of
-        // the original leaf_key we can just slice that.
+        // the original new_child_path we can just slice that.
         //
-        // If the branch is the first branch then we do not add the extra 1, as there is no nibble
-        // in a parent branch to account for.
+        // If the new branch is the first branch then we do not add the extra 1, as there is no
+        // nibble in a parent branch to account for.
         let branch_path_len =
             self.branch_path.len() + common_prefix_len + self.maybe_parent_nibble();
-        self.branch_path = leaf_key.slice_unchecked(0, branch_path_len);
+        self.branch_path = new_child_path.slice_unchecked(0, branch_path_len);
 
-        // Push the new branch onto the branch stack. We do not yet set the `state_mask` bit of the
-        // new leaf; `push_new_leaf` will do that.
+        // Push the new branch onto the `branch_stack`. We do not yet set the `state_mask` bit of
+        // the new child; whatever actually pushes the child onto the `child_stack` is expected to
+        // do that.
         self.branch_stack.push(ProofTrieBranch {
             ext_len: common_prefix_len as u8,
             state_mask: TrieMask::new(1 << first_child_nibble),
@@ -437,22 +436,18 @@ where
             hash_mask: TrieMask::default(),
         });
 
-        // Push the new leaf onto the new branch. This step depends on the top branch being in the
-        // correct state, so must be done last.
-        self.push_new_leaf(targets, leaf_nibble, leaf_short_key, leaf_val)?;
-
         trace!(
             target: TRACE_TARGET,
-            ?leaf_short_key,
+            ?new_child_path,
             ?common_prefix_len,
-            new_branch = ?self.branch_stack.last().expect("branch_stack was just pushed to"),
-            ?branch_path_len,
+            ?first_child_nibble,
             branch_path = ?self.branch_path,
-            "push_new_branch: returning",
+            "Pushed new branch",
         );
 
-        Ok(())
+        (new_child_nibble, new_child_short_key)
     }
+
     /// Pops the top branch off of the `branch_stack`, hashes its children on the `child_stack`, and
     /// replaces those children on the `child_stack`. The `branch_path` field will be updated
     /// accordingly.
@@ -577,7 +572,8 @@ where
                         .expect("already checked for emptiness")
                         .short_key()
                         .is_empty());
-                    self.push_new_branch(targets, key, val)?;
+                    let (nibble, short_key) = self.push_new_branch(key);
+                    self.push_new_leaf(targets, nibble, short_key, val)?;
                     return Ok(())
                 }
             };
@@ -600,8 +596,11 @@ where
             // existing child.
             let nibble = key.get_unchecked(common_prefix_len);
             if curr_branch_state_mask.is_bit_set(nibble) {
-                // This method will also push the new leaf onto the `child_stack`.
-                self.push_new_branch(targets, key, val)?;
+                // Push a new branch which splits the short key of the existing child at this
+                // nibble.
+                let (nibble, short_key) = self.push_new_branch(key);
+                // Push the new leaf onto the new branch.
+                self.push_new_leaf(targets, nibble, short_key, val)?;
             } else {
                 let short_key = key.slice_unchecked(common_prefix_len + 1, key.len());
                 self.push_new_leaf(targets, nibble, short_key, val)?;
@@ -662,6 +661,106 @@ where
         Ok(())
     }
 
+    /// Constructs and returns a new [`ProofTrieBranch`] based on an existing [`BranchNodeCompact`].
+    #[inline]
+    const fn new_from_cached_branch(
+        cached_branch: &BranchNodeCompact,
+        ext_len: u8,
+    ) -> ProofTrieBranch {
+        ProofTrieBranch {
+            ext_len,
+            state_mask: TrieMask::new(0),
+            tree_mask: cached_branch.tree_mask,
+            hash_mask: cached_branch.hash_mask,
+        }
+    }
+
+    // TODO docs
+    fn push_new_cached_branch(
+        &mut self,
+        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        cached_branch: &BranchNodeCompact,
+        cached_branch_path: Nibbles,
+    ) -> Result<(), StateProofError> {
+        debug_assert!(
+            cached_branch_path.starts_with(&self.branch_path),
+            "push_new_cached_branch called with path {cached_branch_path:?} which is not a child of current branch {:?}",
+            self.branch_path,
+        );
+
+        let parent_branch = self.branch_stack.last();
+
+        // If both stacks are empty then there were no leaves before this cached branch, push it and
+        // be done; the extension of the branch will be its full path.
+        if self.child_stack.is_empty() && parent_branch.is_none() {
+            self.branch_path = cached_branch_path;
+            self.branch_stack
+                .push(Self::new_from_cached_branch(cached_branch, cached_branch_path.len() as u8));
+            return Ok(())
+        }
+
+        // Get the nibble which should be set in the parent branch's `state_mask` for this new
+        // branch.
+        let cached_branch_nibble = cached_branch_path.get_unchecked(self.branch_path.len());
+
+        // We calculate the `ext_len` of the new branch, and potentially update its nibble if a new
+        // parent branch is inserted here, based on the state of the parent branch.
+        let (cached_branch_nibble, ext_len) = if parent_branch
+            .is_none_or(|parent_branch| parent_branch.state_mask.is_bit_set(cached_branch_nibble))
+        {
+            // If the `child_stack` is not empty but the `branch_stack` is then it implies that
+            // there must be a leaf or extension at the root of the trie whose short-key will get
+            // split by a new branch, which will become the parent of both that leaf/extension and
+            // this new branch.
+            //
+            // Similarly, if there is a branch on the `branch_stack` but its `state_mask` bit for
+            // this new branch is already set, then there must be a leaf/extension with a short-key
+            // to be split.
+            debug_assert_eq!(self.child_stack.len(), 1);
+            debug_assert!(!self
+                .child_stack
+                .last()
+                .expect("already checked for emptiness")
+                .short_key()
+                .is_empty());
+
+            // Split that leaf/extension's short key with a new branch.
+            let (nibble, short_key) = self.push_new_branch(cached_branch_path);
+            (nibble, short_key.len())
+        } else {
+            // If there is a parent branch but its `state_mask` bit for this branch is not set
+            // then we can simply calculate the `ext_len` based on the difference of each, minus
+            // 1 to account for the nibble in the `state_mask`.
+            (cached_branch_nibble, cached_branch_path.len() - self.branch_path.len() - 1)
+        };
+
+        // `commit_last_child` relies on the last set bit of the parent branch's `state_mask` to
+        // determine the path of the last child on the `child_stack`. Since we are about to
+        // change that mask we need to commit that last child first.
+        self.commit_last_child(targets)?;
+
+        // When pushing a new branch we need to set its child nibble in the `state_mask` of
+        // its parent, if there is one.
+        if let Some(parent_branch) = self.branch_stack.last_mut() {
+            // We've asserted above that branch_path.len() < cached_path.len(), so this
+            // `get_unchecked` is safe.
+            parent_branch.state_mask.set_bit(cached_branch_nibble);
+        }
+
+        // Finally update the `branch_path` and push the new branch.
+        self.branch_path = cached_branch_path;
+        self.branch_stack.push(Self::new_from_cached_branch(cached_branch, ext_len as u8));
+
+        trace!(
+            target: TRACE_TARGET,
+            branch=?self.branch_stack.last(),
+            branch_path=?self.branch_path,
+            "Pushed cached branch",
+        );
+
+        Ok(())
+    }
+
     // TODO docs
     // TODO re-evaluate how next_cached_branch works... might be possible to not always call next
     //      when taking it.
@@ -671,7 +770,14 @@ where
         targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
         next_cached_branch: &mut Option<(Nibbles, BranchNodeCompact)>,
         hashed_key_current: Option<&Nibbles>,
-    ) -> Result<(Nibbles, Option<Nibbles>), StateProofError> {
+    ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
+        // `lower_bound` will be used to track the lower bound of the range which is returned from
+        // this method. If this is None then there are no further keys which need to be processed.
+        //
+        // This starts off being based off of the hashed cursor's current position, which is the
+        // next key which hasn't been processed. If that is None then we start from zero.
+        let mut lower_bound = Some(hashed_key_current.copied().unwrap_or_else(Nibbles::new));
+
         loop {
             // TODO might be possible to move this out of the loop?
             // Determine the current cached branch node.
@@ -696,7 +802,7 @@ where
                         // If both stack and cursor are empty then there are no more cached nodes,
                         // return an open range to indicate that the rest of the trie should be
                         // calculated solely from leaves.
-                        return Ok((hashed_key_current.copied().unwrap_or_else(Nibbles::new), None));
+                        return Ok(lower_bound.map(|lower| (lower, None)));
                     }
                 };
 
@@ -713,28 +819,22 @@ where
 
             // TODO might be possible to move this out of the loop?
             //
-            // TODO A lot of calculations start with something like:
-            // ```
-            // Returning key range to calculate in order to catch up to cached branch lower=Nibbles(0x) upper=Some(Nibbles(0x0))
-            // ```
-            // ...which is not strictly necessary, if 0x0 is a branch then there can't be children
-            // prior.
-            //
             // The current hashed key indicates the first key after the previous uncached range,
             // or None if this is the first call to this method. If the key is not caught up to
             // this cached branch it means there are portions of the trie prior to this branch
             // which need to be computed; return the range up to this branch to make that happen.
-            if hashed_key_current.is_none_or(|k| k < &cached_path) {
-                // If this is the first call to this method then start computation from zero
-                let lower = hashed_key_current.copied().unwrap_or_else(Nibbles::new);
-                let upper = Some(cached_path);
+            //
+            // TODO update docs
+            if hashed_key_current.is_none_or(|k| k < &cached_path) &&
+                !PATH_ALL_ZEROS.starts_with(&cached_path)
+            {
+                let range = lower_bound.map(|lower| (lower, Some(cached_path)));
                 trace!(
                     target: TRACE_TARGET,
-                    ?lower,
-                    ?upper,
+                    ?range,
                     "Returning key range to calculate in order to catch up to cached branch",
                 );
-                return Ok((lower, upper));
+                return Ok(range);
             }
 
             // All trie data prior to this cached branch has been computed. Any branches which were
@@ -757,39 +857,7 @@ where
             // top branch is the parent of this cached branch. Either way we push a branch
             // corresponding to the cached one onto the stack, so we can begin constructing it.
             if self.branch_path != cached_path {
-                // `commit_last_child` relies on the last set bit of the parent branch's
-                // `state_mask` to determine the path of the last child on the `child_stack`. Since
-                // we are about to change that mask we need to commit that last child first.
-                if !self.child_stack.is_empty() {
-                    self.commit_last_child(targets)?;
-                }
-
-                // When pushing a new branch we need to set its child nibble in the `state_mask` of
-                // its parent, if there is one.
-                if let Some(parent_branch) = self.branch_stack.last_mut() {
-                    // We've asserted above that branch_path.len() < cached_path.len(), so this
-                    // `get_unchecked` is safe.
-                    let child_nibble = cached_path.get_unchecked(self.branch_path.len());
-                    parent_branch.state_mask.set_bit(child_nibble);
-                }
-
-                // The length of the extension will be the difference of the lengths of the cached
-                // branch and its parent if any.
-                let ext_len =
-                    (cached_path.len() - self.branch_path.len() - self.maybe_parent_nibble()) as u8;
-                self.branch_stack.push(ProofTrieBranch {
-                    ext_len,
-                    state_mask: TrieMask::new(0),
-                    tree_mask: cached_branch.tree_mask,
-                    hash_mask: cached_branch.hash_mask,
-                });
-                self.branch_path = cached_path;
-                trace!(
-                    target: TRACE_TARGET,
-                    branch=?self.branch_stack.last(),
-                    branch_path=?self.branch_path,
-                    "Pushed cached branch",
-                );
+                self.push_new_cached_branch(targets, &cached_branch, cached_path)?;
             }
 
             // At this point the top of the branch stack is the same branch which was found in the
@@ -821,6 +889,12 @@ where
                 );
                 self.cached_branch_stack.pop();
                 self.pop_branch(targets)?;
+
+                // The just-popped branch is completely processed; we know there can be no more keys
+                // with that prefix. Set the lower bound which can be returned from this method to
+                // be the next possible prefix, if any.
+                lower_bound = cached_path.increment();
+
                 continue
             }
 
@@ -912,7 +986,7 @@ where
                 upper=?child_path_upper,
                 "Returning sub-trie's key range to calculate",
             );
-            return Ok((child_path, child_path_upper));
+            return Ok(Some((child_path, child_path_upper)));
         }
     }
 
@@ -979,11 +1053,16 @@ where
 
         loop {
             // Determine the range of keys of the overall trie which need to be re-computed.
-            let (lower_bound, upper_bound) = self.next_uncached_key_range(
+            let Some((lower_bound, upper_bound)) = self.next_uncached_key_range(
                 &mut targets,
                 &mut next_cached_branch,
                 hashed_cursor_current.as_ref().map(|kv| &kv.0),
-            )?;
+            )?
+            else {
+                // If `next_uncached_key_range` determines that there can be no more keys then
+                // complete the computation.
+                break;
+            };
 
             // Calculate the trie for that range of keys
             self.calculate_key_range(
