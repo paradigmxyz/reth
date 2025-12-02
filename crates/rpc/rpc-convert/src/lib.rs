@@ -19,8 +19,8 @@ pub use block::TryFromBlockResponse;
 pub use receipt::TryFromReceiptResponse;
 pub use rpc::*;
 pub use transaction::{
-    FromConsensusError, RpcConvert, RpcConverter, TransactionConversionError,
-    TryFromTransactionResponse, TryIntoSimTx, TxInfoMapper,
+    RpcConvert, RpcConverter, TransactionConversionError, TryFromTransactionResponse, TryIntoSimTx,
+    TxInfoMapper,
 };
 
 pub use alloy_evm::rpc::{CallFees, CallFeesError, EthTxEnvError, TryIntoTxEnv};

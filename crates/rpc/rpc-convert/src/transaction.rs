@@ -486,28 +486,12 @@ where
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionConversionError {
     /// Required fields are missing from the transaction request.
-    #[error("required fields missing from transaction request")]
-    MissingRequiredFields,
+    #[error("Failed to convert transaction into RPC response: {0}")]
+    FromTxReq(String),
 
-    /// Conversion from `Consensus` failed.
-    #[error(transparent)]
-    FromConsensus(#[from] FromConsensusError),
-}
-
-/// Error when converting from consensus transaction type.
-#[derive(Debug, thiserror::Error)]
-pub enum FromConsensusError {
-    /// Deposit transactions are special system transactions that are directly
-    /// included in blocks by the sequencer/validator and never enter the mempool.
-    #[error("deposit transactions cannot be pooled")]
-    DepositTransaction,
-    /// Blob transactions without sidecars cannot be pooled. After being included
-    /// in a block, the sidecar data is pruned, making the transaction unpoolable.
-    #[error("blob transaction missing sidecar")]
-    BlobSidecarMissing,
-    /// Transaction type is not supported for pool submission.
-    #[error("transaction type not supported for pool")]
-    UnsupportedForPool,
+    /// Other conversion errors.
+    #[error("{0}")]
+    Other(String),
 }
 /// Generic RPC response object converter for `Evm` and network `Network`.
 ///
@@ -847,7 +831,7 @@ where
         Ok(self
             .sim_tx_converter
             .convert_sim_tx(request)
-            .map_err(|_| TransactionConversionError::MissingRequiredFields)?)
+            .map_err(|e| TransactionConversionError::FromTxReq(e.to_string()))?)
     }
 
     fn tx_env(
