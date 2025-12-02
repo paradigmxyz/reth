@@ -2,7 +2,7 @@
 use criterion::{
     black_box, criterion_group, criterion_main, BatchSize, BenchmarkGroup, BenchmarkId, Criterion,
 };
-use reth_trie_common::utils::{extend_sorted_vec, extend_sorted_vec_new};
+use reth_trie_common::utils::*;
 
 /// Generate a sorted vector of (u64, u64) tuples
 fn generate_sorted_vec(size: usize, start: u64) -> Vec<(u64, u64)> {
@@ -41,18 +41,59 @@ fn bench_extend_sorted_vec_old(
     });
 }
 
-fn bench_extend_sorted_vec_new(
+fn bench_extend_sorted_vec_itertools(
     group: &mut BenchmarkGroup<'_, criterion::measurement::WallTime>,
     target_size: usize,
     other_size: usize,
 ) {
-    let id = BenchmarkId::new("extend_sorted_vec_new", format!("t{}_o{}", target_size, other_size));
+    let id = BenchmarkId::new(
+        "extend_sorted_vec_itertools",
+        format!("t{}_o{}", target_size, other_size),
+    );
 
     group.bench_function(id, |b| {
         b.iter_batched_ref(
             || generate_overlapping_vecs(target_size, other_size),
             |(target, other)| {
-                extend_sorted_vec_new(black_box(target), black_box(other));
+                extend_sorted_vec_itertools(black_box(target), black_box(other));
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+fn bench_extend_sorted_vec_custom(
+    group: &mut BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    target_size: usize,
+    other_size: usize,
+) {
+    let id =
+        BenchmarkId::new("extend_sorted_vec_custom", format!("t{}_o{}", target_size, other_size));
+
+    group.bench_function(id, |b| {
+        b.iter_batched_ref(
+            || generate_overlapping_vecs(target_size, other_size),
+            |(target, other)| {
+                extend_sorted_vec_custom(black_box(target), black_box(other));
+            },
+            BatchSize::SmallInput,
+        );
+    });
+}
+
+fn bench_extend_sorted_vec_hybrid(
+    group: &mut BenchmarkGroup<'_, criterion::measurement::WallTime>,
+    target_size: usize,
+    other_size: usize,
+) {
+    let id =
+        BenchmarkId::new("extend_sorted_vec_hybrid", format!("t{}_o{}", target_size, other_size));
+
+    group.bench_function(id, |b| {
+        b.iter_batched_ref(
+            || generate_overlapping_vecs(target_size, other_size),
+            |(target, other)| {
+                extend_sorted_vec_hybrid(black_box(target), black_box(other));
             },
             BatchSize::SmallInput,
         );
@@ -69,11 +110,11 @@ fn extend_sorted_vec_benchmark(c: &mut Criterion) {
     for &target_size in &target_sizes {
         for &other_size in &other_sizes {
             bench_extend_sorted_vec_old(&mut group, target_size, other_size);
-            bench_extend_sorted_vec_new(&mut group, target_size, other_size);
+            //bench_extend_sorted_vec_itertools(&mut group, target_size, other_size);
+            bench_extend_sorted_vec_custom(&mut group, target_size, other_size);
+            bench_extend_sorted_vec_hybrid(&mut group, target_size, other_size);
         }
     }
-
-    group.finish();
 }
 
 criterion_group!(benches, extend_sorted_vec_benchmark);
