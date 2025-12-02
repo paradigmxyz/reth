@@ -1112,6 +1112,8 @@ impl MultiProofTask {
                                 // Batch consecutive PrefetchProofs messages into one
                                 let mut merged_targets = targets;
                                 let mut num_batched = 1;
+                                let mut pending_msg: Option<MultiProofMessage> = None;
+
                                 loop {
                                     match self.rx.try_recv() {
                                         Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
@@ -1119,7 +1121,9 @@ impl MultiProofTask {
                                             num_batched += 1;
                                         }
                                         Ok(other_msg) => {
-                                            let _ = self.tx.send(other_msg);
+                                            // Store locally to preserve ordering instead of
+                                            // sending back to channel (which would put it at the end)
+                                            pending_msg = Some(other_msg);
                                             break;
                                         }
                                         Err(_) => break,
@@ -1138,6 +1142,64 @@ impl MultiProofTask {
                                     num_batched,
                                     "Prefetching proofs"
                                 );
+
+                                // Handle pending message immediately to preserve ordering
+                                if let Some(pending) = pending_msg {
+                                    match pending {
+                                        MultiProofMessage::StateUpdate(src, upd) => {
+                                            let len = upd.len();
+                                            state_update_proofs_requested += self.on_state_update(src, upd);
+                                            debug!(
+                                                target: "engine::tree::payload_processor::multiproof",
+                                                ?src,
+                                                len,
+                                                ?state_update_proofs_requested,
+                                                "Received new state update (from pending)"
+                                            );
+                                        }
+                                        MultiProofMessage::FinishedStateUpdates => {
+                                            updates_finished = true;
+                                            updates_finished_time = Some(Instant::now());
+                                            if self.is_done(
+                                                proofs_processed,
+                                                state_update_proofs_requested,
+                                                prefetch_proofs_requested,
+                                                updates_finished,
+                                            ) {
+                                                debug!(
+                                                    target: "engine::tree::payload_processor::multiproof",
+                                                    "State updates finished and all proofs processed, ending calculation"
+                                                );
+                                                break
+                                            }
+                                        }
+                                        MultiProofMessage::EmptyProof { sequence_number, state } => {
+                                            proofs_processed += 1;
+                                            if let Some(combined_update) = self.on_proof(
+                                                sequence_number,
+                                                SparseTrieUpdate { state, multiproof: Default::default() },
+                                            ) {
+                                                let _ = self.to_sparse_trie.send(combined_update);
+                                            }
+                                            if self.is_done(
+                                                proofs_processed,
+                                                state_update_proofs_requested,
+                                                prefetch_proofs_requested,
+                                                updates_finished,
+                                            ) {
+                                                debug!(
+                                                    target: "engine::tree::payload_processor::multiproof",
+                                                    "State updates finished and all proofs processed, ending calculation"
+                                                );
+                                                break
+                                            }
+                                        }
+                                        MultiProofMessage::PrefetchProofs(_) => {
+                                            // This shouldn't happen as we're batching PrefetchProofs
+                                            unreachable!("PrefetchProofs should have been batched")
+                                        }
+                                    }
+                                }
                             }
                             MultiProofMessage::StateUpdate(source, update) => {
                                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
@@ -1156,6 +1218,8 @@ impl MultiProofTask {
                                 // (observability only).
                                 let mut merged_update = update;
                                 let mut num_batched = 1;
+                                let mut pending_msg: Option<MultiProofMessage> = None;
+
                                 loop {
                                     match self.rx.try_recv() {
                                         Ok(MultiProofMessage::StateUpdate(_new_source, next_update)) => {
@@ -1163,7 +1227,9 @@ impl MultiProofTask {
                                             num_batched += 1;
                                         }
                                         Ok(other_msg) => {
-                                            let _ = self.tx.send(other_msg);
+                                            // Store locally to preserve ordering instead of
+                                            // sending back to channel (which would put it at the end)
+                                            pending_msg = Some(other_msg);
                                             break;
                                         }
                                         Err(_) => break,
@@ -1179,7 +1245,67 @@ impl MultiProofTask {
                                     ?state_update_proofs_requested,
                                     num_batched,
                                     "Received new state update"
-                                 );
+                                );
+
+                                // Handle pending message immediately to preserve ordering
+                                if let Some(pending) = pending_msg {
+                                    match pending {
+                                        MultiProofMessage::PrefetchProofs(targets) => {
+                                            let account_targets = targets.len();
+                                            let storage_targets =
+                                                targets.values().map(|slots| slots.len()).sum::<usize>();
+                                            prefetch_proofs_requested += self.on_prefetch_proof(targets);
+                                            debug!(
+                                                target: "engine::tree::payload_processor::multiproof",
+                                                account_targets,
+                                                storage_targets,
+                                                prefetch_proofs_requested,
+                                                "Prefetching proofs (from pending)"
+                                            );
+                                        }
+                                        MultiProofMessage::FinishedStateUpdates => {
+                                            updates_finished = true;
+                                            updates_finished_time = Some(Instant::now());
+                                            if self.is_done(
+                                                proofs_processed,
+                                                state_update_proofs_requested,
+                                                prefetch_proofs_requested,
+                                                updates_finished,
+                                            ) {
+                                                debug!(
+                                                    target: "engine::tree::payload_processor::multiproof",
+                                                    "State updates finished and all proofs processed, ending calculation"
+                                                );
+                                                break
+                                            }
+                                        }
+                                        MultiProofMessage::EmptyProof { sequence_number, state } => {
+                                            proofs_processed += 1;
+                                            if let Some(combined_update) = self.on_proof(
+                                                sequence_number,
+                                                SparseTrieUpdate { state, multiproof: Default::default() },
+                                            ) {
+                                                let _ = self.to_sparse_trie.send(combined_update);
+                                            }
+                                            if self.is_done(
+                                                proofs_processed,
+                                                state_update_proofs_requested,
+                                                prefetch_proofs_requested,
+                                                updates_finished,
+                                            ) {
+                                                debug!(
+                                                    target: "engine::tree::payload_processor::multiproof",
+                                                    "State updates finished and all proofs processed, ending calculation"
+                                                );
+                                                break
+                                            }
+                                        }
+                                        MultiProofMessage::StateUpdate(_, _) => {
+                                            // This shouldn't happen as we're batching StateUpdates
+                                            unreachable!("StateUpdate should have been batched")
+                                        }
+                                    }
+                                }
                             }
                             MultiProofMessage::FinishedStateUpdates => {
                                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
