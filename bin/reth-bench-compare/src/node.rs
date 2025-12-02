@@ -44,7 +44,13 @@ impl NodeManager {
             binary_path: None,
             enable_profiling: args.profile,
             output_dir: args.output_dir_path(),
-            additional_reth_args: args.reth_args.clone(),
+            // Filter out empty strings to prevent invalid arguments being passed to reth node
+            additional_reth_args: args
+                .reth_args
+                .iter()
+                .filter(|s| !s.is_empty())
+                .cloned()
+                .collect(),
             comparison_dir: None,
             tracing_endpoint: args.traces.otlp.as_ref().map(|u| u.to_string()),
             otlp_max_queue_size: args.otlp_max_queue_size,

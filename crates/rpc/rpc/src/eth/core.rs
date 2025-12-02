@@ -190,8 +190,8 @@ where
     type NetworkTypes = Rpc::Network;
     type RpcConvert = Rpc;
 
-    fn tx_resp_builder(&self) -> &Self::RpcConvert {
-        &self.tx_resp_builder
+    fn converter(&self) -> &Self::RpcConvert {
+        &self.converter
     }
 }
 
@@ -303,7 +303,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     raw_tx_forwarder: Option<RpcClient>,
 
     /// Converter for RPC types.
-    tx_resp_builder: Rpc,
+    converter: Rpc,
 
     /// Builder for pending block environment.
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
@@ -343,7 +343,7 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
-        tx_resp_builder: Rpc,
+        converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
         max_batch_size: usize,
         pending_block_kind: PendingBlockKind,
@@ -386,7 +386,7 @@ where
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
             raw_tx_sender,
             raw_tx_forwarder,
-            tx_resp_builder,
+            converter,
             next_env_builder: Box::new(next_env),
             tx_batch_sender,
             pending_block_kind,
@@ -410,8 +410,8 @@ where
 
     /// Returns a handle to the transaction response builder.
     #[inline]
-    pub const fn tx_resp_builder(&self) -> &Rpc {
-        &self.tx_resp_builder
+    pub const fn converter(&self) -> &Rpc {
+        &self.converter
     }
 
     /// Returns a handle to data in memory.

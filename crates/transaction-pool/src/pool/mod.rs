@@ -284,19 +284,18 @@ where
         self.pool.read()
     }
 
-    /// Returns hashes of transactions in the pool that can be propagated.
-    pub fn pooled_transactions_hashes(&self) -> Vec<TxHash> {
-        self.get_pool_data()
-            .all()
-            .transactions_iter()
-            .filter(|tx| tx.propagate)
-            .map(|tx| *tx.hash())
-            .collect()
-    }
-
     /// Returns transactions in the pool that can be propagated
     pub fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).cloned().collect()
+        let mut out = Vec::new();
+        self.append_pooled_transactions(&mut out);
+        out
+    }
+
+    /// Returns hashes of transactions in the pool that can be propagated.
+    pub fn pooled_transactions_hashes(&self) -> Vec<TxHash> {
+        let mut out = Vec::new();
+        self.append_pooled_transactions_hashes(&mut out);
+        out
     }
 
     /// Returns only the first `max` transactions in the pool that can be propagated.
@@ -304,13 +303,48 @@ where
         &self,
         max: usize,
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        self.get_pool_data()
-            .all()
-            .transactions_iter()
-            .filter(|tx| tx.propagate)
-            .take(max)
-            .cloned()
-            .collect()
+        let mut out = Vec::new();
+        self.append_pooled_transactions_max(max, &mut out);
+        out
+    }
+
+    /// Extends the given vector with all transactions in the pool that can be propagated.
+    pub fn append_pooled_transactions(
+        &self,
+        out: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+    ) {
+        out.extend(
+            self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).cloned(),
+        );
+    }
+
+    /// Extends the given vector with the hashes of all transactions in the pool that can be
+    /// propagated.
+    pub fn append_pooled_transactions_hashes(&self, out: &mut Vec<TxHash>) {
+        out.extend(
+            self.get_pool_data()
+                .all()
+                .transactions_iter()
+                .filter(|tx| tx.propagate)
+                .map(|tx| *tx.hash()),
+        );
+    }
+
+    /// Extends the given vector with only the first `max` transactions in the pool that can be
+    /// propagated.
+    pub fn append_pooled_transactions_max(
+        &self,
+        max: usize,
+        out: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
+    ) {
+        out.extend(
+            self.get_pool_data()
+                .all()
+                .transactions_iter()
+                .filter(|tx| tx.propagate)
+                .take(max)
+                .cloned(),
+        );
     }
 
     /// Returns only the first `max` hashes of transactions in the pool that can be propagated.
@@ -604,16 +638,8 @@ where
     /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
     /// [`TransactionPool::pending_transactions_listener_for`](crate::TransactionPool).
     pub fn on_new_pending_transaction(&self, pending: &AddedPendingTransaction<T::Transaction>) {
-        let propagate_allowed = pending.is_propagate_allowed();
-
         let mut transaction_listeners = self.pending_transaction_listener.lock();
         transaction_listeners.retain_mut(|listener| {
-            if listener.kind.is_propagate_only() && !propagate_allowed {
-                // only emit this hash to listeners that are only allowed to receive propagate only
-                // transactions, such as network
-                return !listener.sender.is_closed()
-            }
-
             // broadcast all pending transactions to the listener
             listener.send_all(pending.pending_transactions(listener.kind))
         });
@@ -1124,11 +1150,6 @@ impl<T: PoolTransaction> AddedPendingTransaction<T> {
     ) -> impl Iterator<Item = B256> + '_ {
         let iter = std::iter::once(&self.transaction).chain(self.promoted.iter());
         PendingTransactionIter { kind, iter }
-    }
-
-    /// Returns if the transaction should be propagated.
-    pub(crate) fn is_propagate_allowed(&self) -> bool {
-        self.transaction.propagate
     }
 }
 

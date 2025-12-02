@@ -584,6 +584,12 @@ impl<N: ProviderNodeTypes> HashedPostStateProvider for ProviderFactory<N> {
     }
 }
 
+impl<N: ProviderNodeTypes> MetadataProvider for ProviderFactory<N> {
+    fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>> {
+        self.provider()?.get_metadata(key)
+    }
+}
+
 impl<N> fmt::Debug for ProviderFactory<N>
 where
     N: NodeTypesWithDB<DB: fmt::Debug, ChainSpec: fmt::Debug, Storage: fmt::Debug>,
