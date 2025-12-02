@@ -4,6 +4,7 @@ use crate::{OpEthApi, OpEthApiError};
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use reth_chain_state::BlockState;
+use reth_optimism_flashblocks::FlashblockPayload;
 use reth_rpc_eth_api::{
     helpers::{pending_block::PendingEnvBuilder, LoadPendingBlock, SpawnBlocking},
     FromEvmError, RpcConvert, RpcNodeCore, RpcNodeCoreExt,
@@ -14,11 +15,12 @@ use reth_rpc_eth_types::{
 };
 use reth_storage_api::{BlockReaderIdExt, StateProviderBox, StateProviderFactory};
 
-impl<N, Rpc> LoadPendingBlock for OpEthApi<N, Rpc>
+impl<N, Rpc, F> LoadPendingBlock for OpEthApi<N, Rpc, F>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+    F: FlashblockPayload,
 {
     #[inline]
     fn pending_block(&self) -> &tokio::sync::Mutex<Option<PendingBlock<N::Primitives>>> {

@@ -1,4 +1,4 @@
-use crate::{ws::FlashBlockDecoder, FlashBlock};
+use crate::ws::FlashBlockDecoder;
 use futures_util::{
     stream::{SplitSink, SplitStream},
     FutureExt, Sink, Stream, StreamExt,
@@ -18,23 +18,27 @@ use tokio_tungstenite::{
 use tracing::debug;
 use url::Url;
 
-/// An asynchronous stream of [`FlashBlock`] from a websocket connection.
+/// An asynchronous stream of flashblock payloads from a websocket connection.
 ///
-/// The stream attempts to connect to a websocket URL and then decode each received item.
+/// The stream attempts to connect to a websocket URL and then decode each received item
+/// into the payload type `F`.
 ///
 /// If the connection fails, the error is returned and connection retried. The number of retries is
 /// unbounded.
-pub struct WsFlashBlockStream<Stream, Sink, Connector> {
+pub struct WsFlashBlockStream<Stream, Sink, Connector, F> {
     ws_url: Url,
     state: State,
     connector: Connector,
-    decoder: Box<dyn FlashBlockDecoder>,
+    decoder: Box<dyn FlashBlockDecoder<F>>,
     connect: ConnectFuture<Sink, Stream>,
     stream: Option<Stream>,
     sink: Option<Sink>,
 }
 
-impl WsFlashBlockStream<WsStream, WsSink, WsConnector> {
+impl<F> WsFlashBlockStream<WsStream, WsSink, WsConnector, F>
+where
+    F: serde::de::DeserializeOwned,
+{
     /// Creates a new websocket stream over `ws_url`.
     pub fn new(ws_url: Url) -> Self {
         Self {
@@ -48,13 +52,16 @@ impl WsFlashBlockStream<WsStream, WsSink, WsConnector> {
         }
     }
 
-    /// Sets the [`FlashBlock`] decoder for the websocket stream.
-    pub fn with_decoder(self, decoder: Box<dyn FlashBlockDecoder>) -> Self {
+    /// Sets a custom decoder for the websocket stream.
+    pub fn with_decoder(self, decoder: Box<dyn FlashBlockDecoder<F>>) -> Self {
         Self { decoder, ..self }
     }
 }
 
-impl<Stream, S, C> WsFlashBlockStream<Stream, S, C> {
+impl<Stream, S, C, F> WsFlashBlockStream<Stream, S, C, F>
+where
+    F: serde::de::DeserializeOwned,
+{
     /// Creates a new websocket stream over `ws_url`.
     pub fn with_connector(ws_url: Url, connector: C) -> Self {
         Self {
@@ -69,13 +76,14 @@ impl<Stream, S, C> WsFlashBlockStream<Stream, S, C> {
     }
 }
 
-impl<Str, S, C> Stream for WsFlashBlockStream<Str, S, C>
+impl<Str, S, C, F> Stream for WsFlashBlockStream<Str, S, C, F>
 where
     Str: Stream<Item = Result<Message, Error>> + Unpin,
     S: Sink<Message> + Send + Unpin,
     C: WsConnect<Stream = Str, Sink = S> + Clone + Send + 'static + Unpin,
+    F: 'static,
 {
-    type Item = eyre::Result<FlashBlock>;
+    type Item = eyre::Result<F>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -136,7 +144,7 @@ where
     }
 }
 
-impl<Stream, S, C> WsFlashBlockStream<Stream, S, C>
+impl<Stream, S, C, F> WsFlashBlockStream<Stream, S, C, F>
 where
     C: WsConnect<Stream = Stream, Sink = S> + Clone + Send + 'static,
 {
@@ -169,7 +177,7 @@ where
     }
 }
 
-impl<Stream: Debug, S: Debug, C: Debug> Debug for WsFlashBlockStream<Stream, S, C> {
+impl<Stream: Debug, S: Debug, C: Debug, F> Debug for WsFlashBlockStream<Stream, S, C, F> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("FlashBlockStream")
             .field("ws_url", &self.ws_url)
@@ -240,6 +248,7 @@ impl WsConnect for WsConnector {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::FlashBlock;
     use alloy_primitives::bytes::Bytes;
     use brotli::enc::BrotliEncoderParams;
     use std::{future, iter};
@@ -463,7 +472,8 @@ mod tests {
         let flashblocks = [flashblock()];
         let connector = FakeConnector::from(flashblocks.iter().map(to_message));
         let ws_url = "http://localhost".parse().unwrap();
-        let stream = WsFlashBlockStream::with_connector(ws_url, connector);
+        let stream: WsFlashBlockStream<_, _, _, FlashBlock> =
+            WsFlashBlockStream::with_connector(ws_url, connector);
 
         let actual_messages: Vec<_> = stream.take(1).map(Result::unwrap).collect().await;
         let expected_messages = flashblocks.to_vec();
@@ -478,7 +488,8 @@ mod tests {
         let flashblock = flashblock();
         let connector = FakeConnector::from([Ok(message), to_json_binary_message(&flashblock)]);
         let ws_url = "http://localhost".parse().unwrap();
-        let mut stream = WsFlashBlockStream::with_connector(ws_url, connector);
+        let mut stream: WsFlashBlockStream<_, _, _, FlashBlock> =
+            WsFlashBlockStream::with_connector(ws_url, connector);
 
         let expected_message = flashblock;
         let actual_message =
@@ -491,7 +502,8 @@ mod tests {
     async fn test_stream_passes_errors_through() {
         let connector = FakeConnector::from([Err(Error::AttackAttempt)]);
         let ws_url = "http://localhost".parse().unwrap();
-        let stream = WsFlashBlockStream::with_connector(ws_url, connector);
+        let stream: WsFlashBlockStream<_, _, _, FlashBlock> =
+            WsFlashBlockStream::with_connector(ws_url, connector);
 
         let actual_messages: Vec<_> =
             stream.take(1).map(Result::unwrap_err).map(|e| format!("{e}")).collect().await;
@@ -506,7 +518,8 @@ mod tests {
         let error_msg = "test".to_owned();
         let connector = FailingConnector(error_msg.clone());
         let ws_url = "http://localhost".parse().unwrap();
-        let stream = WsFlashBlockStream::with_connector(ws_url, connector);
+        let stream: WsFlashBlockStream<_, _, _, FlashBlock> =
+            WsFlashBlockStream::with_connector(ws_url, connector);
 
         let actual_errors: Vec<_> =
             stream.take(tries).map(Result::unwrap_err).map(|e| format!("{e}")).collect().await;
@@ -531,7 +544,8 @@ mod tests {
         let messages = [Ok(msg), to_json_binary_message(&flashblock)];
         let connector = FakeConnectorWithSink::from(messages);
         let ws_url = "http://localhost".parse().unwrap();
-        let mut stream = WsFlashBlockStream::with_connector(ws_url, connector);
+        let mut stream: WsFlashBlockStream<_, _, _, FlashBlock> =
+            WsFlashBlockStream::with_connector(ws_url, connector);
 
         let _ = stream.next().await;
 
