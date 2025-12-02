@@ -140,8 +140,8 @@ pub(crate) fn setup<N: NodeTypesWithDB>(
     output_datadir.update(|tx| {
         tx.import_table_with_range::<tables::BlockBodyIndices, _>(
             &db_tool.provider_factory.db_ref().tx()?,
-            Some(from - 1),
-            to + 1,
+            Some(from),
+            to,
         )
     })??;
 
