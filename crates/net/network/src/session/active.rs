@@ -1055,9 +1055,11 @@ impl<N: NetworkPrimitives> OutgoingMessage<N> {
     /// Returns true if this is a response.
     const fn is_response(&self) -> bool {
         match self {
-            Self::Eth(msg) | Self::SnapProtocolMessage(EthSnapMessage::Eth(msg)) => {
-                msg.is_response()
-            }
+            Self::Eth(msg) => msg.is_response(),
+            Self::SnapProtocolMessage(msg) => match msg {
+                EthSnapMessage::Eth(msg) => msg.is_response(),
+                EthSnapMessage::Snap(msg) => msg.is_response(),
+            },
             _ => false,
         }
     }
