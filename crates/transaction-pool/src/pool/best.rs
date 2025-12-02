@@ -32,7 +32,7 @@ pub(crate) struct BestTransactionsWithFees<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactionsWithFees<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
         BestTransactions::mark_invalid(&mut self.best, tx, kind)
     }
 
@@ -68,7 +68,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactionsWithFees<T> {
             crate::traits::BestTransactions::mark_invalid(
                 self,
                 &best,
-                InvalidPoolTransactionError::Underpriced,
+                &InvalidPoolTransactionError::Underpriced,
             );
         }
     }
@@ -112,7 +112,7 @@ impl<T: TransactionOrdering> BestTransactions<T> {
     pub(crate) fn mark_invalid(
         &mut self,
         tx: &Arc<ValidPoolTransaction<T::Transaction>>,
-        _kind: InvalidPoolTransactionError,
+        _kind: &InvalidPoolTransactionError,
     ) {
         self.invalid.insert(tx.sender_id());
     }
@@ -189,6 +189,50 @@ impl<T: TransactionOrdering> BestTransactions<T> {
             }
         }
     }
+
+    /// Returns the next best transaction and its priority value.
+    #[allow(clippy::type_complexity)]
+    pub fn next_tx_and_priority(
+        &mut self,
+    ) -> Option<(Arc<ValidPoolTransaction<T::Transaction>>, Priority<T::PriorityValue>)> {
+        loop {
+            self.add_new_transactions();
+            // Remove the next independent tx with the highest priority
+            let best = self.pop_best()?;
+            let sender_id = best.transaction.sender_id();
+
+            // skip transactions for which sender was marked as invalid
+            if self.invalid.contains(&sender_id) {
+                debug!(
+                    target: "txpool",
+                    "[{:?}] skipping invalid transaction",
+                    best.transaction.hash()
+                );
+                continue
+            }
+
+            // Insert transactions that just got unlocked.
+            if let Some(unlocked) = self.all.get(&best.unlocks()) {
+                self.independent.insert(unlocked.clone());
+            }
+
+            if self.skip_blobs && best.transaction.transaction.is_eip4844() {
+                // blobs should be skipped, marking them as invalid will ensure that no dependent
+                // transactions are returned
+                self.mark_invalid(
+                    &best.transaction,
+                    &InvalidPoolTransactionError::Eip4844(
+                        Eip4844PoolTransactionError::NoEip4844Blobs,
+                    ),
+                )
+            } else {
+                if self.new_transaction_receiver.is_some() {
+                    self.last_priority = Some(best.priority.clone())
+                }
+                return Some((best.transaction, best.priority))
+            }
+        }
+    }
 }
 
 /// Result of attempting to receive a new transaction from the channel during iteration.
@@ -219,7 +263,7 @@ enum IncomingTransaction<T: TransactionOrdering> {
 }
 
 impl<T: TransactionOrdering> crate::traits::BestTransactions for BestTransactions<T> {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
         Self::mark_invalid(self, tx, kind)
     }
 
@@ -241,43 +285,7 @@ impl<T: TransactionOrdering> Iterator for BestTransactions<T> {
     type Item = Arc<ValidPoolTransaction<T::Transaction>>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            self.add_new_transactions();
-            // Remove the next independent tx with the highest priority
-            let best = self.pop_best()?;
-            let sender_id = best.transaction.sender_id();
-
-            // skip transactions for which sender was marked as invalid
-            if self.invalid.contains(&sender_id) {
-                debug!(
-                    target: "txpool",
-                    "[{:?}] skipping invalid transaction",
-                    best.transaction.hash()
-                );
-                continue
-            }
-
-            // Insert transactions that just got unlocked.
-            if let Some(unlocked) = self.all.get(&best.unlocks()) {
-                self.independent.insert(unlocked.clone());
-            }
-
-            if self.skip_blobs && best.transaction.transaction.is_eip4844() {
-                // blobs should be skipped, marking them as invalid will ensure that no dependent
-                // transactions are returned
-                self.mark_invalid(
-                    &best.transaction,
-                    InvalidPoolTransactionError::Eip4844(
-                        Eip4844PoolTransactionError::NoEip4844Blobs,
-                    ),
-                )
-            } else {
-                if self.new_transaction_receiver.is_some() {
-                    self.last_priority = Some(best.priority.clone())
-                }
-                return Some(best.transaction)
-            }
-        }
+        self.next_tx_and_priority().map(|(tx, _)| tx)
     }
 }
 
@@ -313,7 +321,9 @@ where
             }
             self.best.mark_invalid(
                 &best,
-                InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+                &InvalidPoolTransactionError::Consensus(
+                    InvalidTransactionError::TxTypeNotSupported,
+                ),
             );
         }
     }
@@ -324,7 +334,7 @@ where
     I: crate::traits::BestTransactions,
     P: FnMut(&<I as Iterator>::Item) -> bool + Send,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
         crate::traits::BestTransactions::mark_invalid(&mut self.best, tx, kind)
     }
 
@@ -413,7 +423,7 @@ where
     I: crate::traits::BestTransactions<Item = Arc<ValidPoolTransaction<T>>>,
     T: PoolTransaction,
 {
-    fn mark_invalid(&mut self, tx: &Self::Item, kind: InvalidPoolTransactionError) {
+    fn mark_invalid(&mut self, tx: &Self::Item, kind: &InvalidPoolTransactionError) {
         self.inner.mark_invalid(tx, kind)
     }
 
@@ -484,7 +494,7 @@ mod tests {
         let invalid = best.independent.iter().next().unwrap();
         best.mark_invalid(
             &invalid.transaction.clone(),
-            InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+            &InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
         );
 
         // iterator is empty
@@ -513,7 +523,7 @@ mod tests {
         crate::traits::BestTransactions::mark_invalid(
             &mut *best,
             &tx,
-            InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
+            &InvalidPoolTransactionError::Consensus(InvalidTransactionError::TxTypeNotSupported),
         );
         assert!(Iterator::next(&mut best).is_none());
     }

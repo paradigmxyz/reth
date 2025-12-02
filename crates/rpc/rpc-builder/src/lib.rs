@@ -968,7 +968,7 @@ where
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
                             self.eth.api.pool().clone(),
-                            dyn_clone::clone(self.eth.api.tx_resp_builder()),
+                            dyn_clone::clone(self.eth.api.converter()),
                         )
                         .into_rpc()
                         .into(),

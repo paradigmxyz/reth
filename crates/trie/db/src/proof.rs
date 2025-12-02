@@ -119,13 +119,13 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
             Default::default(),
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
-        Self::from_tx(tx, address)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(tx),
-                &state_sorted,
-            ))
-            .with_prefix_set_mut(prefix_set)
-            .storage_proof(slot)
+        StorageProof::new(
+            DatabaseTrieCursorFactory::new(tx),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            address,
+        )
+        .with_prefix_set_mut(prefix_set)
+        .storage_proof(slot)
     }
 
     fn overlay_storage_multiproof(
@@ -141,12 +141,12 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
             Default::default(),
             HashMap::from_iter([(hashed_address, storage.into_sorted())]),
         );
-        Self::from_tx(tx, address)
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(tx),
-                &state_sorted,
-            ))
-            .with_prefix_set_mut(prefix_set)
-            .storage_multiproof(targets)
+        StorageProof::new(
+            DatabaseTrieCursorFactory::new(tx),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            address,
+        )
+        .with_prefix_set_mut(prefix_set)
+        .storage_multiproof(targets)
     }
 }

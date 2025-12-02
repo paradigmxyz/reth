@@ -2,10 +2,10 @@
 
 use std::sync::Arc;
 
-use alloy_primitives::{TxHash, U256};
+use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
     pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
-    Filter, Header, Log,
+    Filter, Log,
 };
 use futures::StreamExt;
 use jsonrpsee::{
@@ -13,7 +13,7 @@ use jsonrpsee::{
 };
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
-use reth_primitives_traits::NodePrimitives;
+use reth_rpc_convert::RpcHeader;
 use reth_rpc_eth_api::{
     pubsub::EthPubSubApiServer, EthApiTypes, RpcConvert, RpcNodeCore, RpcTransaction,
 };
@@ -21,7 +21,7 @@ use reth_rpc_eth_types::logs_utils;
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use reth_storage_api::BlockNumReader;
 use reth_tasks::{TaskSpawner, TokioTaskExecutor};
-use reth_transaction_pool::{NewTransactionEvent, PoolConsensusTx, TransactionPool};
+use reth_transaction_pool::{NewTransactionEvent, TransactionPool};
 use serde::Serialize;
 use tokio_stream::{
     wrappers::{BroadcastStream, ReceiverStream},
@@ -55,17 +55,9 @@ impl<Eth> EthPubSub<Eth> {
     }
 }
 
-impl<N: NodePrimitives, Eth> EthPubSub<Eth>
+impl<Eth> EthPubSub<Eth>
 where
-    Eth: RpcNodeCore<
-            Provider: BlockNumReader + CanonStateSubscriptions<Primitives = N>,
-            Pool: TransactionPool,
-            Network: NetworkInfo,
-        > + EthApiTypes<
-            RpcConvert: RpcConvert<
-                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
-            >,
-        >,
+    Eth: RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Eth::Primitives>>,
 {
     /// Returns the current sync status for the `syncing` subscription
     pub fn sync_status(&self, is_syncing: bool) -> PubSubSyncStatus {
@@ -85,7 +77,7 @@ where
     }
 
     /// Returns a stream that yields all new RPC blocks.
-    pub fn new_headers_stream(&self) -> impl Stream<Item = Header<N::BlockHeader>> {
+    pub fn new_headers_stream(&self) -> impl Stream<Item = RpcHeader<Eth::NetworkTypes>> {
         self.inner.new_headers_stream()
     }
 
@@ -126,7 +118,7 @@ where
                                 let tx_value = match self
                                     .inner
                                     .eth_api
-                                    .tx_resp_builder()
+                                    .converter()
                                     .fill_pending(tx.transaction.to_consensus())
                                 {
                                     Ok(tx) => Some(tx),
@@ -211,15 +203,7 @@ where
 #[async_trait::async_trait]
 impl<Eth> EthPubSubApiServer<RpcTransaction<Eth::NetworkTypes>> for EthPubSub<Eth>
 where
-    Eth: RpcNodeCore<
-            Provider: BlockNumReader + CanonStateSubscriptions,
-            Pool: TransactionPool,
-            Network: NetworkInfo,
-        > + EthApiTypes<
-            RpcConvert: RpcConvert<
-                Primitives: NodePrimitives<SignedTx = PoolConsensusTx<Eth::Pool>>,
-            >,
-        > + 'static,
+    Eth: RpcNodeCore + EthApiTypes<RpcConvert: RpcConvert<Primitives = Eth::Primitives>>,
 {
     /// Handler for `eth_subscribe`
     async fn subscribe(
@@ -351,22 +335,26 @@ where
     }
 }
 
-impl<N: NodePrimitives, Eth> EthPubSubInner<Eth>
+impl<Eth> EthPubSubInner<Eth>
 where
-    Eth: RpcNodeCore<Provider: CanonStateSubscriptions<Primitives = N>>,
+    Eth: EthApiTypes<RpcConvert: RpcConvert<Primitives = Eth::Primitives>> + RpcNodeCore,
 {
     /// Returns a stream that yields all new RPC blocks.
-    fn new_headers_stream(&self) -> impl Stream<Item = Header<N::BlockHeader>> {
+    fn new_headers_stream(&self) -> impl Stream<Item = RpcHeader<Eth::NetworkTypes>> {
+        let converter = self.eth_api.converter();
         self.eth_api.provider().canonical_state_stream().flat_map(|new_chain| {
             let headers = new_chain
                 .committed()
                 .blocks_iter()
-                .map(|block| {
-                    Header::from_consensus(
-                        block.clone_sealed_header().into(),
-                        None,
-                        Some(U256::from(block.rlp_length())),
-                    )
+                .filter_map(|block| {
+                    match converter.convert_header(block.clone_sealed_header(), block.rlp_length())
+                    {
+                        Ok(header) => Some(header),
+                        Err(err) => {
+                            error!(target = "rpc", %err, "Failed to convert header");
+                            None
+                        }
+                    }
                 })
                 .collect::<Vec<_>>();
             futures::stream::iter(headers)
