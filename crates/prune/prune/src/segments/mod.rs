@@ -11,6 +11,7 @@ use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneProgress, PrunePurpose, PruneSegment, SegmentOutput,
     SegmentOutputCheckpoint,
 };
+use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 pub use set::SegmentSet;
 use std::{fmt::Debug, ops::RangeInclusive};
@@ -83,6 +84,14 @@ pub trait Segment<Provider>: Debug + Send + Sync {
         Provider: PruneCheckpointWriter,
     {
         provider.save_prune_checkpoint(self.segment(), checkpoint)
+    }
+
+    /// Returns the stage this segment depends on, if any.
+    ///
+    /// If this returns `Some(stage_id)`, the pruner will skip this segment if the stage
+    /// has not yet caught up with the `Finish` stage checkpoint.
+    fn required_stage(&self) -> Option<StageId> {
+        None
     }
 }
 

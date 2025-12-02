@@ -9969,6 +9969,7 @@ dependencies = [
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
+ "reth-stages-types",
  "reth-static-file-types",
  "reth-testing-utils",
  "reth-tokio-util",
