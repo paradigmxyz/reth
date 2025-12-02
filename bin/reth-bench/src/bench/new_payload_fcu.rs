@@ -11,7 +11,7 @@ use crate::{
     },
     valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload},
 };
-use alloy_eips::Encodable2718;
+use alloy_eips::{Encodable2718, Typed2718};
 use alloy_primitives::{hex, Bytes};
 use alloy_provider::Provider;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
@@ -155,6 +155,13 @@ impl Command {
                 // Extract the full transactions from the enum
                 let txs = transactions.as_transactions().unwrap_or_default();
                 for tx in txs {
+                    // Skip deposit transactions (type 126/0x7E) - these are L1->L2 system
+                    // transactions on OP chains that cannot be re-submitted to the pool
+                    if tx.inner.ty() == 126 {
+                        debug!(target: "reth-bench", "Skipping deposit transaction");
+                        continue;
+                    }
+
                     // Encode the transaction to raw bytes
                     let mut encoded = Vec::new();
                     tx.inner.inner.encode_2718(&mut encoded);
@@ -191,8 +198,7 @@ impl Command {
             // Determine parent block for building:
             // - If we have blocks in the list, use the most recent one as parent
             // - Otherwise, fall back to using the parent of the RPC block
-            let building_parent_hash = if let Some(latest_built_block) = built_blocks_list.last()
-            {
+            let building_parent_hash = if let Some(latest_built_block) = built_blocks_list.last() {
                 // Use the most recent built block from our list as parent
                 info!(
                     target: "reth-bench",
@@ -226,14 +232,6 @@ impl Command {
             // Check for parent beacon block root (post-Cancun)
             let parent_beacon_block_root = header.parent_beacon_block_root;
 
-            let payload_attributes = PayloadAttributes {
-                timestamp,
-                prev_randao,
-                suggested_fee_recipient,
-                withdrawals,
-                parent_beacon_block_root,
-            };
-
             // Call forkchoiceUpdate with payload attributes to trigger building
             let fcu_for_building = ForkchoiceState {
                 head_block_hash: building_parent_hash, // Use determined parent as head for building
@@ -242,13 +240,59 @@ impl Command {
             };
 
             // Call forkchoiceUpdate to start building
-            let fcu_result = call_forkchoice_updated(
-                &auth_provider,
-                version,
-                fcu_for_building,
-                Some(payload_attributes),
-            )
-            .await?;
+            // For OP chains, we need to use raw JSON to include gas_limit and eip1559Params
+            let fcu_result = if is_optimism {
+                // OP chains require gas_limit and eip1559Params in payload attributes
+                // Extract eip1559Params from extra_data if available (post-Holocene)
+                // Format: 4 bytes denominator + 4 bytes elasticity
+                let eip1559_params = if header.extra_data.len() >= 9 {
+                    // Extra data format: 1 byte version + 4 bytes denom + 4 bytes elasticity
+                    format!("0x{}", hex::encode(&header.extra_data[1..9]))
+                } else {
+                    // Default Base mainnet values: denominator=250, elasticity=6
+                    "0x00000006000000fa".to_string()
+                };
+
+                let payload_attributes_json = serde_json::json!({
+                    "timestamp": format!("0x{:x}", timestamp),
+                    "prevRandao": prev_randao,
+                    "suggestedFeeRecipient": suggested_fee_recipient,
+                    "withdrawals": withdrawals.unwrap_or_default(),
+                    "parentBeaconBlockRoot": parent_beacon_block_root,
+                    "gasLimit": format!("0x{:x}", header.gas_limit),
+                    "noTxPool": false,
+                    "eip1559Params": eip1559_params
+                });
+
+                let fcu_method = match version {
+                    EngineApiMessageVersion::V3 |
+                    EngineApiMessageVersion::V4 |
+                    EngineApiMessageVersion::V5 => "engine_forkchoiceUpdatedV3",
+                    EngineApiMessageVersion::V2 => "engine_forkchoiceUpdatedV2",
+                    EngineApiMessageVersion::V1 => "engine_forkchoiceUpdatedV1",
+                };
+
+                auth_provider
+                    .client()
+                    .request(fcu_method, (fcu_for_building, payload_attributes_json))
+                    .await?
+            } else {
+                let payload_attributes = PayloadAttributes {
+                    timestamp,
+                    prev_randao,
+                    suggested_fee_recipient,
+                    withdrawals,
+                    parent_beacon_block_root,
+                };
+
+                call_forkchoice_updated(
+                    &auth_provider,
+                    version,
+                    fcu_for_building,
+                    Some(payload_attributes),
+                )
+                .await?
+            };
 
             // Extract payload ID if building was triggered
             if let Some(payload_id) = fcu_result.payload_id {
