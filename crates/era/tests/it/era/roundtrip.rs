@@ -11,6 +11,9 @@
 //! Only a couple of era files are downloaded from `https://mainnet.era.nimbus.team/` for mainnet
 //! and `https://hoodi.era.nimbus.team/` for hoodi to keep the tests efficient.
 
+use consensus_types::{
+    BeaconState, ChainSpec, ForkVersionDecode, MainnetEthSpec, SignedBeaconBlock,
+};
 use reth_era::{
     common::file_ops::{EraFileFormat, StreamReader, StreamWriter},
     era::{
@@ -21,6 +24,7 @@ use reth_era::{
         },
     },
 };
+use ssz::Encode;
 use std::io::Cursor;
 
 use crate::{EraTestDownloader, HOODI, MAINNET};
@@ -34,22 +38,34 @@ async fn test_era_file_roundtrip(
     println!("\nTesting roundtrip for file: {filename}");
 
     let original_file = downloader.open_era_file(filename, network).await?;
+    let is_mainnet = network == MAINNET;
 
     if original_file.group.is_genesis() {
         println!("Genesis era detected, using special handling");
-        // Genesis has no blocks
         assert_eq!(original_file.group.blocks.len(), 0, "Genesis should have no blocks");
         assert!(
             original_file.group.slot_index.is_none(),
             "Genesis should not have block slot index"
         );
 
-        // Test genesis state decompression
         let state_data = original_file.group.era_state.decompress()?;
-        assert!(!state_data.is_empty(), "Genesis state should decompress to non-empty data");
         println!("  Genesis state decompressed: {} bytes", state_data.len());
 
-        // Write to buffer and read back
+        // Verify ssz decode/encode only on mainnet, tesnets specs are not supported :'(
+        if is_mainnet {
+            let spec = ChainSpec::mainnet();
+            let beacon_state = BeaconState::<MainnetEthSpec>::from_ssz_bytes(&state_data, &spec)
+                .map_err(|e| eyre::eyre!("Failed to decode genesis state: {e:?}"))?;
+
+            // Verify ssz roundtrip
+            let re_encoded = beacon_state.as_ssz_bytes();
+            assert_eq!(
+                state_data, re_encoded,
+                "Genesis state SSZ should be identical after decode/encode"
+            );
+        }
+
+        // File roundtrip test
         let mut buffer = Vec::new();
         {
             let mut writer = EraWriter::new(&mut buffer);
@@ -69,7 +85,29 @@ async fn test_era_file_roundtrip(
         return Ok(());
     }
 
-    // Write the entire file to a buffer
+    // non genesis start
+    let original_state_data = original_file.group.era_state.decompress()?;
+
+    let fork_name = if is_mainnet {
+        let spec = ChainSpec::mainnet();
+        let beacon_state =
+            BeaconState::<MainnetEthSpec>::from_ssz_bytes(&original_state_data, &spec)
+                .map_err(|e| eyre::eyre!("Failed to decode beacon state: {e:?}"))?;
+
+        let fork = beacon_state.fork_name_unchecked();
+
+        // Verify ssz roundtrip
+        let re_encoded = beacon_state.as_ssz_bytes();
+        assert_eq!(
+            original_state_data, re_encoded,
+            "State SSZ should be identical after decode/encode"
+        );
+
+        Some(fork)
+    } else {
+        None
+    };
+
     let mut buffer = Vec::new();
     {
         let mut writer = EraWriter::new(&mut buffer);
@@ -105,35 +143,44 @@ async fn test_era_file_roundtrip(
     for &block_idx in &test_block_indices {
         let original_block = &original_file.group.blocks[block_idx];
         let roundtrip_block = &roundtrip_file.group.blocks[block_idx];
-        let slot = original_file.group.starting_slot() + block_idx as u64;
 
-        println!("Testing roundtrip for beacon block at slot {slot}");
-
-        // Test beacon block decompression
         let original_block_data = original_block.decompress()?;
         let roundtrip_block_data = roundtrip_block.decompress()?;
 
+        // Verify file roundtrip preserves data
         assert_eq!(
             original_block_data, roundtrip_block_data,
-            "Beacon block at slot {slot} data should be identical after roundtrip"
+            "Block {block_idx} data should be identical after file roundtrip"
         );
 
+        // Verify ssz decode/encode roundtrip, still only for mainnet only
+        if let Some(fork) = fork_name {
+            let signed_block = SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(
+                &original_block_data,
+                fork,
+            )
+            .map_err(|e| eyre::eyre!("Failed to decode block {block_idx}: {e:?}"))?;
+
+            let slot = signed_block.message().slot();
+
+            // Verify SSZ roundtrip
+            let re_encoded = signed_block.as_ssz_bytes();
+            assert_eq!(
+                original_block_data, re_encoded,
+                "Block at slot {slot} SSZ should be identical after decode/encode"
+            );
+        }
+
+        // Verify compression roundtrip
         let recompressed_block = CompressedSignedBeaconBlock::from_ssz(&original_block_data)?;
         let recompressed_block_data = recompressed_block.decompress()?;
 
         assert_eq!(
             original_block_data, recompressed_block_data,
-            "Beacon block at slot {slot} data should be identical after re-compression cycle"
-        );
-
-        println!(
-            "  Beacon block at slot {slot} re-compression cycle verified: {} bytes",
-            recompressed_block_data.len()
+            "Block {block_idx} should be identical after re-compression cycle"
         );
     }
 
-    // Test era state decompression
-    let original_state_data = original_file.group.era_state.decompress()?;
     let roundtrip_state_data = roundtrip_file.group.era_state.decompress()?;
 
     assert_eq!(
@@ -183,7 +230,6 @@ async fn test_era_file_roundtrip(
         writer.write_file(&new_file)?;
     }
 
-    // Read it back and verify
     let reader = EraReader::new(Cursor::new(&reconstructed_buffer));
     let reconstructed_file = reader.read(network.to_string())?;
 
@@ -191,6 +237,24 @@ async fn test_era_file_roundtrip(
         original_file.group.blocks.len(),
         reconstructed_file.group.blocks.len(),
         "Block count should match after full reconstruction"
+    );
+
+    // Verify all reconstructed blocks match
+    for (idx, (orig, recon)) in
+        original_file.group.blocks.iter().zip(reconstructed_file.group.blocks.iter()).enumerate()
+    {
+        assert_eq!(
+            orig.decompress()?,
+            recon.decompress()?,
+            "Block {idx} should match after full reconstruction"
+        );
+    }
+
+    // Verify reconstructed state matches
+    assert_eq!(
+        original_state_data,
+        reconstructed_file.group.era_state.decompress()?,
+        "State should match after full reconstruction"
     );
 
     println!("File {filename} roundtrip successful");
@@ -217,8 +281,5 @@ async fn test_roundtrip_compression_encoding_mainnet(filename: &str) -> eyre::Re
 #[ignore = "download intensive"]
 async fn test_roundtrip_compression_encoding_hoodi(filename: &str) -> eyre::Result<()> {
     let downloader = EraTestDownloader::new().await?;
-
-    test_era_file_roundtrip(&downloader, filename, HOODI).await?;
-
-    Ok(())
+    test_era_file_roundtrip(&downloader, filename, HOODI).await
 }
