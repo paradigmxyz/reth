@@ -432,8 +432,7 @@ where
         self.branch_stack.push(ProofTrieBranch {
             ext_len: common_prefix_len as u8,
             state_mask: TrieMask::new(1 << first_child_nibble),
-            tree_mask: TrieMask::default(),
-            hash_mask: TrieMask::default(),
+            masks: TrieMasks::none(),
         });
 
         trace!(
@@ -510,8 +509,10 @@ where
         );
 
         // Wrap the `BranchNode` so it can be pushed onto the child stack.
-        let mut branch_as_child =
-            ProofTrieBranchChild::Branch(BranchNode::new(rlp_nodes_buf, branch.state_mask));
+        let mut branch_as_child = ProofTrieBranchChild::Branch {
+            node: BranchNode::new(rlp_nodes_buf, branch.state_mask),
+            masks: branch.masks,
+        };
 
         // If there is an extension then encode the branch as an `RlpNode` and use it to construct
         // the extension in its place
@@ -670,8 +671,10 @@ where
         ProofTrieBranch {
             ext_len,
             state_mask: TrieMask::new(0),
-            tree_mask: cached_branch.tree_mask,
-            hash_mask: cached_branch.hash_mask,
+            masks: TrieMasks {
+                tree_mask: Some(cached_branch.tree_mask),
+                hash_mask: Some(cached_branch.hash_mask),
+            },
         }
     }
 
@@ -716,7 +719,6 @@ where
             // Similarly, if there is a branch on the `branch_stack` but its `state_mask` bit for
             // this new branch is already set, then there must be a leaf/extension with a short-key
             // to be split.
-            debug_assert_eq!(self.child_stack.len(), 1);
             debug_assert!(!self
                 .child_stack
                 .last()
@@ -776,39 +778,58 @@ where
         //
         // This starts off being based off of the hashed cursor's current position, which is the
         // next key which hasn't been processed. If that is None then we start from zero.
+        //
+        // TODO better name and docs
         let mut lower_bound = Some(hashed_key_current.copied().unwrap_or_else(Nibbles::new));
 
         loop {
             // TODO might be possible to move this out of the loop?
             // Determine the current cached branch node.
             // Note: Cloning the `cached_branch` is cheap because it uses an Arc.
-            let (cached_path, cached_branch) =
-                match (self.cached_branch_stack.last(), &next_cached_branch) {
-                    (Some(cached), _) => {
-                        // If the `cached_branch_stack` is not empty then its last is the current
-                        cached.clone()
-                    }
-                    (_, Some(_)) => {
-                        // If `cached_branch_stack` is empty but there is an unconsumed cached
-                        // branch from the cursor then we consume that branch, pushing it onto the
-                        // stack.
-                        let cached = core::mem::take(next_cached_branch).expect("is some");
-                        *next_cached_branch = self.trie_cursor.next()?;
-                        self.cached_branch_stack.push(cached.clone());
-                        cached
-                    }
-                    (None, None) => {
-                        trace!(target: TRACE_TARGET, "Exhausted cached trie nodes");
-                        // If both stack and cursor are empty then there are no more cached nodes,
-                        // return an open range to indicate that the rest of the trie should be
-                        // calculated solely from leaves.
-                        return Ok(lower_bound.map(|lower| (lower, None)));
-                    }
-                };
+            let (cached_path, cached_branch) = match (
+                self.cached_branch_stack.last(),
+                &next_cached_branch,
+                lower_bound.as_ref(),
+            ) {
+                (None, None, _) | (_, _, None) => {
+                    trace!(target: TRACE_TARGET, "Exhausted cached trie nodes");
+                    // If both stack and cursor are empty then there are no more cached nodes,
+                    // return an open range to indicate that the rest of the trie should be
+                    // calculated solely from leaves.
+                    //
+                    // If the `lower_bound` indicates that there can be no more data then this will
+                    // return None to indicate end of computation.
+                    return Ok(lower_bound.map(|lower| (lower, None)));
+                }
+                (Some(cached), _, _) => {
+                    // If the `cached_branch_stack` is not empty then its last is the current
+                    cached.clone()
+                }
+                (_, Some((next_cached_path, _)), Some(lower_bound))
+                    if next_cached_path < lower_bound =>
+                {
+                    // If `cached_branch_stack` is empty but there is an unconsumed cached branch,
+                    // we would want to use that. However if that cached branch belongs to a range
+                    // which has already been processed then we can't use it, instead we seek
+                    // forward and try again.
+                    *next_cached_branch = self.trie_cursor.seek(*lower_bound)?;
+                    continue
+                }
+                (_, Some(_), _) => {
+                    // If `cached_branch_stack` is empty but there is an unconsumed cached
+                    // branch from the cursor then we consume that branch, pushing it onto the
+                    // stack.
+                    let cached = core::mem::take(next_cached_branch).expect("is some");
+                    *next_cached_branch = self.trie_cursor.next()?;
+                    self.cached_branch_stack.push(cached.clone());
+                    trace!(target: TRACE_TARGET, ?cached, "Pushed next trie node onto cached_branch_stack");
+                    cached
+                }
+            };
 
             trace!(
                 target: TRACE_TARGET,
-                ?hashed_key_current,
+                ?lower_bound,
                 branch_path = ?self.branch_path,
                 branch_state_mask = ?self.branch_stack.last().map(|b| b.state_mask),
                 ?cached_path,
@@ -922,14 +943,12 @@ where
 
                 if !self.should_retain(targets, &child_path, false) {
                     // Pull this child's hash out of the cached branch node. To get the hash's index
-                    // we first need to calculate which cached hash's have already been used by this
-                    // branch (if any), and subtract that count from the count of total cached
-                    // hashes.
+                    // we first need to calculate the mask of which cached hash's have already been
+                    // used by this branch (if any). The number of set bits in that mask will be the
+                    // index of the next hash in the array to use.
                     let curr_hashed_used_mask = cached_branch.hash_mask.get() & curr_state_mask;
-                    let hash_idx = cached_branch.hash_mask.count_ones() -
-                        curr_hashed_used_mask.count_ones() -
-                        1;
-                    let hash = cached_branch.hashes[hash_idx as usize];
+                    let hash_idx = curr_hashed_used_mask.count_ones() as usize;
+                    let hash = cached_branch.hashes[hash_idx];
 
                     trace!(
                         target: TRACE_TARGET,
@@ -1338,6 +1357,7 @@ mod tests {
             // Call Proof::multiproof (legacy implementation)
             let proof_legacy_result =
                 Proof::new(self.trie_cursor_factory.clone(), self.hashed_cursor_factory.clone())
+                    .with_branch_node_masks(true)
                     .multiproof(legacy_targets)?;
 
             // Decode and sort legacy proof nodes
@@ -1349,10 +1369,12 @@ mod tests {
                     let node = TrieNode::decode(&mut buf)
                         .expect("legacy implementation should not produce malformed proof nodes");
 
-                    ProofTrieNode {
-                        path: *path,
-                        node,
-                        masks: TrieMasks {
+                    // The legacy proof calculator will calculate masks for the root node, even
+                    // though we never store the root node so the masks for it aren't really valid.
+                    let masks = if path.is_empty() {
+                        TrieMasks::none()
+                    } else {
+                        TrieMasks {
                             hash_mask: proof_legacy_result
                                 .branch_node_hash_masks
                                 .get(path)
@@ -1361,8 +1383,10 @@ mod tests {
                                 .branch_node_tree_masks
                                 .get(path)
                                 .copied(),
-                        },
-                    }
+                        }
+                    };
+
+                    ProofTrieNode { path: *path, node, masks }
                 })
                 .sorted_by(|a, b| depth_first::cmp(&a.path, &b.path))
                 .collect::<Vec<_>>();
@@ -1379,7 +1403,7 @@ mod tests {
             }
 
             // Basic comparison: both should succeed and produce identical results
-            assert_eq!(proof_legacy_nodes, proof_v2_result);
+            pretty_assertions::assert_eq!(proof_legacy_nodes, proof_v2_result);
 
             Ok(())
         }
