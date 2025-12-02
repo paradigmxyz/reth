@@ -124,9 +124,7 @@ impl<N: NodePrimitives> AccountReader for MemoryOverlayStateProviderRef<'_, N> {
 
 impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn state_root(&self, state: HashedPostState) -> ProviderResult<B256> {
-        let mut input = TrieInput::from_state(state);
-        input.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes(input)
+        self.state_root_from_nodes(TrieInput::from_state(state))
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
@@ -138,9 +136,7 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         &self,
         state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        let mut input = TrieInput::from_state(state);
-        input.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes_with_updates(input)
+        self.state_root_from_nodes_with_updates(TrieInput::from_state(state))
     }
 
     fn state_root_from_nodes_with_updates(
