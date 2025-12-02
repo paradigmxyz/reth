@@ -115,15 +115,16 @@ impl MerkleChangeSets {
         input: TrieInputSorted,
     ) -> Result<TrieUpdates, StageError> {
         let (root, trie_updates) =
-            StateRoot::overlay_root_from_nodes_sorted_with_updates(provider.tx_ref(), input)
-                .map_err(|e| {
+            StateRoot::overlay_root_from_nodes_with_updates(provider.tx_ref(), input).map_err(
+                |e| {
                     error!(
                             target: "sync::stages::merkle_changesets",
                             %e,
                             ?block_number,
                             "Incremental state root failed! {INVALID_STATE_ROOT_ERROR_MESSAGE}");
                     StageError::Fatal(Box::new(e))
-                })?;
+                },
+            )?;
 
         let block = provider
             .header_by_number(block_number)?
@@ -258,13 +259,12 @@ impl MerkleChangeSets {
             // We calculate the overlay which will be passed into the next step using the trie
             // reverts prior to them being updated.
             let this_trie_updates =
-                Self::calculate_block_trie_updates(provider, block_number, input)?;
+                Self::calculate_block_trie_updates(provider, block_number, input)?.into_sorted();
 
             let trie_overlay = Arc::clone(&nodes);
             let mut nodes_mut = Arc::unwrap_or_clone(nodes);
-            nodes_mut.extend_ref(&this_trie_updates.clone().into_sorted());
+            nodes_mut.extend_ref(&this_trie_updates);
             nodes = Arc::new(nodes_mut);
-            let this_trie_updates = this_trie_updates.into_sorted();
 
             // Write the changesets to the DB using the trie updates produced by the block, and the
             // trie reverts as the overlay.

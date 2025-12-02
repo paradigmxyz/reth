@@ -9,10 +9,10 @@ use reth_storage_api::{
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, TrieInput, TrieInputSorted,
 };
 use revm_database::BundleState;
-use std::sync::OnceLock;
+use std::sync::{Arc, OnceLock};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
 /// reference of the historical state provider for fallback lookups.
@@ -124,27 +124,39 @@ impl<N: NodePrimitives> AccountReader for MemoryOverlayStateProviderRef<'_, N> {
 
 impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn state_root(&self, state: HashedPostState) -> ProviderResult<B256> {
-        self.state_root_from_nodes(TrieInput::from_state(state))
+        let mut input = TrieInput::from_state(state);
+        input.prepend_self(self.trie_input().clone());
+        self.historical.state_root_from_nodes(TrieInputSorted::from_unsorted(input))
     }
 
-    fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
-        input.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes(input)
+    fn state_root_from_nodes(&self, input: TrieInputSorted) -> ProviderResult<B256> {
+        // Convert sorted input to unsorted to combine with internal state
+        let state: HashedPostState = Arc::unwrap_or_clone(input.state).into();
+        let nodes: TrieUpdates = Arc::unwrap_or_clone(input.nodes).into();
+        let mut unsorted = TrieInput::new(nodes, state, input.prefix_sets);
+        unsorted.prepend_self(self.trie_input().clone());
+        self.historical.state_root_from_nodes(TrieInputSorted::from_unsorted(unsorted))
     }
 
     fn state_root_with_updates(
         &self,
         state: HashedPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        self.state_root_from_nodes_with_updates(TrieInput::from_state(state))
+        let mut input = TrieInput::from_state(state);
+        input.prepend_self(self.trie_input().clone());
+        self.historical.state_root_from_nodes_with_updates(TrieInputSorted::from_unsorted(input))
     }
 
     fn state_root_from_nodes_with_updates(
         &self,
-        mut input: TrieInput,
+        input: TrieInputSorted,
     ) -> ProviderResult<(B256, TrieUpdates)> {
-        input.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes_with_updates(input)
+        // Convert sorted input to unsorted to combine with internal state
+        let state: HashedPostState = Arc::unwrap_or_clone(input.state).into();
+        let nodes: TrieUpdates = Arc::unwrap_or_clone(input.nodes).into();
+        let mut unsorted = TrieInput::new(nodes, state, input.prefix_sets);
+        unsorted.prepend_self(self.trie_input().clone());
+        self.historical.state_root_from_nodes_with_updates(TrieInputSorted::from_unsorted(unsorted))
     }
 }
 

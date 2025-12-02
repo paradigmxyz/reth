@@ -10,7 +10,7 @@ use reth_provider::{
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
 };
 use std::{
     sync::atomic::{AtomicU64, Ordering},
@@ -207,7 +207,7 @@ impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
         self.state_provider.state_root(hashed_state)
     }
 
-    fn state_root_from_nodes(&self, input: TrieInput) -> ProviderResult<B256> {
+    fn state_root_from_nodes(&self, input: TrieInputSorted) -> ProviderResult<B256> {
         self.state_provider.state_root_from_nodes(input)
     }
 
@@ -220,7 +220,7 @@ impl<S: StateRootProvider> StateRootProvider for InstrumentedStateProvider<S> {
 
     fn state_root_from_nodes_with_updates(
         &self,
-        input: TrieInput,
+        input: TrieInputSorted,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         self.state_provider.state_root_from_nodes_with_updates(input)
     }

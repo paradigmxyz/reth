@@ -963,7 +963,7 @@ mod tests {
     };
     use reth_trie::{
         updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput, TrieInputSorted,
     };
 
     fn create_mock_state(
@@ -1040,7 +1040,7 @@ mod tests {
             Ok(B256::random())
         }
 
-        fn state_root_from_nodes(&self, _input: TrieInput) -> ProviderResult<B256> {
+        fn state_root_from_nodes(&self, _input: TrieInputSorted) -> ProviderResult<B256> {
             Ok(B256::random())
         }
 
@@ -1053,7 +1053,7 @@ mod tests {
 
         fn state_root_from_nodes_with_updates(
             &self,
-            _input: TrieInput,
+            _input: TrieInputSorted,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }
