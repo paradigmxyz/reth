@@ -42,7 +42,6 @@ use std::{
     future::Future,
     ops::{Deref, DerefMut},
 };
-// testing builder not currently injected to keep testing API disabled by default
 
 /// Contains the handles to the spawned RPC servers.
 ///

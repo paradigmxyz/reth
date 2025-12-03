@@ -1,7 +1,9 @@
 //! Testing namespace for building a block in a single call.
 //!
-//! This follows the `testing_buildBlockV1` specification and is intended for
-//! non-production/debug use only.
+//! This follows the `testing_buildBlockV1` specification. **Highly sensitive:**
+//! testing-only, powerful enough to include arbitrary transactions; must stay
+//! disabled by default and never be exposed on public-facing RPC without an
+//! explicit operator flag.
 
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
@@ -41,4 +43,3 @@ pub trait TestingApi {
         request: TestingBuildBlockRequest,
     ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV4>;
 }
-
