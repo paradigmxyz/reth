@@ -10,7 +10,14 @@ use crate::{
     sepolia::SEPOLIA_PARIS_BLOCK,
     EthChainSpec,
 };
-use alloc::{boxed::Box, format, sync::Arc, vec::Vec};
+use alloc::{
+    boxed::Box,
+    collections::BTreeMap,
+    format,
+    string::{String, ToString},
+    sync::Arc,
+    vec::Vec,
+};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
@@ -37,7 +44,6 @@ use reth_network_peers::{
     NodeRecord,
 };
 use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
-use std::collections::BTreeMap;
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
