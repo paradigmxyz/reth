@@ -10181,6 +10181,7 @@ dependencies = [
  "reth-trie-common",
  "serde",
  "serde_json",
+ "tokio",
 ]
 
 [[package]]
