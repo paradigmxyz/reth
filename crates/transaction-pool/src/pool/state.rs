@@ -330,7 +330,7 @@ mod tests {
     #[test]
     fn test_blob_reason_insufficient_base_fee() {
         // Blob tx with all structural bits set and blob fee sufficient, but base fee insufficient
-        let mut state = TxState::NO_PARKED_ANCESTORS |
+        let state = TxState::NO_PARKED_ANCESTORS |
             TxState::NO_NONCE_GAPS |
             TxState::ENOUGH_BALANCE |
             TxState::NOT_TOO_MUCH_GAS |
@@ -346,7 +346,7 @@ mod tests {
     #[test]
     fn test_blob_reason_insufficient_blob_fee() {
         // Blob tx with all structural bits set and base fee sufficient, but blob fee insufficient
-        let mut state = TxState::NO_PARKED_ANCESTORS |
+        let state = TxState::NO_PARKED_ANCESTORS |
             TxState::NO_NONCE_GAPS |
             TxState::ENOUGH_BALANCE |
             TxState::NOT_TOO_MUCH_GAS |
@@ -378,7 +378,7 @@ mod tests {
     #[test]
     fn test_blob_reason_insufficient_balance() {
         // Blob tx with insufficient balance
-        let mut state = TxState::NO_PARKED_ANCESTORS |
+        let state = TxState::NO_PARKED_ANCESTORS |
             TxState::NO_NONCE_GAPS |
             TxState::NOT_TOO_MUCH_GAS |
             TxState::ENOUGH_FEE_CAP_BLOCK |
