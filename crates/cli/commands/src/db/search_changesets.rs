@@ -1,5 +1,6 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, B256, U256};
 use clap::Parser;
+use crossbeam_channel::Sender;
 use reth_db_api::{
     cursor::DbCursorRO, database::Database, models::BlockNumberAddress, tables, transaction::DbTx,
 };
@@ -8,8 +9,8 @@ use reth_primitives_traits::Account;
 use reth_provider::ProviderFactory;
 use reth_stages::StageId;
 use reth_trie_common::Nibbles;
-use std::{collections::HashMap, sync::mpsc::Receiver, time::Duration};
-use tracing::{debug, info};
+use std::{ops::RangeInclusive, time::Duration};
+use tracing::{debug, info, trace};
 
 /// A match result from searching account change sets
 #[derive(Debug, Clone)]
@@ -29,64 +30,53 @@ struct StorageMatch {
     pre_block_value: U256,
 }
 
-/// Progress update sent by worker threads
-#[derive(Debug, Clone)]
-struct ProgressUpdate {
-    thread_id: usize,
-    progress: f64,
-}
-
-/// Progress indicator function that displays average progress from worker threads
-/// Returns when the channel is closed (all senders dropped)
-fn progress_indicator(rx: Receiver<ProgressUpdate>) {
-    let mut progress_map: HashMap<usize, f64> = HashMap::new();
+/// Distributes work chunks to worker threads via a channel and reports progress
+/// Returns when all chunks have been distributed
+fn distribute_work_and_report_progress(
+    work_tx: Sender<RangeInclusive<BlockNumber>>,
+    min_block: BlockNumber,
+    max_block: BlockNumber,
+    chunk_size: u64,
+) {
+    let total_blocks = max_block - min_block + 1;
+    let total_chunks = total_blocks.div_ceil(chunk_size);
+    let mut chunks_written = 0u64;
     let mut last_report = std::time::Instant::now();
-    let report_interval = Duration::from_millis(500);
+    let report_interval = Duration::from_secs(2);
 
-    loop {
-        // Try to receive updates with a timeout
-        match rx.recv_timeout(report_interval) {
-            Ok(update) => {
-                // Update the progress for this thread
-                progress_map.insert(update.thread_id, update.progress);
+    let mut current_min = min_block;
+    while current_min <= max_block {
+        let current_max = (current_min + chunk_size - 1).min(max_block);
+        let range = current_min..=current_max;
 
-                // Report periodically
-                if last_report.elapsed() >= report_interval {
-                    report_progress(&progress_map);
-                    last_report = std::time::Instant::now();
-                }
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
-                // Timeout - report current progress
-                if !progress_map.is_empty() {
-                    report_progress(&progress_map);
-                    last_report = std::time::Instant::now();
-                }
-            }
-            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
-                // Channel closed - all workers done
-                debug!("Progress indicator: channel closed, exiting");
-                break;
-            }
+        // Send the work chunk - if this fails, all workers have panicked
+        if work_tx.send(range).is_err() {
+            debug!("Work channel closed, stopping distribution");
+            break;
+        }
+
+        chunks_written += 1;
+        current_min = current_max + 1;
+
+        // Report progress periodically
+        if last_report.elapsed() >= report_interval {
+            let progress = chunks_written as f64 / total_chunks as f64;
+            info!(
+                "Search progress: {:.1}% ({}/{} chunks)",
+                progress * 100.0,
+                chunks_written,
+                total_chunks
+            );
+            last_report = std::time::Instant::now();
         }
     }
-}
 
-/// Calculate and report the average progress, excluding completed threads
-fn report_progress(progress_map: &HashMap<usize, f64>) {
-    // Collect all in-progress threads (< 1.0)
-    let active_progress: Vec<f64> = progress_map.values().filter(|&&p| p < 1.0).copied().collect();
+    // Report final progress
+    let progress = chunks_written as f64 / total_chunks as f64;
+    info!("Search progress: {:.1}% ({}/{} chunks)", progress * 100.0, chunks_written, total_chunks);
 
-    if active_progress.is_empty() {
-        // All threads completed or none started yet
-        return;
-    }
-
-    // Calculate average
-    let sum: f64 = active_progress.iter().sum();
-    let average = sum / active_progress.len() as f64;
-
-    info!("Search progress: {:.1}% ({} active threads)", average * 100.0, active_progress.len());
+    // Close the channel by dropping the sender
+    drop(work_tx);
 }
 
 /// The arguments for the `reth db search-changesets` command
@@ -119,6 +109,10 @@ pub struct Command {
     /// Number of concurrent threads to use for searching
     #[arg(long, value_name = "COUNT", default_value_t = default_concurrency())]
     pub concurrency: usize,
+
+    /// Size of block range chunks to distribute to workers
+    #[arg(long, value_name = "BLOCKS", default_value_t = 100)]
+    pub chunk_size: u64,
 }
 
 fn default_concurrency() -> usize {
@@ -128,16 +122,14 @@ fn default_concurrency() -> usize {
 impl Command {
     /// Search for an account by its hash nibbles (prefix match) and output results
     fn search_account_by_nibbles<DB: Database>(
+        &self,
         db: &DB,
         account_prefix: Nibbles,
-        min_block: Option<BlockNumber>,
-        max_block: Option<BlockNumber>,
         db_tip: BlockNumber,
-        concurrency: usize,
     ) -> eyre::Result<()> {
         // Determine actual min and max blocks for the range
-        let actual_max = max_block.unwrap_or(db_tip);
-        let actual_min = min_block.unwrap_or(0);
+        let actual_max = self.max_block.unwrap_or(db_tip);
+        let actual_min = self.min_block.unwrap_or(0);
 
         if actual_min > actual_max {
             info!(
@@ -148,31 +140,20 @@ impl Command {
         }
 
         info!(
-            "Searching for account with nibbles prefix: {:?} from block {} to {} using {} threads",
-            account_prefix, actual_min, actual_max, concurrency
+            "Searching for account with nibbles prefix: {:?} from block {} to {} using {} threads with chunk size {}",
+            account_prefix, actual_min, actual_max, self.concurrency, self.chunk_size
         );
 
-        // Calculate the block range size and split it among threads
-        let total_blocks = actual_max - actual_min + 1;
-        let blocks_per_thread = total_blocks.div_ceil(concurrency as u64);
-
-        // Create progress channel
-        let (progress_tx, progress_rx) = std::sync::mpsc::channel();
+        // Create work channel for distributing block ranges
+        let (work_tx, work_rx) = crossbeam_channel::bounded::<RangeInclusive<BlockNumber>>(1);
 
         // Spawn threads to search in parallel
         let mut all_matches = std::thread::scope(|scope| {
             let mut handles = Vec::new();
 
-            for thread_id in 0..concurrency {
-                let thread_min = actual_min + (thread_id as u64 * blocks_per_thread);
-                let thread_max = (thread_min + blocks_per_thread - 1).min(actual_max);
-
-                // Skip if this thread's range is beyond the actual range
-                if thread_min > actual_max {
-                    break;
-                }
-
-                let progress_tx = progress_tx.clone();
+            // Spawn worker threads
+            for thread_id in 0..self.concurrency {
+                let work_rx = work_rx.clone();
                 let handle = scope.spawn(move || -> eyre::Result<Vec<AccountMatch>> {
                     // Each thread creates its own database transaction
                     let mut tx = db.tx()?;
@@ -181,52 +162,44 @@ impl Command {
                     // Create a cursor over the AccountChangeSets table
                     let mut cursor = tx.cursor_dup_read::<tables::AccountChangeSets>()?;
 
-                    // Position the cursor at the starting point for this thread's range
-                    let max_key_excl = Some(thread_max + 1);
-                    let mut walker = cursor.walk_back(max_key_excl)?;
-                    debug!(?max_key_excl, ?thread_id, ?thread_max, ?thread_min, "Walking back");
-
                     let mut matches = Vec::new();
-                    let thread_range = thread_max - thread_min + 1;
-                    let mut blocks_processed = 0u64;
-                    let progress_report_interval = 1000u64;
 
-                    // Iterate through entries backwards within this thread's range
-                    while let Some((block_number, account_before_tx)) = walker.next().transpose()? {
-                        // Check if we're above our thread's max block
-                        if block_number > thread_max {
-                            continue;
-                        }
+                    // Process work chunks from the channel
+                    while let Ok(range) = work_rx.recv() {
+                        trace!(?thread_id, range_start = ?range.start(), range_end = ?range.end(), "Processing range");
 
-                        // Check if we've gone below our thread's minimum block
-                        if block_number < thread_min {
-                            break;
-                        }
+                        // Position the cursor at the starting point for this range
+                        let min_key_incl = Some(*range.start());
+                        let mut walker = cursor.walk(min_key_incl)?;
 
-                        let address = account_before_tx.address;
-                        let hashed_address = keccak256(address);
-                        let hashed_address_nibbles = Nibbles::unpack(hashed_address);
+                        // Iterate through entries forwards within this range
+                        while let Some((block_number, account_before_tx)) =
+                            walker.next().transpose()?
+                        {
+                            // Check if we're below our range's min block
+                            if block_number < *range.start() {
+                                continue;
+                            }
 
-                        // Check if this is the account we're looking for (prefix match)
-                        if hashed_address_nibbles.starts_with(&account_prefix) {
-                            matches.push(AccountMatch {
-                                block_number,
-                                address,
-                                pre_block_state: account_before_tx.info,
-                            });
-                        }
+                            // Check if we've gone above our range's maximum block
+                            if block_number > *range.end() {
+                                break;
+                            }
 
-                        // Send progress updates periodically
-                        blocks_processed += 1;
-                        if blocks_processed.is_multiple_of(progress_report_interval) {
-                            let blocks_from_max = thread_max - block_number;
-                            let progress = blocks_from_max as f64 / thread_range as f64;
-                            let _ = progress_tx.send(ProgressUpdate { thread_id, progress });
+                            let address = account_before_tx.address;
+                            let hashed_address = keccak256(address);
+                            let hashed_address_nibbles = Nibbles::unpack(hashed_address);
+
+                            // Check if this is the account we're looking for (prefix match)
+                            if hashed_address_nibbles.starts_with(&account_prefix) {
+                                matches.push(AccountMatch {
+                                    block_number,
+                                    address,
+                                    pre_block_state: account_before_tx.info,
+                                });
+                            }
                         }
                     }
-
-                    // Send 100% completion before exiting
-                    let _ = progress_tx.send(ProgressUpdate { thread_id, progress: 1.0 });
 
                     Ok(matches)
                 });
@@ -234,11 +207,8 @@ impl Command {
                 handles.push(handle);
             }
 
-            // Drop the original sender so channel closes when all workers finish
-            drop(progress_tx);
-
-            // Run progress indicator inline in the main thread
-            progress_indicator(progress_rx);
+            // Distribute work and report progress inline in the main thread
+            distribute_work_and_report_progress(work_tx, actual_min, actual_max, self.chunk_size);
 
             // Wait for all threads to complete and collect results
             let mut all_matches = Vec::new();
@@ -272,17 +242,15 @@ impl Command {
 
     /// Search for a storage slot by slot nibbles (prefix match) and optionally account hash
     fn search_storage_by_nibbles<DB: Database>(
+        &self,
         db: &DB,
         account_prefix: Option<Nibbles>,
         slot_prefix: Nibbles,
-        min_block: Option<BlockNumber>,
-        max_block: Option<BlockNumber>,
         db_tip: BlockNumber,
-        concurrency: usize,
     ) -> eyre::Result<()> {
         // Determine actual min and max blocks for the range
-        let actual_max = max_block.unwrap_or(db_tip);
-        let actual_min = min_block.unwrap_or(0);
+        let actual_max = self.max_block.unwrap_or(db_tip);
+        let actual_min = self.min_block.unwrap_or(0);
 
         if actual_min > actual_max {
             info!(
@@ -294,37 +262,26 @@ impl Command {
 
         if let Some(ref account_prefix) = account_prefix {
             info!(
-                "Searching for storage slot with account nibbles prefix: {account_prefix:?} and hashed slot nibbles prefix: {slot_prefix:?} from block {} to {} using {} threads",
-                actual_min, actual_max, concurrency
+                "Searching for storage slot with account nibbles prefix: {account_prefix:?} and hashed slot nibbles prefix: {slot_prefix:?} from block {} to {} using {} threads with chunk size {}",
+                actual_min, actual_max, self.concurrency, self.chunk_size
             );
         } else {
             info!(
-                "Searching for storage slot with nibbles prefix: {slot_prefix:?} from block {} to {} using {} threads",
-                actual_min, actual_max, concurrency
+                "Searching for storage slot with nibbles prefix: {slot_prefix:?} from block {} to {} using {} threads with chunk size {}",
+                actual_min, actual_max, self.concurrency, self.chunk_size
             );
         }
 
-        // Calculate the block range size and split it among threads
-        let total_blocks = actual_max - actual_min + 1;
-        let blocks_per_thread = total_blocks.div_ceil(concurrency as u64);
-
-        // Create progress channel
-        let (progress_tx, progress_rx) = std::sync::mpsc::channel();
+        // Create work channel for distributing block ranges
+        let (work_tx, work_rx) = crossbeam_channel::bounded::<RangeInclusive<BlockNumber>>(1);
 
         // Spawn threads to search in parallel
         let mut all_matches = std::thread::scope(|scope| {
             let mut handles = Vec::new();
 
-            for thread_id in 0..concurrency {
-                let thread_min = actual_min + (thread_id as u64 * blocks_per_thread);
-                let thread_max = (thread_min + blocks_per_thread - 1).min(actual_max);
-
-                // Skip if this thread's range is beyond the actual range
-                if thread_min > actual_max {
-                    break;
-                }
-
-                let progress_tx = progress_tx.clone();
+            // Spawn worker threads
+            for thread_id in 0..self.concurrency {
+                let work_rx = work_rx.clone();
                 let handle = scope.spawn(move || -> eyre::Result<Vec<StorageMatch>> {
                     // Each thread creates its own database transaction
                     let mut tx = db.tx()?;
@@ -333,61 +290,53 @@ impl Command {
                     // Create a cursor over the StorageChangeSets table
                     let mut cursor = tx.cursor_dup_read::<tables::StorageChangeSets>()?;
 
-                    // Position the cursor at the starting point for this thread's range
-                    let max_key_excl = Some(BlockNumberAddress((thread_max + 1, Address::ZERO)));
-                    let mut walker = cursor.walk_back(max_key_excl)?;
-                    debug!(?max_key_excl, ?thread_id, ?thread_max, ?thread_min, "Walking back");
-
                     let mut matches = Vec::new();
-                    let thread_range = thread_max - thread_min + 1;
-                    let mut blocks_processed = 0u64;
-                    let progress_report_interval = 1000u64;
 
-                    // Iterate through entries backwards within this thread's range
-                    while let Some((BlockNumberAddress((block_number, address)), storage_entry)) =
-                        walker.next().transpose()?
-                    {
-                        // Check if we're above our thread's max block
-                        if block_number > thread_max {
-                            continue;
-                        }
+                    // Process work chunks from the channel
+                    while let Ok(range) = work_rx.recv() {
+                        trace!(?thread_id, range_start = ?range.start(), range_end = ?range.end(), "Processing range");
 
-                        // Check if we've gone below our thread's minimum block
-                        if block_number < thread_min {
-                            break;
-                        }
+                        // Position the cursor at the starting point for this range
+                        let min_key_incl = Some(BlockNumberAddress((*range.start(), Address::ZERO)));
+                        let mut walker = cursor.walk(min_key_incl)?;
 
-                        let hashed_slot = keccak256(storage_entry.key);
-                        let hashed_slot_nibbles = Nibbles::unpack(hashed_slot);
+                        // Iterate through entries forwards within this range
+                        while let Some((
+                            BlockNumberAddress((block_number, address)),
+                            storage_entry,
+                        )) = walker.next().transpose()?
+                        {
+                            // Check if we're below our range's min block
+                            if block_number < *range.start() {
+                                continue;
+                            }
 
-                        // Check if the slot nibbles match as a prefix
-                        let slot_matches = hashed_slot_nibbles.starts_with(&slot_prefix);
-                        let addr_matches = account_prefix.as_ref().is_none_or(|prefix| {
-                            let hashed_address = Nibbles::unpack(keccak256(address));
-                            hashed_address.starts_with(prefix)
-                        });
+                            // Check if we've gone above our range's maximum block
+                            if block_number > *range.end() {
+                                break;
+                            }
 
-                        if slot_matches && addr_matches {
-                            matches.push(StorageMatch {
-                                block_number,
-                                address,
-                                slot: storage_entry.key,
-                                hashed_slot: hashed_slot_nibbles,
-                                pre_block_value: storage_entry.value,
+                            let hashed_slot = keccak256(storage_entry.key);
+                            let hashed_slot_nibbles = Nibbles::unpack(hashed_slot);
+
+                            // Check if the slot nibbles match as a prefix
+                            let slot_matches = hashed_slot_nibbles.starts_with(&slot_prefix);
+                            let addr_matches = account_prefix.as_ref().is_none_or(|prefix| {
+                                let hashed_address = Nibbles::unpack(keccak256(address));
+                                hashed_address.starts_with(prefix)
                             });
-                        }
 
-                        // Send progress updates periodically
-                        blocks_processed += 1;
-                        if blocks_processed.is_multiple_of(progress_report_interval) {
-                            let blocks_from_max = thread_max - block_number;
-                            let progress = blocks_from_max as f64 / thread_range as f64;
-                            let _ = progress_tx.send(ProgressUpdate { thread_id, progress });
+                            if slot_matches && addr_matches {
+                                matches.push(StorageMatch {
+                                    block_number,
+                                    address,
+                                    slot: storage_entry.key,
+                                    hashed_slot: hashed_slot_nibbles,
+                                    pre_block_value: storage_entry.value,
+                                });
+                            }
                         }
                     }
-
-                    // Send 100% completion before exiting
-                    let _ = progress_tx.send(ProgressUpdate { thread_id, progress: 1.0 });
 
                     Ok(matches)
                 });
@@ -395,11 +344,8 @@ impl Command {
                 handles.push(handle);
             }
 
-            // Drop the original sender so channel closes when all workers finish
-            drop(progress_tx);
-
-            // Run progress indicator inline in the main thread
-            progress_indicator(progress_rx);
+            // Distribute work and report progress inline in the main thread
+            distribute_work_and_report_progress(work_tx, actual_min, actual_max, self.chunk_size);
 
             // Wait for all threads to complete and collect results
             let mut all_matches = Vec::new();
@@ -479,26 +425,11 @@ impl Command {
         match (account_prefix, slot_prefix) {
             (account_prefix, Some(slot_prefix)) => {
                 // If slot is given, always search storage (with optional account filter)
-                Self::search_storage_by_nibbles(
-                    db,
-                    account_prefix,
-                    slot_prefix,
-                    self.min_block,
-                    self.max_block,
-                    db_tip,
-                    self.concurrency,
-                )
+                self.search_storage_by_nibbles(db, account_prefix, slot_prefix, db_tip)
             }
             (Some(account_prefix), None) => {
                 // If only account is given, search accounts with prefix matching
-                Self::search_account_by_nibbles(
-                    db,
-                    account_prefix,
-                    self.min_block,
-                    self.max_block,
-                    db_tip,
-                    self.concurrency,
-                )
+                self.search_account_by_nibbles(db, account_prefix, db_tip)
             }
             (None, None) => {
                 // If neither is given then error.

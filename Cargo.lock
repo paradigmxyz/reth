@@ -7531,6 +7531,7 @@ dependencies = [
  "backon",
  "clap",
  "comfy-table",
+ "crossbeam-channel",
  "crossterm 0.28.1",
  "eyre",
  "fdlimit",
