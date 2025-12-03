@@ -42,8 +42,8 @@ static PATH_ALL_ZEROS: Nibbles = {
     path
 };
 
-/// Used to track the state of the trie cursor, allowing us to differentiate a node having been
-/// taken from the cursor having been exhausted.
+/// Used to track the state of the trie cursor, allowing us to differentiate between a branch having
+/// been taken (used as a cached branch) and the cursor having been exhausted.
 #[derive(Debug)]
 enum TrieCursorState {
     /// Cursor is seeked to this path and the node has not been used yet.
@@ -224,25 +224,18 @@ where
     /// Because paths in the trie are visited in depth-first order, it's imperative that targets are
     /// given in depth-first order as well. If the targets were generated off of B256s, which is
     /// the common-case, then this is equivalent to lexicographical order.
-    ///
-    /// If `lexicographic` is true then ordering is checked using lexicographic order, not
-    /// depth-first. This is used when checking cached branch nodes, which we visit in lexicographic
-    /// order.
     fn should_retain(
         &self,
         targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
         path: &Nibbles,
-        lexicographic: bool,
     ) -> bool {
-        let cmp_fn = if lexicographic { std::cmp::Ord::cmp } else { depth_first::cmp };
-
-        trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), ?lexicographic, "should_retain: called");
+        trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), "should_retain: called");
         debug_assert!(self.retained_proofs.last().is_none_or(
                 |ProofTrieNode { path: last_retained_path, .. }| {
-                    cmp_fn(path, last_retained_path) == Ordering::Greater
+                    depth_first::cmp(path, last_retained_path) == Ordering::Greater
                 }
             ),
-            "should_retain called with path {path:?} which is not after previously retained node {:?} (lexicographic order:{lexicographic:?})",
+            "should_retain called with path {path:?} which is not after previously retained node {:?} in depth-first order",
             self.retained_proofs.last().map(|n| n.path),
         );
 
@@ -256,9 +249,9 @@ where
 
             // If the path isn't in the current range then iterate forward until it is (or until
             // there is no upper bound, indicating unbounded).
-            if upper.is_some_and(|upper| cmp_fn(path, &upper) != Ordering::Less) {
+            if upper.is_some_and(|upper| depth_first::cmp(path, &upper) != Ordering::Less) {
                 targets.next();
-                trace!(target: TRACE_TARGET, target = ?targets.peek(), ?lexicographic, "upper target <= path, next target");
+                trace!(target: TRACE_TARGET, target = ?targets.peek(), "upper target <= path, next target");
                 let &(l, u) = targets.peek().expect("targets is never exhausted");
                 (lower, upper) = (l, u);
             } else {
@@ -284,7 +277,7 @@ where
         }
 
         // If we should retain the child then do so.
-        if self.should_retain(targets, &child_path, false) {
+        if self.should_retain(targets, &child_path) {
             trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
             // Convert to `ProofTrieNode`, which will be what is retained.
@@ -726,7 +719,7 @@ where
     /// If there is already a child at the top branch of `branch_stack` occupying this new branch's
     /// nibble then that child will have its short-key split with another new branch, and this
     /// cached branch will be a child of that splitting branch.
-    fn push_new_cached_branch(
+    fn push_cached_branch(
         &mut self,
         targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
         cached_path: Nibbles,
@@ -734,7 +727,7 @@ where
     ) -> Result<(), StateProofError> {
         debug_assert!(
             cached_path.starts_with(&self.branch_path),
-            "push_new_cached_branch called with path {cached_path:?} which is not a child of current branch {:?}",
+            "push_cached_branch called with path {cached_path:?} which is not a child of current branch {:?}",
             self.branch_path,
         );
 
@@ -937,7 +930,7 @@ where
             // top branch is the parent of this cached branch. Either way we push a branch
             // corresponding to the cached one onto the stack, so we can begin constructing it.
             if self.branch_path != cached_path {
-                self.push_new_cached_branch(targets, cached_path, &cached_branch)?;
+                self.push_cached_branch(targets, cached_path, &cached_branch)?;
             }
 
             // At this point the top of the branch stack is the same branch which was found in the
@@ -998,11 +991,9 @@ where
                 //   `targets` from being moved beyond the last child before it is checked.
                 // - If we do end up using the cached hash value, then we will need to commit the
                 //   last child before pushing a new one onto the stack anyway.
-                if !self.child_stack.is_empty() {
-                    self.commit_last_child(targets)?;
-                }
+                self.commit_last_child(targets)?;
 
-                if !self.should_retain(targets, &child_path, false) {
+                if !self.should_retain(targets, &child_path) {
                     // Pull this child's hash out of the cached branch node. To get the hash's index
                     // we first need to calculate the mask of which cached hash's have already been
                     // used by this branch (if any). The number of set bits in that mask will be the
