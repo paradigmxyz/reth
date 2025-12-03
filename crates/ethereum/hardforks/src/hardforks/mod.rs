@@ -256,7 +256,7 @@ impl ForkTimestamps {
     pub fn current_with_index(&self, timestamp: u64) -> Option<(usize, u64)> {
         self.timestamps
             .iter()
-            // find the first timestamp that's greater that the given timestmap
+            // find the first timestamp that's greater that the given timestamp
             .position(|ts| &timestamp < ts)
             // get the previous one, which is the currently active timestamp
             .and_then(|idx| idx.checked_sub(1))
