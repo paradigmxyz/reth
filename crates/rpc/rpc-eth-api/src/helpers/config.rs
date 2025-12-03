@@ -76,17 +76,17 @@ where
 
         EthForkConfig {
             activation_time: timestamp,
-            blob_schedule: chain_spec.blob_params_at_timestamp(timestamp).unwrap_or_else(|| {
+            blob_schedule: chain_spec
+                .blob_params_at_timestamp(timestamp)
                 // no blob support, so we set this to zero
-                BlobParams {
+                .unwrap_or(BlobParams {
                     target_blob_count: 0,
                     max_blob_count: 0,
                     update_fraction: 0,
                     min_blob_fee: 0,
                     max_blobs_per_tx: 0,
                     blob_base_cost: 0,
-                }
-            }),
+                }),
             chain_id: chain_spec.chain().id(),
             fork_id,
             precompiles,
