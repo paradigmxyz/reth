@@ -14,6 +14,9 @@ pub trait HeaderMut: BlockHeader {
     /// Updates the block number.
     fn set_block_number(&mut self, number: BlockNumber);
 
+    /// Updates the block's timestamp.
+    fn set_timestamp(&mut self, number: BlockNumber);
+
     /// Updates the block state root.
     fn set_state_root(&mut self, state_root: B256);
 
@@ -33,6 +36,10 @@ impl HeaderMut for Header {
 
     fn set_block_number(&mut self, number: BlockNumber) {
         self.number = number;
+    }
+
+    fn set_timestamp(&mut self, number: BlockNumber) {
+        self.timestamp = number;
     }
 
     fn set_state_root(&mut self, state_root: B256) {
