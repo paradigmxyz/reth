@@ -150,6 +150,23 @@ impl PruneModes {
         self.receipts.is_some() || !self.receipts_log_filter.is_empty()
     }
 
+    /// Migrates deprecated prune mode values to their new defaults.
+    ///
+    /// Returns `true` if any migration was performed.
+    ///
+    /// Currently migrates:
+    /// - `merkle_changesets`: `Distance(10064)` -> `Distance(64)`
+    pub fn migrate(&mut self) -> bool {
+        let mut migrated = false;
+
+        if self.merkle_changesets == PruneMode::Distance(MINIMUM_PRUNING_DISTANCE) {
+            self.merkle_changesets = PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS);
+            migrated = true;
+        }
+
+        migrated
+    }
+
     /// Returns an error if we can't unwind to the targeted block because the target block is
     /// outside the range.
     ///
