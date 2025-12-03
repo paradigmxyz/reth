@@ -720,16 +720,21 @@ where
         }
     }
 
-    // TODO docs
+    /// Pushes a new branch onto the `branch_stack` which is based on a cached branch obtained via
+    /// the trie cursor.
+    ///
+    /// If there is already a child at the top branch of `branch_stack` occupying this new branch's
+    /// nibble then that child will have its short-key split with another new branch, and this
+    /// cached branch will be a child of that splitting branch.
     fn push_new_cached_branch(
         &mut self,
         targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        cached_path: Nibbles,
         cached_branch: &BranchNodeCompact,
-        cached_branch_path: Nibbles,
     ) -> Result<(), StateProofError> {
         debug_assert!(
-            cached_branch_path.starts_with(&self.branch_path),
-            "push_new_cached_branch called with path {cached_branch_path:?} which is not a child of current branch {:?}",
+            cached_path.starts_with(&self.branch_path),
+            "push_new_cached_branch called with path {cached_path:?} which is not a child of current branch {:?}",
             self.branch_path,
         );
 
@@ -738,15 +743,15 @@ where
         // If both stacks are empty then there were no leaves before this cached branch, push it and
         // be done; the extension of the branch will be its full path.
         if self.child_stack.is_empty() && parent_branch.is_none() {
-            self.branch_path = cached_branch_path;
+            self.branch_path = cached_path;
             self.branch_stack
-                .push(Self::new_from_cached_branch(cached_branch, cached_branch_path.len() as u8));
+                .push(Self::new_from_cached_branch(cached_branch, cached_path.len() as u8));
             return Ok(())
         }
 
         // Get the nibble which should be set in the parent branch's `state_mask` for this new
         // branch.
-        let cached_branch_nibble = cached_branch_path.get_unchecked(self.branch_path.len());
+        let cached_branch_nibble = cached_path.get_unchecked(self.branch_path.len());
 
         // We calculate the `ext_len` of the new branch, and potentially update its nibble if a new
         // parent branch is inserted here, based on the state of the parent branch.
@@ -769,13 +774,13 @@ where
                 .is_empty());
 
             // Split that leaf/extension's short key with a new branch.
-            let (nibble, short_key) = self.push_new_branch(cached_branch_path);
+            let (nibble, short_key) = self.push_new_branch(cached_path);
             (nibble, short_key.len())
         } else {
             // If there is a parent branch but its `state_mask` bit for this branch is not set
             // then we can simply calculate the `ext_len` based on the difference of each, minus
             // 1 to account for the nibble in the `state_mask`.
-            (cached_branch_nibble, cached_branch_path.len() - self.branch_path.len() - 1)
+            (cached_branch_nibble, cached_path.len() - self.branch_path.len() - 1)
         };
 
         // `commit_last_child` relies on the last set bit of the parent branch's `state_mask` to
@@ -792,7 +797,7 @@ where
         }
 
         // Finally update the `branch_path` and push the new branch.
-        self.branch_path = cached_branch_path;
+        self.branch_path = cached_path;
         self.branch_stack.push(Self::new_from_cached_branch(cached_branch, ext_len as u8));
 
         trace!(
@@ -805,9 +810,21 @@ where
         Ok(())
     }
 
-    // TODO docs
-    // TODO re-evaluate how next_cached_branch works... might be possible to not always call next
-    //      when taking it.
+    /// Accepts the current state of both hashed and trie cursors, and determines the next range of
+    /// hashed keys which need to be processed using [`Self::push_leaf`].
+    ///
+    /// This method will use cached branch node data from the trie cursor to skip over all possible
+    /// ranges of keys, to reduce computation as much as possible.
+    ///
+    /// # Returns
+    ///
+    /// - `None`: No more data to process, finish computation
+    ///
+    /// - `Some(lower, None)`: Indicates to call `push_leaf` on all keys starting at `lower`, with
+    ///   no upper bound. This method won't be called again after this.
+    ///
+    /// - `Some(lower, Some(upper))`: Indicates to call `push_leaf` on all keys starting at `lower`,
+    ///   up to but excluding `upper`, and then call this method once done.
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn next_uncached_key_range(
         &mut self,
@@ -836,16 +853,16 @@ where
 
         loop {
             // Determine the current cached branch node.
-            // Note: cloning is cheap because BranchNodeCompact uses Arcs.
+            //
+            // NOTE we pop off the `cached_branch_stack` because cloning the `BranchNodeCompact`
+            // means cloning an Arc, which incurs synchronization overhead. We have to be sure to
+            // push the cached branch back onto the stack once done.
             let (cached_path, cached_branch) = match (
-                self.cached_branch_stack.last(),
+                self.cached_branch_stack.pop(),
                 &trie_cursor_state,
                 lower_bound.as_ref(),
             ) {
-                (Some(cached), _, _) => {
-                    // If the `cached_branch_stack` is not empty then its last is the current
-                    cached.clone()
-                }
+                (Some(cached), _, _) => cached,
                 (None, TrieCursorState::Exhausted, _) | (_, _, None) => {
                     trace!(target: TRACE_TARGET, "Exhausted cached trie nodes");
                     // If both stack and trie cursor are empty then there are no more cached nodes,
@@ -875,8 +892,7 @@ where
                     self.cached_branch_stack.push(trie_cursor_state.take());
                     trace!(target: TRACE_TARGET, cached=?self.cached_branch_stack.last(), "Pushed next trie node onto cached_branch_stack");
 
-                    let (cached_path, cached_branch) =
-                        self.cached_branch_stack.last().expect("just pushed");
+                    let (cached_path, _) = self.cached_branch_stack.last().expect("just pushed");
 
                     // The current hashed key indicates the first key after the previous uncached
                     // range, or None if this is the first call to this method. If the key is not
@@ -894,7 +910,7 @@ where
                         return Ok(range);
                     }
 
-                    (*cached_path, cached_branch.clone())
+                    self.cached_branch_stack.pop().expect("just pushed")
                 }
             };
 
@@ -920,7 +936,7 @@ where
             // top branch is the parent of this cached branch. Either way we push a branch
             // corresponding to the cached one onto the stack, so we can begin constructing it.
             if self.branch_path != cached_path {
-                self.push_new_cached_branch(targets, &cached_branch, cached_path)?;
+                self.push_new_cached_branch(targets, cached_path, &cached_branch)?;
             }
 
             // At this point the top of the branch stack is the same branch which was found in the
@@ -950,8 +966,10 @@ where
                     ?cached_branch,
                     "No further children, popping branch",
                 );
-                self.cached_branch_stack.pop();
                 self.pop_branch(targets)?;
+
+                // no need to pop from `cached_branch_stack`, the current cached branch is already
+                // popped (see note at the top of the loop).
 
                 // The just-popped branch is completely processed; we know there can be no more keys
                 // with that prefix. Set the lower bound which can be returned from this method to
@@ -1011,6 +1029,9 @@ where
                     // completely processed.
                     lower_bound = child_path.increment();
 
+                    // Push the current cached branch back onto the stack before looping.
+                    self.cached_branch_stack.push((cached_path, cached_branch));
+
                     continue
                 }
             }
@@ -1033,6 +1054,9 @@ where
                 &trie_cursor_state &&
                 next_cached_path.starts_with(&child_path)
             {
+                // Push the current cached branch back on before pushing its child and then looping
+                self.cached_branch_stack.push((cached_path, cached_branch));
+
                 trace!(
                     target: TRACE_TARGET,
                     ?child_path,
@@ -1054,6 +1078,10 @@ where
                 upper=?child_path_upper,
                 "Returning sub-trie's key range to calculate",
             );
+
+            // Push the current cached branch back onto the stack before returning.
+            self.cached_branch_stack.push((cached_path, cached_branch));
+
             return Ok(Some((child_path, child_path_upper)));
         }
     }
