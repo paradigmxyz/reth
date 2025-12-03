@@ -379,7 +379,7 @@ reth-ethereum-cli = { path = "crates/ethereum/cli", default-features = false }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus", default-features = false }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives", default-features = false }
 reth-ethereum-forks = { path = "crates/ethereum/hardforks", default-features = false }
-reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
+reth-ethereum-payload-builder = { path = "crates/ethereum/payload", default-features = false }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
 reth-ethereum = { path = "crates/ethereum/reth" }
 reth-etl = { path = "crates/etl" }

@@ -10145,6 +10145,8 @@ dependencies = [
  "reth-db-api",
  "reth-engine-primitives",
  "reth-errors",
+ "reth-ethereum-engine-primitives",
+ "reth-ethereum-payload-builder",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
@@ -10207,6 +10209,7 @@ dependencies = [
  "reth-network-peers",
  "reth-rpc-eth-api",
  "reth-trie-common",
+ "serde",
 ]
 
 [[package]]

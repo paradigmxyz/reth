@@ -3,7 +3,7 @@ use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_p
 use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
-use reth_rpc_server_types::RpcModuleSelection;
+use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
 use std::{net::SocketAddr, path::PathBuf};
 use tower::layer::util::Identity;
 use tracing::{debug, warn};
@@ -141,19 +141,25 @@ impl RethRpcServerConfig for RpcServerArgs {
             .with_config(RpcModuleConfig::new(self.eth_config(), self.flashbots_config()));
 
         if self.http {
-            config = config.with_http(
-                self.http_api
-                    .clone()
-                    .unwrap_or_else(|| RpcModuleSelection::standard_modules().into()),
-            );
+            let mut http_modules = self
+                .http_api
+                .clone()
+                .unwrap_or_else(|| RpcModuleSelection::standard_modules().into());
+            if self.http_testing {
+                http_modules.push(RethRpcModule::Other("testing".to_string()));
+            }
+            config = config.with_http(http_modules);
         }
 
         if self.ws {
-            config = config.with_ws(
-                self.ws_api
-                    .clone()
-                    .unwrap_or_else(|| RpcModuleSelection::standard_modules().into()),
-            );
+            let mut ws_modules = self
+                .ws_api
+                .clone()
+                .unwrap_or_else(|| RpcModuleSelection::standard_modules().into());
+            if self.ws_testing {
+                ws_modules.push(RethRpcModule::Other("testing".to_string()));
+            }
+            config = config.with_ws(ws_modules);
         }
 
         if self.is_ipc_enabled() {

@@ -12,7 +12,8 @@ use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
-use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
+use reth_ethereum_payload_builder::EthereumBuilderConfig;
+use reth_ethereum_primitives::{Block as EthBlock, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
 };
@@ -35,12 +36,16 @@ use reth_node_builder::{
     BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
+use reth_primitives_traits::Block as BlockTrait;
+use reth_provider::{
+    providers::ProviderFactoryBuilder, BlockReaderIdExt, ChainSpecProvider, EthStorage,
+    StateProviderFactory,
+};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
-    ValidationApi,
+    EthTestingBlockBuilder, TestingApi, ValidationApi,
 };
-use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
+use reth_rpc_api::servers::{BlockSubmissionValidationApiServer, TestingApiServer};
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
 use reth_rpc_eth_api::{
     helpers::{
@@ -270,12 +275,22 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: Hardforks + EthereumHardforks,
+            ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
+    N::Provider: BlockReaderIdExt<
+            Block = EthBlock,
+            Header = <EthBlock as BlockTrait>::Header,
+            Transaction = TransactionSigned,
+            Receipt = Receipt,
+        > + StateProviderFactory
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + Send
+        + Sync
+        + 'static,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -301,6 +316,8 @@ where
 
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
+        let testing_chain = ctx.config.chain.clone();
+        let testing_provider = ctx.node.provider().clone();
 
         self.inner
             .launch_add_ons_with(ctx, move |container| {
@@ -313,6 +330,29 @@ where
                     .modules
                     .merge_if_module_configured(RethRpcModule::Eth, eth_config.into_rpc())?;
 
+                // testing_buildBlockV1: only wire when the hidden testing module is explicitly
+                // requested on any transport. Default stays disabled to honor security guidance.
+                let testing_requested = {
+                    let cfg = container.modules.module_config();
+                    cfg.contains_http(&RethRpcModule::Other("testing".to_string())) ||
+                        cfg.contains_ws(&RethRpcModule::Other("testing".to_string())) ||
+                        cfg.contains_ipc(&RethRpcModule::Other("testing".to_string()))
+                };
+                if testing_requested {
+                    let evm_config: EthEvmConfig<ChainSpec> =
+                        EthEvmConfig::new(testing_chain.clone());
+                    let builder = EthTestingBlockBuilder::new(
+                        testing_provider,
+                        evm_config,
+                        EthereumBuilderConfig::new(),
+                    );
+                    let testing_api = TestingApi::new(builder).into_rpc();
+                    container.modules.merge_if_module_configured(
+                        RethRpcModule::Other("testing".to_string()),
+                        testing_api,
+                    )?;
+                }
+
                 Ok(())
             })
             .await
@@ -324,12 +364,22 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> RethRpcAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec: Hardforks + EthereumHardforks,
+            ChainSpec = ChainSpec,
             Primitives = EthPrimitives,
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
+    N::Provider: BlockReaderIdExt<
+            Block = EthBlock,
+            Header = <EthBlock as BlockTrait>::Header,
+            Transaction = TransactionSigned,
+            Receipt = Receipt,
+        > + StateProviderFactory
+        + ChainSpecProvider<ChainSpec = ChainSpec>
+        + Send
+        + Sync
+        + 'static,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,

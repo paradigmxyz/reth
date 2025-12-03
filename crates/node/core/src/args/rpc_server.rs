@@ -63,6 +63,10 @@ pub struct RpcServerArgs {
     #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub http_api: Option<RpcModuleSelection>,
 
+    /// Enable the testing namespace (`testing_buildBlockV1`). Highly sensitive; default off.
+    #[arg(long = "http.testing", default_value_t = false, hide = true)]
+    pub http_testing: bool,
+
     /// Http Corsdomain to allow request from
     #[arg(long = "http.corsdomain")]
     pub http_corsdomain: Option<String>,
@@ -86,6 +90,10 @@ pub struct RpcServerArgs {
     /// Rpc Modules to be configured for the WS server
     #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub ws_api: Option<RpcModuleSelection>,
+
+    /// Enable the testing namespace on WS. Highly sensitive; default off.
+    #[arg(long = "ws.testing", default_value_t = false, hide = true)]
+    pub ws_testing: bool,
 
     /// Disable the IPC-RPC server
     #[arg(long)]
@@ -393,12 +401,14 @@ impl Default for RpcServerArgs {
             http_port: constants::DEFAULT_HTTP_RPC_PORT,
             http_disable_compression: false,
             http_api: None,
+            http_testing: false,
             http_corsdomain: None,
             ws: false,
             ws_addr: Ipv4Addr::LOCALHOST.into(),
             ws_port: constants::DEFAULT_WS_RPC_PORT,
             ws_allowed_origins: None,
             ws_api: None,
+            ws_testing: false,
             ipcdisable: false,
             ipcpath: constants::DEFAULT_IPC_ENDPOINT.to_string(),
             ipc_socket_permissions: None,
