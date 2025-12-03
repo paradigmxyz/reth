@@ -276,12 +276,12 @@ impl ForkTimestamps {
     }
 
     /// Returns true if there are no timestamp-based forks.
-    pub fn is_empty(&self) -> bool {
+    pub const fn is_empty(&self) -> bool {
         self.timestamps.is_empty()
     }
 
     /// Returns the number of timestamp-based forks.
-    pub fn len(&self) -> usize {
+    pub const fn len(&self) -> usize {
         self.timestamps.len()
     }
 }
