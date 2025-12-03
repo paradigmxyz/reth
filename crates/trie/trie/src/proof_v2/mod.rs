@@ -42,6 +42,47 @@ static PATH_ALL_ZEROS: Nibbles = {
     path
 };
 
+/// Used to track the state of the trie cursor, allowing us to differentiate a node having been
+/// taken from the cursor having been exhausted.
+#[derive(Debug)]
+enum TrieCursorState {
+    /// Cursor is seeked to this path and the node has not been used yet.
+    Available(Nibbles, BranchNodeCompact),
+    /// Cursor is seeked to this path, but the node has been used.
+    Taken(Nibbles),
+    /// Cursor has been exhausted.
+    Exhausted,
+}
+
+impl TrieCursorState {
+    /// Creates a [`Self`] based on an entry returned from the cursor itself.
+    fn new(entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
+        entry.map_or(Self::Exhausted, |(path, node)| Self::Available(path, node))
+    }
+
+    /// Returns the path the cursor is seeked to, or None if it's exhausted.
+    const fn path(&self) -> Option<&Nibbles> {
+        match self {
+            Self::Available(path, _) | Self::Taken(path) => Some(path),
+            Self::Exhausted => None,
+        }
+    }
+
+    /// Takes the path and node from a [`Self::Available`]. Panics if not [`Self::Available`].
+    fn take(&mut self) -> (Nibbles, BranchNodeCompact) {
+        let Self::Available(path, _) = self else {
+            panic!("take called on non-Available: {self:?}")
+        };
+
+        let path = *path;
+        let Self::Available(path, node) = core::mem::replace(self, Self::Taken(path)) else {
+            unreachable!("already checked that self is Self::Available");
+        };
+
+        (path, node)
+    }
+}
+
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -771,7 +812,7 @@ where
     fn next_uncached_key_range(
         &mut self,
         targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
-        next_cached_branch: &mut Option<(Nibbles, BranchNodeCompact)>,
+        trie_cursor_state: &mut TrieCursorState,
         hashed_key_current: Option<&Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
         // `lower_bound` will be used to track the lower bound of the range which is returned from
@@ -786,15 +827,19 @@ where
         loop {
             // TODO might be possible to move this out of the loop?
             // Determine the current cached branch node.
-            // Note: Cloning the `cached_branch` is cheap because it uses an Arc.
+            // Note: cloning is cheap because BranchNodeCompact uses Arcs.
             let (cached_path, cached_branch) = match (
                 self.cached_branch_stack.last(),
-                &next_cached_branch,
+                &trie_cursor_state,
                 lower_bound.as_ref(),
             ) {
-                (None, None, _) | (_, _, None) => {
+                (Some(cached), _, _) => {
+                    // If the `cached_branch_stack` is not empty then its last is the current
+                    cached.clone()
+                }
+                (None, TrieCursorState::Exhausted, _) | (_, _, None) => {
                     trace!(target: TRACE_TARGET, "Exhausted cached trie nodes");
-                    // If both stack and cursor are empty then there are no more cached nodes,
+                    // If both stack and trie cursor are empty then there are no more cached nodes,
                     // return an open range to indicate that the rest of the trie should be
                     // calculated solely from leaves.
                     //
@@ -802,29 +847,25 @@ where
                     // return None to indicate end of computation.
                     return Ok(lower_bound.map(|lower| (lower, None)));
                 }
-                (Some(cached), _, _) => {
-                    // If the `cached_branch_stack` is not empty then its last is the current
-                    cached.clone()
-                }
-                (_, Some((next_cached_path, _)), Some(lower_bound))
-                    if next_cached_path < lower_bound =>
+                (_, cursor_state, Some(lower_bound))
+                    if cursor_state.path().expect("not exhausted") < lower_bound =>
                 {
-                    // If `cached_branch_stack` is empty but there is an unconsumed cached branch,
-                    // we would want to use that. However if that cached branch belongs to a range
-                    // which has already been processed then we can't use it, instead we seek
-                    // forward and try again.
-                    *next_cached_branch = self.trie_cursor.seek(*lower_bound)?;
+                    // If `cached_branch_stack` is empty then we want to get a new cached branch
+                    // node from the cursor. If the trie cursor is seeked to a branch which has
+                    // already been processed then we can't use it, instead we seek forward and try
+                    // again.
+                    *trie_cursor_state = TrieCursorState::new(self.trie_cursor.seek(*lower_bound)?);
                     continue
                 }
-                (_, Some(_), _) => {
-                    // If `cached_branch_stack` is empty but there is an unconsumed cached
-                    // branch from the cursor then we consume that branch, pushing it onto the
-                    // stack.
-                    let cached = core::mem::take(next_cached_branch).expect("is some");
-                    *next_cached_branch = self.trie_cursor.next()?;
-                    self.cached_branch_stack.push(cached.clone());
-                    trace!(target: TRACE_TARGET, ?cached, "Pushed next trie node onto cached_branch_stack");
-                    cached
+                (_, TrieCursorState::Taken(path), _) => {
+                    panic!("trie cursor at {path:?} had its node taken, but lower_bound {lower_bound:?} is still lte");
+                }
+                (_, TrieCursorState::Available(_, _), _) => {
+                    // If `cached_branch_stack` is empty but there is an available cached branch
+                    // from the trie cursor then we consume that branch, pushing it onto the stack.
+                    self.cached_branch_stack.push(trie_cursor_state.take());
+                    trace!(target: TRACE_TARGET, cached=?self.cached_branch_stack.last(), "Pushed next trie node onto cached_branch_stack");
+                    self.cached_branch_stack.last().expect("just pushed").clone()
                 }
             };
 
@@ -968,6 +1009,7 @@ where
 
                     // Update the `lower_bound` to indicate that the child whose bit was just set is
                     // completely processed.
+                    // TODO redundant call to child_path_at? could just be child_path?
                     lower_bound = self.child_path_at(child_nibble).increment();
 
                     continue
@@ -978,25 +1020,28 @@ where
             // branch node may be the node at this child directly, or this child may be an
             // extension and the cached branch is the child of that extension.
 
-            // All trie nodes prior to `child_path` will not be modified further, so we can seek
-            // the cached cursor to the next cached node at-or-after `child_path`.
-            if let Some(next_cached_path) = next_cached_branch.as_ref().map(|kv| kv.0) &&
-                next_cached_path < child_path
-            {
+            // All trie nodes prior to `child_path` will not be modified further, so we can seek the
+            // trie cursor to the next cached node at-or-after `child_path`.
+            if trie_cursor_state.path().is_some_and(|path| path < &child_path) {
                 trace!(target: TRACE_TARGET, ?child_path, "Seeking trie cursor to child path");
-                *next_cached_branch = self.trie_cursor.seek(child_path)?;
+                *trie_cursor_state = TrieCursorState::new(self.trie_cursor.seek(child_path)?);
             }
 
             // If the next cached branch node is a child of `child_path` then we can assume it is
             // the cached branch for this child. We push it onto the `cached_branch_stack` and loop
             // back to the top.
-            if let Some(next_cached_path) = next_cached_branch.as_ref().map(|kv| kv.0) &&
+            if let TrieCursorState::Available(next_cached_path, next_cached_branch) =
+                &trie_cursor_state &&
                 next_cached_path.starts_with(&child_path)
             {
-                let cached = core::mem::take(next_cached_branch).expect("is some");
-                trace!(target: TRACE_TARGET, ?child_path, ?cached, "Pushing cached branch for child");
-                *next_cached_branch = self.trie_cursor.next()?;
-                self.cached_branch_stack.push(cached);
+                trace!(
+                    target: TRACE_TARGET,
+                    ?child_path,
+                    ?next_cached_path,
+                    ?next_cached_branch,
+                    "Pushing cached branch for child",
+                );
+                self.cached_branch_stack.push(trie_cursor_state.take());
                 continue;
             }
 
@@ -1062,24 +1107,14 @@ where
         // Initialize the hashed cursor to None to indicate it hasn't been seeked yet.
         let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
 
-        // Initialize the `cached_branch_stack` with the node closest to root.
-        if let Some(cached_branch) = self.trie_cursor.seek(Nibbles::new())? {
-            self.cached_branch_stack.push(cached_branch);
-        }
-
-        // `next_cached_branch` will always be the next _unconsumed_ cached node. If the
-        // `cached_branch_stack` is empty then the seek in the previous step returned None,
-        // indicating there are no trie nodes.
-        let mut next_cached_branch = (!self.cached_branch_stack.is_empty())
-            .then(|| self.trie_cursor.next().transpose())
-            .flatten()
-            .transpose()?;
+        // Initialize the `trie_cursor_state` with the node closest to root.
+        let mut trie_cursor_state = TrieCursorState::new(self.trie_cursor.seek(Nibbles::new())?);
 
         loop {
             // Determine the range of keys of the overall trie which need to be re-computed.
             let Some((lower_bound, upper_bound)) = self.next_uncached_key_range(
                 &mut targets,
-                &mut next_cached_branch,
+                &mut trie_cursor_state,
                 hashed_cursor_current.as_ref().map(|kv| &kv.0),
             )?
             else {
