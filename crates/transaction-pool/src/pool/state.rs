@@ -117,7 +117,25 @@ impl TxState {
                 }
             }
             SubPool::BaseFee => Some(QueuedReason::InsufficientBaseFee),
-            SubPool::Blob => Some(QueuedReason::InsufficientBlobFee),
+            SubPool::Blob => {
+                // For blob transactions, derive the queued reason from flags similarly to Queued.
+                if !self.contains(Self::NO_NONCE_GAPS) {
+                    Some(QueuedReason::NonceGap)
+                } else if !self.contains(Self::ENOUGH_BALANCE) {
+                    Some(QueuedReason::InsufficientBalance)
+                } else if !self.contains(Self::NO_PARKED_ANCESTORS) {
+                    Some(QueuedReason::ParkedAncestors)
+                } else if !self.contains(Self::NOT_TOO_MUCH_GAS) {
+                    Some(QueuedReason::TooMuchGas)
+                } else if !self.contains(Self::ENOUGH_FEE_CAP_BLOCK) {
+                    Some(QueuedReason::InsufficientBaseFee)
+                } else if !self.contains(Self::ENOUGH_BLOB_FEE_CAP_BLOCK) {
+                    Some(QueuedReason::InsufficientBlobFee)
+                } else {
+                    // Fallback for unexpected non-pending blob state
+                    Some(QueuedReason::InsufficientBlobFee)
+                }
+            }
         }
     }
 }
@@ -307,5 +325,85 @@ mod tests {
         assert_eq!(SubPool::Blob, state.into());
         assert!(state.is_blob());
         assert!(!state.is_pending());
+    }
+
+    #[test]
+    fn test_blob_reason_insufficient_base_fee() {
+        // Blob tx with all structural bits set and blob fee sufficient, but base fee insufficient
+        let mut state = TxState::NO_PARKED_ANCESTORS |
+            TxState::NO_NONCE_GAPS |
+            TxState::ENOUGH_BALANCE |
+            TxState::NOT_TOO_MUCH_GAS |
+            TxState::ENOUGH_BLOB_FEE_CAP_BLOCK |
+            TxState::BLOB_TRANSACTION;
+        // ENOUGH_FEE_CAP_BLOCK intentionally not set
+        let subpool: SubPool = state.into();
+        assert_eq!(subpool, SubPool::Blob);
+        let reason = state.determine_queued_reason(subpool);
+        assert_eq!(reason, Some(QueuedReason::InsufficientBaseFee));
+    }
+
+    #[test]
+    fn test_blob_reason_insufficient_blob_fee() {
+        // Blob tx with all structural bits set and base fee sufficient, but blob fee insufficient
+        let mut state = TxState::NO_PARKED_ANCESTORS |
+            TxState::NO_NONCE_GAPS |
+            TxState::ENOUGH_BALANCE |
+            TxState::NOT_TOO_MUCH_GAS |
+            TxState::ENOUGH_FEE_CAP_BLOCK |
+            TxState::BLOB_TRANSACTION;
+        // ENOUGH_BLOB_FEE_CAP_BLOCK intentionally not set
+        let subpool: SubPool = state.into();
+        assert_eq!(subpool, SubPool::Blob);
+        let reason = state.determine_queued_reason(subpool);
+        assert_eq!(reason, Some(QueuedReason::InsufficientBlobFee));
+    }
+
+    #[test]
+    fn test_blob_reason_nonce_gap() {
+        // Blob tx with nonce gap should report NonceGap regardless of fee bits
+        let mut state = TxState::NO_PARKED_ANCESTORS |
+            TxState::ENOUGH_BALANCE |
+            TxState::NOT_TOO_MUCH_GAS |
+            TxState::ENOUGH_FEE_CAP_BLOCK |
+            TxState::ENOUGH_BLOB_FEE_CAP_BLOCK |
+            TxState::BLOB_TRANSACTION;
+        state.remove(TxState::NO_NONCE_GAPS);
+        let subpool: SubPool = state.into();
+        assert_eq!(subpool, SubPool::Blob);
+        let reason = state.determine_queued_reason(subpool);
+        assert_eq!(reason, Some(QueuedReason::NonceGap));
+    }
+
+    #[test]
+    fn test_blob_reason_insufficient_balance() {
+        // Blob tx with insufficient balance
+        let mut state = TxState::NO_PARKED_ANCESTORS |
+            TxState::NO_NONCE_GAPS |
+            TxState::NOT_TOO_MUCH_GAS |
+            TxState::ENOUGH_FEE_CAP_BLOCK |
+            TxState::ENOUGH_BLOB_FEE_CAP_BLOCK |
+            TxState::BLOB_TRANSACTION;
+        // ENOUGH_BALANCE intentionally not set
+        let subpool: SubPool = state.into();
+        assert_eq!(subpool, SubPool::Blob);
+        let reason = state.determine_queued_reason(subpool);
+        assert_eq!(reason, Some(QueuedReason::InsufficientBalance));
+    }
+
+    #[test]
+    fn test_blob_reason_too_much_gas() {
+        // Blob tx exceeding gas limit
+        let mut state = TxState::NO_PARKED_ANCESTORS |
+            TxState::NO_NONCE_GAPS |
+            TxState::ENOUGH_BALANCE |
+            TxState::ENOUGH_FEE_CAP_BLOCK |
+            TxState::ENOUGH_BLOB_FEE_CAP_BLOCK |
+            TxState::BLOB_TRANSACTION;
+        state.remove(TxState::NOT_TOO_MUCH_GAS);
+        let subpool: SubPool = state.into();
+        assert_eq!(subpool, SubPool::Blob);
+        let reason = state.determine_queued_reason(subpool);
+        assert_eq!(reason, Some(QueuedReason::TooMuchGas));
     }
 }
