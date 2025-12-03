@@ -42,7 +42,8 @@ pub struct UnboundedMeteredSender<T> {
 }
 
 impl<T> UnboundedMeteredSender<T> {
-    /// Creates a new [`UnboundedMeteredSender`] wrapping around the provided [`mpsc::UnboundedSender`] that updates metrics on send.
+    /// Creates a new [`UnboundedMeteredSender`] wrapping around the provided
+    /// [`mpsc::UnboundedSender`] that updates metrics on send.
     pub fn new(sender: mpsc::UnboundedSender<T>, scope: &'static str) -> Self {
         Self { sender, metrics: MeteredSenderMetrics::new(scope) }
     }
