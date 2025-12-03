@@ -1,7 +1,10 @@
 //! Utilities for serving `eth_simulateV1`
 
 use crate::{
-    error::{api::FromEthApiError, FromEvmError, ToRpcError},
+    error::{
+        api::{AsEthApiError, FromEthApiError},
+        FromEvmError, ToRpcError,
+    },
     EthApiError,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
@@ -81,10 +84,9 @@ pub enum EthSimulateError {
     PrecompileDuplicateAddress,
 }
 
-
 impl EthSimulateError {
     /// Returns the JSON-RPC error code for this error.
-    const fn error_code(&self) -> i32 {
+    pub const fn error_code(&self) -> i32 {
         match self {
             // Transaction errors
             Self::NonceTooLow { .. } => -38010,
@@ -249,6 +251,7 @@ where
     Err: std::error::Error
         + FromEthApiError
         + FromEvmError<T::Evm>
+        + AsEthApiError
         + From<T::Error>
         + Into<jsonrpsee_types::ErrorObject<'static>>,
     T: RpcConvert,
@@ -260,12 +263,15 @@ where
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
                 let error = Err::from_evm_halt(reason, tx.gas_limit());
+                let message = error.to_string();
+                // Use simulate-specific error code if available, otherwise fall back to standard
+                let code = error
+                    .as_simulate_error()
+                    .map(|sim_err| sim_err.error_code())
+                    .unwrap_or_else(|| error.into().code());
                 SimCallResult {
                     return_data: Bytes::new(),
-                    error: Some(SimulateError {
-                        message: error.to_string(),
-                        code: error.into().code(),
-                    }),
+                    error: Some(SimulateError { message, code }),
                     gas_used,
                     logs: Vec::new(),
                     status: false,
@@ -273,12 +279,15 @@ where
             }
             ExecutionResult::Revert { output, gas_used } => {
                 let error = Err::from_revert(output.clone());
+                let message = error.to_string();
+                // Use simulate-specific error code if available, otherwise fall back to standard
+                let code = error
+                    .as_simulate_error()
+                    .map(|sim_err| sim_err.error_code())
+                    .unwrap_or_else(|| error.into().code());
                 SimCallResult {
                     return_data: output,
-                    error: Some(SimulateError {
-                        message: error.to_string(),
-                        code: error.into().code(),
-                    }),
+                    error: Some(SimulateError { message, code }),
                     gas_used,
                     status: false,
                     logs: Vec::new(),
