@@ -332,7 +332,8 @@ pub fn mainnet_chain_config() -> ChainConfig {
     )
 }
 
-fn blob_params_to_schedule(
+/// Converts the given [`BlobScheduleBlobParams`] into blobs schedule.
+pub fn blob_params_to_schedule(
     params: &BlobScheduleBlobParams,
     hardforks: &ChainHardforks,
 ) -> BTreeMap<String, BlobParams> {
