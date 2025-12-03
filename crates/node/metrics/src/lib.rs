@@ -9,6 +9,8 @@
 
 /// Block timing metrics for tracking block production and execution times (X Layer)
 pub mod block_timing;
+#[path = "block_timing_prometheus.rs"]
+mod block_timing_prometheus;
 pub mod chain;
 /// The metrics hooks for prometheus.
 pub mod hooks;
@@ -28,6 +30,6 @@ pub use transaction_trace_xlayer::{
 };
 // Re-export block timing module items for convenience
 pub use block_timing::{
-    get_block_timing, remove_block_timing, store_block_timing, BlockTimingMetrics, BuildTiming,
-    DeliverTxsTiming, InsertTiming,
+    get_block_timing, remove_block_timing, store_block_timing, BlockTimingContext,
+    BlockTimingMetrics, BlockTimingPrometheusMetrics, BuildTiming, InsertTiming, TimingGuard,
 };

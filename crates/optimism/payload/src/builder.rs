@@ -21,7 +21,7 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_node_metrics::{
-    block_timing::{store_block_timing, BlockTimingMetrics, BuildTiming, DeliverTxsTiming},
+    block_timing::{store_block_timing, BlockTimingContext, BlockTimingPrometheusMetrics},
     transaction_trace_xlayer::{get_global_tracer, TransactionProcessId},
 };
 use reth_optimism_forks::OpHardforks;
@@ -364,10 +364,6 @@ impl<Txs> OpBuilder<'_, Txs> {
             .unwrap_or_default()
             .as_millis();
 
-        // X Layer: Initialize timing metrics
-        let build_start = Instant::now();
-        let mut timing_metrics = BlockTimingMetrics::default();
-
         let mut db = State::builder().with_database(db).with_bundle_update().build();
 
         // Load the L1 block contract into the database cache. If the L1 block contract is not
@@ -377,29 +373,47 @@ impl<Txs> OpBuilder<'_, Txs> {
 
         let mut builder = ctx.block_builder(&mut db)?;
 
+        // X Layer: Initialize timing context with RAII and Prometheus support
+        // Note: We'll get the block hash after building, so we create an empty context first
+        // and update it later. For now, we use a placeholder hash.
+        let build_start = Instant::now();
+        let prom_metrics = BlockTimingPrometheusMetrics::default();
+        let mut timing_ctx =
+            BlockTimingContext::new_empty_with_prometheus(B256::ZERO, prom_metrics);
+
         // 1. apply pre-execution changes
-        let pre_exec_start = Instant::now();
-        builder.apply_pre_execution_changes().map_err(|err| {
-            warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
-            PayloadBuilderError::Internal(err.into())
-        })?;
-        timing_metrics.build.apply_pre_execution_changes = pre_exec_start.elapsed();
+        {
+            let _guard = timing_ctx.time_apply_pre_execution_changes();
+            builder.apply_pre_execution_changes().map_err(|err| {
+                warn!(target: "payload_builder", %err, "failed to apply pre-execution changes");
+                PayloadBuilderError::Internal(err.into())
+            })?;
+        }
 
         // 2. execute sequencer transactions
-        let seq_txs_start = Instant::now();
-        let mut info = ctx.execute_sequencer_transactions(&mut builder)?;
-        let seq_txs_elapsed = seq_txs_start.elapsed();
-        timing_metrics.build.execute_sequencer_transactions = seq_txs_elapsed;
+        let mut info = {
+            let _guard = timing_ctx.time_exec_sequencer_transactions();
+            ctx.execute_sequencer_transactions(&mut builder)?
+        };
 
         // 3. if mem pool transactions are requested we execute them
         if !ctx.attributes().no_tx_pool() {
-            let mempool_txs_start = Instant::now();
-            let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
-            if ctx.execute_best_transactions_xlayer(&mut info, &mut builder, best_txs)?.is_some() {
-                return Ok(BuildOutcomeKind::Cancelled)
+            // 3.1. select/pack mempool transactions
+            let best_txs = {
+                let _guard = timing_ctx.time_select_mempool_transactions();
+                best(ctx.best_transaction_attributes(builder.evm_mut().block()))
+            };
+
+            // 3.2. execute mempool transactions
+            {
+                let _guard = timing_ctx.time_exec_mempool_transactions();
+                if ctx
+                    .execute_best_transactions_xlayer(&mut info, &mut builder, best_txs)?
+                    .is_some()
+                {
+                    return Ok(BuildOutcomeKind::Cancelled)
+                }
             }
-            let mempool_txs_elapsed = mempool_txs_start.elapsed();
-            timing_metrics.build.execute_mempool_transactions = mempool_txs_elapsed;
 
             // check if the new payload is even more valuable
             if !ctx.is_better_payload(info.total_fees) {
@@ -408,14 +422,11 @@ impl<Txs> OpBuilder<'_, Txs> {
             }
         }
 
-        let finish_start = Instant::now();
-        let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, block } =
-            builder.finish(state_provider)?;
-        timing_metrics.build.finish = finish_start.elapsed();
-        timing_metrics.build.total = build_start.elapsed();
-        // Calculate DeliverTxs total from BuildTiming to avoid duplication
-        timing_metrics.deliver_txs.total = timing_metrics.build.execute_sequencer_transactions +
-            timing_metrics.build.execute_mempool_transactions;
+        // 4. finish (calculate state root)
+        let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, block } = {
+            let _guard = timing_ctx.time_calc_state_root();
+            builder.finish(state_provider)?
+        };
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
@@ -441,8 +452,15 @@ impl<Txs> OpBuilder<'_, Txs> {
         let block_hash = sealed_block.hash();
         let block_number = sealed_block.number();
 
-        // X Layer: Store timing metrics for this block (will be updated with insert timing later)
-        store_block_timing(block_hash, timing_metrics.clone());
+        // X Layer: Update timing context with actual block hash and total times
+        timing_ctx.set_block_hash(block_hash);
+        // Note: update_totals() will calculate build.total from individual components,
+        // so we don't need to manually set it here
+        timing_ctx.update_totals();
+
+        // Store timing metrics for this block (will be updated with insert timing later)
+        // Context will auto-store on drop, but we can also manually store here
+        timing_ctx.store();
 
         let payload =
             OpBuiltPayload::new(ctx.payload_id(), sealed_block, info.total_fees, Some(executed));
