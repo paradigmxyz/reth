@@ -194,7 +194,8 @@ where
         let mut total_fees = U256::ZERO;
         let base_fee = builder.evm_mut().block().basefee;
 
-        // Per spec: include all provided transactions, in the given order; do not source from txpool.
+        // Per spec: include all provided transactions, in the given order; do not source from
+        // txpool.
         for tx in recovered_txs {
             let gas_used: u64 = builder
                 .execute_transaction(tx.clone())
