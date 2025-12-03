@@ -784,8 +784,6 @@ where
         // When pushing a new branch we need to set its child nibble in the `state_mask` of
         // its parent, if there is one.
         if let Some(parent_branch) = self.branch_stack.last_mut() {
-            // We've asserted above that branch_path.len() < cached_path.len(), so this
-            // `get_unchecked` is safe.
             parent_branch.state_mask.set_bit(cached_branch_nibble);
         }
 
@@ -840,8 +838,6 @@ where
         //
         // This starts off being based off of the hashed cursor's current position, which is the
         // next key which hasn't been processed. If that is None then we start from zero.
-        //
-        // TODO better name and docs
         let mut lower_bound = Some(hashed_key_current_path.unwrap_or_default());
 
         loop {
