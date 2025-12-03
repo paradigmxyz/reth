@@ -830,7 +830,7 @@ where
         &mut self,
         targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
         trie_cursor_state: &mut TrieCursorState,
-        hashed_key_current: Option<&Nibbles>,
+        hashed_key_current_path: Option<Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
         // All trie data prior to the current cached branch, if any, has been computed. Any branches
         // which were under-construction previously, and which are not on the same path as this
@@ -849,7 +849,7 @@ where
         // next key which hasn't been processed. If that is None then we start from zero.
         //
         // TODO better name and docs
-        let mut lower_bound = Some(hashed_key_current.copied().unwrap_or_else(Nibbles::new));
+        let mut lower_bound = Some(hashed_key_current_path.unwrap_or_default());
 
         loop {
             // Determine the current cached branch node.
@@ -895,14 +895,15 @@ where
                     let (cached_path, _) = self.cached_branch_stack.last().expect("just pushed");
 
                     // The current hashed key indicates the first key after the previous uncached
-                    // range, or None if this is the first call to this method. If the key is not
-                    // caught up to the next cached branch it means there are portions of the trie
-                    // prior to that branch which need to be computed; return the uncomputed range
-                    // up to that branch to make that happen.
+                    // range, or None if this is the first call to this method.
                     //
-                    // If the next next cached branch's path is all zeros then we can skip this
-                    // catch-up step, because there cannot be any keys prior to that range.
-                    if hashed_key_current.is_none_or(|k| k < cached_path) &&
+                    // If the key is not caught up to the next cached branch it means there are
+                    // portions of the trie prior to that branch which need to be computed; return
+                    // the uncomputed range up to that branch to make that happen.
+                    //
+                    // If the next cached branch's path is all zeros then we can skip this catch-up
+                    // step, because there cannot be any keys prior to that range.
+                    if hashed_key_current_path.is_none_or(|k| &k < cached_path) &&
                         !PATH_ALL_ZEROS.starts_with(cached_path)
                     {
                         let range = lower_bound.map(|lower| (lower, Some(*cached_path)));
@@ -1142,7 +1143,7 @@ where
             let Some((lower_bound, upper_bound)) = self.next_uncached_key_range(
                 &mut targets,
                 &mut trie_cursor_state,
-                hashed_cursor_current.as_ref().map(|kv| &kv.0),
+                hashed_cursor_current.as_ref().map(|kv| kv.0),
             )?
             else {
                 // If `next_uncached_key_range` determines that there can be no more keys then
