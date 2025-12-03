@@ -1677,7 +1677,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
 /// Configure a http transport only
 ///
 /// ```
-/// use reth_rpc_builder::{RethRpcModule, TransportRpcModuleConfig};
+/// use reth_rpc_builder::TransportRpcModuleConfig;
+/// use reth_rpc_server_types::RethRpcModule;
 /// let config =
 ///     TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth, RethRpcModule::Admin]);
 /// ```
