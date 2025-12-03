@@ -49,3 +49,5 @@ client = [
 
 [dev-dependencies]
 serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+jsonrpsee = { workspace = true, features = ["client", "async-client", "http-client"] }
