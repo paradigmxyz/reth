@@ -376,6 +376,21 @@ impl HashedPostState {
         HashedPostStateSorted { accounts, storages }
     }
 
+    /// Creates a sorted copy without consuming self.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning HashMap metadata.
+    pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
+        let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
+        accounts.sort_unstable_by_key(|(address, _)| *address);
+
+        let storages = self
+            .storages
+            .iter()
+            .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
+            .collect();
+
+        HashedPostStateSorted { accounts, storages }
+    }
+
     /// Clears the account and storage maps of this `HashedPostState`.
     pub fn clear(&mut self) {
         self.accounts.clear();
@@ -464,6 +479,15 @@ impl HashedStorage {
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
+        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+
+        HashedStorageSorted { storage_slots, wiped: self.wiped }
+    }
+
+    /// Creates a sorted copy without consuming self.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning HashMap metadata.
+    pub fn clone_into_sorted(&self) -> HashedStorageSorted {
+        let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
@@ -1431,5 +1455,78 @@ mod tests {
                 chunking_length, size
             );
         }
+    }
+
+    #[test]
+    fn test_clone_into_sorted_equivalence() {
+        let addr1 = B256::from([1; 32]);
+        let addr2 = B256::from([2; 32]);
+        let addr3 = B256::from([3; 32]);
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+        let slot3 = B256::from([3; 32]);
+
+        let state = HashedPostState {
+            accounts: B256Map::from_iter([
+                (addr1, Some(Account { nonce: 1, balance: U256::from(100), bytecode_hash: None })),
+                (addr2, None),
+                (addr3, Some(Account::default())),
+            ]),
+            storages: B256Map::from_iter([
+                (
+                    addr1,
+                    HashedStorage {
+                        wiped: false,
+                        storage: B256Map::from_iter([
+                            (slot1, U256::from(10)),
+                            (slot2, U256::from(20)),
+                        ]),
+                    },
+                ),
+                (
+                    addr2,
+                    HashedStorage {
+                        wiped: true,
+                        storage: B256Map::from_iter([(slot3, U256::ZERO)]),
+                    },
+                ),
+            ]),
+        };
+
+        // clone_into_sorted should produce the same result as clone().into_sorted()
+        let sorted_via_clone = state.clone().into_sorted();
+        let sorted_via_clone_into = state.clone_into_sorted();
+
+        assert_eq!(sorted_via_clone, sorted_via_clone_into);
+
+        // Verify the original state is not consumed
+        assert_eq!(state.accounts.len(), 3);
+        assert_eq!(state.storages.len(), 2);
+    }
+
+    #[test]
+    fn test_hashed_storage_clone_into_sorted_equivalence() {
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+        let slot3 = B256::from([3; 32]);
+
+        let storage = HashedStorage {
+            wiped: true,
+            storage: B256Map::from_iter([
+                (slot1, U256::from(100)),
+                (slot2, U256::ZERO),
+                (slot3, U256::from(300)),
+            ]),
+        };
+
+        // clone_into_sorted should produce the same result as clone().into_sorted()
+        let sorted_via_clone = storage.clone().into_sorted();
+        let sorted_via_clone_into = storage.clone_into_sorted();
+
+        assert_eq!(sorted_via_clone, sorted_via_clone_into);
+
+        // Verify the original storage is not consumed
+        assert_eq!(storage.storage.len(), 3);
+        assert!(storage.wiped);
     }
 }
