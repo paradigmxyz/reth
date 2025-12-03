@@ -56,6 +56,8 @@ pub(crate) mod witness_db;
 #[doc(inline)]
 pub use alloy_rpc_types_debug::ExecutionWitness;
 
+pub use alloy_genesis::Genesis;
+
 use reth_ethereum_primitives::Block;
 
 /// `StatelessInput` is a convenience structure for serializing the input needed
