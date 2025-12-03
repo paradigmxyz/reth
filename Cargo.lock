@@ -10566,6 +10566,7 @@ name = "reth-stateless"
 version = "1.9.3"
 dependencies = [
  "alloy-consensus",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",

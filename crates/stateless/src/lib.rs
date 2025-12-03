@@ -39,6 +39,7 @@ mod recover_block;
 /// Sparse trie implementation for stateless validation
 pub mod trie;
 
+use alloy_genesis::ChainConfig;
 #[doc(inline)]
 pub use recover_block::UncompressedPublicKey;
 #[doc(inline)]
@@ -69,4 +70,7 @@ pub struct StatelessInput {
     pub block: Block,
     /// `ExecutionWitness` for the stateless validation function
     pub witness: ExecutionWitness,
+    /// Chain configuration for the stateless validation function
+    #[serde_as(as = "alloy_genesis::serde_bincode_compat::ChainConfig<'_>")]
+    pub chain_config: ChainConfig,
 }
