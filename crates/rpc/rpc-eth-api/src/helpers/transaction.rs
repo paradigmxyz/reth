@@ -290,7 +290,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     };
 
                     return Ok(Some(
-                        self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)?,
+                        self.converter().fill(tx.clone().with_signer(*signer), tx_info)?,
                     ))
                 }
             }
@@ -316,7 +316,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                     RpcNodeCore::pool(self).get_transaction_by_sender_and_nonce(sender, nonce)
             {
                 let transaction = tx.transaction.clone_into_consensus();
-                return Ok(Some(self.tx_resp_builder().fill_pending(transaction)?));
+                return Ok(Some(self.converter().fill_pending(transaction)?));
             }
 
             // Note: we can't optimize for contracts (account with code) and cannot shortcircuit if
@@ -364,7 +364,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                                 base_fee: base_fee_per_gas,
                                 index: Some(index as u64),
                             };
-                            self.tx_resp_builder().fill(tx.clone().with_signer(*signer), tx_info)
+                            Ok(self.converter().fill(tx.clone().with_signer(*signer), tx_info)?)
                         })
                 })
                 .ok_or(EthApiError::HeaderNotFound(block_id))?
@@ -507,7 +507,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 }
             }
 
-            let tx = self.tx_resp_builder().build_simulate_v1_transaction(request)?;
+            let tx = self.converter().build_simulate_v1_transaction(request)?;
 
             let raw = tx.encoded_2718().into();
 
@@ -609,45 +609,37 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
     > + Send {
         async move {
             // Try to find the transaction on disk
-            let mut resp = self
+            if let Some((tx, meta)) = self
                 .spawn_blocking_io(move |this| {
-                    match this
-                        .provider()
+                    this.provider()
                         .transaction_by_hash_with_meta(hash)
-                        .map_err(Self::Error::from_eth_err)?
-                    {
-                        None => Ok(None),
-                        Some((tx, meta)) => {
-                            // Note: we assume this transaction is valid, because it's mined (or
-                            // part of pending block) and already. We don't need to
-                            // check for pre EIP-2 because this transaction could be pre-EIP-2.
-                            let transaction = tx
-                                .try_into_recovered_unchecked()
-                                .map_err(|_| EthApiError::InvalidTransactionSignature)?;
-
-                            let tx = TransactionSource::Block {
-                                transaction,
-                                index: meta.index,
-                                block_hash: meta.block_hash,
-                                block_number: meta.block_number,
-                                base_fee: meta.base_fee,
-                            };
-                            Ok(Some(tx))
-                        }
-                    }
+                        .map_err(Self::Error::from_eth_err)
                 })
-                .await?;
+                .await?
+            {
+                // Note: we assume this transaction is valid, because it's mined (or
+                // part of pending block) and already. We don't need to
+                // check for pre EIP-2 because this transaction could be pre-EIP-2.
+                let transaction = tx
+                    .try_into_recovered_unchecked()
+                    .map_err(|_| EthApiError::InvalidTransactionSignature)?;
 
-            if resp.is_none() {
-                // tx not found on disk, check pool
-                if let Some(tx) =
-                    self.pool().get(&hash).map(|tx| tx.transaction.clone().into_consensus())
-                {
-                    resp = Some(TransactionSource::Pool(tx.into()));
-                }
+                return Ok(Some(TransactionSource::Block {
+                    transaction,
+                    index: meta.index,
+                    block_hash: meta.block_hash,
+                    block_number: meta.block_number,
+                    base_fee: meta.base_fee,
+                }));
             }
 
-            Ok(resp)
+            // tx not found on disk, check pool
+            if let Some(tx) = self.pool().get(&hash).map(|tx| tx.transaction.clone_into_consensus())
+            {
+                return Ok(Some(TransactionSource::Pool(tx.into())));
+            }
+
+            Ok(None)
         }
     }
 

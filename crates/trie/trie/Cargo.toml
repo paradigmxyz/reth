@@ -42,6 +42,7 @@ metrics = { workspace = true, optional = true }
 
 # `test-utils` feature
 triehash = { workspace = true, optional = true }
+parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
@@ -86,6 +87,7 @@ serde = [
 ]
 test-utils = [
     "triehash",
+    "parking_lot",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
@@ -99,5 +101,10 @@ harness = false
 
 [[bench]]
 name = "trie_root"
+required-features = ["test-utils"]
+harness = false
+
+[[bench]]
+name = "proof_v2"
 required-features = ["test-utils"]
 harness = false

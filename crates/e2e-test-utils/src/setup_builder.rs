@@ -6,10 +6,9 @@
 use crate::{node::NodeTestContext, wallet::Wallet, NodeBuilderHelper, NodeHelperType, TmpDB};
 use futures_util::future::TryJoinAll;
 use reth_chainspec::EthChainSpec;
-use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_node_builder::{
     EngineNodeLauncher, NodeBuilder, NodeConfig, NodeHandle, NodeTypes, NodeTypesWithDBAdapter,
-    PayloadAttributesBuilder, PayloadTypes,
+    PayloadTypes,
 };
 use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_provider::providers::BlockchainProvider;
@@ -38,8 +37,6 @@ where
         + Sync
         + Copy
         + 'static,
-    LocalPayloadAttributesBuilder<N::ChainSpec>:
-        PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
     num_nodes: usize,
     chain_spec: Arc<N::ChainSpec>,
@@ -57,8 +54,6 @@ where
         + Sync
         + Copy
         + 'static,
-    LocalPayloadAttributesBuilder<N::ChainSpec>:
-        PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
     /// Creates a new builder with the required parameters.
     pub fn new(num_nodes: usize, chain_spec: Arc<N::ChainSpec>, attributes_generator: F) -> Self {
@@ -202,8 +197,6 @@ where
         + Sync
         + Copy
         + 'static,
-    LocalPayloadAttributesBuilder<N::ChainSpec>:
-        PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("E2ETestSetupBuilder")

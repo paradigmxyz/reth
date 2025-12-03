@@ -1,6 +1,6 @@
 //! Loads chain configuration.
 
-use alloy_consensus::Header;
+use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip7910::{EthConfig, EthForkConfig, SystemContract};
 use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
@@ -9,6 +9,7 @@ use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardfor
 use reth_errors::{ProviderError, RethError};
 use reth_evm::{precompiles::PrecompilesMap, ConfigureEvm, Evm};
 use reth_node_api::NodePrimitives;
+use reth_primitives_traits::header::HeaderMut;
 use reth_revm::db::EmptyDB;
 use reth_rpc_eth_types::EthApiError;
 use reth_storage_api::BlockReaderIdExt;
@@ -35,9 +36,9 @@ pub struct EthConfigHandler<Provider, Evm> {
 impl<Provider, Evm> EthConfigHandler<Provider, Evm>
 where
     Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
-        + BlockReaderIdExt<Header = Header>
+        + BlockReaderIdExt<Header: HeaderMut>
         + 'static,
-    Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Header>> + 'static,
+    Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Provider::Header>> + 'static,
 {
     /// Creates a new [`EthConfigHandler`].
     pub const fn new(provider: Provider, evm_config: Evm) -> Self {
@@ -100,7 +101,7 @@ where
 
         let (current_fork_idx, current_fork_timestamp) = fork_timestamps
             .iter()
-            .position(|ts| &latest.timestamp < ts)
+            .position(|ts| &latest.timestamp() < ts)
             .and_then(|idx| idx.checked_sub(1))
             .or_else(|| fork_timestamps.len().checked_sub(1))
             .and_then(|idx| fork_timestamps.get(idx).map(|ts| (idx, *ts)))
@@ -115,7 +116,7 @@ where
         if let Some(next_fork_timestamp) = fork_timestamps.get(current_fork_idx + 1).copied() {
             let fake_header = {
                 let mut header = latest.clone();
-                header.timestamp = next_fork_timestamp;
+                header.set_timestamp(next_fork_timestamp);
                 header
             };
             let next_precompiles = evm_to_precompiles_map(
@@ -133,7 +134,7 @@ where
         let last_fork_timestamp = fork_timestamps.last().copied().unwrap();
         let fake_header = {
             let mut header = latest;
-            header.timestamp = last_fork_timestamp;
+            header.set_timestamp(last_fork_timestamp);
             header
         };
         let last_precompiles = evm_to_precompiles_map(

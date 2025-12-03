@@ -32,6 +32,9 @@ impl PeersHandle {
     }
 
     /// Adds a peer to the set.
+    ///
+    /// If the peer already exists, then this will update only the provided address, this is
+    /// equivalent to discovering a peer.
     pub fn add_peer(&self, peer_id: PeerId, addr: SocketAddr) {
         self.send(PeerCommand::Add(peer_id, addr));
     }
