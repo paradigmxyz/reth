@@ -312,6 +312,9 @@ pub struct SerialSparseTrie {
     updates: Option<SparseTrieUpdates>,
     /// Reusable buffer for RLP encoding of nodes.
     rlp_buf: Vec<u8>,
+    /// Collection of revealed trie paths.
+    /// Used to track which paths have already been revealed to avoid re-revealing.
+    revealed: HashSet<Nibbles>,
 }
 
 impl fmt::Debug for SerialSparseTrie {
@@ -324,6 +327,7 @@ impl fmt::Debug for SerialSparseTrie {
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
             .field("rlp_buf", &hex::encode(&self.rlp_buf))
+            .field("revealed", &self.revealed)
             .finish_non_exhaustive()
     }
 }
@@ -410,6 +414,7 @@ impl Default for SerialSparseTrie {
             prefix_set: PrefixSetMut::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            revealed: HashSet::default(),
         }
     }
 }
@@ -450,6 +455,14 @@ impl SparseTrieInterface for SerialSparseTrie {
         masks: TrieMasks,
     ) -> SparseTrieResult<()> {
         trace!(target: "trie::sparse", ?path, ?node, ?masks, "reveal_node called");
+
+        // Skip root node from revealed tracking (it's handled separately)
+        let is_root = path.is_empty();
+
+        // If this non-root path was already revealed, skip it
+        if !is_root && !self.mark_path_revealed(path) {
+            return Ok(())
+        }
 
         // If the node is already revealed and it's not a hash node, do nothing.
         if self.nodes.get(&path).is_some_and(|node| !node.is_hash()) {
@@ -953,6 +966,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         self.values = HashMap::default();
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+        self.revealed.clear();
     }
 
     fn clear(&mut self) {
@@ -965,6 +979,23 @@ impl SparseTrieInterface for SerialSparseTrie {
         self.prefix_set.clear();
         self.updates = None;
         self.rlp_buf.clear();
+        self.revealed.clear();
+    }
+
+    fn is_path_revealed(&self, path: &Nibbles) -> bool {
+        self.revealed.contains(path)
+    }
+
+    fn mark_path_revealed(&mut self, path: Nibbles) -> bool {
+        self.revealed.insert(path)
+    }
+
+    fn revealed_paths(&self) -> &HashSet<Nibbles> {
+        &self.revealed
+    }
+
+    fn revealed_paths_mut(&mut self) -> &mut HashSet<Nibbles> {
+        &mut self.revealed
     }
 
     fn find_leaf(
@@ -2230,6 +2261,7 @@ mod find_leaf_tests {
             prefix_set: Default::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            revealed: Default::default(),
         };
 
         let result = sparse.find_leaf(&leaf_path, None);
@@ -2272,6 +2304,7 @@ mod find_leaf_tests {
             prefix_set: Default::default(),
             updates: None,
             rlp_buf: Vec::new(),
+            revealed: Default::default(),
         };
 
         let result = sparse.find_leaf(&search_path, None);
