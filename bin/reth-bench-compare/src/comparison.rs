@@ -31,6 +31,7 @@ pub(crate) struct BenchmarkResults {
     pub summary: BenchmarkSummary,
     pub start_timestamp: Option<DateTime<Utc>>,
     pub end_timestamp: Option<DateTime<Utc>>,
+    pub reth_command: Option<String>,
 }
 
 /// Combined latency CSV row structure
@@ -89,6 +90,7 @@ pub(crate) struct RefInfo {
     pub summary: BenchmarkSummary,
     pub start_timestamp: Option<DateTime<Utc>>,
     pub end_timestamp: Option<DateTime<Utc>>,
+    pub reth_command: Option<String>,
 }
 
 /// Summary of the comparison between references.
@@ -206,6 +208,29 @@ impl ComparisonGenerator {
         Ok(())
     }
 
+    /// Set the reth command for a reference
+    pub(crate) fn set_ref_command(&mut self, ref_type: &str, command: String) -> Result<()> {
+        match ref_type {
+            "baseline" => {
+                if let Some(ref mut results) = self.baseline_results {
+                    results.reth_command = Some(command);
+                } else {
+                    return Err(eyre!("Baseline results not loaded yet"));
+                }
+            }
+            "feature" => {
+                if let Some(ref mut results) = self.feature_results {
+                    results.reth_command = Some(command);
+                } else {
+                    return Err(eyre!("Feature results not loaded yet"));
+                }
+            }
+            _ => return Err(eyre!("Unknown reference type: {}", ref_type)),
+        }
+
+        Ok(())
+    }
+
     /// Generate the final comparison report
     pub(crate) async fn generate_comparison_report(&self) -> Result<()> {
         info!("Generating comparison report...");
@@ -230,12 +255,14 @@ impl ComparisonGenerator {
                 summary: baseline.summary.clone(),
                 start_timestamp: baseline.start_timestamp,
                 end_timestamp: baseline.end_timestamp,
+                reth_command: baseline.reth_command.clone(),
             },
             feature: RefInfo {
                 ref_name: feature.ref_name.clone(),
                 summary: feature.summary.clone(),
                 start_timestamp: feature.start_timestamp,
                 end_timestamp: feature.end_timestamp,
+                reth_command: feature.reth_command.clone(),
             },
             comparison_summary,
             per_block_comparisons,
@@ -270,6 +297,7 @@ impl ComparisonGenerator {
             summary,
             start_timestamp: None,
             end_timestamp: None,
+            reth_command: None,
         })
     }
 
@@ -599,6 +627,9 @@ impl ComparisonGenerator {
                 end.format("%Y-%m-%d %H:%M:%S UTC")
             );
         }
+        if let Some(ref cmd) = report.baseline.reth_command {
+            println!("  Command: {}", cmd);
+        }
         println!();
 
         println!("Feature Summary:");
@@ -627,6 +658,9 @@ impl ComparisonGenerator {
                 start.format("%Y-%m-%d %H:%M:%S UTC"),
                 end.format("%Y-%m-%d %H:%M:%S UTC")
             );
+        }
+        if let Some(ref cmd) = report.feature.reth_command {
+            println!("  Command: {}", cmd);
         }
         println!();
     }
