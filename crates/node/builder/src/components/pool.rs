@@ -152,7 +152,7 @@ where
             validator,
             CoinbaseTipOrdering::default(),
             blob_store,
-            pool_config.clone(),
+            pool_config,
         )
     }
 
@@ -175,7 +175,7 @@ where
         let ctx = self.ctx;
         let transaction_pool = self.build(blob_store, pool_config);
         // Spawn maintenance tasks using standalone functions
-        spawn_maintenance_tasks(ctx, transaction_pool.clone(), &transaction_pool.config())?;
+        spawn_maintenance_tasks(ctx, transaction_pool.clone(), transaction_pool.config())?;
 
         Ok(transaction_pool)
     }
