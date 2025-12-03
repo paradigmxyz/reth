@@ -38,6 +38,11 @@ pub trait Hardforks: Clone {
 
     /// Creates a [`ForkFilter`] for the block described by [Head].
     fn fork_filter(&self, head: Head) -> ForkFilter;
+
+    /// Returns a [`ForkTimestamps`] helper for managing timestamp-based fork activations.
+    fn fork_timestamps(&self) -> ForkTimestamps {
+        ForkTimestamps::new(self)
+    }
 }
 
 /// Ordered list of a chain hardforks that implement [`Hardfork`].
@@ -202,6 +207,91 @@ impl<T: Hardfork, const N: usize> From<[(T, ForkCondition); N]> for ChainHardfor
     }
 }
 
+/// Manages timestamp-based fork activations.
+///
+/// Contains a sorted, deduplicated list of fork timestamps and provides helpers
+/// to determine current, next, and last fork timestamps relative to a given timestamp.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ForkTimestamps {
+    timestamps: Vec<u64>,
+}
+
+impl ForkTimestamps {
+    /// Creates a new [`ForkTimestamps`] from a type implementing [`Hardforks`].
+    ///
+    /// Extracts all timestamp-based forks, sorts them, and deduplicates.
+    pub fn new(hardforks: &impl Hardforks) -> Self {
+        let mut timestamps =
+            hardforks.forks_iter().filter_map(|(_, cond)| cond.as_timestamp()).collect::<Vec<_>>();
+        timestamps.sort_unstable();
+        timestamps.dedup();
+
+        Self { timestamps }
+    }
+
+    /// Creates a new [`ForkTimestamps`] from an iterator of fork conditions.
+    ///
+    /// Extracts all timestamp-based forks, sorts them, and deduplicates.
+    pub fn from_fork_conditions(
+        forks: impl Iterator<Item = impl core::borrow::Borrow<ForkCondition>>,
+    ) -> Self {
+        let mut timestamps =
+            forks.filter_map(|cond| cond.borrow().as_timestamp()).collect::<Vec<_>>();
+        timestamps.sort_unstable();
+        timestamps.dedup();
+
+        Self { timestamps }
+    }
+
+    /// Returns the current active fork timestamp at the given timestamp.
+    ///
+    /// Returns the highest fork timestamp that is less than or equal to the given timestamp.
+    pub fn current(&self, timestamp: u64) -> Option<u64> {
+        self.current_with_index(timestamp).map(|(_, ts)| ts)
+    }
+
+    /// Returns the current active fork timestamp with its index at the given timestamp.
+    ///
+    /// The index can be used to efficiently retrieve next/last forks.
+    pub fn current_with_index(&self, timestamp: u64) -> Option<(usize, u64)> {
+        match self.timestamps.iter().position(|ts| timestamp < *ts) {
+            Some(0) => None, // timestamp is before the first fork
+            Some(idx) => {
+                let current_idx = idx - 1;
+                self.timestamps.get(current_idx).map(|ts| (current_idx, *ts))
+            }
+            None => {
+                // All forks are at or before the given timestamp, return the last one
+                self.timestamps
+                    .len()
+                    .checked_sub(1)
+                    .and_then(|idx| self.timestamps.get(idx).map(|ts| (idx, *ts)))
+            }
+        }
+    }
+
+    /// Returns the next scheduled fork timestamp after the given timestamp.
+    pub fn next(&self, timestamp: u64) -> Option<u64> {
+        self.current_with_index(timestamp)
+            .and_then(|(idx, _)| self.timestamps.get(idx + 1).copied())
+    }
+
+    /// Returns the last (final) fork timestamp in the schedule.
+    pub fn last(&self) -> Option<u64> {
+        self.timestamps.last().copied()
+    }
+
+    /// Returns true if there are no timestamp-based forks.
+    pub fn is_empty(&self) -> bool {
+        self.timestamps.is_empty()
+    }
+
+    /// Returns the number of timestamp-based forks.
+    pub fn len(&self) -> usize {
+        self.timestamps.len()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -318,5 +408,116 @@ mod tests {
         assert_eq!(fork_list[1].0.name(), "B1");
         assert_eq!(fork_list[2].0.name(), "A2");
         assert_eq!(fork_list[2].1, ForkCondition::Timestamp(3000));
+    }
+
+    #[test]
+    fn fork_timestamps_creation() {
+        let mut forks = ChainHardforks::default();
+        forks.insert(AHardfork::A1, ForkCondition::Block(100));
+        forks.insert(AHardfork::A2, ForkCondition::Timestamp(1000));
+        forks.insert(BHardfork::B1, ForkCondition::Timestamp(2000));
+        forks.insert(BHardfork::B2, ForkCondition::Timestamp(1000)); // Duplicate timestamp
+
+        let fork_timestamps =
+            ForkTimestamps::from_fork_conditions(forks.forks_iter().map(|(_, cond)| cond));
+
+        // Should have 2 unique timestamps (1000, 2000), block-based fork excluded
+        assert_eq!(fork_timestamps.len(), 2);
+        assert!(!fork_timestamps.is_empty());
+    }
+
+    #[test]
+    fn fork_timestamps_current() {
+        let mut forks = ChainHardforks::default();
+        forks.insert(AHardfork::A1, ForkCondition::Timestamp(1000));
+        forks.insert(AHardfork::A2, ForkCondition::Timestamp(2000));
+        forks.insert(AHardfork::A3, ForkCondition::Timestamp(3000));
+
+        let fork_timestamps =
+            ForkTimestamps::from_fork_conditions(forks.forks_iter().map(|(_, cond)| cond));
+
+        // Before first fork
+        assert_eq!(fork_timestamps.current(500), None);
+
+        // At first fork
+        assert_eq!(fork_timestamps.current(1000), Some(1000));
+
+        // Between forks
+        assert_eq!(fork_timestamps.current(1500), Some(1000));
+        assert_eq!(fork_timestamps.current(2500), Some(2000));
+
+        // At last fork
+        assert_eq!(fork_timestamps.current(3000), Some(3000));
+
+        // After last fork
+        assert_eq!(fork_timestamps.current(4000), Some(3000));
+    }
+
+    #[test]
+    fn fork_timestamps_next() {
+        let mut forks = ChainHardforks::default();
+        forks.insert(AHardfork::A1, ForkCondition::Timestamp(1000));
+        forks.insert(AHardfork::A2, ForkCondition::Timestamp(2000));
+        forks.insert(AHardfork::A3, ForkCondition::Timestamp(3000));
+
+        let fork_timestamps =
+            ForkTimestamps::from_fork_conditions(forks.forks_iter().map(|(_, cond)| cond));
+
+        // Before first fork - no current, so no next
+        assert_eq!(fork_timestamps.next(500), None);
+
+        // At first fork - next is 2000
+        assert_eq!(fork_timestamps.next(1000), Some(2000));
+
+        // Between forks
+        assert_eq!(fork_timestamps.next(1500), Some(2000));
+        assert_eq!(fork_timestamps.next(2500), Some(3000));
+
+        // At last fork - no next
+        assert_eq!(fork_timestamps.next(3000), None);
+
+        // After last fork - no next
+        assert_eq!(fork_timestamps.next(4000), None);
+    }
+
+    #[test]
+    fn fork_timestamps_last() {
+        let mut forks = ChainHardforks::default();
+        forks.insert(AHardfork::A1, ForkCondition::Timestamp(1000));
+        forks.insert(AHardfork::A2, ForkCondition::Timestamp(2000));
+        forks.insert(AHardfork::A3, ForkCondition::Timestamp(3000));
+
+        let fork_timestamps =
+            ForkTimestamps::from_fork_conditions(forks.forks_iter().map(|(_, cond)| cond));
+
+        assert_eq!(fork_timestamps.last(), Some(3000));
+    }
+
+    #[test]
+    fn fork_timestamps_empty() {
+        let forks = ChainHardforks::default();
+        let fork_timestamps =
+            ForkTimestamps::from_fork_conditions(forks.forks_iter().map(|(_, cond)| cond));
+
+        assert!(fork_timestamps.is_empty());
+        assert_eq!(fork_timestamps.len(), 0);
+        assert_eq!(fork_timestamps.current(1000), None);
+        assert_eq!(fork_timestamps.next(1000), None);
+        assert_eq!(fork_timestamps.last(), None);
+    }
+
+    #[test]
+    fn fork_timestamps_with_index() {
+        let mut forks = ChainHardforks::default();
+        forks.insert(AHardfork::A1, ForkCondition::Timestamp(1000));
+        forks.insert(AHardfork::A2, ForkCondition::Timestamp(2000));
+        forks.insert(AHardfork::A3, ForkCondition::Timestamp(3000));
+
+        let fork_timestamps =
+            ForkTimestamps::from_fork_conditions(forks.forks_iter().map(|(_, cond)| cond));
+
+        assert_eq!(fork_timestamps.current_with_index(1500), Some((0, 1000)));
+        assert_eq!(fork_timestamps.current_with_index(2500), Some((1, 2000)));
+        assert_eq!(fork_timestamps.current_with_index(3500), Some((2, 3000)));
     }
 }

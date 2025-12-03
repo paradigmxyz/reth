@@ -93,17 +93,10 @@ where
             self.evm_config.evm_for_block(EmptyDB::default(), &latest).map_err(RethError::other)?,
         );
 
-        let mut fork_timestamps =
-            chain_spec.forks_iter().filter_map(|(_, cond)| cond.as_timestamp()).collect::<Vec<_>>();
-        fork_timestamps.sort_unstable();
-        fork_timestamps.dedup();
+        let fork_timestamps = chain_spec.fork_timestamps();
 
-        let (current_fork_idx, current_fork_timestamp) = fork_timestamps
-            .iter()
-            .position(|ts| &latest.timestamp < ts)
-            .and_then(|idx| idx.checked_sub(1))
-            .or_else(|| fork_timestamps.len().checked_sub(1))
-            .and_then(|idx| fork_timestamps.get(idx).map(|ts| (idx, *ts)))
+        let current_fork_timestamp = fork_timestamps
+            .current(latest.timestamp)
             .ok_or_else(|| RethError::msg("no active timestamp fork found"))?;
 
         let current = self
@@ -112,7 +105,7 @@ where
 
         let mut config = EthConfig { current, next: None, last: None };
 
-        if let Some(next_fork_timestamp) = fork_timestamps.get(current_fork_idx + 1).copied() {
+        if let Some(next_fork_timestamp) = fork_timestamps.next(latest.timestamp) {
             let fake_header = {
                 let mut header = latest.clone();
                 header.timestamp = next_fork_timestamp;
@@ -130,7 +123,7 @@ where
             return Ok(config);
         }
 
-        let last_fork_timestamp = fork_timestamps.last().copied().unwrap();
+        let last_fork_timestamp = fork_timestamps.last().unwrap();
         let fake_header = {
             let mut header = latest;
             header.timestamp = last_fork_timestamp;
