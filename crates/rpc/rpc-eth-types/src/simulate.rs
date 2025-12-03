@@ -82,10 +82,9 @@ pub enum EthSimulateError {
 }
 
 impl EthSimulateError {
-    /// Returns the JSON-RPC error code for this error.
+    /// Returns the JSON-RPC error code for a `eth_simulateV1` error.
     pub const fn error_code(&self) -> i32 {
         match self {
-            // Transaction errors
             Self::NonceTooLow { .. } => -38010,
             Self::NonceTooHigh => -38011,
             Self::BaseFeePerGasTooLow => -38012,
