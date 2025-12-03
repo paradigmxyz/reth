@@ -1057,7 +1057,8 @@ impl MultiProofTask {
                 }
 
                 // Batch consecutive StateUpdate messages into one.
-                // When batching, we use the first message's source for logging (observability only).
+                // When batching, we use the first message's source for logging (observability
+                // only).
                 let mut merged_update = update;
                 let mut num_batched = 1;
 
