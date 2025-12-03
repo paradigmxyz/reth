@@ -8,7 +8,8 @@ use reth_primitives_traits::Account;
 use reth_provider::ProviderFactory;
 use reth_stages::StageId;
 use reth_trie_common::Nibbles;
-use tracing::info;
+use std::{collections::HashMap, sync::mpsc::Receiver, time::Duration};
+use tracing::{debug, info};
 
 /// A match result from searching account change sets
 #[derive(Debug, Clone)]
@@ -26,6 +27,66 @@ struct StorageMatch {
     slot: B256,
     hashed_slot: Nibbles,
     pre_block_value: U256,
+}
+
+/// Progress update sent by worker threads
+#[derive(Debug, Clone)]
+struct ProgressUpdate {
+    thread_id: usize,
+    progress: f64,
+}
+
+/// Progress indicator function that displays average progress from worker threads
+/// Returns when the channel is closed (all senders dropped)
+fn progress_indicator(rx: Receiver<ProgressUpdate>) {
+    let mut progress_map: HashMap<usize, f64> = HashMap::new();
+    let mut last_report = std::time::Instant::now();
+    let report_interval = Duration::from_millis(500);
+
+    loop {
+        // Try to receive updates with a timeout
+        match rx.recv_timeout(report_interval) {
+            Ok(update) => {
+                // Update the progress for this thread
+                progress_map.insert(update.thread_id, update.progress);
+
+                // Report periodically
+                if last_report.elapsed() >= report_interval {
+                    report_progress(&progress_map);
+                    last_report = std::time::Instant::now();
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+                // Timeout - report current progress
+                if !progress_map.is_empty() {
+                    report_progress(&progress_map);
+                    last_report = std::time::Instant::now();
+                }
+            }
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                // Channel closed - all workers done
+                debug!("Progress indicator: channel closed, exiting");
+                break;
+            }
+        }
+    }
+}
+
+/// Calculate and report the average progress, excluding completed threads
+fn report_progress(progress_map: &HashMap<usize, f64>) {
+    // Collect all in-progress threads (< 1.0)
+    let active_progress: Vec<f64> = progress_map.values().filter(|&&p| p < 1.0).copied().collect();
+
+    if active_progress.is_empty() {
+        // All threads completed or none started yet
+        return;
+    }
+
+    // Calculate average
+    let sum: f64 = active_progress.iter().sum();
+    let average = sum / active_progress.len() as f64;
+
+    info!("Search progress: {:.1}% ({} active threads)", average * 100.0, active_progress.len());
 }
 
 /// The arguments for the `reth db search-changesets` command
@@ -95,6 +156,9 @@ impl Command {
         let total_blocks = actual_max - actual_min + 1;
         let blocks_per_thread = total_blocks.div_ceil(concurrency as u64);
 
+        // Create progress channel
+        let (progress_tx, progress_rx) = std::sync::mpsc::channel();
+
         // Spawn threads to search in parallel
         let mut all_matches = std::thread::scope(|scope| {
             let mut handles = Vec::new();
@@ -108,6 +172,7 @@ impl Command {
                     break;
                 }
 
+                let progress_tx = progress_tx.clone();
                 let handle = scope.spawn(move || -> eyre::Result<Vec<AccountMatch>> {
                     // Each thread creates its own database transaction
                     let mut tx = db.tx()?;
@@ -119,8 +184,12 @@ impl Command {
                     // Position the cursor at the starting point for this thread's range
                     let max_key_excl = Some(thread_max + 1);
                     let mut walker = cursor.walk_back(max_key_excl)?;
+                    debug!(?max_key_excl, ?thread_id, ?thread_max, ?thread_min, "Walking back");
 
                     let mut matches = Vec::new();
+                    let thread_range = thread_max - thread_min + 1;
+                    let mut blocks_processed = 0u64;
+                    let progress_report_interval = 1000u64;
 
                     // Iterate through entries backwards within this thread's range
                     while let Some((block_number, account_before_tx)) = walker.next().transpose()? {
@@ -146,13 +215,30 @@ impl Command {
                                 pre_block_state: account_before_tx.info,
                             });
                         }
+
+                        // Send progress updates periodically
+                        blocks_processed += 1;
+                        if blocks_processed.is_multiple_of(progress_report_interval) {
+                            let blocks_from_max = thread_max - block_number;
+                            let progress = blocks_from_max as f64 / thread_range as f64;
+                            let _ = progress_tx.send(ProgressUpdate { thread_id, progress });
+                        }
                     }
+
+                    // Send 100% completion before exiting
+                    let _ = progress_tx.send(ProgressUpdate { thread_id, progress: 1.0 });
 
                     Ok(matches)
                 });
 
                 handles.push(handle);
             }
+
+            // Drop the original sender so channel closes when all workers finish
+            drop(progress_tx);
+
+            // Run progress indicator inline in the main thread
+            progress_indicator(progress_rx);
 
             // Wait for all threads to complete and collect results
             let mut all_matches = Vec::new();
@@ -222,6 +308,9 @@ impl Command {
         let total_blocks = actual_max - actual_min + 1;
         let blocks_per_thread = total_blocks.div_ceil(concurrency as u64);
 
+        // Create progress channel
+        let (progress_tx, progress_rx) = std::sync::mpsc::channel();
+
         // Spawn threads to search in parallel
         let mut all_matches = std::thread::scope(|scope| {
             let mut handles = Vec::new();
@@ -235,6 +324,7 @@ impl Command {
                     break;
                 }
 
+                let progress_tx = progress_tx.clone();
                 let handle = scope.spawn(move || -> eyre::Result<Vec<StorageMatch>> {
                     // Each thread creates its own database transaction
                     let mut tx = db.tx()?;
@@ -246,8 +336,12 @@ impl Command {
                     // Position the cursor at the starting point for this thread's range
                     let max_key_excl = Some(BlockNumberAddress((thread_max + 1, Address::ZERO)));
                     let mut walker = cursor.walk_back(max_key_excl)?;
+                    debug!(?max_key_excl, ?thread_id, ?thread_max, ?thread_min, "Walking back");
 
                     let mut matches = Vec::new();
+                    let thread_range = thread_max - thread_min + 1;
+                    let mut blocks_processed = 0u64;
+                    let progress_report_interval = 1000u64;
 
                     // Iterate through entries backwards within this thread's range
                     while let Some((BlockNumberAddress((block_number, address)), storage_entry)) =
@@ -282,13 +376,30 @@ impl Command {
                                 pre_block_value: storage_entry.value,
                             });
                         }
+
+                        // Send progress updates periodically
+                        blocks_processed += 1;
+                        if blocks_processed.is_multiple_of(progress_report_interval) {
+                            let blocks_from_max = thread_max - block_number;
+                            let progress = blocks_from_max as f64 / thread_range as f64;
+                            let _ = progress_tx.send(ProgressUpdate { thread_id, progress });
+                        }
                     }
+
+                    // Send 100% completion before exiting
+                    let _ = progress_tx.send(ProgressUpdate { thread_id, progress: 1.0 });
 
                     Ok(matches)
                 });
 
                 handles.push(handle);
             }
+
+            // Drop the original sender so channel closes when all workers finish
+            drop(progress_tx);
+
+            // Run progress indicator inline in the main thread
+            progress_indicator(progress_rx);
 
             // Wait for all threads to complete and collect results
             let mut all_matches = Vec::new();
