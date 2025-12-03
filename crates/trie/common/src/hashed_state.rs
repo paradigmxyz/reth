@@ -377,7 +377,7 @@ impl HashedPostState {
     }
 
     /// Creates a sorted copy without consuming self.
-    /// More efficient than `.clone().into_sorted()` as it avoids cloning HashMap metadata.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
         let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
         accounts.sort_unstable_by_key(|(address, _)| *address);
@@ -485,7 +485,7 @@ impl HashedStorage {
     }
 
     /// Creates a sorted copy without consuming self.
-    /// More efficient than `.clone().into_sorted()` as it avoids cloning HashMap metadata.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> HashedStorageSorted {
         let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
         storage_slots.sort_unstable_by_key(|(key, _)| *key);
