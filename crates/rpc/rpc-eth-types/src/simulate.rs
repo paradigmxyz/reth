@@ -23,7 +23,7 @@ use reth_storage_api::noop::NoopProvider;
 use revm::{
     context::Block,
     context_interface::result::ExecutionResult,
-    primitives::{Address, Bytes, TxKind},
+    primitives::{Address, Bytes, TxKind, U256},
     Database,
 };
 
@@ -36,12 +36,69 @@ pub enum EthSimulateError {
     /// Max gas limit for entire operation exceeded.
     #[error("Client adjustable limit reached")]
     GasLimitReached,
+    /// Block number in sequence did not increase.
+    #[error("Block number in sequence did not increase")]
+    BlockNumberInvalid,
+    /// Block timestamp in sequence did not increase or stay the same.
+    #[error("Block timestamp in sequence did not increase")]
+    BlockTimestampInvalid,
+    /// Transaction nonce is too low.
+    #[error("nonce too low: next nonce {state}, tx nonce {tx}")]
+    NonceTooLow {
+        /// Transaction nonce.
+        tx: u64,
+        /// Current state nonce.
+        state: u64,
+    },
+    /// Transaction nonce is too high.
+    #[error("nonce too high")]
+    NonceTooHigh,
+    /// Transaction's baseFeePerGas is too low.
+    #[error("max fee per gas less than block base fee")]
+    BaseFeePerGasTooLow,
+    /// Not enough gas provided to pay for intrinsic gas.
+    #[error("intrinsic gas too low")]
+    IntrinsicGasTooLow,
+    /// Insufficient funds to pay for gas fees and value.
+    #[error("insufficient funds for gas * price + value: have {balance} want {cost}")]
+    InsufficientFunds {
+        /// Transaction cost.
+        cost: U256,
+        /// Sender balance.
+        balance: U256,
+    },
+    /// Sender is not an EOA.
+    #[error("sender is not an EOA")]
+    SenderNotEOA,
+    /// Max init code size exceeded.
+    #[error("max initcode size exceeded")]
+    MaxInitCodeSizeExceeded,
+    /// `MovePrecompileToAddress` referenced itself in replacement.
+    #[error("MovePrecompileToAddress referenced itself")]
+    PrecompileSelfReference,
+    /// Multiple `MovePrecompileToAddress` referencing the same address.
+    #[error("Multiple MovePrecompileToAddress referencing the same address")]
+    PrecompileDuplicateAddress,
 }
 
+
 impl EthSimulateError {
+    /// Returns the JSON-RPC error code for this error.
     const fn error_code(&self) -> i32 {
         match self {
+            // Transaction errors
+            Self::NonceTooLow { .. } => -38010,
+            Self::NonceTooHigh => -38011,
+            Self::BaseFeePerGasTooLow => -38012,
+            Self::IntrinsicGasTooLow => -38013,
+            Self::InsufficientFunds { .. } => -38014,
             Self::BlockGasLimitExceeded => -38015,
+            Self::BlockNumberInvalid => -38020,
+            Self::BlockTimestampInvalid => -38021,
+            Self::PrecompileSelfReference => -38022,
+            Self::PrecompileDuplicateAddress => -38023,
+            Self::SenderNotEOA => -38024,
+            Self::MaxInitCodeSizeExceeded => -38025,
             Self::GasLimitReached => -38026,
         }
     }
