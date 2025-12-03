@@ -220,10 +220,14 @@ pub struct TransactionFetcherMetrics {
     pub(crate) duration_find_idle_fallback_peer_for_any_pending_hash: Gauge,
 
     /// Time spent searching for hashes pending fetch, announced by a given peer in
-    /// [`TransactionFetcher::fill_request_from_hashes_pending_fetch`](crate::transactions::TransactionFetcher::fill_request_from_hashes_pending_fetch).
+    /// [`RequestBuilder::fill_from_pending_fetch`](crate::transactions::fetcher::RequestBuilder::fill_from_pending_fetch).
     ///
     /// Duration in seconds.
     pub(crate) duration_fill_request_from_hashes_pending_fetch: Gauge,
+    /// Number of peers that currently have queued hashes pending fetch (per-peer queue length).
+    pub(crate) peer_queue_size: Gauge,
+    /// Total number of hashes tracked in per-peer pending queues.
+    pub(crate) peer_queue_hashes: Gauge,
 }
 
 /// Measures the duration of executing the given code block. The duration is added to the given
