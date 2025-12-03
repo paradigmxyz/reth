@@ -47,6 +47,10 @@ proptest-arbitrary-interop.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
 
+criterion.workspace = true
+rayon.workspace = true
+rand.workspace = true
+
 [features]
 metrics = ["reth-trie/metrics"]
 serde = [
@@ -68,3 +72,7 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-trie/test-utils",
 ]
+
+[[bench]]
+name = "sorting_par_exp"
+harness = false
