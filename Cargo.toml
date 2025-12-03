@@ -646,8 +646,8 @@ c-kzg = "2.1.5"
 # config
 toml = "0.8"
 
-# database
-rocksdb = { version = "0.24", default-features = false, features = ["bindgen-runtime", "lz4", "zstd", "jemalloc"] }
+# rocksdb
+rocksdb = { version = "0.24" }
 
 # otlp obs
 opentelemetry_sdk = "0.31"
