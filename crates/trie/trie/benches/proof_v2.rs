@@ -79,8 +79,8 @@ fn generate_test_data(
 
 /// Create cursor factories from a `HashedPostState` for storage trie testing.
 ///
-/// This mimics the test harness pattern from the `proof_v2` tests by using StateRoot
-/// to generate TrieUpdates from the HashedPostState.
+/// This mimics the test harness pattern from the `proof_v2` tests by using `StateRoot`
+/// to generate `TrieUpdates` from the `HashedPostState`.
 fn create_cursor_factories(
     post_state: &HashedPostState,
 ) -> (MockTrieCursorFactory, MockHashedCursorFactory) {
