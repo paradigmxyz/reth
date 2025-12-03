@@ -113,6 +113,10 @@ pub struct Command {
     /// Size of block range chunks to distribute to workers
     #[arg(long, value_name = "BLOCKS", default_value_t = 100)]
     pub chunk_size: u64,
+
+    /// Output matches immediately without collecting and sorting
+    #[arg(long)]
+    pub unsorted: bool,
 }
 
 fn default_concurrency() -> usize {
@@ -154,6 +158,7 @@ impl Command {
             // Spawn worker threads
             for thread_id in 0..self.concurrency {
                 let work_rx = work_rx.clone();
+                let unsorted = self.unsorted;
                 let handle = scope.spawn(move || -> eyre::Result<Vec<AccountMatch>> {
                     // Each thread creates its own database transaction
                     let mut tx = db.tx()?;
@@ -192,11 +197,22 @@ impl Command {
 
                             // Check if this is the account we're looking for (prefix match)
                             if hashed_address_nibbles.starts_with(&account_prefix) {
-                                matches.push(AccountMatch {
-                                    block_number,
-                                    address,
-                                    pre_block_state: account_before_tx.info,
-                                });
+                                if unsorted {
+                                    // Output immediately without collecting
+                                    info!(
+                                        ?address,
+                                        ?block_number,
+                                        pre_block_state=?account_before_tx.info,
+                                        "Found matching account"
+                                    );
+                                } else {
+                                    // Collect for later sorting
+                                    matches.push(AccountMatch {
+                                        block_number,
+                                        address,
+                                        pre_block_state: account_before_tx.info,
+                                    });
+                                }
                             }
                         }
                     }
@@ -220,21 +236,24 @@ impl Command {
             Ok::<Vec<AccountMatch>, eyre::Error>(all_matches)
         })?;
 
-        // Sort results by block number in reverse order (highest first)
-        all_matches.sort_by(|a, b| b.block_number.cmp(&a.block_number));
+        // Only sort and output if not in unsorted mode (matches were already logged immediately)
+        if !self.unsorted {
+            // Sort results by block number in reverse order (highest first)
+            all_matches.sort_by(|a, b| b.block_number.cmp(&a.block_number));
 
-        // Log all sorted results
-        if all_matches.is_empty() {
-            info!("No account found with the given hash");
-        } else {
-            info!("Total matches found: {}", all_matches.len());
-            for match_result in all_matches {
-                info!(
-                    ?match_result.address,
-                    ?match_result.block_number,
-                    pre_block_state=?match_result.pre_block_state,
-                    "Found matching account!"
-                );
+            // Log all sorted results
+            if all_matches.is_empty() {
+                info!("No account found with the given hash");
+            } else {
+                info!("Total matches found: {}", all_matches.len());
+                for match_result in all_matches {
+                    info!(
+                        ?match_result.address,
+                        ?match_result.block_number,
+                        pre_block_state=?match_result.pre_block_state,
+                        "Found matching account"
+                    );
+                }
             }
         }
         Ok(())
@@ -282,6 +301,7 @@ impl Command {
             // Spawn worker threads
             for thread_id in 0..self.concurrency {
                 let work_rx = work_rx.clone();
+                let unsorted = self.unsorted;
                 let handle = scope.spawn(move || -> eyre::Result<Vec<StorageMatch>> {
                     // Each thread creates its own database transaction
                     let mut tx = db.tx()?;
@@ -327,13 +347,26 @@ impl Command {
                             });
 
                             if slot_matches && addr_matches {
-                                matches.push(StorageMatch {
-                                    block_number,
-                                    address,
-                                    slot: storage_entry.key,
-                                    hashed_slot: hashed_slot_nibbles,
-                                    pre_block_value: storage_entry.value,
-                                });
+                                if unsorted {
+                                    // Output immediately without collecting
+                                    info!(
+                                        ?address,
+                                        slot=?storage_entry.key,
+                                        hashed_slot=?hashed_slot_nibbles,
+                                        ?block_number,
+                                        pre_block_value=?storage_entry.value,
+                                        "Found matching slot"
+                                    );
+                                } else {
+                                    // Collect for later sorting
+                                    matches.push(StorageMatch {
+                                        block_number,
+                                        address,
+                                        slot: storage_entry.key,
+                                        hashed_slot: hashed_slot_nibbles,
+                                        pre_block_value: storage_entry.value,
+                                    });
+                                }
                             }
                         }
                     }
@@ -357,23 +390,26 @@ impl Command {
             Ok::<Vec<StorageMatch>, eyre::Error>(all_matches)
         })?;
 
-        // Sort results by block number in reverse order (highest first)
-        all_matches.sort_by(|a, b| b.block_number.cmp(&a.block_number));
+        // Only sort and output if not in unsorted mode (matches were already logged immediately)
+        if !self.unsorted {
+            // Sort results by block number in reverse order (highest first)
+            all_matches.sort_by(|a, b| b.block_number.cmp(&a.block_number));
 
-        // Log all sorted results
-        if all_matches.is_empty() {
-            info!("No storage slot found with the given criteria");
-        } else {
-            info!("Total matches found: {}", all_matches.len());
-            for match_result in all_matches {
-                info!(
-                    ?match_result.address,
-                    slot=?match_result.slot,
-                    ?match_result.hashed_slot,
-                    ?match_result.block_number,
-                    pre_block_value=?match_result.pre_block_value,
-                    "Found matching slot"
-                );
+            // Log all sorted results
+            if all_matches.is_empty() {
+                info!("No storage slot found with the given criteria");
+            } else {
+                info!("Total matches found: {}", all_matches.len());
+                for match_result in all_matches {
+                    info!(
+                        address = ?match_result.address,
+                        slot=?match_result.slot,
+                        hashed_slot=?match_result.hashed_slot,
+                        ?match_result.block_number,
+                        pre_block_value=?match_result.pre_block_value,
+                        "Found matching slot"
+                    );
+                }
             }
         }
         Ok(())
