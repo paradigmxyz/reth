@@ -5,9 +5,7 @@ use alloy_consensus::{
     Eip2718EncodableReceipt, Eip658Value, ReceiptEnvelope, ReceiptWithBloom, RlpDecodableReceipt,
     RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
-use alloy_eips::{
-    eip2718::{Eip2718Error, Encodable2718, IsTyped2718},
-};
+use alloy_eips::eip2718::{Eip2718Error, Encodable2718, IsTyped2718};
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
