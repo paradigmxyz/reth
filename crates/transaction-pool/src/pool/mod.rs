@@ -112,10 +112,10 @@ mod best;
 pub use best::BestTransactions;
 
 mod blob;
-mod listener;
+pub mod listener;
 mod parked;
 pub mod pending;
-pub(crate) mod size;
+pub mod size;
 pub(crate) mod state;
 pub mod txpool;
 mod update;
