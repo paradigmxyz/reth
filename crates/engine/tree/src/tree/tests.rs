@@ -18,7 +18,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, ComputedTrieData};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -27,7 +27,6 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
-use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -45,20 +44,17 @@ struct MockEngineValidator;
 impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineValidator {
     type Block = Block;
 
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: ExecutionData,
     ) -> Result<
-        reth_primitives_traits::RecoveredBlock<Self::Block>,
+        reth_primitives_traits::SealedBlock<Self::Block>,
         reth_payload_primitives::NewPayloadError,
     > {
-        // For tests, convert the execution payload to a block
         let block = reth_ethereum_primitives::Block::try_from(payload.payload).map_err(|e| {
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
-        let sealed = block.seal_slow();
-
-        sealed.try_recover().map_err(|e| reth_payload_primitives::NewPayloadError::Other(e.into()))
+        Ok(block.seal_slow())
     }
 }
 
@@ -822,23 +818,23 @@ fn test_tree_state_on_new_head_deep_fork() {
     let chain_a = test_block_builder.create_fork(&last_block, 10);
     let chain_b = test_block_builder.create_fork(&last_block, 10);
 
+    let empty_trie_data = ComputedTrieData::default;
+
     for block in &chain_a {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
-            recovered_block: Arc::new(block.clone()),
-            execution_output: Arc::new(ExecutionOutcome::default()),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
-        });
+        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
+            Arc::new(block.clone()),
+            Arc::new(ExecutionOutcome::default()),
+            empty_trie_data(),
+        ));
     }
     test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
 
     for block in &chain_b {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
-            recovered_block: Arc::new(block.clone()),
-            execution_output: Arc::new(ExecutionOutcome::default()),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
-        });
+        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
+            Arc::new(block.clone()),
+            Arc::new(ExecutionOutcome::default()),
+            empty_trie_data(),
+        ));
     }
 
     // for each block in chain_b, reorg to it and then back to canonical

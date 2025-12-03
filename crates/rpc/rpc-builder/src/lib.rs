@@ -99,7 +99,7 @@ pub use eth::EthHandlers;
 // Rpc server metrics
 mod metrics;
 use crate::middleware::RethRpcMiddleware;
-pub use metrics::{MeteredRequestFuture, RpcRequestMetricsService};
+pub use metrics::{MeteredBatchRequestsFuture, MeteredRequestFuture, RpcRequestMetricsService};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_rpc::eth::sim_bundle::EthSimBundle;
 
@@ -968,7 +968,7 @@ where
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
                             self.eth.api.pool().clone(),
-                            dyn_clone::clone(self.eth.api.tx_resp_builder()),
+                            dyn_clone::clone(self.eth.api.converter()),
                         )
                         .into_rpc()
                         .into(),

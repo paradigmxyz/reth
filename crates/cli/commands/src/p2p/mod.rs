@@ -8,7 +8,7 @@ use backon::{ConstantBuilder, Retryable};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
-use reth_cli_util::{get_secret_key, hash_or_num_value_parser};
+use reth_cli_util::hash_or_num_value_parser;
 use reth_config::Config;
 use reth_network::{BlockDownloaderProvider, NetworkConfigBuilder};
 use reth_network_p2p::bodies::client::BodiesClient;
@@ -183,9 +183,7 @@ impl<C: ChainSpecParser> DownloadArgs<C> {
         config.peers.trusted_nodes_only = self.network.trusted_only;
 
         let default_secret_key_path = data_dir.p2p_secret();
-        let secret_key_path =
-            self.network.p2p_secret_key.clone().unwrap_or(default_secret_key_path);
-        let p2p_secret_key = get_secret_key(&secret_key_path)?;
+        let p2p_secret_key = self.network.secret_key(default_secret_key_path)?;
         let rlpx_socket = (self.network.addr, self.network.port).into();
         let boot_nodes = self.chain.bootnodes().unwrap_or_default();
 

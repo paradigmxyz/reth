@@ -8,7 +8,7 @@ use clap::{Parser, Subcommand};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    common::{CliComponentsBuilder, CliHeader, CliNodeTypes},
+    common::{CliComponentsBuilder, CliNodeTypes, HeaderMut},
     config_cmd, db, download, dump_genesis, export_era, import, import_era, init_cmd, init_state,
     launcher::FnLauncher,
     node::{self, NoArgs},
@@ -19,14 +19,14 @@ use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_core::{
-    args::{LogArgs, TraceArgs},
+    args::{LogArgs, OtlpInitStatus, TraceArgs},
     version::version_metadata,
 };
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
-use reth_tracing::FileWorkerGuard;
+use reth_tracing::{FileWorkerGuard, Layers};
 use std::{ffi::OsString, fmt, future::Future, marker::PhantomData, sync::Arc};
-use tracing::info;
+use tracing::{info, warn};
 
 /// The main reth cli interface.
 ///
@@ -149,7 +149,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         self.with_runner_and_components(CliRunner::try_default_runtime()?, components, launcher)
@@ -197,7 +197,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
         ) -> eyre::Result<()>,
     ) -> eyre::Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         // Add network name if available to the logs dir
@@ -205,8 +205,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
             self.logs.log_file_directory =
                 self.logs.log_file_directory.join(chain_spec.chain().to_string());
         }
-        let _guard = self.init_tracing()?;
-        info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+        let _guard = self.init_tracing(&runner, Layers::new())?;
 
         // Install the prometheus recorder to be sure to record all metrics
         let _ = install_prometheus_recorder();
@@ -219,11 +218,27 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
     ///
     /// If file logging is enabled, this function returns a guard that must be kept alive to ensure
     /// that all logs are flushed to disk.
+    ///
     /// If an OTLP endpoint is specified, it will export metrics to the configured collector.
-    pub fn init_tracing(&self) -> eyre::Result<Option<FileWorkerGuard>> {
-        let layers = reth_tracing::Layers::new();
+    pub fn init_tracing(
+        &mut self,
+        runner: &CliRunner,
+        mut layers: Layers,
+    ) -> eyre::Result<Option<FileWorkerGuard>> {
+        let otlp_status = runner.block_on(self.traces.init_otlp_tracing(&mut layers))?;
 
         let guard = self.logs.init_tracing_with_layers(layers)?;
+        info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.logs.log_file_directory);
+        match otlp_status {
+            OtlpInitStatus::Started(endpoint) => {
+                info!(target: "reth::cli", "Started OTLP {:?} tracing export to {endpoint}", self.traces.protocol);
+            }
+            OtlpInitStatus::NoFeature => {
+                warn!(target: "reth::cli", "Provided OTLP tracing arguments do not have effect, compile with the `otlp` feature")
+            }
+            OtlpInitStatus::Disabled => {}
+        }
+
         Ok(guard)
     }
 }

@@ -12,7 +12,6 @@ use crate::{
 use alloy_eips::eip4844::env_settings::EnvKzgSettings;
 use futures::Future;
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
-use reth_cli_util::get_secret_key;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_exex::ExExContext;
 use reth_network::{
@@ -36,7 +35,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use reth_transaction_pool::{PoolConfig, PoolTransaction, TransactionPool};
 use secp256k1::SecretKey;
-use std::{fmt::Debug, sync::Arc};
+use std::sync::Arc;
 use tracing::{info, trace, warn};
 
 pub mod add_ons;
@@ -832,7 +831,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
             > + Unpin
             + 'static,
         Node::Provider: BlockReaderFor<N>,
-        Policy: TransactionPropagationPolicy + Debug,
+        Policy: TransactionPropagationPolicy<N>,
     {
         let (handle, network, txpool, eth) = builder
             .transactions_with_policy(pool, tx_config, propagation_policy)
@@ -869,9 +868,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
 
     /// Get the network secret from the given data dir
     fn network_secret(&self, data_dir: &ChainPath<DataDirPath>) -> eyre::Result<SecretKey> {
-        let network_secret_path =
-            self.config().network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
-        let secret_key = get_secret_key(&network_secret_path)?;
+        let secret_key = self.config().network.secret_key(data_dir.p2p_secret())?;
         Ok(secret_key)
     }
 

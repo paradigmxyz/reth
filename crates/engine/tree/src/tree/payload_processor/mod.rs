@@ -13,6 +13,7 @@ use crate::tree::{
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
+use alloy_eips::eip1898::BlockWithParent;
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
 use crossbeam_channel::Sender as CrossbeamSender;
@@ -46,7 +47,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, warn};
+use tracing::{debug, debug_span, instrument, warn, Span};
 
 mod configured_sparse_trie;
 pub mod executor;
@@ -127,6 +128,11 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
+    /// Returns a reference to the workload executor driving payload tasks.
+    pub(super) const fn executor(&self) -> &WorkloadExecutor {
+        &self.executor
+    }
+
     /// Creates a new payload processor.
     pub fn new(
         executor: WorkloadExecutor,
@@ -209,7 +215,11 @@ where
             + Send
             + 'static,
     {
-        let span = tracing::Span::current();
+        // start preparing transactions immediately
+        let (prewarm_rx, execution_rx, transaction_count_hint) =
+            self.spawn_tx_iterator(transactions);
+
+        let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
 
         // We rely on the cursor factory to provide whatever DB overlay is necessary to see a
@@ -237,9 +247,6 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let (prewarm_rx, execution_rx, transaction_count_hint) =
-            self.spawn_tx_iterator(transactions);
-
         let prewarm_handle = self.spawn_caching_with(
             env,
             prewarm_rx,
@@ -249,8 +256,9 @@ where
         );
 
         // spawn multi-proof task
+        let parent_span = span.clone();
         self.executor.spawn_blocking(move || {
-            let _enter = span.entered();
+            let _enter = parent_span.entered();
             multi_proof_task.run();
         });
 
@@ -265,6 +273,7 @@ where
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
+            _span: span,
         }
     }
 
@@ -289,6 +298,7 @@ where
             prewarm_handle,
             state_root: None,
             transactions: execution_rx,
+            _span: Span::current(),
         }
     }
 
@@ -368,9 +378,7 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            let span = debug_span!(target: "engine::tree::payload_processor", "prewarm task");
             self.executor.spawn_blocking(move || {
-                let _enter = span.entered();
                 prewarm_task.run(transactions, to_prewarm_task);
             });
         }
@@ -434,7 +442,7 @@ where
                 sparse_state_trie,
             );
 
-        let span = tracing::Span::current();
+        let span = Span::current();
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
 
@@ -457,6 +465,54 @@ where
             cleared_sparse_trie.lock().replace(cleared_trie);
         });
     }
+
+    /// Updates the execution cache with the post-execution state from an inserted block.
+    ///
+    /// This is used when blocks are inserted directly (e.g., locally built blocks by sequencers)
+    /// to ensure the cache remains warm for subsequent block execution.
+    ///
+    /// The cache enables subsequent blocks to reuse account, storage, and bytecode data without
+    /// hitting the database, maintaining performance consistency.
+    pub(crate) fn on_inserted_executed_block(
+        &self,
+        block_with_parent: BlockWithParent,
+        bundle_state: &BundleState,
+    ) {
+        self.execution_cache.update_with_guard(|cached| {
+            if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
+                debug!(
+                    target: "engine::caching",
+                    parent_hash = %block_with_parent.parent,
+                    "Cannot find cache for parent hash, skip updating cache with new state for inserted executed block",
+                );
+                return;
+            }
+
+            // Take existing cache (if any) or create fresh caches
+            let (caches, cache_metrics) = match cached.take() {
+                Some(existing) => {
+                    existing.split()
+                }
+                None => (
+                    ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size),
+                    CachedStateMetrics::zeroed(),
+                ),
+            };
+
+            // Insert the block's bundle state into cache
+            let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics);
+            if new_cache.cache().insert_state(bundle_state).is_err() {
+                *cached = None;
+                debug!(target: "engine::caching", "cleared execution cache on update error");
+                return;
+            }
+            new_cache.update_metrics();
+
+            // Replace with the updated cache
+            *cached = Some(new_cache);
+            debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
+        });
+    }
 }
 
 /// Handle to all the spawned tasks.
@@ -466,10 +522,12 @@ pub struct PayloadHandle<Tx, Err> {
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
     prewarm_handle: CacheTaskHandle,
-    /// Receiver for the state root
-    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
     /// Stream of block transactions
     transactions: mpsc::Receiver<Result<Tx, Err>>,
+    /// Receiver for the state root
+    state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    /// Span for tracing
+    _span: Span,
 }
 
 impl<Tx, Err> PayloadHandle<Tx, Err> {
@@ -478,7 +536,12 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// # Panics
     ///
     /// If payload processing was started without background tasks.
-    #[instrument(level = "debug", target = "engine::tree::payload_processor", skip_all)]
+    #[instrument(
+        level = "debug",
+        target = "engine::tree::payload_processor",
+        name = "await_state_root",
+        skip_all
+    )]
     pub fn state_root(&mut self) -> Result<StateRootComputeOutcome, ParallelStateRootError> {
         self.state_root
             .take()
@@ -689,6 +752,7 @@ mod tests {
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
+    use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_evm::block::StateChangeSource;
     use rand::Rng;
     use reth_chainspec::ChainSpec;
@@ -702,6 +766,7 @@ mod tests {
         test_utils::create_test_provider_factory_with_chain_spec,
         ChainSpecProvider, HashingWriter,
     };
+    use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
@@ -777,6 +842,70 @@ mod tests {
 
         let new_checkout = execution_cache.get_cache_for(updated);
         assert!(new_checkout.is_some(), "new checkout should succeed after release and update");
+    }
+
+    #[test]
+    fn on_inserted_executed_block_populates_cache() {
+        let payload_processor = PayloadProcessor::new(
+            WorkloadExecutor::default(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        let parent_hash = B256::from([1u8; 32]);
+        let block_hash = B256::from([10u8; 32]);
+        let block_with_parent = BlockWithParent {
+            block: BlockNumHash { hash: block_hash, number: 1 },
+            parent: parent_hash,
+        };
+        let bundle_state = BundleState::default();
+
+        // Cache should be empty initially
+        assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
+
+        // Update cache with inserted block
+        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+
+        // Cache should now exist for the block hash
+        let cached = payload_processor.execution_cache.get_cache_for(block_hash);
+        assert!(cached.is_some());
+        assert_eq!(cached.unwrap().executed_block_hash(), block_hash);
+    }
+
+    #[test]
+    fn on_inserted_executed_block_skips_on_parent_mismatch() {
+        let payload_processor = PayloadProcessor::new(
+            WorkloadExecutor::default(),
+            EthEvmConfig::new(Arc::new(ChainSpec::default())),
+            &TreeConfig::default(),
+            PrecompileCacheMap::default(),
+        );
+
+        // Setup: populate cache with block 1
+        let block1_hash = B256::from([1u8; 32]);
+        payload_processor
+            .execution_cache
+            .update_with_guard(|slot| *slot = Some(make_saved_cache(block1_hash)));
+
+        // Try to insert block 3 with wrong parent (should skip and keep block 1's cache)
+        let wrong_parent = B256::from([99u8; 32]);
+        let block3_hash = B256::from([3u8; 32]);
+        let block_with_parent = BlockWithParent {
+            block: BlockNumHash { hash: block3_hash, number: 3 },
+            parent: wrong_parent,
+        };
+        let bundle_state = BundleState::default();
+
+        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+
+        // Cache should still be for block 1 (unchanged)
+        let cached = payload_processor.execution_cache.get_cache_for(block1_hash);
+        assert!(cached.is_some(), "Original cache should be preserved");
+
+        // Cache for block 3 should not exist
+        let cached3 = payload_processor.execution_cache.get_cache_for(block3_hash);
+        assert!(cached3.is_none(), "New block cache should not be created on mismatch");
     }
 
     fn create_mock_state_updates(num_accounts: usize, updates_per_account: usize) -> Vec<EvmState> {

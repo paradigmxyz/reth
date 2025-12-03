@@ -1,7 +1,6 @@
 use crate::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, RevealedSparseNode, SparseTrieInterface, SparseTrieUpdates,
-    TrieMasks,
+    LeafLookup, LeafLookupError, SparseTrieInterface, SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -20,8 +19,8 @@ use alloy_rlp::Decodable;
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
-    BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, RlpNode, TrieMask,
-    TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
+    BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNode,
+    RlpNode, TrieMask, TrieMasks, TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use tracing::{debug, instrument, trace};
@@ -589,7 +588,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         Ok(())
     }
 
-    fn reveal_nodes(&mut self, mut nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
+    fn reveal_nodes(&mut self, mut nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {
         nodes.sort_unstable_by_key(|node| node.path);
         for node in nodes {
             self.reveal_node(node.path, node.node, node.masks)?;
@@ -2416,9 +2415,9 @@ mod tests {
             .into_sorted();
         let mut node_iter = TrieNodeIter::state_trie(
             walker,
-            HashedPostStateCursor::new(
-                Option::<NoopHashedCursor<Account>>::None,
-                hashed_post_state.accounts(),
+            HashedPostStateCursor::new_account(
+                NoopHashedCursor::<Account>::default(),
+                &hashed_post_state,
             ),
         );
 
