@@ -25,10 +25,13 @@ mod net;
 mod otterscan;
 mod reth;
 mod rpc;
+mod testing;
 mod trace;
 mod txpool;
 mod validation;
 mod web3;
+
+pub use testing::{TestingBuildBlockRequest, TESTING_BUILD_BLOCK_V1};
 
 /// re-export of all server traits
 pub use servers::*;
@@ -45,6 +48,7 @@ pub mod servers {
         otterscan::OtterscanServer,
         reth::RethApiServer,
         rpc::RpcApiServer,
+        testing::TestingApiServer,
         trace::TraceApiServer,
         txpool::TxPoolApiServer,
         validation::BlockSubmissionValidationApiServer,
@@ -75,6 +79,7 @@ pub mod clients {
         otterscan::OtterscanClient,
         reth::RethApiClient,
         rpc::RpcApiServer,
+        testing::TestingApiClient,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,
         validation::BlockSubmissionValidationApiClient,
