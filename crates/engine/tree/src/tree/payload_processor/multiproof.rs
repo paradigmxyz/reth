@@ -1977,7 +1977,7 @@ mod tests {
         use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
-        let mut task = create_test_state_root_task(test_provider_factory);
+        let task = create_test_state_root_task(test_provider_factory);
 
         let addr1 = B256::random();
         let addr2 = B256::random();
