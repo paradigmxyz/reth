@@ -80,16 +80,21 @@ pub trait AsEthApiError {
         let err = self.as_err()?;
         match err {
             EthApiError::InvalidTransaction(tx_err) => match tx_err {
-                RpcInvalidTransactionError::NonceTooLow { tx, state } => 
-                    Some(EthSimulateError::NonceTooLow { tx: *tx, state: *state }),
+                RpcInvalidTransactionError::NonceTooLow { tx, state } => {
+                    Some(EthSimulateError::NonceTooLow { tx: *tx, state: *state })
+                }
                 RpcInvalidTransactionError::NonceTooHigh => Some(EthSimulateError::NonceTooHigh),
-                RpcInvalidTransactionError::FeeCapTooLow => Some(EthSimulateError::BaseFeePerGasTooLow),
+                RpcInvalidTransactionError::FeeCapTooLow => {
+                    Some(EthSimulateError::BaseFeePerGasTooLow)
+                }
                 RpcInvalidTransactionError::GasTooLow => Some(EthSimulateError::IntrinsicGasTooLow),
-                RpcInvalidTransactionError::InsufficientFunds { cost, balance } => 
-                    Some(EthSimulateError::InsufficientFunds { cost: *cost, balance: *balance }),
+                RpcInvalidTransactionError::InsufficientFunds { cost, balance } => {
+                    Some(EthSimulateError::InsufficientFunds { cost: *cost, balance: *balance })
+                }
                 RpcInvalidTransactionError::SenderNoEOA => Some(EthSimulateError::SenderNotEOA),
-                RpcInvalidTransactionError::MaxInitCodeSizeExceeded => 
-                    Some(EthSimulateError::MaxInitCodeSizeExceeded),
+                RpcInvalidTransactionError::MaxInitCodeSizeExceeded => {
+                    Some(EthSimulateError::MaxInitCodeSizeExceeded)
+                }
                 _ => None,
             },
             _ => None,
