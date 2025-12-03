@@ -12,10 +12,10 @@ use reth_trie::{
     updates::TrieUpdates,
     witness::TrieWitness,
     AccountProof, HashedPostState, HashedStorage, KeccakKeyHasher, MultiProof, MultiProofTargets,
-    StateRoot, StorageMultiProof, StorageRoot, TrieInput,
+    StateRoot, StorageMultiProof, TrieInput,
 };
 use reth_trie_db::{
-    DatabaseProof, DatabaseStateRoot, DatabaseStorageProof, DatabaseStorageRoot,
+    storage_overlay_root, DatabaseProof, DatabaseStateRoot, DatabaseStorageProof,
     DatabaseTrieWitness,
 };
 
@@ -92,7 +92,7 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
         address: Address,
         hashed_storage: HashedStorage,
     ) -> ProviderResult<B256> {
-        StorageRoot::overlay_root(self.tx(), address, hashed_storage)
+        storage_overlay_root(self.tx(), address, hashed_storage)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
