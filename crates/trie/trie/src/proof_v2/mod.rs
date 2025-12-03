@@ -815,6 +815,16 @@ where
         trie_cursor_state: &mut TrieCursorState,
         hashed_key_current: Option<&Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
+        // All trie data prior to the current cached branch, if any, has been computed. Any branches
+        // which were under-construction previously, and which are not on the same path as this
+        // cached branch, can be assumed to be completed; they will not have any further keys added
+        // to them.
+        if let Some(cached_path) = self.cached_branch_stack.last().map(|kv| kv.0) {
+            while !cached_path.starts_with(&self.branch_path) {
+                self.pop_branch(targets)?;
+            }
+        }
+
         // `lower_bound` will be used to track the lower bound of the range which is returned from
         // this method. If this is None then there are no further keys which need to be processed.
         //
@@ -825,7 +835,6 @@ where
         let mut lower_bound = Some(hashed_key_current.copied().unwrap_or_else(Nibbles::new));
 
         loop {
-            // TODO might be possible to move this out of the loop?
             // Determine the current cached branch node.
             // Note: cloning is cheap because BranchNodeCompact uses Arcs.
             let (cached_path, cached_branch) = match (
@@ -847,7 +856,7 @@ where
                     // return None to indicate end of computation.
                     return Ok(lower_bound.map(|lower| (lower, None)));
                 }
-                (_, cursor_state, Some(lower_bound))
+                (None, cursor_state, Some(lower_bound))
                     if cursor_state.path().expect("not exhausted") < lower_bound =>
                 {
                     // If `cached_branch_stack` is empty then we want to get a new cached branch
@@ -857,21 +866,40 @@ where
                     *trie_cursor_state = TrieCursorState::new(self.trie_cursor.seek(*lower_bound)?);
                     continue
                 }
-                (_, TrieCursorState::Taken(path), _) => {
-                    panic!("trie cursor at {path:?} had its node taken, but lower_bound {lower_bound:?} is still lte");
+                (None, TrieCursorState::Taken(path), _) => {
+                    panic!("trie cursor at {path:?} had its node taken, but is >= lower_bound {lower_bound:?}");
                 }
-                (_, TrieCursorState::Available(_, _), _) => {
+                (None, TrieCursorState::Available(_, _), _) => {
                     // If `cached_branch_stack` is empty but there is an available cached branch
                     // from the trie cursor then we consume that branch, pushing it onto the stack.
                     self.cached_branch_stack.push(trie_cursor_state.take());
                     trace!(target: TRACE_TARGET, cached=?self.cached_branch_stack.last(), "Pushed next trie node onto cached_branch_stack");
-                    self.cached_branch_stack.last().expect("just pushed").clone()
+
+                    let (cached_path, cached_branch) =
+                        self.cached_branch_stack.last().expect("just pushed");
+
+                    // The current hashed key indicates the first key after the previous uncached
+                    // range, or None if this is the first call to this method. If the key is not
+                    // caught up to the next cached branch it means there are portions of the trie
+                    // prior to that branch which need to be computed; return the uncomputed range
+                    // up to that branch to make that happen.
+                    //
+                    // If the next next cached branch's path is all zeros then we can skip this
+                    // catch-up step, because there cannot be any keys prior to that range.
+                    if hashed_key_current.is_none_or(|k| k < cached_path) &&
+                        !PATH_ALL_ZEROS.starts_with(cached_path)
+                    {
+                        let range = lower_bound.map(|lower| (lower, Some(*cached_path)));
+                        trace!(target: TRACE_TARGET, ?range, "Returning key range to calculate in order to catch up to cached branch");
+                        return Ok(range);
+                    }
+
+                    (*cached_path, cached_branch.clone())
                 }
             };
 
             trace!(
                 target: TRACE_TARGET,
-                ?lower_bound,
                 branch_path = ?self.branch_path,
                 branch_state_mask = ?self.branch_stack.last().map(|b| b.state_mask),
                 ?cached_path,
@@ -879,34 +907,6 @@ where
                 cached_branch_hash_mask = ?cached_branch.hash_mask,
                 "loop",
             );
-
-            // TODO might be possible to move this out of the loop?
-            //
-            // The current hashed key indicates the first key after the previous uncached range,
-            // or None if this is the first call to this method. If the key is not caught up to
-            // this cached branch it means there are portions of the trie prior to this branch
-            // which need to be computed; return the range up to this branch to make that happen.
-            //
-            // TODO update docs
-            if hashed_key_current.is_none_or(|k| k < &cached_path) &&
-                !PATH_ALL_ZEROS.starts_with(&cached_path)
-            {
-                let range = lower_bound.map(|lower| (lower, Some(cached_path)));
-                trace!(
-                    target: TRACE_TARGET,
-                    ?range,
-                    "Returning key range to calculate in order to catch up to cached branch",
-                );
-                return Ok(range);
-            }
-
-            // All trie data prior to this cached branch has been computed. Any branches which were
-            // under-construction previously, and which are not on the same path as this cached
-            // branch, can be assumed to be completed; they will not have any further keys added to
-            // them.
-            while !cached_path.starts_with(&self.branch_path) {
-                self.pop_branch(targets)?;
-            }
 
             // Since we've popped all branches which don't start with cached_path, branch_path at
             // this point must be equal to or shorter than cached_path.
@@ -1009,8 +1009,7 @@ where
 
                     // Update the `lower_bound` to indicate that the child whose bit was just set is
                     // completely processed.
-                    // TODO redundant call to child_path_at? could just be child_path?
-                    lower_bound = self.child_path_at(child_nibble).increment();
+                    lower_bound = child_path.increment();
 
                     continue
                 }
