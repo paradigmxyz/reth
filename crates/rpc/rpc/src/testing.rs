@@ -153,10 +153,8 @@ where
         let provider = &self.provider;
         let parent = provider
             .sealed_header_by_hash(request.parent_block_hash)
-            .map_err(|err| internal_rpc_err(err.to_string()))?;
-        let Some(parent) = parent else {
-            return Err(invalid_params_rpc_err("parentBlockHash not found"));
-        };
+            .map_err(|err| internal_rpc_err(err.to_string()))?
+            .ok_or_else(|| invalid_params_rpc_err("parentBlockHash not found"))?;
 
         // Prepare state.
         let state_provider = provider
@@ -178,7 +176,7 @@ where
             withdrawals: attrs.withdrawals.map(Into::into),
         };
 
-        // Clone evm config and override extra_data if provided.
+        // Per spec: if extraData is provided, override header extra_data with this value.
         let mut evm_config = self.evm_config.clone();
         if let Some(extra) = request.extra_data {
             evm_config = evm_config.with_extra_data(extra);
@@ -196,8 +194,8 @@ where
         let mut total_fees = U256::ZERO;
         let base_fee = builder.evm_mut().block().basefee;
 
+        // Per spec: include all provided transactions, in the given order; do not source from txpool.
         for tx in recovered_txs {
-            // Execute; error on failure.
             let gas_used: u64 = builder
                 .execute_transaction(tx.clone())
                 .map_err(|err: _| internal_rpc_err(err.to_string()))?;
