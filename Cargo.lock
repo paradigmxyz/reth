@@ -10180,6 +10180,7 @@ dependencies = [
  "reth-rpc-eth-api",
  "reth-trie-common",
  "serde",
+ "serde_json",
 ]
 
 [[package]]
