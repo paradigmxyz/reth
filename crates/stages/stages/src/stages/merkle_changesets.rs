@@ -12,9 +12,11 @@ use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
 };
-use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, StateRoot, TrieInput};
+use reth_trie::{
+    updates::TrieUpdates, HashedPostStateSorted, KeccakKeyHasher, StateRoot, TrieInputSorted,
+};
 use reth_trie_db::{DatabaseHashedPostState, DatabaseStateRoot};
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 use tracing::{debug, error};
 
 /// The `MerkleChangeSets` stage.
@@ -105,12 +107,12 @@ impl MerkleChangeSets {
         Ok(target_start..target_end)
     }
 
-    /// Calculates the trie updates given a [`TrieInput`], asserting that the resulting state root
-    /// matches the expected one for the block.
+    /// Calculates the trie updates given a [`TrieInputSorted`], asserting that the resulting state
+    /// root matches the expected one for the block.
     fn calculate_block_trie_updates<Provider: DBProvider + HeaderProvider>(
         provider: &Provider,
         block_number: BlockNumber,
-        input: TrieInput,
+        input: TrieInputSorted,
     ) -> Result<TrieUpdates, StageError> {
         let (root, trie_updates) =
             StateRoot::overlay_root_from_nodes_with_updates(provider.tx_ref(), input).map_err(
@@ -192,21 +194,21 @@ impl MerkleChangeSets {
         );
         let mut per_block_state_reverts = Vec::new();
         for block_number in target_range.clone() {
-            per_block_state_reverts.push(HashedPostState::from_reverts::<KeccakKeyHasher>(
+            per_block_state_reverts.push(HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
                 block_number..=block_number,
             )?);
         }
 
         // Helper to retrieve state revert data for a specific block from the pre-computed array
-        let get_block_state_revert = |block_number: BlockNumber| -> &HashedPostState {
+        let get_block_state_revert = |block_number: BlockNumber| -> &HashedPostStateSorted {
             let index = (block_number - target_start) as usize;
             &per_block_state_reverts[index]
         };
 
         // Helper to accumulate state reverts from a given block to the target end
-        let compute_cumulative_state_revert = |block_number: BlockNumber| -> HashedPostState {
-            let mut cumulative_revert = HashedPostState::default();
+        let compute_cumulative_state_revert = |block_number: BlockNumber| -> HashedPostStateSorted {
+            let mut cumulative_revert = HashedPostStateSorted::default();
             for n in (block_number..target_end).rev() {
                 cumulative_revert.extend_ref(get_block_state_revert(n))
             }
@@ -216,7 +218,7 @@ impl MerkleChangeSets {
         // To calculate the changeset for a block, we first need the TrieUpdates which are
         // generated as a result of processing the block. To get these we need:
         // 1) The TrieUpdates which revert the db's trie to _prior_ to the block
-        // 2) The HashedPostState to revert the db's state to _after_ the block
+        // 2) The HashedPostStateSorted to revert the db's state to _after_ the block
         //
         // To get (1) for `target_start` we need to do a big state root calculation which takes
         // into account all changes between that block and db tip. For each block after the
@@ -227,12 +229,15 @@ impl MerkleChangeSets {
             ?target_start,
             "Computing trie state at starting block",
         );
-        let mut input = TrieInput::default();
-        input.state = compute_cumulative_state_revert(target_start);
-        input.prefix_sets = input.state.construct_prefix_sets();
+        let initial_state = compute_cumulative_state_revert(target_start);
+        let initial_prefix_sets = initial_state.construct_prefix_sets();
+        let initial_input =
+            TrieInputSorted::new(Arc::default(), Arc::new(initial_state), initial_prefix_sets);
         // target_start will be >= 1, see `determine_target_range`.
-        input.nodes =
-            Self::calculate_block_trie_updates(provider, target_start - 1, input.clone())?;
+        let mut nodes = Arc::new(
+            Self::calculate_block_trie_updates(provider, target_start - 1, initial_input)?
+                .into_sorted(),
+        );
 
         for block_number in target_range {
             debug!(
@@ -242,21 +247,24 @@ impl MerkleChangeSets {
             );
             // Revert the state so that this block has been just processed, meaning we take the
             // cumulative revert of the subsequent block.
-            input.state = compute_cumulative_state_revert(block_number + 1);
+            let state = Arc::new(compute_cumulative_state_revert(block_number + 1));
 
-            // Construct prefix sets from only this block's `HashedPostState`, because we only care
-            // about trie updates which occurred as a result of this block being processed.
-            input.prefix_sets = get_block_state_revert(block_number).construct_prefix_sets();
+            // Construct prefix sets from only this block's `HashedPostStateSorted`, because we only
+            // care about trie updates which occurred as a result of this block being processed.
+            let prefix_sets = get_block_state_revert(block_number).construct_prefix_sets();
+
+            let input = TrieInputSorted::new(Arc::clone(&nodes), state, prefix_sets);
 
             // Calculate the trie updates for this block, then apply those updates to the reverts.
             // We calculate the overlay which will be passed into the next step using the trie
             // reverts prior to them being updated.
             let this_trie_updates =
-                Self::calculate_block_trie_updates(provider, block_number, input.clone())?;
+                Self::calculate_block_trie_updates(provider, block_number, input)?.into_sorted();
 
-            let trie_overlay = input.nodes.clone().into_sorted();
-            input.nodes.extend_ref(&this_trie_updates);
-            let this_trie_updates = this_trie_updates.into_sorted();
+            let trie_overlay = Arc::clone(&nodes);
+            let mut nodes_mut = Arc::unwrap_or_clone(nodes);
+            nodes_mut.extend_ref(&this_trie_updates);
+            nodes = Arc::new(nodes_mut);
 
             // Write the changesets to the DB using the trie updates produced by the block, and the
             // trie reverts as the overlay.

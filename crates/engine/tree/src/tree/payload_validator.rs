@@ -647,7 +647,7 @@ where
 
         // Extend state overlay with current block's sorted state.
         input.prefix_sets.extend(hashed_state.construct_prefix_sets());
-        let sorted_hashed_state = hashed_state.clone().into_sorted();
+        let sorted_hashed_state = hashed_state.clone_into_sorted();
         Arc::make_mut(&mut input.state).extend_ref(&sorted_hashed_state);
 
         let TrieInputSorted { nodes, state, prefix_sets: prefix_sets_mut } = input;
