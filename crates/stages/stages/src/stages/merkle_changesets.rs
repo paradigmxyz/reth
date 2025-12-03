@@ -27,7 +27,8 @@ use tracing::{debug, error};
 #[derive(Debug, Clone)]
 pub struct MerkleChangeSets {
     /// The number of blocks to retain changesets for, used as a fallback when the finalized block
-    /// is not found. Defaults to [`MERKLE_CHANGESETS_RETENTION_BLOCKS`] (2 epochs in beacon chain).
+    /// is not found. Defaults to [`MERKLE_CHANGESETS_RETENTION_BLOCKS`] (2 epochs in beacon
+    /// chain).
     retention_blocks: u64,
 }
 
