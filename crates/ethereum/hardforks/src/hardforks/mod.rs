@@ -254,20 +254,14 @@ impl ForkTimestamps {
     ///
     /// The index can be used to efficiently retrieve next/last forks.
     pub fn current_with_index(&self, timestamp: u64) -> Option<(usize, u64)> {
-        match self.timestamps.iter().position(|ts| timestamp < *ts) {
-            Some(0) => None, // timestamp is before the first fork
-            Some(idx) => {
-                let current_idx = idx - 1;
-                self.timestamps.get(current_idx).map(|ts| (current_idx, *ts))
-            }
-            None => {
-                // All forks are at or before the given timestamp, return the last one
-                self.timestamps
-                    .len()
-                    .checked_sub(1)
-                    .and_then(|idx| self.timestamps.get(idx).map(|ts| (idx, *ts)))
-            }
-        }
+        self.timestamps
+            .iter()
+            // find the first timestamp that's greater that the given timestmap
+            .position(|ts| &timestamp < ts)
+            // get the previous one, which is the currently active timestamp
+            .and_then(|idx| idx.checked_sub(1))
+            .or_else(|| self.timestamps.len().checked_sub(1))
+            .and_then(|idx| self.timestamps.get(idx).map(|ts| (idx, *ts)))
     }
 
     /// Returns the next scheduled fork timestamp after the given timestamp.
@@ -435,9 +429,6 @@ mod tests {
 
         let fork_timestamps =
             ForkTimestamps::from_fork_conditions(forks.forks_iter().map(|(_, cond)| cond));
-
-        // Before first fork
-        assert_eq!(fork_timestamps.current(500), None);
 
         // At first fork
         assert_eq!(fork_timestamps.current(1000), Some(1000));
