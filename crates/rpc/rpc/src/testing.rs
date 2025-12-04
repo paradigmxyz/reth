@@ -17,6 +17,7 @@ use reth_primitives_traits::{Block as BlockTrait, Recovered, SealedBlock, Signer
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use std::{marker::PhantomData, sync::Arc};
+use tokio::{runtime::Handle, sync::Semaphore};
 
 // EVM / payload building
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -50,25 +51,44 @@ impl<T: TestingBlockBuilder + ?Sized> TestingBlockBuilder for Arc<T> {
 #[derive(Clone, Debug)]
 pub struct TestingApi<B> {
     builder: B,
+    semaphore: Arc<Semaphore>,
 }
 
 impl<B> TestingApi<B> {
     /// Create a new testing API handler.
-    pub const fn new(builder: B) -> Self {
-        Self { builder }
+    pub fn new(builder: B, max_concurrent: usize) -> Self {
+        let permits = max_concurrent.max(1);
+        Self { builder, semaphore: Arc::new(Semaphore::new(permits)) }
     }
 }
 
 #[async_trait]
 impl<B> TestingApiServer for TestingApi<B>
 where
-    B: TestingBlockBuilder,
+    B: TestingBlockBuilder + Clone + Send + Sync,
 {
     async fn build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
     ) -> RpcResult<ExecutionPayloadEnvelopeV4> {
-        self.builder.build_block(request).await
+        let permit = self
+            .semaphore
+            .clone()
+            .acquire_owned()
+            .await
+            .map_err(|_| internal_rpc_err("testing_buildBlockV1 concurrency limiter closed"))?;
+
+        let builder = self.builder.clone();
+        let handle = Handle::current();
+        let join_handle =
+            tokio::task::spawn_blocking(move || handle.block_on(builder.build_block(request)));
+
+        let res = join_handle
+            .await
+            .map_err(|err| internal_rpc_err(format!("testing_buildBlockV1 failed: {err}")))?;
+
+        drop(permit);
+        res
     }
 }
 

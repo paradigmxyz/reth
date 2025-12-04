@@ -21,6 +21,9 @@ pub trait RethRpcServerConfig {
     /// Returns whether ipc is enabled.
     fn is_ipc_enabled(&self) -> bool;
 
+    /// Max concurrent `testing_buildBlockV1` requests.
+    fn testing_max_concurrent(&self) -> usize;
+
     /// Returns the path to the target ipc socket if enabled.
     fn ipc_path(&self) -> &str;
 
@@ -85,6 +88,11 @@ impl RethRpcServerConfig for RpcServerArgs {
     fn is_ipc_enabled(&self) -> bool {
         // By default IPC is enabled therefore it is enabled if the `ipcdisable` is false.
         !self.ipcdisable
+    }
+
+    fn testing_max_concurrent(&self) -> usize {
+        // ensure at least 1
+        self.testing_max_concurrent.max(1)
     }
 
     fn ipc_path(&self) -> &str {
