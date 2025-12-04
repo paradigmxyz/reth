@@ -97,6 +97,44 @@ impl<Provider> EthTestingBlockBuilder<Provider> {
     ) -> Self {
         Self { provider, evm_config, builder_config, _marker: PhantomData }
     }
+
+    /// Validate `extra_data` length per spec.
+    fn validate_extra_data(extra: &Option<alloy_primitives::Bytes>) -> RpcResult<()> {
+        if let Some(data) = extra.as_ref() &&
+            data.len() > 32
+        {
+            return Err(invalid_params_rpc_err("extraData must be at most 32 bytes"));
+        }
+        Ok(())
+    }
+
+    /// Decode raw signed transactions, reject blob transactions (no sidecars in testing API),
+    /// and recover signer.
+    fn decode_transactions(
+        transactions: Vec<alloy_primitives::Bytes>,
+    ) -> RpcResult<Vec<Recovered<TransactionSigned>>> {
+        let mut recovered_txs = Vec::with_capacity(transactions.len());
+        for raw in transactions {
+            let mut bytes: &[u8] = raw.as_ref();
+            let tx = TransactionSigned::decode(&mut bytes).map_err(|_| {
+                invalid_params_rpc_err("failed to decode transaction (invalid RLP or signature)")
+            })?;
+
+            if tx.blob_versioned_hashes().is_some_and(|hashes: &[B256]| !hashes.is_empty()) {
+                // Without sidecars we cannot include blob transactions safely.
+                return Err(invalid_params_rpc_err(
+                    "blob transactions are not supported in testing_buildBlockV1 without sidecars",
+                ));
+            }
+
+            let signer = tx
+                .recover_signer()
+                .map_err(|_| invalid_params_rpc_err("failed to recover transaction signer"))?;
+
+            recovered_txs.push(Recovered::new_unchecked(tx, signer));
+        }
+        Ok(recovered_txs)
+    }
 }
 
 #[async_trait]
@@ -119,35 +157,8 @@ where
         &self,
         request: TestingBuildBlockRequest,
     ) -> RpcResult<ExecutionPayloadEnvelopeV4> {
-        // Validate extraData length
-        if let Some(extra) = request.extra_data.as_ref() &&
-            extra.len() > 32
-        {
-            return Err(invalid_params_rpc_err("extraData must be at most 32 bytes"));
-        }
-
-        // Decode and basic-validate transactions.
-        let mut recovered_txs: Vec<Recovered<TransactionSigned>> =
-            Vec::with_capacity(request.transactions.len());
-        for raw in request.transactions {
-            let mut bytes: &[u8] = raw.as_ref();
-            let tx = TransactionSigned::decode(&mut bytes).map_err(|_| {
-                invalid_params_rpc_err("failed to decode transaction (invalid RLP or signature)")
-            })?;
-
-            if tx.blob_versioned_hashes().is_some_and(|hashes: &[B256]| !hashes.is_empty()) {
-                // Without sidecars we cannot include blob transactions safely.
-                return Err(invalid_params_rpc_err(
-                    "blob transactions are not supported in testing_buildBlockV1 without sidecars",
-                ));
-            }
-
-            let signer = tx
-                .recover_signer()
-                .map_err(|_| invalid_params_rpc_err("failed to recover transaction signer"))?;
-
-            recovered_txs.push(Recovered::new_unchecked(tx, signer));
-        }
+        Self::validate_extra_data(&request.extra_data)?;
+        let recovered_txs = Self::decode_transactions(request.transactions)?;
 
         // Build the block using the provided parent and attributes.
         let provider = &self.provider;
