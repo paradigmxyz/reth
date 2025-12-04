@@ -33,11 +33,15 @@ const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 /// Maximum number of targets to batch together in `process_multiproof_message`.
 /// Limits proof computation size while allowing deduplication benefit.
 /// A "target" counts each storage slot as 1, and each account-only update as 1.
-const DEFAULT_MAX_BATCH_TARGETS: usize = 500;
+///
+/// EXPERIMENT 1: Reduced from 500 to 50 to preserve pipeline parallelism.
+const DEFAULT_MAX_BATCH_TARGETS: usize = 50;
 
 /// Maximum number of messages to batch together (secondary safety limit).
 /// Prevents excessive batching even with small messages.
-const DEFAULT_MAX_BATCH_MESSAGES: usize = 16;
+///
+/// EXPERIMENT 1: Reduced from 16 to 2 to preserve pipeline parallelism.
+const DEFAULT_MAX_BATCH_MESSAGES: usize = 4;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
