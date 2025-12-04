@@ -528,7 +528,7 @@ where
             parent: self.parent,
             transactions,
             output: &result,
-            bundle_state: db.bundle_state(),
+            bundle_state: (*db).bundle_state(),
             state_provider: &state,
             state_root,
         })?;
