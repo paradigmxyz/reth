@@ -454,7 +454,7 @@ where
     /// block request processing isn't blocked for a long time.
     fn on_downloaded(
         &mut self,
-        mut blocks: Vec<RecoveredBlock<N::Block>>,
+        mut blocks: Vec<SealedBlock<N::Block>>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         if blocks.is_empty() {
             // nothing to execute
@@ -635,7 +635,7 @@ where
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
         let parent_hash = payload.parent_hash();
 
-        match self.payload_validator.ensure_well_formed_payload(payload) {
+        match self.payload_validator.convert_payload_to_block(payload) {
             // if the block is well-formed, buffer it for later
             Ok(block) => {
                 if let Err(error) = self.buffer_block(block) {
@@ -1974,12 +1974,12 @@ where
         //    remember it as invalid
         // 2. the block is not well formed (i.e block hash is incorrect), and we should just return
         //    an error and forget it
-        let block = match self.payload_validator.ensure_well_formed_payload(payload) {
+        let block = match self.payload_validator.convert_payload_to_block(payload) {
             Ok(block) => block,
             Err(error) => return Ok(self.on_new_payload_error(error, parent_hash)?),
         };
 
-        Ok(self.on_invalid_new_payload(block.into_sealed_block(), invalid)?)
+        Ok(self.on_invalid_new_payload(block, invalid)?)
     }
 
     /// Checks if the given `head` points to an invalid header, which requires a specific response
@@ -2003,13 +2003,13 @@ where
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
-    fn validate_block(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
+    fn validate_block(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block.sealed_block()) {
+        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
             error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
@@ -2062,10 +2062,10 @@ where
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
-        block: RecoveredBlock<N::Block>,
+        block: SealedBlock<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.into_sealed_block()))
+            return Err(InsertBlockError::consensus_error(err, block))
         }
         self.state.buffer.insert_block(block);
         Ok(())
@@ -2330,14 +2330,11 @@ where
     #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
     fn on_downloaded_block(
         &mut self,
-        block: RecoveredBlock<N::Block>,
+        block: SealedBlock<N::Block>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
-        if self
-            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.sealed_block())?
-            .is_some()
-        {
+        if self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, &block)?.is_some() {
             return Ok(None)
         }
 
@@ -2401,13 +2398,13 @@ where
             payload.block_with_parent(),
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
-            |this, payload| Ok(this.payload_validator.ensure_well_formed_payload(payload)?),
+            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
         )
     }
 
     fn insert_block(
         &mut self,
-        block: RecoveredBlock<N::Block>,
+        block: SealedBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
             block.block_with_parent(),
@@ -2439,7 +2436,7 @@ where
         block_id: BlockWithParent,
         input: Input,
         execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ExecutedBlock<N>, Err>,
-        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<RecoveredBlock<N::Block>, Err>,
+        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
         Err: From<InsertBlockError<N::Block>>,
@@ -2451,7 +2448,7 @@ where
         match self.sealed_header_by_hash(block_num_hash.hash) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
+                return Err(InsertBlockError::new(block, err.into()).into());
             }
             Ok(Some(_)) => {
                 // We now assume that we already have this block in the tree. However, we need to
@@ -2466,7 +2463,7 @@ where
         match self.state_provider_builder(block_id.parent) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
+                return Err(InsertBlockError::new(block, err.into()).into());
             }
             Ok(None) => {
                 let block = convert_to_block(self, input)?;
@@ -2494,7 +2491,7 @@ where
         let is_fork = match self.is_fork(block_id) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
+                return Err(InsertBlockError::new(block, err.into()).into());
             }
             Ok(is_fork) => is_fork,
         };
