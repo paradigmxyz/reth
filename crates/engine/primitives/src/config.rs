@@ -97,7 +97,7 @@ pub struct TreeConfig {
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
-    /// Whether the host has enough parallelism to run state root task.
+    /// Whether the host has enough parallelism to run state root in parallel.
     has_enough_parallelism: bool,
     /// Whether multiproof task should chunk proof targets.
     multiproof_chunking_enabled: bool,
@@ -385,10 +385,15 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for has enough parallelism.
+    /// Setter for whether or not the host has enough parallelism to run state root in parallel.
     pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
         self.has_enough_parallelism = has_enough_parallelism;
         self
+    }
+
+    /// Whether or not the host has enough parallelism to run state root in parallel.
+    pub const fn has_enough_parallelism(&self) -> bool {
+        self.has_enough_parallelism
     }
 
     /// Setter for state provider metrics.
