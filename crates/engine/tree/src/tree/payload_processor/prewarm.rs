@@ -435,8 +435,9 @@ where
     /// Accepts an [`mpsc::Receiver`] of transactions and a handle to prewarm task. Executes
     /// transactions and streams [`PrewarmTaskEvent::Outcome`] messages for each transaction.
     ///
-    /// Returns `None` if executing the transactions failed to a non Revert error.
-    /// Returns the touched+modified state of the transaction.
+    /// This function processes transactions sequentially from the receiver and emits outcome events
+    /// via the provided sender. Execution errors are logged and tracked but do not stop the batch
+    /// processing unless the task is explicitly cancelled.
     ///
     /// Note: There are no ordering guarantees; this does not reflect the state produced by
     /// sequential execution.
