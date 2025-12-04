@@ -9,7 +9,7 @@ use alloy_consensus::transaction::Recovered;
 use alloy_evm::{
     block::{
         BlockExecutionError, BlockExecutionResult, BlockExecutor, BlockExecutorFactory,
-        BlockExecutorFor, ExecutableTx, OnStateHook,
+        BlockExecutorFor, ExecutableTx, OnStateHook, StateDB,
     },
     precompiles::PrecompilesMap,
     Database, Evm,
@@ -24,10 +24,9 @@ pub struct CustomBlockExecutor<Evm> {
     inner: OpBlockExecutor<Evm, OpRethReceiptBuilder, Arc<OpChainSpec>>,
 }
 
-impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<E>
+impl<E> BlockExecutor for CustomBlockExecutor<E>
 where
-    DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = CustomTxEnv>,
+    E: Evm<DB: StateDB, Tx = CustomTxEnv>,
 {
     type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
