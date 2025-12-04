@@ -991,7 +991,7 @@ where
 
                 if !self.should_retain(targets, &child_path) {
                     // Pull this child's hash out of the cached branch node. To get the hash's index
-                    // we first need to calculate the mask of which cached hash's have already been
+                    // we first need to calculate the mask of which cached hashes have already been
                     // used by this branch (if any). The number of set bits in that mask will be the
                     // index of the next hash in the array to use.
                     let curr_hashed_used_mask = cached_branch.hash_mask.get() & curr_state_mask;
