@@ -544,10 +544,16 @@ pub(crate) struct MultiProofTaskMetrics {
     /// Histogram of sparse trie total durations.
     pub sparse_trie_total_duration_histogram: Histogram,
 
-    /// Histogram of state updates received.
+    /// Histogram of state updates received (post-chunking count).
     pub state_updates_received_histogram: Histogram,
-    /// Histogram of proofs processed.
+    /// Histogram of proofs processed (both prefetch and state update).
     pub proofs_processed_histogram: Histogram,
+    /// Histogram of raw `StateUpdate` messages received (before any batching/chunking).
+    pub raw_state_update_messages_histogram: Histogram,
+    /// Histogram of raw `PrefetchProofs` messages received (before any batching).
+    pub raw_prefetch_messages_histogram: Histogram,
+    /// Histogram of prefetch proofs requested (after chunking).
+    pub prefetch_proofs_requested_histogram: Histogram,
     /// Histogram of total time spent in the multiproof task.
     pub multiproof_task_total_duration_histogram: Histogram,
     /// Total time spent waiting for the first state update or prefetch request.
@@ -1023,6 +1029,10 @@ impl MultiProofTask {
         let mut state_update_proofs_requested = 0;
         let mut proofs_processed = 0;
 
+        // Raw message counters (before any batching/chunking)
+        let mut raw_state_update_messages = 0u64;
+        let mut raw_prefetch_messages = 0u64;
+
         let mut updates_finished = false;
 
         // Timestamp before the first state update or prefetch was received
@@ -1100,6 +1110,9 @@ impl MultiProofTask {
                             MultiProofMessage::PrefetchProofs(targets) => {
                                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::PrefetchProofs");
 
+                                // Count raw message before any processing
+                                raw_prefetch_messages += 1;
+
                                 if first_update_time.is_none() {
                                     // record the wait time
                                     self.metrics
@@ -1123,6 +1136,9 @@ impl MultiProofTask {
                             }
                             MultiProofMessage::StateUpdate(source, update) => {
                                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
+
+                                // Count raw message before any processing
+                                raw_state_update_messages += 1;
 
                                 if first_update_time.is_none() {
                                     // record the wait time
@@ -1209,6 +1225,9 @@ impl MultiProofTask {
         // update total metrics on finish
         self.metrics.state_updates_received_histogram.record(state_update_proofs_requested as f64);
         self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
+        self.metrics.raw_state_update_messages_histogram.record(raw_state_update_messages as f64);
+        self.metrics.raw_prefetch_messages_histogram.record(raw_prefetch_messages as f64);
+        self.metrics.prefetch_proofs_requested_histogram.record(prefetch_proofs_requested as f64);
         if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
         }
