@@ -14,7 +14,7 @@ pub extern crate reth_mdbx_sys as ffi;
 pub use crate::{
     codec::*,
     cursor::{Cursor, Iter, IterDup},
-    database::Database,
+    table::Table,
     environment::{
         Environment, EnvironmentBuilder, EnvironmentKind, Geometry, HandleSlowReadersCallback,
         HandleSlowReadersReturnCode, Info, PageSize, Stat,
@@ -29,7 +29,7 @@ pub use crate::environment::read_transactions::MaxReadTransactionDuration;
 
 mod codec;
 mod cursor;
-mod database;
+mod table;
 mod environment;
 mod error;
 mod flags;
@@ -63,7 +63,7 @@ mod test_utils {
             let mut value = [0u8; 8];
             LittleEndian::write_u64(&mut value, height);
             let tx = env.begin_rw_txn().expect("begin_rw_txn");
-            let index = tx.create_db(None, DatabaseFlags::DUP_SORT).expect("open index db");
+            let index = tx.create_table(None, TableFlags::DUP_SORT).expect("open index table");
             tx.put(index.dbi(), HEIGHT_KEY, value, WriteFlags::empty()).expect("tx.put");
             tx.commit().expect("tx.commit");
         }

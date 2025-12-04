@@ -6,22 +6,22 @@ use crate::{
 use ffi::MDBX_db_flags_t;
 use std::{ffi::CStr, ptr};
 
-/// A handle to an individual database in an environment.
+/// A handle to an individual table in an environment.
 ///
-/// A database handle denotes the name and parameters of a database in an environment.
+/// A table handle denotes the name and parameters of a table in an environment.
 #[derive(Debug)]
-pub struct Database {
+pub struct Table {
     dbi: ffi::MDBX_dbi,
-    /// The environment that this database belongs to keeps it alive as long as the database
+    /// The environment that this table belongs to keeps it alive as long as the table
     /// instance exists.
     _env: Option<Environment>,
 }
 
-impl Database {
-    /// Opens a new database handle in the given transaction.
+impl Table {
+    /// Opens a new table handle in the given transaction.
     ///
-    /// Prefer using `Environment::open_db`, `Environment::create_db`, `TransactionExt::open_db`,
-    /// or `RwTransaction::create_db`.
+    /// Prefer using `Environment::open_table`, `Environment::create_table`, `TransactionExt::open_table`,
+    /// or `RwTransaction::create_table`.
     pub(crate) fn new<K: TransactionKind>(
         txn: &Transaction<K>,
         name: Option<&str>,
@@ -45,19 +45,19 @@ impl Database {
         Self { dbi, _env: Some(env) }
     }
 
-    /// Opens the freelist database with DBI `0`.
-    pub const fn freelist_db() -> Self {
+    /// Opens the freelist table with DBI `0`.
+    pub const fn freelist_table() -> Self {
         Self { dbi: 0, _env: None }
     }
 
-    /// Returns the underlying MDBX database handle.
+    /// Returns the underlying MDBX table handle.
     ///
     /// The caller **must** ensure that the handle is not used after the lifetime of the
-    /// environment, or after the database has been closed.
+    /// environment, or after the table has been closed.
     pub const fn dbi(&self) -> ffi::MDBX_dbi {
         self.dbi
     }
 }
 
-unsafe impl Send for Database {}
-unsafe impl Sync for Database {}
+unsafe impl Send for Table {}
+unsafe impl Sync for Table {}

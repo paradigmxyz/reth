@@ -1,5 +1,5 @@
 use crate::{
-    database::Database,
+    table::Table,
     error::{mdbx_result, Error, Result},
     flags::EnvironmentFlags,
     transaction::{RO, RW},
@@ -210,8 +210,8 @@ impl Environment {
     pub fn freelist(&self) -> Result<usize> {
         let mut freelist: usize = 0;
         let txn = self.begin_ro_txn()?;
-        let db = Database::freelist_db();
-        let cursor = txn.cursor(&db)?;
+        let db_table = Table::freelist_table();
+        let cursor = txn.cursor(&db_table)?;
 
         for result in cursor.iter_slices() {
             let (_key, value) = result?;
@@ -958,7 +958,7 @@ mod tests {
         // Insert some data in the database, so the read transaction can lock on the snapshot of it
         {
             let tx = env.begin_rw_txn().unwrap();
-            let db = tx.open_db(None).unwrap();
+            let db = tx.open_table(None).unwrap();
             for i in 0usize..1_000 {
                 tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()).unwrap()
             }
@@ -971,9 +971,9 @@ mod tests {
         // Change previously inserted data, so the read transaction would use the previous snapshot
         {
             let tx = env.begin_rw_txn().unwrap();
-            let db = tx.open_db(None).unwrap();
+            let db_table = tx.open_table(None).unwrap();
             for i in 0usize..1_000 {
-                tx.put(db.dbi(), i.to_le_bytes(), b"1", WriteFlags::empty()).unwrap();
+                tx.put(db_table.dbi(), i.to_le_bytes(), b"1", WriteFlags::empty()).unwrap();
             }
             tx.commit().unwrap();
         }
@@ -982,9 +982,9 @@ mod tests {
         // kick long-lived readers and delete their snapshots
         {
             let tx = env.begin_rw_txn().unwrap();
-            let db = tx.open_db(None).unwrap();
+            let db_table = tx.open_table(None).unwrap();
             for i in 1_000usize..1_000_000 {
-                match tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()) {
+                match tx.put(db_table.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()) {
                     Ok(_) => {}
                     Err(Error::MapFull) => break,
                     result @ Err(_) => result.unwrap(),

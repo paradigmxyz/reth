@@ -341,7 +341,7 @@ mod read_transactions {
                 let tx_ptr = tx.txn() as usize;
                 assert!(read_transactions.active.contains_key(&tx_ptr));
 
-                tx.open_db(None).unwrap();
+                tx.open_table(None).unwrap();
                 drop(tx);
 
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
@@ -353,7 +353,7 @@ mod read_transactions {
                 let tx_ptr = tx.txn() as usize;
                 assert!(read_transactions.active.contains_key(&tx_ptr));
 
-                tx.open_db(None).unwrap();
+                tx.open_table(None).unwrap();
                 tx.commit().unwrap();
 
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
@@ -375,7 +375,7 @@ mod read_transactions {
                 assert!(read_transactions.timed_out_not_aborted.contains(&tx_ptr));
 
                 // Use the timed out transaction and observe the `Error::ReadTransactionTimeout`
-                assert_eq!(tx.open_db(None).err(), Some(Error::ReadTransactionTimeout));
+                assert_eq!(tx.open_table(None).err(), Some(Error::ReadTransactionTimeout));
                 assert!(!read_transactions.active.contains_key(&tx_ptr));
                 assert!(read_transactions.timed_out_not_aborted.contains(&tx_ptr));
 

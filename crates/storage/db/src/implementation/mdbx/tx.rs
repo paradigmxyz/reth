@@ -73,8 +73,8 @@ impl<K: TransactionKind> Tx<K> {
             Ok(*dbi)
         } else {
             self.inner
-                .open_db(Some(T::NAME))
-                .map(|db| db.dbi())
+                .open_table(Some(T::NAME))
+                .map(|db_table| db_table.dbi())
                 .map_err(|e| DatabaseError::Open(e.into()))
         }
     }
@@ -324,7 +324,7 @@ impl<K: TransactionKind> DbTx for Tx<K> {
     fn entries<T: Table>(&self) -> Result<usize, DatabaseError> {
         Ok(self
             .inner
-            .db_stat_with_dbi(self.get_dbi::<T>()?)
+            .table_stat_with_dbi(self.get_dbi::<T>()?)
             .map_err(|e| DatabaseError::Stats(e.into()))?
             .entries())
     }
@@ -419,7 +419,7 @@ impl DbTxMut for Tx<RW> {
     }
 
     fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
-        self.inner.clear_db(self.get_dbi::<T>()?).map_err(|e| DatabaseError::Delete(e.into()))?;
+        self.inner.clear_table(self.get_dbi::<T>()?).map_err(|e| DatabaseError::Delete(e.into()))?;
 
         Ok(())
     }

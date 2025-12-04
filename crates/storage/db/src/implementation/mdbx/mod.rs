@@ -17,7 +17,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{
-    ffi, DatabaseFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode,
+    ffi, TableFlags, Environment, EnvironmentFlags, Geometry, HandleSlowReadersReturnCode,
     MaxReadTransactionDuration, Mode, PageSize, SyncMode, RO, RW,
 };
 use reth_storage_errors::db::LogLevel;
@@ -274,11 +274,11 @@ impl DatabaseMetrics for DatabaseEnv {
         let _ = self
             .view(|tx| {
                 for table in Tables::ALL.iter().map(Tables::name) {
-                    let table_db = tx.inner.open_db(Some(table)).wrap_err("Could not open db.")?;
+                    let db_table = tx.inner.open_table(Some(table)).wrap_err("Could not open table.")?;
 
                     let stats = tx
                         .inner
-                        .db_stat(&table_db)
+                        .table_stat(&db_table)
                         .wrap_err(format!("Could not find table: {table}"))?;
 
                     let page_size = stats.page_size() as usize;
@@ -548,12 +548,12 @@ impl DatabaseEnv {
 
         for table in TS::tables() {
             let flags =
-                if table.is_dupsort() { DatabaseFlags::DUP_SORT } else { DatabaseFlags::default() };
+                if table.is_dupsort() { TableFlags::DUP_SORT } else { TableFlags::default() };
 
-            let db = tx
-                .create_db(Some(table.name()), flags)
+            let db_table = tx
+                .create_table(Some(table.name()), flags)
                 .map_err(|e| DatabaseError::CreateTable(e.into()))?;
-            handles.push((table.name(), db.dbi()));
+            handles.push((table.name(), db_table.dbi()));
         }
 
         tx.commit().map_err(|e| DatabaseError::Commit(e.into()))?;

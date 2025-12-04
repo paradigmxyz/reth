@@ -1,10 +1,5 @@
 use crate::{
-    database::Database,
-    environment::Environment,
-    error::{mdbx_result, Result},
-    flags::{DatabaseFlags, WriteFlags},
-    txn_manager::{TxnManagerMessage, TxnPtr},
-    Cursor, Error, Stat, TableObject,
+    Cursor, Error, Stat, TableObject, environment::Environment, error::{Result, mdbx_result}, flags::{TableFlags, WriteFlags}, table::{Table}, txn_manager::{TxnManagerMessage, TxnPtr}
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use parking_lot::{Mutex, MutexGuard};
@@ -57,7 +52,7 @@ impl TransactionKind for RW {
 
 /// An MDBX transaction.
 ///
-/// All database operations require a transaction.
+/// All table operations require a transaction.
 pub struct Transaction<K>
 where
     K: TransactionKind,
@@ -142,13 +137,13 @@ where
         self.txn_execute(|txn| unsafe { ffi::mdbx_txn_id(txn) })
     }
 
-    /// Gets an item from a database.
+    /// Gets an item from a table.
     ///
     /// This function retrieves the data associated with the given key in the
-    /// database. If the database supports duplicate keys
-    /// ([`DatabaseFlags::DUP_SORT`]) then the first data item for the key will be
+    /// table. If the table supports duplicate keys
+    /// ([`TableFlags::DUP_SORT`]) then the first data item for the key will be
     /// returned. Retrieval of other items requires the use of
-    /// [Cursor]. If the item is not in the database, then
+    /// [Cursor]. If the item is not in the table, then
     /// [None] will be returned.
     pub fn get<Key>(&self, dbi: ffi::MDBX_dbi, key: &[u8]) -> Result<Option<Key>>
     where
@@ -192,42 +187,42 @@ where
         result
     }
 
-    /// Opens a handle to an MDBX database.
+    /// Opens a handle to an MDBX table.
     ///
-    /// If `name` is [None], then the returned handle will be for the default database.
+    /// If `name` is [None], then the returned handle will be for the default table.
     ///
-    /// If `name` is not [None], then the returned handle will be for a named database. In this
-    /// case the environment must be configured to allow named databases through
+    /// If `name` is not [None], then the returned handle will be for a named table. In this
+    /// case the environment must be configured to allow named tables through
     /// [`EnvironmentBuilder::set_max_dbs()`](crate::EnvironmentBuilder::set_max_dbs).
     ///
-    /// The returned database handle may be shared among any transaction in the environment.
+    /// The returned table handle may be shared among any transaction in the environment.
     ///
-    /// The database name may not contain the null character.
-    pub fn open_db(&self, name: Option<&str>) -> Result<Database> {
-        Database::new(self, name, 0)
+    /// The table name may not contain the null character.
+    pub fn open_table(&self, name: Option<&str>) -> Result<Table> {
+        Table::new(self, name, 0)
     }
 
-    /// Gets the option flags for the given database in the transaction.
-    pub fn db_flags(&self, db: &Database) -> Result<DatabaseFlags> {
+    /// Gets the option flags for the given table in the transaction.
+    pub fn db_flags(&self, table: &Table) -> Result<TableFlags> {
         let mut flags: c_uint = 0;
         unsafe {
             self.txn_execute(|txn| {
-                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut()))
+                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, table.dbi(), &mut flags, ptr::null_mut()))
             })??;
         }
 
         // The types are not the same on Windows. Great!
         #[cfg_attr(not(windows), allow(clippy::useless_conversion))]
-        Ok(DatabaseFlags::from_bits_truncate(flags.try_into().unwrap()))
+        Ok(TableFlags::from_bits_truncate(flags.try_into().unwrap()))
     }
 
-    /// Retrieves database statistics.
-    pub fn db_stat(&self, db: &Database) -> Result<Stat> {
-        self.db_stat_with_dbi(db.dbi())
+    /// Retrieves table statistics.
+    pub fn table_stat(&self, table: &Table) -> Result<Stat> {
+        self.table_stat_with_dbi(table.dbi())
     }
 
-    /// Retrieves database statistics by the given dbi.
-    pub fn db_stat_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
+    /// Retrieves table statistics by the given dbi.
+    pub fn table_stat_with_dbi(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
         unsafe {
             let mut stat = Stat::new();
             self.txn_execute(|txn| {
@@ -237,9 +232,9 @@ where
         }
     }
 
-    /// Open a new cursor on the given database.
-    pub fn cursor(&self, db: &Database) -> Result<Cursor<K>> {
-        Cursor::new(self.clone(), db.dbi())
+    /// Open a new cursor on the given table.
+    pub fn cursor(&self, table: &Table) -> Result<Cursor<K>> {
+        Cursor::new(self.clone(), table.dbi())
     }
 
     /// Open a new cursor on the given dbi.
@@ -348,32 +343,32 @@ where
 }
 
 impl Transaction<RW> {
-    fn open_db_with_flags(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
-        Database::new(self, name, flags.bits())
+    fn open_table_with_flags_inner(&self, name: Option<&str>, flags: TableFlags) -> Result<Table> {
+        Table::new(self, name, flags.bits())
     }
 
-    /// Opens a handle to an MDBX database, creating the database if necessary.
+    /// Opens a handle to an MDBX table, creating the table if necessary.
     ///
-    /// If the database is already created, the given option flags will be added to it.
+    /// If the table is already created, the given option flags will be added to it.
     ///
-    /// If `name` is [None], then the returned handle will be for the default database.
+    /// If `name` is [None], then the returned handle will be for the default table.
     ///
-    /// If `name` is not [None], then the returned handle will be for a named database. In this
-    /// case the environment must be configured to allow named databases through
+    /// If `name` is not [None], then the returned handle will be for a named table. In this
+    /// case the environment must be configured to allow named tables through
     /// [`EnvironmentBuilder::set_max_dbs()`](crate::EnvironmentBuilder::set_max_dbs).
     ///
     /// This function will fail with [`Error::BadRslot`] if called by a thread with an open
     /// transaction.
-    pub fn create_db(&self, name: Option<&str>, flags: DatabaseFlags) -> Result<Database> {
-        self.open_db_with_flags(name, flags | DatabaseFlags::CREATE)
+    pub fn create_table(&self, name: Option<&str>, flags: TableFlags) -> Result<Table> {
+        self.open_table_with_flags_inner(name, flags | TableFlags::CREATE)
     }
 
-    /// Stores an item into a database.
+    /// Stores an item into a table.
     ///
-    /// This function stores key/data pairs in the database. The default
+    /// This function stores key/data pairs in the table. The default
     /// behavior is to enter the new key/data pair, replacing any previously
     /// existing key if duplicates are disallowed, or adding a duplicate data
-    /// item if duplicates are allowed ([`DatabaseFlags::DUP_SORT`]).
+    /// item if duplicates are allowed ([`TableFlags::DUP_SORT`]).
     pub fn put(
         &self,
         dbi: ffi::MDBX_dbi,
@@ -400,7 +395,7 @@ impl Transaction<RW> {
     #[allow(clippy::mut_from_ref)]
     pub fn reserve(
         &self,
-        db: &Database,
+        table: &Table,
         key: impl AsRef<[u8]>,
         len: usize,
         flags: WriteFlags,
@@ -414,7 +409,7 @@ impl Transaction<RW> {
             mdbx_result(self.txn_execute(|txn| {
                 ffi::mdbx_put(
                     txn,
-                    db.dbi(),
+                    table.dbi(),
                     &key_val,
                     &mut data_val,
                     flags.bits() | ffi::MDBX_RESERVE,
@@ -424,10 +419,10 @@ impl Transaction<RW> {
         }
     }
 
-    /// Delete items from a database.
-    /// This function removes key/data pairs from the database.
+    /// Delete items from a table.
+    /// This function removes key/data pairs from the table.
     ///
-    /// The data parameter is NOT ignored regardless the database does support sorted duplicate data
+    /// The data parameter is NOT ignored regardless the table does support sorted duplicate data
     /// items or not. If the data parameter is [Some] only the matching data item will be
     /// deleted. Otherwise, if data parameter is [None], any/all value(s) for specified key will
     /// be deleted.
@@ -463,33 +458,33 @@ impl Transaction<RW> {
         })
     }
 
-    /// Empties the given database. All items will be removed.
-    pub fn clear_db(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
+    /// Empties the given table. All items will be removed.
+    pub fn clear_table(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
         mdbx_result(self.txn_execute(|txn| unsafe { ffi::mdbx_drop(txn, dbi, false) })?)?;
 
         Ok(())
     }
 
-    /// Drops the database from the environment.
+    /// Drops the table from the environment.
     ///
     /// # Safety
-    /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
+    /// Caller must close ALL other [Table] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn drop_db(&self, db: Database) -> Result<()> {
-        mdbx_result(self.txn_execute(|txn| unsafe { ffi::mdbx_drop(txn, db.dbi(), true) })?)?;
+    pub unsafe fn drop_table(&self, table: Table) -> Result<()> {
+        mdbx_result(self.txn_execute(|txn| unsafe { ffi::mdbx_drop(txn, table.dbi(), true) })?)?;
 
         Ok(())
     }
 }
 
 impl Transaction<RO> {
-    /// Closes the database handle.
+    /// Closes the table handle.
     ///
     /// # Safety
-    /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
+    /// Caller must close ALL other [Table] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn close_db(&self, db: Database) -> Result<()> {
-        mdbx_result(unsafe { ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()) })?;
+    pub unsafe fn close_table(&self, table: Table) -> Result<()> {
+        mdbx_result(unsafe { ffi::mdbx_dbi_close(self.env().env_ptr(), table.dbi()) })?;
 
         Ok(())
     }
@@ -632,7 +627,7 @@ impl CommitLatency {
 
 impl CommitLatency {
     /// Duration of preparation (commit child transactions, update
-    /// sub-databases records and cursors destroying).
+    /// sub-tables records and cursors destroying).
     #[inline]
     pub const fn preparation(&self) -> Duration {
         Self::time_to_duration(self.0.preparation)

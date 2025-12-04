@@ -208,7 +208,7 @@ impl EnvironmentFlags {
 bitflags! {
     #[doc="Database options."]
     #[derive(Default)]
-    pub struct DatabaseFlags: MDBX_env_flags_t {
+    pub struct TableFlags: MDBX_env_flags_t {
         const REVERSE_KEY = MDBX_REVERSEKEY;
         const DUP_SORT = MDBX_DUPSORT;
         const INTEGER_KEY = MDBX_INTEGERKEY;
