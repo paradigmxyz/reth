@@ -11,7 +11,7 @@ fn bench_get_seq_iter(c: &mut Criterion) {
     let n = 100;
     let (_dir, env) = setup_bench_db(n);
     let txn = env.begin_ro_txn().unwrap();
-    let db_table = txn.open_table(None).unwrap();
+    let db_table = txn.open_table_inner(None).unwrap();
 
     c.bench_function("bench_get_seq_iter", |b| {
         b.iter(|| {
@@ -53,7 +53,7 @@ fn bench_get_seq_cursor(c: &mut Criterion) {
     let n = 100;
     let (_dir, env) = setup_bench_db(n);
     let txn = env.begin_ro_txn().unwrap();
-    let db_table = txn.open_table(None).unwrap();
+    let db_table = txn.open_table_inner(None).unwrap();
 
     c.bench_function("bench_get_seq_cursor", |b| {
         b.iter(|| {
@@ -75,7 +75,7 @@ fn bench_get_seq_raw(c: &mut Criterion) {
     let n = 100;
     let (_dir, env) = setup_bench_db(n);
 
-    let dbi = env.begin_ro_txn().unwrap().open_table(None).unwrap().dbi();
+    let dbi = env.begin_ro_txn().unwrap().open_table_inner(None).unwrap().dbi();
     let txn = env.begin_ro_txn().unwrap();
 
     let mut key = MDBX_val { iov_len: 0, iov_base: ptr::null_mut() };

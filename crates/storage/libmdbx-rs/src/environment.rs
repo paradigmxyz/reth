@@ -958,7 +958,7 @@ mod tests {
         // Insert some data in the database, so the read transaction can lock on the snapshot of it
         {
             let tx = env.begin_rw_txn().unwrap();
-            let db = tx.open_table(None).unwrap();
+            let db = tx.open_table_inner(None).unwrap();
             for i in 0usize..1_000 {
                 tx.put(db.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()).unwrap()
             }
@@ -971,7 +971,7 @@ mod tests {
         // Change previously inserted data, so the read transaction would use the previous snapshot
         {
             let tx = env.begin_rw_txn().unwrap();
-            let db_table = tx.open_table(None).unwrap();
+            let db_table = tx.open_table_inner(None).unwrap();
             for i in 0usize..1_000 {
                 tx.put(db_table.dbi(), i.to_le_bytes(), b"1", WriteFlags::empty()).unwrap();
             }
@@ -982,7 +982,7 @@ mod tests {
         // kick long-lived readers and delete their snapshots
         {
             let tx = env.begin_rw_txn().unwrap();
-            let db_table = tx.open_table(None).unwrap();
+            let db_table = tx.open_table_inner(None).unwrap();
             for i in 1_000usize..1_000_000 {
                 match tx.put(db_table.dbi(), i.to_le_bytes(), b"0", WriteFlags::empty()) {
                     Ok(_) => {}

@@ -84,7 +84,7 @@ impl Command {
             db_tables.sort();
             let mut total_size = 0;
             for db_table in db_tables {
-                let table_db = tx.inner.open_table(Some(db_table)).wrap_err("Could not open db.")?;
+                let table_db = tx.inner.open_table_inner(Some(db_table)).wrap_err("Could not open db.")?;
 
                 let stats = tx
                     .inner

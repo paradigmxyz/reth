@@ -274,7 +274,7 @@ impl DatabaseMetrics for DatabaseEnv {
         let _ = self
             .view(|tx| {
                 for table in Tables::ALL.iter().map(Tables::name) {
-                    let db_table = tx.inner.open_table(Some(table)).wrap_err("Could not open table.")?;
+                    let db_table = tx.inner.open_table_inner(Some(table)).wrap_err("Could not open table.")?;
 
                     let stats = tx
                         .inner
@@ -551,7 +551,7 @@ impl DatabaseEnv {
                 if table.is_dupsort() { TableFlags::DUP_SORT } else { TableFlags::default() };
 
             let db_table = tx
-                .create_table(Some(table.name()), flags)
+                .create_table_inner(Some(table.name()), flags)
                 .map_err(|e| DatabaseError::CreateTable(e.into()))?;
             handles.push((table.name(), db_table.dbi()));
         }

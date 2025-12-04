@@ -18,7 +18,7 @@ pub fn setup_bench_db(num_rows: u32) -> (TempDir, Environment) {
 
     {
         let txn = env.begin_rw_txn().unwrap();
-        let db_table = txn.open_table(None).unwrap();
+        let db_table = txn.open_table_inner(None).unwrap();
         for i in 0..num_rows {
             txn.put(db_table.dbi(), get_key(i), get_data(i), WriteFlags::empty()).unwrap();
         }

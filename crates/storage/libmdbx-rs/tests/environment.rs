@@ -44,8 +44,8 @@ fn test_open_db() {
     let env = Environment::builder().set_max_dbs(1).open(dir.path()).unwrap();
 
     let txn = env.begin_ro_txn().unwrap();
-    assert!(txn.open_table(None).is_ok());
-    assert!(txn.open_table(Some("testdb")).is_err());
+    assert!(txn.open_table_inner(None).is_ok());
+    assert!(txn.open_table_inner(Some("testdb")).is_err());
 }
 
 #[test]
@@ -54,9 +54,9 @@ fn test_create_db() {
     let env = Environment::builder().set_max_dbs(11).open(dir.path()).unwrap();
 
     let txn = env.begin_rw_txn().unwrap();
-    assert!(txn.open_table(Some("testdb")).is_err());
-    assert!(txn.create_table(Some("testdb"), TableFlags::empty()).is_ok());
-    assert!(txn.open_table(Some("testdb")).is_ok())
+    assert!(txn.open_table_inner(Some("testdb")).is_err());
+    assert!(txn.create_table_inner(Some("testdb"), TableFlags::empty()).is_ok());
+    assert!(txn.open_table_inner(Some("testdb")).is_ok())
 }
 
 #[test]
@@ -65,8 +65,8 @@ fn test_close_database() {
     let env = Environment::builder().set_max_dbs(10).open(dir.path()).unwrap();
 
     let txn = env.begin_rw_txn().unwrap();
-    txn.create_table(Some("db"), TableFlags::empty()).unwrap();
-    txn.open_table(Some("db")).unwrap();
+    txn.create_table_inner(Some("db"), TableFlags::empty()).unwrap();
+    txn.open_table_inner(Some("db")).unwrap();
 }
 
 #[test]
@@ -100,7 +100,7 @@ fn test_stat() {
         let mut value = [0u8; 8];
         LittleEndian::write_u64(&mut value, i);
         let tx = env.begin_rw_txn().expect("begin_rw_txn");
-        tx.put(tx.open_table(None).unwrap().dbi(), value, value, WriteFlags::default())
+        tx.put(tx.open_table_inner(None).unwrap().dbi(), value, value, WriteFlags::default())
             .expect("tx.put");
         tx.commit().expect("tx.commit");
     }
@@ -155,12 +155,12 @@ fn test_freelist() {
         let mut value = [0u8; 8];
         LittleEndian::write_u64(&mut value, i);
         let tx = env.begin_rw_txn().expect("begin_rw_txn");
-        tx.put(tx.open_table(None).unwrap().dbi(), value, value, WriteFlags::default())
+        tx.put(tx.open_table_inner(None).unwrap().dbi(), value, value, WriteFlags::default())
             .expect("tx.put");
         tx.commit().expect("tx.commit");
     }
     let tx = env.begin_rw_txn().expect("begin_rw_txn");
-    tx.clear_table(tx.open_table(None).unwrap().dbi()).expect("clear");
+    tx.clear_table_inner(tx.open_table_inner(None).unwrap().dbi()).expect("clear");
     tx.commit().expect("tx.commit");
 
     // Freelist should not be empty after clear_db.

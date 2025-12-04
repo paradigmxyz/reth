@@ -243,7 +243,7 @@ where
     T: Table,
 {
     db.view(|tx| {
-        let db_table = tx.inner.open_table(Some(T::NAME)).map_err(|_| "Could not open table.").unwrap();
+        let db_table = tx.inner.open_table_inner(Some(T::NAME)).map_err(|_| "Could not open table.").unwrap();
 
         println!(
             "{:?}\n",

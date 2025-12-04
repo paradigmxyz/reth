@@ -198,7 +198,7 @@ where
     /// The returned table handle may be shared among any transaction in the environment.
     ///
     /// The table name may not contain the null character.
-    pub fn open_table(&self, name: Option<&str>) -> Result<Table> {
+    pub fn open_table_inner(&self, name: Option<&str>) -> Result<Table> {
         Table::new(self, name, 0)
     }
 
@@ -359,7 +359,7 @@ impl Transaction<RW> {
     ///
     /// This function will fail with [`Error::BadRslot`] if called by a thread with an open
     /// transaction.
-    pub fn create_table(&self, name: Option<&str>, flags: TableFlags) -> Result<Table> {
+    pub fn create_table_inner(&self, name: Option<&str>, flags: TableFlags) -> Result<Table> {
         self.open_table_with_flags_inner(name, flags | TableFlags::CREATE)
     }
 
@@ -459,7 +459,7 @@ impl Transaction<RW> {
     }
 
     /// Empties the given table. All items will be removed.
-    pub fn clear_table(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
+    pub fn clear_table_inner(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
         mdbx_result(self.txn_execute(|txn| unsafe { ffi::mdbx_drop(txn, dbi, false) })?)?;
 
         Ok(())
@@ -470,7 +470,7 @@ impl Transaction<RW> {
     /// # Safety
     /// Caller must close ALL other [Table] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn drop_table(&self, table: Table) -> Result<()> {
+    pub unsafe fn drop_table_inner(&self, table: Table) -> Result<()> {
         mdbx_result(self.txn_execute(|txn| unsafe { ffi::mdbx_drop(txn, table.dbi(), true) })?)?;
 
         Ok(())
@@ -483,7 +483,7 @@ impl Transaction<RO> {
     /// # Safety
     /// Caller must close ALL other [Table] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn close_table(&self, table: Table) -> Result<()> {
+    pub unsafe fn close_table_inner(&self, table: Table) -> Result<()> {
         mdbx_result(unsafe { ffi::mdbx_dbi_close(self.env().env_ptr(), table.dbi()) })?;
 
         Ok(())

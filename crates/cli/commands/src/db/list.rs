@@ -99,7 +99,7 @@ impl<N: NodeTypes> TableViewer<()> for ListTableViewer<'_, N> {
             // We may be using the tui for a long time
             tx.disable_long_read_transaction_safety();
 
-            let db_table = tx.inner.open_table(Some(self.args.table.name())).wrap_err("Could not open table.")?;
+            let db_table = tx.inner.open_table_inner(Some(self.args.table.name())).wrap_err("Could not open table.")?;
             let stats = tx.inner.table_stat(&db_table).wrap_err(format!("Could not find table: {}", self.args.table.name()))?;
             let total_entries = stats.entries();
             let final_entry_idx = total_entries.saturating_sub(1);

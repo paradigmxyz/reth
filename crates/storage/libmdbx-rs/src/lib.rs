@@ -63,7 +63,7 @@ mod test_utils {
             let mut value = [0u8; 8];
             LittleEndian::write_u64(&mut value, height);
             let tx = env.begin_rw_txn().expect("begin_rw_txn");
-            let index = tx.create_table(None, TableFlags::DUP_SORT).expect("open index table");
+            let index = tx.create_table_inner(None, TableFlags::DUP_SORT).expect("open index table");
             tx.put(index.dbi(), HEIGHT_KEY, value, WriteFlags::empty()).expect("tx.put");
             tx.commit().expect("tx.commit");
         }
