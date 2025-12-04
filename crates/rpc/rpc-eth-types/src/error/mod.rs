@@ -164,8 +164,8 @@ pub enum EthApiError {
     #[error("Invalid bytecode: {0}")]
     InvalidBytecode(String),
     /// Error encountered when converting a transaction type
-    #[error("Transaction conversion error")]
-    TransactionConversionError,
+    #[error(transparent)]
+    TransactionConversionError(#[from] TransactionConversionError),
     /// Error thrown when tracing with a muxTracer fails
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
@@ -273,7 +273,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
             EthApiError::InvalidTracerConfig |
-            EthApiError::TransactionConversionError |
+            EthApiError::TransactionConversionError(_) |
             EthApiError::InvalidRewardPercentiles |
             EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
@@ -333,12 +333,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 )
             }
         }
-    }
-}
-
-impl From<TransactionConversionError> for EthApiError {
-    fn from(_: TransactionConversionError) -> Self {
-        Self::TransactionConversionError
     }
 }
 
