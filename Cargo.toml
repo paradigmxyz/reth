@@ -493,7 +493,7 @@ alloy-sol-macro = "1.4.1"
 alloy-sol-types = { version = "1.4.1", default-features = false }
 alloy-trie = { version = "0.9.1", default-features = false }
 
-alloy-hardforks = "0.4.4"
+alloy-hardforks = "0.4.5"
 
 alloy-consensus = { version = "1.1.2", default-features = false }
 alloy-contract = { version = "1.1.2", default-features = false }
