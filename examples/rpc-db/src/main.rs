@@ -28,12 +28,11 @@ use reth_ethereum::{
         ProviderFactory,
     },
     rpc::{
-        builder::{RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig},
+        builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig},
         EthApiBuilder,
     },
     tasks::TokioTaskExecutor,
 };
-use reth_rpc_server_types::RethRpcModule;
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
 
