@@ -7,7 +7,9 @@ use reth_provider::{
     ChainStateBlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
     PruneCheckpointWriter, StageCheckpointReader, TrieWriter,
 };
-use reth_prune_types::{PruneCheckpoint, PruneMode, PruneSegment};
+use reth_prune_types::{
+    PruneCheckpoint, PruneMode, PruneSegment, MERKLE_CHANGESETS_RETENTION_BLOCKS,
+};
 use reth_stages_api::{
     BlockErrorKind, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
@@ -23,14 +25,15 @@ use tracing::{debug, error};
 #[derive(Debug, Clone)]
 pub struct MerkleChangeSets {
     /// The number of blocks to retain changesets for, used as a fallback when the finalized block
-    /// is not found. Defaults to 64 (2 epochs in beacon chain).
+    /// is not found. Defaults to [`MERKLE_CHANGESETS_RETENTION_BLOCKS`] (2 epochs in beacon
+    /// chain).
     retention_blocks: u64,
 }
 
 impl MerkleChangeSets {
-    /// Creates a new `MerkleChangeSets` stage with default retention blocks of 64.
+    /// Creates a new `MerkleChangeSets` stage with the default retention blocks.
     pub const fn new() -> Self {
-        Self { retention_blocks: 64 }
+        Self { retention_blocks: MERKLE_CHANGESETS_RETENTION_BLOCKS }
     }
 
     /// Creates a new `MerkleChangeSets` stage with a custom finalized block height.

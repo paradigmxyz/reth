@@ -169,7 +169,7 @@ impl LaunchContext {
     }
 
     /// Save prune config to the toml file if node is a full node or has custom pruning CLI
-    /// arguments.
+    /// arguments. Also migrates deprecated prune config values to new defaults.
     fn save_pruning_config<ChainSpec>(
         reth_config: &mut reth_config::Config,
         config: &NodeConfig<ChainSpec>,
@@ -178,15 +178,22 @@ impl LaunchContext {
     where
         ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
     {
+        let mut should_save = reth_config.prune.segments.migrate();
+
         if let Some(prune_config) = config.prune_config() {
             if reth_config.prune != prune_config {
                 reth_config.set_prune_config(prune_config);
-                info!(target: "reth::cli", "Saving prune config to toml file");
-                reth_config.save(config_path.as_ref())?;
+                should_save = true;
             }
         } else if !reth_config.prune.is_default() {
             warn!(target: "reth::cli", "Pruning configuration is present in the config file, but no CLI arguments are provided. Using config from file.");
         }
+
+        if should_save {
+            info!(target: "reth::cli", "Saving prune config to toml file");
+            reth_config.save(config_path.as_ref())?;
+        }
+
         Ok(())
     }
 
