@@ -267,7 +267,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.24.2"
-source = "git+https://github.com/0xforerunner/evm?rev=f5a7b28#f5a7b28c7e025de9dd532ab5481bfa306419650b"
+source = "git+https://github.com/0xforerunner/evm?rev=9de0fb0#9de0fb0c4440b1dfbffa6abca2aad66483d09c07"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -383,7 +383,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.24.2"
-source = "git+https://github.com/0xforerunner/evm?rev=f5a7b28#f5a7b28c7e025de9dd532ab5481bfa306419650b"
+source = "git+https://github.com/0xforerunner/evm?rev=9de0fb0#9de0fb0c4440b1dfbffa6abca2aad66483d09c07"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
