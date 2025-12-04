@@ -18,7 +18,7 @@ pub const TESTING_BUILD_BLOCK_V1: &str = "testing_buildBlockV1";
 /// Request payload for `testing_buildBlockV1`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct TestingBuildBlockRequest {
+pub struct TestingBuildBlockRequestV1 {
     /// Parent block hash of the block to build.
     pub parent_block_hash: B256,
     /// Payload attributes (Cancun version).
@@ -40,6 +40,6 @@ pub trait TestingApi {
     #[method(name = "buildBlockV1")]
     async fn build_block_v1(
         &self,
-        request: TestingBuildBlockRequest,
+        request: TestingBuildBlockRequestV1,
     ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV4>;
 }

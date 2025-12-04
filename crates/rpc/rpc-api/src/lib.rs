@@ -31,7 +31,7 @@ mod txpool;
 mod validation;
 mod web3;
 
-pub use testing::{TestingBuildBlockRequest, TESTING_BUILD_BLOCK_V1};
+pub use testing::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1};
 
 /// re-export of all server traits
 pub use servers::*;

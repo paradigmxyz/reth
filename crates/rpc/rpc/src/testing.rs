@@ -14,7 +14,7 @@ use reth_ethereum_engine_primitives::{BuiltPayloadConversionError, EthBuiltPaylo
 use reth_ethereum_primitives::{Block as EthBlock, EthPrimitives, Receipt, TransactionSigned};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Block as BlockTrait, Recovered, SealedBlock, SignerRecoverable};
-use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequest};
+use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
 use std::{marker::PhantomData, sync::Arc};
 
@@ -32,7 +32,7 @@ pub trait TestingBlockBuilder: Send + Sync + std::fmt::Debug + 'static {
     /// Build a block according to the testing API request.
     async fn build_block(
         &self,
-        request: TestingBuildBlockRequest,
+        request: TestingBuildBlockRequestV1,
     ) -> RpcResult<ExecutionPayloadEnvelopeV4>;
 }
 
@@ -40,7 +40,7 @@ pub trait TestingBlockBuilder: Send + Sync + std::fmt::Debug + 'static {
 impl<T: TestingBlockBuilder + ?Sized> TestingBlockBuilder for Arc<T> {
     async fn build_block(
         &self,
-        request: TestingBuildBlockRequest,
+        request: TestingBuildBlockRequestV1,
     ) -> RpcResult<ExecutionPayloadEnvelopeV4> {
         (**self).build_block(request).await
     }
@@ -66,7 +66,7 @@ where
 {
     async fn build_block_v1(
         &self,
-        request: TestingBuildBlockRequest,
+        request: TestingBuildBlockRequestV1,
     ) -> RpcResult<ExecutionPayloadEnvelopeV4> {
         self.builder.build_block(request).await
     }
@@ -155,7 +155,7 @@ where
 {
     async fn build_block(
         &self,
-        request: TestingBuildBlockRequest,
+        request: TestingBuildBlockRequestV1,
     ) -> RpcResult<ExecutionPayloadEnvelopeV4> {
         Self::validate_extra_data(&request.extra_data)?;
         let recovered_txs = Self::decode_transactions(request.transactions)?;
