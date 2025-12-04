@@ -1,6 +1,6 @@
 //! Traits for execution.
 
-use std::borrow::Cow;
+use alloc::borrow::Cow;
 
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
