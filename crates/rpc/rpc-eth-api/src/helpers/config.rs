@@ -1,7 +1,10 @@
 //! Loads chain configuration.
 
 use alloy_consensus::{BlockHeader, Header};
-use alloy_eips::eip7910::{EthConfig, EthForkConfig, SystemContract};
+use alloy_eips::{
+    eip7840::BlobParams,
+    eip7910::{EthConfig, EthForkConfig, SystemContract},
+};
 use alloy_evm::precompiles::Precompile;
 use alloy_primitives::Address;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
@@ -46,12 +49,11 @@ where
     }
 
     /// Returns fork config for specific timestamp.
-    /// Returns [`None`] if no blob params were found for this fork.
     fn build_fork_config_at(
         &self,
         timestamp: u64,
         precompiles: BTreeMap<String, Address>,
-    ) -> Option<EthForkConfig> {
+    ) -> EthForkConfig {
         let chain_spec = self.provider.chain_spec();
 
         let mut system_contracts = BTreeMap::<SystemContract, Address>::default();
@@ -72,14 +74,17 @@ where
             .0
             .into();
 
-        Some(EthForkConfig {
+        EthForkConfig {
             activation_time: timestamp,
-            blob_schedule: chain_spec.blob_params_at_timestamp(timestamp)?,
+            blob_schedule: chain_spec
+                .blob_params_at_timestamp(timestamp)
+                // no blob support, so we set this to original cancun values as defined in eip-4844
+                .unwrap_or(BlobParams::cancun()),
             chain_id: chain_spec.chain().id(),
             fork_id,
             precompiles,
             system_contracts,
-        })
+        }
     }
 
     fn config(&self) -> Result<EthConfig, RethError> {
@@ -107,9 +112,7 @@ where
             .and_then(|idx| fork_timestamps.get(idx).map(|ts| (idx, *ts)))
             .ok_or_else(|| RethError::msg("no active timestamp fork found"))?;
 
-        let current = self
-            .build_fork_config_at(current_fork_timestamp, current_precompiles)
-            .ok_or_else(|| RethError::msg("no fork config for current fork"))?;
+        let current = self.build_fork_config_at(current_fork_timestamp, current_precompiles);
 
         let mut config = EthConfig { current, next: None, last: None };
 
@@ -125,7 +128,7 @@ where
                     .map_err(RethError::other)?,
             );
 
-            config.next = self.build_fork_config_at(next_fork_timestamp, next_precompiles);
+            config.next = Some(self.build_fork_config_at(next_fork_timestamp, next_precompiles));
         } else {
             // If there is no fork scheduled, there is no "last" or "final" fork scheduled.
             return Ok(config);
@@ -143,7 +146,7 @@ where
                 .map_err(RethError::other)?,
         );
 
-        config.last = self.build_fork_config_at(last_fork_timestamp, last_precompiles);
+        config.last = Some(self.build_fork_config_at(last_fork_timestamp, last_precompiles));
 
         Ok(config)
     }
