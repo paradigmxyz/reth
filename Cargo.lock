@@ -9594,11 +9594,13 @@ name = "reth-optimism-exex"
 version = "1.9.3"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "derive_more",
  "eyre",
  "futures",
  "futures-util",
  "reth-db",
+ "reth-execution-types",
  "reth-exex",
  "reth-node-api",
  "reth-node-builder",
@@ -9606,8 +9608,8 @@ dependencies = [
  "reth-optimism-chainspec",
  "reth-optimism-node",
  "reth-optimism-trie",
- "reth-primitives-traits",
  "reth-provider",
+ "reth-trie",
  "tempfile",
  "tokio",
  "tracing",
