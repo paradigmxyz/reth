@@ -6,6 +6,7 @@ use alloy_rpc_types_eth::TransactionInfo;
 use futures::StreamExt;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
 use reth_chain_state::CanonStateSubscriptions;
+use reth_optimism_flashblocks::FlashblockPayload;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{
     BlockBody, Recovered, SignedTransaction, SignerRecoverable, WithEncoded,
@@ -25,7 +26,6 @@ use std::{
     future::Future,
     time::Duration,
 };
-use reth_optimism_flashblocks::FlashblockPayload;
 use tokio_stream::wrappers::WatchStream;
 
 impl<N, Rpc, F> EthTransactions for OpEthApi<N, Rpc, F>

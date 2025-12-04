@@ -210,7 +210,7 @@ impl<P: FlashblockPayload> FlashBlockCompleteSequence<P> {
     }
 
     /// Returns the number of flashblocks in the sequence.
-    pub fn count(&self) -> usize {
+    pub const fn count(&self) -> usize {
         self.inner.len()
     }
 
@@ -235,10 +235,7 @@ impl<P: FlashblockPayload> FlashBlockCompleteSequence<P> {
     /// Returns all transactions from all flashblocks in the sequence
     pub fn all_transactions(&self) -> Vec<Bytes> {
         use crate::traits::FlashblockDiff;
-        self.inner
-            .iter()
-            .flat_map(|fb| fb.diff().transactions_raw().iter().cloned())
-            .collect()
+        self.inner.iter().flat_map(|fb| fb.diff().transactions_raw().iter().cloned()).collect()
     }
 
     /// Returns an iterator over all flashblocks in the sequence.
@@ -306,7 +303,8 @@ mod tests {
 
         #[test]
         fn test_insert_ignores_different_block_number() {
-            let mut sequence: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut sequence: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let factory = TestFlashBlockFactory::new();
 
             let fb0 = factory.flashblock_at(0).build();
@@ -322,7 +320,8 @@ mod tests {
 
         #[test]
         fn test_insert_ignores_different_payload_id() {
-            let mut sequence: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut sequence: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let factory = TestFlashBlockFactory::new();
 
             let fb0 = factory.flashblock_at(0).build();
@@ -340,7 +339,8 @@ mod tests {
 
         #[test]
         fn test_insert_maintains_btree_order() {
-            let mut sequence: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut sequence: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let factory = TestFlashBlockFactory::new();
 
             let fb0 = factory.flashblock_at(0).build();
@@ -362,7 +362,8 @@ mod tests {
 
         #[test]
         fn test_finalize_empty_sequence_fails() {
-            let mut sequence: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut sequence: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let result = sequence.finalize();
 
             assert!(result.is_err());
@@ -374,7 +375,8 @@ mod tests {
 
         #[test]
         fn test_finalize_clears_pending_state() {
-            let mut sequence: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut sequence: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let factory = TestFlashBlockFactory::new();
 
             let fb0 = factory.flashblock_at(0).build();
@@ -391,7 +393,8 @@ mod tests {
 
         #[test]
         fn test_finalize_preserves_execution_outcome() {
-            let mut sequence: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut sequence: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let factory = TestFlashBlockFactory::new();
 
             let fb0 = factory.flashblock_at(0).build();
@@ -408,7 +411,8 @@ mod tests {
 
         #[test]
         fn test_finalize_clears_cached_reads() {
-            let mut sequence: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut sequence: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let factory = TestFlashBlockFactory::new();
 
             let fb0 = factory.flashblock_at(0).build();
@@ -426,7 +430,8 @@ mod tests {
 
         #[test]
         fn test_finalize_multiple_times_after_refill() {
-            let mut sequence: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut sequence: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let factory = TestFlashBlockFactory::new();
 
             // First sequence
@@ -616,7 +621,8 @@ mod tests {
 
         #[test]
         fn test_try_from_pending_to_complete_valid() {
-            let mut pending: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut pending: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let factory = TestFlashBlockFactory::new();
 
             let fb0 = factory.flashblock_at(0).build();
@@ -637,7 +643,8 @@ mod tests {
 
         #[test]
         fn test_try_from_preserves_execution_outcome() {
-            let mut pending: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut pending: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let factory = TestFlashBlockFactory::new();
 
             let fb0 = factory.flashblock_at(0).build();
@@ -657,7 +664,8 @@ mod tests {
 
         #[test]
         fn test_last_flashblock_returns_highest_index() {
-            let mut sequence: FlashBlockPendingSequence<FlashBlock> = FlashBlockPendingSequence::new();
+            let mut sequence: FlashBlockPendingSequence<FlashBlock> =
+                FlashBlockPendingSequence::new();
             let factory = TestFlashBlockFactory::new();
 
             let fb0 = factory.flashblock_at(0).build();

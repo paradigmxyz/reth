@@ -16,19 +16,19 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{B256, U256};
 use eyre::WrapErr;
 use op_alloy_network::Optimism;
-use op_alloy_rpc_types_engine::{OpFlashblockPayload};
+use op_alloy_rpc_types_engine::OpFlashblockPayload;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reqwest::Url;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
-use reth_primitives_traits::NodePrimitives;
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
     FlashBlockBuildInfo, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
-    FlashBlockService, FlashblocksListeners, FlashblockPayload, PendingBlockRx, PendingFlashBlock,
+    FlashBlockService, FlashblockPayload, FlashblocksListeners, PendingBlockRx, PendingFlashBlock,
     WsFlashBlockStream,
 };
+use reth_primitives_traits::NodePrimitives;
 use reth_rpc::eth::core::EthApiInner;
 use reth_rpc_eth_api::{
     helpers::{
@@ -366,8 +366,11 @@ impl<N: RpcNodeCore, Rpc: RpcConvert, F: FlashblockPayload> fmt::Debug for OpEth
 }
 
 /// Container type `OpEthApi`
-pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert, F: FlashblockPayload = OpFlashblockPayload>
-{
+pub struct OpEthApiInner<
+    N: RpcNodeCore,
+    Rpc: RpcConvert,
+    F: FlashblockPayload = OpFlashblockPayload,
+> {
     /// Gateway to node's core components.
     eth_api: EthApiNodeBackend<N, Rpc>,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
@@ -383,7 +386,9 @@ pub struct OpEthApiInner<N: RpcNodeCore, Rpc: RpcConvert, F: FlashblockPayload =
     flashblocks: Option<FlashblocksListeners<N::Primitives, F>>,
 }
 
-impl<N: RpcNodeCore, Rpc: RpcConvert, F: FlashblockPayload> fmt::Debug for OpEthApiInner<N, Rpc, F> {
+impl<N: RpcNodeCore, Rpc: RpcConvert, F: FlashblockPayload> fmt::Debug
+    for OpEthApiInner<N, Rpc, F>
+{
     fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         f.debug_struct("OpEthApiInner").finish()
     }
@@ -562,8 +567,9 @@ where
             let in_progress_rx = service.subscribe_in_progress();
             ctx.components.task_executor().spawn(Box::pin(service.run(tx)));
 
-
-            if flashblock_consensus { todo!("Modularize FlashBlockConsensusClient?") }
+            if flashblock_consensus {
+                todo!("Modularize FlashBlockConsensusClient?")
+            }
             // if flashblock_consensus {
             //     info!(target: "reth::cli", "Launching FlashBlockConsensusClient");
             //     let flashblock_client = FlashBlockConsensusClient::new(

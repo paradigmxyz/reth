@@ -51,8 +51,8 @@ impl FlashblockDiff for OpFlashblockPayloadDelta {
     }
 
     fn withdrawals(&self) -> Option<&Withdrawals> {
-        // OpFlashblockPayloadDelta stores Vec<Withdrawal>, not Withdrawals newtype
-        // This method isn't currently used in the flashblocks infrastructure
+        // TODO: Might not be needed as withdrawals aren't processed in a block except if at start
+        // or end
         None
     }
 
@@ -83,12 +83,12 @@ impl FlashblockPayload for OpFlashblockPayload {
     }
 
     fn block_number(&self) -> u64 {
-        OpFlashblockPayload::block_number(self)
+        Self::block_number(self)
     }
 
     fn recover_transactions(
         &self,
     ) -> impl Iterator<Item = Result<WithEncoded<Recovered<Self::SignedTx>>, RecoveryError>> {
-        OpFlashblockPayload::recover_transactions::<OpTxEnvelope>(self)
+        Self::recover_transactions::<OpTxEnvelope>(self)
     }
 }

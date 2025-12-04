@@ -1,5 +1,6 @@
 use crate::{
-    traits::FlashblockPayloadBase, FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
+    traits::FlashblockPayloadBase, FlashBlock, FlashBlockCompleteSequence,
+    FlashBlockCompleteSequenceRx,
 };
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadStatusEnum;
@@ -30,7 +31,8 @@ where
 impl<P> FlashBlockConsensusClient<P>
 where
     P: PayloadTypes,
-    P::ExecutionData: for<'a> TryFrom<&'a FlashBlockCompleteSequence<FlashBlock>, Error: std::fmt::Display>,
+    P::ExecutionData:
+        for<'a> TryFrom<&'a FlashBlockCompleteSequence<FlashBlock>, Error: std::fmt::Display>,
 {
     /// Create a new `FlashBlockConsensusClient` with the given Op engine and sequence receiver.
     pub const fn new(

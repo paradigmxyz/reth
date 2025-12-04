@@ -84,16 +84,19 @@ where
     K: AsRef<AddedRemovedKeys>,
 {
     /// Creates a new [`TrieNodeIter`] for the state trie.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn state_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
         Self::new(walker, hashed_cursor, TrieType::State)
     }
 
     /// Creates a new [`TrieNodeIter`] for the storage trie.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn storage_trie(walker: TrieWalker<C, K>, hashed_cursor: H) -> Self {
         Self::new(walker, hashed_cursor, TrieType::Storage)
     }
 
     /// Creates a new [`TrieNodeIter`].
+    #[allow(clippy::missing_const_for_fn)]
     fn new(walker: TrieWalker<C, K>, hashed_cursor: H, trie_type: TrieType) -> Self {
         Self {
             walker,

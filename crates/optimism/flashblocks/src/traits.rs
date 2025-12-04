@@ -86,5 +86,10 @@ pub trait FlashblockPayload:
     /// or an error if decoding/recovery failed.
     fn recover_transactions(
         &self,
-    ) -> impl Iterator<Item = Result<alloy_eips::eip2718::WithEncoded<reth_primitives_traits::Recovered<Self::SignedTx>>, RecoveryError>>;
+    ) -> impl Iterator<
+        Item = Result<
+            alloy_eips::eip2718::WithEncoded<reth_primitives_traits::Recovered<Self::SignedTx>>,
+            RecoveryError,
+        >,
+    >;
 }

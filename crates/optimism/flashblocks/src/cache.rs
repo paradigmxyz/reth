@@ -17,6 +17,16 @@ use ringbuffer::{AllocRingBuffer, RingBuffer};
 use tokio::sync::broadcast;
 use tracing::*;
 
+type CachedSequenceEntry<P> = (
+    FlashBlockCompleteSequence<P>,
+    Vec<WithEncoded<Recovered<<P as FlashblockPayload>::SignedTx>>>,
+);
+
+type SequenceBuildArgs<P> = BuildArgs<
+    Vec<WithEncoded<Recovered<<P as FlashblockPayload>::SignedTx>>>,
+    <P as FlashblockPayload>::Base,
+>;
+
 /// Maximum number of cached sequences in the ring buffer.
 const CACHE_SIZE: usize = 3;
 /// 200 ms flashblock time.
@@ -37,7 +47,7 @@ pub(crate) struct SequenceManager<P: FlashblockPayload> {
     pending_transactions: Vec<WithEncoded<Recovered<P::SignedTx>>>,
     /// Ring buffer of recently completed sequences bundled with their decoded transactions (FIFO,
     /// size 3)
-    completed_cache: AllocRingBuffer<(FlashBlockCompleteSequence<P>, Vec<WithEncoded<Recovered<P::SignedTx>>>)>,
+    completed_cache: AllocRingBuffer<CachedSequenceEntry<P>>,
     /// Broadcast channel for completed sequences
     block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence<P>>,
     /// Whether to compute state roots when building blocks
@@ -65,7 +75,9 @@ impl<P: FlashblockPayload> SequenceManager<P> {
     }
 
     /// Gets a subscriber to the flashblock sequences produced.
-    pub(crate) fn subscribe_block_sequence(&self) -> broadcast::Receiver<FlashBlockCompleteSequence<P>> {
+    pub(crate) fn subscribe_block_sequence(
+        &self,
+    ) -> broadcast::Receiver<FlashBlockCompleteSequence<P>> {
         self.block_broadcaster.subscribe()
     }
 
@@ -130,7 +142,7 @@ impl<P: FlashblockPayload> SequenceManager<P> {
         &mut self,
         local_tip_hash: B256,
         local_tip_timestamp: u64,
-    ) -> Option<BuildArgs<Vec<WithEncoded<Recovered<P::SignedTx>>>, P::Base>> {
+    ) -> Option<SequenceBuildArgs<P>> {
         // Try to find a buildable sequence: (base, last_fb, transactions, cached_state,
         // source_name)
         let (base, last_flashblock, transactions, cached_state, source_name) =
@@ -143,7 +155,7 @@ impl<P: FlashblockPayload> SequenceManager<P> {
             }
             // Priority 2: Try cached sequence with exact parent match
             else if let Some((cached, txs)) = self.completed_cache.iter().find(|(c, _)| c.payload_base().parent_hash() == local_tip_hash) {
-                let base = cached.payload_base().clone();
+                let base = cached.payload_base();
                 let last_fb = cached.last().clone();
                 let transactions = txs.clone();
                 let cached_state = None;
@@ -267,8 +279,7 @@ impl<P: FlashblockPayload> SequenceManager<P> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_utils::TestFlashBlockFactory;
-    use crate::FlashBlock;
+    use crate::{test_utils::TestFlashBlockFactory, FlashBlock};
     use alloy_primitives::B256;
 
     #[test]

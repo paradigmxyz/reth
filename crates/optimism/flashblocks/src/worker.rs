@@ -144,8 +144,14 @@ where
     }
 }
 
-impl<EvmConfig: Clone, Provider: Clone, Base> Clone for FlashBlockBuilder<EvmConfig, Provider, Base> {
+impl<EvmConfig: Clone, Provider: Clone, Base> Clone
+    for FlashBlockBuilder<EvmConfig, Provider, Base>
+{
     fn clone(&self) -> Self {
-        Self { evm_config: self.evm_config.clone(), provider: self.provider.clone(), _base: PhantomData }
+        Self {
+            evm_config: self.evm_config.clone(),
+            provider: self.provider.clone(),
+            _base: PhantomData,
+        }
     }
 }

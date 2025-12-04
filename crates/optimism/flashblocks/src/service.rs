@@ -51,9 +51,8 @@ where
     N: NodePrimitives,
     P: FlashblockPayload<SignedTx = N::SignedTx>,
     S: Stream<Item = eyre::Result<P>> + Unpin + 'static,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<P::Base> + Unpin>
-        + Clone
-        + 'static,
+    EvmConfig:
+        ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<P::Base> + Unpin> + Clone + 'static,
     Provider: StateProviderFactory
         + BlockReaderIdExt<
             Header = HeaderTy<N>,
@@ -92,7 +91,9 @@ where
     }
 
     /// Returns the sender half to the flashblock sequence.
-    pub const fn block_sequence_broadcaster(&self) -> &broadcast::Sender<FlashBlockCompleteSequence<P>> {
+    pub const fn block_sequence_broadcaster(
+        &self,
+    ) -> &broadcast::Sender<FlashBlockCompleteSequence<P>> {
         self.sequences.block_sequence_broadcaster()
     }
 

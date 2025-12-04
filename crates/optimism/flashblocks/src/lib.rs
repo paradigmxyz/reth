@@ -26,7 +26,9 @@ mod payload;
 pub use payload::{FlashBlock, PendingFlashBlock};
 
 mod sequence;
-pub use sequence::{FlashBlockCompleteSequence, FlashBlockPendingSequence, SequenceExecutionOutcome};
+pub use sequence::{
+    FlashBlockCompleteSequence, FlashBlockPendingSequence, SequenceExecutionOutcome,
+};
 
 mod service;
 pub use service::{FlashBlockBuildInfo, FlashBlockService};
