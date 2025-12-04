@@ -134,6 +134,9 @@ pub enum ProviderError {
     /// Received invalid output from configured storage implementation.
     #[error("received invalid output from storage")]
     InvalidStorageOutput,
+    /// Missing trie updates.
+    #[error("missing trie updates for block {0}")]
+    MissingTrieUpdates(B256),
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),

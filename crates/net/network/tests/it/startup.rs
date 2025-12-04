@@ -97,19 +97,25 @@ async fn test_discv5_and_discv4_same_socket_fails() {
 
 #[tokio::test(flavor = "multi_thread")]
 async fn test_discv5_and_rlpx_same_socket_ok_without_discv4() {
+    let test_port: u16 = TcpListener::bind("127.0.0.1:0") // 0 means OS assigns a free port
+        .await
+        .expect("Failed to bind to a port")
+        .local_addr()
+        .unwrap()
+        .port();
+
     let secret_key = SecretKey::new(&mut rand_08::thread_rng());
     let config = NetworkConfigBuilder::eth(secret_key)
-        .listener_port(DEFAULT_DISCOVERY_PORT)
+        .listener_port(test_port)
         .disable_discv4_discovery()
         .discovery_v5(
-            reth_discv5::Config::builder((DEFAULT_DISCOVERY_ADDR, DEFAULT_DISCOVERY_PORT).into())
-                .discv5_config(
-                    discv5::ConfigBuilder::new(discv5::ListenConfig::from_ip(
-                        DEFAULT_DISCOVERY_ADDR,
-                        DEFAULT_DISCOVERY_PORT,
-                    ))
-                    .build(),
-                ),
+            reth_discv5::Config::builder((DEFAULT_DISCOVERY_ADDR, test_port).into()).discv5_config(
+                discv5::ConfigBuilder::new(discv5::ListenConfig::from_ip(
+                    DEFAULT_DISCOVERY_ADDR,
+                    test_port,
+                ))
+                .build(),
+            ),
         )
         .disable_dns_discovery()
         .build(NoopProvider::default());

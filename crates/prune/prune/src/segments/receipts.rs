@@ -89,7 +89,7 @@ mod tests {
         Itertools,
     };
     use reth_db_api::tables;
-    use reth_provider::{DatabaseProviderFactory, PruneCheckpointReader};
+    use reth_provider::{DBProvider, DatabaseProviderFactory, PruneCheckpointReader};
     use reth_prune_types::{
         PruneCheckpoint, PruneInterruptReason, PruneMode, PruneProgress, PruneSegment,
     };
@@ -115,8 +115,10 @@ mod tests {
         for block in &blocks {
             receipts.reserve_exact(block.transaction_count());
             for transaction in &block.body().transactions {
-                receipts
-                    .push((receipts.len() as u64, random_receipt(&mut rng, transaction, Some(0))));
+                receipts.push((
+                    receipts.len() as u64,
+                    random_receipt(&mut rng, transaction, Some(0), None),
+                ));
             }
         }
         let receipts_len = receipts.len();

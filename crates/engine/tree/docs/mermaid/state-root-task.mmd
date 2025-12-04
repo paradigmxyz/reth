@@ -4,7 +4,7 @@ flowchart TD
         StateRootMessage::PrefetchProofs
         StateRootMessage::EmptyProof
         StateRootMessage::ProofCalculated
-        StataRootMessage::FinishedStateUpdates
+        StateRootMessage::FinishedStateUpdates
     end
 
     subgraph StateRootTask[State Root Task thread]
@@ -40,5 +40,5 @@ flowchart TD
     StateRootMessage::ProofCalculated --> NewProof
     NewProof ---> MultiProofCompletion
     ProofSequencerCondition -->|Yes, send multiproof and state update| SparseTrieUpdate
-    StataRootMessage::FinishedStateUpdates --> EndCondition1
+    StateRootMessage::FinishedStateUpdates --> EndCondition1
     EndCondition3 -->|Close SparseTrieUpdate channel| SparseTrieUpdate

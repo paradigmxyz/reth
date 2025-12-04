@@ -35,8 +35,6 @@ sha2.workspace = true
 sha2.features = ["std"]
 
 [dev-dependencies]
-tokio.workspace = true
-tokio.features = ["fs", "io-util", "macros"]
 tempfile.workspace = true
 test-case.workspace = true
 futures.workspace = true

@@ -12,15 +12,15 @@ use reth_e2e_test_utils::{
 use reth_node_api::FullNodeTypes;
 use reth_node_builder::{
     components::{BasicPayloadServiceBuilder, ComponentsBuilder},
-    EngineNodeLauncher, NodeBuilder, NodeConfig,
+    EngineNodeLauncher, Node, NodeBuilder, NodeConfig,
 };
 use reth_node_core::args::DatadirArgs;
 use reth_optimism_chainspec::OpChainSpecBuilder;
 use reth_optimism_node::{
     args::RollupArgs,
     node::{
-        OpAddOns, OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpNodeTypes,
-        OpPayloadBuilder, OpPoolBuilder,
+        OpConsensusBuilder, OpExecutorBuilder, OpNetworkBuilder, OpNodeComponentBuilder,
+        OpNodeTypes, OpPayloadBuilder, OpPoolBuilder,
     },
     txpool::OpPooledTransaction,
     utils::optimism_payload_attributes,
@@ -88,14 +88,7 @@ impl OpPayloadTransactions<OpPooledTransaction> for CustomTxPriority {
 /// Builds the node with custom transaction priority service within default payload builder.
 fn build_components<Node>(
     chain_id: ChainId,
-) -> ComponentsBuilder<
-    Node,
-    OpPoolBuilder,
-    BasicPayloadServiceBuilder<OpPayloadBuilder<CustomTxPriority>>,
-    OpNetworkBuilder,
-    OpExecutorBuilder,
-    OpConsensusBuilder,
->
+) -> OpNodeComponentBuilder<Node, OpPayloadBuilder<CustomTxPriority>>
 where
     Node: FullNodeTypes<Types: OpNodeTypes>,
 {
@@ -109,7 +102,7 @@ where
             OpPayloadBuilder::new(compute_pending_block)
                 .with_transactions(CustomTxPriority { chain_id }),
         ))
-        .network(OpNetworkBuilder { disable_txpool_gossip, disable_discovery_v4: !discovery_v4 })
+        .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
         .consensus(OpConsensusBuilder::default())
 }
 
@@ -143,7 +136,7 @@ async fn test_custom_block_priority_config() {
         .with_database(db)
         .with_types_and_provider::<OpNode, BlockchainProvider<_>>()
         .with_components(build_components(config.chain.chain_id()))
-        .with_add_ons(OpAddOns::default())
+        .with_add_ons(OpNode::new(Default::default()).add_ons())
         .launch_with_fn(|builder| {
             let launcher = EngineNodeLauncher::new(
                 tasks.executor(),
@@ -179,11 +172,11 @@ async fn test_custom_block_priority_config() {
         .unwrap();
     assert_eq!(block_payloads.len(), 1);
     let block_payload = block_payloads.first().unwrap();
-    let block_payload = block_payload.block().clone();
-    assert_eq!(block_payload.body().transactions.len(), 2); // L1 block info tx + end-of-block custom tx
+    let block = block_payload.block();
+    assert_eq!(block.body().transactions.len(), 2); // L1 block info tx + end-of-block custom tx
 
     // Check that last transaction in the block looks like a transfer to a random address.
-    let end_of_block_tx = block_payload.body().transactions.last().unwrap();
+    let end_of_block_tx = block.body().transactions.last().unwrap();
     let Some(tx) = end_of_block_tx.as_eip1559() else {
         panic!("expected EIP-1559 transaction");
     };

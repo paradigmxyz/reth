@@ -5,12 +5,15 @@
 /* clang-format off */
 
 #cmakedefine LTO_ENABLED
-#cmakedefine MDBX_USE_VALGRIND
+#cmakedefine ENABLE_MEMCHECK
 #cmakedefine ENABLE_GPROF
 #cmakedefine ENABLE_GCOV
 #cmakedefine ENABLE_ASAN
 #cmakedefine ENABLE_UBSAN
 #cmakedefine01 MDBX_FORCE_ASSERTIONS
+#if !defined(MDBX_BUILD_TEST) && !defined(MDBX_BUILD_CXX)
+#cmakedefine01 MDBX_BUILD_CXX
+#endif
 
 /* Common */
 #cmakedefine01 MDBX_TXN_CHECKOWNER
@@ -29,23 +32,36 @@
 #cmakedefine01 MDBX_DISABLE_VALIDATION
 #cmakedefine01 MDBX_AVOID_MSYNC
 #cmakedefine01 MDBX_ENABLE_REFUND
-#cmakedefine01 MDBX_ENABLE_MADVISE
 #cmakedefine01 MDBX_ENABLE_BIGFOOT
 #cmakedefine01 MDBX_ENABLE_PGOP_STAT
 #cmakedefine01 MDBX_ENABLE_PROFGC
+#cmakedefine01 MDBX_ENABLE_DBI_SPARSE
+#cmakedefine01 MDBX_ENABLE_DBI_LOCKFREE
 
 /* Windows */
+#if defined(MDBX_BUILD_TEST) || !defined(MDBX_BUILD_CXX) || MDBX_BUILD_CXX
+#define MDBX_WITHOUT_MSVC_CRT 0
+#else
 #cmakedefine01 MDBX_WITHOUT_MSVC_CRT
+#endif /* MDBX_WITHOUT_MSVC_CRT */
 
 /* MacOS & iOS */
-#cmakedefine01 MDBX_OSX_SPEED_INSTEADOF_DURABILITY
+#cmakedefine01 MDBX_APPLE_SPEED_INSTEADOF_DURABILITY
 
 /* POSIX */
 #cmakedefine01 MDBX_DISABLE_GNU_SOURCE
+
 #cmakedefine MDBX_USE_OFDLOCKS_AUTO
 #ifndef MDBX_USE_OFDLOCKS_AUTO
 #cmakedefine01 MDBX_USE_OFDLOCKS
-#endif
+#endif /* MDBX_USE_OFDLOCKS */
+
+#cmakedefine MDBX_MMAP_NEEDS_JOLT_AUTO
+#ifndef MDBX_MMAP_NEEDS_JOLT_AUTO
+#cmakedefine01 MDBX_MMAP_NEEDS_JOLT
+#endif /* MDBX_MMAP_NEEDS_JOLT */
+
+#cmakedefine01 MDBX_USE_MINCORE
 
 /* Build Info */
 #ifndef MDBX_BUILD_TIMESTAMP
@@ -62,6 +78,9 @@
 #endif
 #ifndef MDBX_BUILD_FLAGS
 #cmakedefine MDBX_BUILD_FLAGS "@MDBX_BUILD_FLAGS@"
+#endif
+#ifndef MDBX_BUILD_METADATA
+#cmakedefine MDBX_BUILD_METADATA "@MDBX_BUILD_METADATA@"
 #endif
 #cmakedefine MDBX_BUILD_SOURCERY @MDBX_BUILD_SOURCERY@
 

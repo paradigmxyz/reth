@@ -74,7 +74,7 @@ mod tests {
 
     fn assert_eyre<T: PartialEq + Debug>(got: T, expected: T, msg: &str) -> eyre::Result<()> {
         if got != expected {
-            eyre::bail!("{msg} | got: {got:?} expected: {expected:?})");
+            eyre::bail!("{msg} | got: {got:?} expected: {expected:?}");
         }
         Ok(())
     }
@@ -146,12 +146,12 @@ mod tests {
                 let header = header.unseal();
 
                 // Compare Header
-                assert_eq!(header, db_provider.header(&header_hash).unwrap().unwrap());
+                assert_eq!(header, db_provider.header(header_hash).unwrap().unwrap());
                 assert_eq!(header, jar_provider.header_by_number(header.number).unwrap().unwrap());
 
                 // Compare HeaderTerminalDifficulties
                 assert_eq!(
-                    db_provider.header_td(&header_hash).unwrap().unwrap(),
+                    db_provider.header_td(header_hash).unwrap().unwrap(),
                     jar_provider.header_td_by_number(header.number).unwrap().unwrap()
                 );
             }

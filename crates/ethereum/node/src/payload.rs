@@ -1,6 +1,6 @@
 //! Payload component configuration for the Ethereum node.
 
-use reth_chainspec::EthereumHardforks;
+use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
@@ -45,11 +45,14 @@ where
         evm_config: Evm,
     ) -> eyre::Result<Self::PayloadBuilder> {
         let conf = ctx.payload_builder_config();
+        let chain = ctx.chain_spec().chain();
+        let gas_limit = conf.gas_limit_for(chain);
+
         Ok(reth_ethereum_payload_builder::EthereumPayloadBuilder::new(
             ctx.provider().clone(),
             pool,
             evm_config,
-            EthereumBuilderConfig::new().with_gas_limit(conf.gas_limit()),
+            EthereumBuilderConfig::new().with_gas_limit(gas_limit),
         ))
     }
 }

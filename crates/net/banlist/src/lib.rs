@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 type PeerId = alloy_primitives::B512;
 
@@ -59,11 +59,11 @@ impl BanList {
     pub fn evict_peers(&mut self, now: Instant) -> Vec<PeerId> {
         let mut evicted = Vec::new();
         self.banned_peers.retain(|peer, until| {
-            if let Some(until) = until {
-                if now > *until {
-                    evicted.push(*peer);
-                    return false
-                }
+            if let Some(until) = until &&
+                now > *until
+            {
+                evicted.push(*peer);
+                return false
             }
             true
         });
@@ -74,11 +74,11 @@ impl BanList {
     pub fn evict_ips(&mut self, now: Instant) -> Vec<IpAddr> {
         let mut evicted = Vec::new();
         self.banned_ips.retain(|peer, until| {
-            if let Some(until) = until {
-                if now > *until {
-                    evicted.push(*peer);
-                    return false
-                }
+            if let Some(until) = until &&
+                now > *until
+            {
+                evicted.push(*peer);
+                return false
             }
             true
         });

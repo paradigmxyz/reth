@@ -323,10 +323,21 @@ where
     let mut file =
         File::create(&tmp_path).map_err(|err| FsPathError::create_file(err, &tmp_path))?;
 
-    write_fn(&mut file).map_err(|err| FsPathError::Write {
-        source: Error::other(err.into()),
-        path: tmp_path.clone(),
-    })?;
+    // Execute the write function and handle errors properly
+    // If write_fn fails, we need to clean up the temporary file before returning
+    match write_fn(&mut file) {
+        Ok(()) => {
+            // Success - continue with the atomic operation
+        }
+        Err(err) => {
+            // Clean up the temporary file before returning the error
+            let _ = fs::remove_file(&tmp_path);
+            return Err(FsPathError::Write {
+                source: Error::other(err.into()),
+                path: tmp_path.clone(),
+            });
+        }
+    }
 
     // fsync() file
     file.sync_all().map_err(|err| FsPathError::fsync(err, &tmp_path))?;

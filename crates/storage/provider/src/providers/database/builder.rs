@@ -4,7 +4,10 @@
 //! up to the intended build target.
 
 use crate::{providers::StaticFileProvider, ProviderFactory};
-use reth_db::{mdbx::DatabaseArguments, open_db_read_only, DatabaseEnv};
+use reth_db::{
+    mdbx::{DatabaseArguments, MaxReadTransactionDuration},
+    open_db_read_only, DatabaseEnv,
+};
 use reth_db_api::{database_metrics::DatabaseMetrics, Database};
 use reth_node_types::{NodeTypes, NodeTypesWithDBAdapter};
 use std::{
@@ -62,12 +65,35 @@ impl<N> ProviderFactoryBuilder<N> {
     /// ```no_run
     /// use reth_chainspec::MAINNET;
     /// use reth_node_types::NodeTypes;
-    /// ///
+    ///
     /// use reth_provider::providers::{ProviderFactoryBuilder, ReadOnlyConfig};
     ///
     /// fn demo<N: NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>() {
     ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
     ///         .open_read_only(MAINNET.clone(), ReadOnlyConfig::from_datadir("datadir").no_watch())
+    ///         .unwrap();
+    /// }
+    /// ```
+    ///
+    /// # Open an instance with disabled read-transaction timeout
+    ///
+    /// By default, read transactions are automatically terminated after a timeout to prevent
+    /// database free list growth. However, if the database is static (no writes occurring), this
+    /// safety mechanism can be disabled using
+    /// [`ReadOnlyConfig::disable_long_read_transaction_safety`].
+    ///
+    /// ```no_run
+    /// use reth_chainspec::MAINNET;
+    /// use reth_node_types::NodeTypes;
+    ///
+    /// use reth_provider::providers::{ProviderFactoryBuilder, ReadOnlyConfig};
+    ///
+    /// fn demo<N: NodeTypes<ChainSpec = reth_chainspec::ChainSpec>>() {
+    ///     let provider_factory = ProviderFactoryBuilder::<N>::default()
+    ///         .open_read_only(
+    ///             MAINNET.clone(),
+    ///             ReadOnlyConfig::from_datadir("datadir").disable_long_read_transaction_safety(),
+    ///         )
     ///         .unwrap();
     /// }
     /// ```
@@ -127,6 +153,15 @@ impl ReadOnlyConfig {
     pub fn from_datadir(datadir: impl AsRef<Path>) -> Self {
         let datadir = datadir.as_ref();
         Self::from_dirs(datadir.join("db"), datadir.join("static_files"))
+    }
+
+    /// Disables long-lived read transaction safety guarantees.
+    ///
+    /// Caution: Keeping database transaction open indefinitely can cause the free list to grow if
+    /// changes to the database are made.
+    pub const fn disable_long_read_transaction_safety(mut self) -> Self {
+        self.db_args.max_read_transaction_duration(Some(MaxReadTransactionDuration::Unbounded));
+        self
     }
 
     /// Derives the [`ReadOnlyConfig`] from the database dir.

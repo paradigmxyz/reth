@@ -55,7 +55,7 @@ impl<T: Encode> Encode for ShardedKey<T> {
 
 impl<T: Decode> Decode for ShardedKey<T> {
     fn decode(value: &[u8]) -> Result<Self, DatabaseError> {
-        let (key, highest_tx_number) = value.split_last_chunk().unwrap();
+        let (key, highest_tx_number) = value.split_last_chunk().ok_or(DatabaseError::Decode)?;
         let key = T::decode(key)?;
         let highest_tx_number = u64::from_be_bytes(*highest_tx_number);
         Ok(Self::new(key, highest_tx_number))

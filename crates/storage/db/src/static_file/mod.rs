@@ -33,25 +33,22 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
         .map_err(|err| NippyJarError::Custom(err.to_string()))?
         .filter_map(Result::ok);
     for entry in entries {
-        if entry.metadata().is_ok_and(|metadata| metadata.is_file()) {
-            if let Some((segment, _)) =
+        if entry.metadata().is_ok_and(|metadata| metadata.is_file()) &&
+            let Some((segment, _)) =
                 StaticFileSegment::parse_filename(&entry.file_name().to_string_lossy())
-            {
-                let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
+        {
+            let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
 
-                let (block_range, tx_range) = (
-                    jar.user_header().block_range().copied(),
-                    jar.user_header().tx_range().copied(),
-                );
+            let (block_range, tx_range) =
+                (jar.user_header().block_range().copied(), jar.user_header().tx_range().copied());
 
-                if let Some(block_range) = block_range {
-                    match static_files.entry(segment) {
-                        Entry::Occupied(mut entry) => {
-                            entry.get_mut().push((block_range, tx_range));
-                        }
-                        Entry::Vacant(entry) => {
-                            entry.insert(vec![(block_range, tx_range)]);
-                        }
+            if let Some(block_range) = block_range {
+                match static_files.entry(segment) {
+                    Entry::Occupied(mut entry) => {
+                        entry.get_mut().push((block_range, tx_range));
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(vec![(block_range, tx_range)]);
                     }
                 }
             }

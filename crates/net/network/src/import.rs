@@ -1,6 +1,7 @@
 //! This module provides an abstraction over block import in the form of the `BlockImport` trait.
 
 use crate::message::NewBlockMessage;
+use reth_eth_wire::NewBlock;
 use reth_eth_wire_types::broadcast::NewBlockHashes;
 use reth_network_peers::PeerId;
 use std::{
@@ -9,7 +10,7 @@ use std::{
 };
 
 /// Abstraction over block import.
-pub trait BlockImport<B = reth_ethereum_primitives::Block>: std::fmt::Debug + Send + Sync {
+pub trait BlockImport<B = NewBlock>: std::fmt::Debug + Send + Sync {
     /// Invoked for a received block announcement from the peer.
     ///
     /// For a `NewBlock` message:
@@ -27,7 +28,7 @@ pub trait BlockImport<B = reth_ethereum_primitives::Block>: std::fmt::Debug + Se
 
 /// Represents different types of block announcement events from the network.
 #[derive(Debug, Clone)]
-pub enum NewBlockEvent<B = reth_ethereum_primitives::Block> {
+pub enum NewBlockEvent<B = NewBlock> {
     /// A new full block announcement
     Block(NewBlockMessage<B>),
     /// Only the hashes of new blocks

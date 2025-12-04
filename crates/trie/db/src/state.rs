@@ -1,11 +1,11 @@
 use crate::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory, PrefixSetLoader};
 use alloy_primitives::{
     map::{AddressMap, B256Map},
-    Address, BlockNumber, B256, U256,
+    BlockNumber, B256, U256,
 };
 use reth_db_api::{
     cursor::DbCursorRO,
-    models::{AccountBeforeTx, BlockNumberAddress},
+    models::{AccountBeforeTx, BlockNumberAddress, BlockNumberAddressRange},
     tables,
     transaction::DbTx,
     DatabaseError,
@@ -16,7 +16,10 @@ use reth_trie::{
     updates::TrieUpdates, HashedPostState, HashedStorage, KeccakKeyHasher, KeyHasher, StateRoot,
     StateRootProgress, TrieInput,
 };
-use std::{collections::HashMap, ops::RangeInclusive};
+use std::{
+    collections::HashMap,
+    ops::{RangeBounds, RangeInclusive},
+};
 use tracing::debug;
 
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
@@ -124,13 +127,16 @@ pub trait DatabaseStateRoot<'a, TX>: Sized {
 
 /// Extends [`HashedPostState`] with operations specific for working with a database transaction.
 pub trait DatabaseHashedPostState<TX>: Sized {
-    /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts from the specified
-    /// block up to the current tip and aggregates them into hashed state in reverse.
-    fn from_reverts<KH: KeyHasher>(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError>;
+    /// Initializes [`HashedPostState`] from reverts. Iterates over state reverts in the specified
+    /// range and aggregates them into hashed state in reverse.
+    fn from_reverts<KH: KeyHasher>(
+        tx: &TX,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Self, DatabaseError>;
 }
 
 impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
-    for StateRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
+    for StateRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
         Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
@@ -220,21 +226,24 @@ impl<'a, TX: DbTx> DatabaseStateRoot<'a, TX>
 }
 
 impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
-    fn from_reverts<KH: KeyHasher>(tx: &TX, from: BlockNumber) -> Result<Self, DatabaseError> {
+    fn from_reverts<KH: KeyHasher>(
+        tx: &TX,
+        range: impl RangeBounds<BlockNumber>,
+    ) -> Result<Self, DatabaseError> {
         // Iterate over account changesets and record value before first occurring account change.
+        let account_range = (range.start_bound(), range.end_bound()); // to avoid cloning
         let mut accounts = HashMap::new();
         let mut account_changesets_cursor = tx.cursor_read::<tables::AccountChangeSets>()?;
-        for entry in account_changesets_cursor.walk_range(from..)? {
+        for entry in account_changesets_cursor.walk_range(account_range)? {
             let (_, AccountBeforeTx { address, info }) = entry?;
             accounts.entry(address).or_insert(info);
         }
 
         // Iterate over storage changesets and record value before first occurring storage change.
+        let storage_range: BlockNumberAddressRange = range.into();
         let mut storages = AddressMap::<B256Map<U256>>::default();
         let mut storage_changesets_cursor = tx.cursor_read::<tables::StorageChangeSets>()?;
-        for entry in
-            storage_changesets_cursor.walk_range(BlockNumberAddress((from, Address::ZERO))..)?
-        {
+        for entry in storage_changesets_cursor.walk_range(storage_range)? {
             let (BlockNumberAddress((_, address)), storage) = entry?;
             let account_storage = storages.entry(address).or_default();
             account_storage.entry(storage.key).or_insert(storage.value);
@@ -250,8 +259,8 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
                     KH::hash_key(address),
                     HashedStorage::from_iter(
                         // The `wiped` flag indicates only whether previous storage entries
-                        // should be looked up in db or not. For reverts it's a noop since all
-                        // wiped changes had been written as storage reverts.
+                        // should be looked up in db or not. For reverts it's a noop since all
+                        // wiped changes had been written as storage reverts.
                         false,
                         storage.into_iter().map(|(slot, value)| (KH::hash_key(slot), value)),
                     ),

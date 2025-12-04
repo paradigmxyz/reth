@@ -3,7 +3,10 @@ use crate::{
     transaction::signed::{RecoveryError, SignedTransaction},
 };
 use alloc::vec::Vec;
-use alloy_consensus::Transaction;
+use alloy_consensus::{
+    transaction::{SignerRecoverable, TxHashRef},
+    EthereumTxEnvelope, Transaction,
+};
 use alloy_eips::{
     eip2718::{Eip2718Error, Eip2718Result, IsTyped2718},
     eip2930::AccessList,
@@ -23,23 +26,24 @@ macro_rules! delegate {
     };
 }
 
-/// A [`SignedTransaction`] implementation that combines two different transaction types.
+/// An enum that combines two different transaction types.
 ///
-/// This is intended to be used to extend existing presets, for example the ethereum or optstack
-/// transaction types.
+/// This is intended to be used to extend existing presets, for example the ethereum or opstack
+/// transaction types and receipts
 ///
-/// Note: The other transaction type variants must not overlap with the builtin one, transaction
-/// types must be unique.
+/// Note: The [`Extended::Other`] variants must not overlap with the builtin one, transaction
+/// types must be unique. For example if [`Extended::BuiltIn`] contains an `EIP-1559` type variant,
+/// [`Extended::Other`] must not include that type.
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Debug, Clone, Hash, Eq, PartialEq)]
-pub enum ExtendedTxEnvelope<BuiltIn, Other> {
+pub enum Extended<BuiltIn, Other> {
     /// The builtin transaction type.
     BuiltIn(BuiltIn),
     /// The other transaction type.
     Other(Other),
 }
 
-impl<B, T> Transaction for ExtendedTxEnvelope<B, T>
+impl<B, T> Transaction for Extended<B, T>
 where
     B: Transaction,
     T: Transaction,
@@ -91,7 +95,7 @@ where
     fn is_create(&self) -> bool {
         match self {
             Self::BuiltIn(tx) => tx.is_create(),
-            Self::Other(_tx) => false,
+            Self::Other(tx) => tx.is_create(),
         }
     }
 
@@ -116,7 +120,7 @@ where
     }
 }
 
-impl<B, T> IsTyped2718 for ExtendedTxEnvelope<B, T>
+impl<B, T> IsTyped2718 for Extended<B, T>
 where
     B: IsTyped2718,
     T: IsTyped2718,
@@ -126,7 +130,7 @@ where
     }
 }
 
-impl<B, T> InMemorySize for ExtendedTxEnvelope<B, T>
+impl<B, T> InMemorySize for Extended<B, T>
 where
     B: InMemorySize,
     T: InMemorySize,
@@ -136,18 +140,11 @@ where
     }
 }
 
-impl<B, T> SignedTransaction for ExtendedTxEnvelope<B, T>
+impl<B, T> SignerRecoverable for Extended<B, T>
 where
-    B: SignedTransaction + IsTyped2718,
-    T: SignedTransaction,
+    B: SignerRecoverable,
+    T: SignerRecoverable,
 {
-    fn tx_hash(&self) -> &TxHash {
-        match self {
-            Self::BuiltIn(tx) => tx.tx_hash(),
-            Self::Other(tx) => tx.tx_hash(),
-        }
-    }
-
     fn recover_signer(&self) -> Result<Address, RecoveryError> {
         delegate!(self => tx.recover_signer())
     }
@@ -156,15 +153,29 @@ where
         delegate!(self => tx.recover_signer_unchecked())
     }
 
-    fn recover_signer_unchecked_with_buf(
-        &self,
-        buf: &mut Vec<u8>,
-    ) -> Result<Address, RecoveryError> {
-        delegate!(self => tx.recover_signer_unchecked_with_buf(buf))
+    fn recover_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Result<Address, RecoveryError> {
+        delegate!(self => tx.recover_unchecked_with_buf(buf))
     }
 }
 
-impl<B, T> Typed2718 for ExtendedTxEnvelope<B, T>
+impl<B, T> TxHashRef for Extended<B, T>
+where
+    B: TxHashRef,
+    T: TxHashRef,
+{
+    fn tx_hash(&self) -> &TxHash {
+        delegate!(self => tx.tx_hash())
+    }
+}
+
+impl<B, T> SignedTransaction for Extended<B, T>
+where
+    B: SignedTransaction + IsTyped2718 + TxHashRef,
+    T: SignedTransaction + TxHashRef,
+{
+}
+
+impl<B, T> Typed2718 for Extended<B, T>
 where
     B: Typed2718,
     T: Typed2718,
@@ -177,7 +188,7 @@ where
     }
 }
 
-impl<B, T> Decodable2718 for ExtendedTxEnvelope<B, T>
+impl<B, T> Decodable2718 for Extended<B, T>
 where
     B: Decodable2718 + IsTyped2718,
     T: Decodable2718,
@@ -199,7 +210,7 @@ where
     }
 }
 
-impl<B, T> Encodable2718 for ExtendedTxEnvelope<B, T>
+impl<B, T> Encodable2718 for Extended<B, T>
 where
     B: Encodable2718,
     T: Encodable2718,
@@ -219,7 +230,7 @@ where
     }
 }
 
-impl<B, T> Encodable for ExtendedTxEnvelope<B, T>
+impl<B, T> Encodable for Extended<B, T>
 where
     B: Encodable,
     T: Encodable,
@@ -239,7 +250,7 @@ where
     }
 }
 
-impl<B, T> Decodable for ExtendedTxEnvelope<B, T>
+impl<B, T> Decodable for Extended<B, T>
 where
     B: Decodable,
     T: Decodable,
@@ -257,43 +268,75 @@ where
     }
 }
 
+impl<Eip4844, Tx> From<EthereumTxEnvelope<Eip4844>> for Extended<EthereumTxEnvelope<Eip4844>, Tx> {
+    fn from(value: EthereumTxEnvelope<Eip4844>) -> Self {
+        Self::BuiltIn(value)
+    }
+}
+
 #[cfg(feature = "op")]
 mod op {
-    use crate::ExtendedTxEnvelope;
+    use crate::Extended;
     use alloy_consensus::error::ValueError;
-    use alloy_primitives::{Signature, B256};
-    use op_alloy_consensus::{OpPooledTransaction, OpTxEnvelope};
+    use alloy_primitives::{Sealed, Signature, B256};
+    use op_alloy_consensus::{OpPooledTransaction, OpTransaction, OpTxEnvelope, TxDeposit};
 
-    impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>>
-        for ExtendedTxEnvelope<OpPooledTransaction, Tx>
+    impl<B, T> OpTransaction for Extended<B, T>
+    where
+        B: OpTransaction,
+        T: OpTransaction,
     {
-        type Error = OpTxEnvelope;
+        fn is_deposit(&self) -> bool {
+            match self {
+                Self::BuiltIn(b) => b.is_deposit(),
+                Self::Other(t) => t.is_deposit(),
+            }
+        }
 
-        fn try_from(value: ExtendedTxEnvelope<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
-            match value {
-                ExtendedTxEnvelope::BuiltIn(tx) => {
-                    let converted_tx: OpPooledTransaction =
-                        tx.clone().try_into().map_err(|_| tx)?;
-                    Ok(Self::BuiltIn(converted_tx))
-                }
-                ExtendedTxEnvelope::Other(tx) => Ok(Self::Other(tx)),
+        fn as_deposit(&self) -> Option<&Sealed<TxDeposit>> {
+            match self {
+                Self::BuiltIn(b) => b.as_deposit(),
+                Self::Other(t) => t.as_deposit(),
             }
         }
     }
 
-    impl<Tx> From<OpPooledTransaction> for ExtendedTxEnvelope<OpTxEnvelope, Tx> {
+    impl<Tx> TryFrom<Extended<OpTxEnvelope, Tx>> for Extended<OpPooledTransaction, Tx> {
+        type Error = <OpPooledTransaction as TryFrom<OpTxEnvelope>>::Error;
+
+        fn try_from(value: Extended<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
+            match value {
+                Extended::BuiltIn(tx) => {
+                    let converted_tx: OpPooledTransaction = tx.try_into()?;
+                    Ok(Self::BuiltIn(converted_tx))
+                }
+                Extended::Other(tx) => Ok(Self::Other(tx)),
+            }
+        }
+    }
+
+    impl<Tx> From<OpPooledTransaction> for Extended<OpTxEnvelope, Tx> {
         fn from(tx: OpPooledTransaction) -> Self {
             Self::BuiltIn(tx.into())
         }
     }
 
-    impl<Tx> TryFrom<ExtendedTxEnvelope<OpTxEnvelope, Tx>> for OpPooledTransaction {
+    impl<Tx> From<Extended<OpPooledTransaction, Tx>> for Extended<OpTxEnvelope, Tx> {
+        fn from(tx: Extended<OpPooledTransaction, Tx>) -> Self {
+            match tx {
+                Extended::BuiltIn(tx) => Self::BuiltIn(tx.into()),
+                Extended::Other(tx) => Self::Other(tx),
+            }
+        }
+    }
+
+    impl<Tx> TryFrom<Extended<OpTxEnvelope, Tx>> for OpPooledTransaction {
         type Error = ValueError<OpTxEnvelope>;
 
-        fn try_from(_tx: ExtendedTxEnvelope<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
+        fn try_from(_tx: Extended<OpTxEnvelope, Tx>) -> Result<Self, Self::Error> {
             match _tx {
-                ExtendedTxEnvelope::BuiltIn(inner) => inner.try_into(),
-                ExtendedTxEnvelope::Other(_tx) => Err(ValueError::new(
+                Extended::BuiltIn(inner) => inner.try_into(),
+                Extended::Other(_tx) => Err(ValueError::new(
                     OpTxEnvelope::Legacy(alloy_consensus::Signed::new_unchecked(
                         alloy_consensus::TxLegacy::default(),
                         Signature::decode_rlp_vrs(&mut &[0u8; 65][..], |_| Ok(false)).unwrap(),
@@ -302,6 +345,12 @@ mod op {
                     "Cannot convert custom transaction to OpPooledTransaction",
                 )),
             }
+        }
+    }
+
+    impl<Tx> From<OpTxEnvelope> for Extended<OpTxEnvelope, Tx> {
+        fn from(value: OpTxEnvelope) -> Self {
+            Self::BuiltIn(value)
         }
     }
 }
@@ -313,29 +362,29 @@ mod serde_bincode_compat {
 
     #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
     #[derive(Debug)]
-    pub enum ExtendedTxEnvelopeRepr<'a, B: SerdeBincodeCompat, T: SerdeBincodeCompat> {
+    pub enum ExtendedRepr<'a, B: SerdeBincodeCompat, T: SerdeBincodeCompat> {
         BuiltIn(B::BincodeRepr<'a>),
         Other(T::BincodeRepr<'a>),
     }
 
-    impl<B, T> SerdeBincodeCompat for ExtendedTxEnvelope<B, T>
+    impl<B, T> SerdeBincodeCompat for Extended<B, T>
     where
         B: SerdeBincodeCompat + core::fmt::Debug,
         T: SerdeBincodeCompat + core::fmt::Debug,
     {
-        type BincodeRepr<'a> = ExtendedTxEnvelopeRepr<'a, B, T>;
+        type BincodeRepr<'a> = ExtendedRepr<'a, B, T>;
 
         fn as_repr(&self) -> Self::BincodeRepr<'_> {
             match self {
-                Self::BuiltIn(tx) => ExtendedTxEnvelopeRepr::BuiltIn(tx.as_repr()),
-                Self::Other(tx) => ExtendedTxEnvelopeRepr::Other(tx.as_repr()),
+                Self::BuiltIn(tx) => ExtendedRepr::BuiltIn(tx.as_repr()),
+                Self::Other(tx) => ExtendedRepr::Other(tx.as_repr()),
             }
         }
 
         fn from_repr(repr: Self::BincodeRepr<'_>) -> Self {
             match repr {
-                ExtendedTxEnvelopeRepr::BuiltIn(tx_repr) => Self::BuiltIn(B::from_repr(tx_repr)),
-                ExtendedTxEnvelopeRepr::Other(tx_repr) => Self::Other(T::from_repr(tx_repr)),
+                ExtendedRepr::BuiltIn(tx_repr) => Self::BuiltIn(B::from_repr(tx_repr)),
+                ExtendedRepr::Other(tx_repr) => Self::Other(T::from_repr(tx_repr)),
             }
         }
     }
@@ -345,7 +394,7 @@ mod serde_bincode_compat {
 use alloy_primitives::bytes::Buf;
 
 #[cfg(feature = "reth-codec")]
-impl<B, T> reth_codecs::Compact for ExtendedTxEnvelope<B, T>
+impl<B, T> reth_codecs::Compact for Extended<B, T>
 where
     B: Transaction + IsTyped2718 + reth_codecs::Compact,
     T: Transaction + reth_codecs::Compact,

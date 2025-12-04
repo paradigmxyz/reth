@@ -251,13 +251,7 @@ impl Encodable2718 for OvmTransactionSigned {
     }
 
     fn encode_2718(&self, out: &mut dyn alloy_rlp::BufMut) {
-        match &self.transaction {
-            OpTypedTransaction::Legacy(tx) => tx.eip2718_encode(&self.signature, out),
-            OpTypedTransaction::Eip2930(tx) => tx.eip2718_encode(&self.signature, out),
-            OpTypedTransaction::Eip1559(tx) => tx.eip2718_encode(&self.signature, out),
-            OpTypedTransaction::Eip7702(tx) => tx.eip2718_encode(&self.signature, out),
-            OpTypedTransaction::Deposit(tx) => tx.encode_2718(out),
-        }
+        self.transaction.eip2718_encode(&self.signature, out)
     }
 }
 
@@ -309,7 +303,7 @@ mod tests {
 
         // Verify deposit transaction
         let deposit_tx = match &deposit_decoded.transaction {
-            OpTypedTransaction::Legacy(ref tx) => tx,
+            OpTypedTransaction::Legacy(tx) => tx,
             _ => panic!("Expected legacy transaction for NFT deposit"),
         };
 
@@ -351,7 +345,7 @@ mod tests {
         assert!(system_decoded.is_legacy());
 
         let system_tx = match &system_decoded.transaction {
-            OpTypedTransaction::Legacy(ref tx) => tx,
+            OpTypedTransaction::Legacy(tx) => tx,
             _ => panic!("Expected Legacy transaction"),
         };
 

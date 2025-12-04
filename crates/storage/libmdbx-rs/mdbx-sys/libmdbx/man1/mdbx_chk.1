@@ -1,6 +1,6 @@
-.\" Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_CHK 1 "2024-03-13" "MDBX 0.12.10"
+.TH MDBX_CHK 1 "2024-08-29" "MDBX 0.13"
 .SH NAME
 mdbx_chk \- MDBX checking tool
 .SH SYNOPSIS
@@ -22,12 +22,12 @@ mdbx_chk \- MDBX checking tool
 [\c
 .BR \-i ]
 [\c
-.BI \-s \ subdb\fR]
+.BI \-s \ table\fR]
 .BR \ dbpath
 .SH DESCRIPTION
 The
 .B mdbx_chk
-utility intended to check an MDBX database file.
+utility is intended to check an MDBX database file.
 .SH OPTIONS
 .TP
 .BR \-V
@@ -55,7 +55,7 @@ check, including full check of all meta-pages and actual size of database file.
 .BR \-w
 Open environment in read-write mode and lock for writing while checking.
 This could be impossible if environment already used by another process(s)
-in an incompatible read-write mode. This allow rollback to last steady commit
+in an incompatible read-write mode. This allows rollback to last steady commit
 (in case environment was not closed properly) and then check transaction IDs
 of meta-pages. Otherwise, without \fB\-w\fP option environment will be
 opened in read-only mode.
@@ -69,8 +69,8 @@ pages.
 Ignore wrong order errors, which will likely false-positive if custom
 comparator(s) was used.
 .TP
-.BR \-s \ subdb
-Verify and show info only for a specific subdatabase.
+.BR \-s \ table
+Verify and show info only for a specific table.
 .TP
 .BR \-0 | \-1 | \-2
 Using specific meta-page 0, or 2 for checking.
@@ -90,7 +90,7 @@ then forcibly loads ones by sequential access and tries to lock database pages i
 .TP
 .BR \-n
 Open MDBX environment(s) which do not use subdirectories.
-This is legacy option. For now MDBX handles this automatically.
+This is a legacy option. For now MDBX handles this automatically.
 
 .SH DIAGNOSTICS
 Exit status is zero if no errors occur. Errors result in a non-zero exit status

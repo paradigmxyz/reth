@@ -32,7 +32,7 @@ pub trait StorageReader: Send + Sync {
     ) -> ProviderResult<BTreeMap<(Address, B256), Vec<u64>>>;
 }
 
-/// Storage ChangeSet reader
+/// Storage `ChangeSet` reader
 #[cfg(feature = "db-api")]
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageChangeSetReader: Send + Sync {
@@ -41,27 +41,4 @@ pub trait StorageChangeSetReader: Send + Sync {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>>;
-}
-
-/// An enum that represents the storage location for a piece of data.
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub enum StorageLocation {
-    /// Write only to static files.
-    StaticFiles,
-    /// Write only to the database.
-    Database,
-    /// Write to both the database and static files.
-    Both,
-}
-
-impl StorageLocation {
-    /// Returns true if the storage location includes static files.
-    pub const fn static_files(&self) -> bool {
-        matches!(self, Self::StaticFiles | Self::Both)
-    }
-
-    /// Returns true if the storage location includes the database.
-    pub const fn database(&self) -> bool {
-        matches!(self, Self::Database | Self::Both)
-    }
 }

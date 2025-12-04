@@ -14,7 +14,8 @@ use alloy_primitives::{BlockNumber, B256};
 use eyre::eyre;
 use reth_chainspec::{ChainSpec, EthChainSpec, MAINNET};
 use reth_config::config::PruneConfig;
-use reth_ethereum_forks::Head;
+use reth_engine_local::MiningMode;
+use reth_ethereum_forks::{EthereumHardforks, Head};
 use reth_network_p2p::headers::client::HeadersClient;
 use reth_primitives_traits::SealedHeader;
 use reth_stages_types::StageId;
@@ -22,22 +23,20 @@ use reth_storage_api::{
     BlockHashReader, DatabaseProviderFactory, HeaderProvider, StageCheckpointReader,
 };
 use reth_storage_errors::provider::ProviderResult;
+use reth_transaction_pool::TransactionPool;
 use serde::{de::DeserializeOwned, Serialize};
 use std::{
     fs,
-    net::SocketAddr,
     path::{Path, PathBuf},
     sync::Arc,
 };
 use tracing::*;
 
+use crate::args::{EraArgs, MetricArgs};
 pub use reth_engine_primitives::{
     DEFAULT_MAX_PROOF_TASK_CONCURRENCY, DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
-    DEFAULT_RESERVED_CPU_CORES,
+    DEFAULT_PERSISTENCE_THRESHOLD, DEFAULT_RESERVED_CPU_CORES,
 };
-
-/// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
-pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 
 /// Default size of cross-block cache in megabytes.
 pub const DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB: u64 = 4 * 1024;
@@ -100,10 +99,8 @@ pub struct NodeConfig<ChainSpec> {
     /// Possible values are either a built-in chain or the path to a chain specification file.
     pub chain: Arc<ChainSpec>,
 
-    /// Enable Prometheus metrics.
-    ///
-    /// The metrics will be served at the given interface and port.
-    pub metrics: Option<SocketAddr>,
+    /// Enable to configure metrics export to endpoints
+    pub metrics: MetricArgs,
 
     /// Add a new instance of a node.
     ///
@@ -148,6 +145,9 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All engine related arguments
     pub engine: EngineArgs,
+
+    /// All ERA import related arguments with --era prefix
+    pub era: EraArgs,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -165,7 +165,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         Self {
             config: None,
             chain,
-            metrics: None,
+            metrics: MetricArgs::default(),
             instance: None,
             network: NetworkArgs::default(),
             rpc: RpcServerArgs::default(),
@@ -177,6 +177,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             pruning: PruningArgs::default(),
             datadir: DatadirArgs::default(),
             engine: EngineArgs::default(),
+            era: EraArgs::default(),
         }
     }
 
@@ -218,8 +219,8 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     }
 
     /// Set the metrics address for the node
-    pub const fn with_metrics(mut self, metrics: SocketAddr) -> Self {
-        self.metrics = Some(metrics);
+    pub const fn with_metrics(mut self, metrics: MetricArgs) -> Self {
+        self.metrics = metrics;
         self
     }
 
@@ -285,7 +286,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
     /// Returns pruning configuration.
     pub fn prune_config(&self) -> Option<PruneConfig>
     where
-        ChainSpec: EthChainSpec,
+        ChainSpec: EthereumHardforks,
     {
         self.pruning.prune_config(&self.chain)
     }
@@ -482,6 +483,19 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             dev: self.dev,
             pruning: self.pruning,
             engine: self.engine,
+            era: self.era,
+        }
+    }
+
+    /// Returns the [`MiningMode`] intended for --dev mode.
+    pub fn dev_mining_mode<Pool>(&self, pool: Pool) -> MiningMode<Pool>
+    where
+        Pool: TransactionPool + Unpin,
+    {
+        if let Some(interval) = self.dev.block_time {
+            MiningMode::interval(interval)
+        } else {
+            MiningMode::instant(pool, self.dev.block_max_transactions)
         }
     }
 }
@@ -497,7 +511,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
         Self {
             chain: self.chain.clone(),
             config: self.config.clone(),
-            metrics: self.metrics,
+            metrics: self.metrics.clone(),
             instance: self.instance,
             network: self.network.clone(),
             rpc: self.rpc.clone(),
@@ -509,6 +523,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             pruning: self.pruning.clone(),
             datadir: self.datadir.clone(),
             engine: self.engine.clone(),
+            era: self.era.clone(),
         }
     }
 }

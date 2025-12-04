@@ -5,15 +5,15 @@ pub type OpExecutorProvider = crate::OpEvmConfig;
 
 #[cfg(test)]
 mod tests {
-    use crate::{OpChainSpec, OpEvmConfig, OpRethReceiptBuilder};
+    use crate::{OpEvmConfig, OpRethReceiptBuilder};
     use alloc::sync::Arc;
     use alloy_consensus::{Block, BlockBody, Header, SignableTransaction, TxEip1559};
     use alloy_primitives::{b256, Address, Signature, StorageKey, StorageValue, U256};
     use op_alloy_consensus::TxDeposit;
     use op_revm::constants::L1_BLOCK_CONTRACT;
     use reth_chainspec::MIN_TRANSACTION_GAS;
-    use reth_evm::{execute::Executor, ConfigureEvm};
-    use reth_optimism_chainspec::OpChainSpecBuilder;
+    use reth_evm::execute::{BasicBlockExecutor, Executor};
+    use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder};
     use reth_optimism_primitives::{OpReceipt, OpTransactionSigned};
     use reth_primitives_traits::{Account, RecoveredBlock};
     use reth_revm::{database::StateProviderDatabase, test_utils::StateProviderTest};
@@ -90,7 +90,7 @@ mod tests {
         .into();
 
         let provider = evm_config(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = BasicBlockExecutor::new(provider, StateProviderDatabase::new(&db));
 
         // make sure the L1 block contract state is preloaded.
         executor.with_state_mut(|state| {
@@ -163,7 +163,7 @@ mod tests {
         .into();
 
         let provider = evm_config(chain_spec);
-        let mut executor = provider.batch_executor(StateProviderDatabase::new(&db));
+        let mut executor = BasicBlockExecutor::new(provider, StateProviderDatabase::new(&db));
 
         // make sure the L1 block contract state is preloaded.
         executor.with_state_mut(|state| {

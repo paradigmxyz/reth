@@ -6,7 +6,7 @@ use alloy_eips::eip4895::{Withdrawal as AlloyWithdrawal, Withdrawals};
 use alloy_primitives::Address;
 use reth_codecs_derive::add_arbitrary_tests;
 
-/// Withdrawal acts as bridge which simplifies Compact implementation for AlloyWithdrawal.
+/// Withdrawal acts as bridge which simplifies Compact implementation for `AlloyWithdrawal`.
 ///
 /// Notice: Make sure this struct is 1:1 with `alloy_eips::eip4895::Withdrawal`
 #[derive(Debug, Clone, PartialEq, Eq, Default, Compact)]

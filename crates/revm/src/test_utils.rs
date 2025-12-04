@@ -4,8 +4,8 @@ use alloy_primitives::{
 };
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, StateProofProvider, StateProvider,
-    StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
+    StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -158,7 +158,9 @@ impl StateProvider for StateProviderTest {
     ) -> ProviderResult<Option<alloy_primitives::StorageValue>> {
         Ok(self.accounts.get(&account).and_then(|(storage, _)| storage.get(&storage_key).copied()))
     }
+}
 
+impl BytecodeReader for StateProviderTest {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
         Ok(self.contracts.get(code_hash).cloned())
     }

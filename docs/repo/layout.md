@@ -2,7 +2,7 @@
 
 This repository contains several Rust crates that implement the different building blocks of an Ethereum node. The high-level structure of the repository is as follows:
 
-Generally reth is composed of a few components, with supporting crates. The main components can be defined as:
+Generally, reth is composed of a few components, with supporting crates. The main components can be defined as:
 
 - [Project Layout](#project-layout)
   - [Documentation](#documentation)
@@ -29,7 +29,7 @@ The supporting crates are split into two categories: [primitives](#primitives) a
 
 ### Documentation
 
-Contributor documentation is in [`docs`](../../docs) and end-user documentation is in [`book`](../../book).
+Contributor documentation is in [`docs`](../../docs).
 
 ### Binaries
 
@@ -135,7 +135,7 @@ The IPC transport lives in [`rpc/ipc`](../../crates/rpc/ipc).
 
 #### Utilities Crates
 
-- [`rpc/rpc-types-compat`](../../crates/rpc/rpc-types-compat): This crate various helper functions to convert between reth primitive types and rpc types.
+- [`rpc/rpc-convert`](../../crates/rpc/rpc-convert): This crate provides various helper functions to convert between reth primitive types and rpc types.
 - [`rpc/layer`](../../crates/rpc/rpc-layer/): Some RPC middleware layers (e.g. `AuthValidator`, `JwtAuthValidator`)
 - [`rpc/rpc-testing-util`](../../crates/rpc/rpc-testing-util/): Reth RPC testing helpers
 

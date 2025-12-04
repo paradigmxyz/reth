@@ -17,6 +17,7 @@
 pub mod block;
 pub mod blocking_task;
 pub mod call;
+pub mod config;
 pub mod estimate;
 pub mod fee;
 pub mod pending_block;

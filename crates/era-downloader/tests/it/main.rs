@@ -9,10 +9,9 @@ mod stream;
 const fn main() {}
 
 use bytes::Bytes;
-use futures_util::Stream;
+use futures::Stream;
 use reqwest::IntoUrl;
 use reth_era_downloader::HttpClient;
-use std::future::Future;
 
 pub(crate) const NIMBUS: &[u8] = include_bytes!("../res/nimbus.html");
 pub(crate) const ETH_PORTAL: &[u8] = include_bytes!("../res/ethportal.html");
@@ -27,91 +26,30 @@ pub(crate) const MAINNET_1: &[u8] = include_bytes!("../res/mainnet-00001-a5364e9
 struct StubClient;
 
 impl HttpClient for StubClient {
-    fn get<U: IntoUrl + Send + Sync>(
+    async fn get<U: IntoUrl + Send + Sync>(
         &self,
         url: U,
-    ) -> impl Future<
-        Output = eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>,
-    > + Send
-           + Sync {
+    ) -> eyre::Result<impl Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin> {
         let url = url.into_url().unwrap();
 
-        async move {
-            match url.to_string().as_str() {
-                "https://mainnet.era1.nimbus.team/index.html" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(NIMBUS))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://era1.ethportal.net/index.html" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(ETH_PORTAL))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://era.ithaca.xyz/era1/index.html" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(ITHACA))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://mainnet.era1.nimbus.team/checksums.txt" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(CHECKSUMS))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://era1.ethportal.net/checksums.txt" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(CHECKSUMS))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://era.ithaca.xyz/era1/checksums.txt" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(CHECKSUMS))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://era1.ethportal.net/mainnet-00000-5ec1ffb8.era1" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(MAINNET_0))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://mainnet.era1.nimbus.team/mainnet-00000-5ec1ffb8.era1" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(MAINNET_0))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(MAINNET_0))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://era1.ethportal.net/mainnet-00001-a5364e9a.era1" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(MAINNET_1))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://mainnet.era1.nimbus.team/mainnet-00001-a5364e9a.era1" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(MAINNET_1))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                "https://era.ithaca.xyz/era1/mainnet-00001-a5364e9a.era1" => {
-                    Ok(Box::new(futures::stream::once(Box::pin(async move {
-                        Ok(bytes::Bytes::from(MAINNET_1))
-                    })))
-                        as Box<dyn Stream<Item = eyre::Result<Bytes>> + Send + Sync + Unpin>)
-                }
-                v => unimplemented!("Unexpected URL \"{v}\""),
+        Ok(futures::stream::iter(vec![Ok(match url.to_string().as_str() {
+            "https://mainnet.era1.nimbus.team/" => Bytes::from_static(NIMBUS),
+            "https://era1.ethportal.net/" => Bytes::from_static(ETH_PORTAL),
+            "https://era.ithaca.xyz/era1/index.html" => Bytes::from_static(ITHACA),
+            "https://mainnet.era1.nimbus.team/checksums.txt" |
+            "https://era1.ethportal.net/checksums.txt" |
+            "https://era.ithaca.xyz/era1/checksums.txt" => Bytes::from_static(CHECKSUMS),
+            "https://era1.ethportal.net/mainnet-00000-5ec1ffb8.era1" |
+            "https://mainnet.era1.nimbus.team/mainnet-00000-5ec1ffb8.era1" |
+            "https://era.ithaca.xyz/era1/mainnet-00000-5ec1ffb8.era1" => {
+                Bytes::from_static(MAINNET_0)
             }
-        }
+            "https://era1.ethportal.net/mainnet-00001-a5364e9a.era1" |
+            "https://mainnet.era1.nimbus.team/mainnet-00001-a5364e9a.era1" |
+            "https://era.ithaca.xyz/era1/mainnet-00001-a5364e9a.era1" => {
+                Bytes::from_static(MAINNET_1)
+            }
+            v => unimplemented!("Unexpected URL \"{v}\""),
+        })]))
     }
 }

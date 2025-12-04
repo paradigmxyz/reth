@@ -80,8 +80,8 @@ impl SyncTarget {
 }
 
 /// Represents a gap to sync: from `local_head` to `target`
-#[derive(Clone, Debug)]
-pub struct HeaderSyncGap<H = Header> {
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct HeaderSyncGap<H: Sealable = Header> {
     /// The local head block. Represents lower bound of sync range.
     pub local_head: SealedHeader<H>,
 

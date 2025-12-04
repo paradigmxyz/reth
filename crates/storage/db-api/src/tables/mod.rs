@@ -405,8 +405,7 @@ tables! {
     /// the shard that equal or more than asked. For example:
     /// * For N=50 we would get first shard.
     /// * for N=150 we would get second shard.
-    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and
-    ///     know that needed entry is in `AccountPlainState`.
+    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `AccountPlainState`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
@@ -428,8 +427,7 @@ tables! {
     /// the shard that equal or more than asked. For example:
     /// * For N=50 we would get first shard.
     /// * for N=150 we would get second shard.
-    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and
-    ///     know that needed entry is in `StoragePlainState`.
+    /// * If max block number is 200 and we ask for N=250 we would fetch last shard and know that needed entry is in `StoragePlainState`.
     /// * If there were no shard we would get `None` entry or entry of different storage key.
     ///
     /// Code example can be found in `reth_provider::HistoricalStateProviderRef`
@@ -481,7 +479,7 @@ tables! {
         type Value = BranchNodeCompact;
     }
 
-    /// From HashedAddress => NibblesSubKey => Intermediate value
+    /// From `HashedAddress` => `NibblesSubKey` => Intermediate value
     table StoragesTrie {
         type Key = B256;
         type Value = StorageTrieEntry;
@@ -532,8 +530,8 @@ tables! {
 pub enum ChainStateKey {
     /// Last finalized block key
     LastFinalizedBlock,
-    /// Last finalized block key
-    LastSafeBlockBlock,
+    /// Last safe block key
+    LastSafeBlock,
 }
 
 impl Encode for ChainStateKey {
@@ -542,7 +540,7 @@ impl Encode for ChainStateKey {
     fn encode(self) -> Self::Encoded {
         match self {
             Self::LastFinalizedBlock => [0],
-            Self::LastSafeBlockBlock => [1],
+            Self::LastSafeBlock => [1],
         }
     }
 }
@@ -551,7 +549,7 @@ impl Decode for ChainStateKey {
     fn decode(value: &[u8]) -> Result<Self, crate::DatabaseError> {
         match value {
             [0] => Ok(Self::LastFinalizedBlock),
-            [1] => Ok(Self::LastSafeBlockBlock),
+            [1] => Ok(Self::LastSafeBlock),
             _ => Err(crate::DatabaseError::Decode),
         }
     }

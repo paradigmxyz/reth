@@ -1,0 +1,125 @@
+# Reth for Developers
+
+Reth can be used as a library to build custom Ethereum nodes, interact with blockchain data, or create specialized tools for blockchain analysis and indexing.
+
+## What is the Reth SDK?
+
+The Reth SDK allows developers to:
+
+-   Use components of the Reth node as libraries
+-   Build custom Ethereum execution nodes with modified behavior (e.g. payload building)
+-   Access blockchain data directly from the database
+-   Create high-performance indexing solutions
+-   Extend a new with new RPC endpoints and functionality
+-   Implement custom consensus mechanisms
+-   Build specialized tools for blockchain analysis
+
+## Quick Start
+
+Add Reth to your project
+
+### Ethereum
+
+```toml
+[dependencies]
+# Ethereum meta crate
+reth-ethereum = { git = "https://github.com/paradigmxyz/reth" }
+```
+
+### Opstack
+
+```toml
+[dependencies]
+reth-op = { git = "https://github.com/paradigmxyz/reth" }
+```
+
+## Key Concepts
+
+### Node Architecture
+
+Reth is built with modularity in mind. The main components include:
+
+-   **Primitives**: Core data type abstractions like `Block`
+-   **Node Builder**: Constructs and configures node instances
+-   **Database**: Efficient storage using MDBX and static files
+-   **Network**: P2P communication and block synchronization
+-   **Consensus**: Block validation and chain management
+-   **EVM**: Transaction execution and state transitions
+-   **RPC**: JSON-RPC server for external communication
+-   **Transaction Pool**: Pending transaction management
+
+### Dependency Management
+
+Reth is primarily built on top of the [alloy](https://github.com/alloy-rs/alloy) ecosystem, which provides the necessary abstractions and implementations for core ethereum blockchain data types, transaction handling, and EVM execution.
+
+### Type System
+
+Reth uses its own type system to handle different representations of blockchain data:
+
+-   **Primitives**: Core types like `B256`, `Address`, `U256`
+-   **Transactions**: Multiple representations for different contexts (pooled, consensus, RPC)
+-   **Blocks**: Headers, bodies, and sealed blocks with proven properties
+-   **State**: Accounts, storage, and state transitions
+
+### Building Custom Nodes
+
+The node builder pattern allows you to customize every aspect of node behavior:
+
+```rust
+use reth_ethereum::node::{EthereumNode, NodeBuilder};
+
+// Build a custom node with modified components
+let node = NodeBuilder::new(config)
+     // install the ethereum specific node primitives
+    .with_types::<EthereumNode>()
+    .with_components(|components| {
+        // Customize components here
+        components
+    })
+    .build()
+    .await?;
+```
+
+## Architecture Overview
+
+```mermaid
+graph TD
+    A[Node Builder] --> B[Database]
+    A --> C[Network]
+    A --> D[Consensus]
+    A --> E[EVM]
+    A --> F[RPC Server]
+    A --> G[Transaction Pool]
+
+    B --> H[DB Storage]
+    B --> I[Static Files]
+
+    C --> J[Discovery]
+    C --> K[ETH Protocol]
+
+    E --> L[State Provider]
+    E --> M[Block Executor]
+```
+
+## Nodes Built with Reth
+
+Several production networks have been built using Reth's node builder pattern:
+
+| Node | Company | Description | Lines of Code |
+|------|---------|-------------|---------------|
+| [Base Node](https://github.com/base/node-reth) | Coinbase | Coinbase's L2 scaling solution node implementation | ~3K |
+| [Bera Reth](https://github.com/berachain/bera-reth) | Berachain | Berachain's high-performance EVM node with custom features | ~1K |
+| [Reth Gnosis](https://github.com/gnosischain/reth_gnosis) | Gnosis | Gnosis Chain's xDai-compatible execution client | ~5K |
+| [Reth BSC](https://github.com/loocapro/reth-bsc) | Binance Smart Chain | BNB Smart Chain execution client implementation | ~6K |
+
+## Next Steps
+
+-   **[Node Components](/sdk/node-components)**: Deep dive into each component
+-   **[Type System](/sdk/typesystem/block)**: Understanding Reth's type system
+-   **[Custom Nodes](/sdk/custom-node/prerequisites)**: Building production nodes
+-   **[Examples](/sdk/examples/modify-node)**: Real-world implementations
+
+## Resources
+
+-   [API Documentation](https://docs.rs/reth/latest/reth/)
+-   [GitHub Repository](https://github.com/paradigmxyz/reth)

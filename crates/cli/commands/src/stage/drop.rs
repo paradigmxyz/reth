@@ -15,9 +15,7 @@ use reth_db_common::{
 };
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
-use reth_provider::{
-    writer::UnifiedStorageWriter, DatabaseProviderFactory, StaticFileProviderFactory,
-};
+use reth_provider::{DBProvider, DatabaseProviderFactory, StaticFileProviderFactory};
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
@@ -160,7 +158,7 @@ impl<C: ChainSpecParser> Command<C> {
 
         tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
 
-        UnifiedStorageWriter::commit_unwind(provider_rw)?;
+        provider_rw.commit()?;
 
         Ok(())
     }

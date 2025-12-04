@@ -12,24 +12,20 @@ use reth_trie::{
 };
 
 /// Wrapper struct for database transaction implementing trie cursor factory trait.
-#[derive(Debug)]
-pub struct DatabaseTrieCursorFactory<'a, TX>(&'a TX);
+#[derive(Debug, Clone)]
+pub struct DatabaseTrieCursorFactory<T>(T);
 
-impl<TX> Clone for DatabaseTrieCursorFactory<'_, TX> {
-    fn clone(&self) -> Self {
-        Self(self.0)
-    }
-}
-
-impl<'a, TX> DatabaseTrieCursorFactory<'a, TX> {
+impl<T> DatabaseTrieCursorFactory<T> {
     /// Create new [`DatabaseTrieCursorFactory`].
-    pub const fn new(tx: &'a TX) -> Self {
+    pub const fn new(tx: T) -> Self {
         Self(tx)
     }
 }
 
-/// Implementation of the trie cursor factory for a database transaction.
-impl<TX: DbTx> TrieCursorFactory for DatabaseTrieCursorFactory<'_, TX> {
+impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
+where
+    TX: DbTx,
+{
     type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
     type StorageTrieCursor =
         DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
@@ -140,7 +136,7 @@ where
         let mut num_entries = 0;
         for (nibbles, maybe_updated) in storage_updates.into_iter().filter(|(n, _)| !n.is_empty()) {
             num_entries += 1;
-            let nibbles = StoredNibblesSubKey(nibbles.clone());
+            let nibbles = StoredNibblesSubKey(*nibbles);
             // Delete the old entry if it exists.
             if self
                 .cursor
@@ -175,7 +171,7 @@ where
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(self
             .cursor
-            .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key.clone()))?
+            .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key))?
             .filter(|e| e.nibbles == StoredNibblesSubKey(key))
             .map(|value| (value.nibbles.0, value.node)))
     }

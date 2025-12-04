@@ -19,11 +19,11 @@ pub const GIGAGAS: u64 = MEGAGAS * 1_000;
 pub fn format_gas_throughput(gas: u64, execution_duration: Duration) -> String {
     let gas_per_second = gas as f64 / execution_duration.as_secs_f64();
     if gas_per_second < MEGAGAS as f64 {
-        format!("{:.2} Kgas/second", gas_per_second / KILOGAS as f64)
+        format!("{:.2}Kgas/second", gas_per_second / KILOGAS as f64)
     } else if gas_per_second < GIGAGAS as f64 {
-        format!("{:.2} Mgas/second", gas_per_second / MEGAGAS as f64)
+        format!("{:.2}Mgas/second", gas_per_second / MEGAGAS as f64)
     } else {
-        format!("{:.2} Ggas/second", gas_per_second / GIGAGAS as f64)
+        format!("{:.2}Ggas/second", gas_per_second / GIGAGAS as f64)
     }
 }
 
@@ -36,11 +36,11 @@ pub fn format_gas_throughput(gas: u64, execution_duration: Duration) -> String {
 pub fn format_gas(gas: u64) -> String {
     let gas = gas as f64;
     if gas < MEGAGAS as f64 {
-        format!("{:.2} Kgas", gas / KILOGAS as f64)
+        format!("{:.2}Kgas", gas / KILOGAS as f64)
     } else if gas < GIGAGAS as f64 {
-        format!("{:.2} Mgas", gas / MEGAGAS as f64)
+        format!("{:.2}Mgas", gas / MEGAGAS as f64)
     } else {
-        format!("{:.2} Ggas", gas / GIGAGAS as f64)
+        format!("{:.2}Ggas", gas / GIGAGAS as f64)
     }
 }
 
@@ -50,17 +50,21 @@ mod tests {
 
     #[test]
     fn test_gas_fmt() {
+        let gas = 888;
+        let gas_unit = format_gas(gas);
+        assert_eq!(gas_unit, "0.89Kgas");
+
         let gas = 100_000;
         let gas_unit = format_gas(gas);
-        assert_eq!(gas_unit, "100.00 Kgas");
+        assert_eq!(gas_unit, "100.00Kgas");
 
         let gas = 100_000_000;
         let gas_unit = format_gas(gas);
-        assert_eq!(gas_unit, "100.00 Mgas");
+        assert_eq!(gas_unit, "100.00Mgas");
 
         let gas = 100_000_000_000;
         let gas_unit = format_gas(gas);
-        assert_eq!(gas_unit, "100.00 Ggas");
+        assert_eq!(gas_unit, "100.00Ggas");
     }
 
     #[test]
@@ -68,14 +72,14 @@ mod tests {
         let duration = Duration::from_secs(1);
         let gas = 100_000;
         let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100.00 Kgas/second");
+        assert_eq!(throughput, "100.00Kgas/second");
 
         let gas = 100_000_000;
         let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100.00 Mgas/second");
+        assert_eq!(throughput, "100.00Mgas/second");
 
         let gas = 100_000_000_000;
         let throughput = format_gas_throughput(gas, duration);
-        assert_eq!(throughput, "100.00 Ggas/second");
+        assert_eq!(throughput, "100.00Ggas/second");
     }
 }

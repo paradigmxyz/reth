@@ -15,7 +15,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 mod block;
@@ -31,8 +31,8 @@ pub use block::{BlockWithSenders, SealedBlockFor, SealedBlockWithSenders};
 pub use receipt::{gas_spent_by_transactions, Receipt};
 pub use reth_primitives_traits::{
     logs_bloom, Account, BlockTy, BodyTy, Bytecode, GotExpected, GotExpectedBoxed, Header,
-    HeaderError, HeaderTy, Log, LogData, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
-    StorageEntry, TxTy,
+    HeaderTy, Log, LogData, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader, StorageEntry,
+    TxTy,
 };
 pub use static_file::StaticFileSegment;
 
@@ -54,9 +54,6 @@ pub use transaction::{PooledTransactionsElementEcRecovered, TransactionSignedEcR
 
 // Re-exports
 pub use reth_ethereum_forks::*;
-
-#[cfg(any(test, feature = "arbitrary"))]
-pub use arbitrary;
 
 #[cfg(feature = "c-kzg")]
 pub use c_kzg as kzg;

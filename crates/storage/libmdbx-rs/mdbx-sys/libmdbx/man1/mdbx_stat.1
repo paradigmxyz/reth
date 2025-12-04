@@ -1,8 +1,8 @@
-.\" Copyright 2015-2024 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2015-2025 Leonid Yuriev <leo@yuriev.ru>.
 .\" Copyright 2015,2016 Peter-Service R&D LLC <http://billing.ru/>.
 .\" Copyright 2012-2015 Howard Chu, Symas Corp. All Rights Reserved.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_STAT 1 "2024-03-13" "MDBX 0.12.10"
+.TH MDBX_STAT 1 "2024-08-29" "MDBX 0.13"
 .SH NAME
 mdbx_stat \- MDBX environment status tool
 .SH SYNOPSIS
@@ -21,7 +21,7 @@ mdbx_stat \- MDBX environment status tool
 .BR \-r [ r ]]
 [\c
 .BR \-a \ |
-.BI \-s \ subdb\fR]
+.BI \-s \ table\fR]
 .BR \ dbpath
 [\c
 .BR \-n ]
@@ -61,10 +61,10 @@ table and clear them. The reader table will be printed again
 after the check is performed.
 .TP
 .BR \-a
-Display the status of all of the subdatabases in the environment.
+Display the status of all of the tables in the environment.
 .TP
-.BR \-s \ subdb
-Display the status of a specific subdatabase.
+.BR \-s \ table
+Display the status of a specific table.
 .TP
 .BR \-n
 Display the status of an MDBX database which does not use subdirectories.

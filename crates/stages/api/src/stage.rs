@@ -111,7 +111,7 @@ impl ExecInput {
             // body.
             let end_block_body = provider
                 .block_body_indices(end_block_number)?
-                .ok_or(ProviderError::BlockBodyIndicesNotFound(target_block))?;
+                .ok_or(ProviderError::BlockBodyIndicesNotFound(end_block_number))?;
             (end_block_number, false, end_block_body.next_tx_num())
         };
 
@@ -165,6 +165,11 @@ pub struct ExecOutput {
 }
 
 impl ExecOutput {
+    /// Mark the stage as not done, checkpointing at the given place.
+    pub const fn in_progress(checkpoint: StageCheckpoint) -> Self {
+        Self { checkpoint, done: false }
+    }
+
     /// Mark the stage as done, checkpointing at the given place.
     pub const fn done(checkpoint: StageCheckpoint) -> Self {
         Self { checkpoint, done: true }
@@ -184,7 +189,7 @@ pub struct UnwindOutput {
 /// transactions, and persist their results to a database.
 ///
 /// Stages must have a unique [ID][StageId] and implement a way to "roll forwards"
-/// ([Stage::execute]) and a way to "roll back" ([Stage::unwind]).
+/// ([`Stage::execute`]) and a way to "roll back" ([`Stage::unwind`]).
 ///
 /// Stages are executed as part of a pipeline where they are executed serially.
 ///
@@ -271,4 +276,4 @@ pub trait StageExt<Provider>: Stage<Provider> {
     }
 }
 
-impl<Provider, S: Stage<Provider>> StageExt<Provider> for S {}
+impl<Provider, S: Stage<Provider> + ?Sized> StageExt<Provider> for S {}

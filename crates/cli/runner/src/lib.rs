@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 //! Entrypoint for running commands.
 
@@ -99,8 +99,7 @@ impl CliRunner {
         F: Future<Output = Result<(), E>>,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let tokio_runtime = tokio_runtime()?;
-        tokio_runtime.block_on(run_until_ctrl_c(fut))?;
+        self.tokio_runtime.block_on(run_until_ctrl_c(fut))?;
         Ok(())
     }
 
@@ -113,7 +112,7 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        let tokio_runtime = tokio_runtime()?;
+        let tokio_runtime = self.tokio_runtime;
         let handle = tokio_runtime.handle().clone();
         let fut = tokio_runtime.handle().spawn_blocking(move || handle.block_on(fut));
         tokio_runtime
@@ -174,8 +173,10 @@ where
     {
         let fut = pin!(fut);
         tokio::select! {
-            err = tasks => {
-                return Err(err.into())
+            task_manager_result = tasks => {
+                if let Err(panicked_error) = task_manager_result {
+                    return Err(panicked_error.into());
+                }
             },
             res = fut => res?,
         }

@@ -1,17 +1,25 @@
 //! Contains types required for building a payload.
 
 use alloc::{sync::Arc, vec::Vec};
-use alloy_eips::{eip4844::BlobTransactionSidecar, eip4895::Withdrawals, eip7685::Requests};
+use alloy_eips::{
+    eip4844::BlobTransactionSidecar,
+    eip4895::Withdrawals,
+    eip7594::{BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant},
+    eip7685::Requests,
+};
 use alloy_primitives::{Address, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3, ExecutionPayloadEnvelopeV4,
-    ExecutionPayloadFieldV2, ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
+    BlobsBundleV1, BlobsBundleV2, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
+    ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadFieldV2,
+    ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
-use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives_traits::SealedBlock;
+use reth_primitives_traits::{NodePrimitives, SealedBlock};
+
+use crate::BuiltPayloadConversionError;
 
 /// Contains the built payload.
 ///
@@ -19,33 +27,33 @@ use reth_primitives_traits::SealedBlock;
 /// Therefore, the empty-block here is always available and full-block will be set/updated
 /// afterward.
 #[derive(Debug, Clone)]
-pub struct EthBuiltPayload {
+pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
-    pub(crate) block: Arc<SealedBlock<Block>>,
+    pub(crate) block: Arc<SealedBlock<N::Block>>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
     /// empty.
-    pub(crate) sidecars: Vec<BlobTransactionSidecar>,
+    pub(crate) sidecars: BlobSidecars,
     /// The requests of the payload
     pub(crate) requests: Option<Requests>,
 }
 
 // === impl BuiltPayload ===
 
-impl EthBuiltPayload {
+impl<N: NodePrimitives> EthBuiltPayload<N> {
     /// Initializes the payload with the given initial block
     ///
-    /// Caution: This does not set any [`BlobTransactionSidecar`].
+    /// Caution: This does not set any [`BlobSidecars`].
     pub const fn new(
         id: PayloadId,
-        block: Arc<SealedBlock<Block>>,
+        block: Arc<SealedBlock<N::Block>>,
         fees: U256,
         requests: Option<Requests>,
     ) -> Self {
-        Self { id, block, fees, sidecars: Vec::new(), requests }
+        Self { id, block, fees, requests, sidecars: BlobSidecars::Empty }
     }
 
     /// Returns the identifier of the payload.
@@ -54,7 +62,7 @@ impl EthBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    pub fn block(&self) -> &SealedBlock<Block> {
+    pub fn block(&self) -> &SealedBlock<N::Block> {
         &self.block
     }
 
@@ -64,29 +72,98 @@ impl EthBuiltPayload {
     }
 
     /// Returns the blob sidecars.
-    pub fn sidecars(&self) -> &[BlobTransactionSidecar] {
+    pub const fn sidecars(&self) -> &BlobSidecars {
         &self.sidecars
     }
 
-    /// Adds sidecars to the payload.
-    pub fn extend_sidecars(&mut self, sidecars: impl IntoIterator<Item = BlobTransactionSidecar>) {
-        self.sidecars.extend(sidecars)
-    }
-
-    /// Same as [`Self::extend_sidecars`] but returns the type again.
-    pub fn with_sidecars(
-        mut self,
-        sidecars: impl IntoIterator<Item = BlobTransactionSidecar>,
-    ) -> Self {
-        self.extend_sidecars(sidecars);
+    /// Sets blob transactions sidecars on the payload.
+    pub fn with_sidecars(mut self, sidecars: impl Into<BlobSidecars>) -> Self {
+        self.sidecars = sidecars.into();
         self
     }
 }
 
-impl BuiltPayload for EthBuiltPayload {
-    type Primitives = EthPrimitives;
+impl EthBuiltPayload {
+    /// Try converting built payload into [`ExecutionPayloadEnvelopeV3`].
+    ///
+    /// Returns an error if the payload contains non EIP-4844 sidecar.
+    pub fn try_into_v3(self) -> Result<ExecutionPayloadEnvelopeV3, BuiltPayloadConversionError> {
+        let Self { block, fees, sidecars, .. } = self;
 
-    fn block(&self) -> &SealedBlock<Block> {
+        let blobs_bundle = match sidecars {
+            BlobSidecars::Empty => BlobsBundleV1::empty(),
+            BlobSidecars::Eip4844(sidecars) => BlobsBundleV1::from(sidecars),
+            BlobSidecars::Eip7594(_) => {
+                return Err(BuiltPayloadConversionError::UnexpectedEip7594Sidecars)
+            }
+        };
+
+        Ok(ExecutionPayloadEnvelopeV3 {
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+            ),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle,
+        })
+    }
+
+    /// Try converting built payload into [`ExecutionPayloadEnvelopeV4`].
+    ///
+    /// Returns an error if the payload contains non EIP-4844 sidecar.
+    pub fn try_into_v4(self) -> Result<ExecutionPayloadEnvelopeV4, BuiltPayloadConversionError> {
+        Ok(ExecutionPayloadEnvelopeV4 {
+            execution_requests: self.requests.clone().unwrap_or_default(),
+            envelope_inner: self.try_into()?,
+        })
+    }
+
+    /// Try converting built payload into [`ExecutionPayloadEnvelopeV5`].
+    pub fn try_into_v5(self) -> Result<ExecutionPayloadEnvelopeV5, BuiltPayloadConversionError> {
+        let Self { block, fees, sidecars, requests, .. } = self;
+
+        let blobs_bundle = match sidecars {
+            BlobSidecars::Empty => BlobsBundleV2::empty(),
+            BlobSidecars::Eip7594(sidecars) => BlobsBundleV2::from(sidecars),
+            BlobSidecars::Eip4844(_) => {
+                return Err(BuiltPayloadConversionError::UnexpectedEip4844Sidecars)
+            }
+        };
+
+        Ok(ExecutionPayloadEnvelopeV5 {
+            execution_payload: ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &Arc::unwrap_or_clone(block).into_block(),
+            ),
+            block_value: fees,
+            // From the engine API spec:
+            //
+            // > Client software **MAY** use any heuristics to decide whether to set
+            // `shouldOverrideBuilder` flag or not. If client software does not implement any
+            // heuristic this flag **SHOULD** be set to `false`.
+            //
+            // Spec:
+            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
+            should_override_builder: false,
+            blobs_bundle,
+            execution_requests: requests.unwrap_or_default(),
+        })
+    }
+}
+
+impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
+    type Primitives = N;
+
+    fn block(&self) -> &SealedBlock<N::Block> {
         &self.block
     }
 
@@ -124,36 +201,114 @@ impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV2 {
     }
 }
 
-impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
-    fn from(value: EthBuiltPayload) -> Self {
-        let EthBuiltPayload { block, fees, sidecars, .. } = value;
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV3 {
+    type Error = BuiltPayloadConversionError;
 
-        Self {
-            execution_payload: ExecutionPayloadV3::from_block_unchecked(
-                block.hash(),
-                &Arc::unwrap_or_clone(block).into_block(),
-            ),
-            block_value: fees,
-            // From the engine API spec:
-            //
-            // > Client software **MAY** use any heuristics to decide whether to set
-            // `shouldOverrideBuilder` flag or not. If client software does not implement any
-            // heuristic this flag **SHOULD** be set to `false`.
-            //
-            // Spec:
-            // <https://github.com/ethereum/execution-apis/blob/fe8e13c288c592ec154ce25c534e26cb7ce0530d/src/engine/cancun.md#specification-2>
-            should_override_builder: false,
-            blobs_bundle: sidecars.into(),
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        value.try_into_v3()
+    }
+}
+
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
+    type Error = BuiltPayloadConversionError;
+
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        value.try_into_v4()
+    }
+}
+
+impl TryFrom<EthBuiltPayload> for ExecutionPayloadEnvelopeV5 {
+    type Error = BuiltPayloadConversionError;
+
+    fn try_from(value: EthBuiltPayload) -> Result<Self, Self::Error> {
+        value.try_into_v5()
+    }
+}
+
+/// An enum representing blob transaction sidecars belonging to [`EthBuiltPayload`].
+#[derive(Clone, Default, Debug)]
+pub enum BlobSidecars {
+    /// No sidecars (default).
+    #[default]
+    Empty,
+    /// EIP-4844 style sidecars.
+    Eip4844(Vec<BlobTransactionSidecar>),
+    /// EIP-7594 style sidecars.
+    Eip7594(Vec<BlobTransactionSidecarEip7594>),
+}
+
+impl BlobSidecars {
+    /// Create new EIP-4844 style sidecars.
+    pub const fn eip4844(sidecars: Vec<BlobTransactionSidecar>) -> Self {
+        Self::Eip4844(sidecars)
+    }
+
+    /// Create new EIP-7594 style sidecars.
+    pub const fn eip7594(sidecars: Vec<BlobTransactionSidecarEip7594>) -> Self {
+        Self::Eip7594(sidecars)
+    }
+
+    /// Push EIP-4844 blob sidecar. Ignores the item if sidecars already contain EIP-7594 sidecars.
+    pub fn push_eip4844_sidecar(&mut self, sidecar: BlobTransactionSidecar) {
+        match self {
+            Self::Empty => {
+                *self = Self::Eip4844(Vec::from([sidecar]));
+            }
+            Self::Eip4844(sidecars) => {
+                sidecars.push(sidecar);
+            }
+            Self::Eip7594(_) => {}
+        }
+    }
+
+    /// Push EIP-7594 blob sidecar. Ignores the item if sidecars already contain EIP-4844 sidecars.
+    pub fn push_eip7594_sidecar(&mut self, sidecar: BlobTransactionSidecarEip7594) {
+        match self {
+            Self::Empty => {
+                *self = Self::Eip7594(Vec::from([sidecar]));
+            }
+            Self::Eip7594(sidecars) => {
+                sidecars.push(sidecar);
+            }
+            Self::Eip4844(_) => {}
+        }
+    }
+
+    /// Push a [`BlobTransactionSidecarVariant`]. Ignores the item if sidecars already contain the
+    /// opposite type.
+    pub fn push_sidecar_variant(&mut self, sidecar: BlobTransactionSidecarVariant) {
+        match sidecar {
+            BlobTransactionSidecarVariant::Eip4844(sidecar) => {
+                self.push_eip4844_sidecar(sidecar);
+            }
+            BlobTransactionSidecarVariant::Eip7594(sidecar) => {
+                self.push_eip7594_sidecar(sidecar);
+            }
         }
     }
 }
 
-impl From<EthBuiltPayload> for ExecutionPayloadEnvelopeV4 {
-    fn from(value: EthBuiltPayload) -> Self {
-        Self {
-            execution_requests: value.requests.clone().unwrap_or_default(),
-            envelope_inner: value.into(),
-        }
+impl From<Vec<BlobTransactionSidecar>> for BlobSidecars {
+    fn from(value: Vec<BlobTransactionSidecar>) -> Self {
+        Self::eip4844(value)
+    }
+}
+
+impl From<Vec<BlobTransactionSidecarEip7594>> for BlobSidecars {
+    fn from(value: Vec<BlobTransactionSidecarEip7594>) -> Self {
+        Self::eip7594(value)
+    }
+}
+
+impl From<alloc::vec::IntoIter<BlobTransactionSidecar>> for BlobSidecars {
+    fn from(value: alloc::vec::IntoIter<BlobTransactionSidecar>) -> Self {
+        value.collect::<Vec<_>>().into()
+    }
+}
+
+impl From<alloc::vec::IntoIter<BlobTransactionSidecarEip7594>> for BlobSidecars {
+    fn from(value: alloc::vec::IntoIter<BlobTransactionSidecarEip7594>) -> Self {
+        value.collect::<Vec<_>>().into()
     }
 }
 
@@ -251,7 +406,7 @@ impl PayloadBuilderAttributes for EthPayloadBuilderAttributes {
 /// Generates the payload id for the configured payload from the [`PayloadAttributes`].
 ///
 /// Returns an 8-byte identifier by hashing the payload components with sha256 hash.
-pub(crate) fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
+pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     use sha2::Digest;
     let mut hasher = sha2::Sha256::new();
     hasher.update(parent.as_slice());

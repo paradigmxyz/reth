@@ -3,20 +3,20 @@ use alloy_evm::eth::spec::EthExecutorSpec;
 
 use crate::{
     constants::{MAINNET_DEPOSIT_CONTRACT, MAINNET_PRUNE_DELETE_LIMIT},
-    EthChainSpec,
+    holesky, hoodi, sepolia, EthChainSpec,
 };
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_chains::{Chain, NamedChain};
 use alloy_consensus::{
     constants::{
-        DEV_GENESIS_HASH, EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, HOODI_GENESIS_HASH,
-        MAINNET_GENESIS_HASH, SEPOLIA_GENESIS_HASH,
+        EMPTY_WITHDRAWALS, HOLESKY_GENESIS_HASH, HOODI_GENESIS_HASH, MAINNET_GENESIS_HASH,
+        SEPOLIA_GENESIS_HASH,
     },
     Header,
 };
 use alloy_eips::{
-    eip1559::INITIAL_BASE_FEE, eip6110::MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-    eip7685::EMPTY_REQUESTS_HASH, eip7892::BlobScheduleBlobParams,
+    eip1559::INITIAL_BASE_FEE, eip7685::EMPTY_REQUESTS_HASH, eip7840::BlobParams,
+    eip7892::BlobScheduleBlobParams,
 };
 use alloy_genesis::Genesis;
 use alloy_primitives::{address, b256, Address, BlockNumber, B256, U256};
@@ -31,7 +31,7 @@ use reth_network_peers::{
     holesky_nodes, hoodi_nodes, mainnet_nodes, op_nodes, op_testnet_nodes, sepolia_nodes,
     NodeRecord,
 };
-use reth_primitives_traits::{sync::LazyLock, SealedHeader};
+use reth_primitives_traits::{sync::LazyLock, BlockHeader, SealedHeader};
 
 /// Helper method building a [`Header`] given [`Genesis`] and [`ChainHardforks`].
 pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
@@ -105,11 +105,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         hardforks,
         // https://etherscan.io/tx/0xe75fb554e433e03763a1560646ee22dcb74e5274b34c5ad644e7c0f619a7e1d0
-        deposit_contract: Some(DepositContract::new(
-            MAINNET_DEPOSIT_CONTRACT_ADDRESS,
-            11052984,
-            b256!("0x649bbc62d0e31342afea4e5cd82d4049e7e1ee912fc0889aa790803be39038c5"),
-        )),
+        deposit_contract: Some(MAINNET_DEPOSIT_CONTRACT),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
         blob_params: BlobScheduleBlobParams::default(),
@@ -141,7 +137,10 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: BlobScheduleBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default().with_scheduled([
+            (sepolia::SEPOLIA_BPO1_TIMESTAMP, BlobParams::bpo1()),
+            (sepolia::SEPOLIA_BPO2_TIMESTAMP, BlobParams::bpo2()),
+        ]),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -168,7 +167,10 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: BlobScheduleBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default().with_scheduled([
+            (holesky::HOLESKY_BPO1_TIMESTAMP, BlobParams::bpo1()),
+            (holesky::HOLESKY_BPO2_TIMESTAMP, BlobParams::bpo2()),
+        ]),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -197,7 +199,10 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
         )),
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         prune_delete_limit: 10000,
-        blob_params: BlobScheduleBlobParams::default(),
+        blob_params: BlobScheduleBlobParams::default().with_scheduled([
+            (hoodi::HOODI_BPO1_TIMESTAMP, BlobParams::bpo1()),
+            (hoodi::HOODI_BPO2_TIMESTAMP, BlobParams::bpo2()),
+        ]),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -213,13 +218,10 @@ pub static DEV: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
     let hardforks = DEV_HARDFORKS.clone();
     ChainSpec {
         chain: Chain::dev(),
-        genesis_header: SealedHeader::new(
-            make_genesis_header(&genesis, &hardforks),
-            DEV_GENESIS_HASH,
-        ),
+        genesis_header: SealedHeader::seal_slow(make_genesis_header(&genesis, &hardforks)),
         genesis,
         paris_block_and_final_difficulty: Some((0, U256::from(0))),
-        hardforks: DEV_HARDFORKS.clone(),
+        hardforks,
         base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
         deposit_contract: None, // TODO: do we even have?
         ..Default::default()
@@ -261,7 +263,7 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
-impl core::ops::Deref for ChainSpec {
+impl<H: BlockHeader> core::ops::Deref for ChainSpec<H> {
     type Target = ChainHardforks;
 
     fn deref(&self) -> &Self::Target {
@@ -277,7 +279,7 @@ impl core::ops::Deref for ChainSpec {
 /// - The genesis block of the chain ([`Genesis`])
 /// - What hardforks are activated, and under which conditions
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ChainSpec {
+pub struct ChainSpec<H: BlockHeader = Header> {
     /// The chain ID
     pub chain: Chain,
 
@@ -285,7 +287,7 @@ pub struct ChainSpec {
     pub genesis: Genesis,
 
     /// The header corresponding to the genesis block.
-    pub genesis_header: SealedHeader,
+    pub genesis_header: SealedHeader<H>,
 
     /// The block at which [`EthereumHardfork::Paris`] was activated and the final difficulty at
     /// this block.
@@ -307,7 +309,7 @@ pub struct ChainSpec {
     pub blob_params: BlobScheduleBlobParams,
 }
 
-impl Default for ChainSpec {
+impl<H: BlockHeader> Default for ChainSpec<H> {
     fn default() -> Self {
         Self {
             chain: Default::default(),
@@ -329,6 +331,13 @@ impl ChainSpec {
         genesis.into()
     }
 
+    /// Build a chainspec using [`ChainSpecBuilder`]
+    pub fn builder() -> ChainSpecBuilder {
+        ChainSpecBuilder::default()
+    }
+}
+
+impl<H: BlockHeader> ChainSpec<H> {
     /// Get information about the chain itself
     pub const fn chain(&self) -> Chain {
         self.chain
@@ -366,12 +375,12 @@ impl ChainSpec {
     }
 
     /// Get the header for the genesis block.
-    pub fn genesis_header(&self) -> &Header {
+    pub fn genesis_header(&self) -> &H {
         &self.genesis_header
     }
 
     /// Get the sealed header for the genesis block.
-    pub fn sealed_genesis_header(&self) -> SealedHeader {
+    pub fn sealed_genesis_header(&self) -> SealedHeader<H> {
         SealedHeader::new(self.genesis_header().clone(), self.genesis_hash())
     }
 
@@ -404,25 +413,6 @@ impl ChainSpec {
         }
     }
 
-    /// Get the [`BaseFeeParams`] for the chain at the given block number
-    pub fn base_fee_params_at_block(&self, block_number: u64) -> BaseFeeParams {
-        match self.base_fee_params {
-            BaseFeeParamsKind::Constant(bf_params) => bf_params,
-            BaseFeeParamsKind::Variable(ForkBaseFeeParams(ref bf_params)) => {
-                // Walk through the base fee params configuration in reverse order, and return the
-                // first one that corresponds to a hardfork that is active at the
-                // given timestamp.
-                for (fork, params) in bf_params.iter().rev() {
-                    if self.hardforks.is_fork_active_at_block(fork.clone(), block_number) {
-                        return *params
-                    }
-                }
-
-                bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
-            }
-        }
-    }
-
     /// Get the hash of the genesis block.
     pub fn genesis_hash(&self) -> B256 {
         self.genesis_header.hash()
@@ -439,7 +429,7 @@ impl ChainSpec {
     }
 
     /// Get the fork filter for the given hardfork
-    pub fn hardfork_fork_filter<H: Hardfork + Clone>(&self, fork: H) -> Option<ForkFilter> {
+    pub fn hardfork_fork_filter<HF: Hardfork + Clone>(&self, fork: HF) -> Option<ForkFilter> {
         match self.hardforks.fork(fork.clone()) {
             ForkCondition::Never => None,
             _ => Some(self.fork_filter(self.satisfy(self.hardforks.fork(fork)))),
@@ -453,7 +443,7 @@ impl ChainSpec {
 
     /// Get the fork id for the given hardfork.
     #[inline]
-    pub fn hardfork_fork_id<H: Hardfork + Clone>(&self, fork: H) -> Option<ForkId> {
+    pub fn hardfork_fork_id<HF: Hardfork + Clone>(&self, fork: HF) -> Option<ForkId> {
         let condition = self.hardforks.fork(fork);
         match condition {
             ForkCondition::Never => None,
@@ -485,8 +475,8 @@ impl ChainSpec {
     /// Creates a [`ForkFilter`] for the block described by [Head].
     pub fn fork_filter(&self, head: Head) -> ForkFilter {
         let forks = self.hardforks.forks_iter().filter_map(|(_, condition)| {
-            // We filter out TTD-based forks w/o a pre-known block since those do not show up in the
-            // fork filter.
+            // We filter out TTD-based forks w/o a pre-known block since those do not show up in
+            // the fork filter.
             Some(match condition {
                 ForkCondition::Block(block) |
                 ForkCondition::TTD { fork_block: Some(block), .. } => ForkFilterKey::Block(block),
@@ -618,11 +608,6 @@ impl ChainSpec {
         None
     }
 
-    /// Build a chainspec using [`ChainSpecBuilder`]
-    pub fn builder() -> ChainSpecBuilder {
-        ChainSpecBuilder::default()
-    }
-
     /// Returns the known bootnode records for the given chain.
     pub fn bootnodes(&self) -> Option<Vec<NodeRecord>> {
         use NamedChain as C;
@@ -642,6 +627,32 @@ impl ChainSpec {
             chain if chain.is_optimism() && chain.is_testnet() => Some(op_testnet_nodes()),
             chain if chain.is_optimism() => Some(op_nodes()),
             _ => None,
+        }
+    }
+
+    /// Convert header to another type.
+    pub fn map_header<NewH: BlockHeader>(self, f: impl FnOnce(H) -> NewH) -> ChainSpec<NewH> {
+        let Self {
+            chain,
+            genesis,
+            genesis_header,
+            paris_block_and_final_difficulty,
+            hardforks,
+            deposit_contract,
+            base_fee_params,
+            prune_delete_limit,
+            blob_params,
+        } = self;
+        ChainSpec {
+            chain,
+            genesis,
+            genesis_header: SealedHeader::new_unhashed(f(genesis_header.into_header())),
+            paris_block_and_final_difficulty,
+            hardforks,
+            deposit_contract,
+            base_fee_params,
+            prune_delete_limit,
+            blob_params,
         }
     }
 }
@@ -700,6 +711,11 @@ impl From<Genesis> for ChainSpec {
             (EthereumHardfork::Cancun.boxed(), genesis.config.cancun_time),
             (EthereumHardfork::Prague.boxed(), genesis.config.prague_time),
             (EthereumHardfork::Osaka.boxed(), genesis.config.osaka_time),
+            (EthereumHardfork::Bpo1.boxed(), genesis.config.bpo1_time),
+            (EthereumHardfork::Bpo2.boxed(), genesis.config.bpo2_time),
+            (EthereumHardfork::Bpo3.boxed(), genesis.config.bpo3_time),
+            (EthereumHardfork::Bpo4.boxed(), genesis.config.bpo4_time),
+            (EthereumHardfork::Bpo5.boxed(), genesis.config.bpo5_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -751,8 +767,8 @@ impl From<Genesis> for ChainSpec {
     }
 }
 
-impl Hardforks for ChainSpec {
-    fn fork<H: Hardfork>(&self, fork: H) -> ForkCondition {
+impl<H: BlockHeader> Hardforks for ChainSpec<H> {
+    fn fork<HF: Hardfork>(&self, fork: HF) -> ForkCondition {
         self.hardforks.fork(fork)
     }
 
@@ -773,7 +789,7 @@ impl Hardforks for ChainSpec {
     }
 }
 
-impl EthereumHardforks for ChainSpec {
+impl<H: BlockHeader> EthereumHardforks for ChainSpec<H> {
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
         self.fork(fork)
     }
@@ -812,6 +828,12 @@ impl ChainSpecBuilder {
     /// Set the chain ID
     pub const fn chain(mut self, chain: Chain) -> Self {
         self.chain = Some(chain);
+        self
+    }
+
+    /// Resets any existing hardforks from the builder.
+    pub fn reset(mut self) -> Self {
+        self.hardforks = ChainHardforks::default();
         self
     }
 
@@ -953,10 +975,22 @@ impl ChainSpecBuilder {
         self
     }
 
+    /// Enable Prague at the given timestamp.
+    pub fn with_prague_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Prague, ForkCondition::Timestamp(timestamp));
+        self
+    }
+
     /// Enable Osaka at genesis.
     pub fn osaka_activated(mut self) -> Self {
         self = self.prague_activated();
         self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(0));
+        self
+    }
+
+    /// Enable Osaka at the given timestamp.
+    pub fn with_osaka_at(mut self, timestamp: u64) -> Self {
+        self.hardforks.insert(EthereumHardfork::Osaka, ForkCondition::Timestamp(timestamp));
         self
     }
 
@@ -1002,7 +1036,7 @@ impl From<&Arc<ChainSpec>> for ChainSpecBuilder {
     }
 }
 
-impl EthExecutorSpec for ChainSpec {
+impl<H: BlockHeader> EthExecutorSpec for ChainSpec<H> {
     fn deposit_contract_address(&self) -> Option<Address> {
         self.deposit_contract.map(|deposit_contract| deposit_contract.address)
     }
@@ -1051,11 +1085,7 @@ mod tests {
     use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
     use core::ops::Deref;
     use reth_ethereum_forks::{ForkCondition, ForkHash, ForkId, Head};
-    use std::{
-        collections::{BTreeMap, HashMap},
-        str::FromStr,
-        string::String,
-    };
+    use std::{collections::HashMap, str::FromStr};
 
     fn test_hardfork_fork_ids(spec: &ChainSpec, cases: &[(EthereumHardfork, ForkId)]) {
         for (hardfork, expected_id) in cases {
@@ -1065,9 +1095,9 @@ mod tests {
                     "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for hardfork {hardfork}"
                 );
                 if matches!(hardfork, EthereumHardfork::Shanghai) {
-                    if let Some(shangai_id) = spec.shanghai_fork_id() {
+                    if let Some(shanghai_id) = spec.shanghai_fork_id() {
                         assert_eq!(
-                            expected_id, &shangai_id,
+                            expected_id, &shanghai_id,
                             "Expected fork ID {expected_id:?}, computed fork ID {computed_id:?} for Shanghai hardfork"
                         );
                     } else {
@@ -1242,7 +1272,7 @@ Post-merge hard forks (timestamp based):
             Head { number: 101, timestamp: 11313123, ..Default::default() };
         assert_eq!(
             fork_cond_ttd_blocknum_head, fork_cond_ttd_blocknum_expected,
-            "expected satisfy() to return {fork_cond_ttd_blocknum_expected:#?}, but got {fork_cond_ttd_blocknum_expected:#?} ",
+            "expected satisfy() to return {fork_cond_ttd_blocknum_expected:#?}, but got {fork_cond_ttd_blocknum_head:#?} ",
         );
 
         // spec w/ only ForkCondition::Block - test the match arm for ForkCondition::Block to ensure
@@ -1271,7 +1301,7 @@ Post-merge hard forks (timestamp based):
             Head { total_difficulty: U256::from(10_790_000), ..Default::default() };
         assert_eq!(
             fork_cond_ttd_no_new_spec, fork_cond_ttd_no_new_spec_expected,
-            "expected satisfy() to return {fork_cond_ttd_blocknum_expected:#?}, but got {fork_cond_ttd_blocknum_expected:#?} ",
+            "expected satisfy() to return {fork_cond_ttd_no_new_spec_expected:#?}, but got {fork_cond_ttd_no_new_spec:#?} ",
         );
     }
 
@@ -1411,7 +1441,10 @@ Post-merge hard forks (timestamp based):
                 ),
                 (
                     EthereumHardfork::Prague,
-                    ForkId { hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]),
+                        next: sepolia::SEPOLIA_OSAKA_TIMESTAMP,
+                    },
                 ),
             ],
         );
@@ -1510,7 +1543,22 @@ Post-merge hard forks (timestamp based):
                 // First Prague block
                 (
                     Head { number: 0, timestamp: 1742999833, ..Default::default() },
-                    ForkId { hash: ForkHash([0x09, 0x29, 0xe2, 0x4e]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0x09, 0x29, 0xe2, 0x4e]),
+                        next: hoodi::HOODI_OSAKA_TIMESTAMP,
+                    },
+                ),
+                // First Osaka block
+                (
+                    Head {
+                        number: 0,
+                        timestamp: hoodi::HOODI_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0xe7e0e7ff")),
+                        next: hoodi::HOODI_BPO1_TIMESTAMP,
+                    },
                 ),
             ],
         )
@@ -1558,7 +1606,22 @@ Post-merge hard forks (timestamp based):
                 // First Prague block
                 (
                     Head { number: 123, timestamp: 1740434112, ..Default::default() },
-                    ForkId { hash: ForkHash([0xdf, 0xbd, 0x9b, 0xed]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0xdf, 0xbd, 0x9b, 0xed]),
+                        next: holesky::HOLESKY_OSAKA_TIMESTAMP,
+                    },
+                ),
+                // First Osaka block
+                (
+                    Head {
+                        number: 123,
+                        timestamp: holesky::HOLESKY_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0x783def52")),
+                        next: holesky::HOLESKY_BPO1_TIMESTAMP,
+                    },
                 ),
             ],
         )
@@ -1608,7 +1671,22 @@ Post-merge hard forks (timestamp based):
                 // First Prague block
                 (
                     Head { number: 1735377, timestamp: 1741159776, ..Default::default() },
-                    ForkId { hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]), next: 0 },
+                    ForkId {
+                        hash: ForkHash([0xed, 0x88, 0xb5, 0xfd]),
+                        next: sepolia::SEPOLIA_OSAKA_TIMESTAMP,
+                    },
+                ),
+                // First Osaka block
+                (
+                    Head {
+                        number: 1735377,
+                        timestamp: sepolia::SEPOLIA_OSAKA_TIMESTAMP,
+                        ..Default::default()
+                    },
+                    ForkId {
+                        hash: ForkHash(hex!("0xe2ae4999")),
+                        next: sepolia::SEPOLIA_BPO1_TIMESTAMP,
+                    },
                 ),
             ],
         );
@@ -1620,7 +1698,7 @@ Post-merge hard forks (timestamp based):
             &DEV,
             &[(
                 Head { number: 0, ..Default::default() },
-                ForkId { hash: ForkHash([0x45, 0xb8, 0x36, 0x12]), next: 0 },
+                ForkId { hash: ForkHash([0x0b, 0x1a, 0x4e, 0xf7]), next: 0 },
             )],
         )
     }
@@ -2383,7 +2461,7 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn check_fork_id_chainspec_with_fork_condition_never() {
-        let spec = ChainSpec {
+        let spec: ChainSpec = ChainSpec {
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
             hardforks: ChainHardforks::new(vec![(
@@ -2400,7 +2478,7 @@ Post-merge hard forks (timestamp based):
 
     #[test]
     fn check_fork_filter_chainspec_with_fork_condition_never() {
-        let spec = ChainSpec {
+        let spec: ChainSpec = ChainSpec {
             chain: Chain::mainnet(),
             genesis: Genesis::default(),
             hardforks: ChainHardforks::new(vec![(
@@ -2421,6 +2499,24 @@ Post-merge hard forks (timestamp based):
             ForkId { hash: ForkHash([0xc3, 0x76, 0xcf, 0x8b]), next: 0 },
             MAINNET.latest_fork_id()
         )
+    }
+
+    #[test]
+    fn latest_hoodi_mainnet_fork_id() {
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x23aa1351")), next: 0 }, HOODI.latest_fork_id())
+    }
+
+    #[test]
+    fn latest_holesky_mainnet_fork_id() {
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x9bc6cb31")), next: 0 }, HOLESKY.latest_fork_id())
+    }
+
+    #[test]
+    fn latest_sepolia_mainnet_fork_id() {
+        // BPO2
+        assert_eq!(ForkId { hash: ForkHash(hex!("0x268956b6")), next: 0 }, SEPOLIA.latest_fork_id())
     }
 
     #[test]
@@ -2521,33 +2617,39 @@ Post-merge hard forks (timestamp based):
     #[test]
     fn blob_params_from_genesis() {
         let s = r#"{
-         "cancun":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         },
-         "prague":{
-            "baseFeeUpdateFraction":3338477,
-            "max":6,
-            "target":3
-         }
-      }"#;
-        let schedule: BTreeMap<String, BlobParams> = serde_json::from_str(s).unwrap();
-        let hardfork_params = BlobScheduleBlobParams::from_schedule(&schedule);
+            "blobSchedule": {
+                "cancun":{
+                    "baseFeeUpdateFraction":3338477,
+                    "max":6,
+                    "target":3
+                },
+                "prague":{
+                    "baseFeeUpdateFraction":3338477,
+                    "max":6,
+                    "target":3
+                }
+            }
+        }"#;
+        let config: ChainConfig = serde_json::from_str(s).unwrap();
+        let hardfork_params = config.blob_schedule_blob_params();
         let expected = BlobScheduleBlobParams {
             cancun: BlobParams {
                 target_blob_count: 3,
                 max_blob_count: 6,
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+                max_blobs_per_tx: 6,
+                blob_base_cost: 0,
             },
             prague: BlobParams {
                 target_blob_count: 3,
                 max_blob_count: 6,
                 update_fraction: 3338477,
                 min_blob_fee: BLOB_TX_MIN_BLOB_GASPRICE,
+                max_blobs_per_tx: 6,
+                blob_base_cost: 0,
             },
-            scheduled: Default::default(),
+            ..Default::default()
         };
         assert_eq!(hardfork_params, expected);
     }

@@ -15,13 +15,25 @@ pub struct BenchmarkArgs {
     #[arg(long, verbatim_doc_comment)]
     pub to: Option<u64>,
 
+    /// Number of blocks to advance from the current head block.
+    /// When specified, automatically sets --from to current head + 1 and --to to current head +
+    /// advance. Cannot be used together with explicit --from and --to arguments.
+    #[arg(long, conflicts_with_all = &["from", "to"], verbatim_doc_comment)]
+    pub advance: Option<u64>,
+
     /// Path to a JWT secret to use for the authenticated engine-API RPC server.
     ///
     /// This will perform JWT authentication for all requests to the given engine RPC url.
     ///
     /// If no path is provided, a secret will be generated and stored in the datadir under
     /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
-    #[arg(long = "jwtsecret", value_name = "PATH", global = true, required = false)]
+    #[arg(
+        long = "jwt-secret",
+        alias = "jwtsecret",
+        value_name = "PATH",
+        global = true,
+        required = false
+    )]
     pub auth_jwtsecret: Option<PathBuf>,
 
     /// The RPC url to use for sending engine requests.

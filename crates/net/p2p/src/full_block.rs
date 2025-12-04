@@ -20,6 +20,7 @@ use std::{
     fmt::Debug,
     future::Future,
     hash::Hash,
+    ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -279,18 +280,18 @@ where
     Client: BlockClient,
 {
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<ResponseResult<Client::Header, Client::Body>> {
-        if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                self.header = None;
-                return Poll::Ready(ResponseResult::Header(res))
-            }
+        if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            self.header = None;
+            return Poll::Ready(ResponseResult::Header(res))
         }
 
-        if let Some(fut) = Pin::new(&mut self.body).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                self.body = None;
-                return Poll::Ready(ResponseResult::Body(res))
-            }
+        if let Some(fut) = Pin::new(&mut self.body).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            self.body = None;
+            return Poll::Ready(ResponseResult::Body(res))
         }
 
         Poll::Pending
@@ -620,18 +621,18 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<RangeResponseResult<Client::Header, Client::Body>> {
-        if let Some(fut) = Pin::new(&mut self.headers).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                self.headers = None;
-                return Poll::Ready(RangeResponseResult::Header(res))
-            }
+        if let Some(fut) = Pin::new(&mut self.headers).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            self.headers = None;
+            return Poll::Ready(RangeResponseResult::Header(res))
         }
 
-        if let Some(fut) = Pin::new(&mut self.bodies).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                self.bodies = None;
-                return Poll::Ready(RangeResponseResult::Body(res))
-            }
+        if let Some(fut) = Pin::new(&mut self.bodies).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            self.bodies = None;
+            return Poll::Ready(RangeResponseResult::Body(res))
         }
 
         Poll::Pending
@@ -646,7 +647,7 @@ enum RangeResponseResult<H, B> {
 }
 
 /// A headers+bodies client implementation that does nothing.
-#[derive(Debug, Default, Clone)]
+#[derive(Debug, Clone)]
 #[non_exhaustive]
 pub struct NoopFullBlockClient<Net = EthNetworkPrimitives>(PhantomData<Net>);
 
@@ -692,10 +693,11 @@ where
     /// # Returns
     ///
     /// A future containing an empty vector of block bodies and a randomly generated `PeerId`.
-    fn get_block_bodies_with_priority(
+    fn get_block_bodies_with_priority_and_range_hint(
         &self,
         _hashes: Vec<B256>,
         _priority: Priority,
+        _range_hint: Option<RangeInclusive<u64>>,
     ) -> Self::Output {
         // Create a future that immediately returns an empty vector of block bodies and a random
         // PeerId.
@@ -739,6 +741,12 @@ where
     Net: NetworkPrimitives,
 {
     type Block = Net::Block;
+}
+
+impl<Net> Default for NoopFullBlockClient<Net> {
+    fn default() -> Self {
+        Self(PhantomData::<Net>)
+    }
 }
 
 #[cfg(test)]

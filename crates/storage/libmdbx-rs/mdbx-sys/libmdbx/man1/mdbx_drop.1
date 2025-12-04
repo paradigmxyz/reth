@@ -1,7 +1,7 @@
-.\" Copyright 2021-2024 Leonid Yuriev <leo@yuriev.ru>.
+.\" Copyright 2021-2025 Leonid Yuriev <leo@yuriev.ru>.
 .\" Copyright 2014-2021 Howard Chu, Symas Corp. All Rights Reserved.
 .\" Copying restrictions apply.  See COPYRIGHT/LICENSE.
-.TH MDBX_DROP 1 "2024-03-13" "MDBX 0.12.10"
+.TH MDBX_DROP 1 "2024-08-29" "MDBX 0.13"
 .SH NAME
 mdbx_drop \- MDBX database delete tool
 .SH SYNOPSIS
@@ -11,7 +11,7 @@ mdbx_drop \- MDBX database delete tool
 [\c
 .BR \-d ]
 [\c
-.BI \-s \ subdb\fR]
+.BI \-s \ table\fR]
 [\c
 .BR \-n ]
 .BR \ dbpath
@@ -28,8 +28,8 @@ Write the library version number to the standard output, and exit.
 .BR \-d
 Delete the specified database, don't just empty it.
 .TP
-.BR \-s \ subdb
-Operate on a specific subdatabase. If no database is specified, only the main database is dropped.
+.BR \-s \ table
+Operate on a specific table. If no table is specified, only the main table is dropped.
 .TP
 .BR \-n
 Dump an MDBX database which does not use subdirectories.

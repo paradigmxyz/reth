@@ -8,7 +8,6 @@ license.workspace = true
 [dependencies]
 futures.workspace = true
 jsonrpsee.workspace = true
-reth.workspace = true
 reth-ethereum = { workspace = true, features = ["test-utils", "node", "provider", "pool", "network", "rpc"] }
 tokio = { workspace = true, features = ["full"] }
 eyre.workspace = true

@@ -8,6 +8,7 @@ use reth_trie::{HashedPostState, HashedStorage};
 /// The state witness recorder that records all state accesses during execution.
 /// It does so by implementing the [`reth_revm::Database`] and recording accesses of accounts and
 /// slots.
+#[derive(Debug)]
 pub(crate) struct StateWitnessRecorderDatabase<D> {
     database: D,
     state: HashedPostState,

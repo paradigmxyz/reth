@@ -17,14 +17,13 @@ mod index_storage_history;
 /// Stage for computing state root.
 mod merkle;
 mod prune;
-/// The s3 download stage
-mod s3;
 /// The sender recovery stage.
 mod sender_recovery;
 /// The transaction lookup stage
 mod tx_lookup;
 
 pub use bodies::*;
+pub use era::*;
 pub use execution::*;
 pub use finish::*;
 pub use hashing_account::*;
@@ -34,11 +33,12 @@ pub use index_account_history::*;
 pub use index_storage_history::*;
 pub use merkle::*;
 pub use prune::*;
-pub use s3::*;
 pub use sender_recovery::*;
 pub use tx_lookup::*;
 
+mod era;
 mod utils;
+
 use utils::*;
 
 #[cfg(test)]
@@ -61,20 +61,18 @@ mod tests {
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_primitives::Block;
-    use reth_evm_ethereum::execute::EthExecutorProvider;
+    use reth_evm_ethereum::EthEvmConfig;
     use reth_exex::ExExManagerHandle;
     use reth_primitives_traits::{Account, Bytecode, SealedBlock};
     use reth_provider::{
         providers::{StaticFileProvider, StaticFileWriter},
         test_utils::MockNodeTypesWithDB,
-        AccountExtReader, BlockBodyIndicesProvider, DatabaseProviderFactory, ProviderFactory,
-        ProviderResult, ReceiptProvider, StageCheckpointWriter, StaticFileProviderFactory,
-        StorageReader,
+        AccountExtReader, BlockBodyIndicesProvider, BlockWriter, DatabaseProviderFactory,
+        ProviderFactory, ProviderResult, ReceiptProvider, StageCheckpointWriter,
+        StaticFileProviderFactory, StorageReader,
     };
     use reth_prune_types::{PruneMode, PruneModes};
-    use reth_stages_api::{
-        ExecInput, ExecutionStageThresholds, PipelineTarget, Stage, StageCheckpoint, StageId,
-    };
+    use reth_stages_api::{ExecInput, ExecutionStageThresholds, Stage, StageCheckpoint, StageId};
     use reth_static_file_types::StaticFileSegment;
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_receipt, BlockRangeParams,
@@ -93,8 +91,8 @@ mod tests {
         let genesis = SealedBlock::<Block>::decode(&mut genesis_rlp).unwrap();
         let mut block_rlp = hex!("f90262f901f9a075c371ba45999d87f4542326910a11af515897aebce5265d3f6acd1f1161f82fa01dcc4de8dec75d7aab85b567b6ccd41ad312451b948a7413f0a142fd40d49347942adc25665018aa1fe0e6bc666dac8fc2697ff9baa098f2dcd87c8ae4083e7017a05456c14eea4b1db2032126e27b3b1563d57d7cc0a08151d548273f6683169524b66ca9fe338b9ce42bc3540046c828fd939ae23bcba03f4e5c2ec5b2170b711d97ee755c160457bb58d8daa338e835ec02ae6860bbabb901000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000083020000018502540be40082a8798203e800a00000000000000000000000000000000000000000000000000000000000000000880000000000000000f863f861800a8405f5e10094100000000000000000000000000000000000000080801ba07e09e26678ed4fac08a249ebe8ed680bf9051a5e14ad223e4b2b9d26e0208f37a05f6e3f188e3e6eab7d7d3b6568f5eac7d687b08d307d3154ccd8c87b4630509bc0").as_slice();
         let block = SealedBlock::<Block>::decode(&mut block_rlp).unwrap();
-        provider_rw.insert_historical_block(genesis.try_recover().unwrap()).unwrap();
-        provider_rw.insert_historical_block(block.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(genesis.try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(block.clone().try_recover().unwrap()).unwrap();
 
         // Fill with bogus blocks to respect PruneMode distance.
         let mut head = block.hash();
@@ -106,7 +104,7 @@ mod tests {
                 generators::BlockParams { parent: Some(head), ..Default::default() },
             );
             head = nblock.hash();
-            provider_rw.insert_historical_block(nblock.try_recover().unwrap()).unwrap();
+            provider_rw.insert_block(nblock.try_recover().unwrap()).unwrap();
         }
         provider_rw
             .static_file_provider()
@@ -154,7 +152,7 @@ mod tests {
             // Check execution and create receipts and changesets according to the pruning
             // configuration
             let mut execution_stage = ExecutionStage::new(
-                EthExecutorProvider::ethereum(Arc::new(
+                EthEvmConfig::ethereum(Arc::new(
                     ChainSpecBuilder::mainnet().berlin_activated().build(),
                 )),
                 Arc::new(EthBeaconConsensus::new(Arc::new(
@@ -166,7 +164,7 @@ mod tests {
                     max_cumulative_gas: None,
                     max_duration: None,
                 },
-                MERKLE_STAGE_DEFAULT_CLEAN_THRESHOLD,
+                MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
                 ExExManagerHandle::empty(),
             );
 
@@ -210,7 +208,7 @@ mod tests {
 
             if prune_modes.storage_history == Some(PruneMode::Full) {
                 // Full is not supported
-                assert!(acc_indexing_stage.execute(&provider, input).is_err());
+                assert!(storage_indexing_stage.execute(&provider, input).is_err());
             } else {
                 storage_indexing_stage.execute(&provider, input).unwrap();
 
@@ -277,7 +275,7 @@ mod tests {
         for block in &blocks {
             let mut block_receipts = Vec::with_capacity(block.transaction_count());
             for transaction in &block.body().transactions {
-                block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0))));
+                block_receipts.push((tx_num, random_receipt(&mut rng, transaction, Some(0), None)));
                 tx_num += 1;
             }
             receipts.push((block.number, block_receipts));
@@ -301,7 +299,7 @@ mod tests {
         prune_count: usize,
         segment: StaticFileSegment,
         is_full_node: bool,
-        expected: Option<PipelineTarget>,
+        expected: Option<u64>,
     ) {
         // We recreate the static file provider, since consistency heals are done on fetching the
         // writer for the first time.
@@ -323,11 +321,18 @@ mod tests {
 
         // We recreate the static file provider, since consistency heals are done on fetching the
         // writer for the first time.
+        let mut provider = db.factory.database_provider_ro().unwrap();
+        if is_full_node {
+            provider.set_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Full),
+                ..Default::default()
+            });
+        }
         let mut static_file_provider = db.factory.static_file_provider();
         static_file_provider = StaticFileProvider::read_write(static_file_provider.path()).unwrap();
         assert!(matches!(
             static_file_provider
-                .check_consistency(&db.factory.database_provider_ro().unwrap(), is_full_node,),
+                .check_consistency(&provider),
             Ok(e) if e == expected
         ));
     }
@@ -338,7 +343,7 @@ mod tests {
         db: &TestStageDB,
         stage_id: StageId,
         checkpoint_block_number: BlockNumber,
-        expected: Option<PipelineTarget>,
+        expected: Option<u64>,
     ) {
         let provider_rw = db.factory.provider_rw().unwrap();
         provider_rw
@@ -349,18 +354,15 @@ mod tests {
         assert!(matches!(
             db.factory
                 .static_file_provider()
-                .check_consistency(&db.factory.database_provider_ro().unwrap(), false,),
+                .check_consistency(&db.factory.database_provider_ro().unwrap()),
             Ok(e) if e == expected
         ));
     }
 
     /// Inserts a dummy value at key and compare the check consistency result against the expected
     /// one.
-    fn update_db_and_check<T: Table<Key = u64>>(
-        db: &TestStageDB,
-        key: u64,
-        expected: Option<PipelineTarget>,
-    ) where
+    fn update_db_and_check<T: Table<Key = u64>>(db: &TestStageDB, key: u64, expected: Option<u64>)
+    where
         <T as Table>::Value: Default,
     {
         update_db_with_and_check::<T>(db, key, expected, &Default::default());
@@ -371,7 +373,7 @@ mod tests {
     fn update_db_with_and_check<T: Table<Key = u64>>(
         db: &TestStageDB,
         key: u64,
-        expected: Option<PipelineTarget>,
+        expected: Option<u64>,
         value: &T::Value,
     ) {
         let provider_rw = db.factory.provider_rw().unwrap();
@@ -382,7 +384,7 @@ mod tests {
         assert!(matches!(
             db.factory
                 .static_file_provider()
-                .check_consistency(&db.factory.database_provider_ro().unwrap(), false),
+                .check_consistency(&db.factory.database_provider_ro().unwrap()),
             Ok(e) if e == expected
         ));
     }
@@ -393,7 +395,7 @@ mod tests {
         let db_provider = db.factory.database_provider_ro().unwrap();
 
         assert!(matches!(
-            db.factory.static_file_provider().check_consistency(&db_provider, false),
+            db.factory.static_file_provider().check_consistency(&db_provider),
             Ok(None)
         ));
     }
@@ -415,7 +417,7 @@ mod tests {
             1,
             StaticFileSegment::Receipts,
             archive_node,
-            Some(PipelineTarget::Unwind(88)),
+            Some(88),
         );
 
         simulate_behind_checkpoint_corruption(
@@ -423,7 +425,7 @@ mod tests {
             3,
             StaticFileSegment::Headers,
             archive_node,
-            Some(PipelineTarget::Unwind(86)),
+            Some(86),
         );
     }
 
@@ -472,7 +474,7 @@ mod tests {
         );
 
         // When a checkpoint is ahead, we request a pipeline unwind.
-        save_checkpoint_and_check(&db, StageId::Headers, 91, Some(PipelineTarget::Unwind(block)));
+        save_checkpoint_and_check(&db, StageId::Headers, 91, Some(block));
     }
 
     #[test]
@@ -485,7 +487,7 @@ mod tests {
             .unwrap();
 
         // Creates a gap of one header: static_file <missing> db
-        update_db_and_check::<tables::Headers>(&db, current + 2, Some(PipelineTarget::Unwind(89)));
+        update_db_and_check::<tables::Headers>(&db, current + 2, Some(89));
 
         // Fill the gap, and ensure no unwind is necessary.
         update_db_and_check::<tables::Headers>(&db, current + 1, None);
@@ -504,7 +506,7 @@ mod tests {
         update_db_with_and_check::<tables::Transactions>(
             &db,
             current + 2,
-            Some(PipelineTarget::Unwind(89)),
+            Some(89),
             &TxLegacy::default().into_signed(Signature::test_signature()).into(),
         );
 
@@ -527,7 +529,7 @@ mod tests {
             .unwrap();
 
         // Creates a gap of one receipt: static_file <missing> db
-        update_db_and_check::<tables::Receipts>(&db, current + 2, Some(PipelineTarget::Unwind(89)));
+        update_db_and_check::<tables::Receipts>(&db, current + 2, Some(89));
 
         // Fill the gap, and ensure no unwind is necessary.
         update_db_and_check::<tables::Receipts>(&db, current + 1, None);

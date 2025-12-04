@@ -1,0 +1,9 @@
+[package]
+name = "example-node-builder-api"
+version = "0.0.0"
+publish = false
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+reth-ethereum = { workspace = true, features = ["node", "pool", "node-api", "cli", "test-utils"] }

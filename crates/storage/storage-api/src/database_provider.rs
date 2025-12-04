@@ -37,9 +37,7 @@ pub trait DBProvider: Sized {
     }
 
     /// Commit database transaction
-    fn commit(self) -> ProviderResult<bool> {
-        Ok(self.into_tx().commit()?)
-    }
+    fn commit(self) -> ProviderResult<bool>;
 
     /// Returns a reference to prune modes.
     fn prune_modes_ref(&self) -> &PruneModes;

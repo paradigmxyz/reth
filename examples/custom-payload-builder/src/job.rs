@@ -1,7 +1,9 @@
 use futures_util::Future;
-use reth::tasks::TaskSpawner;
 use reth_basic_payload_builder::{HeaderForPayload, PayloadBuilder, PayloadConfig};
-use reth_ethereum::node::api::PayloadKind;
+use reth_ethereum::{
+    node::api::{PayloadBuilderAttributes, PayloadKind},
+    tasks::TaskSpawner,
+};
 use reth_payload_builder::{KeepPayloadJobAlive, PayloadBuilderError, PayloadJob};
 
 use std::{
@@ -43,6 +45,10 @@ where
 
     fn payload_attributes(&self) -> Result<Self::PayloadAttributes, PayloadBuilderError> {
         Ok(self.config.attributes.clone())
+    }
+
+    fn payload_timestamp(&self) -> Result<u64, PayloadBuilderError> {
+        Ok(self.config.attributes.timestamp())
     }
 
     fn resolve_kind(

@@ -70,7 +70,7 @@ async fn test_streaming_from_local_directory(
     fs::write(folder.join("mainnet-00001-a5364e9a.era1"), CONTENTS_1).await.unwrap();
 
     let folder = folder.into_boxed_path();
-    let actual = read_dir(folder.clone());
+    let actual = read_dir(folder.clone(), 0);
 
     match checksums {
         Ok(_) => match actual {

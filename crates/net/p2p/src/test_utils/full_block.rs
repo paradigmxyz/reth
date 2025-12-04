@@ -14,7 +14,7 @@ use reth_eth_wire_types::HeadersDirection;
 use reth_ethereum_primitives::{Block, BlockBody};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, ops::RangeInclusive, sync::Arc};
 
 /// A headers+bodies client that stores the headers and bodies in memory, with an artificial soft
 /// bodies response limit that is set to 20 by default.
@@ -145,10 +145,11 @@ impl BodiesClient for TestFullBlockClient {
     /// # Returns
     ///
     /// A future containing the result of the block body retrieval operation.
-    fn get_block_bodies_with_priority(
+    fn get_block_bodies_with_priority_and_range_hint(
         &self,
         hashes: Vec<B256>,
         _priority: Priority,
+        _range_hint: Option<RangeInclusive<u64>>,
     ) -> Self::Output {
         // Acquire a lock on the bodies.
         let bodies = self.bodies.lock();

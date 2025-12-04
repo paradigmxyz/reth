@@ -23,12 +23,11 @@ reth-tasks.workspace = true
 reth-engine-primitives.workspace = true
 reth-transaction-pool.workspace = true
 reth-primitives-traits.workspace = true
-reth-rpc-server-types.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
-alloy-rpc-types-engine = { workspace = true, features = ["jsonrpsee-types"] }
+alloy-rpc-types-engine.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -50,7 +49,6 @@ parking_lot.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-ethereum-primitives.workspace = true
-reth-primitives-traits.workspace = true
 reth-payload-builder = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-rlp.workspace = true

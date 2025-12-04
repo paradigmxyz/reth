@@ -1,8 +1,14 @@
 //! Builder support for configuring the entire setup.
 
+use std::fmt::Debug;
+
 use crate::{
     eth_requests::EthRequestHandler,
-    transactions::{TransactionPropagationPolicy, TransactionsManager, TransactionsManagerConfig},
+    transactions::{
+        config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
+        policy::NetworkPolicies,
+        TransactionPropagationPolicy, TransactionsManager, TransactionsManagerConfig,
+    },
     NetworkHandle, NetworkManager,
 };
 use reth_eth_wire::{EthNetworkPrimitives, NetworkPrimitives};
@@ -71,27 +77,49 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         self,
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
-    ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
-        self.transactions_with_policy(pool, transactions_manager_config, Default::default())
+    ) -> NetworkBuilder<
+        TransactionsManager<
+            Pool,
+            N,
+            NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter>,
+        >,
+        Eth,
+        N,
+    > {
+        self.transactions_with_policy(
+            pool,
+            transactions_manager_config,
+            TransactionPropagationKind::default(),
+        )
     }
 
     /// Creates a new [`TransactionsManager`] and wires it to the network.
-    pub fn transactions_with_policy<Pool: TransactionPool, P: TransactionPropagationPolicy>(
+    pub fn transactions_with_policy<
+        Pool: TransactionPool,
+        P: TransactionPropagationPolicy + Debug,
+    >(
         self,
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
         propagation_policy: P,
-    ) -> NetworkBuilder<TransactionsManager<Pool, N, P>, Eth, N> {
+    ) -> NetworkBuilder<
+        TransactionsManager<Pool, N, NetworkPolicies<P, StrictEthAnnouncementFilter>>,
+        Eth,
+        N,
+    > {
         let Self { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);
         let handle = network.handle().clone();
+        let announcement_policy = StrictEthAnnouncementFilter::default();
+        let policies = NetworkPolicies::new(propagation_policy, announcement_policy);
+
         let transactions = TransactionsManager::with_policy(
             handle,
             pool,
             rx,
             transactions_manager_config,
-            propagation_policy,
+            policies,
         );
         NetworkBuilder { network, request_handler, transactions }
     }

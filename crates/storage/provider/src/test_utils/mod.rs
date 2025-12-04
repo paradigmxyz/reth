@@ -29,7 +29,6 @@ pub type MockNodeTypes = reth_node_types::AnyNodeTypesWithEngine<
     reth_ethereum_primitives::EthPrimitives,
     reth_ethereum_engine_primitives::EthEngineTypes,
     reth_chainspec::ChainSpec,
-    reth_trie_db::MerklePatriciaTrie,
     crate::EthStorage,
     EthEngineTypes,
 >;
@@ -59,7 +58,7 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypes>(
     ProviderFactory::new(
         db,
         chain_spec,
-        StaticFileProvider::read_write(static_dir.into_path()).expect("static file provider"),
+        StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
     )
 }
 

@@ -12,13 +12,13 @@ workspace = true
 
 [dependencies]
 # reth
+reth-evm.workspace = true
 reth-execution-types.workspace = true
 reth-payload-primitives.workspace = true
 reth-payload-builder-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-chain-state.workspace = true
-reth-trie.workspace = true
 reth-errors.workspace = true
 reth-trie-common.workspace = true
 
@@ -26,10 +26,11 @@ reth-trie-common.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-eips.workspace = true
 
 # async
-tokio = { workspace = true, features = ["sync"] }
-futures.workspace = true
+tokio = { workspace = true, features = ["sync"], optional = true }
+futures = { workspace = true, optional = true }
 
 # misc
 auto_impl.workspace = true
@@ -46,7 +47,10 @@ std = [
     "alloy-primitives/std",
     "alloy-consensus/std",
     "alloy-rpc-types-engine/std",
+    "alloy-eips/std",
     "futures/std",
+    "tokio",
     "serde/std",
     "thiserror/std",
+    "reth-evm/std",
 ]

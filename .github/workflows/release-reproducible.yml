@@ -1,0 +1,64 @@
+# This workflow is for building and pushing reproducible Docker images for releases.
+
+name: release-reproducible
+
+on:
+  push:
+    tags:
+      - v*
+
+env:
+  DOCKER_REPRODUCIBLE_IMAGE_NAME: ghcr.io/${{ github.repository_owner }}/reth-reproducible
+
+jobs:
+  extract-version:
+    name: extract version
+    runs-on: ubuntu-latest
+    steps:
+      - name: Extract version
+        run: echo "VERSION=$(echo ${GITHUB_REF#refs/tags/})" >> $GITHUB_OUTPUT
+        id: extract_version
+    outputs:
+      VERSION: ${{ steps.extract_version.outputs.VERSION }}
+
+  build-reproducible:
+    name: build and push reproducible image
+    runs-on: ubuntu-latest
+    needs: extract-version
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v5
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract Rust version from Cargo.toml
+        id: rust_version
+        run: |
+          RUST_VERSION=$(cargo metadata --format-version 1 | jq -r '.packages[] | select(.name == "reth") | .rust_version' || echo "1")
+          echo "RUST_VERSION=$RUST_VERSION" >> $GITHUB_OUTPUT
+
+      - name: Build and push reproducible image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.reproducible
+          push: true
+          build-args: |
+            RUST_VERSION=${{ steps.rust_version.outputs.RUST_VERSION }}
+          tags: |
+            ${{ env.DOCKER_REPRODUCIBLE_IMAGE_NAME }}:${{ needs.extract-version.outputs.VERSION }}
+            ${{ env.DOCKER_REPRODUCIBLE_IMAGE_NAME }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: false
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false

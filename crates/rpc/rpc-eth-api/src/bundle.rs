@@ -4,8 +4,8 @@
 
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_mev::{
-    CancelBundleRequest, CancelPrivateTransactionRequest, EthBundleHash, EthCallBundle,
-    EthCallBundleResponse, EthSendBundle, PrivateTransactionRequest,
+    EthBundleHash, EthCallBundle, EthCallBundleResponse, EthCancelBundle,
+    EthCancelPrivateTransaction, EthSendBundle, EthSendPrivateTransaction,
 };
 use jsonrpsee::proc_macros::rpc;
 
@@ -43,19 +43,19 @@ pub trait EthBundleApi {
 
     /// `eth_cancelBundle` is used to prevent a submitted bundle from being included on-chain. See [bundle cancellations](https://docs.flashbots.net/flashbots-auction/advanced/bundle-cancellations) for more information.
     #[method(name = "cancelBundle")]
-    async fn cancel_bundle(&self, request: CancelBundleRequest) -> jsonrpsee::core::RpcResult<()>;
+    async fn cancel_bundle(&self, request: EthCancelBundle) -> jsonrpsee::core::RpcResult<()>;
 
     /// `eth_sendPrivateTransaction` is used to send a single transaction to Flashbots. Flashbots will attempt to build a block including the transaction for the next 25 blocks. See [Private Transactions](https://docs.flashbots.net/flashbots-protect/additional-documentation/eth-sendPrivateTransaction) for more info.
     #[method(name = "sendPrivateTransaction")]
     async fn send_private_transaction(
         &self,
-        request: PrivateTransactionRequest,
+        request: EthSendPrivateTransaction,
     ) -> jsonrpsee::core::RpcResult<B256>;
 
     /// The `eth_sendPrivateRawTransaction` method can be used to send private transactions to
     /// the RPC endpoint. Private transactions are protected from frontrunning and kept
     /// private until included in a block. A request to this endpoint needs to follow
-    /// the standard eth_sendRawTransaction
+    /// the standard `eth_sendRawTransaction`
     #[method(name = "sendPrivateRawTransaction")]
     async fn send_private_raw_transaction(&self, bytes: Bytes) -> jsonrpsee::core::RpcResult<B256>;
 
@@ -63,10 +63,10 @@ pub trait EthBundleApi {
     /// submitted for future blocks.
     ///
     /// A transaction can only be cancelled if the request is signed by the same key as the
-    /// eth_sendPrivateTransaction call submitting the transaction in first place.
+    /// `eth_sendPrivateTransaction` call submitting the transaction in first place.
     #[method(name = "cancelPrivateTransaction")]
     async fn cancel_private_transaction(
         &self,
-        request: CancelPrivateTransactionRequest,
+        request: EthCancelPrivateTransaction,
     ) -> jsonrpsee::core::RpcResult<bool>;
 }

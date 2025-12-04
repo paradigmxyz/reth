@@ -1,7 +1,7 @@
 //! Implements the `GetReceipts` and `Receipts` message types.
 
 use alloc::vec::Vec;
-use alloy_consensus::{ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt};
+use alloy_consensus::{ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_primitives::B256;
 use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
@@ -43,6 +43,53 @@ impl<T: RlpDecodableReceipt> alloy_rlp::Decodable for Receipts<T> {
     #[inline]
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         alloy_rlp::Decodable::decode(buf).map(Self)
+    }
+}
+
+/// Eth/69 receipt response type that removes bloom filters from the protocol.
+///
+/// This is effectively a subset of [`Receipts`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
+pub struct Receipts69<T = Receipt>(pub Vec<Vec<T>>);
+
+impl<T: RlpEncodableReceipt + alloy_rlp::Encodable> alloy_rlp::Encodable for Receipts69<T> {
+    #[inline]
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.0.encode(out)
+    }
+    #[inline]
+    fn length(&self) -> usize {
+        self.0.length()
+    }
+}
+
+impl<T: RlpDecodableReceipt + alloy_rlp::Decodable> alloy_rlp::Decodable for Receipts69<T> {
+    #[inline]
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        alloy_rlp::Decodable::decode(buf).map(Self)
+    }
+}
+
+impl<T: TxReceipt> Receipts69<T> {
+    /// Encodes all receipts with the bloom filter.
+    ///
+    /// Note: This is an expensive operation that recalculates the bloom for each receipt.
+    pub fn into_with_bloom(self) -> Receipts<T> {
+        Receipts(
+            self.0
+                .into_iter()
+                .map(|receipts| receipts.into_iter().map(|r| r.into_with_bloom()).collect())
+                .collect(),
+        )
+    }
+}
+
+impl<T: TxReceipt> From<Receipts69<T>> for Receipts<T> {
+    fn from(receipts: Receipts69<T>) -> Self {
+        receipts.into_with_bloom()
     }
 }
 

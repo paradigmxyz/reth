@@ -93,6 +93,13 @@ pub struct NewTransactionEvent<T: PoolTransaction> {
     pub transaction: Arc<ValidPoolTransaction<T>>,
 }
 
+impl<T: PoolTransaction> NewTransactionEvent<T> {
+    /// Creates a new event for a pending transaction.
+    pub const fn pending(transaction: Arc<ValidPoolTransaction<T>>) -> Self {
+        Self { subpool: SubPool::Pending, transaction }
+    }
+}
+
 impl<T: PoolTransaction> Clone for NewTransactionEvent<T> {
     fn clone(&self) -> Self {
         Self { subpool: self.subpool, transaction: self.transaction.clone() }

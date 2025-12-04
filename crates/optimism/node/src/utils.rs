@@ -25,6 +25,7 @@ pub async fn setup(num_nodes: usize) -> eyre::Result<(Vec<OpNode>, TaskManager, 
         num_nodes,
         Arc::new(OpChainSpecBuilder::base_mainnet().genesis(genesis).ecotone_activated().build()),
         false,
+        Default::default(),
         optimism_payload_attributes,
     )
     .await
@@ -68,5 +69,6 @@ pub fn optimism_payload_attributes<T>(timestamp: u64) -> OpPayloadBuilderAttribu
         no_tx_pool: false,
         gas_limit: Some(30_000_000),
         eip_1559_params: None,
+        min_base_fee: None,
     }
 }

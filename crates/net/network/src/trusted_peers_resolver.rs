@@ -13,7 +13,7 @@ use tracing::warn;
 /// It returns a resolved (`PeerId`, `NodeRecord`) update when one of its in‑flight tasks completes.
 #[derive(Debug)]
 pub struct TrustedPeersResolver {
-    /// The timer that triggers a new resolution cycle.
+    /// The list of trusted peers to resolve.
     pub trusted_peers: Vec<TrustedPeer>,
     /// The timer that triggers a new resolution cycle.
     pub interval: Interval,

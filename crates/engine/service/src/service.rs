@@ -2,13 +2,13 @@ use futures::{Stream, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{ConsensusError, FullConsensus};
-use reth_engine_primitives::{BeaconConsensusEngineEvent, BeaconEngineMessage, EngineValidator};
+use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_engine_tree::{
     backfill::PipelineSync,
     download::BasicBlockDownloader,
     engine::{EngineApiKind, EngineApiRequest, EngineApiRequestHandler, EngineHandler},
     persistence::PersistenceHandle,
-    tree::{EngineApiTreeHandler, InvalidBlockHook, TreeConfig},
+    tree::{EngineApiTreeHandler, EngineValidator, TreeConfig},
 };
 pub use reth_engine_tree::{
     chain::{ChainEvent, ChainOrchestrator},
@@ -51,7 +51,7 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
 #[expect(missing_debug_implementations)]
-// TODO(mattsse): remove hidde once fixed : <https://github.com/rust-lang/rust/issues/135363>
+// TODO(mattsse): remove hidden once fixed : <https://github.com/rust-lang/rust/issues/135363>
 //  otherwise rustdoc fails to resolve the alias
 #[doc(hidden)]
 pub struct EngineService<N, Client>
@@ -82,12 +82,11 @@ where
         payload_builder: PayloadBuilderHandle<N::Payload>,
         payload_validator: V,
         tree_config: TreeConfig,
-        invalid_block_hook: Box<dyn InvalidBlockHook<N::Primitives>>,
         sync_metrics_tx: MetricEventsSender,
         evm_config: C,
     ) -> Self
     where
-        V: EngineValidator<N::Payload, Block = BlockTy<N>>,
+        V: EngineValidator<N::Payload>,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let engine_kind =
@@ -108,7 +107,6 @@ where
             payload_builder,
             canonical_in_memory_state,
             tree_config,
-            invalid_block_hook,
             engine_kind,
             evm_config,
         );
@@ -132,7 +130,7 @@ where
     N: ProviderNodeTypes,
     Client: BlockClient<Block = BlockTy<N>> + 'static,
 {
-    type Item = ChainEvent<BeaconConsensusEngineEvent<N::Primitives>>;
+    type Item = ChainEvent<ConsensusEngineEvent<N::Primitives>>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut orchestrator = self.project().orchestrator;
@@ -140,17 +138,12 @@ where
     }
 }
 
-/// Potential error returned by `EngineService`.
-#[derive(Debug, thiserror::Error)]
-#[error("Engine service error.")]
-pub struct EngineServiceError {}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
-    use reth_engine_primitives::BeaconEngineMessage;
-    use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::NoopInvalidBlockHook};
+    use reth_engine_primitives::{BeaconEngineMessage, NoopInvalidBlockHook};
+    use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::BasicEngineValidator};
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::EthEvmConfig;
@@ -195,6 +188,15 @@ mod tests {
         let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);
         let evm_config = EthEvmConfig::new(chain_spec.clone());
 
+        let engine_validator = BasicEngineValidator::new(
+            blockchain_db.clone(),
+            consensus.clone(),
+            evm_config.clone(),
+            engine_payload_validator,
+            TreeConfig::default(),
+            Box::new(NoopInvalidBlockHook::default()),
+        );
+
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
         let (tx, _rx) = unbounded_channel();
         let _eth_service = EngineService::new(
@@ -208,9 +210,8 @@ mod tests {
             blockchain_db,
             pruner,
             PayloadBuilderHandle::new(tx),
-            engine_payload_validator,
+            engine_validator,
             TreeConfig::default(),
-            Box::new(NoopInvalidBlockHook::default()),
             sync_metrics_tx,
             evm_config,
         );

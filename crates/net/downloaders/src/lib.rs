@@ -3,6 +3,7 @@
 //! ## Feature Flags
 //!
 //! - `test-utils`: Export utilities for testing
+//! - `file-client`: Enables the file-based clients for reading blocks and receipts from files.
 
 #![doc(
     html_logo_url = "https://raw.githubusercontent.com/paradigmxyz/reth/main/assets/reth-docs.png",
@@ -10,7 +11,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 /// The collection of algorithms for downloading block bodies.
 pub mod bodies;
@@ -25,20 +26,24 @@ pub mod metrics;
 ///
 /// Contains [`FileClient`](file_client::FileClient) to read block data from files,
 /// efficiently buffering headers and bodies for retrieval.
+#[cfg(any(test, feature = "file-client"))]
 pub mod file_client;
 
 /// Module managing file-based data retrieval and buffering of receipts.
 ///
 /// Contains [`ReceiptFileClient`](receipt_file_client::ReceiptFileClient) to read receipt data from
 /// files, efficiently buffering receipts for retrieval.
+#[cfg(any(test, feature = "file-client"))]
 pub mod receipt_file_client;
 
 /// Module with a codec for reading and encoding block bodies in files.
 ///
 /// Enables decoding and encoding `Block` types within file contexts.
+#[cfg(any(test, feature = "file-client"))]
 pub mod file_codec;
 
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils;
 
+#[cfg(any(test, feature = "file-client"))]
 pub use file_client::{DecodedFileChunk, FileClientError};

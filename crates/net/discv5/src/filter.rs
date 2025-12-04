@@ -1,4 +1,4 @@
-//! Predicates to constraint peer lookups.
+//! Predicates to constrain peer lookups.
 
 use std::collections::HashSet;
 

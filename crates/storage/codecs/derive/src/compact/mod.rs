@@ -171,28 +171,14 @@ fn load_field_from_segments(
 ///
 /// If so, we use another impl to code/decode its data.
 fn should_use_alt_impl(ftype: &str, segment: &syn::PathSegment) -> bool {
-    if ftype == "Vec" || ftype == "Option" {
-        if let syn::PathArguments::AngleBracketed(ref args) = segment.arguments {
-            if let Some(syn::GenericArgument::Type(syn::Type::Path(arg_path))) = args.args.last() {
-                if let (Some(path), 1) =
-                    (arg_path.path.segments.first(), arg_path.path.segments.len())
-                {
-                    if [
-                        "B256",
-                        "Address",
-                        "Address",
-                        "Bloom",
-                        "TxHash",
-                        "BlockHash",
-                        "CompactPlaceholder",
-                    ]
-                    .contains(&path.ident.to_string().as_str())
-                    {
-                        return true
-                    }
-                }
-            }
-        }
+    if (ftype == "Vec" || ftype == "Option") &&
+        let syn::PathArguments::AngleBracketed(ref args) = segment.arguments &&
+        let Some(syn::GenericArgument::Type(syn::Type::Path(arg_path))) = args.args.last() &&
+        let (Some(path), 1) = (arg_path.path.segments.first(), arg_path.path.segments.len()) &&
+        ["B256", "Address", "Address", "Bloom", "TxHash", "BlockHash", "CompactPlaceholder"]
+            .contains(&path.ident.to_string().as_str())
+    {
+        return true
     }
     false
 }
@@ -289,21 +275,6 @@ mod tests {
                         )
                     }
                 }
-            }
-            #[cfg(test)]
-            #[expect(dead_code)]
-            #[test_fuzz::test_fuzz]
-            fn fuzz_test_test_struct(obj: TestStruct) {
-                use reth_codecs::Compact;
-                let mut buf = vec![];
-                let len = obj.clone().to_compact(&mut buf);
-                let (same_obj, buf) = TestStruct::from_compact(buf.as_ref(), len);
-                assert_eq!(obj, same_obj);
-            }
-            #[test]
-            #[expect(missing_docs)]
-            pub fn fuzz_test_struct() {
-                fuzz_test_test_struct(TestStruct::default())
             }
             impl reth_codecs::Compact for TestStruct {
                 fn to_compact<B>(&self, buf: &mut B) -> usize where B: reth_codecs::__private::bytes::BufMut + AsMut<[u8]> {

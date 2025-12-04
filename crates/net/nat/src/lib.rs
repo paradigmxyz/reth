@@ -10,7 +10,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod net_if;
 
@@ -25,7 +25,7 @@ use std::{
     task::{Context, Poll},
     time::Duration,
 };
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::net_if::resolve_net_if_ip;
 #[cfg(feature = "serde")]
@@ -161,6 +161,11 @@ impl ResolveNatInterval {
         Self::with_interval(resolver, interval)
     }
 
+    /// Returns the resolver used by this interval
+    pub const fn resolver(&self) -> &NatResolver {
+        &self.resolver
+    }
+
     /// Completes when the next [`IpAddr`] in the interval has been reached.
     pub async fn tick(&mut self) -> Option<IpAddr> {
         poll_fn(|cx| self.poll_tick(cx)).await
@@ -230,7 +235,8 @@ async fn resolve_external_ip_url_res(url: &str) -> Result<IpAddr, ()> {
 }
 
 async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
-    let response = reqwest::get(url).await.ok()?;
+    let client = reqwest::Client::builder().timeout(Duration::from_secs(10)).build().ok()?;
+    let response = client.get(url).send().await.ok()?;
     let response = response.error_for_status().ok()?;
     let text = response.text().await.ok()?;
     text.trim().parse().ok()
