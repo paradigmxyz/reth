@@ -6,7 +6,7 @@ use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
-    block::{CommitChanges, ExecutableTxParts},
+    block::{CommitChanges, ExecutableTxParts, StateDB},
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{Address, B256};
@@ -431,7 +431,7 @@ where
     }
 }
 
-impl<'a, F, DB, Executor, Builder, N> BlockBuilder
+impl<'a, DB, F, Executor, Builder, N> BlockBuilder
     for BasicBlockBuilder<'a, F, Executor, Builder, N>
 where
     F: BlockExecutorFactory<Transaction = N::SignedTx, Receipt = N::Receipt>,
@@ -440,12 +440,12 @@ where
             Spec = <F::EvmFactory as EvmFactory>::Spec,
             HaltReason = <F::EvmFactory as EvmFactory>::HaltReason,
             BlockEnv = <F::EvmFactory as EvmFactory>::BlockEnv,
-            DB = &'a mut State<DB>,
+            DB = &'a mut DB,
         >,
         Transaction = N::SignedTx,
         Receipt = N::Receipt,
     >,
-    DB: Database + 'a,
+    DB: StateDB + 'a,
     Builder: BlockAssembler<F, Block = N::Block>,
     N: NodePrimitives,
 {
@@ -485,7 +485,7 @@ where
         db.merge_transitions(BundleRetention::Reverts);
 
         // calculate the state root
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let hashed_state = state.hashed_post_state(db.bundle_state());
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;
@@ -499,7 +499,7 @@ where
             parent: self.parent,
             transactions,
             output: &result,
-            bundle_state: &db.bundle_state,
+            bundle_state: db.bundle_state(),
             state_provider: &state,
             state_root,
         })?;

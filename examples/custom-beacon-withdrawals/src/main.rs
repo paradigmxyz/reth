@@ -5,7 +5,7 @@
 
 use alloy_eips::eip4895::Withdrawal;
 use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx},
+    block::{BlockExecutorFactory, BlockExecutorFor, ExecutableTx, StateDB},
     eth::{EthBlockExecutionCtx, EthBlockExecutor, EthTxResult},
     precompiles::PrecompilesMap,
     revm::context::Block as _,
@@ -187,10 +187,9 @@ pub struct CustomBlockExecutor<'a, Evm> {
     inner: EthBlockExecutor<'a, Evm, &'a Arc<ChainSpec>, &'a RethReceiptBuilder>,
 }
 
-impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<'_, E>
+impl<E> BlockExecutor for CustomBlockExecutor<'_, E>
 where
-    DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = TxEnv>,
+    E: Evm<DB: StateDB, Tx = TxEnv>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
