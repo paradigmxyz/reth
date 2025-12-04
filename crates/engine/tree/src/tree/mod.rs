@@ -1695,8 +1695,13 @@ where
         }
 
         let min_block = self.persistence_state.last_persisted_block.number;
-        self.state.tree_state.canonical_block_number().saturating_sub(min_block) >
+        let gate = if self.config.persistence_threshold() > self.config.memory_block_buffer_target()
+        {
             self.config.persistence_threshold()
+        } else {
+            self.config.memory_block_buffer_target()
+        };
+        self.state.tree_state.canonical_block_number().saturating_sub(min_block) > gate
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range
