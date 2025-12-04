@@ -318,9 +318,11 @@ where
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
         let testing_chain = ctx.config.chain.clone();
         let testing_provider = ctx.node.provider().clone();
+        let testing_max_concurrent = ctx.config.rpc.testing_max_concurrent();
+        let ctx_clone = ctx.clone();
 
         self.inner
-            .launch_add_ons_with(ctx, move |container| {
+            .launch_add_ons_with(ctx_clone, move |container| {
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
@@ -346,7 +348,7 @@ where
                         evm_config,
                         EthereumBuilderConfig::new(),
                     );
-                    let testing_api = TestingApi::new(builder).into_rpc();
+                    let testing_api = TestingApi::new(builder, testing_max_concurrent).into_rpc();
                     container.modules.merge_if_module_configured(
                         RethRpcModule::Other("testing".to_string()),
                         testing_api,
