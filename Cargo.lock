@@ -3839,7 +3839,6 @@ dependencies = [
  "futures",
  "jsonrpsee",
  "reth-ethereum",
- "reth-rpc-server-types",
  "tokio",
 ]
 

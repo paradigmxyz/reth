@@ -52,7 +52,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
-use reth_rpc_server_types::RethRpcModule;
+pub use reth_rpc_server_types::RethRpcModule;
 use reth_storage_api::{
     AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, ProviderBlock,
     StateProviderFactory,
