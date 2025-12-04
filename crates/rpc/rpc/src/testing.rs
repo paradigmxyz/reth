@@ -67,6 +67,8 @@ impl<B> TestingApiServer for TestingApi<B>
 where
     B: TestingBlockBuilder + Clone + Send + Sync,
 {
+    /// Handles `testing_buildBlockV1` by gating concurrency via a semaphore and offloading heavy
+    /// work to the blocking pool to avoid stalling the async runtime.
     async fn build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
@@ -173,6 +175,8 @@ where
     EthEvmConfig<ChainSpec>:
         ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
 {
+    /// Core build logic used by the testing RPC; wrapped by the RPC layer in a semaphore +
+    /// blocking task to avoid exhausting the async runtime.
     async fn build_block(
         &self,
         request: TestingBuildBlockRequestV1,
