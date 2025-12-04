@@ -9,7 +9,7 @@ on:
   pull_request:
   merge_group:
   push:
-    branches: [main]
+    branches: [unstable, main]
 
 env:
   CARGO_TERM_COLOR: always
