@@ -30,9 +30,14 @@ use tracing::{debug, error, instrument, trace};
 /// fetched by a single worker.
 const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
-/// Maximum number of messages to batch together in process_multiproof_message.
-/// Limits proof computation size while allowing some deduplication benefit.
-const DEFAULT_MAX_BATCH_SIZE: usize = 4;
+/// Maximum number of targets to batch together in `process_multiproof_message`.
+/// Limits proof computation size while allowing deduplication benefit.
+/// A "target" counts each storage slot as 1, and each account-only update as 1.
+const DEFAULT_MAX_BATCH_TARGETS: usize = 500;
+
+/// Maximum number of messages to batch together (secondary safety limit).
+/// Prevents excessive batching even with small messages.
+const DEFAULT_MAX_BATCH_MESSAGES: usize = 16;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -162,6 +167,24 @@ impl Drop for StateHookSender {
         // Send completion signal when the sender is dropped
         let _ = self.0.send(MultiProofMessage::FinishedStateUpdates);
     }
+}
+
+/// Estimates the target count from an `EvmState` without full conversion to `HashedPostState`.
+///
+/// This is used during batching to decide when to stop batching before the actual conversion
+/// happens. The estimate mirrors the logic of `chunking_length()` on `MultiProofTargets`:
+/// each storage slot counts as 1, each account-only update (no slots) counts as 1.
+fn estimate_evm_state_targets(state: &EvmState) -> usize {
+    state
+        .values()
+        .filter(|account| account.is_touched())
+        .map(|account| {
+            let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
+            // Same logic as chunking_length(): 1 + (slots - 1).saturating_sub(0)
+            // Which simplifies to: max(1, slots) for non-empty, but we want min 1 for account
+            1 + changed_slots.saturating_sub(1)
+        })
+        .sum()
 }
 
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
@@ -1022,17 +1045,32 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Batch consecutive PrefetchProofs messages into one, up to max batch size
+                // Batch consecutive PrefetchProofs messages by target count.
+                // Stop when total targets reach the limit or message count limit is hit.
                 let mut merged_targets = targets;
                 let mut num_batched = 1;
+                let mut target_count = merged_targets.chunking_length();
 
                 loop {
-                    if num_batched >= DEFAULT_MAX_BATCH_SIZE {
+                    if target_count >= DEFAULT_MAX_BATCH_TARGETS ||
+                        num_batched >= DEFAULT_MAX_BATCH_MESSAGES
+                    {
                         break;
                     }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
+                            let next_count = next_targets.chunking_length();
+                            // If adding this would exceed target limit and we already have work,
+                            // save it for next iteration
+                            if target_count + next_count > DEFAULT_MAX_BATCH_TARGETS &&
+                                num_batched > 0
+                            {
+                                *pending_msg =
+                                    Some(MultiProofMessage::PrefetchProofs(next_targets));
+                                break;
+                            }
                             merged_targets.extend(next_targets);
+                            target_count += next_count;
                             num_batched += 1;
                         }
                         Ok(other_msg) => {
@@ -1070,19 +1108,33 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Batch consecutive StateUpdate messages into one, up to max batch size.
+                // Batch consecutive StateUpdate messages by estimated target count.
                 // When batching, we use the first message's source for logging (observability
                 // only).
                 let mut merged_update = update;
                 let mut num_batched = 1;
+                let mut estimated_targets = estimate_evm_state_targets(&merged_update);
 
                 loop {
-                    if num_batched >= DEFAULT_MAX_BATCH_SIZE {
+                    if estimated_targets >= DEFAULT_MAX_BATCH_TARGETS ||
+                        num_batched >= DEFAULT_MAX_BATCH_MESSAGES
+                    {
                         break;
                     }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(_new_source, next_update)) => {
+                            let next_estimate = estimate_evm_state_targets(&next_update);
+                            // If adding this would exceed target limit and we already have work,
+                            // save it for next iteration
+                            if estimated_targets + next_estimate > DEFAULT_MAX_BATCH_TARGETS &&
+                                num_batched > 0
+                            {
+                                *pending_msg =
+                                    Some(MultiProofMessage::StateUpdate(_new_source, next_update));
+                                break;
+                            }
                             merged_update.extend(next_update);
+                            estimated_targets += next_estimate;
                             num_batched += 1;
                         }
                         Ok(other_msg) => {
