@@ -3,7 +3,7 @@ use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_p
 use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
-use reth_rpc_server_types::{RethRpcModule, RpcModuleSelection};
+use reth_rpc_server_types::RpcModuleSelection;
 use std::{net::SocketAddr, path::PathBuf};
 use tower::layer::util::Identity;
 use tracing::{debug, warn};
@@ -141,7 +141,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .with_config(RpcModuleConfig::new(self.eth_config(), self.flashbots_config()));
 
         if self.http {
-            let mut http_modules = self
+            let http_modules = self
                 .http_api
                 .clone()
                 .unwrap_or_else(|| RpcModuleSelection::standard_modules().into());
@@ -149,7 +149,7 @@ impl RethRpcServerConfig for RpcServerArgs {
         }
 
         if self.ws {
-            let mut ws_modules = self
+            let ws_modules = self
                 .ws_api
                 .clone()
                 .unwrap_or_else(|| RpcModuleSelection::standard_modules().into());
