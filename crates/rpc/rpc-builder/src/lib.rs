@@ -37,8 +37,7 @@ use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
     AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
-    OtterscanApi, RPCApi, RethApi, TestingBlockBuilder, TraceApi, TxPoolApi, ValidationApiConfig,
-    Web3Api,
+    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -64,7 +63,6 @@ use std::{
     collections::HashMap,
     fmt::Debug,
     net::{Ipv4Addr, SocketAddr, SocketAddrV4},
-    sync::Arc,
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tower_http::cors::CorsLayer;
@@ -128,8 +126,6 @@ pub struct RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, Consensus> {
     consensus: Consensus,
     /// Node data primitives.
     _primitives: PhantomData<N>,
-    /// Optional testing builder for `testing_buildBlockV1`.
-    testing_builder: Option<Arc<dyn TestingBlockBuilder>>,
 }
 
 // === impl RpcBuilder ===
@@ -146,16 +142,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         evm_config: EvmConfig,
         consensus: Consensus,
     ) -> Self {
-        Self {
-            provider,
-            pool,
-            network,
-            executor,
-            evm_config,
-            consensus,
-            _primitives: PhantomData,
-            testing_builder: None,
-        }
+        Self { provider, pool, network, executor, evm_config, consensus, _primitives: PhantomData }
     }
 
     /// Configure the provider instance.
@@ -163,26 +150,8 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         self,
         provider: P,
     ) -> RpcModuleBuilder<N, P, Pool, Network, EvmConfig, Consensus> {
-        let Self {
-            pool,
-            network,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-            ..
-        } = self;
-        RpcModuleBuilder {
-            provider,
-            network,
-            pool,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-        }
+        let Self { pool, network, executor, evm_config, consensus, _primitives, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
 
     /// Configure the transaction pool instance.
@@ -190,26 +159,8 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         self,
         pool: P,
     ) -> RpcModuleBuilder<N, Provider, P, Network, EvmConfig, Consensus> {
-        let Self {
-            provider,
-            network,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-            ..
-        } = self;
-        RpcModuleBuilder {
-            provider,
-            network,
-            pool,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-        }
+        let Self { provider, network, executor, evm_config, consensus, _primitives, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
 
     /// Configure a [`NoopTransactionPool`] instance.
@@ -220,16 +171,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     pub fn with_noop_pool(
         self,
     ) -> RpcModuleBuilder<N, Provider, NoopTransactionPool, Network, EvmConfig, Consensus> {
-        let Self {
-            provider,
-            executor,
-            network,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-            ..
-        } = self;
+        let Self { provider, executor, network, evm_config, consensus, _primitives, .. } = self;
         RpcModuleBuilder {
             provider,
             executor,
@@ -238,7 +180,6 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
             pool: NoopTransactionPool::default(),
             consensus,
             _primitives,
-            testing_builder,
         }
     }
 
@@ -247,26 +188,8 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         self,
         network: Net,
     ) -> RpcModuleBuilder<N, Provider, Pool, Net, EvmConfig, Consensus> {
-        let Self {
-            provider,
-            pool,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-            ..
-        } = self;
-        RpcModuleBuilder {
-            provider,
-            network,
-            pool,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-        }
+        let Self { provider, pool, executor, evm_config, consensus, _primitives, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
 
     /// Configure a [`NoopNetwork`] instance.
@@ -277,16 +200,7 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
     pub fn with_noop_network(
         self,
     ) -> RpcModuleBuilder<N, Provider, Pool, NoopNetwork, EvmConfig, Consensus> {
-        let Self {
-            provider,
-            pool,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-            ..
-        } = self;
+        let Self { provider, pool, executor, evm_config, consensus, _primitives, .. } = self;
         RpcModuleBuilder {
             provider,
             pool,
@@ -295,32 +209,13 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
             evm_config,
             consensus,
             _primitives,
-            testing_builder,
         }
     }
 
     /// Configure the task executor to use for additional tasks.
     pub fn with_executor(self, executor: Box<dyn TaskSpawner + 'static>) -> Self {
-        let Self {
-            pool,
-            network,
-            provider,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-            ..
-        } = self;
-        Self {
-            provider,
-            network,
-            pool,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-        }
+        let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
+        Self { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
 
     /// Configure the evm configuration type
@@ -328,19 +223,8 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         self,
         evm_config: E,
     ) -> RpcModuleBuilder<N, Provider, Pool, Network, E, Consensus> {
-        let Self {
-            provider, pool, executor, network, consensus, _primitives, testing_builder, ..
-        } = self;
-        RpcModuleBuilder {
-            provider,
-            network,
-            pool,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-        }
+        let Self { provider, pool, executor, network, consensus, _primitives, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
 
     /// Configure the consensus implementation.
@@ -348,26 +232,8 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         self,
         consensus: C,
     ) -> RpcModuleBuilder<N, Provider, Pool, Network, EvmConfig, C> {
-        let Self {
-            provider,
-            network,
-            pool,
-            executor,
-            evm_config,
-            _primitives,
-            testing_builder,
-            ..
-        } = self;
-        RpcModuleBuilder {
-            provider,
-            network,
-            pool,
-            executor,
-            evm_config,
-            consensus,
-            _primitives,
-            testing_builder,
-        }
+        let Self { provider, network, pool, executor, evm_config, _primitives, .. } = self;
+        RpcModuleBuilder { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
 
     /// Instantiates a new [`EthApiBuilder`] from the configured components.
@@ -452,22 +318,12 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
-        let Self {
-            provider, pool, network, executor, consensus, evm_config, testing_builder, ..
-        } = self;
+        let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
 
         let config = module_config.config.clone().unwrap_or_default();
 
         let mut registry = RpcRegistryInner::new(
-            provider,
-            pool,
-            network,
-            executor,
-            consensus,
-            config,
-            evm_config,
-            eth,
-            testing_builder.clone(),
+            provider, pool, network, executor, consensus, config, evm_config, eth,
         );
 
         let modules = registry.create_transport_rpc_modules(module_config);
@@ -489,16 +345,7 @@ where
     {
         let mut modules = TransportRpcModules::default();
 
-        let Self {
-            provider,
-            pool,
-            network,
-            executor,
-            consensus,
-            evm_config,
-            ref testing_builder,
-            ..
-        } = self;
+        let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
 
         if !module_config.is_empty() {
             let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
@@ -512,24 +359,7 @@ where
                 config.unwrap_or_default(),
                 evm_config,
                 eth,
-                testing_builder.clone(),
             );
-
-            // only enable testing namespace if explicitly requested on any transport
-            let testing_requested =
-                module_config
-                    .http
-                    .as_ref()
-                    .is_some_and(|s| s.contains(&RethRpcModule::Other("testing".to_string()))) ||
-                    module_config.ws.as_ref().is_some_and(|s| {
-                        s.contains(&RethRpcModule::Other("testing".to_string()))
-                    }) ||
-                    module_config.ipc.as_ref().is_some_and(|s| {
-                        s.contains(&RethRpcModule::Other("testing".to_string()))
-                    });
-            if !testing_requested {
-                registry.testing_builder = None;
-            }
 
             modules.config = module_config;
             modules.http = registry.maybe_module(http.as_ref());
@@ -649,8 +479,6 @@ pub struct RpcRegistryInner<
     modules: HashMap<RethRpcModule, Methods>,
     /// eth config settings
     eth_config: EthConfig,
-    /// Optional testing builder to attach testing namespace.
-    testing_builder: Option<Arc<dyn TestingBlockBuilder>>,
 }
 
 // === impl RpcRegistryInner ===
@@ -681,7 +509,6 @@ where
         config: RpcModuleConfig,
         evm_config: EvmConfig,
         eth_api: EthApi,
-        testing_builder: Option<Arc<dyn TestingBlockBuilder>>,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Primitives = N>,
@@ -701,7 +528,6 @@ where
             blocking_pool_guard,
             eth_config: config.eth,
             evm_config,
-            testing_builder,
         }
     }
 }
@@ -1031,21 +857,6 @@ where
         modules.http = http;
         modules.ws = ws;
         modules.ipc = ipc;
-
-        // If testing builder is configured, merge testing namespace into configured transports.
-        if let Some(builder) = &self.testing_builder {
-            let testing_api = reth_rpc::TestingApi::new(builder.clone());
-            let testing_module = testing_api.into_rpc();
-            if let Some(http_mod) = modules.http.as_mut() {
-                http_mod.merge(testing_module.clone()).expect("No conflicts");
-            }
-            if let Some(ws_mod) = modules.ws.as_mut() {
-                ws_mod.merge(testing_module.clone()).expect("No conflicts");
-            }
-            if let Some(ipc_mod) = modules.ipc.as_mut() {
-                ipc_mod.merge(testing_module).expect("No conflicts");
-            }
-        }
         modules
     }
 
