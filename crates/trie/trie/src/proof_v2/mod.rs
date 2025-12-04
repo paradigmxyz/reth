@@ -836,7 +836,7 @@ where
         // `lower_bound` will be used to track the lower bound of the range which is returned from
         // this method. If this is None then there are no further keys which need to be processed.
         //
-        // This starts off being based off of the hashed cursor's current position, which is the
+        // This starts off being based on the hashed cursor's current position, which is the
         // next key which hasn't been processed. If that is None then we start from zero.
         let mut lower_bound = Some(hashed_key_current_path.unwrap_or_default());
 
