@@ -19,6 +19,9 @@ use std::{
 };
 use tracing::{debug, instrument};
 
+#[cfg(feature = "parallel-from-reverts")]
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
 pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// Create a new [`StateRoot`] instance.
@@ -280,14 +283,37 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostStateSorted {
             }
         }
 
-        // Sort storage slots and convert to HashedStorageSorted
-        let hashed_storages = storages
-            .into_iter()
-            .map(|(address, mut slots)| {
-                slots.sort_unstable_by_key(|(slot, _)| *slot);
-                (address, HashedStorageSorted { storage_slots: slots, wiped: false })
-            })
-            .collect();
+        // Threshold based on benchmark
+        const PARALLEL_THRESHOLD: usize = 2_500;
+
+        // Check Feature Flag AND Threshold
+        let use_parallel =
+            cfg!(feature = "parallel-from-reverts") && storages.len() >= PARALLEL_THRESHOLD;
+
+        let hashed_storages = if use_parallel {
+            #[cfg(feature = "parallel-from-reverts")]
+            {
+                storages
+                    .into_par_iter()
+                    .map(|(address, mut slots)| {
+                        slots.sort_unstable_by_key(|(slot, _)| *slot);
+                        (address, HashedStorageSorted { storage_slots: slots, wiped: false })
+                    })
+                    .collect()
+            }
+            #[cfg(not(feature = "parallel-from-reverts"))]
+            {
+                unreachable!()
+            }
+        } else {
+            storages
+                .into_iter()
+                .map(|(address, mut slots)| {
+                    slots.sort_unstable_by_key(|(slot, _)| *slot);
+                    (address, HashedStorageSorted { storage_slots: slots, wiped: false })
+                })
+                .collect()
+        };
 
         Ok(Self::new(accounts, hashed_storages))
     }

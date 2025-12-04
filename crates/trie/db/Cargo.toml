@@ -24,6 +24,9 @@ alloy-primitives.workspace = true
 # tracing
 tracing.workspace = true
 
+# rayon
+rayon = { workspace = true, optional = true }
+
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
@@ -48,7 +51,6 @@ serde_json.workspace = true
 similar-asserts.workspace = true
 
 criterion.workspace = true
-rayon.workspace = true
 rand.workspace = true
 
 [features]
@@ -62,6 +64,7 @@ serde = [
     "reth-primitives-traits/serde",
     "revm-database/serde",
     "revm/serde",
+    "rand/serde",
 ]
 test-utils = [
     "reth-trie-common/test-utils",
@@ -73,6 +76,13 @@ test-utils = [
     "reth-trie/test-utils",
 ]
 
+parallel-from-reverts = ["dep:rayon"]
+
 [[bench]]
 name = "sorting_par_exp"
+harness = false
+required-features = ["parallel-from-reverts"]
+
+[[bench]]
+name = "integration_bench"
 harness = false
