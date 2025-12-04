@@ -145,9 +145,6 @@ impl RethRpcServerConfig for RpcServerArgs {
                 .http_api
                 .clone()
                 .unwrap_or_else(|| RpcModuleSelection::standard_modules().into());
-            if self.http_testing {
-                http_modules.push(RethRpcModule::Other("testing".to_string()));
-            }
             config = config.with_http(http_modules);
         }
 
@@ -156,9 +153,6 @@ impl RethRpcServerConfig for RpcServerArgs {
                 .ws_api
                 .clone()
                 .unwrap_or_else(|| RpcModuleSelection::standard_modules().into());
-            if self.ws_testing {
-                ws_modules.push(RethRpcModule::Other("testing".to_string()));
-            }
             config = config.with_ws(ws_modules);
         }
 
