@@ -615,7 +615,7 @@ where
             Err(error) => match error {
                 InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
                 InsertPayloadError::Payload(error) => {
-                    Ok(self.on_new_payload_error(error, parent_hash)?)
+                    Ok(self.on_new_payload_error(error, num_hash, parent_hash)?)
                 }
             },
         }
@@ -634,6 +634,7 @@ where
         payload: T::ExecutionData,
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
         let parent_hash = payload.parent_hash();
+        let num_hash = payload.num_hash();
 
         match self.payload_validator.ensure_well_formed_payload(payload) {
             // if the block is well-formed, buffer it for later
@@ -644,7 +645,7 @@ where
                     Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
                 }
             }
-            Err(error) => Ok(self.on_new_payload_error(error, parent_hash)?),
+            Err(error) => Ok(self.on_new_payload_error(error, num_hash, parent_hash)?),
         }
     }
 
@@ -1968,6 +1969,7 @@ where
         invalid: BlockWithParent,
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
         let parent_hash = payload.parent_hash();
+        let num_hash = payload.num_hash();
 
         // Here we might have 2 cases
         // 1. the block is well formed and indeed links to an invalid header, meaning we should
@@ -1976,7 +1978,7 @@ where
         //    an error and forget it
         let block = match self.payload_validator.ensure_well_formed_payload(payload) {
             Ok(block) => block,
-            Err(error) => return Ok(self.on_new_payload_error(error, parent_hash)?),
+            Err(error) => return Ok(self.on_new_payload_error(error, num_hash, parent_hash)?),
         };
 
         Ok(self.on_invalid_new_payload(block.into_sealed_block(), invalid)?)
@@ -2575,9 +2577,10 @@ where
     fn on_new_payload_error(
         &mut self,
         error: NewPayloadError,
+        payload_num_hash: NumHash,
         parent_hash: B256,
     ) -> ProviderResult<PayloadStatus> {
-        error!(target: "engine::tree", %error, "Invalid payload");
+        error!(target: "engine::tree", payload=?payload_num_hash, %error, "Invalid payload");
         // we need to convert the error to a payload status (response to the CL)
 
         let latest_valid_hash =
