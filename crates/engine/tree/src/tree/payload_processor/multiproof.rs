@@ -30,6 +30,10 @@ use tracing::{debug, error, instrument, trace};
 /// fetched by a single worker.
 const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
 
+/// Maximum number of messages to batch together in process_multiproof_message.
+/// Limits proof computation size while allowing some deduplication benefit.
+const DEFAULT_MAX_BATCH_SIZE: usize = 4;
+
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
@@ -534,6 +538,11 @@ pub(crate) struct MultiProofTaskMetrics {
     /// Histogram of the number of state update proof target chunks.
     pub state_update_proof_chunks_histogram: Histogram,
 
+    /// Histogram of prefetch proof batch sizes (number of messages merged).
+    pub prefetch_batch_size_histogram: Histogram,
+    /// Histogram of state update batch sizes (number of messages merged).
+    pub state_update_batch_size_histogram: Histogram,
+
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
 
@@ -1013,11 +1022,14 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Batch consecutive PrefetchProofs messages into one
+                // Batch consecutive PrefetchProofs messages into one, up to max batch size
                 let mut merged_targets = targets;
                 let mut num_batched = 1;
 
                 loop {
+                    if num_batched >= DEFAULT_MAX_BATCH_SIZE {
+                        break;
+                    }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
                             merged_targets.extend(next_targets);
@@ -1030,6 +1042,8 @@ impl MultiProofTask {
                         Err(_) => break,
                     }
                 }
+
+                self.metrics.prefetch_batch_size_histogram.record(num_batched as f64);
 
                 let account_targets = merged_targets.len();
                 let storage_targets =
@@ -1056,13 +1070,16 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Batch consecutive StateUpdate messages into one.
+                // Batch consecutive StateUpdate messages into one, up to max batch size.
                 // When batching, we use the first message's source for logging (observability
                 // only).
                 let mut merged_update = update;
                 let mut num_batched = 1;
 
                 loop {
+                    if num_batched >= DEFAULT_MAX_BATCH_SIZE {
+                        break;
+                    }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(_new_source, next_update)) => {
                             merged_update.extend(next_update);
@@ -1075,6 +1092,8 @@ impl MultiProofTask {
                         Err(_) => break,
                     }
                 }
+
+                self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
 
                 let len = merged_update.len();
                 *state_update_proofs_requested += self.on_state_update(source, merged_update);
