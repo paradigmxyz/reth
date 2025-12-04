@@ -1,5 +1,7 @@
 //! Traits for execution.
 
+use std::borrow::Cow;
+
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
 use alloc::{boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
@@ -202,7 +204,7 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     /// Output of block execution.
     pub output: &'b BlockExecutionResult<F::Receipt>,
     /// [`BundleState`] after the block execution.
-    pub bundle_state: &'a BundleState,
+    pub bundle_state: Cow<'a, BundleState>,
     /// Provider with access to state.
     #[debug(skip)]
     pub state_provider: &'b dyn StateProvider,
@@ -222,7 +224,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
         parent: &'a SealedHeader<H>,
         transactions: Vec<F::Transaction>,
         output: &'b BlockExecutionResult<F::Receipt>,
-        bundle_state: &'a BundleState,
+        bundle_state: impl Into<Cow<'a, BundleState>>,
         state_provider: &'b dyn StateProvider,
         state_root: B256,
     ) -> Self {
@@ -232,7 +234,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
             parent,
             transactions,
             output,
-            bundle_state,
+            bundle_state: bundle_state.into(),
             state_provider,
             state_root,
         }
@@ -431,8 +433,7 @@ where
     }
 }
 
-impl<'a, DB, F, Executor, Builder, N> BlockBuilder
-    for BasicBlockBuilder<'a, F, Executor, Builder, N>
+impl<'a, F, Executor, Builder, N> BlockBuilder for BasicBlockBuilder<'a, F, Executor, Builder, N>
 where
     F: BlockExecutorFactory<Transaction = N::SignedTx, Receipt = N::Receipt>,
     Executor: BlockExecutor<
@@ -440,12 +441,11 @@ where
             Spec = <F::EvmFactory as EvmFactory>::Spec,
             HaltReason = <F::EvmFactory as EvmFactory>::HaltReason,
             BlockEnv = <F::EvmFactory as EvmFactory>::BlockEnv,
-            DB = &'a mut DB,
+            DB: StateDB + 'a,
         >,
         Transaction = N::SignedTx,
         Receipt = N::Receipt,
     >,
-    DB: StateDB + 'a,
     Builder: BlockAssembler<F, Block = N::Block>,
     N: NodePrimitives,
 {
@@ -479,7 +479,7 @@ where
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
-        let (db, evm_env) = evm.finish();
+        let (mut db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
@@ -499,7 +499,7 @@ where
             parent: self.parent,
             transactions,
             output: &result,
-            bundle_state: (*db).bundle_state(),
+            bundle_state: Cow::Owned(db.take_bundle()),
             state_provider: &state,
             state_root,
         })?;
