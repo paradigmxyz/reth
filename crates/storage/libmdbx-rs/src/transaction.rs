@@ -1,5 +1,10 @@
 use crate::{
-    Cursor, Error, Stat, TableObject, environment::Environment, error::{Result, mdbx_result}, flags::{TableFlags, WriteFlags}, table::{Table}, txn_manager::{TxnManagerMessage, TxnPtr}
+    environment::Environment, 
+    error::{Result, mdbx_result}, 
+    flags::{TableFlags, WriteFlags}, 
+    table::{Table}, 
+    txn_manager::{TxnManagerMessage, TxnPtr},
+    Cursor, Error, Stat, TableObject,
 };
 use ffi::{MDBX_txn_flags_t, MDBX_TXN_RDONLY, MDBX_TXN_READWRITE};
 use parking_lot::{Mutex, MutexGuard};

@@ -150,7 +150,7 @@ where
         self.get_full(None, None, MDBX_FIRST)
     }
 
-    /// [`DatabaseFlags::DUP_SORT`]-only: Position at first data item of current key.
+    /// [`TableFlags::DUP_SORT`]-only: Position at first data item of current key.
     pub fn first_dup<Value>(&mut self) -> Result<Option<Value>>
     where
         Value: TableObject,
@@ -158,7 +158,7 @@ where
         self.get_value(None, None, MDBX_FIRST_DUP)
     }
 
-    /// [`DatabaseFlags::DUP_SORT`]-only: Position at key/data pair.
+    /// [`TableFlags::DUP_SORT`]-only: Position at key/data pair.
     pub fn get_both<Value>(&mut self, k: &[u8], v: &[u8]) -> Result<Option<Value>>
     where
         Value: TableObject,
@@ -166,7 +166,7 @@ where
         self.get_value(Some(k), Some(v), MDBX_GET_BOTH)
     }
 
-    /// [`DatabaseFlags::DUP_SORT`]-only: Position at given key and at first data greater than or
+    /// [`TableFlags::DUP_SORT`]-only: Position at given key and at first data greater than or
     /// equal to specified data.
     pub fn get_both_range<Value>(&mut self, k: &[u8], v: &[u8]) -> Result<Option<Value>>
     where
@@ -220,7 +220,7 @@ where
         self.get_full(None, None, MDBX_NEXT)
     }
 
-    /// [`DatabaseFlags::DUP_SORT`]-only: Position at next data item of current key.
+    /// [`TableFlags::DUP_SORT`]-only: Position at next data item of current key.
     pub fn next_dup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
         Key: TableObject,
@@ -229,7 +229,7 @@ where
         self.get_full(None, None, MDBX_NEXT_DUP)
     }
 
-    /// [`DatabaseFlags::DUP_FIXED`]-only: Return up to a page of duplicate data items from next
+    /// [`TableFlags::DUP_FIXED`]-only: Return up to a page of duplicate data items from next
     /// cursor position. Move cursor to prepare for `MDBX_NEXT_MULTIPLE`.
     pub fn next_multiple<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
@@ -257,7 +257,7 @@ where
         self.get_full(None, None, MDBX_PREV)
     }
 
-    /// [`DatabaseFlags::DUP_SORT`]-only: Position at previous data item of current key.
+    /// [`TableFlags::DUP_SORT`]-only: Position at previous data item of current key.
     pub fn prev_dup<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
         Key: TableObject,
@@ -301,7 +301,7 @@ where
         self.get_full(Some(key), None, MDBX_SET_RANGE)
     }
 
-    /// [`DatabaseFlags::DUP_FIXED`]-only: Position at previous page and return up to a page of
+    /// [`TableFlags::DUP_FIXED`]-only: Position at previous page and return up to a page of
     /// duplicate data items.
     pub fn prev_multiple<Key, Value>(&mut self) -> Result<Option<(Key, Value)>>
     where
@@ -335,7 +335,7 @@ where
     /// The iterator will begin with item next after the cursor, and continue until the end of the
     /// database. For new cursors, the iterator will begin with the first item in the database.
     ///
-    /// For databases with duplicate data items ([`DatabaseFlags::DUP_SORT`]), the
+    /// For databases with duplicate data items ([`TableFlags::DUP_SORT`]), the
     /// duplicate data items of each key will be returned before moving on to
     /// the next key.
     pub fn iter<Key, Value>(&mut self) -> Iter<'_, K, Key, Value>
@@ -348,7 +348,7 @@ where
 
     /// Iterate over database items starting from the beginning of the database.
     ///
-    /// For databases with duplicate data items ([`DatabaseFlags::DUP_SORT`]), the
+    /// For databases with duplicate data items ([`TableFlags::DUP_SORT`]), the
     /// duplicate data items of each key will be returned before moving on to
     /// the next key.
     pub fn iter_start<Key, Value>(&mut self) -> Iter<'_, K, Key, Value>
@@ -361,7 +361,7 @@ where
 
     /// Iterate over database items starting from the given key.
     ///
-    /// For databases with duplicate data items ([`DatabaseFlags::DUP_SORT`]), the
+    /// For databases with duplicate data items ([`TableFlags::DUP_SORT`]), the
     /// duplicate data items of each key will be returned before moving on to
     /// the next key.
     pub fn iter_from<Key, Value>(&mut self, key: &[u8]) -> Iter<'_, K, Key, Value>
@@ -452,7 +452,7 @@ impl Cursor<RW> {
     /// ### Flags
     ///
     /// [`WriteFlags::NO_DUP_DATA`] may be used to delete all data items for the
-    /// current key, if the database was opened with [`DatabaseFlags::DUP_SORT`].
+    /// current key, if the database was opened with [`TableFlags::DUP_SORT`].
     pub fn del(&mut self, flags: WriteFlags) -> Result<()> {
         mdbx_result(unsafe {
             self.txn.txn_execute(|_| ffi::mdbx_cursor_del(self.cursor, flags.bits()))?
