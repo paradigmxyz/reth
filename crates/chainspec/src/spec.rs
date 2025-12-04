@@ -256,13 +256,7 @@ pub fn create_chain_config(
     blob_schedule: BTreeMap<String, BlobParams>,
 ) -> ChainConfig {
     // Helper to extract block number from a hardfork condition
-    let block_num = |fork: EthereumHardfork| -> Option<u64> {
-        match hardforks.fork(fork) {
-            ForkCondition::Block(n) => Some(n),
-            ForkCondition::TTD { activation_block_number, .. } => Some(activation_block_number),
-            _ => None,
-        }
-    };
+    let block_num = |fork: EthereumHardfork| hardforks.fork(fork).block_number();
 
     // Helper to extract timestamp from a hardfork condition
     let timestamp = |fork: EthereumHardfork| -> Option<u64> {
@@ -343,20 +337,13 @@ pub fn blob_params_to_schedule(
     schedule.insert("osaka".to_string(), params.osaka);
 
     // Map scheduled entries back to bpo fork names by matching timestamps
-    let bpo_forks = [
-        (EthereumHardfork::Bpo1, "bpo1"),
-        (EthereumHardfork::Bpo2, "bpo2"),
-        (EthereumHardfork::Bpo3, "bpo3"),
-        (EthereumHardfork::Bpo4, "bpo4"),
-        (EthereumHardfork::Bpo5, "bpo5"),
-    ];
-
+    let bpo_forks = EthereumHardfork::bpo_variants();
     for (timestamp, blob_params) in &params.scheduled {
-        for (fork, name) in &bpo_forks {
-            if let ForkCondition::Timestamp(fork_ts) = hardforks.fork(*fork) &&
+        for bpo_fork in bpo_forks {
+            if let ForkCondition::Timestamp(fork_ts) = hardforks.fork(bpo_fork) &&
                 fork_ts == *timestamp
             {
-                schedule.insert((*name).to_string(), *blob_params);
+                schedule.insert(bpo_fork.name().to_lowercase(), *blob_params);
                 break;
             }
         }
