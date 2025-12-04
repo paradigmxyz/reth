@@ -84,7 +84,7 @@ pub struct MockExecutor<DB: Database, I> {
     receipts: Vec<Receipt>,
 }
 
-impl<'a, DB: StateDB + Database, I: Inspector<EthEvmContext<DB>>> BlockExecutor
+impl<DB: StateDB + Database, I: Inspector<EthEvmContext<DB>>> BlockExecutor
     for MockExecutor<DB, I>
 {
     type Evm = EthEvm<DB, I, PrecompilesMap>;

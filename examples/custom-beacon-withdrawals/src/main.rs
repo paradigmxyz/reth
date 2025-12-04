@@ -23,7 +23,6 @@ use reth_ethereum::{
         },
         revm::{
             context::TxEnv,
-            db::State,
             primitives::{address, hardfork::SpecId, Address},
             DatabaseCommit,
         },
@@ -101,12 +100,12 @@ impl BlockExecutorFactory for CustomEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EthEvm<&'a mut State<DB>, I, PrecompilesMap>,
+        evm: EthEvm<DB, I, PrecompilesMap>,
         ctx: EthBlockExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
-        DB: Database + 'a,
-        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+        DB: StateDB + DatabaseCommit + Database + 'a,
+        I: InspectorFor<Self, DB> + 'a,
     {
         CustomBlockExecutor {
             inner: EthBlockExecutor::new(
@@ -189,7 +188,7 @@ pub struct CustomBlockExecutor<'a, Evm> {
 
 impl<E> BlockExecutor for CustomBlockExecutor<'_, E>
 where
-    E: Evm<DB: StateDB, Tx = TxEnv>,
+    E: Evm<DB: StateDB + DatabaseCommit + Database, Tx = TxEnv>,
 {
     type Transaction = TransactionSigned;
     type Receipt = Receipt;
