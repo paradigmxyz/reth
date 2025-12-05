@@ -606,9 +606,7 @@ impl Display for StatusMessage {
 }
 #[cfg(test)]
 mod tests {
-    use crate::{
-        BlockRange, EthVersion, Status, StatusEth69, StatusEth70, StatusMessage, UnifiedStatus,
-    };
+    use crate::{BlockRange, EthVersion, Status, StatusEth69, StatusMessage, UnifiedStatus};
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
     use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
@@ -705,6 +703,7 @@ mod tests {
             .genesis(MAINNET_GENESIS_HASH)
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
             .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
+            .total_difficulty(None)
             .block_range(Some(BlockRange { start_block: 1, end_block: 2 }))
             .build();
 

@@ -206,7 +206,7 @@ impl Decodable for ProtocolVersion {
 
 #[cfg(test)]
 mod tests {
-    use super::{EthVersion, ParseVersionError};
+    use super::EthVersion;
     use alloy_rlp::{Decodable, Encodable, Error as RlpError};
     use bytes::BytesMut;
 
