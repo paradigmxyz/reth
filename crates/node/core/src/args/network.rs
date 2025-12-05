@@ -121,8 +121,8 @@ pub struct NetworkArgs {
 
     /// Maximum number of total peers (inbound + outbound).
     ///
-    /// Sets both max-inbound-peers and max-outbound-peers using 2:1 ratio.
-    /// Cannot be used with --max-outbound-peers or --max-inbound-peers.
+    /// Splits peers using approximately 2:1 inbound:outbound ratio. Cannot be used together with
+    /// `--max-outbound-peers` or `--max-inbound-peers`.
     #[arg(
         long,
         value_name = "COUNT",
