@@ -1,24 +1,26 @@
 //! Consensus types for Era post-merge history files
-//! 
+//!
 //! # Decoding Consensus Types
-//! 
+//!
 //! # Examples
-//! 
+//!
 //! ## Decoding a [`CompressedBeaconState`]
 //!
 //! ```rust
-//! use consensus_types::{BeaconState, MainnetEthSpec, ChainSpec};
+//! use consensus_types::{BeaconState, ChainSpec, MainnetEthSpec};
 //! use reth_era::era::types::consensus::CompressedBeaconState;
 //!
-//! fn decode_state(compressed_state: &CompressedBeaconState) -> Result<(), Box<dyn std::error::Error>> {
-//!     
+//! fn decode_state(
+//!     compressed_state: &CompressedBeaconState,
+//! ) -> Result<(), Box<dyn std::error::Error>> {
 //!     let spec = ChainSpec::mainnet();
 //!
 //!     // Decompress to get SSZ bytes
 //!     let ssz_bytes = compressed_state.decompress()?;
 //!
 //!     // Decode with fork-aware method, chainSpec determines fork from slot in SSZ
-//!     let state = BeaconState::<MainnetEthSpec>::from_ssz_bytes(&ssz_bytes, &spec).map_err(|e| format!("{:?}", e))?;
+//!     let state = BeaconState::<MainnetEthSpec>::from_ssz_bytes(&ssz_bytes, &spec)
+//!         .map_err(|e| format!("{:?}", e))?;
 //!
 //!     println!("State slot: {}", state.slot());
 //!     println!("Fork: {:?}", state.fork_name_unchecked());
@@ -27,11 +29,11 @@
 //!     Ok(())
 //! }
 //! ```
-//! 
+//!
 //! ## Decoding a [`CompressedSignedBeaconBlock`]
 //!
 //! ```rust
-//! use consensus_types::{SignedBeaconBlock, MainnetEthSpec, ForkName, ForkVersionDecode};
+//! use consensus_types::{ForkName, ForkVersionDecode, MainnetEthSpec, SignedBeaconBlock};
 //! use reth_era::era::types::consensus::CompressedSignedBeaconBlock;
 //!
 //! // Decode using fork-aware decoding, fork must be known beforehand
@@ -42,7 +44,8 @@
 //!     // Decompress to get SSZ bytes
 //!     let ssz_bytes = compressed.decompress()?;
 //!
-//!     let block = SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork).map_err(|e| format!("{:?}", e))?;;
+//!     let block = SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork)
+//!         .map_err(|e| format!("{:?}", e))?;
 //!
 //!     println!("Block slot: {}", block.message().slot());
 //!     println!("Proposer index: {}", block.message().proposer_index());
@@ -52,7 +55,7 @@
 //!     Ok(())
 //! }
 //! ```
-  
+
 use crate::e2s::{error::E2sError, types::Entry};
 use snap::{read::FrameDecoder, write::FrameEncoder};
 use std::io::{Read, Write};
