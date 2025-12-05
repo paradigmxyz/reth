@@ -276,6 +276,20 @@ mod tests {
     }
 
     #[test]
+    fn test_default_protocols_still_include_eth69() {
+        // ensure that older eth/69 remains advertised for compatibility
+        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
+        let id = pk2id(&secret_key.public_key(SECP256K1));
+        let hello = HelloMessageWithProtocols::builder(id).build();
+
+        let has_eth69 = hello
+            .protocols
+            .iter()
+            .any(|p| p.cap.name == "eth" && p.cap.version == EthVersion::Eth69 as usize);
+        assert!(has_eth69, "Default protocols should include Eth69");
+    }
+
+    #[test]
     fn hello_message_id_prefix() {
         // ensure that the hello message id is prefixed
         let secret_key = SecretKey::new(&mut rand_08::thread_rng());
