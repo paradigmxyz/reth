@@ -5,6 +5,7 @@
 use crate::{
     pool::{state::SubPool, txpool::TxPool, AddedTransaction},
     test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
+    traits::BlockInfo,
     TransactionOrdering,
 };
 use alloy_primitives::{Address, U256};
@@ -93,6 +94,18 @@ impl<R: Rng> MockTransactionSimulator<R> {
             validator: Default::default(),
             rng,
         }
+    }
+
+    /// Creates a pool configured for this simulator
+    ///
+    /// This is needed because `MockPool::default()` sets `pending_basefee` to 7, but we might want
+    /// to use different values
+    pub(crate) fn create_pool(&self) -> MockPool {
+        let mut pool = MockPool::default();
+        let mut info = pool.block_info();
+        info.pending_basefee = self.base_fee as u64;
+        pool.set_block_info(info);
+        pool
     }
 
     /// Returns a random address from the senders set
@@ -312,7 +325,7 @@ mod tests {
             ),
         };
         let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
-        let mut pool = MockPool::default();
+        let mut pool = simulator.create_pool();
 
         simulator.next(&mut pool);
         assert_eq!(pool.pending().len(), 1);
@@ -348,7 +361,7 @@ mod tests {
             ),
         };
         let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
-        let mut pool = MockPool::default();
+        let mut pool = simulator.create_pool();
 
         simulator.next(&mut pool);
         assert_eq!(pool.pending().len(), 0);
@@ -389,7 +402,7 @@ mod tests {
         };
 
         let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
-        let mut pool = MockPool::default();
+        let mut pool = simulator.create_pool();
 
         for _ in 0..1000 {
             simulator.next(&mut pool);
