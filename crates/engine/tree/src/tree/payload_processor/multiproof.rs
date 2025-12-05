@@ -238,7 +238,7 @@ fn dispatch_with_chunking<T, I>(
     available_storage_workers: usize,
     chunker: impl FnOnce(T, usize) -> I,
     mut dispatch: impl FnMut(T),
-) -> ChunkDispatchOutcome
+) -> usize
 where
     I: IntoIterator<Item = T>,
 {
@@ -255,11 +255,11 @@ where
             dispatch(chunk);
             dispatched += 1;
         }
-        return ChunkDispatchOutcome { dispatched, chunked: true };
+        return dispatched;
     }
 
     dispatch(items);
-    ChunkDispatchOutcome { dispatched: 1, chunked: false }
+    1
 }
 
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
