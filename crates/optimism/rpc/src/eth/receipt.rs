@@ -19,7 +19,7 @@ use reth_rpc_eth_api::{
     RpcConvert,
 };
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
-use reth_storage_api::{ReceiptProvider, StateProviderFactory, TransactionsProvider};
+use reth_storage_api::{BlockReader, StateProviderFactory};
 use std::fmt::Debug;
 
 impl<N, Rpc> LoadReceipt for OpEthApi<N, Rpc>
@@ -45,8 +45,11 @@ impl<Provider> OpReceiptConverter<Provider> {
 impl<Provider, N> ReceiptConverter<N> for OpReceiptConverter<Provider>
 where
     N: NodePrimitives<SignedTx: OpTransaction, Receipt = OpReceipt>,
-    Provider:
-        BlockReader<Block = N::Block> + ChainSpecProvider<ChainSpec: OpHardforks> + Debug + 'static,
+    Provider: BlockReader<Block = N::Block>
+        + ChainSpecProvider<ChainSpec: OpHardforks>
+        + StateProviderFactory
+        + Debug
+        + 'static,
 {
     type RpcReceipt = OpTransactionReceipt;
     type Error = OpEthApiError;
@@ -86,7 +89,7 @@ where
 
         // [TODO] It's a temporary solution to get token ratio from state, we should modify the
         // receipt
-        let state = self.inner.eth_api.provider().state_by_block_hash(meta.block_hash).unwrap();
+        let state = self.provider.state_by_block_hash(block.hash()).unwrap();
         let token_ratio = state.storage(GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT.into()).unwrap();
         l1_block_info.token_ratio = token_ratio;
 
@@ -131,6 +134,24 @@ pub struct OpReceiptFieldsBuilder {
     /* --------------------------------------- Mantle ---------------------------------------- */
     /// The token ratio.
     pub token_ratio: Option<u128>,
+    /* ---------------------------------------- Canyon ----------------------------------------- */
+    /// Deposit receipt version, if this is a deposit transaction.
+    pub deposit_receipt_version: Option<u64>,
+    /* ---------------------------------------- Ecotone ---------------------------------------- */
+    /// The current L1 fee scalar.
+    pub l1_base_fee_scalar: Option<u128>,
+    /// The current L1 blob base fee.
+    pub l1_blob_base_fee: Option<u128>,
+    /// The current L1 blob base fee scalar.
+    pub l1_blob_base_fee_scalar: Option<u128>,
+    /* ---------------------------------------- Isthmus ---------------------------------------- */
+    /// The current operator fee scalar.
+    pub operator_fee_scalar: Option<u128>,
+    /// The current L1 blob base fee scalar.
+    pub operator_fee_constant: Option<u128>,
+    /* ---------------------------------------- Jovian ----------------------------------------- */
+    /// The current DA footprint gas scalar.
+    pub da_footprint_gas_scalar: Option<u16>,
 }
 
 impl OpReceiptFieldsBuilder {
@@ -145,6 +166,13 @@ impl OpReceiptFieldsBuilder {
             l1_base_fee: None,
             deposit_nonce: None,
             token_ratio: None,
+            deposit_receipt_version: None,
+            l1_base_fee_scalar: None,
+            l1_blob_base_fee: None,
+            l1_blob_base_fee_scalar: None,
+            operator_fee_scalar: None,
+            operator_fee_constant: None,
+            da_footprint_gas_scalar: None,
         }
     }
 
@@ -196,7 +224,8 @@ impl OpReceiptFieldsBuilder {
         //         l1_block_info.operator_fee_constant.map(|constant| constant.saturating_to());
         // }
 
-        self.token_ratio = l1_block_info.token_ratio.map(|ratio| ratio.saturating_to());
+        // self.da_footprint_gas_scalar = l1_block_info.da_footprint_gas_scalar;
+        // self.token_ratio = l1_block_info.token_ratio.map(|ratio| ratio.saturating_to());
 
         Ok(self)
     }
@@ -223,13 +252,14 @@ impl OpReceiptFieldsBuilder {
             l1_fee_scalar,
             l1_base_fee: l1_gas_price,
             deposit_nonce,
-            // deposit_receipt_version,
-            // l1_base_fee_scalar,
-            // l1_blob_base_fee,
-            // l1_blob_base_fee_scalar,
-            // operator_fee_scalar,
-            // operator_fee_constant,
             token_ratio,
+            deposit_receipt_version,
+            l1_base_fee_scalar,
+            l1_blob_base_fee,
+            l1_blob_base_fee_scalar,
+            operator_fee_scalar,
+            operator_fee_constant,
+            da_footprint_gas_scalar,
         } = self;
 
         OpTransactionReceiptFields {
@@ -238,15 +268,16 @@ impl OpReceiptFieldsBuilder {
                 l1_gas_used,
                 l1_fee,
                 l1_fee_scalar,
-                l1_base_fee_scalar: None,
-                l1_blob_base_fee: None,
-                l1_blob_base_fee_scalar: None,
-                operator_fee_scalar: None,
-                operator_fee_constant: None,
+                l1_base_fee_scalar,
+                l1_blob_base_fee,
+                l1_blob_base_fee_scalar,
+                operator_fee_scalar,
+                operator_fee_constant,
                 token_ratio,
+                da_footprint_gas_scalar,
             },
             deposit_nonce,
-            deposit_receipt_version: None,
+            deposit_receipt_version,
         }
     }
 }
@@ -297,6 +328,21 @@ impl OpReceiptBuilder {
                 }
             }
         });
+
+        // In jovian, we're using the blob gas used field to store the current da
+        // footprint's value.
+        // We're computing the jovian blob gas used before building the receipt since the inputs get
+        // consumed by the `build_receipt` function.
+        // chain_spec.is_jovian_active_at_timestamp(timestamp).then(|| {
+        //     // Estimate the size of the transaction in bytes and multiply by the DA
+        //     // footprint gas scalar.
+        //     // Jovian specs: `https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/jovian/exec-engine.md#da-footprint-block-limit`
+        //     let da_size = estimate_tx_compressed_size(tx_signed.encoded_2718().as_slice())
+        //         .saturating_div(1_000_000)
+        //         .saturating_mul(l1_block_info.da_footprint_gas_scalar.unwrap_or_default().into());
+
+        //     core_receipt.blob_gas_used = Some(da_size);
+        // });
 
         let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp, block_number)
             .l1_block_info(chain_spec, tx_signed, l1_block_info)?
@@ -360,6 +406,7 @@ mod test {
                 operator_fee_scalar: None,
                 operator_fee_constant: None,
                 token_ratio: None,
+                da_footprint_gas_scalar: None,
             },
             deposit_nonce: None,
             deposit_receipt_version: None,
@@ -404,6 +451,7 @@ mod test {
             operator_fee_scalar,
             operator_fee_constant,
             token_ratio,
+            da_footprint_gas_scalar,
         } = receipt_meta.l1_block_info;
 
         assert_eq!(
@@ -451,6 +499,11 @@ mod test {
             token_ratio, TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.token_ratio,
             "incorrect token ratio"
         );
+        assert_eq!(
+            da_footprint_gas_scalar,
+            TX_META_TX_1_OP_MAINNET_BLOCK_124665056.l1_block_info.da_footprint_gas_scalar,
+            "incorrect da footprint gas scalar"
+        );
     }
 
     #[test]
@@ -459,11 +512,7 @@ mod test {
             OpTransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
                 .unwrap();
 
-        let mut l1_block_info = op_revm::L1BlockInfo {
-            // operator_fee_scalar: Some(U256::ZERO),
-            // operator_fee_constant: Some(U256::from(2)),
-            ..Default::default()
-        };
+        let mut l1_block_info = op_revm::L1BlockInfo::default();
 
         let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
             .l1_block_info(&*OP_MAINNET, &tx_1, &mut l1_block_info)
@@ -483,11 +532,7 @@ mod test {
             OpTransactionSigned::decode_2718(&mut TX_1_OP_MAINNET_BLOCK_124665056.as_slice())
                 .unwrap();
 
-        let mut l1_block_info = op_revm::L1BlockInfo {
-            // operator_fee_scalar: Some(U256::ZERO),
-            // operator_fee_constant: Some(U256::ZERO),
-            ..Default::default()
-        };
+        let mut l1_block_info = op_revm::L1BlockInfo::default();
 
         let receipt_meta = OpReceiptFieldsBuilder::new(BLOCK_124665056_TIMESTAMP, 124665056)
             .l1_block_info(&*OP_MAINNET, &tx_1, &mut l1_block_info)
@@ -539,6 +584,7 @@ mod test {
             operator_fee_scalar,
             operator_fee_constant,
             token_ratio,
+            da_footprint_gas_scalar,
         } = receipt_meta.l1_block_info;
 
         assert_eq!(l1_gas_price, Some(14121491676), "incorrect l1 base fee (former gas price)");
@@ -551,5 +597,6 @@ mod test {
         assert_eq!(operator_fee_scalar, None, "incorrect operator fee scalar");
         assert_eq!(operator_fee_constant, None, "incorrect operator fee constant");
         assert_eq!(token_ratio, None, "incorrect token ratio");
+        assert_eq!(da_footprint_gas_scalar, None, "incorrect da footprint gas scalar");
     }
 }

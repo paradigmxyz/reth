@@ -11,8 +11,9 @@ use reth_db_common::init::init_from_state_dump;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_primitives::OpPrimitives;
 use reth_primitives_traits::SealedHeader;
+use reth_provider::DBProvider;
 use reth_provider::{
-    BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter
+    BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
 };
 use std::{io::BufReader, str::FromStr, sync::Arc};
 use tracing::info;
@@ -56,7 +57,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
                 .init_state
                 .header
                 .ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
-            let header = without_evm::read_header_from_file(header)?;
+            let header: alloy_consensus::Header = without_evm::read_header_from_file(header)?;
 
             let header_hash = self
                 .init_state
@@ -80,6 +81,7 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
                     &provider_rw,
                     SealedHeader::new(header, header_hash),
                     total_difficulty,
+                    |_| alloy_consensus::Header::default(),
                 )?;
 
                 // SAFETY: it's safe to commit static files, since in the event of a crash, they

@@ -13,7 +13,7 @@ use reth_static_file_types::StaticFileSegment;
 use std::{fs::File, io::Read, path::PathBuf};
 use tracing::info;
 /// Reads the header RLP from a file and returns the Header.
-pub(crate) fn read_header_from_file<H>(path: PathBuf) -> Result<H, eyre::Error>
+pub fn read_header_from_file<H>(path: PathBuf) -> Result<H, eyre::Error>
 where
     H: Decodable,
 {

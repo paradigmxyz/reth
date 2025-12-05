@@ -7,7 +7,6 @@ pub mod transaction;
 
 mod block;
 mod call;
-mod fee;
 mod pending_block;
 
 use crate::{
@@ -19,8 +18,8 @@ use alloy_primitives::{B256, U256};
 use eyre::WrapErr;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
-use reth_chain_state::CanonStateSubscriptions;
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
+use reqwest::Url;
+use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
@@ -30,14 +29,15 @@ use reth_optimism_flashblocks::{
 };
 use reth_rpc::eth::{core::EthApiInner, DevSigner};
 use reth_rpc_eth_api::{
-    helpers::{AddDevSigners, EthApiSpec, EthSigner, EthState, LoadState, SpawnBlocking, Trace},
+    helpers::{
+        pending_block::BuildPendingEnv, AddDevSigners, EthApiSpec, EthFees, EthState, LoadFee,
+        LoadPendingBlock, LoadState, SpawnBlocking, Trace,
+    },
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes, SignableTxRequest,
 };
-use reth_rpc_eth_types::EthStateCache;
-use reth_storage_api::{
-    BlockNumReader, BlockReader, BlockReaderIdExt, ProviderBlock, ProviderHeader, ProviderReceipt,
-    ProviderTx, StageCheckpointReader, StateProviderFactory,
+use reth_rpc_eth_types::{
+    EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock, PendingBlockEnvOrigin,
 };
 use reth_storage_api::{ProviderHeader, ProviderTx};
 use reth_tasks::{
@@ -274,6 +274,32 @@ where
     }
 }
 
+impl<N, Rpc> LoadFee for OpEthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+{
+    #[inline]
+    fn gas_oracle(&self) -> &GasPriceOracle<Self::Provider> {
+        self.inner.eth_api.gas_oracle()
+    }
+
+    #[inline]
+    fn fee_history_cache(&self) -> &FeeHistoryCache<ProviderHeader<N::Provider>> {
+        self.inner.eth_api.fee_history_cache()
+    }
+
+    async fn suggested_priority_fee(&self) -> Result<U256, Self::Error> {
+        self.inner
+            .eth_api
+            .gas_oracle()
+            .op_suggest_tip_cap(self.inner.min_suggested_priority_fee)
+            .await
+            .map_err(Into::into)
+    }
+}
+
 impl<N, Rpc> LoadState for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
@@ -292,6 +318,14 @@ where
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_api.eth_proof_window()
     }
+}
+
+impl<N, Rpc> EthFees for OpEthApi<N, Rpc>
+where
+    N: RpcNodeCore,
+    OpEthApiError: FromEvmError<N::Evm>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+{
 }
 
 impl<N, Rpc> Trace for OpEthApi<N, Rpc>

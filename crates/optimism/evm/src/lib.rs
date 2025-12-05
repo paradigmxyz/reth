@@ -203,7 +203,7 @@ where
 
 impl<ChainSpec, N, R> ConfigureEngineEvm<OpExecutionData> for OpEvmConfig<ChainSpec, N, R>
 where
-    ChainSpec: EthChainSpec<Header = Header> + OpHardforks,
+    ChainSpec: EthChainSpec<Header = Header> + OpHardforks + MantleHardforks,
     N: NodePrimitives<
         Receipt = R::Receipt,
         SignedTx = R::Transaction,
@@ -222,7 +222,8 @@ where
         let timestamp = payload.payload.timestamp();
         let block_number = payload.payload.block_number();
 
-        let spec = revm_spec_by_timestamp_after_bedrock(self.chain_spec(), timestamp);
+        // Use trait method that automatically handles Mantle-specific hardforks
+        let spec = self.chain_spec().revm_spec_at_timestamp(timestamp);
 
         let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
 

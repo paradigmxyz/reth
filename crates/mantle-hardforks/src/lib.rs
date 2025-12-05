@@ -102,6 +102,24 @@ pub trait MantleHardforks: OpHardforks {
     fn is_skadi_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.mantle_fork_activation(MantleHardfork::Skadi).active_at_timestamp(timestamp)
     }
+
+    /// Returns the revm spec ID for Mantle chains at the given timestamp.
+    /// 
+    /// This checks Mantle-specific hardforks (like Skadi) first, then falls back
+    /// to standard OP Stack hardfork detection.
+    /// 
+    /// # Note
+    /// 
+    /// This is only intended to be used after Bedrock, when hardforks are activated by timestamp.
+    fn revm_spec_at_timestamp(&self, timestamp: u64) -> op_revm::OpSpecId {
+        // Check Mantle Skadi first
+        if self.is_skadi_active_at_timestamp(timestamp) {
+            op_revm::OpSpecId::OSAKA
+        } else {
+            // Fall back to OP Stack hardforks
+            alloy_op_evm::spec_by_timestamp_after_bedrock(self, timestamp)
+        }
+    }
 }
 
 /// A type allowing to configure activation [`ForkCondition`]s for a given list of

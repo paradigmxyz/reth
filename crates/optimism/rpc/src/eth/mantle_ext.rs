@@ -58,6 +58,7 @@ where
     Provider: BlockReaderIdExt + BlockNumReader + StateProviderFactory + Clone + 'static,
     EthApi: EthApiTypes
         + EthApiServer<
+            reth_rpc_eth_api::RpcTxReq<EthApi::NetworkTypes>,
             reth_rpc_eth_api::RpcTransaction<EthApi::NetworkTypes>,
             RpcBlock<EthApi::NetworkTypes>,
             reth_rpc_eth_api::RpcReceipt<EthApi::NetworkTypes>,
@@ -147,14 +148,12 @@ where
                 .await
                 .map_err(|err| {
                     // Extract the original error message from the sequencer response
-                    let error_msg = match &err {
-                        SequencerClientError::HttpError(rpc_err) => {
-                            rpc_err.as_error_resp()
-                                .map(|payload| payload.message.to_string())
-                                .unwrap_or_else(|| err.to_string())
-                        }
-                        _ => err.to_string(),
-                    };
+                    // SequencerClientError only has one variant (HttpError), so we can directly destructure
+                    let SequencerClientError::HttpError(rpc_err) = &err;
+                    let error_msg = rpc_err
+                        .as_error_resp()
+                        .map(|payload| payload.message.to_string())
+                        .unwrap_or_else(|| err.to_string());
                     
                     ErrorObject::owned(
                         -32000,

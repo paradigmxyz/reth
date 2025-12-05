@@ -41,7 +41,7 @@ pub(crate) struct TxDeposit {
     value: U256,
     gas_limit: u64,
     is_system_transaction: bool,
-    eth_value: Option<u128>,
+    eth_value: u128,
     eth_tx_value: Option<u128>,
     input: Bytes,
 }

@@ -12,8 +12,7 @@ use reth_rpc_server_types::{
     constants,
     constants::gas_oracle::{
         DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
-        DEFAULT_MAX_GAS_PRICE, DEFAULT_MIN_SUGGESTED_PRIORITY_FEE, MAX_HEADER_HISTORY,
-        MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
+        DEFAULT_MAX_GAS_PRICE, MAX_HEADER_HISTORY, MAX_REWARD_PERCENTILE_COUNT, SAMPLE_NUMBER,
     },
 };
 use reth_storage_api::{BlockReaderIdExt, NodePrimitivesProvider};
@@ -57,12 +56,6 @@ pub struct GasPriceOracleConfig {
 
     /// The minimum gas price, under which the sample will be ignored
     pub ignore_price: Option<U256>,
-
-    /// The minimum suggested priority fee for Optimism chains
-    ///
-    /// This is used by Optimism-specific gas price algorithms.
-    /// If not set, defaults to [`DEFAULT_MIN_SUGGESTED_PRIORITY_FEE`] (0.0001 gwei = 100,000 wei).
-    pub min_suggested_priority_fee: Option<U256>,
 }
 
 impl Default for GasPriceOracleConfig {
@@ -76,7 +69,6 @@ impl Default for GasPriceOracleConfig {
             default_suggested_fee: None,
             max_price: Some(DEFAULT_MAX_GAS_PRICE),
             ignore_price: Some(DEFAULT_IGNORE_GAS_PRICE),
-            min_suggested_priority_fee: Some(DEFAULT_MIN_SUGGESTED_PRIORITY_FEE),
         }
     }
 }
@@ -130,14 +122,6 @@ where
                 cached_values,
             ))),
         });
-
-        // if the price is less than the min suggested priority fee, then we use the min suggested priority fee
-        if oracle_config.min_suggested_priority_fee.is_none()
-            || oracle_config.min_suggested_priority_fee.unwrap_or_default() <= U256::ZERO
-        {
-            warn!("Sanitizing invalid optimism gasprice oracle min priority fee suggestion, using default");
-            oracle_config.min_suggested_priority_fee = Some(DEFAULT_MIN_SUGGESTED_PRIORITY_FEE);
-        }
 
         Self { provider, oracle_config, cache, ignore_price, inner }
     }

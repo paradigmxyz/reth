@@ -303,7 +303,12 @@ impl EthChainSpec for OpChainSpec {
         } else if self.is_holocene_active_at_timestamp(parent.timestamp()) {
             decode_holocene_base_fee(self, parent, target_timestamp).ok()
         } else {
-            self.inner.next_block_base_fee(parent, target_timestamp)
+            // For chains with Constant basefee (e.g., Mantle), keep basefee unchanged
+            // to avoid dynamic calculation that would cause basefee variation
+            match &self.inner.base_fee_params {
+                BaseFeeParamsKind::Constant(_) => parent.base_fee_per_gas(),
+                BaseFeeParamsKind::Variable(_) => self.inner.next_block_base_fee(parent, target_timestamp),
+            }
         }
     }
 }

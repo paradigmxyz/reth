@@ -482,7 +482,7 @@ revm-context-interface = { git = "https://github.com/mantle-xyz/revm", tag = "v2
 revm-database = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.0", default-features = false }
 revm-database-interface = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.0", default-features = false }
 op-revm = { git = "https://github.com/mantle-xyz/revm", tag = "v2.1.0", default-features = false }
-#revm-inspectors = { git = "https://github.com/mantle-xyz/revm-inspectors", tag = "v2.1.0", default-features = false }
+revm-inspectors = { git = "https://github.com/mantle-xyz/revm-inspectors", tag = "v2.1.0", default-features = false }
 
 
 # eth
@@ -496,7 +496,7 @@ alloy-sol-macro = "1.4.1"
 alloy-sol-types = { version = "1.4.1", default-features = false }
 alloy-trie = { version = "0.9.1", default-features = false }
 
-alloy-hardforks = "0.4.0"
+alloy-hardforks = "^0.4.2"
 
 alloy-consensus = { version = "1.0.37", default-features = false }
 alloy-contract = { version = "1.0.37", default-features = false }
@@ -570,7 +570,7 @@ rand = "0.9"
 rayon = "1.7"
 rustc-hash = { version = "2.0", default-features = false }
 schnellru = "0.2"
-serde = { version = "=1.0.215", default-features = false }
+serde = { version = "^1.0.226", default-features = false }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
 serde_with = { version = "3", default-features = false, features = ["macros"] }
 sha2 = { version = "0.10", default-features = false }
@@ -751,7 +751,7 @@ vergen-git2 = "1.0.5"
 # revm-database = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/database", default-features = false }
 # revm-database-interface = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/database/interface", default-features = false }
 # op-revm = { path = "/Users/sh001/Documents/codes/op-reth/revm/crates/op-revm", default-features = false }
-revm-inspectors = { path = "/Users/sh001/Documents/codes/op-reth/revm-inspectors", default-features = false }
+# revm-inspectors = { path = "/Users/sh001/Documents/codes/op-reth/revm-inspectors", default-features = false }
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "cfb13aa" }
