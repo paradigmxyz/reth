@@ -1425,12 +1425,13 @@ where
                                         .engine
                                         .failed_forkchoice_updated_response_deliveries
                                         .increment(1);
-                                    error!(target: "engine::tree", elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    error!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
+                                let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
                                 self.metrics
                                     .engine
@@ -1446,7 +1447,7 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    error!(target: "engine::tree", "Failed to send event: {err:?}");
+                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
