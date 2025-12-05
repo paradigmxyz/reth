@@ -2099,6 +2099,7 @@ mod tests {
         assert!(!targets.contains_key(&addr));
     }
 
+    /// Verifies that consecutive prefetch proof messages are batched together.
     #[test]
     fn test_prefetch_proofs_batching() {
         let test_provider_factory = create_test_provider_factory();
@@ -2147,6 +2148,7 @@ mod tests {
         assert_eq!(proofs_requested, 1);
     }
 
+    /// Verifies that consecutive state update messages from the same source are batched together.
     #[test]
     fn test_state_update_batching() {
         use alloy_evm::block::StateChangeSource;
@@ -2221,6 +2223,7 @@ mod tests {
         assert_eq!(proofs_requested, 1);
     }
 
+    /// Verifies that state updates from different sources are not batched together.
     #[test]
     fn test_state_update_batching_separates_sources() {
         use alloy_evm::block::StateChangeSource;
@@ -2346,6 +2349,7 @@ mod tests {
         }
     }
 
+    /// Verifies that pre-block updates only batch when their payloads are identical.
     #[test]
     fn test_pre_block_updates_require_payload_match_to_batch() {
         use alloy_evm::block::{StateChangePreBlockSource, StateChangeSource};
@@ -2458,12 +2462,9 @@ mod tests {
         }
     }
 
+    /// Verifies that different message types arriving mid-batch are not lost and preserve order.
     #[test]
     fn test_batching_preserves_ordering_with_different_message_type() {
-        // This test verifies that when a different message type arrives mid-batch,
-        // it is NOT lost and is processed in the correct order.
-        // This catches the bug where `self.tx.send(other_msg)` would put the message
-        // at the END of the queue instead of preserving its position.
         use alloy_evm::block::StateChangeSource;
         use revm_state::Account;
 
@@ -2587,12 +2588,9 @@ mod tests {
         }
     }
 
+    /// Verifies that pending messages from a previous batch drain get full batching treatment.
     #[test]
     fn test_pending_messages_get_full_batching_treatment() {
-        // This test verifies that pending messages (stored during a previous batch drain)
-        // get FULL batching treatment when processed - they should also drain and merge
-        // same-type messages that follow them in the channel.
-        //
         // Queue: [Prefetch1, State1, State2, State3, Prefetch2]
         //
         // Expected behavior:
