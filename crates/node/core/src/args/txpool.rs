@@ -3,7 +3,7 @@
 use crate::cli::config::RethTransactionPoolConfig;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
-use clap::Args;
+use clap::{builder::Resettable, Args};
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
@@ -33,11 +33,14 @@ pub struct DefaultTxPoolValues {
     queued_max_size: usize,
     blobpool_max_count: usize,
     blobpool_max_size: usize,
+    blob_cache_size: Option<u32>,
     disable_blobs_support: bool,
     max_account_slots: usize,
     price_bump: u128,
     minimal_protocol_basefee: u64,
+    minimum_priority_fee: Option<u128>,
     enforced_gas_limit: u64,
+    max_tx_gas_limit: Option<u64>,
     blob_transaction_price_bump: u128,
     max_tx_input_bytes: usize,
     max_cached_entries: u32,
@@ -49,6 +52,7 @@ pub struct DefaultTxPoolValues {
     new_tx_listener_buffer_size: usize,
     max_new_pending_txs_notifications: usize,
     max_queued_lifetime: Duration,
+    transactions_backup_path: Option<PathBuf>,
     disable_transactions_backup: bool,
     max_batch_size: usize,
 }
@@ -112,6 +116,12 @@ impl DefaultTxPoolValues {
         self
     }
 
+    /// Set the default blob cache size
+    pub const fn with_blob_cache_size(mut self, v: Option<u32>) -> Self {
+        self.blob_cache_size = v;
+        self
+    }
+
     /// Set whether to disable blob transaction support by default
     pub const fn with_disable_blobs_support(mut self, v: bool) -> Self {
         self.disable_blobs_support = v;
@@ -136,9 +146,21 @@ impl DefaultTxPoolValues {
         self
     }
 
+    /// Set the default minimum priority fee
+    pub const fn with_minimum_priority_fee(mut self, v: Option<u128>) -> Self {
+        self.minimum_priority_fee = v;
+        self
+    }
+
     /// Set the default enforced gas limit
     pub const fn with_enforced_gas_limit(mut self, v: u64) -> Self {
         self.enforced_gas_limit = v;
+        self
+    }
+
+    /// Set the default max transaction gas limit
+    pub const fn with_max_tx_gas_limit(mut self, v: Option<u64>) -> Self {
+        self.max_tx_gas_limit = v;
         self
     }
 
@@ -208,6 +230,12 @@ impl DefaultTxPoolValues {
         self
     }
 
+    /// Set the default transactions backup path
+    pub fn with_transactions_backup_path(mut self, v: Option<PathBuf>) -> Self {
+        self.transactions_backup_path = v;
+        self
+    }
+
     /// Set whether to disable transaction backup by default
     pub const fn with_disable_transactions_backup(mut self, v: bool) -> Self {
         self.disable_transactions_backup = v;
@@ -232,11 +260,14 @@ impl Default for DefaultTxPoolValues {
             queued_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
             blobpool_max_count: TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
             blobpool_max_size: TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+            blob_cache_size: None,
             disable_blobs_support: false,
             max_account_slots: TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
             price_bump: DEFAULT_PRICE_BUMP,
             minimal_protocol_basefee: MIN_PROTOCOL_BASE_FEE,
+            minimum_priority_fee: None,
             enforced_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
+            max_tx_gas_limit: None,
             blob_transaction_price_bump: REPLACE_BLOB_PRICE_BUMP,
             max_tx_input_bytes: DEFAULT_MAX_TX_INPUT_BYTES,
             max_cached_entries: DEFAULT_MAX_CACHED_BLOBS,
@@ -248,6 +279,7 @@ impl Default for DefaultTxPoolValues {
             new_tx_listener_buffer_size: NEW_TX_LISTENER_BUFFER_SIZE,
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
+            transactions_backup_path: None,
             disable_transactions_backup: false,
             max_batch_size: 1,
         }
@@ -287,7 +319,7 @@ pub struct TxPoolArgs {
     pub blobpool_max_size: usize,
 
     /// Max number of entries for the in memory cache of the blob store.
-    #[arg(long = "txpool.blob-cache-size", alias = "txpool.blob_cache_size")]
+    #[arg(long = "txpool.blob-cache-size", alias = "txpool.blob_cache_size", default_value = Resettable::from(DefaultTxPoolValues::get_global().blob_cache_size.map(|v| v.to_string().into())))]
     pub blob_cache_size: Option<u32>,
 
     /// Disable EIP-4844 blob transaction support
@@ -308,7 +340,7 @@ pub struct TxPoolArgs {
 
     /// Minimum priority fee required for transaction acceptance into the pool.
     /// Transactions with priority fee below this value will be rejected.
-    #[arg(long = "txpool.minimum-priority-fee")]
+    #[arg(long = "txpool.minimum-priority-fee", default_value = Resettable::from(DefaultTxPoolValues::get_global().minimum_priority_fee.map(|v| v.to_string().into())))]
     pub minimum_priority_fee: Option<u128>,
 
     /// The default enforced gas limit for transactions entering the pool
@@ -317,7 +349,7 @@ pub struct TxPoolArgs {
 
     /// Maximum gas limit for individual transactions. Transactions exceeding this limit will be
     /// rejected by the transaction pool
-    #[arg(long = "txpool.max-tx-gas")]
+    #[arg(long = "txpool.max-tx-gas", default_value = Resettable::from(DefaultTxPoolValues::get_global().max_tx_gas_limit.map(|v| v.to_string().into())))]
     pub max_tx_gas_limit: Option<u64>,
 
     /// Price bump percentage to replace an already existing blob transaction
@@ -335,11 +367,9 @@ pub struct TxPoolArgs {
     /// Flag to disable local transaction exemptions.
     #[arg(long = "txpool.nolocals", default_value_t = DefaultTxPoolValues::get_global().no_locals)]
     pub no_locals: bool,
-
     /// Flag to allow certain addresses as local.
     #[arg(long = "txpool.locals", default_values = DefaultTxPoolValues::get_global().locals.iter().map(ToString::to_string))]
     pub locals: Vec<Address>,
-
     /// Flag to toggle local transaction propagation.
     #[arg(long = "txpool.no-local-transactions-propagation", default_value_t = DefaultTxPoolValues::get_global().no_local_transactions_propagation)]
     pub no_local_transactions_propagation: bool,
@@ -366,7 +396,7 @@ pub struct TxPoolArgs {
     pub max_queued_lifetime: Duration,
 
     /// Path to store the local transaction backup at, to survive node restarts.
-    #[arg(long = "txpool.transactions-backup", alias = "txpool.journal", value_name = "PATH")]
+    #[arg(long = "txpool.transactions-backup", alias = "txpool.journal", value_name = "PATH", default_value = Resettable::from(DefaultTxPoolValues::get_global().transactions_backup_path.as_ref().map(|v| v.to_string_lossy().into())))]
     pub transactions_backup_path: Option<PathBuf>,
 
     /// Disables transaction backup to disk on node shutdown.
@@ -412,11 +442,14 @@ impl Default for TxPoolArgs {
             queued_max_size,
             blobpool_max_count,
             blobpool_max_size,
+            blob_cache_size,
             disable_blobs_support,
             max_account_slots,
             price_bump,
             minimal_protocol_basefee,
+            minimum_priority_fee,
             enforced_gas_limit,
+            max_tx_gas_limit,
             blob_transaction_price_bump,
             max_tx_input_bytes,
             max_cached_entries,
@@ -428,6 +461,7 @@ impl Default for TxPoolArgs {
             new_tx_listener_buffer_size,
             max_new_pending_txs_notifications,
             max_queued_lifetime,
+            transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
         } = DefaultTxPoolValues::get_global().clone();
@@ -440,14 +474,14 @@ impl Default for TxPoolArgs {
             queued_max_size,
             blobpool_max_count,
             blobpool_max_size,
-            blob_cache_size: None,
+            blob_cache_size,
             disable_blobs_support,
             max_account_slots,
             price_bump,
             minimal_protocol_basefee,
-            minimum_priority_fee: None,
+            minimum_priority_fee,
             enforced_gas_limit,
-            max_tx_gas_limit: None,
+            max_tx_gas_limit,
             blob_transaction_price_bump,
             max_tx_input_bytes,
             max_cached_entries,
@@ -459,7 +493,7 @@ impl Default for TxPoolArgs {
             new_tx_listener_buffer_size,
             max_new_pending_txs_notifications,
             max_queued_lifetime,
-            transactions_backup_path: None,
+            transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
         }
@@ -518,6 +552,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::address;
     use clap::Parser;
 
     /// A helper type to parse Args more easily
@@ -532,17 +567,6 @@ mod tests {
         let default_args = TxPoolArgs::default();
         let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
-    }
-
-    #[test]
-    fn txpool_parse_locals() {
-        let args = CommandParser::<TxPoolArgs>::parse_from([
-            "reth",
-            "--txpool.locals",
-            "0x0000000000000000000000000000000000000000",
-        ])
-        .args;
-        assert_eq!(args.locals, vec![Address::ZERO]);
     }
 
     #[test]
@@ -563,5 +587,107 @@ mod tests {
             CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.lifetime", "invalid"]);
 
         assert!(result.is_err(), "Expected an error for invalid duration");
+    }
+
+    #[test]
+    fn txpool_args() {
+        let args = TxPoolArgs {
+            pending_max_count: 1000,
+            pending_max_size: 200,
+            basefee_max_count: 2000,
+            basefee_max_size: 300,
+            queued_max_count: 3000,
+            queued_max_size: 400,
+            blobpool_max_count: 4000,
+            blobpool_max_size: 500,
+            blob_cache_size: Some(100),
+            disable_blobs_support: false,
+            max_account_slots: 20,
+            price_bump: 15,
+            minimal_protocol_basefee: 1000000000,
+            minimum_priority_fee: Some(2000000000),
+            enforced_gas_limit: 40000000,
+            max_tx_gas_limit: Some(50000000),
+            blob_transaction_price_bump: 25,
+            max_tx_input_bytes: 131072,
+            max_cached_entries: 200,
+            no_locals: true,
+            locals: vec![
+                address!("0x0000000000000000000000000000000000000001"),
+                address!("0x0000000000000000000000000000000000000002"),
+            ],
+            no_local_transactions_propagation: true,
+            additional_validation_tasks: 4,
+            pending_tx_listener_buffer_size: 512,
+            new_tx_listener_buffer_size: 256,
+            max_new_pending_txs_notifications: 128,
+            max_queued_lifetime: Duration::from_secs(7200),
+            transactions_backup_path: Some(PathBuf::from("/tmp/txpool-backup")),
+            disable_transactions_backup: false,
+            max_batch_size: 10,
+        };
+
+        let parsed_args = CommandParser::<TxPoolArgs>::parse_from([
+            "reth",
+            "--txpool.pending-max-count",
+            "1000",
+            "--txpool.pending-max-size",
+            "200",
+            "--txpool.basefee-max-count",
+            "2000",
+            "--txpool.basefee-max-size",
+            "300",
+            "--txpool.queued-max-count",
+            "3000",
+            "--txpool.queued-max-size",
+            "400",
+            "--txpool.blobpool-max-count",
+            "4000",
+            "--txpool.blobpool-max-size",
+            "500",
+            "--txpool.blob-cache-size",
+            "100",
+            "--txpool.max-account-slots",
+            "20",
+            "--txpool.pricebump",
+            "15",
+            "--txpool.minimal-protocol-fee",
+            "1000000000",
+            "--txpool.minimum-priority-fee",
+            "2000000000",
+            "--txpool.gas-limit",
+            "40000000",
+            "--txpool.max-tx-gas",
+            "50000000",
+            "--blobpool.pricebump",
+            "25",
+            "--txpool.max-tx-input-bytes",
+            "131072",
+            "--txpool.max-cached-entries",
+            "200",
+            "--txpool.nolocals",
+            "--txpool.locals",
+            "0x0000000000000000000000000000000000000001",
+            "--txpool.locals",
+            "0x0000000000000000000000000000000000000002",
+            "--txpool.no-local-transactions-propagation",
+            "--txpool.additional-validation-tasks",
+            "4",
+            "--txpool.max-pending-txns",
+            "512",
+            "--txpool.max-new-txns",
+            "256",
+            "--txpool.max-new-pending-txs-notifications",
+            "128",
+            "--txpool.lifetime",
+            "7200",
+            "--txpool.transactions-backup",
+            "/tmp/txpool-backup",
+            "--txpool.max-batch-size",
+            "10",
+        ])
+        .args;
+
+        assert_eq!(parsed_args, args);
     }
 }
