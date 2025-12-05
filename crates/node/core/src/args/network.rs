@@ -119,6 +119,18 @@ pub struct NetworkArgs {
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
 
+    /// Maximum number of total peers (inbound + outbound).
+    ///
+    /// Sets both max-inbound-peers and max-outbound-peers using 2:1 ratio.
+    /// Cannot be used with --max-outbound-peers or --max-inbound-peers.
+    #[arg(
+        long,
+        value_name = "COUNT",
+        conflicts_with = "max_outbound_peers",
+        conflicts_with = "max_inbound_peers"
+    )]
+    pub max_peers: Option<usize>,
+
     /// Max concurrent `GetPooledTransactions` requests.
     #[arg(long = "max-tx-reqs", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, verbatim_doc_comment)]
     pub max_concurrent_tx_requests: u32,
@@ -245,6 +257,34 @@ impl NetworkArgs {
             bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
         })
     }
+
+    /// Returns the max inbound peers (2:1 ratio).
+    pub fn resolved_max_inbound_peers(&self) -> Option<usize> {
+        if let Some(max_peers) = self.max_peers {
+            if max_peers == 0 {
+                Some(0)
+            } else {
+                let outbound = (max_peers / 3).max(1);
+                Some(max_peers.saturating_sub(outbound))
+            }
+        } else {
+            self.max_inbound_peers
+        }
+    }
+
+    /// Returns the max outbound peers (1:2 ratio).
+    pub fn resolved_max_outbound_peers(&self) -> Option<usize> {
+        if let Some(max_peers) = self.max_peers {
+            if max_peers == 0 {
+                Some(0)
+            } else {
+                Some((max_peers / 3).max(1))
+            }
+        } else {
+            self.max_outbound_peers
+        }
+    }
+
     /// Configures and returns a `TransactionsManagerConfig` based on the current settings.
     pub const fn transactions_manager_config(&self) -> TransactionsManagerConfig {
         TransactionsManagerConfig {
@@ -291,8 +331,8 @@ impl NetworkArgs {
             .peers_config_with_basic_nodes_from_file(
                 self.persistent_peers_file(peers_file).as_deref(),
             )
-            .with_max_inbound_opt(self.max_inbound_peers)
-            .with_max_outbound_opt(self.max_outbound_peers)
+            .with_max_inbound_opt(self.resolved_max_inbound_peers())
+            .with_max_outbound_opt(self.resolved_max_outbound_peers())
             .with_ip_filter(ip_filter);
 
         // Configure basic network stack
@@ -434,6 +474,7 @@ impl Default for NetworkArgs {
             port: DEFAULT_DISCOVERY_PORT,
             max_outbound_peers: None,
             max_inbound_peers: None,
+            max_peers: None,
             max_concurrent_tx_requests: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
             max_concurrent_tx_requests_per_peer: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             soft_limit_byte_size_pooled_transactions_response:
@@ -756,6 +797,96 @@ mod tests {
     fn parse_disable_tx_gossip_args() {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--disable-tx-gossip"]).args;
         assert!(args.disable_tx_gossip);
+    }
+
+    #[test]
+    fn parse_max_peers_flag() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "90"]).args;
+
+        assert_eq!(args.max_peers, Some(90));
+        assert_eq!(args.max_outbound_peers, None);
+        assert_eq!(args.max_inbound_peers, None);
+        assert_eq!(args.resolved_max_outbound_peers(), Some(30));
+        assert_eq!(args.resolved_max_inbound_peers(), Some(60));
+    }
+
+    #[test]
+    fn max_peers_conflicts_with_outbound() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--max-peers",
+            "90",
+            "--max-outbound-peers",
+            "50",
+        ]);
+        assert!(
+            result.is_err(),
+            "Should fail when both --max-peers and --max-outbound-peers are used"
+        );
+    }
+
+    #[test]
+    fn max_peers_conflicts_with_inbound() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--max-peers",
+            "90",
+            "--max-inbound-peers",
+            "30",
+        ]);
+        assert!(
+            result.is_err(),
+            "Should fail when both --max-peers and --max-inbound-peers are used"
+        );
+    }
+
+    #[test]
+    fn max_peers_split_calculation() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "90"]).args;
+
+        assert_eq!(args.max_peers, Some(90));
+        assert_eq!(args.resolved_max_outbound_peers(), Some(30));
+        assert_eq!(args.resolved_max_inbound_peers(), Some(60));
+    }
+
+    #[test]
+    fn max_peers_small_values() {
+        let args1 = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "1"]).args;
+        assert_eq!(args1.resolved_max_outbound_peers(), Some(1));
+        assert_eq!(args1.resolved_max_inbound_peers(), Some(0));
+
+        let args2 = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "2"]).args;
+        assert_eq!(args2.resolved_max_outbound_peers(), Some(1));
+        assert_eq!(args2.resolved_max_inbound_peers(), Some(1));
+
+        let args3 = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "3"]).args;
+        assert_eq!(args3.resolved_max_outbound_peers(), Some(1));
+        assert_eq!(args3.resolved_max_inbound_peers(), Some(2));
+    }
+
+    #[test]
+    fn resolved_peers_without_max_peers() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--max-outbound-peers",
+            "75",
+            "--max-inbound-peers",
+            "15",
+        ])
+        .args;
+
+        assert_eq!(args.max_peers, None);
+        assert_eq!(args.resolved_max_outbound_peers(), Some(75));
+        assert_eq!(args.resolved_max_inbound_peers(), Some(15));
+    }
+
+    #[test]
+    fn resolved_peers_with_defaults() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+
+        assert_eq!(args.max_peers, None);
+        assert_eq!(args.resolved_max_outbound_peers(), None);
+        assert_eq!(args.resolved_max_inbound_peers(), None);
     }
 
     #[test]

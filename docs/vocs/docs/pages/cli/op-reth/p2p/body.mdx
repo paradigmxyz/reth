@@ -135,6 +135,11 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound peers. default: 30
 
+      --max-peers <COUNT>
+          Maximum number of total peers (inbound + outbound).
+
+          Sets both max-inbound-peers and max-outbound-peers using 2:1 ratio. Cannot be used with --max-outbound-peers or --max-inbound-peers.
+
       --max-tx-reqs <COUNT>
           Max concurrent `GetPooledTransactions` requests.
 
