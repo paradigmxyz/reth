@@ -798,7 +798,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         })
                     } else {
                         EthMessage::BlockRangeUpdate(this.local_range_info.to_message())
-                };
+                    };
                     this.queued_outgoing.push_back(msg.into());
                     this.last_sent_latest_block = Some(current_latest);
                 }
