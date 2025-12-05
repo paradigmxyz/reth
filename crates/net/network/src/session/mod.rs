@@ -19,7 +19,7 @@ use futures::{future::Either, io, FutureExt, StreamExt};
 use reth_ecies::{stream::ECIESStream, ECIESError};
 use reth_eth_wire::{
     errors::EthStreamError, handshake::EthRlpxHandshake, multiplex::RlpxProtocolMultiplexer,
-    BlockRangeUpdate, Capabilities, DisconnectReason, EthStream, EthVersion,
+    BlockRange, BlockRangeUpdate, Capabilities, DisconnectReason, EthStream, EthVersion,
     HelloMessageWithProtocols, NetworkPrimitives, UnauthedP2PStream, UnifiedStatus,
     HANDSHAKE_TIMEOUT,
 };
@@ -538,6 +538,11 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 // negotiated version
                 let version = conn.version();
 
+                let remote_range_info =
+                    status.earliest_block.zip(status.latest_block).map(|(earliest, latest)| {
+                        BlockRangeInfo::new(earliest, latest, status.blockhash)
+                    });
+
                 // Configure the interval at which the range information is updated, starting with
                 // ETH69
                 let range_update_interval = (conn.version() >= EthVersion::Eth69).then(|| {
@@ -545,6 +550,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     interval
                 });
+                let now = Instant::now();
 
                 let session = ActiveSession {
                     next_id: 0,
@@ -568,10 +574,12 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
                     terminate_message: None,
-                    range_info: None,
+                    range_info: remote_range_info.clone(),
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
                     last_sent_latest_block: None,
+                    last_range_request: None,
+                    last_range_update: remote_range_info.as_ref().map(|_| now),
                 };
 
                 self.spawn(session);
@@ -608,7 +616,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     messages,
                     direction,
                     timeout,
-                    range_info: None,
+                    range_info: remote_range_info,
                 })
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
@@ -692,6 +700,10 @@ impl<N: NetworkPrimitives> SessionManager<N> {
         self.status.earliest_block = Some(block_range_update.earliest);
         self.status.latest_block = Some(block_range_update.latest);
         self.status.blockhash = block_range_update.latest_hash;
+        self.status.block_range = Some(BlockRange {
+            start_block: block_range_update.earliest,
+            end_block: block_range_update.latest,
+        });
 
         // Update the shared local range info that gets propagated to active sessions
         self.local_range_info.update(

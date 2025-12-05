@@ -218,6 +218,19 @@ where
                         return Err(EthHandshakeError::BlockhashZero.into());
                     }
                 }
+                if let StatusMessage::Eth70(s) = their_status_message {
+                    if !s.block_range.is_valid() {
+                        return Err(EthHandshakeError::EarliestBlockGreaterThanLatestBlock {
+                            got: s.block_range.start_block,
+                            latest: s.block_range.end_block,
+                        }
+                        .into());
+                    }
+
+                    if s.blockhash.is_zero() {
+                        return Err(EthHandshakeError::BlockhashZero.into());
+                    }
+                }
 
                 Ok(UnifiedStatus::from_message(their_status_message))
             }

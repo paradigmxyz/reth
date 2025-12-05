@@ -26,7 +26,8 @@ use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, MessageError, RequestPair},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
+    BlockRange, Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
+    NewBlockPayload, RequestBlockRange, SendBlockRange,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -50,6 +51,9 @@ use tracing::{debug, trace};
 /// Updates are only sent when the block height has advanced by at least one epoch (32 blocks)
 /// since the last update. The interval is set to one epoch duration in seconds.
 pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(EPOCH_SLOTS * 12);
+
+/// Minimum interval between `RequestBlockRange` queries for eth/70 peers.
+pub(super) const RANGE_REQUEST_INTERVAL: Duration = Duration::from_secs(60);
 
 // Constants for timeout updating.
 
@@ -135,6 +139,10 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// The last latest block number we sent in a range update
     /// Used to avoid sending unnecessary updates when block height hasn't changed significantly
     pub(crate) last_sent_latest_block: Option<u64>,
+    /// The last time we requested the remote block range (eth/70).
+    pub(crate) last_range_request: Option<Instant>,
+    /// The last time we updated the remote block range information.
+    pub(crate) last_range_update: Option<Instant>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -165,6 +173,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     ///
     /// Returns an error if the message is considered to be in violation of the protocol.
     fn on_incoming_message(&mut self, msg: EthMessage<N>) -> OnIncomingMessageOutcome<N> {
+        let now = Instant::now();
         /// A macro that handles an incoming request
         /// This creates a new channel and tries to send the sender half to the session while
         /// storing the receiver half internally so the pending response can be polled.
@@ -276,6 +285,37 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::Receipts69(resp) => {
                 on_response!(resp, GetReceipts69)
             }
+            EthMessage::RequestBlockRange(req) => {
+                let response = EthMessage::SendBlockRange(RequestPair {
+                    request_id: req.request_id,
+                    message: SendBlockRange::from_range(BlockRange {
+                        start_block: self.local_range_info.earliest(),
+                        end_block: self.local_range_info.latest(),
+                    }),
+                });
+                self.queued_outgoing.push_back(response.into());
+                OnIncomingMessageOutcome::Ok
+            }
+            EthMessage::SendBlockRange(msg) => {
+                let range = msg.message.as_range();
+                if range.start_block > range.end_block {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(format!(
+                            "invalid block range: start ({}) > end ({})",
+                            range.start_block, range.end_block
+                        ))),
+                        message: EthMessage::SendBlockRange(msg),
+                    };
+                }
+
+                if let Some(range_info) = self.range_info.as_ref() {
+                    let latest_hash = range_info.latest_hash();
+                    range_info.update(range.start_block, range.end_block, latest_hash);
+                }
+                self.last_range_update = Some(now);
+
+                OnIncomingMessageOutcome::Ok
+            }
             EthMessage::BlockRangeUpdate(msg) => {
                 // Validate that earliest <= latest according to the spec
                 if msg.earliest > msg.latest {
@@ -301,6 +341,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 if let Some(range_info) = self.range_info.as_ref() {
                     range_info.update(msg.earliest, msg.latest, msg.latest_hash);
                 }
+                self.last_range_update = Some(now);
 
                 OnIncomingMessageOutcome::Ok
             }
@@ -746,11 +787,42 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 };
 
                 if should_send {
-                    this.queued_outgoing.push_back(
-                        EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
-                    );
+                    let msg = if this.conn.version() >= EthVersion::Eth70 {
+                        EthMessage::SendBlockRange(RequestPair {
+                            request_id: 0,
+                            message: SendBlockRange::from_range(BlockRange {
+                                start_block: this.local_range_info.earliest(),
+                                end_block: this.local_range_info.latest(),
+                            }),
+                        })
+                    } else {
+                        EthMessage::BlockRangeUpdate(this.local_range_info.to_message())
+                    };
+                    this.queued_outgoing.push_back(msg.into());
                     this.last_sent_latest_block = Some(current_latest);
                 }
+            }
+        }
+
+        if this.conn.version() >= EthVersion::Eth70 {
+            let now = Instant::now();
+            let stale_update = this
+                .last_range_update
+                .is_none_or(|t| now.saturating_duration_since(t) >= RANGE_REQUEST_INTERVAL);
+            let can_request = this
+                .last_range_request
+                .is_none_or(|t| now.saturating_duration_since(t) >= RANGE_REQUEST_INTERVAL);
+
+            if stale_update && can_request {
+                let request_id = this.next_id();
+                this.queued_outgoing.push_back(
+                    EthMessage::RequestBlockRange(RequestPair {
+                        request_id,
+                        message: RequestBlockRange,
+                    })
+                    .into(),
+                );
+                this.last_range_request = Some(now);
             }
         }
 
@@ -1073,6 +1145,8 @@ mod tests {
                         ),
                         range_update_interval: None,
                         last_sent_latest_block: None,
+                        last_range_request: None,
+                        last_range_update: None,
                     }
                 }
                 ev => {
