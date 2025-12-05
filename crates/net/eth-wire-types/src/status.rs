@@ -200,13 +200,16 @@ pub struct StatusBuilder {
 impl StatusBuilder {
     /// Consumes the builder and returns the constructed [`UnifiedStatus`].
     pub const fn build(mut self) -> UnifiedStatus {
+        // If earliest/latest were set (eth/69 path), also populate block_range so eth/70 can reuse
+        // the same values without requiring a separate setter. eth/69 conversion ignores
+        // block_range, so this is safe for all versions.
         if let (Some(start), Some(end)) = (self.status.earliest_block, self.status.latest_block) {
             self.status.block_range = Some(BlockRange { start_block: start, end_block: end });
         }
         self.status
     }
 
-    /// Sets the eth protocol version (e.g., eth/66, eth/69).
+    /// Sets the eth protocol version (e.g., eth/66, eth/70).
     pub const fn version(mut self, version: EthVersion) -> Self {
         self.status.version = version;
         self
