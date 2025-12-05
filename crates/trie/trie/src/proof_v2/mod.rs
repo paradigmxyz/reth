@@ -42,47 +42,6 @@ static PATH_ALL_ZEROS: Nibbles = {
     path
 };
 
-/// Used to track the state of the trie cursor, allowing us to differentiate between a branch having
-/// been taken (used as a cached branch) and the cursor having been exhausted.
-#[derive(Debug)]
-enum TrieCursorState {
-    /// Cursor is seeked to this path and the node has not been used yet.
-    Available(Nibbles, BranchNodeCompact),
-    /// Cursor is seeked to this path, but the node has been used.
-    Taken(Nibbles),
-    /// Cursor has been exhausted.
-    Exhausted,
-}
-
-impl TrieCursorState {
-    /// Creates a [`Self`] based on an entry returned from the cursor itself.
-    fn new(entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
-        entry.map_or(Self::Exhausted, |(path, node)| Self::Available(path, node))
-    }
-
-    /// Returns the path the cursor is seeked to, or None if it's exhausted.
-    const fn path(&self) -> Option<&Nibbles> {
-        match self {
-            Self::Available(path, _) | Self::Taken(path) => Some(path),
-            Self::Exhausted => None,
-        }
-    }
-
-    /// Takes the path and node from a [`Self::Available`]. Panics if not [`Self::Available`].
-    fn take(&mut self) -> (Nibbles, BranchNodeCompact) {
-        let Self::Available(path, _) = self else {
-            panic!("take called on non-Available: {self:?}")
-        };
-
-        let path = *path;
-        let Self::Available(path, node) = core::mem::replace(self, Self::Taken(path)) else {
-            unreachable!("already checked that self is Self::Available");
-        };
-
-        (path, node)
-    }
-}
-
 /// A proof calculator that generates merkle proofs using only leaf data.
 ///
 /// The calculator:
@@ -393,8 +352,8 @@ where
         // child, so that only `child_stack`'s final child is a non-RlpNode.
         self.commit_last_child(targets)?;
 
-        // Once the first child is committed we set the new child's bit on the top branch's
-        // `state_mask` and push that child.
+        // Once the last child is committed we set the new child's bit on the top branch's
+        // `state_mask` and push that new child.
         let branch = self.branch_stack.last_mut().expect("branch_stack cannot be empty");
 
         debug_assert!(!branch.state_mask.is_bit_set(leaf_nibble));
@@ -801,6 +760,77 @@ where
         Ok(())
     }
 
+    /// Attempts to pop off the top branch of the `cached_branch_stack`, returning
+    /// [`PopCachedBranchOutcome::Popped`] on success. Returns other variants to indicate that the
+    /// stack is empty and what to do about it.
+    ///
+    /// This method only returns [`PopCachedBranchOutcome::CalculateLeaves`] if there is a cached
+    /// branch on top of the stack.
+    #[inline]
+    fn try_pop_cached_branch(
+        &mut self,
+        trie_cursor_state: &mut TrieCursorState,
+        uncalculated_lower_bound: &Option<Nibbles>,
+    ) -> Result<PopCachedBranchOutcome, StateProofError> {
+        // If there is a branch on top of the stack we use that.
+        if let Some(cached) = self.cached_branch_stack.pop() {
+            return Ok(PopCachedBranchOutcome::Popped(cached));
+        }
+
+        // There is no cached branch on the stack. It's possible that another one exists
+        // farther on in the trie, but we perform some checks first to prevent unnecessary
+        // attempts to find it.
+
+        // If the `uncalculated_lower_bound` is None it indicates that there can be no more
+        // leaf data, so similarly there be no more branches.
+        let Some(uncalculated_lower_bound) = uncalculated_lower_bound else {
+            return Ok(PopCachedBranchOutcome::Exhausted)
+        };
+
+        // If [`TrieCursorState::path`] returns None it means that the cursor has been
+        // exhausted, so there can be no more cached data.
+        let Some(trie_cursor_path) = trie_cursor_state.path() else {
+            return Ok(PopCachedBranchOutcome::Exhausted)
+        };
+
+        // If the trie cursor is seeked to a branch whose leaves have already been processed
+        // then we can't use it, instead we seek forward and try again.
+        if trie_cursor_path < uncalculated_lower_bound {
+            *trie_cursor_state =
+                TrieCursorState::new(self.trie_cursor.seek(*uncalculated_lower_bound)?);
+
+            // Having just seeked forward we need to check if the cursor is now exhausted.
+            if matches!(trie_cursor_state, TrieCursorState::Exhausted) {
+                return Ok(PopCachedBranchOutcome::Exhausted)
+            };
+        }
+
+        // At this point we can be sure that the cursor is in an `Available` state. We know for
+        // sure it's not `Exhausted` because of the call to `path` above, and we know it's not
+        // `Taken` because we push all taken branches onto the `cached_branch_stack`, and the
+        // stack is empty.
+        //
+        // We will use this `Available` cached branch as our next branch.
+        self.cached_branch_stack.push(trie_cursor_state.take());
+        trace!(target: TRACE_TARGET, cached=?self.cached_branch_stack.last(), "Pushed next trie node onto cached_branch_stack");
+
+        let (cached_path, _) = self.cached_branch_stack.last().expect("just pushed");
+
+        // If the calculated range is not caught up to the next cached branch it means there
+        // are portions of the trie prior to that branch which may need to be calculated;
+        // return the uncalculated range up to that branch to make that happen.
+        //
+        // If the next cached branch's path is all zeros then we can skip this catch-up step,
+        // because there cannot be any keys prior to that range.
+        if uncalculated_lower_bound < cached_path && !PATH_ALL_ZEROS.starts_with(cached_path) {
+            let range = (*uncalculated_lower_bound, Some(*cached_path));
+            trace!(target: TRACE_TARGET, ?range, "Returning key range to calculate in order to catch up to cached branch");
+            return Ok(PopCachedBranchOutcome::CalculateLeaves(range));
+        }
+
+        Ok(PopCachedBranchOutcome::Popped(self.cached_branch_stack.pop().expect("just pushed")))
+    }
+
     /// Accepts the current state of both hashed and trie cursors, and determines the next range of
     /// hashed keys which need to be processed using [`Self::push_leaf`].
     ///
@@ -834,74 +864,33 @@ where
             }
         }
 
-        // `lower_bound` will be used to track the lower bound of the range which is returned from
-        // this method. If this is None then there are no further keys which need to be processed.
+        // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
+        // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor (this
+        // method). If this is None then there are no further nodes which could exist.
         //
         // This starts off being based on the hashed cursor's current position, which is the
-        // next key which hasn't been processed. If that is None then we start from zero.
-        let mut lower_bound = Some(hashed_key_current_path.unwrap_or_default());
+        // next hashed key which hasn't been processed. If that is None then we start from zero.
+        let mut uncalculated_lower_bound = Some(hashed_key_current_path.unwrap_or_default());
 
         loop {
-            // Determine the current cached branch node.
+            // Pop the currently cached branch node.
             //
             // NOTE we pop off the `cached_branch_stack` because cloning the `BranchNodeCompact`
             // means cloning an Arc, which incurs synchronization overhead. We have to be sure to
             // push the cached branch back onto the stack once done.
-            let (cached_path, cached_branch) = match (
-                self.cached_branch_stack.pop(),
-                &trie_cursor_state,
-                lower_bound.as_ref(),
-            ) {
-                (Some(cached), _, _) => cached,
-                (None, TrieCursorState::Exhausted, _) | (_, _, None) => {
-                    trace!(target: TRACE_TARGET, "Exhausted cached trie nodes");
-                    // If both stack and trie cursor are empty then there are no more cached nodes,
-                    // return an open range to indicate that the rest of the trie should be
-                    // calculated solely from leaves.
-                    //
-                    // If the `lower_bound` indicates that there can be no more data then this will
-                    // return None to indicate end of computation.
-                    return Ok(lower_bound.map(|lower| (lower, None)));
+            let (cached_path, cached_branch) = match self
+                .try_pop_cached_branch(trie_cursor_state, &uncalculated_lower_bound)?
+            {
+                PopCachedBranchOutcome::Popped(cached) => cached,
+                PopCachedBranchOutcome::Exhausted => {
+                    // If cached branches are exhausted it's possible that there is still an
+                    // unbounded range of leaves to be processed. `uncalculated_lower_bound` is
+                    // used to return that range.
+                    trace!(target: TRACE_TARGET, ?uncalculated_lower_bound, "Exhausted cached trie nodes");
+                    return Ok(uncalculated_lower_bound.map(|lower| (lower, None)));
                 }
-                (None, cursor_state, Some(lower_bound))
-                    if cursor_state.path().expect("not exhausted") < lower_bound =>
-                {
-                    // If `cached_branch_stack` is empty then we want to get a new cached branch
-                    // node from the cursor. If the trie cursor is seeked to a branch which has
-                    // already been processed then we can't use it, instead we seek forward and try
-                    // again.
-                    *trie_cursor_state = TrieCursorState::new(self.trie_cursor.seek(*lower_bound)?);
-                    continue
-                }
-                (None, TrieCursorState::Taken(path), _) => {
-                    panic!("trie cursor at {path:?} had its node taken, but is >= lower_bound {lower_bound:?}");
-                }
-                (None, TrieCursorState::Available(_, _), _) => {
-                    // If `cached_branch_stack` is empty but there is an available cached branch
-                    // from the trie cursor then we consume that branch, pushing it onto the stack.
-                    self.cached_branch_stack.push(trie_cursor_state.take());
-                    trace!(target: TRACE_TARGET, cached=?self.cached_branch_stack.last(), "Pushed next trie node onto cached_branch_stack");
-
-                    let (cached_path, _) = self.cached_branch_stack.last().expect("just pushed");
-
-                    // The current hashed key indicates the first key after the previous uncached
-                    // range, or None if this is the first call to this method.
-                    //
-                    // If the key is not caught up to the next cached branch it means there are
-                    // portions of the trie prior to that branch which need to be computed; return
-                    // the uncomputed range up to that branch to make that happen.
-                    //
-                    // If the next cached branch's path is all zeros then we can skip this catch-up
-                    // step, because there cannot be any keys prior to that range.
-                    if hashed_key_current_path.is_none_or(|k| &k < cached_path) &&
-                        !PATH_ALL_ZEROS.starts_with(cached_path)
-                    {
-                        let range = lower_bound.map(|lower| (lower, Some(*cached_path)));
-                        trace!(target: TRACE_TARGET, ?range, "Returning key range to calculate in order to catch up to cached branch");
-                        return Ok(range);
-                    }
-
-                    self.cached_branch_stack.pop().expect("just pushed")
+                PopCachedBranchOutcome::CalculateLeaves(range) => {
+                    return Ok(Some(range));
                 }
             };
 
@@ -965,7 +954,7 @@ where
                 // The just-popped branch is completely processed; we know there can be no more keys
                 // with that prefix. Set the lower bound which can be returned from this method to
                 // be the next possible prefix, if any.
-                lower_bound = cached_path.increment();
+                uncalculated_lower_bound = cached_path.increment();
 
                 continue
             }
@@ -1014,9 +1003,9 @@ where
                         .state_mask
                         .set_bit(child_nibble);
 
-                    // Update the `lower_bound` to indicate that the child whose bit was just set is
-                    // completely processed.
-                    lower_bound = child_path.increment();
+                    // Update the `uncalculated_lower_bound` to indicate that the child whose bit
+                    // was just set is completely processed.
+                    uncalculated_lower_bound = child_path.increment();
 
                     // Push the current cached branch back onto the stack before looping.
                     self.cached_branch_stack.push((cached_path, cached_branch));
@@ -1305,6 +1294,58 @@ impl<I: Iterator<Item: Copy>> Iterator for WindowIter<I> {
             }
         }
     }
+}
+
+/// Used to track the state of the trie cursor, allowing us to differentiate between a branch having
+/// been taken (used as a cached branch) and the cursor having been exhausted.
+#[derive(Debug)]
+enum TrieCursorState {
+    /// Cursor is seeked to this path and the node has not been used yet.
+    Available(Nibbles, BranchNodeCompact),
+    /// Cursor is seeked to this path, but the node has been used.
+    Taken(Nibbles),
+    /// Cursor has been exhausted.
+    Exhausted,
+}
+
+impl TrieCursorState {
+    /// Creates a [`Self`] based on an entry returned from the cursor itself.
+    fn new(entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
+        entry.map_or(Self::Exhausted, |(path, node)| Self::Available(path, node))
+    }
+
+    /// Returns the path the cursor is seeked to, or None if it's exhausted.
+    const fn path(&self) -> Option<&Nibbles> {
+        match self {
+            Self::Available(path, _) | Self::Taken(path) => Some(path),
+            Self::Exhausted => None,
+        }
+    }
+
+    /// Takes the path and node from a [`Self::Available`]. Panics if not [`Self::Available`].
+    fn take(&mut self) -> (Nibbles, BranchNodeCompact) {
+        let Self::Available(path, _) = self else {
+            panic!("take called on non-Available: {self:?}")
+        };
+
+        let path = *path;
+        let Self::Available(path, node) = core::mem::replace(self, Self::Taken(path)) else {
+            unreachable!("already checked that self is Self::Available");
+        };
+
+        (path, node)
+    }
+}
+
+/// Describes the state of the currently cached branch node (if any).
+enum PopCachedBranchOutcome {
+    /// Cached branch has been popped from the `cached_branch_stack` and is ready to be used.
+    Popped((Nibbles, BranchNodeCompact)),
+    /// All cached branches have been exhausted.
+    Exhausted,
+    /// Need to calculate leaves from this range (exclusive upper) before the cached branch
+    /// (catch-up range). If None then
+    CalculateLeaves((Nibbles, Option<Nibbles>)),
 }
 
 #[cfg(test)]
