@@ -2,10 +2,10 @@ use core::fmt::Debug;
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    Eip2718EncodableReceipt, Eip658Value, ReceiptEnvelope, ReceiptWithBloom, RlpDecodableReceipt,
-    RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
+    Eip2718DecodableReceipt, Eip2718EncodableReceipt, Eip658Value, ReceiptEnvelope,
+    ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
-use alloy_eips::eip2718::{Eip2718Error, Encodable2718, IsTyped2718};
+use alloy_eips::eip2718::{Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718};
 use alloy_primitives::{Bloom, Log, B256};
 use alloy_rlp::{BufMut, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
@@ -151,6 +151,16 @@ impl<T: TxTy> Eip2718EncodableReceipt for Receipt<T> {
         }
         self.rlp_header_inner(bloom).encode(out);
         self.rlp_encode_fields(bloom, out);
+    }
+}
+
+impl<T: TxTy> Eip2718DecodableReceipt for Receipt<T> {
+    fn typed_decode_with_bloom(ty: u8, buf: &mut &[u8]) -> Eip2718Result<ReceiptWithBloom<Self>> {
+        Ok(Self::rlp_decode_inner(buf, T::try_from(ty)?)?)
+    }
+
+    fn fallback_decode_with_bloom(buf: &mut &[u8]) -> Eip2718Result<ReceiptWithBloom<Self>> {
+        Ok(Self::rlp_decode_inner(buf, T::try_from(0)?)?)
     }
 }
 
