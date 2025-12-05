@@ -9130,6 +9130,7 @@ dependencies = [
  "futures",
  "humantime",
  "ipnet",
+ "itertools 0.14.0",
  "proptest",
  "rand 0.9.2",
  "reth-chainspec",
