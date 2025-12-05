@@ -958,7 +958,7 @@ where
                 // The just-popped branch is completely processed; we know there can be no more keys
                 // with that prefix. Set the lower bound which can be returned from this method to
                 // be the next possible prefix, if any.
-                uncalculated_lower_bound = cached_path.increment();
+                uncalculated_lower_bound = increment_and_strip_trailing_zeros(&cached_path);
 
                 continue
             }
@@ -1009,7 +1009,7 @@ where
 
                     // Update the `uncalculated_lower_bound` to indicate that the child whose bit
                     // was just set is completely processed.
-                    uncalculated_lower_bound = child_path.increment();
+                    uncalculated_lower_bound = increment_and_strip_trailing_zeros(&child_path);
 
                     // Push the current cached branch back onto the stack before looping.
                     self.cached_branch_stack.push((cached_path, cached_branch));
@@ -1053,7 +1053,7 @@ where
             // There is no cached data for the sub-trie at this child, we must recalculate the
             // sub-trie root (this child) using the leaves. Return the range of keys based on the
             // child path.
-            let child_path_upper = child_path.increment();
+            let child_path_upper = increment_and_strip_trailing_zeros(&child_path);
             trace!(
                 target: TRACE_TARGET,
                 lower=?child_path,
@@ -1350,6 +1350,26 @@ enum PopCachedBranchOutcome {
     /// Need to calculate leaves from this range (exclusive upper) before the cached branch
     /// (catch-up range). If None then
     CalculateLeaves((Nibbles, Option<Nibbles>)),
+}
+
+/// Increments the nibbles and strips any trailing zeros.
+///
+/// This function wraps `Nibbles::increment` and when it returns a value with trailing zeros,
+/// it strips those zeros using bit manipulation on the underlying U256.
+fn increment_and_strip_trailing_zeros(nibbles: &Nibbles) -> Option<Nibbles> {
+    let mut result = nibbles.increment()?;
+
+    // If result is empty, just return it
+    if result.is_empty() {
+        return Some(result);
+    }
+
+    // Get access to the underlying U256 to detect trailing zeros
+    let uint_val = *result.as_mut_uint_unchecked();
+    let non_zero_prefix_len = 64 - (uint_val.trailing_zeros() / 4);
+    result.truncate(non_zero_prefix_len);
+
+    Some(result)
 }
 
 #[cfg(test)]
@@ -1649,5 +1669,29 @@ mod tests {
 
         // Assert the proof
         harness.assert_proof(targets).expect("Proof generation failed");
+    }
+
+    #[test]
+    fn test_increment_and_strip_trailing_zeros() {
+        let test_cases: Vec<(Nibbles, Option<Nibbles>)> = vec![
+            // Basic increment without trailing zeros
+            (Nibbles::from_nibbles([0x1, 0x2, 0x3]), Some(Nibbles::from_nibbles([0x1, 0x2, 0x4]))),
+            // Increment with trailing zeros - should be stripped
+            (Nibbles::from_nibbles([0x0, 0x0, 0xF]), Some(Nibbles::from_nibbles([0x0, 0x1]))),
+            (Nibbles::from_nibbles([0x0, 0xF, 0xF]), Some(Nibbles::from_nibbles([0x1]))),
+            // Overflow case
+            (Nibbles::from_nibbles([0xF, 0xF, 0xF]), None),
+            // Empty nibbles
+            (Nibbles::new(), None),
+            // Single nibble
+            (Nibbles::from_nibbles([0x5]), Some(Nibbles::from_nibbles([0x6]))),
+            // All Fs except last - results in trailing zeros after increment
+            (Nibbles::from_nibbles([0xE, 0xF, 0xF]), Some(Nibbles::from_nibbles([0xF]))),
+        ];
+
+        for (input, expected) in test_cases {
+            let result = increment_and_strip_trailing_zeros(&input);
+            assert_eq!(result, expected, "Failed for input: {:?}", input);
+        }
     }
 }
