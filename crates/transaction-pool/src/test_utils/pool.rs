@@ -176,6 +176,34 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         },
                     });
             }
+
+            ScenarioType::BelowBaseFee { fee } => {
+                let tx = self.tx_generator.tx(on_chain_nonce, &mut self.rng).with_gas_price(fee);
+                let valid_tx = self.validator.validated(tx);
+
+                let res =
+                    pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None).unwrap();
+
+                match res {
+                    AddedTransaction::Pending(_) => panic!("expected parked"),
+                    AddedTransaction::Parked { subpool, .. } => {
+                        assert_eq!(
+                            subpool,
+                            SubPool::BaseFee,
+                            "expected to be moved to base fee subpool"
+                        );
+                    }
+                }
+                self.executed
+                    .entry(sender)
+                    .or_insert_with(|| ExecutedScenarios { sender, scenarios: vec![] }) // in the case of a new sender
+                    .scenarios
+                    .push(ExecutedScenario {
+                        balance: on_chain_balance,
+                        nonce: on_chain_nonce,
+                        scenario: Scenario::BelowBaseFee { fee },
+                    });
+            }
         }
         // make sure everything is set
         pool.enforce_invariants()
@@ -207,6 +235,7 @@ impl MockSimulatorConfig {
 pub(crate) enum ScenarioType {
     OnchainNonce,
     HigherNonce { skip: u64 },
+    BelowBaseFee { fee: u128 },
 }
 
 /// The actual scenario, ready to be executed
@@ -221,6 +250,9 @@ pub(crate) enum Scenario {
     OnchainNonce { nonce: u64 },
     /// Send a tx with a higher nonce that what the sender has on chain
     HigherNonce { onchain: u64, nonce: u64 },
+    /// Send a tx with a base fee below the base fee of the pool
+    BelowBaseFee { fee: u128 },
+
     Multi {
         // Execute multiple test scenarios
         scenario: Vec<Self>,
@@ -342,7 +374,11 @@ mod tests {
 
         let config = MockSimulatorConfig {
             num_senders: 10,
-            scenarios: vec![ScenarioType::OnchainNonce, ScenarioType::HigherNonce { skip: 1 }, ScenarioType::HigherNonce { skip: 5 }],
+            scenarios: vec![
+                ScenarioType::OnchainNonce,
+                ScenarioType::HigherNonce { skip: 1 },
+                ScenarioType::HigherNonce { skip: 5 },
+            ],
             base_fee: 10,
             tx_generator: MockTransactionDistribution::new(
                 transaction_ratio,
