@@ -891,10 +891,6 @@ impl MultiProofTask {
                 );
             },
         );
-        if outcome.chunked {
-            tracing::Span::current().record("chunks", outcome.dispatched);
-        }
-
         self.metrics.prefetch_proof_chunks_histogram.record(outcome.dispatched as f64);
 
         outcome.dispatched as u64
@@ -1046,10 +1042,6 @@ impl MultiProofTask {
                 );
             },
         );
-        if outcome.chunked {
-            tracing::Span::current().record("chunks", outcome.dispatched);
-        }
-
         self.metrics
             .state_update_proof_targets_accounts_histogram
             .record(spawned_proof_targets.len() as f64);
