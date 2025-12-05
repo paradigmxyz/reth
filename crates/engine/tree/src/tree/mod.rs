@@ -45,6 +45,7 @@ use std::{
     },
     time::Instant,
 };
+use thread_priority::{ThreadBuilderExt, ThreadPriority};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot::{self, error::TryRecvError},
@@ -409,7 +410,15 @@ where
             evm_config,
         );
         let incoming = task.incoming_tx.clone();
-        std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
+        std::thread::Builder::new()
+            .name("Engine Task".to_string())
+            .spawn_with_priority(ThreadPriority::Max, |result| {
+                if let Err(err) = result {
+                    warn!(target: "engine::tree", ?err, "Failed to set thread priority");
+                }
+                task.run()
+            })
+            .unwrap();
         (incoming, outgoing)
     }
 
