@@ -10,7 +10,7 @@ use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType, Options,
     WriteBatch, DB,
 };
-use std::{fmt, path::Path, sync::Arc};
+use std::{fmt, path::{Path, PathBuf}, sync::Arc};
 
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
 
@@ -31,7 +31,7 @@ const DEFAULT_BLOOM_FILTER_BITS: f64 = 10.0;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
-    path: std::path::PathBuf,
+    path: PathBuf,
     column_families: Vec<String>,
     enable_metrics: bool,
     enable_statistics: bool,
