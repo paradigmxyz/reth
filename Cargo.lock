@@ -303,9 +303,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-hardforks"
-version = "0.4.4"
+version = "0.4.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e29d7eacf42f89c21d7f089916d0bdb4f36139a31698790e8837d2dbbd4b2c3"
+checksum = "2d9a33550fc21fd77a3f8b63e99969d17660eec8dcc50a95a80f7c9964f7680b"
 dependencies = [
  "alloy-chains",
  "alloy-eip2124",
@@ -10359,6 +10359,7 @@ dependencies = [
  "reth-provider",
  "reth-prune-types",
  "reth-stages",
+ "reth-stages-types",
  "reth-static-file-types",
  "reth-testing-utils",
  "reth-tokio-util",
@@ -10955,6 +10956,7 @@ name = "reth-stateless"
 version = "1.9.3"
 dependencies = [
  "alloy-consensus",
+ "alloy-genesis",
  "alloy-primitives",
  "alloy-rlp",
  "alloy-rpc-types-debug",
@@ -11522,9 +11524,9 @@ dependencies = [
 
 [[package]]
 name = "revm-inspectors"
-version = "0.33.0"
+version = "0.33.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a91cee0a75ef5f96b7e86f6c6a8bd4fda86eb37b57d501df6790418ee2b03c18"
+checksum = "6c93974333e7acc4b2dc024b10def99707f7375a4d53db7a7f8351722d25673f"
 dependencies = [
  "alloy-primitives",
  "alloy-rpc-types-eth",
