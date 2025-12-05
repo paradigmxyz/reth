@@ -15,6 +15,7 @@ use std::{
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
+    time::Instant,
 };
 
 /// Default cache size for `RocksDB` block cache (128 MB).
@@ -228,6 +229,11 @@ impl RocksDBProvider {
         RocksDBBuilder::new(path).build()
     }
 
+    /// Creates a new `RocksDB` provider builder.
+    pub fn builder(path: impl AsRef<Path>) -> RocksDBBuilder {
+        RocksDBBuilder::new(path)
+    }
+
     /// Gets the column family handle for a table.
     fn get_cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
         self.0
@@ -243,13 +249,13 @@ impl RocksDBProvider {
         table: &'static str,
         f: impl FnOnce(&Self) -> T,
     ) -> T {
-        let start = std::time::Instant::now();
+        let start = self.0.metrics.as_ref().map(|_| Instant::now());
         let res = f(self);
 
-        if let Some(metrics) = &self.0.metrics {
-            let duration = start.elapsed();
-            metrics.record_operation(operation, table, duration);
+        if let (Some(start), Some(metrics)) = (start, &self.0.metrics) {
+            metrics.record_operation(operation, table, start.elapsed());
         }
+
         res
     }
 
