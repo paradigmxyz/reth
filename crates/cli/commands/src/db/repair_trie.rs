@@ -48,7 +48,7 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub async fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
+    pub fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         // Set up metrics server if requested
         let _metrics_handle = if let Some(listen_addr) = self.metrics {
             // Spawn an OS thread with a single-threaded tokio runtime for the metrics server

@@ -158,7 +158,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
                 db_exec!(self.env, tool, N, access_rights, {
-                    command.execute(&tool).await?;
+                    command.execute(&tool)?;
                 });
             }
             Subcommands::StaticFileHeader(command) => {
