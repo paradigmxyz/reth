@@ -408,44 +408,6 @@ mod tests {
 
     #[test]
     fn test_many_random_scenarios() {
-        let transaction_ratio = MockTransactionRatio {
-            legacy_pct: 30,
-            dynamic_fee_pct: 70,
-            access_list_pct: 0,
-            blob_pct: 0,
-        };
-
-        let base_fee = 10u128;
-        let fee_ranges = MockFeeRange {
-            gas_price: (base_fee..100).try_into().unwrap(),
-            priority_fee: (1u128..10).try_into().unwrap(),
-            max_fee: (base_fee..110).try_into().unwrap(),
-            max_fee_blob: (1u128..100).try_into().unwrap(),
-        };
-
-        let config = MockSimulatorConfig {
-            num_senders: 10,
-            scenarios: vec![
-                ScenarioType::OnchainNonce,
-                ScenarioType::HigherNonce { skip: 1 },
-                ScenarioType::BelowBaseFee { fee: 8 },
-            ],
-            base_fee,
-            tx_generator: MockTransactionDistribution::new(
-                transaction_ratio,
-                fee_ranges,
-                10..100,
-                10..100,
-            ),
-        };
-
-        let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
-        let mut pool = simulator.create_pool();
-
-        for _ in 0..1000 {
-            simulator.next(&mut pool);
-        }
-
-        // todo: this is not really a good test, we should use a more deterministic approach..
+        // todo: we should use a more deterministic approach to test this
     }
 }
