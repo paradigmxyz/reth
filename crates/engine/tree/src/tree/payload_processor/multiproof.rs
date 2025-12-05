@@ -23,7 +23,7 @@ use reth_trie_parallel::{
         StorageProofInput,
     },
 };
-use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, mem, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
 /// Maximum number of targets to batch together in `process_multiproof_message`.
@@ -180,6 +180,20 @@ fn estimate_evm_state_targets(state: &EvmState) -> usize {
             1 + changed_slots
         })
         .sum()
+}
+
+/// Checks whether two state change sources refer to the same origin.
+fn same_state_change_source(lhs: StateChangeSource, rhs: StateChangeSource) -> bool {
+    match (lhs, rhs) {
+        (StateChangeSource::Transaction(a), StateChangeSource::Transaction(b)) => a == b,
+        (StateChangeSource::PreBlock(a), StateChangeSource::PreBlock(b)) => {
+            mem::discriminant(&a) == mem::discriminant(&b)
+        }
+        (StateChangeSource::PostBlock(a), StateChangeSource::PostBlock(b)) => {
+            mem::discriminant(&a) == mem::discriminant(&b)
+        }
+        _ => false,
+    }
 }
 
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
@@ -1179,6 +1193,7 @@ impl MultiProofTask {
                 // STEP 2: While workers process, accumulate more messages into a batch
                 let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> = Vec::new();
                 let mut accumulated_targets = 0usize;
+                let mut batch_source: Option<StateChangeSource> = None;
 
                 loop {
                     if accumulated_targets >= DEFAULT_MAX_BATCH_TARGETS ||
@@ -1188,6 +1203,18 @@ impl MultiProofTask {
                     }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
+                            if let Some(source) = batch_source {
+                                if !same_state_change_source(source, next_source) {
+                                    *pending_msg = Some(MultiProofMessage::StateUpdate(
+                                        next_source,
+                                        next_update,
+                                    ));
+                                    break;
+                                }
+                            } else {
+                                batch_source = Some(next_source);
+                            }
+
                             let next_estimate = estimate_evm_state_targets(&next_update);
                             if accumulated_targets + next_estimate > DEFAULT_MAX_BATCH_TARGETS &&
                                 !accumulated_updates.is_empty()
@@ -1214,6 +1241,9 @@ impl MultiProofTask {
                 } else {
                     let num_accumulated = accumulated_updates.len();
                     let batch_source = accumulated_updates[0].0;
+                    debug_assert!(accumulated_updates
+                        .iter()
+                        .all(|(source, _)| same_state_change_source(*source, batch_source)));
                     let mut merged_update = accumulated_updates.remove(0).1;
                     for (_, next_update) in accumulated_updates {
                         merged_update.extend(next_update);
@@ -1549,8 +1579,8 @@ fn get_proof_targets(
             .storage
             .keys()
             .filter(|slot| {
-                !fetched.is_some_and(|f| f.contains(*slot)) ||
-                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
+                !fetched.is_some_and(|f| f.contains(*slot))
+                    || storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
             })
             .peekable();
 
@@ -2163,6 +2193,128 @@ mod tests {
                 panic!("Expected StateUpdate message");
             };
         assert_eq!(proofs_requested, 1);
+    }
+
+    #[test]
+    fn test_state_update_batching_separates_sources() {
+        use alloy_evm::block::StateChangeSource;
+        use revm_state::Account;
+
+        let test_provider_factory = create_test_provider_factory();
+        let task = create_test_state_root_task(test_provider_factory);
+
+        let addr_a1 = alloy_primitives::Address::random();
+        let addr_b1 = alloy_primitives::Address::random();
+        let addr_a2 = alloy_primitives::Address::random();
+
+        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
+            let mut state = EvmState::default();
+            state.insert(
+                addr,
+                Account {
+                    info: revm_state::AccountInfo {
+                        balance: U256::from(balance),
+                        nonce: 1,
+                        code_hash: Default::default(),
+                        code: Default::default(),
+                    },
+                    transaction_id: Default::default(),
+                    storage: Default::default(),
+                    status: revm_state::AccountStatus::Touched,
+                },
+            );
+            state
+        };
+
+        let source_a = StateChangeSource::Transaction(1);
+        let source_b = StateChangeSource::Transaction(2);
+
+        // Queue: A1 (immediate dispatch), B1 (batched), A2 (should become pending)
+        let tx = task.state_root_message_sender();
+        tx.send(MultiProofMessage::StateUpdate(source_a, create_state_update(addr_a1, 100)))
+            .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source_b, create_state_update(addr_b1, 200)))
+            .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source_a, create_state_update(addr_a2, 300)))
+            .unwrap();
+
+        let mut pending_msg: Option<MultiProofMessage> = None;
+
+        if let Ok(MultiProofMessage::StateUpdate(first_source, _)) = task.rx.recv() {
+            assert!(same_state_change_source(first_source, source_a));
+
+            // Simulate batching loop for remaining messages
+            let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> = Vec::new();
+            let mut accumulated_targets = 0usize;
+            let mut batch_source = None;
+
+            loop {
+                if accumulated_targets >= DEFAULT_MAX_BATCH_TARGETS
+                    || accumulated_updates.len() >= DEFAULT_MAX_BATCH_MESSAGES
+                {
+                    break;
+                }
+                match task.rx.try_recv() {
+                    Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
+                        if let Some(source) = batch_source {
+                            if !same_state_change_source(source, next_source) {
+                                pending_msg =
+                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
+                                break;
+                            }
+                        } else {
+                            batch_source = Some(next_source);
+                        }
+
+                        let next_estimate = estimate_evm_state_targets(&next_update);
+                        if accumulated_targets + next_estimate > DEFAULT_MAX_BATCH_TARGETS
+                            && !accumulated_updates.is_empty()
+                        {
+                            pending_msg =
+                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
+                            break;
+                        }
+                        accumulated_targets += next_estimate;
+                        accumulated_updates.push((next_source, next_update));
+                    }
+                    Ok(other_msg) => {
+                        pending_msg = Some(other_msg);
+                        break;
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            assert_eq!(accumulated_updates.len(), 1, "Should only batch matching sources");
+            match batch_source {
+                Some(source) => assert!(same_state_change_source(source, source_b)),
+                None => panic!("Batch source missing"),
+            }
+
+            let batch_source = accumulated_updates[0].0;
+            let mut merged_update = accumulated_updates.remove(0).1;
+            for (_, next_update) in accumulated_updates {
+                merged_update.extend(next_update);
+            }
+
+            assert!(
+                same_state_change_source(batch_source, source_b),
+                "Batch should use matching source"
+            );
+            assert!(merged_update.contains_key(&addr_b1));
+            assert!(!merged_update.contains_key(&addr_a1));
+            assert!(!merged_update.contains_key(&addr_a2));
+        } else {
+            panic!("Expected first StateUpdate");
+        }
+
+        match pending_msg {
+            Some(MultiProofMessage::StateUpdate(pending_source, pending_update)) => {
+                assert!(same_state_change_source(pending_source, source_a));
+                assert!(pending_update.contains_key(&addr_a2));
+            }
+            other => panic!("Expected pending StateUpdate with source_a, got {:?}", other),
+        }
     }
 
     #[test]
