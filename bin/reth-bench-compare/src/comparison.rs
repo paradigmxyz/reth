@@ -21,6 +21,10 @@ pub(crate) struct ComparisonGenerator {
     feature_ref_name: String,
     baseline_results: Option<BenchmarkResults>,
     feature_results: Option<BenchmarkResults>,
+    /// Reth command used for baseline run (stored independently of results)
+    baseline_command: Option<String>,
+    /// Reth command used for feature run (stored independently of results)
+    feature_command: Option<String>,
 }
 
 /// Represents the results from a single benchmark run
@@ -31,7 +35,6 @@ pub(crate) struct BenchmarkResults {
     pub summary: BenchmarkSummary,
     pub start_timestamp: Option<DateTime<Utc>>,
     pub end_timestamp: Option<DateTime<Utc>>,
-    pub reth_command: Option<String>,
 }
 
 /// Combined latency CSV row structure
@@ -144,6 +147,8 @@ impl ComparisonGenerator {
             feature_ref_name: args.feature_ref.clone(),
             baseline_results: None,
             feature_results: None,
+            baseline_command: None,
+            feature_command: None,
         }
     }
 
@@ -208,22 +213,17 @@ impl ComparisonGenerator {
         Ok(())
     }
 
-    /// Set the reth command for a reference
+    /// Set the reth command for a reference.
+    ///
+    /// Commands are stored independently of benchmark results, so they can be
+    /// captured regardless of whether the benchmark succeeded or failed.
     pub(crate) fn set_ref_command(&mut self, ref_type: &str, command: String) -> Result<()> {
         match ref_type {
             "baseline" => {
-                if let Some(ref mut results) = self.baseline_results {
-                    results.reth_command = Some(command);
-                } else {
-                    return Err(eyre!("Baseline results not loaded yet"));
-                }
+                self.baseline_command = Some(command);
             }
             "feature" => {
-                if let Some(ref mut results) = self.feature_results {
-                    results.reth_command = Some(command);
-                } else {
-                    return Err(eyre!("Feature results not loaded yet"));
-                }
+                self.feature_command = Some(command);
             }
             _ => return Err(eyre!("Unknown reference type: {}", ref_type)),
         }
@@ -255,14 +255,14 @@ impl ComparisonGenerator {
                 summary: baseline.summary.clone(),
                 start_timestamp: baseline.start_timestamp,
                 end_timestamp: baseline.end_timestamp,
-                reth_command: baseline.reth_command.clone(),
+                reth_command: self.baseline_command.clone(),
             },
             feature: RefInfo {
                 ref_name: feature.ref_name.clone(),
                 summary: feature.summary.clone(),
                 start_timestamp: feature.start_timestamp,
                 end_timestamp: feature.end_timestamp,
-                reth_command: feature.reth_command.clone(),
+                reth_command: self.feature_command.clone(),
             },
             comparison_summary,
             per_block_comparisons,
@@ -297,7 +297,6 @@ impl ComparisonGenerator {
             summary,
             start_timestamp: None,
             end_timestamp: None,
-            reth_command: None,
         })
     }
 
