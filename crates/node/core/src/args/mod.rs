@@ -46,7 +46,7 @@ pub use gas_price_oracle::GasPriceOracleArgs;
 
 /// TxPoolArgs for configuring the transaction pool
 mod txpool;
-pub use txpool::TxPoolArgs;
+pub use txpool::{DefaultTxPoolValues, TxPoolArgs};
 
 /// DevArgs for configuring the dev testnet
 mod dev;
