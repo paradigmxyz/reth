@@ -465,22 +465,23 @@ where
     ) -> Result<Vec<Log>, EthFilterError> {
         match filter.block_option {
             FilterBlockOption::AtBlockHash(block_hash) => {
-                // for all matching logs in the block
-                // get the block header with the hash
-                let header = self
-                    .provider()
-                    .header_by_hash_or_number(block_hash.into())?
-                    .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?;
+                // First try to get cached block and receipts, as it's likely they're already cached
+                let Some((receipts, maybe_block)) =
+                    self.eth_cache().get_receipts_and_maybe_block(block_hash).await?
+                else {
+                    return Err(ProviderError::HeaderNotFound(block_hash.into()).into())
+                };
+
+                // Get header - from cached block if available, otherwise from provider
+                let header = if let Some(block) = &maybe_block {
+                    block.header().clone()
+                } else {
+                    self.provider()
+                        .header_by_hash_or_number(block_hash.into())?
+                        .ok_or_else(|| ProviderError::HeaderNotFound(block_hash.into()))?
+                };
 
                 let block_num_hash = BlockNumHash::new(header.number(), block_hash);
-
-                // we also need to ensure that the receipts are available and return an error if
-                // not, in case the block hash been reorged
-                let (receipts, maybe_block) = self
-                    .eth_cache()
-                    .get_receipts_and_maybe_block(block_num_hash.hash)
-                    .await?
-                    .ok_or(EthApiError::HeaderNotFound(block_hash.into()))?;
 
                 let mut all_logs = Vec::new();
                 append_matching_block_logs(
