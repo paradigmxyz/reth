@@ -18,6 +18,9 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 
+# ligthouse consensus types
+consensus-types = { git = "https://github.com/sigp/lighthouse", package = "types", optional = true }
+
 # compression and decompression
 snap.workspace = true
 

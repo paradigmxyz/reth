@@ -1,7 +1,6 @@
 //! Consensus types for Era post-merge history files
 
-use crate::
-    e2s::{error::E2sError, types::Entry};
+use crate::e2s::{error::E2sError, types::Entry};
 use snap::{read::FrameDecoder, write::FrameEncoder};
 use std::io::{Read, Write};
 
