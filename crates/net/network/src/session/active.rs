@@ -787,6 +787,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 };
 
                 if should_send {
+                    // Prefer eth/70 SendBlockRange; fall back to eth/69 BlockRangeUpdate.
                     let msg = if this.conn.version() >= EthVersion::Eth70 {
                         EthMessage::SendBlockRange(RequestPair {
                             request_id: 0,
@@ -797,7 +798,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         })
                     } else {
                         EthMessage::BlockRangeUpdate(this.local_range_info.to_message())
-                    };
+                };
                     this.queued_outgoing.push_back(msg.into());
                     this.last_sent_latest_block = Some(current_latest);
                 }
@@ -805,6 +806,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         }
 
         if this.conn.version() >= EthVersion::Eth70 {
+            // If our view of the peer's range is stale, request an update (throttled).
             let now = Instant::now();
             let stale_update = this
                 .last_range_update
