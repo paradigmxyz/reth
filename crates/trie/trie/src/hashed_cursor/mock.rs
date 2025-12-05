@@ -48,7 +48,7 @@ impl MockHashedCursorFactory {
             .collect();
 
         // Extract storages from post state
-        let hashed_storages: B256Map<BTreeMap<B256, U256>> = post_state
+        let mut hashed_storages: B256Map<BTreeMap<B256, U256>> = post_state
             .storages
             .into_iter()
             .map(|(addr, hashed_storage)| {
@@ -61,6 +61,11 @@ impl MockHashedCursorFactory {
                 (addr, storage_map)
             })
             .collect();
+
+        // Ensure all accounts have at least an empty storage
+        for account in hashed_accounts.keys() {
+            hashed_storages.entry(*account).or_default();
+        }
 
         Self::new(hashed_accounts, hashed_storages)
     }
