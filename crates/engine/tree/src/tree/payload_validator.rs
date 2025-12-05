@@ -353,8 +353,7 @@ where
             )
             .into())
         };
-        let mut state_provider: Box<dyn StateProvider> =
-            Box::new(ensure_ok!(provider_builder.build()));
+        let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
         // fetch parent block
@@ -397,11 +396,11 @@ where
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
-        if !self.config.disable_state_cache() {
+        if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
             state_provider = Box::new(CachedStateProvider::new_with_caches(
                 state_provider,
-                handle.caches(),
-                handle.cache_metrics(),
+                caches,
+                cache_metrics,
             ));
         };
 

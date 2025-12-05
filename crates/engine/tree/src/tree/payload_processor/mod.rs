@@ -104,6 +104,8 @@ where
     cross_block_cache_size: u64,
     /// Whether transactions should not be executed on prewarming task.
     disable_transaction_prewarming: bool,
+    /// Whether state cache should be disable
+    disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
     /// Whether precompile cache should be disabled.
@@ -147,6 +149,7 @@ where
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
             evm_config,
+            disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
@@ -351,9 +354,15 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let saved_cache = self.cache_for(env.parent_hash);
-        let cache = saved_cache.cache().clone();
-        let cache_metrics = saved_cache.metrics().clone();
+        let (saved_cache, cache, cache_metrics) = if self.disable_state_cache {
+            (None, None, None)
+        } else {
+            let saved_cache = self.cache_for(env.parent_hash);
+            let cache = saved_cache.cache().clone();
+            let cache_metrics = saved_cache.metrics().clone();
+            (Some(saved_cache), Some(cache), Some(cache_metrics))
+        };
+
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -565,12 +574,12 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     }
 
     /// Returns a clone of the caches used by prewarming
-    pub(super) fn caches(&self) -> StateExecutionCache {
+    pub(super) fn caches(&self) -> Option<StateExecutionCache> {
         self.prewarm_handle.cache.clone()
     }
 
     /// Returns a clone of the cache metrics used by prewarming
-    pub(super) fn cache_metrics(&self) -> CachedStateMetrics {
+    pub(super) fn cache_metrics(&self) -> Option<CachedStateMetrics> {
         self.prewarm_handle.cache_metrics.clone()
     }
 
@@ -600,9 +609,9 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle {
     /// The shared cache the task operates with.
-    cache: StateExecutionCache,
+    cache: Option<StateExecutionCache>,
     /// Metrics for the caches
-    cache_metrics: CachedStateMetrics,
+    cache_metrics: Option<CachedStateMetrics>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent>>,
 }
