@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use crate::{
-    pool::{txpool::TxPool, AddedTransaction},
+    pool::{state::SubPool, txpool::TxPool, AddedTransaction},
     test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
     TransactionOrdering,
 };
@@ -125,23 +125,58 @@ impl<R: Rng> MockTransactionSimulator<R> {
                 let res =
                     pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None).unwrap();
 
-                // TODO(mattsse): need a way expect based on the current state of the pool and tx
-                // settings
-
                 match res {
                     AddedTransaction::Pending(_) => {}
                     AddedTransaction::Parked { .. } => {
                         panic!("expected pending")
                     }
                 }
-
-                // TODO(mattsse): check subpools
+                self.executed
+                    .entry(sender)
+                    .or_insert_with(|| ExecutedScenarios { sender, scenarios: vec![] }) // in the case of a new sender
+                    .scenarios
+                    .push(ExecutedScenario {
+                        balance: on_chain_balance,
+                        nonce: on_chain_nonce,
+                        scenario: Scenario::OnchainNonce { nonce: on_chain_nonce },
+                    });
             }
-            ScenarioType::HigherNonce { .. } => {
-                unimplemented!()
+
+            ScenarioType::HigherNonce { skip } => {
+                let higher_nonce = on_chain_nonce + skip;
+                let tx =
+                    self.tx_generator.tx(higher_nonce, &mut self.rng).with_gas_price(self.base_fee);
+                let valid_tx = self.validator.validated(tx);
+
+                let res =
+                    pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None).unwrap();
+
+                match res {
+                    AddedTransaction::Pending(_) => {
+                        panic!("expected parked")
+                    }
+                    AddedTransaction::Parked { subpool, .. } => {
+                        assert_eq!(
+                            subpool,
+                            SubPool::Queued,
+                            "expected to be moved to queued subpool"
+                        );
+                    }
+                }
+                self.executed
+                    .entry(sender)
+                    .or_insert_with(|| ExecutedScenarios { sender, scenarios: vec![] }) // in the case of a new sender
+                    .scenarios
+                    .push(ExecutedScenario {
+                        balance: on_chain_balance,
+                        nonce: on_chain_nonce,
+                        scenario: Scenario::HigherNonce {
+                            onchain: on_chain_nonce,
+                            nonce: higher_nonce,
+                        },
+                    });
             }
         }
-
         // make sure everything is set
         pool.enforce_invariants()
     }
