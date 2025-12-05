@@ -5,7 +5,6 @@
 use crate::{
     pool::{state::SubPool, txpool::TxPool, AddedTransaction},
     test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
-    traits::BlockInfo,
     TransactionOrdering,
 };
 use alloy_primitives::{Address, U256};
@@ -129,10 +128,8 @@ impl<R: Rng> MockTransactionSimulator<R> {
 
         match scenario {
             ScenarioType::OnchainNonce => {
-                let tx = self
-                    .tx_generator
-                    .tx(on_chain_nonce, &mut self.rng)
-                    .with_gas_price(self.base_fee);
+                // uses fee from fee_ranges
+                let tx = self.tx_generator.tx(on_chain_nonce, &mut self.rng);
                 let valid_tx = self.validator.validated(tx);
 
                 let res =
@@ -157,8 +154,9 @@ impl<R: Rng> MockTransactionSimulator<R> {
 
             ScenarioType::HigherNonce { skip } => {
                 let higher_nonce = on_chain_nonce + skip;
-                let tx =
-                    self.tx_generator.tx(higher_nonce, &mut self.rng).with_gas_price(self.base_fee);
+
+                // uses fee from fee_ranges
+                let tx = self.tx_generator.tx(higher_nonce, &mut self.rng);
                 let valid_tx = self.validator.validated(tx);
 
                 let res =
@@ -191,6 +189,7 @@ impl<R: Rng> MockTransactionSimulator<R> {
             }
 
             ScenarioType::BelowBaseFee { fee } => {
+                // fee should be in [MIN_PROTOCOL_BASE_FEE, base_fee)
                 let tx = self.tx_generator.tx(on_chain_nonce, &mut self.rng).with_gas_price(fee);
                 let valid_tx = self.validator.validated(tx);
 
@@ -265,11 +264,8 @@ pub(crate) enum Scenario {
     HigherNonce { onchain: u64, nonce: u64 },
     /// Send a tx with a base fee below the base fee of the pool
     BelowBaseFee { fee: u128 },
-
-    Multi {
-        // Execute multiple test scenarios
-        scenario: Vec<Self>,
-    },
+    /// Execute multiple test scenarios
+    Multi { scenario: Vec<Self> },
 }
 
 /// Represents an executed scenario
@@ -306,17 +302,18 @@ mod tests {
             blob_pct: 0,
         };
 
+        let base_fee = 10u128;
         let fee_ranges = MockFeeRange {
-            gas_price: (10u128..100).try_into().unwrap(),
-            priority_fee: (10u128..100).try_into().unwrap(),
-            max_fee: (100u128..110).try_into().unwrap(),
+            gas_price: (base_fee..100).try_into().unwrap(),
+            priority_fee: (1u128..10).try_into().unwrap(),
+            max_fee: (base_fee..110).try_into().unwrap(),
             max_fee_blob: (1u128..100).try_into().unwrap(),
         };
 
         let config = MockSimulatorConfig {
             num_senders: 10,
             scenarios: vec![ScenarioType::OnchainNonce],
-            base_fee: 10,
+            base_fee,
             tx_generator: MockTransactionDistribution::new(
                 transaction_ratio,
                 fee_ranges,
@@ -342,17 +339,18 @@ mod tests {
             blob_pct: 0,
         };
 
+        let base_fee = 10u128;
         let fee_ranges = MockFeeRange {
-            gas_price: (10u128..100).try_into().unwrap(),
-            priority_fee: (10u128..100).try_into().unwrap(),
-            max_fee: (100u128..110).try_into().unwrap(),
+            gas_price: (base_fee..100).try_into().unwrap(),
+            priority_fee: (1u128..10).try_into().unwrap(),
+            max_fee: (base_fee..110).try_into().unwrap(),
             max_fee_blob: (1u128..100).try_into().unwrap(),
         };
 
         let config = MockSimulatorConfig {
             num_senders: 10,
             scenarios: vec![ScenarioType::HigherNonce { skip: 1 }],
-            base_fee: 10,
+            base_fee,
             tx_generator: MockTransactionDistribution::new(
                 transaction_ratio,
                 fee_ranges,
@@ -370,6 +368,45 @@ mod tests {
     }
 
     #[test]
+    fn test_below_base_fee_scenario() {
+        let transaction_ratio = MockTransactionRatio {
+            legacy_pct: 30,
+            dynamic_fee_pct: 70,
+            access_list_pct: 0,
+            blob_pct: 0,
+        };
+
+        let base_fee = 10u128;
+        let fee_ranges = MockFeeRange {
+            gas_price: (base_fee..100).try_into().unwrap(),
+            priority_fee: (1u128..10).try_into().unwrap(),
+            max_fee: (base_fee..110).try_into().unwrap(),
+            max_fee_blob: (1u128..100).try_into().unwrap(),
+        };
+
+        let config = MockSimulatorConfig {
+            num_senders: 10,
+            scenarios: vec![ScenarioType::BelowBaseFee { fee: 8 }], /* fee should be in
+                                                                     * [MIN_PROTOCOL_BASE_FEE,
+                                                                     * base_fee) */
+            base_fee,
+            tx_generator: MockTransactionDistribution::new(
+                transaction_ratio,
+                fee_ranges,
+                10..100,
+                10..100,
+            ),
+        };
+        let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
+        let mut pool = simulator.create_pool();
+
+        simulator.next(&mut pool);
+        assert_eq!(pool.pending().len(), 0);
+        assert_eq!(pool.queued().len(), 0);
+        assert_eq!(pool.base_fee().len(), 1);
+    }
+
+    #[test]
     fn test_many_random_scenarios() {
         let transaction_ratio = MockTransactionRatio {
             legacy_pct: 30,
@@ -378,10 +415,11 @@ mod tests {
             blob_pct: 0,
         };
 
+        let base_fee = 10u128;
         let fee_ranges = MockFeeRange {
-            gas_price: (10u128..100).try_into().unwrap(),
-            priority_fee: (10u128..100).try_into().unwrap(),
-            max_fee: (100u128..110).try_into().unwrap(),
+            gas_price: (base_fee..100).try_into().unwrap(),
+            priority_fee: (1u128..10).try_into().unwrap(),
+            max_fee: (base_fee..110).try_into().unwrap(),
             max_fee_blob: (1u128..100).try_into().unwrap(),
         };
 
@@ -390,9 +428,9 @@ mod tests {
             scenarios: vec![
                 ScenarioType::OnchainNonce,
                 ScenarioType::HigherNonce { skip: 1 },
-                ScenarioType::HigherNonce { skip: 5 },
+                ScenarioType::BelowBaseFee { fee: 8 },
             ],
-            base_fee: 10,
+            base_fee,
             tx_generator: MockTransactionDistribution::new(
                 transaction_ratio,
                 fee_ranges,
@@ -407,5 +445,7 @@ mod tests {
         for _ in 0..1000 {
             simulator.next(&mut pool);
         }
+
+        // todo: add assertions that the pool is in a valid state
     }
 }
