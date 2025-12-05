@@ -550,7 +550,7 @@ where
         trace!(target: "rpc::eth", ?hash, "Serving eth_getTransactionByHash");
         Ok(EthTransactions::transaction_by_hash(self, hash)
             .await?
-            .map(|tx| tx.into_transaction(self.tx_resp_builder()))
+            .map(|tx| tx.into_transaction(self.converter()))
             .transpose()
             .map_err(T::Error::from)?)
     }

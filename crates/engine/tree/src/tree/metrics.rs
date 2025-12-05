@@ -17,6 +17,7 @@ use reth_metrics::{
 use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
+use revm_primitives::Address;
 use std::time::Instant;
 use tracing::{debug_span, trace};
 
@@ -64,7 +65,7 @@ impl EngineApiMetrics {
         executor: E,
         transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
-    ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
+    ) -> Result<(BlockExecutionOutput<E::Receipt>, Vec<Address>), BlockExecutionError>
     where
         DB: alloy_evm::Database,
         E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction: SignedTransaction>,
@@ -74,6 +75,7 @@ impl EngineApiMetrics {
         // be accessible.
         let wrapper = MeteredStateHook { metrics: self.executor.clone(), inner_hook: state_hook };
 
+        let mut senders = Vec::new();
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
         let f = || {
@@ -84,6 +86,7 @@ impl EngineApiMetrics {
                     debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
                 let enter = span.entered();
                 trace!(target: "engine::tree", "Executing transaction");
+                senders.push(*tx.signer());
                 let gas_used = executor.execute_transaction(tx)?;
 
                 // record the tx gas used
@@ -113,7 +116,7 @@ impl EngineApiMetrics {
         self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
         self.executor.bytecodes_updated_histogram.record(bytecodes as f64);
 
-        Ok(output)
+        Ok((output, senders))
     }
 }
 
@@ -304,6 +307,10 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_duration: Gauge,
     /// Histogram for state root duration ie the time spent blocked waiting for the state root
     pub(crate) state_root_histogram: Histogram,
+    /// Histogram of deferred trie computation duration.
+    pub(crate) deferred_trie_compute_duration: Histogram,
+    /// Histogram of time spent waiting for deferred trie data to become available.
+    pub(crate) deferred_trie_wait_duration: Histogram,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Histogram,
     /// Payload conversion and validation latency

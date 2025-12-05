@@ -348,6 +348,9 @@ impl<N: NetworkPrimitives> Peers for NetworkHandle<N> {
 
     /// Sends a message to the [`NetworkManager`](crate::NetworkManager) to connect to the given
     /// peer.
+    ///
+    /// This will add a new entry for the given peer if it isn't tracked yet.
+    /// If it is tracked then the peer is updated with the given information.
     fn connect_peer_kind(
         &self,
         peer_id: PeerId,

@@ -1,6 +1,6 @@
 #![allow(deprecated)] // necessary to all defining deprecated `PruneSegment` variants
 
-use crate::MINIMUM_PRUNING_DISTANCE;
+use crate::{MERKLE_CHANGESETS_RETENTION_BLOCKS, MINIMUM_PRUNING_DISTANCE};
 use derive_more::Display;
 use strum::{EnumIter, IntoEnumIterator};
 use thiserror::Error;
@@ -68,9 +68,9 @@ impl PruneSegment {
             Self::ContractLogs |
             Self::AccountHistory |
             Self::StorageHistory |
-            Self::MerkleChangeSets |
             Self::Bodies |
             Self::Receipts => MINIMUM_PRUNING_DISTANCE,
+            Self::MerkleChangeSets => MERKLE_CHANGESETS_RETENTION_BLOCKS,
             #[expect(deprecated)]
             #[expect(clippy::match_same_arms)]
             Self::Headers | Self::Transactions => 0,

@@ -36,9 +36,13 @@ pub enum HistoryType {
     StorageHistory,
 }
 
+/// Default number of blocks to retain for merkle changesets.
+/// This is used by both the `MerkleChangeSets` stage and the pruner segment.
+pub const MERKLE_CHANGESETS_RETENTION_BLOCKS: u64 = 64;
+
 /// Default pruning mode for merkle changesets
 const fn default_merkle_changesets_mode() -> PruneMode {
-    PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)
+    PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS)
 }
 
 /// Pruning configuration for every segment of the data that can be pruned.
@@ -95,7 +99,7 @@ pub struct PruneModes {
         any(test, feature = "serde"),
         serde(
             default = "default_merkle_changesets_mode",
-            deserialize_with = "deserialize_prune_mode_with_min_blocks::<MINIMUM_PRUNING_DISTANCE, _>"
+            deserialize_with = "deserialize_prune_mode_with_min_blocks::<MERKLE_CHANGESETS_RETENTION_BLOCKS, _>"
         )
     )]
     pub merkle_changesets: PruneMode,
@@ -144,6 +148,21 @@ impl PruneModes {
     /// Returns whether there is any kind of receipt pruning configuration.
     pub fn has_receipts_pruning(&self) -> bool {
         self.receipts.is_some() || !self.receipts_log_filter.is_empty()
+    }
+
+    /// Migrates deprecated prune mode values to their new defaults.
+    ///
+    /// Returns `true` if any migration was performed.
+    ///
+    /// Currently migrates:
+    /// - `merkle_changesets`: `Distance(10064)` -> `Distance(64)`
+    pub fn migrate(&mut self) -> bool {
+        if self.merkle_changesets == PruneMode::Distance(MINIMUM_PRUNING_DISTANCE) {
+            self.merkle_changesets = PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS);
+            true
+        } else {
+            false
+        }
     }
 
     /// Returns an error if we can't unwind to the targeted block because the target block is
