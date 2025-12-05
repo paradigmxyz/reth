@@ -560,6 +560,18 @@ pub(crate) struct MultiProofTaskMetrics {
     pub first_update_wait_time_histogram: Histogram,
     /// Total time spent waiting for the last proof result.
     pub last_proof_wait_time_histogram: Histogram,
+
+    // === P1 Metrics for root cause analysis ===
+    /// Histogram of available storage workers when dispatch is attempted.
+    pub available_storage_workers_at_dispatch_histogram: Histogram,
+    /// Histogram of available account workers when dispatch is attempted.
+    pub available_account_workers_at_dispatch_histogram: Histogram,
+    /// Counter: chunking was skipped because workers were busy (not enough available).
+    pub chunking_skipped_busy: metrics::Counter,
+    /// Counter: chunking was skipped because targets were below threshold.
+    pub chunking_skipped_below_threshold: metrics::Counter,
+    /// Counter: chunking was performed successfully.
+    pub chunking_performed: metrics::Counter,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -754,11 +766,21 @@ impl MultiProofTask {
         // Process proof targets in chunks.
         let mut chunks = 0;
 
+        // Record available workers at dispatch time (P1 metrics)
+        let available_account_workers =
+            self.multiproof_manager.proof_worker_handle.available_account_workers();
+        let available_storage_workers =
+            self.multiproof_manager.proof_worker_handle.available_storage_workers();
+        self.metrics
+            .available_account_workers_at_dispatch_histogram
+            .record(available_account_workers as f64);
+        self.metrics
+            .available_storage_workers_at_dispatch_histogram
+            .record(available_storage_workers as f64);
+
         // Only chunk if multiple account or storage workers are available to take advantage of
         // parallelism.
-        let should_chunk = self.multiproof_manager.proof_worker_handle.available_account_workers() >
-            1 ||
-            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
+        let should_chunk = available_account_workers > 1 || available_storage_workers > 1;
 
         let mut dispatch = |proof_targets| {
             self.multiproof_manager.dispatch(
@@ -775,10 +797,14 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if should_chunk &&
-            let Some(chunk_size) = self.chunk_size &&
-            proof_targets.chunking_length() > chunk_size
-        {
+        let targets_above_threshold = self
+            .chunk_size
+            .map(|chunk_size| proof_targets.chunking_length() > chunk_size)
+            .unwrap_or(false);
+
+        if should_chunk && targets_above_threshold {
+            self.metrics.chunking_performed.increment(1);
+            let chunk_size = self.chunk_size.unwrap();
             let mut chunks = 0usize;
             for proof_targets_chunk in proof_targets.chunks(chunk_size) {
                 dispatch(proof_targets_chunk);
@@ -786,6 +812,14 @@ impl MultiProofTask {
             }
             tracing::Span::current().record("chunks", chunks);
         } else {
+            // Record why chunking was skipped (P1 metrics)
+            if targets_above_threshold && !should_chunk {
+                // Targets were large enough but workers weren't available
+                self.metrics.chunking_skipped_busy.increment(1);
+            } else if !targets_above_threshold {
+                // Targets were below the chunking threshold
+                self.metrics.chunking_skipped_below_threshold.increment(1);
+            }
             dispatch(proof_targets);
         }
 
@@ -906,15 +940,26 @@ impl MultiProofTask {
 
         let mut spawned_proof_targets = MultiProofTargets::default();
 
+        // Record available workers at dispatch time (P1 metrics)
+        let available_account_workers =
+            self.multiproof_manager.proof_worker_handle.available_account_workers();
+        let available_storage_workers =
+            self.multiproof_manager.proof_worker_handle.available_storage_workers();
+        self.metrics
+            .available_account_workers_at_dispatch_histogram
+            .record(available_account_workers as f64);
+        self.metrics
+            .available_storage_workers_at_dispatch_histogram
+            .record(available_storage_workers as f64);
+
         // Chunk regardless if there are many proof targets
         let many_proof_targets =
             not_fetched_state_update.chunking_length() > self.max_targets_for_chunking;
 
         // Only chunk if multiple account or storage workers are available to take advantage of
         // parallelism.
-        let should_chunk = many_proof_targets ||
-            self.multiproof_manager.proof_worker_handle.available_account_workers() > 1 ||
-            self.multiproof_manager.proof_worker_handle.available_storage_workers() > 1;
+        let should_chunk =
+            many_proof_targets || available_account_workers > 1 || available_storage_workers > 1;
 
         let mut dispatch = |hashed_state_update| {
             let proof_targets = get_proof_targets(
@@ -939,10 +984,14 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        if should_chunk &&
-            let Some(chunk_size) = self.chunk_size &&
-            not_fetched_state_update.chunking_length() > chunk_size
-        {
+        let targets_above_threshold = self
+            .chunk_size
+            .map(|chunk_size| not_fetched_state_update.chunking_length() > chunk_size)
+            .unwrap_or(false);
+
+        if should_chunk && targets_above_threshold {
+            self.metrics.chunking_performed.increment(1);
+            let chunk_size = self.chunk_size.unwrap();
             let mut chunks = 0usize;
             for chunk in not_fetched_state_update.chunks(chunk_size) {
                 dispatch(chunk);
@@ -950,6 +999,14 @@ impl MultiProofTask {
             }
             tracing::Span::current().record("chunks", chunks);
         } else {
+            // Record why chunking was skipped (P1 metrics)
+            if targets_above_threshold && !should_chunk {
+                // Targets were large enough but workers weren't available
+                self.metrics.chunking_skipped_busy.increment(1);
+            } else if !targets_above_threshold {
+                // Targets were below the chunking threshold
+                self.metrics.chunking_skipped_below_threshold.increment(1);
+            }
             dispatch(not_fetched_state_update);
         }
 
