@@ -1,3 +1,4 @@
+use super::metrics::{RocksDBMetrics, RocksDBOperation};
 use reth_db_api::{
     table::{Compress, Decompress, Encode, Table},
     DatabaseError,
@@ -10,9 +11,11 @@ use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType, Options,
     WriteBatch, DB,
 };
-use std::{fmt, path::{Path, PathBuf}, sync::Arc};
-
-use super::metrics::{RocksDBMetrics, RocksDBOperation};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+    sync::Arc,
+};
 
 /// Default cache size for `RocksDB` block cache (128 MB).
 const DEFAULT_CACHE_SIZE: usize = 128 << 20;
