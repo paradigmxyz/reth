@@ -202,6 +202,74 @@ fn same_state_change_source(lhs: StateChangeSource, rhs: StateChangeSource) -> b
     }
 }
 
+/// Checks whether two state updates can be merged in a batch.
+///
+/// For pre/post-block sources the payload must be identical to avoid collapsing distinct block
+/// contexts into a single proof request.
+fn can_batch_state_update(
+    batch_source: StateChangeSource,
+    batch_update: &EvmState,
+    next_source: StateChangeSource,
+    next_update: &EvmState,
+) -> bool {
+    if !same_state_change_source(batch_source, next_source) {
+        return false;
+    }
+
+    match (batch_source, next_source) {
+        (StateChangeSource::PreBlock(_), StateChangeSource::PreBlock(_)) |
+        (StateChangeSource::PostBlock(_), StateChangeSource::PostBlock(_)) => {
+            batch_update == next_update
+        }
+        _ => true,
+    }
+}
+
+/// Outcome of chunked dispatching.
+#[derive(Debug, Clone, Copy, Default)]
+struct ChunkDispatchOutcome {
+    /// How many dispatches were performed.
+    dispatched: usize,
+    /// Whether chunking was actually applied.
+    chunked: bool,
+}
+
+/// Dispatches work items either as a single unit or in chunks, depending on target size and worker
+/// availability. Returns how many dispatches were performed and whether chunking happened.
+fn dispatch_with_chunking<T, I>(
+    items: T,
+    chunking_len: usize,
+    chunk_size: Option<usize>,
+    max_targets_for_chunking: usize,
+    available_account_workers: usize,
+    available_storage_workers: usize,
+    chunker: impl FnOnce(T, usize) -> I,
+    mut dispatch: impl FnMut(T),
+) -> ChunkDispatchOutcome
+where
+    I: IntoIterator<Item = T>,
+{
+    let should_chunk = chunking_len > max_targets_for_chunking ||
+        available_account_workers > 1 ||
+        available_storage_workers > 1;
+
+    if should_chunk {
+        if let Some(chunk_size) = chunk_size {
+            if chunking_len > chunk_size {
+                let mut dispatched = 0usize;
+                for chunk in chunker(items, chunk_size) {
+                    dispatch(chunk);
+                    dispatched += 1;
+                }
+                return ChunkDispatchOutcome { dispatched, chunked: true };
+            }
+        }
+    }
+
+    dispatch(items);
+    ChunkDispatchOutcome { dispatched: 1, chunked: false }
+}
+
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
@@ -778,7 +846,7 @@ impl MultiProofTask {
 
     /// Handles request for proof prefetch.
     ///
-    /// Returns a number of proofs that were spawned.
+    /// Returns how many multiproof tasks were dispatched for the prefetch request.
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::multiproof",
@@ -803,7 +871,7 @@ impl MultiProofTask {
             .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
 
         // Process proof targets in chunks.
-        let mut chunks = 0;
+        let chunking_len = proof_targets.chunking_length();
 
         // Record available workers at dispatch time (P1 metrics)
         let available_account_workers =
@@ -817,48 +885,38 @@ impl MultiProofTask {
             .available_storage_workers_at_dispatch_histogram
             .record(available_storage_workers as f64);
 
-        let mut dispatch = |proof_targets| {
-            self.multiproof_manager.dispatch(
-                MultiproofInput {
-                    source: None,
-                    hashed_state_update: Default::default(),
-                    proof_targets,
-                    proof_sequence_number: self.proof_sequencer.next_sequence(),
-                    state_root_message_sender: self.tx.clone(),
-                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
-                }
-                .into(),
-            );
-            chunks += 1;
-        };
-
-        // Chunk regardless if there are many proof targets
-        let many_proof_targets = proof_targets.chunking_length() > self.max_targets_for_chunking;
-
-        // Only chunk if multiple account or storage workers are available to take advantage of
-        // parallelism.
-        let should_chunk =
-            many_proof_targets || available_account_workers > 1 || available_storage_workers > 1;
-
-        if should_chunk &&
-            let Some(chunk_size) = self.chunk_size &&
-            proof_targets.chunking_length() > chunk_size
-        {
+        let outcome = dispatch_with_chunking(
+            proof_targets,
+            chunking_len,
+            self.chunk_size,
+            self.max_targets_for_chunking,
+            available_account_workers,
+            available_storage_workers,
+            MultiProofTargets::chunks,
+            |proof_targets| {
+                self.multiproof_manager.dispatch(
+                    MultiproofInput {
+                        source: None,
+                        hashed_state_update: Default::default(),
+                        proof_targets,
+                        proof_sequence_number: self.proof_sequencer.next_sequence(),
+                        state_root_message_sender: self.tx.clone(),
+                        multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                    }
+                    .into(),
+                );
+            },
+        );
+        if outcome.chunked {
             self.metrics.chunking_performed.increment(1);
-            let mut chunks = 0usize;
-            for proof_targets_chunk in proof_targets.chunks(chunk_size) {
-                dispatch(proof_targets_chunk);
-                chunks += 1;
-            }
-            tracing::Span::current().record("chunks", chunks);
+            tracing::Span::current().record("chunks", outcome.dispatched);
         } else {
             self.metrics.chunking_skipped_below_threshold.increment(1);
-            dispatch(proof_targets);
         }
 
-        self.metrics.prefetch_proof_chunks_histogram.record(chunks as f64);
+        self.metrics.prefetch_proof_chunks_histogram.record(outcome.dispatched as f64);
 
-        chunks
+        outcome.dispatched as u64
     }
 
     // Returns true if all state updates finished and all proofs processed.
@@ -914,7 +972,7 @@ impl MultiProofTask {
             let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
                 // this means the account has not been fetched yet, so we must fetch everything
                 // associated with this account
-                continue
+                continue;
             };
 
             let prev_target_storage_len = target_storage.len();
@@ -936,7 +994,8 @@ impl MultiProofTask {
 
     /// Handles state updates.
     ///
-    /// Returns a number of proofs that were spawned.
+    /// Returns how many proof dispatches were spawned (including an EmptyProof for already fetched
+    /// targets).
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::multiproof",
@@ -969,8 +1028,7 @@ impl MultiProofTask {
         let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
 
         // Process state updates in chunks.
-        let mut chunks = 0;
-
+        let chunking_len = not_fetched_state_update.chunking_length();
         let mut spawned_proof_targets = MultiProofTargets::default();
 
         // Record available workers at dispatch time (P1 metrics)
@@ -985,52 +1043,40 @@ impl MultiProofTask {
             .available_storage_workers_at_dispatch_histogram
             .record(available_storage_workers as f64);
 
-        let mut dispatch = |hashed_state_update| {
-            let proof_targets = get_proof_targets(
-                &hashed_state_update,
-                &self.fetched_proof_targets,
-                &multi_added_removed_keys,
-            );
-            spawned_proof_targets.extend_ref(&proof_targets);
+        let outcome = dispatch_with_chunking(
+            not_fetched_state_update,
+            chunking_len,
+            self.chunk_size,
+            self.max_targets_for_chunking,
+            available_account_workers,
+            available_storage_workers,
+            HashedPostState::chunks,
+            |hashed_state_update| {
+                let proof_targets = get_proof_targets(
+                    &hashed_state_update,
+                    &self.fetched_proof_targets,
+                    &multi_added_removed_keys,
+                );
+                spawned_proof_targets.extend_ref(&proof_targets);
 
-            self.multiproof_manager.dispatch(
-                MultiproofInput {
-                    source: Some(source),
-                    hashed_state_update,
-                    proof_targets,
-                    proof_sequence_number: self.proof_sequencer.next_sequence(),
-                    state_root_message_sender: self.tx.clone(),
-                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
-                }
-                .into(),
-            );
-
-            chunks += 1;
-        };
-
-        // Chunk regardless if there are many proof targets
-        let many_proof_targets =
-            not_fetched_state_update.chunking_length() > self.max_targets_for_chunking;
-
-        // Only chunk if multiple account or storage workers are available to take advantage of
-        // parallelism.
-        let should_chunk =
-            many_proof_targets || available_account_workers > 1 || available_storage_workers > 1;
-
-        if should_chunk &&
-            let Some(chunk_size) = self.chunk_size &&
-            not_fetched_state_update.chunking_length() > chunk_size
-        {
+                self.multiproof_manager.dispatch(
+                    MultiproofInput {
+                        source: Some(source),
+                        hashed_state_update,
+                        proof_targets,
+                        proof_sequence_number: self.proof_sequencer.next_sequence(),
+                        state_root_message_sender: self.tx.clone(),
+                        multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                    }
+                    .into(),
+                );
+            },
+        );
+        if outcome.chunked {
             self.metrics.chunking_performed.increment(1);
-            let mut chunks = 0usize;
-            for chunk in not_fetched_state_update.chunks(chunk_size) {
-                dispatch(chunk);
-                chunks += 1;
-            }
-            tracing::Span::current().record("chunks", chunks);
+            tracing::Span::current().record("chunks", outcome.dispatched);
         } else {
             self.metrics.chunking_skipped_below_threshold.increment(1);
-            dispatch(not_fetched_state_update);
         }
 
         self.metrics
@@ -1039,11 +1085,11 @@ impl MultiProofTask {
         self.metrics
             .state_update_proof_targets_storages_histogram
             .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
-        self.metrics.state_update_proof_chunks_histogram.record(chunks as f64);
+        self.metrics.state_update_proof_chunks_histogram.record(outcome.dispatched as f64);
 
         self.fetched_proof_targets.extend(spawned_proof_targets);
 
-        state_updates + chunks
+        state_updates + outcome.dispatched as u64
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
@@ -1205,7 +1251,6 @@ impl MultiProofTask {
                 // STEP 2: While workers process, accumulate more messages into a batch
                 let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> = Vec::new();
                 let mut accumulated_targets = 0usize;
-                let mut batch_source: Option<StateChangeSource> = None;
 
                 loop {
                     if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
@@ -1213,16 +1258,20 @@ impl MultiProofTask {
                     }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                            if let Some(source) = batch_source {
-                                if !same_state_change_source(source, next_source) {
+                            if let Some((batch_source, batch_update)) = accumulated_updates.first()
+                            {
+                                if !can_batch_state_update(
+                                    *batch_source,
+                                    batch_update,
+                                    next_source,
+                                    &next_update,
+                                ) {
                                     *pending_msg = Some(MultiProofMessage::StateUpdate(
                                         next_source,
                                         next_update,
                                     ));
                                     break;
                                 }
-                            } else {
-                                batch_source = Some(next_source);
                             }
 
                             let next_estimate = estimate_evm_state_targets(&next_update);
@@ -1258,9 +1307,12 @@ impl MultiProofTask {
                 } else {
                     let num_accumulated = accumulated_updates.len();
                     let batch_source = accumulated_updates[0].0;
-                    debug_assert!(accumulated_updates
-                        .iter()
-                        .all(|(source, _)| same_state_change_source(*source, batch_source)));
+                    {
+                        let batch_update = &accumulated_updates[0].1;
+                        debug_assert!(accumulated_updates.iter().all(|(source, update)| {
+                            can_batch_state_update(batch_source, batch_update, *source, update)
+                        }));
+                    }
                     let mut merged_update = accumulated_updates.remove(0).1;
                     for (_, next_update) in accumulated_updates {
                         merged_update.extend(next_update);
@@ -2263,7 +2315,6 @@ mod tests {
             // Simulate batching loop for remaining messages
             let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> = Vec::new();
             let mut accumulated_targets = 0usize;
-            let mut batch_source = None;
 
             loop {
                 if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
@@ -2271,14 +2322,17 @@ mod tests {
                 }
                 match task.rx.try_recv() {
                     Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some(source) = batch_source {
-                            if !same_state_change_source(source, next_source) {
+                        if let Some((batch_source, batch_update)) = accumulated_updates.first() {
+                            if !can_batch_state_update(
+                                *batch_source,
+                                batch_update,
+                                next_source,
+                                &next_update,
+                            ) {
                                 pending_msg =
                                     Some(MultiProofMessage::StateUpdate(next_source, next_update));
                                 break;
                             }
-                        } else {
-                            batch_source = Some(next_source);
                         }
 
                         let next_estimate = estimate_evm_state_targets(&next_update);
@@ -2306,10 +2360,8 @@ mod tests {
             }
 
             assert_eq!(accumulated_updates.len(), 1, "Should only batch matching sources");
-            match batch_source {
-                Some(source) => assert!(same_state_change_source(source, source_b)),
-                None => panic!("Batch source missing"),
-            }
+            let batch_source = accumulated_updates[0].0;
+            assert!(same_state_change_source(batch_source, source_b));
 
             let batch_source = accumulated_updates[0].0;
             let mut merged_update = accumulated_updates.remove(0).1;
@@ -2334,6 +2386,118 @@ mod tests {
                 assert!(pending_update.contains_key(&addr_a2));
             }
             other => panic!("Expected pending StateUpdate with source_a, got {:?}", other),
+        }
+    }
+
+    #[test]
+    fn test_pre_block_updates_require_payload_match_to_batch() {
+        use alloy_evm::block::{StateChangePreBlockSource, StateChangeSource};
+        use revm_state::Account;
+
+        let test_provider_factory = create_test_provider_factory();
+        let task = create_test_state_root_task(test_provider_factory);
+
+        let addr1 = alloy_primitives::Address::random();
+        let addr2 = alloy_primitives::Address::random();
+        let addr3 = alloy_primitives::Address::random();
+
+        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
+            let mut state = EvmState::default();
+            state.insert(
+                addr,
+                Account {
+                    info: revm_state::AccountInfo {
+                        balance: U256::from(balance),
+                        nonce: 1,
+                        code_hash: Default::default(),
+                        code: Default::default(),
+                    },
+                    transaction_id: Default::default(),
+                    storage: Default::default(),
+                    status: revm_state::AccountStatus::Touched,
+                },
+            );
+            state
+        };
+
+        let source = StateChangeSource::PreBlock(StateChangePreBlockSource::BeaconRootContract);
+
+        // Queue: first update dispatched immediately, next two should not merge
+        let tx = task.state_root_message_sender();
+        tx.send(MultiProofMessage::StateUpdate(source, create_state_update(addr1, 100))).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source, create_state_update(addr2, 200))).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source, create_state_update(addr3, 300))).unwrap();
+
+        let mut pending_msg: Option<MultiProofMessage> = None;
+
+        if let Ok(MultiProofMessage::StateUpdate(first_source, first_update)) = task.rx.recv() {
+            assert!(same_state_change_source(first_source, source));
+            assert!(first_update.contains_key(&addr1));
+
+            let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> = Vec::new();
+            let mut accumulated_targets = 0usize;
+
+            loop {
+                if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
+                    break;
+                }
+                match task.rx.try_recv() {
+                    Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
+                        if let Some((batch_source, batch_update)) = accumulated_updates.first() {
+                            if !can_batch_state_update(
+                                *batch_source,
+                                batch_update,
+                                next_source,
+                                &next_update,
+                            ) {
+                                pending_msg =
+                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
+                                break;
+                            }
+                        }
+
+                        let next_estimate = estimate_evm_state_targets(&next_update);
+                        if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
+                            pending_msg =
+                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
+                            break;
+                        }
+                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
+                            !accumulated_updates.is_empty()
+                        {
+                            pending_msg =
+                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
+                            break;
+                        }
+                        accumulated_targets += next_estimate;
+                        accumulated_updates.push((next_source, next_update));
+                    }
+                    Ok(other_msg) => {
+                        pending_msg = Some(other_msg);
+                        break;
+                    }
+                    Err(_) => break,
+                }
+            }
+
+            assert_eq!(
+                accumulated_updates.len(),
+                1,
+                "Second pre-block update should not merge with a different payload"
+            );
+            let (batched_source, batched_update) = accumulated_updates.remove(0);
+            assert!(same_state_change_source(batched_source, source));
+            assert!(batched_update.contains_key(&addr2));
+            assert!(!batched_update.contains_key(&addr3));
+
+            match pending_msg {
+                Some(MultiProofMessage::StateUpdate(_, pending_update)) => {
+                    assert!(pending_update.contains_key(&addr3));
+                }
+                other => panic!("Expected pending third pre-block update, got {:?}", other),
+            }
+        } else {
+            panic!("Expected first StateUpdate");
         }
     }
 
