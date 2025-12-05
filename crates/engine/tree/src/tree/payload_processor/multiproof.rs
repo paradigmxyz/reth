@@ -28,10 +28,10 @@ use tracing::{debug, error, instrument, trace};
 
 /// Maximum number of targets to batch together for prefetch batching.
 /// Prefetches are just proof requests (no state merging), so we allow a higher cap than state
-/// updates to drain bursts efficiently without stalling proof workers.
+/// updates
 const PREFETCH_MAX_BATCH_TARGETS: usize = 500;
 
-/// Maximum number of prefetch messages to batch together (secondary safety limit).
+/// Maximum number of prefetch messages to batch together.
 /// Prevents excessive batching even with small messages.
 const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
 
@@ -123,7 +123,7 @@ impl ProofSequencer {
 
         // return early if we don't have the next expected proof
         if !self.pending_proofs.contains_key(&self.next_to_deliver) {
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
@@ -172,18 +172,13 @@ impl Drop for StateHookSender {
     }
 }
 
-/// Estimates the target count from an `EvmState` without full conversion to `HashedPostState`.
-///
-/// This is used during batching to decide when to stop batching before the actual conversion
-/// happens. The estimate mirrors the logic of `chunking_length()` on `HashedPostState`:
-/// each account counts as 1, plus each storage slot counts as 1.
+/// Estimates target count from `EvmState` for batching decisions.
 fn estimate_evm_state_targets(state: &EvmState) -> usize {
     state
         .values()
         .filter(|account| account.is_touched())
         .map(|account| {
             let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
-            // Match HashedPostState::chunking_length: 1 for the account + 1 for each storage slot
             1 + changed_slots
         })
         .sum()
@@ -204,9 +199,6 @@ fn same_state_change_source(lhs: StateChangeSource, rhs: StateChangeSource) -> b
 }
 
 /// Checks whether two state updates can be merged in a batch.
-///
-/// For pre/post-block sources the payload must be identical to avoid collapsing distinct block
-/// contexts into a single proof request.
 fn can_batch_state_update(
     batch_source: StateChangeSource,
     batch_update: &EvmState,
@@ -224,42 +216,6 @@ fn can_batch_state_update(
         }
         _ => true,
     }
-}
-
-/// Dispatches work items either as a single unit or in chunks, depending on target size and worker
-/// availability. Returns how many dispatches were performed.
-#[allow(clippy::too_many_arguments)]
-fn dispatch_with_chunking<T, I>(
-    items: T,
-    chunking_len: usize,
-    chunk_size: Option<usize>,
-    max_targets_for_chunking: usize,
-    available_account_workers: usize,
-    available_storage_workers: usize,
-    chunker: impl FnOnce(T, usize) -> I,
-    mut dispatch: impl FnMut(T),
-) -> usize
-where
-    I: IntoIterator<Item = T>,
-{
-    let should_chunk = chunking_len > max_targets_for_chunking ||
-        available_account_workers > 1 ||
-        available_storage_workers > 1;
-
-    if should_chunk &&
-        let Some(chunk_size) = chunk_size &&
-        chunking_len > chunk_size
-    {
-        let mut dispatched = 0usize;
-        for chunk in chunker(items, chunk_size) {
-            dispatch(chunk);
-            dispatched += 1;
-        }
-        return dispatched;
-    }
-
-    dispatch(items);
-    1
 }
 
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
@@ -292,6 +248,42 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     }
 
     hashed_state
+}
+
+/// Dispatches work items as a single unit or in chunks based on target size and worker
+/// availability.
+#[allow(clippy::too_many_arguments)]
+fn dispatch_with_chunking<T, I>(
+    items: T,
+    chunking_len: usize,
+    chunk_size: Option<usize>,
+    max_targets_for_chunking: usize,
+    available_account_workers: usize,
+    available_storage_workers: usize,
+    chunker: impl FnOnce(T, usize) -> I,
+    mut dispatch: impl FnMut(T),
+) -> usize
+where
+    I: IntoIterator<Item = T>,
+{
+    let should_chunk = chunking_len > max_targets_for_chunking ||
+        available_account_workers > 1 ||
+        available_storage_workers > 1;
+
+    if should_chunk &&
+        let Some(chunk_size) = chunk_size &&
+        chunking_len > chunk_size
+    {
+        let mut dispatched = 0usize;
+        for chunk in chunker(items, chunk_size) {
+            dispatch(chunk);
+            dispatched += 1;
+        }
+        return dispatched;
+    }
+
+    dispatch(items);
+    1
 }
 
 /// A pending multiproof task, either [`StorageMultiproofInput`] or [`MultiproofInput`].
@@ -444,7 +436,7 @@ impl MultiproofManager {
                 "No proof targets, sending empty multiproof back immediately"
             );
             input.send_empty_proof();
-            return
+            return;
         }
 
         match input {
@@ -852,10 +844,7 @@ impl MultiProofTask {
             .prefetch_proof_targets_storages_histogram
             .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
 
-        // Process proof targets in chunks.
         let chunking_len = proof_targets.chunking_length();
-
-        // Record available workers at dispatch time (P1 metrics)
         let available_account_workers =
             self.multiproof_manager.proof_worker_handle.available_account_workers();
         let available_storage_workers =
@@ -995,11 +984,8 @@ impl MultiProofTask {
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
         let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
 
-        // Process state updates in chunks.
         let chunking_len = not_fetched_state_update.chunking_length();
         let mut spawned_proof_targets = MultiProofTargets::default();
-
-        // Record available workers at dispatch time (P1 metrics)
         let available_account_workers =
             self.multiproof_manager.proof_worker_handle.available_account_workers();
         let available_storage_workers =
@@ -1099,7 +1085,7 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Dispatch first prefetch immediately, then accumulate more while workers process.
+                // Dispatch first message immediately
                 let first_account_targets = targets.len();
                 let first_storage_targets =
                     targets.values().map(|slots| slots.len()).sum::<usize>();
@@ -1113,7 +1099,7 @@ impl MultiProofTask {
                     "Dispatched first prefetch immediately"
                 );
 
-                // STEP 2: Accumulate more messages while workers process
+                // Accumulate more messages while workers process
                 let mut accumulated_targets: Vec<MultiProofTargets> = Vec::new();
                 let mut accumulated_count = 0usize;
 
@@ -1144,7 +1130,7 @@ impl MultiProofTask {
                     }
                 }
 
-                // STEP 3: Process accumulated batch if any
+                // Process accumulated batch
                 if accumulated_targets.is_empty() {
                     self.metrics.prefetch_batch_size_histogram.record(1.0);
                 } else {
@@ -1183,11 +1169,7 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // EXPERIMENT 3: Dispatch-then-batch strategy.
-                // Dispatch first message IMMEDIATELY to maintain pipeline flow,
-                // then accumulate more messages while workers process.
-
-                // STEP 1: Dispatch first message immediately (no batching delay)
+                // Dispatch first message immediately
                 let first_len = update.len();
                 *state_update_proofs_requested += self.on_state_update(source, update);
                 debug!(
@@ -1199,7 +1181,7 @@ impl MultiProofTask {
                     "Dispatched first state update immediately"
                 );
 
-                // STEP 2: While workers process, accumulate more messages into a batch
+                // Accumulate more messages while workers process
                 let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> = Vec::new();
                 let mut accumulated_targets = 0usize;
 
@@ -1248,9 +1230,8 @@ impl MultiProofTask {
                     }
                 }
 
-                // STEP 3: Process accumulated batch if any
+                // Process accumulated batch
                 if accumulated_updates.is_empty() {
-                    // Record batch size of 1 for the immediate dispatch
                     self.metrics.state_update_batch_size_histogram.record(1.0);
                 } else {
                     let num_accumulated = accumulated_updates.len();
@@ -1443,7 +1424,6 @@ impl MultiProofTask {
                 }
             }
 
-            // Process pending message (from batching) after draining proof results
             if let Some(msg) = pending_msg.take() {
                 if self.process_multiproof_message(
                     msg,
