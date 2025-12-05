@@ -882,9 +882,9 @@ impl MultiProofTask {
                 );
             },
         );
-        self.metrics.prefetch_proof_chunks_histogram.record(outcome.dispatched as f64);
+        self.metrics.prefetch_proof_chunks_histogram.record(outcome as f64);
 
-        outcome.dispatched as u64
+        outcome as u64
     }
 
     // Returns true if all state updates finished and all proofs processed.
@@ -1039,11 +1039,11 @@ impl MultiProofTask {
         self.metrics
             .state_update_proof_targets_storages_histogram
             .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
-        self.metrics.state_update_proof_chunks_histogram.record(outcome.dispatched as f64);
+        self.metrics.state_update_proof_chunks_histogram.record(outcome as f64);
 
         self.fetched_proof_targets.extend(spawned_proof_targets);
 
-        state_updates + outcome.dispatched as u64
+        state_updates + outcome as u64
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
