@@ -3,7 +3,7 @@ use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{Block, Bundle, StateContext};
+use alloy_rpc_types_eth::{BadBlock, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
@@ -38,7 +38,7 @@ pub trait DebugApi<TxReq: RpcObject> {
 
     /// Returns an array of recent bad blocks that the client has seen on the network.
     #[method(name = "getBadBlocks")]
-    async fn bad_blocks(&self) -> RpcResult<Vec<Block>>;
+    async fn bad_blocks(&self) -> RpcResult<Vec<BadBlock>>;
 
     /// Returns the structured logs created during the execution of EVM between two blocks
     /// (excluding start) as a JSON object.

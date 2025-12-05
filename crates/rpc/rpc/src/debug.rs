@@ -9,23 +9,27 @@ use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
-    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext,
+    state::EvmOverrides, BadBlock, BlockError, BlockTransactionsKind, Bundle, StateContext,
+    TransactionInfo,
 };
 use alloy_rpc_types_trace::geth::{
-    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
+    mux::MuxConfig, BlockTraceResult, CallConfig, FourByteFrame, GethDebugBuiltInTracerType,
+    GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions,
+    GethDefaultTracingOptions, GethTrace, NoopFrame, PreStateConfig, TraceResult,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
+use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
 use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor};
-use reth_primitives_traits::{Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock};
+use reth_primitives_traits::{Block as BlockTrait, BlockBody, ReceiptWithBloom, RecoveredBlock};
 use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError, RpcNodeCore,
+    EthApiTypes, FromEthApiError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -35,24 +39,84 @@ use reth_storage_api::{
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::DatabaseCommit;
-use revm_inspectors::tracing::{DebugInspector, TransactionContext};
-use std::sync::Arc;
+use revm::{
+    context::{
+        result::{HaltReasonTr, ResultAndState},
+        ContextTr,
+    },
+    inspector::{JournalExt, NoOpInspector},
+    interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter},
+    DatabaseCommit, DatabaseRef, Inspector,
+};
+use revm_inspectors::tracing::{
+    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
+};
+use revm_primitives::{Log, U256};
+use serde::{Deserialize, Serialize};
+use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
-pub struct DebugApi<Eth> {
+pub struct DebugApi<Eth: RpcNodeCore> {
     inner: Arc<DebugApiInner<Eth>>,
+}
+
+/// A bounded, deduplicating store of recently observed bad blocks.
+#[derive(Clone, Debug)]
+pub struct BadBlockStore<B: BlockTrait> {
+    inner: Arc<RwLock<VecDeque<Arc<RecoveredBlock<B>>>>>,
+    limit: usize,
+}
+
+impl<B: BlockTrait> BadBlockStore<B> {
+    /// Creates a new store with the given capacity.
+    pub fn new(limit: usize) -> Self {
+        Self { inner: Arc::new(RwLock::new(VecDeque::with_capacity(limit))), limit }
+    }
+
+    /// Inserts a recovered block, keeping only the most recent `limit` entries and deduplicating
+    /// by block hash.
+    pub fn insert(&self, block: RecoveredBlock<B>) {
+        let hash = block.hash();
+        let mut guard = self.inner.write();
+
+        // drop existing entry with same hash to keep most recent order
+        guard.retain(|b| b.hash() != hash);
+        guard.push_back(Arc::new(block));
+
+        while guard.len() > self.limit {
+            guard.pop_front();
+        }
+    }
+
+    /// Returns all cached bad blocks ordered from newest to oldest.
+    pub fn all(&self) -> Vec<Arc<RecoveredBlock<B>>> {
+        let guard = self.inner.read();
+        guard.iter().rev().cloned().collect()
+    }
+}
+
+impl<B: BlockTrait> Default for BadBlockStore<B> {
+    fn default() -> Self {
+        Self::new(64)
+    }
 }
 
 // === impl DebugApi ===
 
-impl<Eth> DebugApi<Eth> {
+impl<Eth> DebugApi<Eth>
+where
+    Eth: RpcNodeCore,
+{
     /// Create a new instance of the [`DebugApi`]
-    pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
-        let inner = Arc::new(DebugApiInner { eth_api, blocking_task_guard });
+    pub fn new(
+        eth_api: Eth,
+        blocking_task_guard: BlockingTaskGuard,
+        bad_block_store: BadBlockStore<ProviderBlock<Eth::Provider>>,
+    ) -> Self {
+        let inner = Arc::new(DebugApiInner { eth_api, blocking_task_guard, bad_block_store });
         Self { inner }
     }
 
@@ -60,12 +124,15 @@ impl<Eth> DebugApi<Eth> {
     pub fn eth_api(&self) -> &Eth {
         &self.inner.eth_api
     }
-}
 
-impl<Eth: RpcNodeCore> DebugApi<Eth> {
     /// Access the underlying provider.
     pub fn provider(&self) -> &Eth::Provider {
         self.inner.eth_api.provider()
+    }
+
+    /// Access the bad block store.
+    pub fn bad_block_store(&self) -> &BadBlockStore<ProviderBlock<Eth::Provider>> {
+        &self.inner.bad_block_store
     }
 }
 
@@ -610,7 +677,7 @@ where
 #[async_trait]
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
-    Eth: EthApiTypes + EthTransactions + TraceExt + 'static,
+    Eth: EthApiTypes + EthTransactions + TraceExt + RpcNodeCore + 'static,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -660,7 +727,7 @@ where
     /// Handler for `debug_getRawTransactions`
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transactions(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
-        let block = self
+        let block: RecoveredBlock<ProviderBlock<Eth::Provider>> = self
             .provider()
             .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
             .to_rpc_result()?
@@ -681,8 +748,43 @@ where
     }
 
     /// Handler for `debug_getBadBlocks`
-    async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
-        Ok(vec![])
+    async fn bad_blocks(&self) -> RpcResult<Vec<BadBlock>> {
+        let blocks = self.bad_block_store().all();
+        let mut bad_blocks = Vec::with_capacity(blocks.len());
+
+        #[derive(Serialize, Deserialize)]
+        struct BadBlockSerde<Tx, H> {
+            block: alloy_rpc_types_eth::Block<Tx, H>,
+            hash: B256,
+            rlp: Bytes,
+        }
+
+        for block in blocks {
+            let rpc_block = block
+                .clone_into_rpc_block(
+                    BlockTransactionsKind::Full,
+                    |tx, tx_info| self.eth_api().converter().fill(tx, tx_info),
+                    |header, size| self.eth_api().converter().convert_header(header, size),
+                )
+                .map_err(|err| internal_rpc_err(err.to_string()))?;
+
+            // Convert to default RPC block via serde to align with BadBlock fields.
+            let rpc_block: alloy_rpc_types_eth::Block = serde_json::to_value(&rpc_block)
+                .and_then(serde_json::from_value)
+                .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
+
+            let mut rlp = Vec::new();
+            block.clone_sealed_block().encode(&mut rlp);
+
+            let wrapper = BadBlockSerde { block: rpc_block, hash: block.hash(), rlp: rlp.into() };
+            let bad_block: BadBlock = serde_json::to_value(wrapper)
+                .and_then(serde_json::from_value)
+                .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
+
+            bad_blocks.push(bad_block);
+        }
+
+        Ok(bad_blocks)
     }
 
     /// Handler for `debug_traceChain`
@@ -1045,21 +1147,22 @@ where
     }
 }
 
-impl<Eth> std::fmt::Debug for DebugApi<Eth> {
+impl<Eth: RpcNodeCore> std::fmt::Debug for DebugApi<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
 }
 
-impl<Eth> Clone for DebugApi<Eth> {
+impl<Eth: RpcNodeCore> Clone for DebugApi<Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct DebugApiInner<Eth> {
+struct DebugApiInner<Eth: RpcNodeCore> {
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls
     blocking_task_guard: BlockingTaskGuard,
+    bad_block_store: BadBlockStore<ProviderBlock<Eth::Provider>>,
 }
