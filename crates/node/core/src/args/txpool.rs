@@ -4,7 +4,6 @@ use crate::cli::config::RethTransactionPoolConfig;
 use alloy_eips::eip1559::{ETHEREUM_BLOCK_GAS_LIMIT_30M, MIN_PROTOCOL_BASE_FEE};
 use alloy_primitives::Address;
 use clap::Args;
-use itertools::Itertools;
 use reth_cli_util::{parse_duration_from_secs_or_ms, parsers::format_duration_as_secs_or_ms};
 use reth_transaction_pool::{
     blobstore::disk::DEFAULT_MAX_CACHED_BLOBS,
@@ -338,7 +337,7 @@ pub struct TxPoolArgs {
     pub no_locals: bool,
 
     /// Flag to allow certain addresses as local.
-    #[arg(long = "txpool.locals", default_value = DefaultTxPoolValues::get_global().locals.iter().join(","))]
+    #[arg(long = "txpool.locals", default_values = DefaultTxPoolValues::get_global().locals.iter().map(ToString::to_string))]
     pub locals: Vec<Address>,
 
     /// Flag to toggle local transaction propagation.
