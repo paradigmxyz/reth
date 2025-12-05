@@ -90,7 +90,6 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
-// === impl DebugApi ===
 
 impl<Eth> DebugApi<Eth>
 where
