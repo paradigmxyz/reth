@@ -32,28 +32,6 @@ use tracing::{info, warn};
 
 const PROGRESS_PERIOD: Duration = Duration::from_secs(5);
 
-/// Metrics for tracking trie repair inconsistencies
-#[derive(Debug)]
-struct RepairTrieMetrics {
-    account_inconsistencies: Counter,
-    storage_inconsistencies: Counter,
-}
-
-impl RepairTrieMetrics {
-    fn new() -> Self {
-        Self {
-            account_inconsistencies: metrics::counter!(
-                "db.repair_trie.inconsistencies_found",
-                "type" => "account"
-            ),
-            storage_inconsistencies: metrics::counter!(
-                "db.repair_trie.inconsistencies_found",
-                "type" => "storage"
-            ),
-        }
-    }
-}
-
 /// The arguments for the `reth db repair-trie` command
 #[derive(Parser, Debug)]
 pub struct Command {
@@ -379,4 +357,26 @@ fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_node
         inconsistent_nodes,
         "Repairing trie tables",
     );
+}
+
+/// Metrics for tracking trie repair inconsistencies
+#[derive(Debug)]
+struct RepairTrieMetrics {
+    account_inconsistencies: Counter,
+    storage_inconsistencies: Counter,
+}
+
+impl RepairTrieMetrics {
+    fn new() -> Self {
+        Self {
+            account_inconsistencies: metrics::counter!(
+                "db.repair_trie.inconsistencies_found",
+                "type" => "account"
+            ),
+            storage_inconsistencies: metrics::counter!(
+                "db.repair_trie.inconsistencies_found",
+                "type" => "storage"
+            ),
+        }
+    }
 }
