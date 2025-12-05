@@ -283,5 +283,44 @@ mod tests {
         let mut pool = MockPool::default();
 
         simulator.next(&mut pool);
+        assert_eq!(pool.pending().len(), 1);
+        assert_eq!(pool.queued().len(), 0);
+        assert_eq!(pool.base_fee().len(), 0);
+    }
+
+    #[test]
+    fn test_higher_nonce_scenario() {
+        let transaction_ratio = MockTransactionRatio {
+            legacy_pct: 30,
+            dynamic_fee_pct: 70,
+            access_list_pct: 0,
+            blob_pct: 0,
+        };
+
+        let fee_ranges = MockFeeRange {
+            gas_price: (10u128..100).try_into().unwrap(),
+            priority_fee: (10u128..100).try_into().unwrap(),
+            max_fee: (100u128..110).try_into().unwrap(),
+            max_fee_blob: (1u128..100).try_into().unwrap(),
+        };
+
+        let config = MockSimulatorConfig {
+            num_senders: 10,
+            scenarios: vec![ScenarioType::HigherNonce { skip: 1 }],
+            base_fee: 10,
+            tx_generator: MockTransactionDistribution::new(
+                transaction_ratio,
+                fee_ranges,
+                10..100,
+                10..100,
+            ),
+        };
+        let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
+        let mut pool = MockPool::default();
+
+        simulator.next(&mut pool);
+        assert_eq!(pool.pending().len(), 0);
+        assert_eq!(pool.queued().len(), 1);
+        assert_eq!(pool.base_fee().len(), 0);
     }
 }
