@@ -80,6 +80,7 @@ impl EngineApiMetrics {
             debug_span!(target: "engine::tree", "pre execution")
                 .entered()
                 .in_scope(|| executor.apply_pre_execution_changes())?;
+            let exec_span = debug_span!(target: "engine::tree", "execution").entered();
             for tx in transactions {
                 let tx = tx?;
                 let span =
@@ -91,6 +92,7 @@ impl EngineApiMetrics {
                 // record the tx gas used
                 enter.record("gas_used", gas_used);
             }
+            drop(exec_span);
             debug_span!(target: "engine::tree", "finish")
                 .entered()
                 .in_scope(|| executor.finish())
