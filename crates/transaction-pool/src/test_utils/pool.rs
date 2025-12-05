@@ -446,6 +446,6 @@ mod tests {
             simulator.next(&mut pool);
         }
 
-        // todo: add assertions that the pool is in a valid state
+        // todo: this is not really a good test, we should use a more deterministic approach..
     }
 }
