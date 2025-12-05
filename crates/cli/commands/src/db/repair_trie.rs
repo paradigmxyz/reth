@@ -18,7 +18,6 @@ use reth_node_metrics::{
 };
 use reth_provider::{providers::ProviderNodeTypes, ChainSpecProvider, StageCheckpointReader};
 use reth_stages::StageId;
-use reth_tasks::TaskExecutor;
 use reth_trie::{
     verify::{Output, Verifier},
     Nibbles,
@@ -71,30 +70,57 @@ pub struct Command {
 
 impl Command {
     /// Execute `db repair-trie` command
-    pub async fn execute<N: ProviderNodeTypes>(
-        self,
-        task_executor: TaskExecutor,
-        tool: &DbTool<N>,
-    ) -> eyre::Result<()> {
+    pub async fn execute<N: ProviderNodeTypes>(self, tool: &DbTool<N>) -> eyre::Result<()> {
         // Set up metrics server if requested
-        if let Some(listen_addr) = self.metrics {
-            let config = MetricServerConfig::new(
-                listen_addr,
-                VersionInfo {
-                    version: version_metadata().cargo_pkg_version.as_ref(),
-                    build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
-                    cargo_features: version_metadata().vergen_cargo_features.as_ref(),
-                    git_sha: version_metadata().vergen_git_sha.as_ref(),
-                    target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
-                    build_profile: version_metadata().build_profile_name.as_ref(),
-                },
-                ChainSpecInfo { name: tool.provider_factory.chain_spec().chain().to_string() },
-                task_executor,
-                Hooks::builder().build(),
-            );
+        let _metrics_handle = if let Some(listen_addr) = self.metrics {
+            // Spawn an OS thread with a single-threaded tokio runtime for the metrics server
+            let chain_name = tool.provider_factory.chain_spec().chain().to_string();
 
-            MetricServer::new(config).serve().await?;
-        }
+            let handle = std::thread::Builder::new().name("metrics-server".to_string()).spawn(
+                move || {
+                    // Create a single-threaded tokio runtime
+                    let runtime = tokio::runtime::Builder::new_current_thread()
+                        .enable_all()
+                        .build()
+                        .expect("Failed to create tokio runtime for metrics server");
+
+                    let handle = runtime.handle().clone();
+                    runtime.block_on(async move {
+                        let task_manager = reth_tasks::TaskManager::new(handle.clone());
+                        let task_executor = task_manager.executor();
+
+                        let config = MetricServerConfig::new(
+                            listen_addr,
+                            VersionInfo {
+                                version: version_metadata().cargo_pkg_version.as_ref(),
+                                build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
+                                cargo_features: version_metadata().vergen_cargo_features.as_ref(),
+                                git_sha: version_metadata().vergen_git_sha.as_ref(),
+                                target_triple: version_metadata()
+                                    .vergen_cargo_target_triple
+                                    .as_ref(),
+                                build_profile: version_metadata().build_profile_name.as_ref(),
+                            },
+                            ChainSpecInfo { name: chain_name },
+                            task_executor,
+                            Hooks::builder().build(),
+                        );
+
+                        // Spawn the metrics server
+                        if let Err(e) = MetricServer::new(config).serve().await {
+                            tracing::error!("Metrics server error: {}", e);
+                        }
+
+                        // Block forever to keep the runtime alive
+                        std::future::pending::<()>().await
+                    });
+                },
+            )?;
+
+            Some(handle)
+        } else {
+            None
+        };
 
         if self.dry_run {
             verify_only(tool)?
