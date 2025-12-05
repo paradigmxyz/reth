@@ -77,7 +77,9 @@ impl EngineApiMetrics {
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
         let f = || {
-            executor.apply_pre_execution_changes()?;
+            debug_span!(target: "engine::tree", "pre execution")
+                .entered()
+                .in_scope(|| executor.apply_pre_execution_changes())?;
             for tx in transactions {
                 let tx = tx?;
                 let span =
@@ -89,7 +91,10 @@ impl EngineApiMetrics {
                 // record the tx gas used
                 enter.record("gas_used", gas_used);
             }
-            executor.finish().map(|(evm, result)| (evm.into_db(), result))
+            debug_span!(target: "engine::tree", "finish")
+                .entered()
+                .in_scope(|| executor.finish())
+                .map(|(evm, result)| (evm.into_db(), result))
         };
 
         // Use metered to execute and track timing/gas metrics
@@ -100,7 +105,9 @@ impl EngineApiMetrics {
         })?;
 
         // merge transitions into bundle state
-        db.borrow_mut().merge_transitions(BundleRetention::Reverts);
+        debug_span!(target: "engine::tree", "merge transitions")
+            .entered()
+            .in_scope(|| db.borrow_mut().merge_transitions(BundleRetention::Reverts));
         let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
 
         // Update the metrics for the number of accounts, storage slots and bytecodes updated
