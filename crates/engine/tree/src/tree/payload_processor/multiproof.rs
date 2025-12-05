@@ -236,6 +236,7 @@ struct ChunkDispatchOutcome {
 
 /// Dispatches work items either as a single unit or in chunks, depending on target size and worker
 /// availability. Returns how many dispatches were performed and whether chunking happened.
+#[allow(clippy::too_many_arguments)]
 fn dispatch_with_chunking<T, I>(
     items: T,
     chunking_len: usize,
@@ -253,17 +254,16 @@ where
         available_account_workers > 1 ||
         available_storage_workers > 1;
 
-    if should_chunk {
-        if let Some(chunk_size) = chunk_size {
-            if chunking_len > chunk_size {
-                let mut dispatched = 0usize;
-                for chunk in chunker(items, chunk_size) {
-                    dispatch(chunk);
-                    dispatched += 1;
-                }
-                return ChunkDispatchOutcome { dispatched, chunked: true };
-            }
+    if should_chunk &&
+        let Some(chunk_size) = chunk_size &&
+        chunking_len > chunk_size
+    {
+        let mut dispatched = 0usize;
+        for chunk in chunker(items, chunk_size) {
+            dispatch(chunk);
+            dispatched += 1;
         }
+        return ChunkDispatchOutcome { dispatched, chunked: true };
     }
 
     dispatch(items);
@@ -994,8 +994,8 @@ impl MultiProofTask {
 
     /// Handles state updates.
     ///
-    /// Returns how many proof dispatches were spawned (including an EmptyProof for already fetched
-    /// targets).
+    /// Returns how many proof dispatches were spawned (including an `EmptyProof` for already
+    /// fetched targets).
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor::multiproof",
@@ -1258,20 +1258,17 @@ impl MultiProofTask {
                     }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                            if let Some((batch_source, batch_update)) = accumulated_updates.first()
-                            {
-                                if !can_batch_state_update(
+                            if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
+                                !can_batch_state_update(
                                     *batch_source,
                                     batch_update,
                                     next_source,
                                     &next_update,
-                                ) {
-                                    *pending_msg = Some(MultiProofMessage::StateUpdate(
-                                        next_source,
-                                        next_update,
-                                    ));
-                                    break;
-                                }
+                                )
+                            {
+                                *pending_msg =
+                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
+                                break;
                             }
 
                             let next_estimate = estimate_evm_state_targets(&next_update);
