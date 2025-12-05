@@ -10831,6 +10831,7 @@ dependencies = [
  "pretty_assertions",
  "proptest",
  "proptest-arbitrary-interop",
+ "rand 0.9.2",
  "reth-ethereum-primitives",
  "reth-execution-errors",
  "reth-metrics",
