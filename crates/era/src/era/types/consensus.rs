@@ -1,5 +1,58 @@
 //! Consensus types for Era post-merge history files
-
+//! 
+//! # Decoding Consensus Types
+//! 
+//! # Examples
+//! 
+//! ## Decoding a [`CompressedBeaconState`]
+//!
+//! ```rust
+//! use consensus_types::{BeaconState, MainnetEthSpec, ChainSpec};
+//! use reth_era::era::types::consensus::CompressedBeaconState;
+//!
+//! fn decode_state(compressed_state: &CompressedBeaconState) -> Result<(), Box<dyn std::error::Error>> {
+//!     
+//!     let spec = ChainSpec::mainnet();
+//!
+//!     // Decompress to get SSZ bytes
+//!     let ssz_bytes = compressed_state.decompress()?;
+//!
+//!     // Decode with fork-aware method, chainSpec determines fork from slot in SSZ
+//!     let state = BeaconState::<MainnetEthSpec>::from_ssz_bytes(&ssz_bytes, &spec).map_err(|e| format!("{:?}", e))?;
+//!
+//!     println!("State slot: {}", state.slot());
+//!     println!("Fork: {:?}", state.fork_name_unchecked());
+//!     println!("Validators: {}", state.validators().len());
+//!     println!("Finalized checkpoint: {:?}", state.finalized_checkpoint());
+//!     Ok(())
+//! }
+//! ```
+//! 
+//! ## Decoding a [`CompressedSignedBeaconBlock`]
+//!
+//! ```rust
+//! use consensus_types::{SignedBeaconBlock, MainnetEthSpec, ForkName, ForkVersionDecode};
+//! use reth_era::era::types::consensus::CompressedSignedBeaconBlock;
+//!
+//! // Decode using fork-aware decoding, fork must be known beforehand
+//! fn decode_block(
+//!     compressed: &CompressedSignedBeaconBlock,
+//!     fork: ForkName,
+//! ) -> Result<(), Box<dyn std::error::Error>> {
+//!     // Decompress to get SSZ bytes
+//!     let ssz_bytes = compressed.decompress()?;
+//!
+//!     let block = SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork).map_err(|e| format!("{:?}", e))?;;
+//!
+//!     println!("Block slot: {}", block.message().slot());
+//!     println!("Proposer index: {}", block.message().proposer_index());
+//!     println!("Parent root: {:?}", block.message().parent_root());
+//!     println!("State root: {:?}", block.message().state_root());
+//!
+//!     Ok(())
+//! }
+//! ```
+  
 use crate::e2s::{error::E2sError, types::Entry};
 use snap::{read::FrameDecoder, write::FrameEncoder};
 use std::io::{Read, Write};
