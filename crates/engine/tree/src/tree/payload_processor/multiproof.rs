@@ -26,10 +26,6 @@ use reth_trie_parallel::{
 use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
-/// The default max targets, for limiting the number of account and storage proof targets to be
-/// fetched by a single worker.
-const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
-
 /// Maximum number of targets to batch together in `process_multiproof_message`.
 /// Limits proof computation size while allowing deduplication benefit.
 /// A "target" counts each storage slot as 1, and each account-only update as 1.
@@ -172,17 +168,16 @@ impl Drop for StateHookSender {
 /// Estimates the target count from an `EvmState` without full conversion to `HashedPostState`.
 ///
 /// This is used during batching to decide when to stop batching before the actual conversion
-/// happens. The estimate mirrors the logic of `chunking_length()` on `MultiProofTargets`:
-/// each storage slot counts as 1, each account-only update (no slots) counts as 1.
+/// happens. The estimate mirrors the logic of `chunking_length()` on `HashedPostState`:
+/// each account counts as 1, plus each storage slot counts as 1.
 fn estimate_evm_state_targets(state: &EvmState) -> usize {
     state
         .values()
         .filter(|account| account.is_touched())
         .map(|account| {
             let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
-            // Same logic as chunking_length(): 1 + (slots - 1).saturating_sub(0)
-            // Which simplifies to: max(1, slots) for non-empty, but we want min 1 for account
-            1 + changed_slots.saturating_sub(1)
+            // Match HashedPostState::chunking_length: 1 for the account + 1 for each storage slot
+            1 + changed_slots
         })
         .sum()
 }
@@ -592,8 +587,6 @@ pub(crate) struct MultiProofTaskMetrics {
     pub available_storage_workers_at_dispatch_histogram: Histogram,
     /// Histogram of available account workers when dispatch is attempted.
     pub available_account_workers_at_dispatch_histogram: Histogram,
-    /// Counter: chunking was skipped because workers were busy (not enough available).
-    pub chunking_skipped_busy: metrics::Counter,
     /// Counter: chunking was skipped because targets were below threshold.
     pub chunking_skipped_below_threshold: metrics::Counter,
     /// Counter: chunking was performed successfully.
@@ -722,10 +715,6 @@ pub(super) struct MultiProofTask {
     multiproof_manager: MultiproofManager,
     /// multi proof task metrics
     metrics: MultiProofTaskMetrics,
-    /// If this number is exceeded and chunking is enabled, then this will override whether or not
-    /// there are any active workers and force chunking across workers. This is to prevent tasks
-    /// which are very long from hitting a single worker.
-    max_targets_for_chunking: usize,
 }
 
 impl MultiProofTask {
@@ -754,7 +743,6 @@ impl MultiProofTask {
                 proof_result_tx,
             ),
             metrics,
-            max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
         }
     }
 
@@ -804,10 +792,6 @@ impl MultiProofTask {
             .available_storage_workers_at_dispatch_histogram
             .record(available_storage_workers as f64);
 
-        // Only chunk if multiple account or storage workers are available to take advantage of
-        // parallelism.
-        let should_chunk = available_account_workers > 1 || available_storage_workers > 1;
-
         let mut dispatch = |proof_targets| {
             self.multiproof_manager.dispatch(
                 MultiproofInput {
@@ -828,7 +812,11 @@ impl MultiProofTask {
             .map(|chunk_size| proof_targets.chunking_length() > chunk_size)
             .unwrap_or(false);
 
-        if should_chunk && targets_above_threshold {
+        // Always chunk if targets exceed threshold - workers will pick up chunks as they become
+        // free. Previously we checked worker availability here, but that caused a vicious cycle:
+        // when workers were busy, we'd skip chunking, creating larger proofs that kept workers
+        // busy even longer.
+        if targets_above_threshold {
             self.metrics.chunking_performed.increment(1);
             let chunk_size = self.chunk_size.unwrap();
             let mut chunks = 0usize;
@@ -838,14 +826,8 @@ impl MultiProofTask {
             }
             tracing::Span::current().record("chunks", chunks);
         } else {
-            // Record why chunking was skipped (P1 metrics)
-            if targets_above_threshold && !should_chunk {
-                // Targets were large enough but workers weren't available
-                self.metrics.chunking_skipped_busy.increment(1);
-            } else if !targets_above_threshold {
-                // Targets were below the chunking threshold
-                self.metrics.chunking_skipped_below_threshold.increment(1);
-            }
+            // Targets were below the chunking threshold
+            self.metrics.chunking_skipped_below_threshold.increment(1);
             dispatch(proof_targets);
         }
 
@@ -978,15 +960,6 @@ impl MultiProofTask {
             .available_storage_workers_at_dispatch_histogram
             .record(available_storage_workers as f64);
 
-        // Chunk regardless if there are many proof targets
-        let many_proof_targets =
-            not_fetched_state_update.chunking_length() > self.max_targets_for_chunking;
-
-        // Only chunk if multiple account or storage workers are available to take advantage of
-        // parallelism.
-        let should_chunk =
-            many_proof_targets || available_account_workers > 1 || available_storage_workers > 1;
-
         let mut dispatch = |hashed_state_update| {
             let proof_targets = get_proof_targets(
                 &hashed_state_update,
@@ -1015,7 +988,11 @@ impl MultiProofTask {
             .map(|chunk_size| not_fetched_state_update.chunking_length() > chunk_size)
             .unwrap_or(false);
 
-        if should_chunk && targets_above_threshold {
+        // Always chunk if targets exceed threshold - workers will pick up chunks as they become
+        // free. Previously we checked worker availability here, but that caused a vicious cycle:
+        // when workers were busy, we'd skip chunking, creating larger proofs that kept workers
+        // busy even longer.
+        if targets_above_threshold {
             self.metrics.chunking_performed.increment(1);
             let chunk_size = self.chunk_size.unwrap();
             let mut chunks = 0usize;
@@ -1025,14 +1002,8 @@ impl MultiProofTask {
             }
             tracing::Span::current().record("chunks", chunks);
         } else {
-            // Record why chunking was skipped (P1 metrics)
-            if targets_above_threshold && !should_chunk {
-                // Targets were large enough but workers weren't available
-                self.metrics.chunking_skipped_busy.increment(1);
-            } else if !targets_above_threshold {
-                // Targets were below the chunking threshold
-                self.metrics.chunking_skipped_below_threshold.increment(1);
-            }
+            // Targets were below the chunking threshold
+            self.metrics.chunking_skipped_below_threshold.increment(1);
             dispatch(not_fetched_state_update);
         }
 
@@ -1151,7 +1122,9 @@ impl MultiProofTask {
                 }
 
                 // STEP 3: Process accumulated batch if any
-                if !accumulated_targets.is_empty() {
+                if accumulated_targets.is_empty() {
+                    self.metrics.prefetch_batch_size_histogram.record(1.0);
+                } else {
                     let num_accumulated = accumulated_targets.len();
                     let mut merged_targets = accumulated_targets.remove(0);
                     for next_targets in accumulated_targets {
@@ -1172,8 +1145,6 @@ impl MultiProofTask {
                         num_batched = num_accumulated,
                         "Dispatched accumulated prefetch batch"
                     );
-                } else {
-                    self.metrics.prefetch_batch_size_histogram.record(1.0);
                 }
 
                 false
@@ -1237,7 +1208,10 @@ impl MultiProofTask {
                 }
 
                 // STEP 3: Process accumulated batch if any
-                if !accumulated_updates.is_empty() {
+                if accumulated_updates.is_empty() {
+                    // Record batch size of 1 for the immediate dispatch
+                    self.metrics.state_update_batch_size_histogram.record(1.0);
+                } else {
                     let num_accumulated = accumulated_updates.len();
                     let batch_source = accumulated_updates[0].0;
                     let mut merged_update = accumulated_updates.remove(0).1;
@@ -1258,9 +1232,6 @@ impl MultiProofTask {
                         num_batched = num_accumulated,
                         "Dispatched accumulated batch"
                     );
-                } else {
-                    // Record batch size of 1 for the immediate dispatch
-                    self.metrics.state_update_batch_size_histogram.record(1.0);
                 }
 
                 false
@@ -1375,7 +1346,57 @@ impl MultiProofTask {
         'main: loop {
             trace!(target: "engine::tree::payload_processor::multiproof", "entering main channel receiving loop");
 
-            // Process pending message first before blocking on channel
+            // Always drain proof results first to maintain priority over pending messages.
+            // This prevents priority inversion where pending_msg would bypass select_biased!
+            // and starve proof result processing.
+            while let Ok(proof_result) = self.proof_result_rx.try_recv() {
+                proofs_processed += 1;
+
+                self.metrics.proof_calculation_duration_histogram.record(proof_result.elapsed);
+
+                self.multiproof_manager.on_calculation_complete();
+
+                match proof_result.result {
+                    Ok(proof_result_data) => {
+                        debug!(
+                            target: "engine::tree::payload_processor::multiproof",
+                            sequence = proof_result.sequence_number,
+                            total_proofs = proofs_processed,
+                            "Processing calculated proof from worker (priority drain)"
+                        );
+
+                        let update = SparseTrieUpdate {
+                            state: proof_result.state,
+                            multiproof: proof_result_data.into_multiproof(),
+                        };
+
+                        if let Some(combined_update) =
+                            self.on_proof(proof_result.sequence_number, update)
+                        {
+                            let _ = self.to_sparse_trie.send(combined_update);
+                        }
+                    }
+                    Err(error) => {
+                        error!(target: "engine::tree::payload_processor::multiproof", ?error, "proof calculation error from worker");
+                        return;
+                    }
+                }
+
+                if self.is_done(
+                    proofs_processed,
+                    state_update_proofs_requested,
+                    prefetch_proofs_requested,
+                    updates_finished,
+                ) {
+                    debug!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        "State updates finished and all proofs processed, ending calculation"
+                    );
+                    break 'main;
+                }
+            }
+
+            // Process pending message (from batching) after draining proof results
             if let Some(msg) = pending_msg.take() {
                 if self.process_multiproof_message(
                     msg,
