@@ -68,6 +68,14 @@ pub struct EthConfig {
     pub eth_proof_window: u64,
     /// The maximum number of tracing calls that can be executed in concurrently.
     pub max_tracing_requests: usize,
+    /// The maximum number of regular calls that can be executed in concurrently.
+    ///
+    /// Call requests such as eth_call, eth_estimateGas and alike require evm execution, which is
+    /// considered blocking since it's usually more heavy on the IO side but also CPU constrained.
+    /// It is expected that these are spawned as short lived blocking tokio tasks. This config
+    /// determines how many can be spawned concurrently, to avoid a build up in the blocking pool's
+    /// queue this setting restricts how many tasks are spawned concurrently.
+    pub max_call_requests: usize,
     /// Maximum number of blocks for `trace_filter` requests.
     pub max_trace_filter_blocks: u64,
     /// Maximum number of blocks that could be scanned per filter request in `eth_getLogs` calls.
@@ -116,6 +124,7 @@ impl Default for EthConfig {
             gas_oracle: GasPriceOracleConfig::default(),
             eth_proof_window: DEFAULT_ETH_PROOF_WINDOW,
             max_tracing_requests: default_max_tracing_requests(),
+            max_call_requests: 0,
             max_trace_filter_blocks: DEFAULT_MAX_TRACE_FILTER_BLOCKS,
             max_blocks_per_filter: DEFAULT_MAX_BLOCKS_PER_FILTER,
             max_logs_per_response: DEFAULT_MAX_LOGS_PER_RESPONSE,
