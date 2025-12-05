@@ -811,10 +811,8 @@ where
         // stack is empty.
         //
         // We will use this `Available` cached branch as our next branch.
-        self.cached_branch_stack.push(trie_cursor_state.take());
-        trace!(target: TRACE_TARGET, cached=?self.cached_branch_stack.last(), "Pushed next trie node onto cached_branch_stack");
-
-        let (cached_path, _) = self.cached_branch_stack.last().expect("just pushed");
+        let cached = trie_cursor_state.take();
+        trace!(target: TRACE_TARGET, cached=?cached, "Pushed next trie node onto cached_branch_stack");
 
         // If the calculated range is not caught up to the next cached branch it means there
         // are portions of the trie prior to that branch which may need to be calculated;
@@ -822,13 +820,19 @@ where
         //
         // If the next cached branch's path is all zeros then we can skip this catch-up step,
         // because there cannot be any keys prior to that range.
+        let cached_path = &cached.0;
         if uncalculated_lower_bound < cached_path && !PATH_ALL_ZEROS.starts_with(cached_path) {
             let range = (*uncalculated_lower_bound, Some(*cached_path));
             trace!(target: TRACE_TARGET, ?range, "Returning key range to calculate in order to catch up to cached branch");
+
+            // Push the cached branch onto the stack so it's available once the leaf range is done
+            // being calculated.
+            self.cached_branch_stack.push(cached);
+
             return Ok(PopCachedBranchOutcome::CalculateLeaves(range));
         }
 
-        Ok(PopCachedBranchOutcome::Popped(self.cached_branch_stack.pop().expect("just pushed")))
+        Ok(PopCachedBranchOutcome::Popped(cached))
     }
 
     /// Accepts the current state of both hashed and trie cursors, and determines the next range of
