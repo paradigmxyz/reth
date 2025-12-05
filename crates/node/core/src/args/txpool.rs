@@ -552,6 +552,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::address;
     use clap::Parser;
 
     /// A helper type to parse Args more easily
@@ -566,17 +567,6 @@ mod tests {
         let default_args = TxPoolArgs::default();
         let args = CommandParser::<TxPoolArgs>::parse_from(["reth"]).args;
         assert_eq!(args, default_args);
-    }
-
-    #[test]
-    fn txpool_parse_locals() {
-        let args = CommandParser::<TxPoolArgs>::parse_from([
-            "reth",
-            "--txpool.locals",
-            "0x0000000000000000000000000000000000000000",
-        ])
-        .args;
-        assert_eq!(args.locals, vec![Address::ZERO]);
     }
 
     #[test]
@@ -597,5 +587,107 @@ mod tests {
             CommandParser::<TxPoolArgs>::try_parse_from(["reth", "--txpool.lifetime", "invalid"]);
 
         assert!(result.is_err(), "Expected an error for invalid duration");
+    }
+
+    #[test]
+    fn txpool_args() {
+        let args = TxPoolArgs {
+            pending_max_count: 1000,
+            pending_max_size: 200,
+            basefee_max_count: 2000,
+            basefee_max_size: 300,
+            queued_max_count: 3000,
+            queued_max_size: 400,
+            blobpool_max_count: 4000,
+            blobpool_max_size: 500,
+            blob_cache_size: Some(100),
+            disable_blobs_support: false,
+            max_account_slots: 20,
+            price_bump: 15,
+            minimal_protocol_basefee: 1000000000,
+            minimum_priority_fee: Some(2000000000),
+            enforced_gas_limit: 40000000,
+            max_tx_gas_limit: Some(50000000),
+            blob_transaction_price_bump: 25,
+            max_tx_input_bytes: 131072,
+            max_cached_entries: 200,
+            no_locals: true,
+            locals: vec![
+                address!("0x0000000000000000000000000000000000000001"),
+                address!("0x0000000000000000000000000000000000000002"),
+            ],
+            no_local_transactions_propagation: true,
+            additional_validation_tasks: 4,
+            pending_tx_listener_buffer_size: 512,
+            new_tx_listener_buffer_size: 256,
+            max_new_pending_txs_notifications: 128,
+            max_queued_lifetime: Duration::from_secs(7200),
+            transactions_backup_path: Some(PathBuf::from("/tmp/txpool-backup")),
+            disable_transactions_backup: false,
+            max_batch_size: 10,
+        };
+
+        let parsed_args = CommandParser::<TxPoolArgs>::parse_from([
+            "reth",
+            "--txpool.pending-max-count",
+            "1000",
+            "--txpool.pending-max-size",
+            "200",
+            "--txpool.basefee-max-count",
+            "2000",
+            "--txpool.basefee-max-size",
+            "300",
+            "--txpool.queued-max-count",
+            "3000",
+            "--txpool.queued-max-size",
+            "400",
+            "--txpool.blobpool-max-count",
+            "4000",
+            "--txpool.blobpool-max-size",
+            "500",
+            "--txpool.blob-cache-size",
+            "100",
+            "--txpool.max-account-slots",
+            "20",
+            "--txpool.pricebump",
+            "15",
+            "--txpool.minimal-protocol-fee",
+            "1000000000",
+            "--txpool.minimum-priority-fee",
+            "2000000000",
+            "--txpool.gas-limit",
+            "40000000",
+            "--txpool.max-tx-gas",
+            "50000000",
+            "--blobpool.pricebump",
+            "25",
+            "--txpool.max-tx-input-bytes",
+            "131072",
+            "--txpool.max-cached-entries",
+            "200",
+            "--txpool.nolocals",
+            "--txpool.locals",
+            "0x0000000000000000000000000000000000000001",
+            "--txpool.locals",
+            "0x0000000000000000000000000000000000000002",
+            "--txpool.no-local-transactions-propagation",
+            "--txpool.additional-validation-tasks",
+            "4",
+            "--txpool.max-pending-txns",
+            "512",
+            "--txpool.max-new-txns",
+            "256",
+            "--txpool.max-new-pending-txs-notifications",
+            "128",
+            "--txpool.lifetime",
+            "7200",
+            "--txpool.transactions-backup",
+            "/tmp/txpool-backup",
+            "--txpool.max-batch-size",
+            "10",
+        ])
+        .args;
+
+        assert_eq!(parsed_args, args);
     }
 }
