@@ -26,14 +26,16 @@ use reth_trie_parallel::{
 use std::{collections::BTreeMap, mem, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
-/// Maximum number of targets to batch together in `process_multiproof_message`.
-/// Limits proof computation size while allowing deduplication benefit.
+/// Maximum number of targets to batch together for prefetch batching.
 /// A "target" counts each storage slot as 1, and each account-only update as 1.
-const DEFAULT_MAX_BATCH_TARGETS: usize = 500;
+const PREFETCH_MAX_BATCH_TARGETS: usize = 500;
 
-/// Maximum number of messages to batch together (secondary safety limit).
+/// Maximum number of prefetch messages to batch together (secondary safety limit).
 /// Prevents excessive batching even with small messages.
-const DEFAULT_MAX_BATCH_MESSAGES: usize = 16;
+const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
+
+/// Maximum number of targets to batch together for state updates.
+const STATE_UPDATE_MAX_BATCH_TARGETS: usize = 50;
 
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
@@ -1109,16 +1111,16 @@ impl MultiProofTask {
                 let mut accumulated_count = 0usize;
 
                 loop {
-                    if accumulated_count >= DEFAULT_MAX_BATCH_TARGETS ||
-                        accumulated_targets.len() >= DEFAULT_MAX_BATCH_MESSAGES
+                    if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS
+                        || accumulated_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
                     {
                         break;
                     }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
                             let next_count = next_targets.chunking_length();
-                            if accumulated_count + next_count > DEFAULT_MAX_BATCH_TARGETS &&
-                                !accumulated_targets.is_empty()
+                            if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS
+                                && !accumulated_targets.is_empty()
                             {
                                 *pending_msg =
                                     Some(MultiProofMessage::PrefetchProofs(next_targets));
@@ -1196,9 +1198,7 @@ impl MultiProofTask {
                 let mut batch_source: Option<StateChangeSource> = None;
 
                 loop {
-                    if accumulated_targets >= DEFAULT_MAX_BATCH_TARGETS ||
-                        accumulated_updates.len() >= DEFAULT_MAX_BATCH_MESSAGES
-                    {
+                    if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
                         break;
                     }
                     match self.rx.try_recv() {
@@ -1216,8 +1216,15 @@ impl MultiProofTask {
                             }
 
                             let next_estimate = estimate_evm_state_targets(&next_update);
-                            if accumulated_targets + next_estimate > DEFAULT_MAX_BATCH_TARGETS &&
-                                !accumulated_updates.is_empty()
+                            // Do not merge outlier updates that exceed the cap on their own.
+                            // Leave them pending so they dispatch immediately on the next loop.
+                            if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
+                                *pending_msg =
+                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
+                                break;
+                            }
+                            if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
+                                && !accumulated_updates.is_empty()
                             {
                                 *pending_msg =
                                     Some(MultiProofMessage::StateUpdate(next_source, next_update));
@@ -2249,9 +2256,7 @@ mod tests {
             let mut batch_source = None;
 
             loop {
-                if accumulated_targets >= DEFAULT_MAX_BATCH_TARGETS
-                    || accumulated_updates.len() >= DEFAULT_MAX_BATCH_MESSAGES
-                {
+                if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
                     break;
                 }
                 match task.rx.try_recv() {
@@ -2267,7 +2272,12 @@ mod tests {
                         }
 
                         let next_estimate = estimate_evm_state_targets(&next_update);
-                        if accumulated_targets + next_estimate > DEFAULT_MAX_BATCH_TARGETS
+                        if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
+                            pending_msg =
+                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
+                            break;
+                        }
+                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
                             && !accumulated_updates.is_empty()
                         {
                             pending_msg =
