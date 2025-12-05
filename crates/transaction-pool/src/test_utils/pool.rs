@@ -323,4 +323,40 @@ mod tests {
         assert_eq!(pool.queued().len(), 1);
         assert_eq!(pool.base_fee().len(), 0);
     }
+
+    #[test]
+    fn test_many_random_scenarios() {
+        let transaction_ratio = MockTransactionRatio {
+            legacy_pct: 30,
+            dynamic_fee_pct: 70,
+            access_list_pct: 0,
+            blob_pct: 0,
+        };
+
+        let fee_ranges = MockFeeRange {
+            gas_price: (10u128..100).try_into().unwrap(),
+            priority_fee: (10u128..100).try_into().unwrap(),
+            max_fee: (100u128..110).try_into().unwrap(),
+            max_fee_blob: (1u128..100).try_into().unwrap(),
+        };
+
+        let config = MockSimulatorConfig {
+            num_senders: 10,
+            scenarios: vec![ScenarioType::OnchainNonce, ScenarioType::HigherNonce { skip: 1 }, ScenarioType::HigherNonce { skip: 5 }],
+            base_fee: 10,
+            tx_generator: MockTransactionDistribution::new(
+                transaction_ratio,
+                fee_ranges,
+                10..100,
+                10..100,
+            ),
+        };
+
+        let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
+        let mut pool = MockPool::default();
+
+        for _ in 0..1000 {
+            simulator.next(&mut pool);
+        }
+    }
 }
