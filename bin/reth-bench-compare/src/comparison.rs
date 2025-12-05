@@ -99,6 +99,8 @@ pub(crate) struct RefInfo {
 /// - `per_block_latency_change_mean_percent` / `per_block_latency_change_median_percent` are the
 ///   mean and median of per-block percent deltas (feature vs baseline), capturing block-level
 ///   drift.
+/// - `per_block_latency_change_std_dev_percent`: standard deviation of per-block percent changes,
+///   measuring consistency of performance changes across blocks.
 /// - `new_payload_total_latency_change_percent` is the percent change of the total newPayload time
 ///   across the run.
 ///
@@ -107,6 +109,7 @@ pub(crate) struct RefInfo {
 pub(crate) struct ComparisonSummary {
     pub per_block_latency_change_mean_percent: f64,
     pub per_block_latency_change_median_percent: f64,
+    pub per_block_latency_change_std_dev_percent: f64,
     pub new_payload_total_latency_change_percent: f64,
     pub new_payload_latency_p50_change_percent: f64,
     pub new_payload_latency_p90_change_percent: f64,
@@ -384,6 +387,10 @@ impl ComparisonGenerator {
             }
         };
 
+        // Calculate per-block statistics. "Per-block" means: for each block, compute the percent
+        // change (feature - baseline) / baseline * 100, then calculate statistics across those
+        // per-block percent changes. This captures how consistently the feature performs relative
+        // to baseline across all blocks.
         let per_block_percent_changes: Vec<f64> =
             per_block_comparisons.iter().map(|c| c.new_payload_latency_change_percent).collect();
         let per_block_latency_change_mean_percent = if per_block_percent_changes.is_empty() {
@@ -394,10 +401,12 @@ impl ComparisonGenerator {
         let per_block_latency_change_median_percent = if per_block_percent_changes.is_empty() {
             0.0
         } else {
-            let mut sorted = per_block_percent_changes;
+            let mut sorted = per_block_percent_changes.clone();
             sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
             percentile(&sorted, 0.5)
         };
+        let per_block_latency_change_std_dev_percent =
+            calculate_std_dev(&per_block_percent_changes, per_block_latency_change_mean_percent);
 
         let baseline_total_latency_ms =
             baseline.mean_new_payload_latency_ms * baseline.total_blocks as f64;
@@ -409,6 +418,7 @@ impl ComparisonGenerator {
         Ok(ComparisonSummary {
             per_block_latency_change_mean_percent,
             per_block_latency_change_median_percent,
+            per_block_latency_change_std_dev_percent,
             new_payload_total_latency_change_percent,
             new_payload_latency_p50_change_percent: calc_percent_change(
                 baseline.median_new_payload_latency_ms,
@@ -533,6 +543,10 @@ impl ComparisonGenerator {
             summary.per_block_latency_change_median_percent
         );
         println!(
+            "  NewPayload Latency per-block std dev:       {:.2}%",
+            summary.per_block_latency_change_std_dev_percent
+        );
+        println!(
             "  Total newPayload time change:                {:+.2}%",
             summary.new_payload_total_latency_change_percent
         );
@@ -616,6 +630,29 @@ impl ComparisonGenerator {
         }
         println!();
     }
+}
+
+/// Calculate standard deviation from a set of values and their mean.
+///
+/// Computes the population standard deviation using the formula:
+/// `sqrt(sum((x - mean)²) / n)`
+///
+/// Returns 0.0 for empty input.
+fn calculate_std_dev(values: &[f64], mean: f64) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    let variance = values
+        .iter()
+        .map(|x| {
+            let diff = x - mean;
+            diff * diff
+        })
+        .sum::<f64>() /
+        values.len() as f64;
+
+    variance.sqrt()
 }
 
 /// Calculate percentile using linear interpolation on a sorted slice.

@@ -17,7 +17,7 @@ use reth_payload_primitives::{
     EngineApiMessageVersion, EngineObjectValidationError, InvalidPayloadAttributesError,
     NewPayloadError, PayloadAttributes, PayloadOrAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{Block, RecoveredBlock};
+use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock};
 use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
@@ -131,6 +131,21 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     /// The block type used by the engine.
     type Block: Block;
 
+    /// Converts the given payload into a sealed block without recovering signatures.
+    ///
+    /// This function validates the payload and converts it into a [`SealedBlock`] which contains
+    /// the block hash but does not perform signature recovery on transactions.
+    ///
+    /// This is more efficient than [`Self::ensure_well_formed_payload`] when signature recovery
+    /// is not needed immediately or will be performed later.
+    ///
+    /// Implementers should ensure that the checks are done in the order that conforms with the
+    /// engine-API specification.
+    fn convert_payload_to_block(
+        &self,
+        payload: Types::ExecutionData,
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError>;
+
     /// Ensures that the given payload does not violate any consensus rules that concern the block's
     /// layout.
     ///
@@ -142,7 +157,10 @@ pub trait PayloadValidator<Types: PayloadTypes>: Send + Sync + Unpin + 'static {
     fn ensure_well_formed_payload(
         &self,
         payload: Types::ExecutionData,
-    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError>;
+    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
+        let sealed_block = self.convert_payload_to_block(payload)?;
+        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
+    }
 
     /// Verifies payload post-execution w.r.t. hashed state updates.
     fn validate_block_post_execution_with_hashed_state(

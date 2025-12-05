@@ -7,6 +7,7 @@ use alloy_primitives::{map::B256Map, B256, U256};
 use parking_lot::{Mutex, MutexGuard};
 use reth_primitives_traits::Account;
 use reth_storage_errors::db::DatabaseError;
+use reth_trie_common::HashedPostState;
 use tracing::instrument;
 
 /// Mock hashed cursor factory.
@@ -35,6 +36,33 @@ impl MockHashedCursorFactory {
             visited_account_keys: Default::default(),
             visited_storage_keys: Arc::new(visited_storage_keys),
         }
+    }
+
+    /// Creates a new mock hashed cursor factory from a `HashedPostState`.
+    pub fn from_hashed_post_state(post_state: HashedPostState) -> Self {
+        // Extract accounts from post state, filtering out None (deleted accounts)
+        let hashed_accounts: BTreeMap<B256, Account> = post_state
+            .accounts
+            .into_iter()
+            .filter_map(|(addr, account)| account.map(|acc| (addr, acc)))
+            .collect();
+
+        // Extract storages from post state
+        let hashed_storages: B256Map<BTreeMap<B256, U256>> = post_state
+            .storages
+            .into_iter()
+            .map(|(addr, hashed_storage)| {
+                // Convert HashedStorage to BTreeMap, filtering out zero values (deletions)
+                let storage_map: BTreeMap<B256, U256> = hashed_storage
+                    .storage
+                    .into_iter()
+                    .filter_map(|(slot, value)| (value != U256::ZERO).then_some((slot, value)))
+                    .collect();
+                (addr, storage_map)
+            })
+            .collect();
+
+        Self::new(hashed_accounts, hashed_storages)
     }
 
     /// Returns a reference to the list of visited hashed account keys.
@@ -101,7 +129,7 @@ pub struct MockHashedCursor<T> {
 
 impl<T> MockHashedCursor<T> {
     /// Creates a new mock hashed cursor for accounts with the given values and key tracking.
-    pub fn new(
+    pub const fn new(
         values: Arc<BTreeMap<B256, T>>,
         visited_keys: Arc<Mutex<Vec<KeyVisit<B256>>>>,
     ) -> Self {
