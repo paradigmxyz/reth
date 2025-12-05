@@ -85,6 +85,7 @@ serde = [
     "revm-state/serde",
     "parking_lot/serde",
     "reth-ethereum-primitives/serde",
+    "rand/serde",
 ]
 test-utils = [
     "triehash",
