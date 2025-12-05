@@ -413,15 +413,13 @@ where
 {
     fn from(error: DebugInspectorError<Err>) -> Self {
         match error {
-            DebugInspectorError::InvalidTracerConfig => EthApiError::InvalidTracerConfig,
-            DebugInspectorError::UnsupportedTracer => {
-                EthApiError::Unsupported("unsupported tracer")
-            }
+            DebugInspectorError::InvalidTracerConfig => Self::InvalidTracerConfig,
+            DebugInspectorError::UnsupportedTracer => Self::Unsupported("unsupported tracer"),
             DebugInspectorError::JsTracerNotEnabled => {
-                EthApiError::Unsupported("JS Tracer is not enabled")
+                Self::Unsupported("JS Tracer is not enabled")
             }
             DebugInspectorError::MuxInspector(err) => err.into(),
-            DebugInspectorError::Database(err) => EthApiError::Internal(RethError::other(err)),
+            DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
             #[cfg(feature = "js-tracer")]
             DebugInspectorError::JsInspector(err) => err.into(),
         }
