@@ -59,7 +59,6 @@ pub(crate) struct TotalGasRow {
 /// - `mean_new_payload_latency_ms`: arithmetic mean latency across blocks.
 /// - `median_new_payload_latency_ms`: p50 latency across blocks.
 /// - `p90_new_payload_latency_ms` / `p99_new_payload_latency_ms`: tail latencies across blocks.
-/// - `std_dev_new_payload_latency_ms`: standard deviation of latency across blocks.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct BenchmarkSummary {
     pub total_blocks: u64,
@@ -69,7 +68,6 @@ pub(crate) struct BenchmarkSummary {
     pub median_new_payload_latency_ms: f64,
     pub p90_new_payload_latency_ms: f64,
     pub p99_new_payload_latency_ms: f64,
-    pub std_dev_new_payload_latency_ms: f64,
     pub gas_per_second: f64,
     pub blocks_per_second: f64,
     pub min_block_number: u64,
@@ -101,7 +99,6 @@ pub(crate) struct RefInfo {
 /// Percent deltas are `(feature - baseline) / baseline * 100`:
 /// - `new_payload_latency_p50_change_percent` / p90 / p99: percent changes of the respective
 ///   per-block percentiles.
-/// - `std_dev_change_percent`: percent change in standard deviation of newPayload latency.
 /// - `per_block_latency_change_mean_percent` / `per_block_latency_change_median_percent` are the
 ///   mean and median of per-block percent deltas (feature vs baseline), capturing block-level
 ///   drift.
@@ -120,7 +117,6 @@ pub(crate) struct ComparisonSummary {
     pub new_payload_latency_p50_change_percent: f64,
     pub new_payload_latency_p90_change_percent: f64,
     pub new_payload_latency_p99_change_percent: f64,
-    pub std_dev_change_percent: f64,
     pub gas_per_second_change_percent: f64,
     pub blocks_per_second_change_percent: f64,
 }
@@ -361,9 +357,6 @@ impl ComparisonGenerator {
         let mean_new_payload_latency_ms: f64 =
             latencies_ms.iter().sum::<f64>() / total_blocks as f64;
 
-        let std_dev_new_payload_latency_ms =
-            calculate_std_dev(&latencies_ms, mean_new_payload_latency_ms);
-
         let mut sorted_latencies_ms = latencies_ms;
         sorted_latencies_ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
         let median_new_payload_latency_ms = percentile(&sorted_latencies_ms, 0.5);
@@ -394,7 +387,6 @@ impl ComparisonGenerator {
             median_new_payload_latency_ms,
             p90_new_payload_latency_ms,
             p99_new_payload_latency_ms,
-            std_dev_new_payload_latency_ms,
             gas_per_second,
             blocks_per_second,
             min_block_number,
@@ -461,10 +453,6 @@ impl ComparisonGenerator {
             new_payload_latency_p99_change_percent: calc_percent_change(
                 baseline.p99_new_payload_latency_ms,
                 feature.p99_new_payload_latency_ms,
-            ),
-            std_dev_change_percent: calc_percent_change(
-                baseline.std_dev_new_payload_latency_ms,
-                feature.std_dev_new_payload_latency_ms,
             ),
             gas_per_second_change_percent: calc_percent_change(
                 baseline.gas_per_second,
@@ -596,7 +584,6 @@ impl ComparisonGenerator {
             "  NewPayload Latency p99:           {:+.2}%",
             summary.new_payload_latency_p99_change_percent
         );
-        println!("  NewPayload Latency std dev:       {:+.2}%", summary.std_dev_change_percent);
         println!(
             "  Gas/Second:                      {:+.2}%",
             summary.gas_per_second_change_percent
@@ -619,12 +606,11 @@ impl ComparisonGenerator {
         );
         println!("  NewPayload latency (ms):");
         println!(
-            "    mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}, std dev: {:.2}",
+            "    mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
             baseline.mean_new_payload_latency_ms,
             baseline.median_new_payload_latency_ms,
             baseline.p90_new_payload_latency_ms,
-            baseline.p99_new_payload_latency_ms,
-            baseline.std_dev_new_payload_latency_ms
+            baseline.p99_new_payload_latency_ms
         );
         if let (Some(start), Some(end)) =
             (&report.baseline.start_timestamp, &report.baseline.end_timestamp)
@@ -652,12 +638,11 @@ impl ComparisonGenerator {
         );
         println!("  NewPayload latency (ms):");
         println!(
-            "    mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}, std dev: {:.2}",
+            "    mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
             feature.mean_new_payload_latency_ms,
             feature.median_new_payload_latency_ms,
             feature.p90_new_payload_latency_ms,
-            feature.p99_new_payload_latency_ms,
-            feature.std_dev_new_payload_latency_ms
+            feature.p99_new_payload_latency_ms
         );
         if let (Some(start), Some(end)) =
             (&report.feature.start_timestamp, &report.feature.end_timestamp)
