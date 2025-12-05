@@ -21,9 +21,7 @@ pub(crate) struct ComparisonGenerator {
     feature_ref_name: String,
     baseline_results: Option<BenchmarkResults>,
     feature_results: Option<BenchmarkResults>,
-    /// Reth command used for baseline run (stored independently of results)
     baseline_command: Option<String>,
-    /// Reth command used for feature run (stored independently of results)
     feature_command: Option<String>,
 }
 
@@ -213,10 +211,7 @@ impl ComparisonGenerator {
         Ok(())
     }
 
-    /// Set the reth command for a reference.
-    ///
-    /// Commands are stored independently of benchmark results, so they can be
-    /// captured regardless of whether the benchmark succeeded or failed.
+    /// Set the reth command for a reference
     pub(crate) fn set_ref_command(&mut self, ref_type: &str, command: String) -> Result<()> {
         match ref_type {
             "baseline" => {
