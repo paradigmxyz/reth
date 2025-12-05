@@ -40,6 +40,7 @@ reth-consensus.workspace = true
 reth-consensus-common.workspace = true
 reth-node-api.workspace = true
 reth-trie-common.workspace = true
+secp256k1.workspace = true
 
 # ethereum
 alloy-evm = { workspace = true, features = ["overrides"] }
