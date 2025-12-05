@@ -37,6 +37,10 @@ const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
 /// Maximum number of targets to batch together for state updates.
 const STATE_UPDATE_MAX_BATCH_TARGETS: usize = 50;
 
+/// The default max targets, for limiting the number of account and storage proof targets to be
+/// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
+const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
+
 /// A trie update that can be applied to sparse trie alongside the proofs for touched parts of the
 /// state.
 #[derive(Default, Debug)]
@@ -598,7 +602,7 @@ pub(crate) struct MultiProofTaskMetrics {
     /// Total time spent waiting for the last proof result.
     pub last_proof_wait_time_histogram: Histogram,
 
-    // === P1 Metrics for root cause analysis ===
+    // === TODO: Remove Metrics for root cause analysis ===
     /// Histogram of available storage workers when dispatch is attempted.
     pub available_storage_workers_at_dispatch_histogram: Histogram,
     /// Histogram of available account workers when dispatch is attempted.
@@ -731,6 +735,10 @@ pub(super) struct MultiProofTask {
     multiproof_manager: MultiproofManager,
     /// multi proof task metrics
     metrics: MultiProofTaskMetrics,
+    /// If this number is exceeded and chunking is enabled, then this will override whether or not
+    /// there are any active workers and force chunking across workers. This is to prevent tasks
+    /// which are very long from hitting a single worker.
+    max_targets_for_chunking: usize,
 }
 
 impl MultiProofTask {
@@ -759,6 +767,7 @@ impl MultiProofTask {
                 proof_result_tx,
             ),
             metrics,
+            max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
         }
     }
 
@@ -823,18 +832,19 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        let targets_above_threshold = self
-            .chunk_size
-            .map(|chunk_size| proof_targets.chunking_length() > chunk_size)
-            .unwrap_or(false);
+        // Chunk regardless if there are many proof targets
+        let many_proof_targets = proof_targets.chunking_length() > self.max_targets_for_chunking;
 
-        // Always chunk if targets exceed threshold - workers will pick up chunks as they become
-        // free. Previously we checked worker availability here, but that caused a vicious cycle:
-        // when workers were busy, we'd skip chunking, creating larger proofs that kept workers
-        // busy even longer.
-        if targets_above_threshold {
+        // Only chunk if multiple account or storage workers are available to take advantage of
+        // parallelism.
+        let should_chunk =
+            many_proof_targets || available_account_workers > 1 || available_storage_workers > 1;
+
+        if should_chunk &&
+            let Some(chunk_size) = self.chunk_size &&
+            proof_targets.chunking_length() > chunk_size
+        {
             self.metrics.chunking_performed.increment(1);
-            let chunk_size = self.chunk_size.unwrap();
             let mut chunks = 0usize;
             for proof_targets_chunk in proof_targets.chunks(chunk_size) {
                 dispatch(proof_targets_chunk);
@@ -842,7 +852,6 @@ impl MultiProofTask {
             }
             tracing::Span::current().record("chunks", chunks);
         } else {
-            // Targets were below the chunking threshold
             self.metrics.chunking_skipped_below_threshold.increment(1);
             dispatch(proof_targets);
         }
@@ -999,18 +1008,20 @@ impl MultiProofTask {
             chunks += 1;
         };
 
-        let targets_above_threshold = self
-            .chunk_size
-            .map(|chunk_size| not_fetched_state_update.chunking_length() > chunk_size)
-            .unwrap_or(false);
+        // Chunk regardless if there are many proof targets
+        let many_proof_targets =
+            not_fetched_state_update.chunking_length() > self.max_targets_for_chunking;
 
-        // Always chunk if targets exceed threshold - workers will pick up chunks as they become
-        // free. Previously we checked worker availability here, but that caused a vicious cycle:
-        // when workers were busy, we'd skip chunking, creating larger proofs that kept workers
-        // busy even longer.
-        if targets_above_threshold {
+        // Only chunk if multiple account or storage workers are available to take advantage of
+        // parallelism.
+        let should_chunk =
+            many_proof_targets || available_account_workers > 1 || available_storage_workers > 1;
+
+        if should_chunk &&
+            let Some(chunk_size) = self.chunk_size &&
+            not_fetched_state_update.chunking_length() > chunk_size
+        {
             self.metrics.chunking_performed.increment(1);
-            let chunk_size = self.chunk_size.unwrap();
             let mut chunks = 0usize;
             for chunk in not_fetched_state_update.chunks(chunk_size) {
                 dispatch(chunk);
@@ -1018,7 +1029,6 @@ impl MultiProofTask {
             }
             tracing::Span::current().record("chunks", chunks);
         } else {
-            // Targets were below the chunking threshold
             self.metrics.chunking_skipped_below_threshold.increment(1);
             dispatch(not_fetched_state_update);
         }
@@ -1111,16 +1121,16 @@ impl MultiProofTask {
                 let mut accumulated_count = 0usize;
 
                 loop {
-                    if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS
-                        || accumulated_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
+                    if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS ||
+                        accumulated_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
                     {
                         break;
                     }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
                             let next_count = next_targets.chunking_length();
-                            if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS
-                                && !accumulated_targets.is_empty()
+                            if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS &&
+                                !accumulated_targets.is_empty()
                             {
                                 *pending_msg =
                                     Some(MultiProofMessage::PrefetchProofs(next_targets));
@@ -1223,8 +1233,8 @@ impl MultiProofTask {
                                     Some(MultiProofMessage::StateUpdate(next_source, next_update));
                                 break;
                             }
-                            if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
-                                && !accumulated_updates.is_empty()
+                            if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
+                                !accumulated_updates.is_empty()
                             {
                                 *pending_msg =
                                     Some(MultiProofMessage::StateUpdate(next_source, next_update));
@@ -1586,8 +1596,8 @@ fn get_proof_targets(
             .storage
             .keys()
             .filter(|slot| {
-                !fetched.is_some_and(|f| f.contains(*slot))
-                    || storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
+                !fetched.is_some_and(|f| f.contains(*slot)) ||
+                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
             })
             .peekable();
 
@@ -2277,8 +2287,8 @@ mod tests {
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
                             break;
                         }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
-                            && !accumulated_updates.is_empty()
+                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
+                            !accumulated_updates.is_empty()
                         {
                             pending_msg =
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
