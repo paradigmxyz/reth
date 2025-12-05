@@ -12,8 +12,7 @@ use alloy_rpc_types_eth::{
     state::EvmOverrides, BadBlock, BlockError, BlockTransactionsKind, Bundle, StateContext,
 };
 use alloy_rpc_types_trace::geth::{
-    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
-    TraceResult,
+    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;

@@ -1027,8 +1027,8 @@ where
             "collect bad blocks",
             Box::pin(async move {
                 while let Some(event) = engine_events_stream.next().await {
-                    if let ConsensusEngineEvent::InvalidBlock(block) = event
-                        && let Ok(recovered) =
+                    if let ConsensusEngineEvent::InvalidBlock(block) = event &&
+                        let Ok(recovered) =
                             RecoveredBlock::try_recover_sealed(block.as_ref().clone())
                     {
                         bad_block_store.insert(recovered);
