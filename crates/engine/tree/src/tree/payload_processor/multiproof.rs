@@ -27,7 +27,8 @@ use std::{collections::BTreeMap, mem, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
 /// Maximum number of targets to batch together for prefetch batching.
-/// A "target" counts each storage slot as 1, and each account-only update as 1.
+/// Prefetches are just proof requests (no state merging), so we allow a higher cap than state
+/// updates to drain bursts efficiently without stalling proof workers.
 const PREFETCH_MAX_BATCH_TARGETS: usize = 500;
 
 /// Maximum number of prefetch messages to batch together (secondary safety limit).
@@ -669,16 +670,6 @@ pub(crate) struct MultiProofTaskMetrics {
     pub first_update_wait_time_histogram: Histogram,
     /// Total time spent waiting for the last proof result.
     pub last_proof_wait_time_histogram: Histogram,
-
-    // === TODO: Remove Metrics for root cause analysis ===
-    /// Histogram of available storage workers when dispatch is attempted.
-    pub available_storage_workers_at_dispatch_histogram: Histogram,
-    /// Histogram of available account workers when dispatch is attempted.
-    pub available_account_workers_at_dispatch_histogram: Histogram,
-    /// Counter: chunking was skipped because targets were below threshold.
-    pub chunking_skipped_below_threshold: metrics::Counter,
-    /// Counter: chunking was performed successfully.
-    pub chunking_performed: metrics::Counter,
 }
 
 /// Standalone task that receives a transaction state stream and updates relevant
@@ -878,13 +869,6 @@ impl MultiProofTask {
             self.multiproof_manager.proof_worker_handle.available_account_workers();
         let available_storage_workers =
             self.multiproof_manager.proof_worker_handle.available_storage_workers();
-        self.metrics
-            .available_account_workers_at_dispatch_histogram
-            .record(available_account_workers as f64);
-        self.metrics
-            .available_storage_workers_at_dispatch_histogram
-            .record(available_storage_workers as f64);
-
         let outcome = dispatch_with_chunking(
             proof_targets,
             chunking_len,
@@ -908,10 +892,7 @@ impl MultiProofTask {
             },
         );
         if outcome.chunked {
-            self.metrics.chunking_performed.increment(1);
             tracing::Span::current().record("chunks", outcome.dispatched);
-        } else {
-            self.metrics.chunking_skipped_below_threshold.increment(1);
         }
 
         self.metrics.prefetch_proof_chunks_histogram.record(outcome.dispatched as f64);
@@ -1036,13 +1017,6 @@ impl MultiProofTask {
             self.multiproof_manager.proof_worker_handle.available_account_workers();
         let available_storage_workers =
             self.multiproof_manager.proof_worker_handle.available_storage_workers();
-        self.metrics
-            .available_account_workers_at_dispatch_histogram
-            .record(available_account_workers as f64);
-        self.metrics
-            .available_storage_workers_at_dispatch_histogram
-            .record(available_storage_workers as f64);
-
         let outcome = dispatch_with_chunking(
             not_fetched_state_update,
             chunking_len,
@@ -1073,10 +1047,7 @@ impl MultiProofTask {
             },
         );
         if outcome.chunked {
-            self.metrics.chunking_performed.increment(1);
             tracing::Span::current().record("chunks", outcome.dispatched);
-        } else {
-            self.metrics.chunking_skipped_below_threshold.increment(1);
         }
 
         self.metrics
@@ -1145,10 +1116,7 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // EXPERIMENT 3: Dispatch-then-batch strategy for PrefetchProofs.
-                // Dispatch first message IMMEDIATELY, then accumulate more while workers process.
-
-                // STEP 1: Dispatch first message immediately
+                // Dispatch first prefetch immediately, then accumulate more while workers process.
                 let first_account_targets = targets.len();
                 let first_storage_targets =
                     targets.values().map(|slots| slots.len()).sum::<usize>();
@@ -2319,17 +2287,17 @@ mod tests {
                 }
                 match task.rx.try_recv() {
                     Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() {
-                            if !can_batch_state_update(
+                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
+                            !can_batch_state_update(
                                 *batch_source,
                                 batch_update,
                                 next_source,
                                 &next_update,
-                            ) {
-                                pending_msg =
-                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                                break;
-                            }
+                            )
+                        {
+                            pending_msg =
+                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
+                            break;
                         }
 
                         let next_estimate = estimate_evm_state_targets(&next_update);
@@ -2440,17 +2408,17 @@ mod tests {
                 }
                 match task.rx.try_recv() {
                     Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() {
-                            if !can_batch_state_update(
+                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
+                            !can_batch_state_update(
                                 *batch_source,
                                 batch_update,
                                 next_source,
                                 &next_update,
-                            ) {
-                                pending_msg =
-                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                                break;
-                            }
+                            )
+                        {
+                            pending_msg =
+                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
+                            break;
                         }
 
                         let next_estimate = estimate_evm_state_targets(&next_update);
