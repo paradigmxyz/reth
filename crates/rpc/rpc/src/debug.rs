@@ -10,12 +10,10 @@ use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
     state::EvmOverrides, BadBlock, BlockError, BlockTransactionsKind, Bundle, StateContext,
-    TransactionInfo,
 };
 use alloy_rpc_types_trace::geth::{
-    mux::MuxConfig, BlockTraceResult, CallConfig, FourByteFrame, GethDebugBuiltInTracerType,
-    GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions,
-    GethDefaultTracingOptions, GethTrace, NoopFrame, PreStateConfig, TraceResult,
+    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
+    TraceResult,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
@@ -39,19 +37,8 @@ use reth_storage_api::{
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{
-    context::{
-        result::{HaltReasonTr, ResultAndState},
-        ContextTr,
-    },
-    inspector::{JournalExt, NoOpInspector},
-    interpreter::{CallInputs, CallOutcome, CreateInputs, CreateOutcome, Interpreter},
-    DatabaseCommit, DatabaseRef, Inspector,
-};
-use revm_inspectors::tracing::{
-    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
-};
-use revm_primitives::{Log, U256};
+use revm::DatabaseCommit;
+use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
