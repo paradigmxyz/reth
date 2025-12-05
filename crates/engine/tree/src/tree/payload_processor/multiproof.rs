@@ -226,17 +226,8 @@ fn can_batch_state_update(
     }
 }
 
-/// Outcome of chunked dispatching.
-#[derive(Debug, Clone, Copy, Default)]
-struct ChunkDispatchOutcome {
-    /// How many dispatches were performed.
-    dispatched: usize,
-    /// Whether chunking was actually applied.
-    chunked: bool,
-}
-
 /// Dispatches work items either as a single unit or in chunks, depending on target size and worker
-/// availability. Returns how many dispatches were performed and whether chunking happened.
+/// availability. Returns how many dispatches were performed.
 #[allow(clippy::too_many_arguments)]
 fn dispatch_with_chunking<T, I>(
     items: T,
