@@ -31,7 +31,7 @@ use reth_node_core::{
 use reth_node_events::node;
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
-    BlockNumReader,
+    BlockNumReader, MetadataProvider,
 };
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
@@ -39,6 +39,7 @@ use reth_tracing::tracing::{debug, error, info};
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
+use tracing::warn;
 
 /// The engine node launcher.
 #[derive(Debug)]
@@ -98,8 +99,24 @@ impl EngineNodeLauncher {
             .with_adjusted_configs()
             // Create the provider factory
             .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>().await?
-            .inspect(|_| {
+            .inspect(|ctx| {
                 info!(target: "reth::cli", "Database opened");
+                match ctx.provider_factory().storage_settings() {
+                    Ok(settings) => {
+                        info!(
+                            target: "reth::cli",
+                            ?settings,
+                            "Storage settings"
+                        );
+                    },
+                    Err(err) => {
+                        warn!(
+                            target: "reth::cli",
+                            ?err,
+                            "Failed to get storage settings"
+                        );
+                    },
+                }
             })
             .with_prometheus_server().await?
             .inspect(|this| {

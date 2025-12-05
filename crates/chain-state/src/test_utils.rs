@@ -1,6 +1,6 @@
 use crate::{
     in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions,
+    CanonStateSubscriptions, ComputedTrieData,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::{
@@ -23,7 +23,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, updates::TrieUpdatesSorted, HashedPostStateSorted};
+use reth_trie::root::state_root_unhashed;
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{
@@ -92,7 +92,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         &mut self,
         number: BlockNumber,
         parent_hash: B256,
-    ) -> RecoveredBlock<reth_ethereum_primitives::Block> {
+    ) -> SealedBlock<reth_ethereum_primitives::Block> {
         let mut rng = rand::rng();
 
         let mock_tx = |nonce: u64| -> Recovered<_> {
@@ -167,7 +167,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             ..Default::default()
         };
 
-        let block = SealedBlock::from_sealed_parts(
+        SealedBlock::from_sealed_parts(
             SealedHeader::seal_slow(header),
             BlockBody {
                 transactions: transactions.into_iter().map(|tx| tx.into_inner()).collect(),
@@ -175,10 +175,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 withdrawals: Some(vec![].into()),
                 block_access_list: None,
             },
-        );
-
-        RecoveredBlock::try_recover_sealed_with_senders(block, vec![self.signer; num_txs as usize])
-            .unwrap()
+        )
     }
 
     /// Creates a fork chain with the given base block.
@@ -192,7 +189,9 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         for _ in 0..length {
             let block = self.generate_random_block(parent.number + 1, parent.hash());
-            parent = block.clone_sealed_block();
+            parent = block.clone();
+            let senders = vec![self.signer; block.body().transactions.len()];
+            let block = block.with_senders(senders);
             fork.push(block);
         }
 
@@ -206,20 +205,19 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
     ) -> ExecutedBlock {
-        let block_with_senders = self.generate_random_block(block_number, parent_hash);
-
-        let (block, senders) = block_with_senders.split_sealed();
-        ExecutedBlock {
-            recovered_block: Arc::new(RecoveredBlock::new_sealed(block, senders)),
-            execution_output: Arc::new(ExecutionOutcome::new(
+        let block = self.generate_random_block(block_number, parent_hash);
+        let senders = vec![self.signer; block.body().transactions.len()];
+        let trie_data = ComputedTrieData::default();
+        ExecutedBlock::new(
+            Arc::new(RecoveredBlock::new_sealed(block, senders)),
+            Arc::new(ExecutionOutcome::new(
                 BundleState::default(),
                 receipts,
                 block_number,
                 vec![Requests::default()],
             )),
-            hashed_state: Arc::new(HashedPostStateSorted::default()),
-            trie_updates: Arc::new(TrieUpdatesSorted::default()),
-        }
+            trie_data,
+        )
     }
 
     /// Generates an [`ExecutedBlock`] that includes the given receipts.
