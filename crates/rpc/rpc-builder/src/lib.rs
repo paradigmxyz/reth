@@ -51,6 +51,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
+pub use reth_rpc_server_types::RethRpcModule;
 use reth_storage_api::{
     AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, ProviderBlock,
     StateProviderFactory,
@@ -74,7 +75,7 @@ use jsonrpsee::server::ServerConfigBuilder;
 pub use reth_ipc::server::{
     Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
 };
-pub use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+pub use reth_rpc_server_types::{constants, RpcModuleSelection};
 pub use tower::layer::util::{Identity, Stack};
 
 /// Auth server utilities.
@@ -217,23 +218,6 @@ impl<N, Provider, Pool, Network, EvmConfig, Consensus>
         Self { provider, network, pool, executor, evm_config, consensus, _primitives }
     }
 
-    /// Configure [`TokioTaskExecutor`] as the task executor to use for additional tasks.
-    ///
-    /// This will spawn additional tasks directly via `tokio::task::spawn`, See
-    /// [`TokioTaskExecutor`].
-    pub fn with_tokio_executor(self) -> Self {
-        let Self { pool, network, provider, evm_config, consensus, _primitives, .. } = self;
-        Self {
-            provider,
-            network,
-            pool,
-            executor: Box::new(TokioTaskExecutor::default()),
-            evm_config,
-            consensus,
-            _primitives,
-        }
-    }
-
     /// Configure the evm configuration type
     pub fn with_evm_config<E>(
         self,
@@ -347,22 +331,6 @@ where
         let auth_module = registry.create_auth_module(engine);
 
         (modules, auth_module, registry)
-    }
-
-    /// Converts the builder into a [`RpcRegistryInner`] which can be used to create all
-    /// components.
-    ///
-    /// This is useful for getting access to API handlers directly
-    pub fn into_registry<EthApi>(
-        self,
-        config: RpcModuleConfig,
-        eth: EthApi,
-    ) -> RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
-    where
-        EthApi: EthApiTypes + 'static,
-    {
-        let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
-        RpcRegistryInner::new(provider, pool, network, executor, consensus, config, evm_config, eth)
     }
 
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
@@ -1446,7 +1414,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
 /// Configure a http transport only
 ///
 /// ```
-/// use reth_rpc_builder::{RethRpcModule, TransportRpcModuleConfig};
+/// use reth_rpc_builder::TransportRpcModuleConfig;
+/// use reth_rpc_server_types::RethRpcModule;
 /// let config =
 ///     TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth, RethRpcModule::Admin]);
 /// ```

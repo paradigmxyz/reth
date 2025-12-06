@@ -9219,6 +9219,7 @@ dependencies = [
  "alloy-sol-types",
  "eyre",
  "futures",
+ "jsonrpsee-core",
  "rand 0.9.2",
  "reth-chainspec",
  "reth-db",
@@ -9254,6 +9255,7 @@ dependencies = [
  "serde",
  "serde_json",
  "similar-asserts",
+ "tempfile",
  "tokio",
 ]
 
@@ -10144,6 +10146,8 @@ dependencies = [
  "reth-db-api",
  "reth-engine-primitives",
  "reth-errors",
+ "reth-ethereum-engine-primitives",
+ "reth-ethereum-payload-builder",
  "reth-ethereum-primitives",
  "reth-evm",
  "reth-evm-ethereum",
@@ -10206,6 +10210,9 @@ dependencies = [
  "reth-network-peers",
  "reth-rpc-eth-api",
  "reth-trie-common",
+ "serde",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
