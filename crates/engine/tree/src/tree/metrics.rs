@@ -63,7 +63,7 @@ impl EngineApiMetrics {
     pub(crate) fn execute_metered<E, DB>(
         &self,
         executor: E,
-        transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
+        mut transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<(BlockExecutionOutput<E::Receipt>, Vec<Address>), BlockExecutionError>
     where
@@ -79,27 +79,42 @@ impl EngineApiMetrics {
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
         let f = || {
+            let start = Instant::now();
             debug_span!(target: "engine::tree", "pre execution")
                 .entered()
                 .in_scope(|| executor.apply_pre_execution_changes())?;
+            self.executor.pre_execution_histogram.record(start.elapsed());
+
             let exec_span = debug_span!(target: "engine::tree", "execution").entered();
-            for tx in transactions {
+            loop {
+                let start = Instant::now();
+                let Some(tx) = transactions.next() else { break };
+                self.executor.transaction_wait_histogram.record(start.elapsed());
+
                 let tx = tx?;
+                senders.push(*tx.signer());
+
                 let span =
                     debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
                 let enter = span.entered();
                 trace!(target: "engine::tree", "Executing transaction");
-                senders.push(*tx.signer());
+                let start = Instant::now();
                 let gas_used = executor.execute_transaction(tx)?;
+                self.executor.transaction_execution_histogram.record(start.elapsed());
 
                 // record the tx gas used
                 enter.record("gas_used", gas_used);
             }
             drop(exec_span);
-            debug_span!(target: "engine::tree", "finish")
+
+            let start = Instant::now();
+            let result = debug_span!(target: "engine::tree", "finish")
                 .entered()
                 .in_scope(|| executor.finish())
-                .map(|(evm, result)| (evm.into_db(), result))
+                .map(|(evm, result)| (evm.into_db(), result));
+            self.executor.post_execution_histogram.record(start.elapsed());
+
+            result
         };
 
         // Use metered to execute and track timing/gas metrics
