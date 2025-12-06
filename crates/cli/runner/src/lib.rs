@@ -77,10 +77,9 @@ impl CliRunner {
     }
 
     /// Executes an async block on the runtime and blocks until completion.
-    pub fn block_on<F, T>(&self, fut: F) -> Result<T, std::io::Error>
+    pub fn block_on<F, T>(&self, fut: F) -> T
     where
-        F: Future<Output = T> + Send + 'static,
-        T: Send + 'static,
+        F: Future<Output = T>,
     {
         self.executor.block_on(fut)
     }
@@ -91,7 +90,7 @@ impl CliRunner {
         F: Future<Output = Result<(), E>> + Send + 'static,
         E: Send + Sync + From<std::io::Error> + 'static,
     {
-        self.executor.block_on(run_until_ctrl_c(fut)).map_err(E::from)??;
+        self.executor.block_on(run_until_ctrl_c(fut))?;
         Ok(())
     }
 
@@ -171,8 +170,7 @@ impl CliRunner {
         let fut = self.executor.spawn_blocking_task(fut);
 
         self.executor
-            .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))
-            .map_err(E::from)??;
+            .block_on(run_until_ctrl_c(async move { fut.await.expect("Failed to join task") }))?;
 
         // drop the tokio runtime on a separate thread because drop blocks until its pools
         // (including blocking pool) are shutdown. In other words `drop(tokio_runtime)` would block
@@ -326,38 +324,30 @@ impl RuntimeOrHandle {
         }
     }
 
-    /// Block on a future, handling both `Runtime` and `Handle` cases.
+    /// Block on a future.
+    ///
+    /// # Panics
+    ///
+    /// When using a `Handle`, this will panic if called from within an async context.
     ///
     /// # Example
-    /// ```ignore
-    /// // Safe: Called from outside async context
-    /// std::thread::spawn(move || {
-    ///     let result = handle.block_on(async { "ok" });
-    /// });
+    /// ```rust
+    /// // Safe: Called from outside async context (e.g., in main or a spawned thread)
+    /// let runner = CliRunner::from_handle(handle);
+    /// let result = runner.block_on(async { "ok" });
     ///
-    /// // Unsafe: Would panic if called directly in async context
+    /// // Unsafe: Would panic if called from within async context
     /// // async fn bad() {
-    /// //     handle.block_on(async { "panic!" }); // Don't do this!
+    /// //     runner.block_on(async { "panic!" }); // Don't do this!
     /// // }
     /// ```
-    fn block_on<F>(&self, fut: F) -> Result<F::Output, std::io::Error>
+    fn block_on<F>(&self, fut: F) -> F::Output
     where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
+        F: Future,
     {
         match self {
-            Self::Runtime(rt) => Ok(rt.block_on(fut)),
-            Self::Handle(handle) => {
-                // Check if we're in an async context to spawn a thread to avoid panic
-                if Handle::try_current().is_ok() {
-                    let handle = handle.clone();
-                    std::thread::spawn(move || handle.block_on(fut))
-                        .join()
-                        .map_err(|_| std::io::Error::other("Failed to join blocking thread"))
-                } else {
-                    Ok(handle.block_on(fut))
-                }
-            }
+            Self::Runtime(rt) => rt.block_on(fut),
+            Self::Handle(handle) => handle.block_on(fut),
         }
     }
 
