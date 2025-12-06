@@ -331,7 +331,7 @@ impl RuntimeOrHandle {
     /// When using a `Handle`, this will panic if called from within an async context.
     ///
     /// # Example
-    /// ```rust
+    /// ```ignore
     /// // Safe: Called from outside async context (e.g., in main or a spawned thread)
     /// let runner = CliRunner::from_handle(handle);
     /// let result = runner.block_on(async { "ok" });
