@@ -18,7 +18,6 @@ futures-util = "0.3"
 
 # grpc
 tonic = "0.11"
-prost = "0.12"
 bincode = "1"
 
 # misc

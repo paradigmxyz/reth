@@ -30,7 +30,6 @@ reth-node-builder = { workspace = true, features = ["test-utils"] }
 reth-tokio-util.workspace = true
 reth-stages-types.workspace = true
 reth-network-peers.workspace = true
-reth-engine-local.workspace = true
 reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
 reth-node-ethereum.workspace = true
