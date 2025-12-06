@@ -246,9 +246,22 @@ where
             let filename = format!("{}.witness.healthy.json", block_prefix);
             let healthy_path = self.save_file(filename, &healthy_node_witness)?;
 
-            if witness != &healthy_node_witness {
+            // Normalize both witnesses to ensure order-insensitive comparison
+            // Sort codes and keys in place to make comparison order-insensitive
+            // These fields represent unordered sets of bytecode and preimages
+            let mut normalized_witness = witness.clone();
+            let mut normalized_healthy_witness = healthy_node_witness;
+            normalized_witness.codes.sort();
+            normalized_witness.keys.sort();
+            normalized_healthy_witness.codes.sort();
+            normalized_healthy_witness.keys.sort();
+
+            let witness_matches = normalized_witness == normalized_healthy_witness;
+
+            if !witness_matches {
                 let filename = format!("{}.witness.diff", block_prefix);
-                let diff_path = self.save_diff(filename, witness, &healthy_node_witness)?;
+                let diff_path =
+                    self.save_diff(filename, &normalized_witness, &normalized_healthy_witness)?;
                 warn!(
                     target: "engine::invalid_block_hooks::witness",
                     diff_path = %diff_path.display(),
