@@ -289,12 +289,15 @@ where
         &self,
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
-        Ok(payload.payload.transactions().clone().into_iter().map(|tx| {
+        let txs = payload.payload.transactions().clone().into_iter();
+        let convert = |tx: Bytes| {
             let tx =
                 TxTy::<Self::Primitives>::decode_2718_exact(tx.as_ref()).map_err(AnyError::new)?;
             let signer = tx.try_recover().map_err(AnyError::new)?;
             Ok::<_, AnyError>(tx.with_signer(signer))
-        }))
+        };
+
+        Ok((txs, convert))
     }
 }
 
