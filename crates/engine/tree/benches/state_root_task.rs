@@ -229,9 +229,7 @@ fn bench_state_root(c: &mut Criterion) {
                         black_box({
                             let mut handle = payload_processor.spawn(
                                 Default::default(),
-                                core::iter::empty::<
-                                    Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                                >(),
+                                (Vec::new(), |_| unreachable!()),
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
                                 OverlayStateProviderFactory::new(provider),
                                 &TreeConfig::default(),
