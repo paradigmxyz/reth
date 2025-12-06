@@ -1,13 +1,17 @@
 //! Consensus types for Era post-merge history files
 //!
-//! # Decoding Consensus Types
+//! # Decoding
 //!
+//! This crate only handles compression/decompression. 
+//! To decode the SSZ data into concrete beacon types, use the [Lighthouse `types`](https://github.com/sigp/lighthouse/tree/stable/consensus/types)
+//! crate or another SSZ-compatible library.
+//! 
 //! # Examples
 //!
 //! ## Decoding a [`CompressedBeaconState`]
 //!
-//! ```rust
-//! use consensus_types::{BeaconState, ChainSpec, MainnetEthSpec};
+//! ```ignore
+//! use types::{BeaconState, ChainSpec, MainnetEthSpec};
 //! use reth_era::era::types::consensus::CompressedBeaconState;
 //!
 //! fn decode_state(
@@ -32,7 +36,7 @@
 //!
 //! ## Decoding a [`CompressedSignedBeaconBlock`]
 //!
-//! ```rust
+//! ```ignore
 //! use consensus_types::{ForkName, ForkVersionDecode, MainnetEthSpec, SignedBeaconBlock};
 //! use reth_era::era::types::consensus::CompressedSignedBeaconBlock;
 //!

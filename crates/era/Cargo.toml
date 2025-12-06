@@ -9,9 +9,6 @@ homepage.workspace = true
 repository.workspace = true
 exclude.workspace = true
 
-[package.metadata.cargo-udeps.ignore]
-development = ["consensus-types"]
-
 [dependencies]
 thiserror.workspace = true
 
@@ -29,7 +26,6 @@ ethereum_ssz.workspace = true
 ethereum_ssz_derive.workspace = true
 
 [dev-dependencies]
-consensus-types = { git = "https://github.com/sigp/lighthouse", package = "types" }
 eyre.workspace = true
 rand.workspace = true
 reqwest.workspace = true
