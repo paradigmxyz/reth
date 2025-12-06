@@ -173,7 +173,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     ///
     /// Returns an error if the message is considered to be in violation of the protocol.
     fn on_incoming_message(&mut self, msg: EthMessage<N>) -> OnIncomingMessageOutcome<N> {
-        let now = Instant::now();
         /// A macro that handles an incoming request
         /// This creates a new channel and tries to send the sender half to the session while
         /// storing the receiver half internally so the pending response can be polled.
@@ -312,7 +311,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     let latest_hash = range_info.latest_hash();
                     range_info.update(range.start_block, range.end_block, latest_hash);
                 }
-                self.last_range_update = Some(now);
+                self.last_range_update = Some(Instant::now());
 
                 OnIncomingMessageOutcome::Ok
             }
@@ -341,7 +340,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 if let Some(range_info) = self.range_info.as_ref() {
                     range_info.update(msg.earliest, msg.latest, msg.latest_hash);
                 }
-                self.last_range_update = Some(now);
+                self.last_range_update = Some(Instant::now());
 
                 OnIncomingMessageOutcome::Ok
             }
