@@ -16,8 +16,9 @@ use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Block as BlockTrait, Recovered, SealedBlock, SignerRecoverable};
 use reth_rpc_api::{TestingApiServer, TestingBuildBlockRequestV1};
 use reth_rpc_server_types::result::{internal_rpc_err, invalid_params_rpc_err};
+use reth_tasks::TaskExecutor;
 use std::{marker::PhantomData, sync::Arc};
-use tokio::{runtime::Handle, sync::Semaphore};
+use tokio::sync::{oneshot, Semaphore};
 
 // EVM / payload building
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
@@ -50,17 +51,18 @@ impl<T: TestingBlockBuilder + ?Sized> TestingBlockBuilder for Arc<T> {
 }
 
 /// Testing API handler.
-#[derive(Clone, Debug)]
+#[derive(Debug, Clone)]
 pub struct TestingApi<B> {
     builder: B,
     semaphore: Arc<Semaphore>,
+    executor: TaskExecutor,
 }
 
 impl<B> TestingApi<B> {
     /// Create a new testing API handler.
-    pub fn new(builder: B, max_concurrent: usize) -> Self {
+    pub fn new(builder: B, max_concurrent: usize, executor: TaskExecutor) -> Self {
         let permits = max_concurrent.max(1);
-        Self { builder, semaphore: Arc::new(Semaphore::new(permits)) }
+        Self { builder, semaphore: Arc::new(Semaphore::new(permits)), executor }
     }
 }
 
@@ -90,11 +92,16 @@ where
             .map_err(|_| internal_rpc_err("testing_buildBlockV1 concurrency limiter closed"))?;
 
         let builder = self.builder.clone();
-        let handle = Handle::current();
-        let join_handle =
-            tokio::task::spawn_blocking(move || handle.block_on(builder.build_block(request)));
+        let executor = self.executor.clone();
+        let (tx, rx) = oneshot::channel();
 
-        let res = join_handle
+        let join_handle = executor.spawn_blocking(Box::pin(async move {
+            let res = builder.build_block(request).await;
+            let _ = tx.send(res);
+        }));
+
+        let res = rx.await.map_err(|_| internal_rpc_err("testing_buildBlockV1 worker canceled"))?;
+        join_handle
             .await
             .map_err(|err| internal_rpc_err(format!("testing_buildBlockV1 failed: {err}")))?;
 
