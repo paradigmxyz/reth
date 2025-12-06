@@ -3,7 +3,7 @@
 #![allow(dead_code)]
 
 use crate::{
-    pool::{txpool::TxPool, AddedTransaction},
+    pool::{state::SubPool, txpool::TxPool, AddedTransaction},
     test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
     TransactionOrdering,
 };
@@ -95,6 +95,18 @@ impl<R: Rng> MockTransactionSimulator<R> {
         }
     }
 
+    /// Creates a pool configured for this simulator
+    ///
+    /// This is needed because `MockPool::default()` sets `pending_basefee` to 7, but we might want
+    /// to use different values
+    pub(crate) fn create_pool(&self) -> MockPool {
+        let mut pool = MockPool::default();
+        let mut info = pool.block_info();
+        info.pending_basefee = self.base_fee as u64;
+        pool.set_block_info(info);
+        pool
+    }
+
     /// Returns a random address from the senders set
     fn rng_address(&mut self) -> Address {
         let idx = self.rng.random_range(0..self.senders.len());
@@ -116,17 +128,12 @@ impl<R: Rng> MockTransactionSimulator<R> {
 
         match scenario {
             ScenarioType::OnchainNonce => {
-                let tx = self
-                    .tx_generator
-                    .tx(on_chain_nonce, &mut self.rng)
-                    .with_gas_price(self.base_fee);
+                // uses fee from fee_ranges
+                let tx = self.tx_generator.tx(on_chain_nonce, &mut self.rng);
                 let valid_tx = self.validator.validated(tx);
 
                 let res =
                     pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None).unwrap();
-
-                // TODO(mattsse): need a way expect based on the current state of the pool and tx
-                // settings
 
                 match res {
                     AddedTransaction::Pending(_) => {}
@@ -134,14 +141,82 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         panic!("expected pending")
                     }
                 }
-
-                // TODO(mattsse): check subpools
+                self.executed
+                    .entry(sender)
+                    .or_insert_with(|| ExecutedScenarios { sender, scenarios: vec![] }) // in the case of a new sender
+                    .scenarios
+                    .push(ExecutedScenario {
+                        balance: on_chain_balance,
+                        nonce: on_chain_nonce,
+                        scenario: Scenario::OnchainNonce { nonce: on_chain_nonce },
+                    });
             }
-            ScenarioType::HigherNonce { .. } => {
-                unimplemented!()
+
+            ScenarioType::HigherNonce { skip } => {
+                let higher_nonce = on_chain_nonce + skip;
+
+                // uses fee from fee_ranges
+                let tx = self.tx_generator.tx(higher_nonce, &mut self.rng);
+                let valid_tx = self.validator.validated(tx);
+
+                let res =
+                    pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None).unwrap();
+
+                match res {
+                    AddedTransaction::Pending(_) => {
+                        panic!("expected parked")
+                    }
+                    AddedTransaction::Parked { subpool, .. } => {
+                        assert_eq!(
+                            subpool,
+                            SubPool::Queued,
+                            "expected to be moved to queued subpool"
+                        );
+                    }
+                }
+                self.executed
+                    .entry(sender)
+                    .or_insert_with(|| ExecutedScenarios { sender, scenarios: vec![] }) // in the case of a new sender
+                    .scenarios
+                    .push(ExecutedScenario {
+                        balance: on_chain_balance,
+                        nonce: on_chain_nonce,
+                        scenario: Scenario::HigherNonce {
+                            onchain: on_chain_nonce,
+                            nonce: higher_nonce,
+                        },
+                    });
+            }
+
+            ScenarioType::BelowBaseFee { fee } => {
+                // fee should be in [MIN_PROTOCOL_BASE_FEE, base_fee)
+                let tx = self.tx_generator.tx(on_chain_nonce, &mut self.rng).with_gas_price(fee);
+                let valid_tx = self.validator.validated(tx);
+
+                let res =
+                    pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None).unwrap();
+
+                match res {
+                    AddedTransaction::Pending(_) => panic!("expected parked"),
+                    AddedTransaction::Parked { subpool, .. } => {
+                        assert_eq!(
+                            subpool,
+                            SubPool::BaseFee,
+                            "expected to be moved to base fee subpool"
+                        );
+                    }
+                }
+                self.executed
+                    .entry(sender)
+                    .or_insert_with(|| ExecutedScenarios { sender, scenarios: vec![] }) // in the case of a new sender
+                    .scenarios
+                    .push(ExecutedScenario {
+                        balance: on_chain_balance,
+                        nonce: on_chain_nonce,
+                        scenario: Scenario::BelowBaseFee { fee },
+                    });
             }
         }
-
         // make sure everything is set
         pool.enforce_invariants()
     }
@@ -172,6 +247,7 @@ impl MockSimulatorConfig {
 pub(crate) enum ScenarioType {
     OnchainNonce,
     HigherNonce { skip: u64 },
+    BelowBaseFee { fee: u128 },
 }
 
 /// The actual scenario, ready to be executed
@@ -186,10 +262,10 @@ pub(crate) enum Scenario {
     OnchainNonce { nonce: u64 },
     /// Send a tx with a higher nonce that what the sender has on chain
     HigherNonce { onchain: u64, nonce: u64 },
-    Multi {
-        // Execute multiple test scenarios
-        scenario: Vec<Self>,
-    },
+    /// Send a tx with a base fee below the base fee of the pool
+    BelowBaseFee { fee: u128 },
+    /// Execute multiple test scenarios
+    Multi { scenario: Vec<Self> },
 }
 
 /// Represents an executed scenario
@@ -226,17 +302,18 @@ mod tests {
             blob_pct: 0,
         };
 
+        let base_fee = 10u128;
         let fee_ranges = MockFeeRange {
-            gas_price: (10u128..100).try_into().unwrap(),
-            priority_fee: (10u128..100).try_into().unwrap(),
-            max_fee: (100u128..110).try_into().unwrap(),
+            gas_price: (base_fee..100).try_into().unwrap(),
+            priority_fee: (1u128..10).try_into().unwrap(),
+            max_fee: (base_fee..110).try_into().unwrap(),
             max_fee_blob: (1u128..100).try_into().unwrap(),
         };
 
         let config = MockSimulatorConfig {
             num_senders: 10,
             scenarios: vec![ScenarioType::OnchainNonce],
-            base_fee: 10,
+            base_fee,
             tx_generator: MockTransactionDistribution::new(
                 transaction_ratio,
                 fee_ranges,
@@ -245,8 +322,92 @@ mod tests {
             ),
         };
         let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
-        let mut pool = MockPool::default();
+        let mut pool = simulator.create_pool();
 
         simulator.next(&mut pool);
+        assert_eq!(pool.pending().len(), 1);
+        assert_eq!(pool.queued().len(), 0);
+        assert_eq!(pool.base_fee().len(), 0);
+    }
+
+    #[test]
+    fn test_higher_nonce_scenario() {
+        let transaction_ratio = MockTransactionRatio {
+            legacy_pct: 30,
+            dynamic_fee_pct: 70,
+            access_list_pct: 0,
+            blob_pct: 0,
+        };
+
+        let base_fee = 10u128;
+        let fee_ranges = MockFeeRange {
+            gas_price: (base_fee..100).try_into().unwrap(),
+            priority_fee: (1u128..10).try_into().unwrap(),
+            max_fee: (base_fee..110).try_into().unwrap(),
+            max_fee_blob: (1u128..100).try_into().unwrap(),
+        };
+
+        let config = MockSimulatorConfig {
+            num_senders: 10,
+            scenarios: vec![ScenarioType::HigherNonce { skip: 1 }],
+            base_fee,
+            tx_generator: MockTransactionDistribution::new(
+                transaction_ratio,
+                fee_ranges,
+                10..100,
+                10..100,
+            ),
+        };
+        let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
+        let mut pool = simulator.create_pool();
+
+        simulator.next(&mut pool);
+        assert_eq!(pool.pending().len(), 0);
+        assert_eq!(pool.queued().len(), 1);
+        assert_eq!(pool.base_fee().len(), 0);
+    }
+
+    #[test]
+    fn test_below_base_fee_scenario() {
+        let transaction_ratio = MockTransactionRatio {
+            legacy_pct: 30,
+            dynamic_fee_pct: 70,
+            access_list_pct: 0,
+            blob_pct: 0,
+        };
+
+        let base_fee = 10u128;
+        let fee_ranges = MockFeeRange {
+            gas_price: (base_fee..100).try_into().unwrap(),
+            priority_fee: (1u128..10).try_into().unwrap(),
+            max_fee: (base_fee..110).try_into().unwrap(),
+            max_fee_blob: (1u128..100).try_into().unwrap(),
+        };
+
+        let config = MockSimulatorConfig {
+            num_senders: 10,
+            scenarios: vec![ScenarioType::BelowBaseFee { fee: 8 }], /* fee should be in
+                                                                     * [MIN_PROTOCOL_BASE_FEE,
+                                                                     * base_fee) */
+            base_fee,
+            tx_generator: MockTransactionDistribution::new(
+                transaction_ratio,
+                fee_ranges,
+                10..100,
+                10..100,
+            ),
+        };
+        let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
+        let mut pool = simulator.create_pool();
+
+        simulator.next(&mut pool);
+        assert_eq!(pool.pending().len(), 0);
+        assert_eq!(pool.queued().len(), 0);
+        assert_eq!(pool.base_fee().len(), 1);
+    }
+
+    #[test]
+    fn test_many_random_scenarios() {
+        // todo: we should use a more deterministic approach to test this
     }
 }
