@@ -481,18 +481,16 @@ impl FileReader {
         chunk: &mut Vec<u8>,
         chunk_byte_len: u64,
     ) -> Result<bool, FileClientError> {
+        let mut buffer = vec![0u8; 64 * 1024];
         loop {
             if chunk.len() >= chunk_byte_len as usize {
                 return Ok(true)
             }
 
-            let mut buffer = vec![0u8; 64 * 1024];
-
             match self.read(&mut buffer).await {
                 Ok(0) => return Ok(!chunk.is_empty()),
                 Ok(n) => {
-                    buffer.truncate(n);
-                    chunk.extend_from_slice(&buffer);
+                    chunk.extend_from_slice(&buffer[..n]);
                 }
                 Err(e) => return Err(e.into()),
             }

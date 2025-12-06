@@ -1,11 +1,8 @@
 //! Utilities for serving `eth_simulateV1`
 
 use crate::{
-    error::{
-        api::{FromEthApiError, FromEvmHalt},
-        ToRpcError,
-    },
-    EthApiError, RevertError,
+    error::{api::FromEthApiError, FromEvmError, ToRpcError},
+    EthApiError,
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
@@ -17,7 +14,7 @@ use alloy_rpc_types_eth::{
 use jsonrpsee_types::ErrorObject;
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome, BlockExecutor},
-    Evm,
+    Evm, HaltReasonFor,
 };
 use reth_primitives_traits::{BlockBody as _, BlockTy, NodePrimitives, Recovered, RecoveredBlock};
 use reth_rpc_convert::{RpcBlock, RpcConvert, RpcTxReq};
@@ -68,7 +65,7 @@ pub fn execute_transactions<S, T>(
     calls: Vec<RpcTxReq<T::Network>>,
     default_gas_limit: u64,
     chain_id: u64,
-    tx_resp_builder: &T,
+    converter: &T,
 ) -> Result<
     (
         BlockBuilderOutcome<S::Primitives>,
@@ -92,7 +89,7 @@ where
             builder.evm().block().basefee(),
             chain_id,
             builder.evm_mut().db_mut(),
-            tx_resp_builder,
+            converter,
         )?;
         // Create transaction with an empty envelope.
         // The effect for a layer-2 execution client is that it does not charge L1 cost.
@@ -120,7 +117,7 @@ pub fn resolve_transaction<DB: Database, Tx, T>(
     block_base_fee_per_gas: u64,
     chain_id: u64,
     db: &mut DB,
-    tx_resp_builder: &T,
+    converter: &T,
 ) -> Result<Recovered<Tx>, EthApiError>
 where
     DB::Error: Into<EthApiError>,
@@ -178,22 +175,26 @@ where
         }
     }
 
-    let tx = tx_resp_builder
-        .build_simulate_v1_transaction(tx)
-        .map_err(|e| EthApiError::other(e.into()))?;
+    let tx =
+        converter.build_simulate_v1_transaction(tx).map_err(|e| EthApiError::other(e.into()))?;
 
     Ok(Recovered::new_unchecked(tx, from))
 }
 
 /// Handles outputs of the calls execution and builds a [`SimulatedBlock`].
-pub fn build_simulated_block<T, Halt: Clone>(
+pub fn build_simulated_block<Err, T>(
     block: RecoveredBlock<BlockTy<T::Primitives>>,
-    results: Vec<ExecutionResult<Halt>>,
+    results: Vec<ExecutionResult<HaltReasonFor<T::Evm>>>,
     txs_kind: BlockTransactionsKind,
-    tx_resp_builder: &T,
-) -> Result<SimulatedBlock<RpcBlock<T::Network>>, T::Error>
+    converter: &T,
+) -> Result<SimulatedBlock<RpcBlock<T::Network>>, Err>
 where
-    T: RpcConvert<Error: FromEthApiError + FromEvmHalt<Halt>>,
+    Err: std::error::Error
+        + FromEthApiError
+        + FromEvmError<T::Evm>
+        + From<T::Error>
+        + Into<jsonrpsee_types::ErrorObject<'static>>,
+    T: RpcConvert,
 {
     let mut calls: Vec<SimCallResult> = Vec::with_capacity(results.len());
 
@@ -201,7 +202,7 @@ where
     for (index, (result, tx)) in results.into_iter().zip(block.body().transactions()).enumerate() {
         let call = match result {
             ExecutionResult::Halt { reason, gas_used } => {
-                let error = T::Error::from_evm_halt(reason, tx.gas_limit());
+                let error = Err::from_evm_halt(reason, tx.gas_limit());
                 SimCallResult {
                     return_data: Bytes::new(),
                     error: Some(SimulateError {
@@ -214,12 +215,12 @@ where
                 }
             }
             ExecutionResult::Revert { output, gas_used } => {
-                let error = RevertError::new(output.clone());
+                let error = Err::from_revert(output.clone());
                 SimCallResult {
                     return_data: output,
                     error: Some(SimulateError {
-                        code: error.error_code(),
                         message: error.to_string(),
+                        code: error.into().code(),
                     }),
                     gas_used,
                     status: false,
@@ -254,8 +255,8 @@ where
 
     let block = block.into_rpc_block(
         txs_kind,
-        |tx, tx_info| tx_resp_builder.fill(tx, tx_info),
-        |header, size| tx_resp_builder.convert_header(header, size),
+        |tx, tx_info| converter.fill(tx, tx_info),
+        |header, size| converter.convert_header(header, size),
     )?;
     Ok(SimulatedBlock { inner: block, calls })
 }

@@ -2,7 +2,7 @@
 
 use crate::{
     CanonStateNotification, CanonStateNotificationSender, CanonStateNotifications,
-    ChainInfoTracker, MemoryOverlayStateProvider,
+    ChainInfoTracker, ComputedTrieData, DeferredTrieData, MemoryOverlayStateProvider,
 };
 use alloy_consensus::{transaction::TransactionMeta, BlockHeader};
 use alloy_eips::{BlockHashOrNumber, BlockNumHash};
@@ -17,7 +17,7 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::StateProviderBox;
-use reth_trie::{updates::TrieUpdates, HashedPostState};
+use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
@@ -565,12 +565,18 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
 
 /// State after applying the given block, this block is part of the canonical chain that partially
 /// stored in memory and can be traced back to a canonical block on disk.
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub struct BlockState<N: NodePrimitives = EthPrimitives> {
     /// The executed block that determines the state after this block has been executed.
     block: ExecutedBlock<N>,
     /// The block's parent block if it exists.
     parent: Option<Arc<Self>>,
+}
+
+impl<N: NodePrimitives> PartialEq for BlockState<N> {
+    fn eq(&self, other: &Self) -> bool {
+        self.block == other.block && self.parent == other.parent
+    }
 }
 
 impl<N: NodePrimitives> BlockState<N> {
@@ -719,16 +725,17 @@ impl<N: NodePrimitives> BlockState<N> {
 }
 
 /// Represents an executed block stored in-memory.
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug)]
 pub struct ExecutedBlock<N: NodePrimitives = EthPrimitives> {
     /// Recovered Block
     pub recovered_block: Arc<RecoveredBlock<N::Block>>,
     /// Block's execution outcome.
     pub execution_output: Arc<ExecutionOutcome<N::Receipt>>,
-    /// Block's hashed state.
-    pub hashed_state: Arc<HashedPostState>,
-    /// Trie updates that result from calculating the state root for the block.
-    pub trie_updates: Arc<TrieUpdates>,
+    /// Deferred trie data produced by execution.
+    ///
+    /// This allows deferring the computation of the trie data which can be expensive.
+    /// The data can be populated asynchronously after the block was validated.
+    pub trie_data: DeferredTrieData,
 }
 
 impl<N: NodePrimitives> Default for ExecutedBlock<N> {
@@ -736,13 +743,54 @@ impl<N: NodePrimitives> Default for ExecutedBlock<N> {
         Self {
             recovered_block: Default::default(),
             execution_output: Default::default(),
-            hashed_state: Default::default(),
-            trie_updates: Default::default(),
+            trie_data: DeferredTrieData::ready(ComputedTrieData::default()),
         }
     }
 }
 
+impl<N: NodePrimitives> PartialEq for ExecutedBlock<N> {
+    fn eq(&self, other: &Self) -> bool {
+        // Trie data is computed asynchronously and doesn't define block identity.
+        self.recovered_block == other.recovered_block &&
+            self.execution_output == other.execution_output
+    }
+}
+
 impl<N: NodePrimitives> ExecutedBlock<N> {
+    /// Create a new [`ExecutedBlock`] with already-computed trie data.
+    ///
+    /// Use this constructor when trie data is available immediately (e.g., sequencers,
+    /// payload builders). This is the safe default path.
+    pub fn new(
+        recovered_block: Arc<RecoveredBlock<N::Block>>,
+        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+        trie_data: ComputedTrieData,
+    ) -> Self {
+        Self { recovered_block, execution_output, trie_data: DeferredTrieData::ready(trie_data) }
+    }
+
+    /// Create a new [`ExecutedBlock`] with deferred trie data.
+    ///
+    /// This is useful if the trie data is populated somewhere else, e.g. asynchronously
+    /// after the block was validated.
+    ///
+    /// The [`DeferredTrieData`] handle allows expensive trie operations (sorting hashed state,
+    /// sorting trie updates, and building the accumulated trie input overlay) to be performed
+    /// outside the critical validation path. This can improve latency for time-sensitive
+    /// operations like block validation.
+    ///
+    /// If the data hasn't been populated when [`Self::trie_data()`] is called, computation
+    /// occurs synchronously from stored inputs, so there is no blocking or deadlock risk.
+    ///
+    /// Use [`Self::new()`] instead when trie data is already computed and available immediately.
+    pub const fn with_deferred_trie_data(
+        recovered_block: Arc<RecoveredBlock<N::Block>>,
+        execution_output: Arc<ExecutionOutcome<N::Receipt>>,
+        trie_data: DeferredTrieData,
+    ) -> Self {
+        Self { recovered_block, execution_output, trie_data }
+    }
+
     /// Returns a reference to an inner [`SealedBlock`]
     #[inline]
     pub fn sealed_block(&self) -> &SealedBlock<N::Block> {
@@ -761,16 +809,55 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         &self.execution_output
     }
 
-    /// Returns a reference to the hashed state result of the execution outcome
+    /// Returns the trie data, computing it synchronously if not already cached.
+    ///
+    /// Uses `OnceLock::get_or_init` internally:
+    /// - If already computed: returns cached result immediately
+    /// - If not computed: first caller computes, others wait for that result
     #[inline]
-    pub fn hashed_state(&self) -> &HashedPostState {
-        &self.hashed_state
+    #[tracing::instrument(level = "debug", target = "engine::tree", name = "trie_data", skip_all)]
+    pub fn trie_data(&self) -> ComputedTrieData {
+        self.trie_data.wait_cloned()
     }
 
-    /// Returns a reference to the trie updates resulting from the execution outcome
+    /// Returns a clone of the deferred trie data handle.
+    ///
+    /// A handle is a lightweight reference that can be passed to descendants without
+    /// forcing trie data to be computed immediately. The actual work runs when
+    /// `wait_cloned()` is called by a consumer (e.g. when merging overlays).
     #[inline]
-    pub fn trie_updates(&self) -> &TrieUpdates {
-        &self.trie_updates
+    pub fn trie_data_handle(&self) -> DeferredTrieData {
+        self.trie_data.clone()
+    }
+
+    /// Returns the hashed state result of the execution outcome.
+    ///
+    /// May compute trie data synchronously if the deferred task hasn't completed.
+    #[inline]
+    pub fn hashed_state(&self) -> Arc<HashedPostStateSorted> {
+        self.trie_data().hashed_state
+    }
+
+    /// Returns the trie updates resulting from the execution outcome.
+    ///
+    /// May compute trie data synchronously if the deferred task hasn't completed.
+    #[inline]
+    pub fn trie_updates(&self) -> Arc<TrieUpdatesSorted> {
+        self.trie_data().trie_updates
+    }
+
+    /// Returns the trie input anchored to the persisted ancestor.
+    ///
+    /// May compute trie data synchronously if the deferred task hasn't completed.
+    #[inline]
+    pub fn trie_input(&self) -> Option<Arc<TrieInputSorted>> {
+        self.trie_data().trie_input().cloned()
+    }
+
+    /// Returns the anchor hash of the trie input, if present.
+    #[inline]
+    pub fn anchor_hash(&self) -> Option<B256> {
+        self.trie_data().anchor_hash()
     }
 
     /// Returns a [`BlockNumber`] of the block.
@@ -875,8 +962,8 @@ mod tests {
         StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
-        AccountProof, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
-        StorageProof, TrieInput,
+        updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
+        MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
     };
 
     fn create_mock_state(

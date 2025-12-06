@@ -64,13 +64,12 @@ install-op: ## Build and install the op-reth binary under `$(CARGO_HOME)/bin`.
 build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 
-.PHONY: build-reth
-build-reth: ## Build the reth binary (alias for build target).
-	$(MAKE) build
-
 # Environment variables for reproducible builds
 # Set timestamp from last git commit for reproducible builds
 SOURCE_DATE ?= $(shell git log -1 --pretty=%ct)
+
+# Extra RUSTFLAGS for reproducible builds. Can be overridden via the environment.
+RUSTFLAGS_REPRODUCIBLE_EXTRA ?=
 
 # `reproducible` only supports reth on x86_64-unknown-linux-gnu
 build-%-reproducible:
@@ -79,14 +78,18 @@ build-%-reproducible:
 		exit 1; \
 	fi
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE) \
-	RUSTFLAGS="-C symbol-mangling-version=v0 -C strip=none -C link-arg=-Wl,--build-id=none -C metadata='' --remap-path-prefix $$(pwd)=." \
+	RUSTFLAGS="-C symbol-mangling-version=v0 -C strip=none -C link-arg=-Wl,--build-id=none -C metadata='' --remap-path-prefix $$(pwd)=. $(RUSTFLAGS_REPRODUCIBLE_EXTRA)" \
 	LC_ALL=C \
 	TZ=UTC \
-	cargo build --bin reth --features "$(FEATURES)" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
+	JEMALLOC_OVERRIDE=/usr/lib/x86_64-linux-gnu/libjemalloc.a \
+	cargo build --bin reth --features "$(FEATURES) jemalloc-unprefixed" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
 
 .PHONY: build-debug
 build-debug: ## Build the reth binary into `target/debug` directory.
 	cargo build --bin reth --features "$(FEATURES)"
+.PHONY: build-debug-op
+build-debug-op: ## Build the op-reth binary into `target/debug` directory.
+	cargo build --bin op-reth --features "$(FEATURES)" --manifest-path crates/optimism/bin/Cargo.toml
 
 .PHONY: build-op
 build-op: ## Build the op-reth binary into `target` directory.
@@ -387,9 +390,9 @@ db-tools: ## Compile MDBX debugging tools.
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
 
 .PHONY: update-book-cli
-update-book-cli: build-debug ## Update book cli documentation.
+update-book-cli: build-debug build-debug-op## Update book cli documentation.
 	@echo "Updating book cli doc..."
-	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
+	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth $(CARGO_TARGET_DIR)/debug/op-reth
 
 .PHONY: profiling
 profiling: ## Builds `reth` with optimisations, but also symbols.

@@ -7,7 +7,7 @@ use crate::{
         TreeConfig,
     },
 };
-use alloy_consensus::Header;
+
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
     map::{HashMap, HashSet},
@@ -18,7 +18,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
-use reth_chain_state::{test_utils::TestBlockBuilder, BlockState};
+use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, ComputedTrieData};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -27,7 +27,6 @@ use reth_ethereum_primitives::{Block, EthPrimitives};
 use reth_evm_ethereum::MockEvmConfig;
 use reth_primitives_traits::Block as _;
 use reth_provider::{test_utils::MockEthProvider, ExecutionOutcome};
-use reth_trie::{updates::TrieUpdates, HashedPostState};
 use std::{
     collections::BTreeMap,
     str::FromStr,
@@ -45,20 +44,17 @@ struct MockEngineValidator;
 impl reth_engine_primitives::PayloadValidator<EthEngineTypes> for MockEngineValidator {
     type Block = Block;
 
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: ExecutionData,
     ) -> Result<
-        reth_primitives_traits::RecoveredBlock<Self::Block>,
+        reth_primitives_traits::SealedBlock<Self::Block>,
         reth_payload_primitives::NewPayloadError,
     > {
-        // For tests, convert the execution payload to a block
         let block = reth_ethereum_primitives::Block::try_from(payload.payload).map_err(|e| {
             reth_payload_primitives::NewPayloadError::Other(format!("{e:?}").into())
         })?;
-        let sealed = block.seal_slow();
-
-        sealed.try_recover().map_err(|e| reth_payload_primitives::NewPayloadError::Other(e.into()))
+        Ok(block.seal_slow())
     }
 }
 
@@ -336,15 +332,12 @@ impl TestHarness {
 
     fn persist_blocks(&self, blocks: Vec<RecoveredBlock<reth_ethereum_primitives::Block>>) {
         let mut block_data: Vec<(B256, Block)> = Vec::with_capacity(blocks.len());
-        let mut headers_data: Vec<(B256, Header)> = Vec::with_capacity(blocks.len());
 
         for block in &blocks {
             block_data.push((block.hash(), block.clone_block()));
-            headers_data.push((block.hash(), block.header().clone()));
         }
 
         self.provider.extend_blocks(block_data);
-        self.provider.extend_headers(headers_data);
     }
 }
 
@@ -403,7 +396,7 @@ impl ValidatorTestHarness {
         Self { harness, validator, metrics: TestMetrics::default() }
     }
 
-    /// Configure `PersistenceState` for specific `PersistingKind` scenarios
+    /// Configure `PersistenceState` for specific persistence scenarios
     fn start_persistence_operation(&mut self, action: CurrentPersistenceAction) {
         use tokio::sync::oneshot;
 
@@ -428,11 +421,10 @@ impl ValidatorTestHarness {
     /// Call `validate_block_with_state` directly with block
     fn validate_block_direct(
         &mut self,
-        block: RecoveredBlock<Block>,
+        block: SealedBlock<Block>,
     ) -> ValidationOutcome<EthPrimitives> {
         let ctx = TreeCtx::new(
             &mut self.harness.tree.state,
-            &self.harness.tree.persistence_state,
             &self.harness.tree.canonical_in_memory_state,
         );
         let result = self.validator.validate_block(block, ctx);
@@ -457,30 +449,30 @@ impl TestBlockFactory {
     }
 
     /// Create block that triggers consensus violation by corrupting state root
-    fn create_invalid_consensus_block(&mut self, parent_hash: B256) -> RecoveredBlock<Block> {
+    fn create_invalid_consensus_block(&mut self, parent_hash: B256) -> SealedBlock<Block> {
         let mut block = self.builder.generate_random_block(1, parent_hash).into_block();
 
         // Corrupt state root to trigger consensus violation
         block.header.state_root = B256::random();
 
-        block.seal_slow().try_recover().unwrap()
+        block.seal_slow()
     }
 
     /// Create block that triggers execution failure
-    fn create_invalid_execution_block(&mut self, parent_hash: B256) -> RecoveredBlock<Block> {
+    fn create_invalid_execution_block(&mut self, parent_hash: B256) -> SealedBlock<Block> {
         let mut block = self.builder.generate_random_block(1, parent_hash).into_block();
 
         // Create transaction that will fail execution
         // This is simplified - in practice we'd create a transaction with insufficient gas, etc.
         block.header.gas_used = block.header.gas_limit + 1; // Gas used exceeds limit
 
-        block.seal_slow().try_recover().unwrap()
+        block.seal_slow()
     }
 
     /// Create valid block
-    fn create_valid_block(&mut self, parent_hash: B256) -> RecoveredBlock<Block> {
+    fn create_valid_block(&mut self, parent_hash: B256) -> SealedBlock<Block> {
         let block = self.builder.generate_random_block(1, parent_hash).into_block();
-        block.seal_slow().try_recover().unwrap()
+        block.seal_slow()
     }
 }
 
@@ -630,7 +622,7 @@ fn test_disconnected_payload() {
 
     // ensure block is buffered
     let buffered = test_harness.tree.state.buffer.block(&hash).unwrap();
-    assert_eq!(buffered.clone_sealed_block(), sealed_clone);
+    assert_eq!(*buffered, sealed_clone);
 }
 
 #[test]
@@ -638,7 +630,7 @@ fn test_disconnected_block() {
     let s = include_str!("../../test-data/holesky/2.rlp");
     let data = Bytes::from_str(s).unwrap();
     let block = Block::decode(&mut data.as_ref()).unwrap();
-    let sealed = block.seal_slow().try_recover().unwrap();
+    let sealed = block.seal_slow();
 
     let mut test_harness = TestHarness::new(HOLESKY.clone());
 
@@ -826,23 +818,23 @@ fn test_tree_state_on_new_head_deep_fork() {
     let chain_a = test_block_builder.create_fork(&last_block, 10);
     let chain_b = test_block_builder.create_fork(&last_block, 10);
 
+    let empty_trie_data = ComputedTrieData::default;
+
     for block in &chain_a {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
-            recovered_block: Arc::new(block.clone()),
-            execution_output: Arc::new(ExecutionOutcome::default()),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
-        });
+        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
+            Arc::new(block.clone()),
+            Arc::new(ExecutionOutcome::default()),
+            empty_trie_data(),
+        ));
     }
     test_harness.tree.state.tree_state.set_canonical_head(chain_a.last().unwrap().num_hash());
 
     for block in &chain_b {
-        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock {
-            recovered_block: Arc::new(block.clone()),
-            execution_output: Arc::new(ExecutionOutcome::default()),
-            hashed_state: Arc::new(HashedPostState::default()),
-            trie_updates: Arc::new(TrieUpdates::default()),
-        });
+        test_harness.tree.state.tree_state.insert_executed(ExecutedBlock::new(
+            Arc::new(block.clone()),
+            Arc::new(ExecutionOutcome::default()),
+            empty_trie_data(),
+        ));
     }
 
     // for each block in chain_b, reorg to it and then back to canonical
@@ -1001,7 +993,10 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
 
     test_harness
         .tree
-        .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain.last().unwrap().clone()]))
+        .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
+            .last()
+            .unwrap()
+            .clone_sealed_block()]))
         .unwrap();
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
@@ -1133,7 +1128,7 @@ fn test_on_new_payload_canonical_insertion() {
 
     // Ensure block is buffered (like test_disconnected_payload)
     let buffered = test_harness.tree.state.buffer.block(&hash1).unwrap();
-    assert_eq!(buffered.clone_sealed_block(), sealed1_clone, "Block should be buffered");
+    assert_eq!(buffered.clone(), sealed1_clone, "Block should be buffered");
 }
 
 /// Test that ensures payloads are rejected when linking to a known-invalid ancestor
@@ -1240,11 +1235,7 @@ fn test_on_new_payload_backfill_buffering() {
         .expect("Block should be buffered during backfill sync");
 
     // Verify the buffered block matches what we submitted
-    assert_eq!(
-        buffered_block.clone_sealed_block(),
-        sealed,
-        "Buffered block should match submitted payload"
-    );
+    assert_eq!(*buffered_block, sealed, "Buffered block should match submitted payload");
 }
 
 /// Test that captures the Engine-API rule where malformed payloads report latestValidHash = None
@@ -1517,11 +1508,10 @@ mod check_invalid_ancestors_tests {
         // Create a genesis-like payload with parent_hash = B256::ZERO
         let mut test_block_builder = TestBlockBuilder::eth();
         let genesis_block = test_block_builder.generate_random_block(0, B256::ZERO);
-        let (sealed_genesis, _) = genesis_block.split_sealed();
         let genesis_payload = ExecutionData {
             payload: ExecutionPayloadV1::from_block_unchecked(
-                sealed_genesis.hash(),
-                &sealed_genesis.into_block(),
+                genesis_block.hash(),
+                &genesis_block.into_block(),
             )
             .into(),
             sidecar: ExecutionPayloadSidecar::none(),
@@ -1571,8 +1561,7 @@ mod check_invalid_ancestors_tests {
 
         // Intentionally corrupt the block to make it malformed
         // Modify the block after creation to make validation fail
-        let (sealed_block, _senders) = block.split_sealed();
-        let unsealed_block = sealed_block.unseal();
+        let unsealed_block = block.unseal();
 
         // Create payload with wrong hash (this makes it malformed)
         let wrong_hash = B256::from([0xff; 32]);
@@ -1600,13 +1589,9 @@ mod payload_execution_tests {
         // Create a valid payload
         let mut test_block_builder = TestBlockBuilder::eth();
         let block = test_block_builder.generate_random_block(1, B256::ZERO);
-        let (sealed_block, _) = block.split_sealed();
         let payload = ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(
-                sealed_block.hash(),
-                &sealed_block.into_block(),
-            )
-            .into(),
+            payload: ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block())
+                .into(),
             sidecar: ExecutionPayloadSidecar::none(),
         };
 
@@ -1646,13 +1631,9 @@ mod payload_execution_tests {
         // Create a valid payload
         let mut test_block_builder = TestBlockBuilder::eth();
         let block = test_block_builder.generate_random_block(1, B256::ZERO);
-        let (sealed_block, _) = block.split_sealed();
         let payload = ExecutionData {
-            payload: ExecutionPayloadV1::from_block_unchecked(
-                sealed_block.hash(),
-                &sealed_block.into_block(),
-            )
-            .into(),
+            payload: ExecutionPayloadV1::from_block_unchecked(block.hash(), &block.into_block())
+                .into(),
             sidecar: ExecutionPayloadSidecar::none(),
         };
 
@@ -1674,8 +1655,7 @@ mod payload_execution_tests {
         let block = test_block_builder.generate_random_block(1, B256::ZERO);
 
         // Modify the block to make it malformed
-        let (sealed_block, _senders) = block.split_sealed();
-        let mut unsealed_block = sealed_block.unseal();
+        let mut unsealed_block = block.unseal();
 
         // Corrupt the block by setting an invalid gas limit
         unsealed_block.header.gas_limit = 0;
@@ -1695,7 +1675,6 @@ mod payload_execution_tests {
 #[cfg(test)]
 mod forkchoice_updated_tests {
     use super::*;
-    use alloy_primitives::Address;
 
     /// Test that validates the forkchoice state pre-validation logic
     #[tokio::test]
@@ -1913,33 +1892,6 @@ mod forkchoice_updated_tests {
             .unwrap();
         let fcu_result = result.outcome.await.unwrap();
         assert!(fcu_result.payload_status.is_syncing(), "Should return syncing during backfill");
-    }
-
-    /// Test metrics recording in forkchoice updated
-    #[tokio::test]
-    async fn test_record_forkchoice_metrics() {
-        let chain_spec = MAINNET.clone();
-        let test_harness = TestHarness::new(chain_spec);
-
-        // Get initial metrics state by checking if metrics are recorded
-        // We can't directly get counter values, but we can verify the methods are called
-
-        // Test without attributes
-        let attrs_none = None;
-        test_harness.tree.record_forkchoice_metrics(&attrs_none);
-
-        // Test with attributes
-        let attrs_some = Some(alloy_rpc_types_engine::PayloadAttributes {
-            timestamp: 1000,
-            prev_randao: B256::random(),
-            suggested_fee_recipient: Address::random(),
-            withdrawals: None,
-            parent_beacon_block_root: None,
-        });
-        test_harness.tree.record_forkchoice_metrics(&attrs_some);
-
-        // We can't directly verify counter values since they're private metrics
-        // But we can verify the methods don't panic and execute successfully
     }
 
     /// Test edge case: FCU with invalid ancestor

@@ -13,6 +13,7 @@ use reth_provider::{
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
+use reth_stages_types::StageId;
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -45,6 +46,10 @@ where
 
     fn purpose(&self) -> PrunePurpose {
         PrunePurpose::User
+    }
+
+    fn required_stage(&self) -> Option<StageId> {
+        Some(StageId::MerkleChangeSets)
     }
 
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]

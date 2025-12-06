@@ -1,13 +1,9 @@
-#![allow(dead_code)]
-
 //! An ExEx example that installs a new RPC subscription endpoint that emits storage changes for a
 //! requested address.
-#[allow(dead_code)]
 use alloy_primitives::{Address, U256};
 use futures::TryStreamExt;
 use jsonrpsee::{
-    core::SubscriptionResult, proc_macros::rpc, tracing, PendingSubscriptionSink,
-    SubscriptionMessage,
+    core::SubscriptionResult, proc_macros::rpc, PendingSubscriptionSink, SubscriptionMessage,
 };
 use reth_ethereum::{
     exex::{ExExContext, ExExEvent, ExExNotification},
@@ -168,8 +164,7 @@ async fn my_exex<Node: FullNodeComponents>(
 fn main() -> eyre::Result<()> {
     reth_ethereum::cli::Cli::parse_args().run(|builder, _| async move {
         let (subscriptions_tx, subscriptions_rx) = mpsc::unbounded_channel::<SubscriptionRequest>();
-
-        let rpc = StorageWatcherRpc::new(subscriptions_tx.clone());
+        let rpc = StorageWatcherRpc::new(subscriptions_tx);
 
         let handle: NodeHandleFor<EthereumNode> = builder
             .node(EthereumNode::default())

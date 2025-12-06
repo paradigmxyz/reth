@@ -329,7 +329,7 @@ mod tests {
         let rt = Runtime::new().unwrap();
 
         let factory = reth_provider::providers::OverlayStateProviderFactory::new(factory);
-        let task_ctx = ProofTaskCtx::new(factory, Default::default());
+        let task_ctx = ProofTaskCtx::new(factory);
         let proof_worker_handle = ProofWorkerHandle::new(rt.handle().clone(), task_ctx, 1, 1);
 
         let parallel_result =

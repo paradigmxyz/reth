@@ -120,11 +120,11 @@ impl EthBuiltPayload {
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV4`].
     ///
     /// Returns an error if the payload contains non EIP-4844 sidecar.
-    pub fn try_into_v4(self) -> Result<ExecutionPayloadEnvelopeV4, BuiltPayloadConversionError> {
-        Ok(ExecutionPayloadEnvelopeV4 {
-            execution_requests: self.requests.clone().unwrap_or_default(),
-            envelope_inner: self.try_into()?,
-        })
+    pub fn try_into_v4(
+        mut self,
+    ) -> Result<ExecutionPayloadEnvelopeV4, BuiltPayloadConversionError> {
+        let execution_requests = self.requests.take().unwrap_or_default();
+        Ok(ExecutionPayloadEnvelopeV4 { execution_requests, envelope_inner: self.try_into()? })
     }
 
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV5`].
@@ -424,6 +424,8 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     }
 
     let out = hasher.finalize();
+
+    #[allow(deprecated)] // generic-array 0.14 deprecated
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }
 

@@ -82,7 +82,7 @@ pub fn get_fields(data: &Data) -> FieldList {
                 );
                 load_field(&data_fields.unnamed[0], &mut fields, false);
             }
-            syn::Fields::Unit => todo!(),
+            syn::Fields::Unit => unimplemented!("Compact does not support unit structs"),
         },
         Data::Enum(data) => {
             for variant in &data.variants {
@@ -106,7 +106,7 @@ pub fn get_fields(data: &Data) -> FieldList {
                 }
             }
         }
-        Data::Union(_) => todo!(),
+        Data::Union(_) => unimplemented!("Compact does not support union types"),
     }
 
     fields
@@ -176,7 +176,8 @@ fn should_use_alt_impl(ftype: &str, segment: &syn::PathSegment) -> bool {
         let Some(syn::GenericArgument::Type(syn::Type::Path(arg_path))) = args.args.last() &&
         let (Some(path), 1) = (arg_path.path.segments.first(), arg_path.path.segments.len()) &&
         ["B256", "Address", "Address", "Bloom", "TxHash", "BlockHash", "CompactPlaceholder"]
-            .contains(&path.ident.to_string().as_str())
+            .iter()
+            .any(|&s| path.ident == s)
     {
         return true
     }
@@ -237,11 +238,11 @@ mod tests {
             impl TestStruct {
                 #[doc = "Used bytes by [`TestStructFlags`]"]
                 pub const fn bitflag_encoded_bytes() -> usize {
-                    2u8 as usize
+                    2usize
                 }
                 #[doc = "Unused bits for new fields by [`TestStructFlags`]"]
                 pub const fn bitflag_unused_bits() -> usize {
-                    1u8 as usize
+                    1usize
                 }
             }
 

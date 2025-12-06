@@ -270,8 +270,14 @@ where
         Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        StageSetBuilder::default()
-            .add_stage(EraStage::new(self.era_import_source, self.stages_config.etl.clone()))
+        let mut builder = StageSetBuilder::default();
+
+        if self.era_import_source.is_some() {
+            builder = builder
+                .add_stage(EraStage::new(self.era_import_source, self.stages_config.etl.clone()));
+        }
+
+        builder
             .add_stage(HeaderStage::new(
                 self.provider,
                 self.header_downloader,

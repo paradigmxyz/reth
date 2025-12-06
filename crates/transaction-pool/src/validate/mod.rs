@@ -74,6 +74,14 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
         }
     }
 
+    /// Returns the [`ValidTransaction`] if this is a [`TransactionValidationOutcome::Valid`].
+    pub const fn as_valid_transaction(&self) -> Option<&ValidTransaction<T>> {
+        match self {
+            Self::Valid { transaction, .. } => Some(transaction),
+            _ => None,
+        }
+    }
+
     /// Returns true if the transaction is valid.
     pub const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid { .. })
@@ -452,11 +460,7 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     /// This applies to both standard gas fees and, for blob-carrying transactions (EIP-4844),
     /// the blob-specific fees.
     #[inline]
-    pub(crate) fn is_underpriced(
-        &self,
-        maybe_replacement: &Self,
-        price_bumps: &PriceBumpConfig,
-    ) -> bool {
+    pub fn is_underpriced(&self, maybe_replacement: &Self, price_bumps: &PriceBumpConfig) -> bool {
         // Retrieve the required price bump percentage for this type of transaction.
         //
         // The bump is different for EIP-4844 and other transactions. See `PriceBumpConfig`.
@@ -515,7 +519,7 @@ impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidPoolTransaction")
             .field("id", &self.transaction_id)
-            .field("pragate", &self.propagate)
+            .field("propagate", &self.propagate)
             .field("origin", &self.origin)
             .field("hash", self.transaction.hash())
             .field("tx", &self.transaction)

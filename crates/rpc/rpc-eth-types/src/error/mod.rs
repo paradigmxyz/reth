@@ -1,7 +1,6 @@
 //! Implementation specific Errors for the `eth_` namespace.
 
 pub mod api;
-use crate::error::api::FromEvmHalt;
 use alloy_eips::BlockId;
 use alloy_evm::{call::CallError, overrides::StateOverrideError};
 use alloy_primitives::{Address, Bytes, B256, U256};
@@ -21,9 +20,9 @@ use reth_transaction_pool::error::{
     PoolError, PoolErrorKind, PoolTransactionError,
 };
 use revm::context_interface::result::{
-    EVMError, ExecutionResult, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
+    EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
 };
-use revm_inspectors::tracing::MuxError;
+use revm_inspectors::tracing::{DebugInspectorError, MuxError};
 use std::convert::Infallible;
 use tokio::sync::oneshot::error::RecvError;
 
@@ -165,8 +164,8 @@ pub enum EthApiError {
     #[error("Invalid bytecode: {0}")]
     InvalidBytecode(String),
     /// Error encountered when converting a transaction type
-    #[error("Transaction conversion error")]
-    TransactionConversionError,
+    #[error(transparent)]
+    TransactionConversionError(#[from] TransactionConversionError),
     /// Error thrown when tracing with a muxTracer fails
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
@@ -274,7 +273,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
             EthApiError::InvalidTracerConfig |
-            EthApiError::TransactionConversionError |
+            EthApiError::TransactionConversionError(_) |
             EthApiError::InvalidRewardPercentiles |
             EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
@@ -334,12 +333,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 )
             }
         }
-    }
-}
-
-impl From<TransactionConversionError> for EthApiError {
-    fn from(_: TransactionConversionError) -> Self {
-        Self::TransactionConversionError
     }
 }
 
@@ -410,6 +403,25 @@ impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
                 Self::InternalJsTracerError(err.to_string())
             }
             err => Self::InvalidParams(err.to_string()),
+        }
+    }
+}
+
+impl<Err> From<DebugInspectorError<Err>> for EthApiError
+where
+    Err: core::error::Error + Send + Sync + 'static,
+{
+    fn from(error: DebugInspectorError<Err>) -> Self {
+        match error {
+            DebugInspectorError::InvalidTracerConfig => Self::InvalidTracerConfig,
+            DebugInspectorError::UnsupportedTracer => Self::Unsupported("unsupported tracer"),
+            DebugInspectorError::JsTracerNotEnabled => {
+                Self::Unsupported("JS Tracer is not enabled")
+            }
+            DebugInspectorError::MuxInspector(err) => err.into(),
+            DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
+            #[cfg(feature = "js-tracer")]
+            DebugInspectorError::JsInspector(err) => err.into(),
         }
     }
 }
@@ -619,6 +631,9 @@ pub enum RpcInvalidTransactionError {
     /// Contains the gas limit.
     #[error("out of gas: gas exhausted during memory expansion: {0}")]
     MemoryOutOfGas(u64),
+    /// Memory limit was exceeded during memory expansion.
+    #[error("out of memory: memory limit exceeded during memory expansion")]
+    MemoryLimitOutOfGas,
     /// Gas limit was exceeded during precompile execution.
     /// Contains the gas limit.
     #[error("out of gas: gas exhausted during precompiled contract execution: {0}")]
@@ -723,7 +738,8 @@ impl RpcInvalidTransactionError {
             OutOfGasError::Basic | OutOfGasError::ReentrancySentry => {
                 Self::BasicOutOfGas(gas_limit)
             }
-            OutOfGasError::Memory | OutOfGasError::MemoryLimit => Self::MemoryOutOfGas(gas_limit),
+            OutOfGasError::Memory => Self::MemoryOutOfGas(gas_limit),
+            OutOfGasError::MemoryLimit => Self::MemoryLimitOutOfGas,
             OutOfGasError::Precompile => Self::PrecompileOutOfGas(gas_limit),
             OutOfGasError::InvalidOperand => Self::InvalidOperandOutOfGas(gas_limit),
         }
@@ -1068,20 +1084,6 @@ pub enum SignError {
     /// No chain ID was given.
     #[error("no chainid")]
     NoChainId,
-}
-
-/// Converts the evm [`ExecutionResult`] into a result where `Ok` variant is the output bytes if it
-/// is [`ExecutionResult::Success`].
-pub fn ensure_success<Halt, Error: FromEvmHalt<Halt> + FromEthApiError>(
-    result: ExecutionResult<Halt>,
-) -> Result<Bytes, Error> {
-    match result {
-        ExecutionResult::Success { output, .. } => Ok(output.into_data()),
-        ExecutionResult::Revert { output, .. } => {
-            Err(Error::from_eth_err(RpcInvalidTransactionError::Revert(RevertError::new(output))))
-        }
-        ExecutionResult::Halt { reason, gas_used } => Err(Error::from_evm_halt(reason, gas_used)),
-    }
 }
 
 #[cfg(test)]

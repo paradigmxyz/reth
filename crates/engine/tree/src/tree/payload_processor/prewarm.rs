@@ -40,7 +40,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, trace, warn};
+use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 /// A wrapper for transactions that includes their index in the block.
 #[derive(Clone)]
@@ -87,6 +87,8 @@ where
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
+    /// Parent span for tracing
+    parent_span: Span,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -122,6 +124,7 @@ where
                 transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
+                parent_span: Span::current(),
             },
             actions_tx,
         )
@@ -140,7 +143,7 @@ where
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
         let transaction_count_hint = self.transaction_count_hint;
-        let span = tracing::Span::current();
+        let span = Span::current();
 
         self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
@@ -284,9 +287,10 @@ where
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
     #[instrument(
+        parent = &self.parent_span,
         level = "debug",
         target = "engine::tree::payload_processor::prewarm",
-        name = "prewarm",
+        name = "prewarm and caching",
         skip_all
     )]
     pub(super) fn run(
@@ -431,8 +435,9 @@ where
     /// Accepts an [`mpsc::Receiver`] of transactions and a handle to prewarm task. Executes
     /// transactions and streams [`PrewarmTaskEvent::Outcome`] messages for each transaction.
     ///
-    /// Returns `None` if executing the transactions failed to a non Revert error.
-    /// Returns the touched+modified state of the transaction.
+    /// This function processes transactions sequentially from the receiver and emits outcome events
+    /// via the provided sender. Execution errors are logged and tracked but do not stop the batch
+    /// processing unless the task is explicitly cancelled.
     ///
     /// Note: There are no ordering guarantees; this does not reflect the state produced by
     /// sequential execution.
@@ -452,7 +457,7 @@ where
                 .entered();
             txs.recv()
         } {
-            let _enter =
+            let enter =
                 debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
                     .entered();
 
@@ -484,7 +489,11 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
-            drop(_enter);
+            // record some basic information about the transactions
+            enter.record("gas_used", res.result.gas_used());
+            enter.record("is_success", res.result.is_success());
+
+            drop(enter);
 
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.
@@ -521,7 +530,7 @@ where
         done_tx: Sender<()>,
     ) -> mpsc::Sender<IndexedTransaction<Tx>>
     where
-        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+        Tx: ExecutableTxFor<Evm> + Send + 'static,
     {
         let (tx, rx) = mpsc::channel();
         let ctx = self.clone();

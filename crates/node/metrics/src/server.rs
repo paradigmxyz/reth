@@ -119,6 +119,8 @@ impl MetricServer {
             .await
             .wrap_err("Could not bind to address")?;
 
+        tracing::info!(target: "reth::cli", "Starting metrics endpoint at {}", listener.local_addr().unwrap());
+
         task_executor.spawn_with_graceful_shutdown_signal(|mut signal| {
             Box::pin(async move {
                 loop {

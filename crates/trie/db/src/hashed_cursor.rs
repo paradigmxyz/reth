@@ -69,6 +69,10 @@ where
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         self.0.next()
     }
+
+    fn reset(&mut self) {
+        // Database cursors are stateless, no reset needed
+    }
 }
 
 /// The structure wrapping a database cursor for hashed storage and
@@ -102,6 +106,10 @@ where
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         Ok(self.cursor.next_dup_val()?.map(|e| (e.key, e.value)))
     }
+
+    fn reset(&mut self) {
+        // Database cursors are stateless, no reset needed
+    }
 }
 
 impl<C> HashedStorageCursor for DatabaseHashedStorageCursor<C>
@@ -110,5 +118,9 @@ where
 {
     fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
         Ok(self.cursor.seek_exact(self.hashed_address)?.is_none())
+    }
+
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.hashed_address = hashed_address;
     }
 }

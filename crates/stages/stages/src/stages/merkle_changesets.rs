@@ -4,16 +4,21 @@ use alloy_primitives::BlockNumber;
 use reth_consensus::ConsensusError;
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
-    ChainStateBlockReader, DBProvider, HeaderProvider, ProviderError, StageCheckpointReader,
-    TrieWriter,
+    ChainStateBlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, StageCheckpointReader, TrieWriter,
+};
+use reth_prune_types::{
+    PruneCheckpoint, PruneMode, PruneSegment, MERKLE_CHANGESETS_RETENTION_BLOCKS,
 };
 use reth_stages_api::{
-    BlockErrorKind, CheckpointBlockRange, ExecInput, ExecOutput, MerkleChangeSetsCheckpoint, Stage,
-    StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
+    BlockErrorKind, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
+    UnwindInput, UnwindOutput,
 };
-use reth_trie::{updates::TrieUpdates, HashedPostState, KeccakKeyHasher, StateRoot, TrieInput};
+use reth_trie::{
+    updates::TrieUpdates, HashedPostStateSorted, KeccakKeyHasher, StateRoot, TrieInputSorted,
+};
 use reth_trie_db::{DatabaseHashedPostState, DatabaseStateRoot};
-use std::ops::Range;
+use std::{ops::Range, sync::Arc};
 use tracing::{debug, error};
 
 /// The `MerkleChangeSets` stage.
@@ -22,14 +27,15 @@ use tracing::{debug, error};
 #[derive(Debug, Clone)]
 pub struct MerkleChangeSets {
     /// The number of blocks to retain changesets for, used as a fallback when the finalized block
-    /// is not found. Defaults to 64 (2 epochs in beacon chain).
+    /// is not found. Defaults to [`MERKLE_CHANGESETS_RETENTION_BLOCKS`] (2 epochs in beacon
+    /// chain).
     retention_blocks: u64,
 }
 
 impl MerkleChangeSets {
-    /// Creates a new `MerkleChangeSets` stage with default retention blocks of 64.
+    /// Creates a new `MerkleChangeSets` stage with the default retention blocks.
     pub const fn new() -> Self {
-        Self { retention_blocks: 64 }
+        Self { retention_blocks: MERKLE_CHANGESETS_RETENTION_BLOCKS }
     }
 
     /// Creates a new `MerkleChangeSets` stage with a custom finalized block height.
@@ -39,14 +45,28 @@ impl MerkleChangeSets {
 
     /// Returns the range of blocks which are already computed. Will return an empty range if none
     /// have been computed.
-    fn computed_range(checkpoint: Option<StageCheckpoint>) -> Range<BlockNumber> {
+    fn computed_range<Provider>(
+        provider: &Provider,
+        checkpoint: Option<StageCheckpoint>,
+    ) -> Result<Range<BlockNumber>, StageError>
+    where
+        Provider: PruneCheckpointReader,
+    {
         let to = checkpoint.map(|chk| chk.block_number).unwrap_or_default();
-        let from = checkpoint
-            .map(|chk| chk.merkle_changesets_stage_checkpoint().unwrap_or_default())
-            .unwrap_or_default()
-            .block_range
-            .to;
-        from..to + 1
+
+        // Get the prune checkpoint for MerkleChangeSets to use as the lower bound. If there's no
+        // prune checkpoint or if the pruned block number is None, return empty range
+        let Some(from) = provider
+            .get_prune_checkpoint(PruneSegment::MerkleChangeSets)?
+            .and_then(|chk| chk.block_number)
+            // prune checkpoint indicates the last block pruned, so the block after is the start of
+            // the computed data
+            .map(|block_number| block_number + 1)
+        else {
+            return Ok(0..0)
+        };
+
+        Ok(from..to + 1)
     }
 
     /// Determines the target range for changeset computation based on the checkpoint and provider
@@ -90,12 +110,12 @@ impl MerkleChangeSets {
         Ok(target_start..target_end)
     }
 
-    /// Calculates the trie updates given a [`TrieInput`], asserting that the resulting state root
-    /// matches the expected one for the block.
+    /// Calculates the trie updates given a [`TrieInputSorted`], asserting that the resulting state
+    /// root matches the expected one for the block.
     fn calculate_block_trie_updates<Provider: DBProvider + HeaderProvider>(
         provider: &Provider,
         block_number: BlockNumber,
-        input: TrieInput,
+        input: TrieInputSorted,
     ) -> Result<TrieUpdates, StageError> {
         let (root, trie_updates) =
             StateRoot::overlay_root_from_nodes_with_updates(provider.tx_ref(), input).map_err(
@@ -177,21 +197,21 @@ impl MerkleChangeSets {
         );
         let mut per_block_state_reverts = Vec::new();
         for block_number in target_range.clone() {
-            per_block_state_reverts.push(HashedPostState::from_reverts::<KeccakKeyHasher>(
+            per_block_state_reverts.push(HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
                 block_number..=block_number,
             )?);
         }
 
         // Helper to retrieve state revert data for a specific block from the pre-computed array
-        let get_block_state_revert = |block_number: BlockNumber| -> &HashedPostState {
+        let get_block_state_revert = |block_number: BlockNumber| -> &HashedPostStateSorted {
             let index = (block_number - target_start) as usize;
             &per_block_state_reverts[index]
         };
 
         // Helper to accumulate state reverts from a given block to the target end
-        let compute_cumulative_state_revert = |block_number: BlockNumber| -> HashedPostState {
-            let mut cumulative_revert = HashedPostState::default();
+        let compute_cumulative_state_revert = |block_number: BlockNumber| -> HashedPostStateSorted {
+            let mut cumulative_revert = HashedPostStateSorted::default();
             for n in (block_number..target_end).rev() {
                 cumulative_revert.extend_ref(get_block_state_revert(n))
             }
@@ -201,7 +221,7 @@ impl MerkleChangeSets {
         // To calculate the changeset for a block, we first need the TrieUpdates which are
         // generated as a result of processing the block. To get these we need:
         // 1) The TrieUpdates which revert the db's trie to _prior_ to the block
-        // 2) The HashedPostState to revert the db's state to _after_ the block
+        // 2) The HashedPostStateSorted to revert the db's state to _after_ the block
         //
         // To get (1) for `target_start` we need to do a big state root calculation which takes
         // into account all changes between that block and db tip. For each block after the
@@ -212,12 +232,15 @@ impl MerkleChangeSets {
             ?target_start,
             "Computing trie state at starting block",
         );
-        let mut input = TrieInput::default();
-        input.state = compute_cumulative_state_revert(target_start);
-        input.prefix_sets = input.state.construct_prefix_sets();
+        let initial_state = compute_cumulative_state_revert(target_start);
+        let initial_prefix_sets = initial_state.construct_prefix_sets();
+        let initial_input =
+            TrieInputSorted::new(Arc::default(), Arc::new(initial_state), initial_prefix_sets);
         // target_start will be >= 1, see `determine_target_range`.
-        input.nodes =
-            Self::calculate_block_trie_updates(provider, target_start - 1, input.clone())?;
+        let mut nodes = Arc::new(
+            Self::calculate_block_trie_updates(provider, target_start - 1, initial_input)?
+                .into_sorted(),
+        );
 
         for block_number in target_range {
             debug!(
@@ -227,21 +250,24 @@ impl MerkleChangeSets {
             );
             // Revert the state so that this block has been just processed, meaning we take the
             // cumulative revert of the subsequent block.
-            input.state = compute_cumulative_state_revert(block_number + 1);
+            let state = Arc::new(compute_cumulative_state_revert(block_number + 1));
 
-            // Construct prefix sets from only this block's `HashedPostState`, because we only care
-            // about trie updates which occurred as a result of this block being processed.
-            input.prefix_sets = get_block_state_revert(block_number).construct_prefix_sets();
+            // Construct prefix sets from only this block's `HashedPostStateSorted`, because we only
+            // care about trie updates which occurred as a result of this block being processed.
+            let prefix_sets = get_block_state_revert(block_number).construct_prefix_sets();
+
+            let input = TrieInputSorted::new(Arc::clone(&nodes), state, prefix_sets);
 
             // Calculate the trie updates for this block, then apply those updates to the reverts.
             // We calculate the overlay which will be passed into the next step using the trie
             // reverts prior to them being updated.
             let this_trie_updates =
-                Self::calculate_block_trie_updates(provider, block_number, input.clone())?;
+                Self::calculate_block_trie_updates(provider, block_number, input)?.into_sorted();
 
-            let trie_overlay = input.nodes.clone().into_sorted();
-            input.nodes.extend_ref(&this_trie_updates);
-            let this_trie_updates = this_trie_updates.into_sorted();
+            let trie_overlay = Arc::clone(&nodes);
+            let mut nodes_mut = Arc::unwrap_or_clone(nodes);
+            nodes_mut.extend_ref(&this_trie_updates);
+            nodes = Arc::new(nodes_mut);
 
             // Write the changesets to the DB using the trie updates produced by the block, and the
             // trie reverts as the overlay.
@@ -269,8 +295,13 @@ impl Default for MerkleChangeSets {
 
 impl<Provider> Stage<Provider> for MerkleChangeSets
 where
-    Provider:
-        StageCheckpointReader + TrieWriter + DBProvider + HeaderProvider + ChainStateBlockReader,
+    Provider: StageCheckpointReader
+        + TrieWriter
+        + DBProvider
+        + HeaderProvider
+        + ChainStateBlockReader
+        + PruneCheckpointReader
+        + PruneCheckpointWriter,
 {
     fn id(&self) -> StageId {
         StageId::MerkleChangeSets
@@ -291,7 +322,13 @@ where
 
         // Get the previously computed range. This will be updated to reflect the populating of the
         // target range.
-        let mut computed_range = Self::computed_range(input.checkpoint);
+        let mut computed_range = Self::computed_range(provider, input.checkpoint)?;
+        debug!(
+            target: "sync::stages::merkle_changesets",
+            ?computed_range,
+            ?target_range,
+            "Got computed and target ranges",
+        );
 
         // We want the target range to not include any data already computed previously, if
         // possible, so we start the target range from the end of the computed range if that is
@@ -315,9 +352,9 @@ where
         }
 
         // If target range is empty (target_start >= target_end), stage is already successfully
-        // executed
+        // executed.
         if target_range.start >= target_range.end {
-            return Ok(ExecOutput::done(input.checkpoint.unwrap_or_default()));
+            return Ok(ExecOutput::done(StageCheckpoint::new(target_range.end.saturating_sub(1))));
         }
 
         // If our target range is a continuation of the already computed range then we can keep the
@@ -336,16 +373,19 @@ where
         // Populate the target range with changesets
         Self::populate_range(provider, target_range)?;
 
-        let checkpoint_block_range = CheckpointBlockRange {
-            from: computed_range.start,
-            // CheckpointBlockRange is inclusive
-            to: computed_range.end.saturating_sub(1),
-        };
+        // Update the prune checkpoint to reflect that all data before `computed_range.start`
+        // is not available.
+        provider.save_prune_checkpoint(
+            PruneSegment::MerkleChangeSets,
+            PruneCheckpoint {
+                block_number: Some(computed_range.start.saturating_sub(1)),
+                tx_number: None,
+                prune_mode: PruneMode::Before(computed_range.start),
+            },
+        )?;
 
-        let checkpoint = StageCheckpoint::new(checkpoint_block_range.to)
-            .with_merkle_changesets_stage_checkpoint(MerkleChangeSetsCheckpoint {
-                block_range: checkpoint_block_range,
-            });
+        // `computed_range.end` is exclusive.
+        let checkpoint = StageCheckpoint::new(computed_range.end.saturating_sub(1));
 
         Ok(ExecOutput::done(checkpoint))
     }
@@ -358,22 +398,14 @@ where
         // Unwinding is trivial; just clear everything after the target block.
         provider.clear_trie_changesets_from(input.unwind_to + 1)?;
 
-        let mut computed_range = Self::computed_range(Some(input.checkpoint));
+        let mut computed_range = Self::computed_range(provider, Some(input.checkpoint))?;
         computed_range.end = input.unwind_to + 1;
         if computed_range.start > computed_range.end {
             computed_range.start = computed_range.end;
         }
 
-        let checkpoint_block_range = CheckpointBlockRange {
-            from: computed_range.start,
-            // computed_range.end is exclusive
-            to: computed_range.end.saturating_sub(1),
-        };
-
-        let checkpoint = StageCheckpoint::new(input.unwind_to)
-            .with_merkle_changesets_stage_checkpoint(MerkleChangeSetsCheckpoint {
-                block_range: checkpoint_block_range,
-            });
+        // `computed_range.end` is exclusive
+        let checkpoint = StageCheckpoint::new(computed_range.end.saturating_sub(1));
 
         Ok(UnwindOutput { checkpoint })
     }

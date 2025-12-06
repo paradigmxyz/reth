@@ -49,9 +49,6 @@ pub trait TransactionsProvider: BlockNumReader + Send + Sync {
         hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>>;
 
-    /// Get transaction block number
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>>;
-
     /// Get transactions by block id.
     fn transactions_by_block(
         &self,

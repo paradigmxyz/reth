@@ -158,6 +158,15 @@ pub struct Capabilities {
 }
 
 impl Capabilities {
+    /// Create a new instance from the given vec.
+    pub fn new(value: Vec<Capability>) -> Self {
+        Self {
+            eth_66: value.iter().any(Capability::is_eth_v66),
+            eth_67: value.iter().any(Capability::is_eth_v67),
+            eth_68: value.iter().any(Capability::is_eth_v68),
+            inner: value,
+        }
+    }
     /// Returns all capabilities.
     #[inline]
     pub fn capabilities(&self) -> &[Capability] {
@@ -197,12 +206,7 @@ impl Capabilities {
 
 impl From<Vec<Capability>> for Capabilities {
     fn from(value: Vec<Capability>) -> Self {
-        Self {
-            eth_66: value.iter().any(Capability::is_eth_v66),
-            eth_67: value.iter().any(Capability::is_eth_v67),
-            eth_68: value.iter().any(Capability::is_eth_v68),
-            inner: value,
-        }
+        Self::new(value)
     }
 }
 

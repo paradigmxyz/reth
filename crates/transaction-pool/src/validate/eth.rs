@@ -396,15 +396,12 @@ where
             match self.tx_fee_cap {
                 Some(0) | None => {} // Skip if cap is 0 or None
                 Some(tx_fee_cap_wei) => {
-                    // max possible tx fee is (gas_price * gas_limit)
-                    // (if EIP1559) max possible tx fee is (max_fee_per_gas * gas_limit)
-                    let gas_price = transaction.max_fee_per_gas();
-                    let max_tx_fee_wei = gas_price.saturating_mul(transaction_gas_limit as u128);
+                    let max_tx_fee_wei = transaction.cost().saturating_sub(transaction.value());
                     if max_tx_fee_wei > tx_fee_cap_wei {
                         return Err(TransactionValidationOutcome::Invalid(
                             transaction,
                             InvalidPoolTransactionError::ExceedsFeeCap {
-                                max_tx_fee_wei,
+                                max_tx_fee_wei: max_tx_fee_wei.saturating_to(),
                                 tx_fee_cap_wei,
                             },
                         ))
@@ -534,7 +531,9 @@ where
         };
 
         // Checks for nonce
-        if let Err(err) = self.validate_sender_nonce(&transaction, &account) {
+        if transaction.requires_nonce_check() &&
+            let Err(err) = self.validate_sender_nonce(&transaction, &account)
+        {
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
@@ -1713,7 +1712,7 @@ mod tests {
             ExtendedAccount::new(transaction.nonce(), alloy_primitives::U256::ZERO),
         );
 
-        // Valdiate with balance check enabled
+        // Validate with balance check enabled
         let validator = EthTransactionValidatorBuilder::new(provider.clone())
             .build(InMemoryBlobStore::default());
 
@@ -1729,7 +1728,7 @@ mod tests {
             panic!("Expected Invalid outcome with InsufficientFunds error");
         }
 
-        // Valdiate with balance check disabled
+        // Validate with balance check disabled
         let validator = EthTransactionValidatorBuilder::new(provider)
             .disable_balance_check() // This should allow the transaction through despite zero balance
             .build(InMemoryBlobStore::default());

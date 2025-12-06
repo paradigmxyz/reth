@@ -63,7 +63,7 @@ alloy-rpc-types-txpool.workspace = true
 alloy-rpc-types-admin.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["kzg"] }
 alloy-serde.workspace = true
-revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee"] }
+revm = { workspace = true, features = ["optional_block_gas_limit", "optional_eip3607", "optional_no_base_fee", "memory_limit"] }
 revm-primitives = { workspace = true, features = ["serde"] }
 
 # rpc
@@ -106,4 +106,8 @@ rand.workspace = true
 jsonrpsee = { workspace = true, features = ["client"] }
 
 [features]
-js-tracer = ["revm-inspectors/js-tracer", "reth-rpc-eth-types/js-tracer"]
+js-tracer = [
+    "revm-inspectors/js-tracer",
+    "reth-rpc-eth-types/js-tracer",
+    "reth-rpc-eth-api/js-tracer",
+]

@@ -39,7 +39,7 @@ use reth_optimism_evm::{OpEvmConfig, OpRethReceiptBuilder};
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{
     builder::OpPayloadTransactions,
-    config::{OpBuilderConfig, OpDAConfig},
+    config::{OpBuilderConfig, OpDAConfig, OpGasLimitConfig},
     OpAttributes, OpBuiltPayload, OpPayloadPrimitives,
 };
 use reth_optimism_primitives::{DepositReceipt, OpPrimitives};
@@ -118,6 +118,10 @@ pub struct OpNode {
     ///
     /// By default no throttling is applied.
     pub da_config: OpDAConfig,
+    /// Gas limit configuration for the OP builder.
+    /// Used to control the gas limit of the blocks produced by the OP builder.(configured by the
+    /// batcher via the `miner_` api)
+    pub gas_limit_config: OpGasLimitConfig,
 }
 
 /// A [`ComponentsBuilder`] with its generic arguments set to a stack of Optimism specific builders.
@@ -133,12 +137,22 @@ pub type OpNodeComponentBuilder<Node, Payload = OpPayloadBuilder> = ComponentsBu
 impl OpNode {
     /// Creates a new instance of the Optimism node type.
     pub fn new(args: RollupArgs) -> Self {
-        Self { args, da_config: OpDAConfig::default() }
+        Self {
+            args,
+            da_config: OpDAConfig::default(),
+            gas_limit_config: OpGasLimitConfig::default(),
+        }
     }
 
     /// Configure the data availability configuration for the OP builder.
     pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
         self.da_config = da_config;
+        self
+    }
+
+    /// Configure the gas limit configuration for the OP builder.
+    pub fn with_gas_limit_config(mut self, gas_limit_config: OpGasLimitConfig) -> Self {
+        self.gas_limit_config = gas_limit_config;
         self
     }
 
@@ -161,7 +175,9 @@ impl OpNode {
             )
             .executor(OpExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(
-                OpPayloadBuilder::new(compute_pending_block).with_da_config(self.da_config.clone()),
+                OpPayloadBuilder::new(compute_pending_block)
+                    .with_da_config(self.da_config.clone())
+                    .with_gas_limit_config(self.gas_limit_config.clone()),
             ))
             .network(OpNetworkBuilder::new(disable_txpool_gossip, !discovery_v4))
             .consensus(OpConsensusBuilder::default())
@@ -173,10 +189,12 @@ impl OpNode {
             .with_sequencer(self.args.sequencer.clone())
             .with_sequencer_headers(self.args.sequencer_headers.clone())
             .with_da_config(self.da_config.clone())
+            .with_gas_limit_config(self.gas_limit_config.clone())
             .with_enable_tx_conditional(self.args.enable_tx_conditional)
             .with_min_suggested_priority_fee(self.args.min_suggested_priority_fee)
             .with_historical_rpc(self.args.historical_rpc.clone())
             .with_flashblocks(self.args.flashblocks_url.clone())
+            .with_flashblock_consensus(self.args.flashblock_consensus)
     }
 
     /// Instantiates the [`ProviderFactoryBuilder`] for an opstack node.
@@ -286,6 +304,8 @@ pub struct OpAddOns<
     pub rpc_add_ons: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>,
     /// Data availability configuration for the OP builder.
     pub da_config: OpDAConfig,
+    /// Gas limit configuration for the OP builder.
+    pub gas_limit_config: OpGasLimitConfig,
     /// Sequencer client, configured to forward submitted transactions to sequencer of given OP
     /// network.
     pub sequencer_url: Option<String>,
@@ -306,9 +326,11 @@ where
     EthB: EthApiBuilder<N>,
 {
     /// Creates a new instance from components.
+    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         rpc_add_ons: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>,
         da_config: OpDAConfig,
+        gas_limit_config: OpGasLimitConfig,
         sequencer_url: Option<String>,
         sequencer_headers: Vec<String>,
         historical_rpc: Option<String>,
@@ -318,6 +340,7 @@ where
         Self {
             rpc_add_ons,
             da_config,
+            gas_limit_config,
             sequencer_url,
             sequencer_headers,
             historical_rpc,
@@ -368,6 +391,7 @@ where
         let Self {
             rpc_add_ons,
             da_config,
+            gas_limit_config,
             sequencer_url,
             sequencer_headers,
             historical_rpc,
@@ -378,6 +402,7 @@ where
         OpAddOns::new(
             rpc_add_ons.with_engine_api(engine_api_builder),
             da_config,
+            gas_limit_config,
             sequencer_url,
             sequencer_headers,
             historical_rpc,
@@ -394,6 +419,7 @@ where
         let Self {
             rpc_add_ons,
             da_config,
+            gas_limit_config,
             sequencer_url,
             sequencer_headers,
             enable_tx_conditional,
@@ -404,6 +430,7 @@ where
         OpAddOns::new(
             rpc_add_ons.with_payload_validator(payload_validator_builder),
             da_config,
+            gas_limit_config,
             sequencer_url,
             sequencer_headers,
             historical_rpc,
@@ -423,6 +450,7 @@ where
         let Self {
             rpc_add_ons,
             da_config,
+            gas_limit_config,
             sequencer_url,
             sequencer_headers,
             enable_tx_conditional,
@@ -433,6 +461,7 @@ where
         OpAddOns::new(
             rpc_add_ons.with_rpc_middleware(rpc_middleware),
             da_config,
+            gas_limit_config,
             sequencer_url,
             sequencer_headers,
             historical_rpc,
@@ -496,6 +525,7 @@ where
         let Self {
             rpc_add_ons,
             da_config,
+            gas_limit_config,
             sequencer_url,
             sequencer_headers,
             enable_tx_conditional,
@@ -536,7 +566,7 @@ where
             Box::new(ctx.node.task_executor().clone()),
             builder,
         );
-        let miner_ext = OpMinerExtApi::new(da_config);
+        let miner_ext = OpMinerExtApi::new(da_config, gas_limit_config);
 
         let sequencer_client = if let Some(url) = sequencer_url {
             Some(SequencerClient::new_with_headers(url, sequencer_headers).await?)
@@ -559,7 +589,7 @@ where
                 modules.merge_if_module_configured(RethRpcModule::Debug, debug_ext.into_rpc())?;
 
                 // extend the miner namespace if configured in the regular http server
-                modules.merge_if_module_configured(
+                modules.add_or_replace_if_module_configured(
                     RethRpcModule::Miner,
                     miner_ext.clone().into_rpc(),
                 )?;
@@ -652,6 +682,8 @@ pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity> {
     historical_rpc: Option<String>,
     /// Data availability configuration for the OP builder.
     da_config: Option<OpDAConfig>,
+    /// Gas limit configuration for the OP builder.
+    gas_limit_config: Option<OpGasLimitConfig>,
     /// Enable transaction conditionals.
     enable_tx_conditional: bool,
     /// Marker for network types.
@@ -664,6 +696,8 @@ pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity> {
     tokio_runtime: Option<tokio::runtime::Handle>,
     /// A URL pointing to a secure websocket service that streams out flashblocks.
     flashblocks_url: Option<Url>,
+    /// Enable flashblock consensus client to drive chain forward.
+    flashblock_consensus: bool,
 }
 
 impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
@@ -673,12 +707,14 @@ impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
             sequencer_headers: Vec::new(),
             historical_rpc: None,
             da_config: None,
+            gas_limit_config: None,
             enable_tx_conditional: false,
             min_suggested_priority_fee: 1_000_000,
             _nt: PhantomData,
             rpc_middleware: Identity::new(),
             tokio_runtime: None,
             flashblocks_url: None,
+            flashblock_consensus: false,
         }
     }
 }
@@ -699,6 +735,12 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
     /// Configure the data availability configuration for the OP builder.
     pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
         self.da_config = Some(da_config);
+        self
+    }
+
+    /// Configure the gas limit configuration for the OP payload builder.
+    pub fn with_gas_limit_config(mut self, gas_limit_config: OpGasLimitConfig) -> Self {
+        self.gas_limit_config = Some(gas_limit_config);
         self
     }
 
@@ -735,11 +777,13 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             sequencer_headers,
             historical_rpc,
             da_config,
+            gas_limit_config,
             enable_tx_conditional,
             min_suggested_priority_fee,
             tokio_runtime,
             _nt,
             flashblocks_url,
+            flashblock_consensus,
             ..
         } = self;
         OpAddOnsBuilder {
@@ -747,18 +791,26 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             sequencer_headers,
             historical_rpc,
             da_config,
+            gas_limit_config,
             enable_tx_conditional,
             min_suggested_priority_fee,
             _nt,
             rpc_middleware,
             tokio_runtime,
             flashblocks_url,
+            flashblock_consensus,
         }
     }
 
     /// With a URL pointing to a flashblocks secure websocket subscription.
     pub fn with_flashblocks(mut self, flashblocks_url: Option<Url>) -> Self {
         self.flashblocks_url = flashblocks_url;
+        self
+    }
+
+    /// With a flashblock consensus client to drive chain forward.
+    pub const fn with_flashblock_consensus(mut self, flashblock_consensus: bool) -> Self {
+        self.flashblock_consensus = flashblock_consensus;
         self
     }
 }
@@ -779,12 +831,14 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             sequencer_url,
             sequencer_headers,
             da_config,
+            gas_limit_config,
             enable_tx_conditional,
             min_suggested_priority_fee,
             historical_rpc,
             rpc_middleware,
             tokio_runtime,
             flashblocks_url,
+            flashblock_consensus,
             ..
         } = self;
 
@@ -794,7 +848,8 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
                     .with_sequencer(sequencer_url.clone())
                     .with_sequencer_headers(sequencer_headers.clone())
                     .with_min_suggested_priority_fee(min_suggested_priority_fee)
-                    .with_flashblocks(flashblocks_url),
+                    .with_flashblocks(flashblocks_url)
+                    .with_flashblock_consensus(flashblock_consensus),
                 PVB::default(),
                 EB::default(),
                 EVB::default(),
@@ -802,6 +857,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             )
             .with_tokio_runtime(tokio_runtime),
             da_config.unwrap_or_default(),
+            gas_limit_config.unwrap_or_default(),
             sequencer_url,
             sequencer_headers,
             historical_rpc,
@@ -1006,18 +1062,32 @@ pub struct OpPayloadBuilder<Txs = ()> {
     /// This data availability configuration specifies constraints for the payload builder
     /// when assembling payloads
     pub da_config: OpDAConfig,
+    /// Gas limit configuration for the OP builder.
+    /// This is used to configure gas limit related constraints for the payload builder.
+    pub gas_limit_config: OpGasLimitConfig,
 }
 
 impl OpPayloadBuilder {
     /// Create a new instance with the given `compute_pending_block` flag and data availability
     /// config.
     pub fn new(compute_pending_block: bool) -> Self {
-        Self { compute_pending_block, best_transactions: (), da_config: OpDAConfig::default() }
+        Self {
+            compute_pending_block,
+            best_transactions: (),
+            da_config: OpDAConfig::default(),
+            gas_limit_config: OpGasLimitConfig::default(),
+        }
     }
 
     /// Configure the data availability configuration for the OP payload builder.
     pub fn with_da_config(mut self, da_config: OpDAConfig) -> Self {
         self.da_config = da_config;
+        self
+    }
+
+    /// Configure the gas limit configuration for the OP payload builder.
+    pub fn with_gas_limit_config(mut self, gas_limit_config: OpGasLimitConfig) -> Self {
+        self.gas_limit_config = gas_limit_config;
         self
     }
 }
@@ -1026,8 +1096,8 @@ impl<Txs> OpPayloadBuilder<Txs> {
     /// Configures the type responsible for yielding the transactions that should be included in the
     /// payload.
     pub fn with_transactions<T>(self, best_transactions: T) -> OpPayloadBuilder<T> {
-        let Self { compute_pending_block, da_config, .. } = self;
-        OpPayloadBuilder { compute_pending_block, best_transactions, da_config }
+        let Self { compute_pending_block, da_config, gas_limit_config, .. } = self;
+        OpPayloadBuilder { compute_pending_block, best_transactions, da_config, gas_limit_config }
     }
 }
 
@@ -1068,7 +1138,10 @@ where
             pool,
             ctx.provider().clone(),
             evm_config,
-            OpBuilderConfig { da_config: self.da_config.clone() },
+            OpBuilderConfig {
+                da_config: self.da_config.clone(),
+                gas_limit_config: self.gas_limit_config.clone(),
+            },
         )
         .with_transactions(self.best_transactions.clone())
         .set_compute_pending_block(self.compute_pending_block);
@@ -1110,7 +1183,8 @@ impl OpNetworkBuilder {
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
         NetworkP: NetworkPrimitives,
     {
-        let Self { disable_txpool_gossip, disable_discovery_v4, .. } = self.clone();
+        let disable_txpool_gossip = self.disable_txpool_gossip;
+        let disable_discovery_v4 = self.disable_discovery_v4;
         let args = &ctx.config().network;
         let network_builder = ctx
             .network_config_builder()?

@@ -11,7 +11,7 @@ pub struct PipelineBuilder<Provider> {
     stages: Vec<BoxedStage<Provider>>,
     /// The maximum block number to sync to.
     max_block: Option<BlockNumber>,
-    /// A receiver for the current chain tip to sync to.
+    /// A Sender for the current chain tip to sync to.
     tip_tx: Option<watch::Sender<B256>>,
     metrics_tx: Option<MetricEventsSender>,
     fail_on_unwind: bool,
@@ -35,11 +35,9 @@ impl<Provider> PipelineBuilder<Provider> {
     /// [`builder`][StageSet::builder] on the set which will convert it to a
     /// [`StageSetBuilder`][crate::StageSetBuilder].
     pub fn add_stages<Set: StageSet<Provider>>(mut self, set: Set) -> Self {
-        let states = set.builder().build();
-        self.stages.reserve_exact(states.len());
-        for stage in states {
-            self.stages.push(stage);
-        }
+        let stages = set.builder().build();
+        self.stages.reserve(stages.len());
+        self.stages.extend(stages);
         self
     }
 

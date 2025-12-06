@@ -42,7 +42,7 @@ where
                 Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
-            ),
+            )?,
             to,
             from,
             evm_config,

@@ -9,8 +9,8 @@ pub use database::*;
 
 mod static_file;
 pub use static_file::{
-    StaticFileAccess, StaticFileJarProvider, StaticFileProvider, StaticFileProviderRW,
-    StaticFileProviderRWRefMut, StaticFileWriter,
+    StaticFileAccess, StaticFileJarProvider, StaticFileProvider, StaticFileProviderBuilder,
+    StaticFileProviderRW, StaticFileProviderRWRefMut, StaticFileWriter,
 };
 
 mod state;
@@ -28,6 +28,13 @@ pub use blockchain_provider::BlockchainProvider;
 
 mod consistent;
 pub use consistent::ConsistentProvider;
+
+// RocksDB currently only supported on Unix platforms
+// Windows support is planned for future releases
+#[cfg(unix)]
+mod rocksdb;
+#[cfg(unix)]
+pub use rocksdb::{RocksDBBuilder, RocksDBProvider};
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy
 /// [`ProviderNodeTypes`].

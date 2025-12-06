@@ -8,7 +8,7 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_eth::BlockNumberOrTag;
 use futures::Future;
-use reth_chain_state::{BlockState, ExecutedBlock};
+use reth_chain_state::{BlockState, ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_errors::{BlockExecutionError, BlockValidationError, ProviderError, RethError};
 use reth_evm::{
@@ -276,7 +276,7 @@ pub trait LoadPendingBlock:
                     // the iterator before we can continue
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidPoolTransactionError::ExceedsGasLimit(
+                        &InvalidPoolTransactionError::ExceedsGasLimit(
                             pool_tx.gas_limit(),
                             block_gas_limit,
                         ),
@@ -290,7 +290,7 @@ pub trait LoadPendingBlock:
                     // transactions from the iteratorbefore we can continue
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidPoolTransactionError::Consensus(
+                        &InvalidPoolTransactionError::Consensus(
                             InvalidTransactionError::TxTypeNotSupported,
                         ),
                     );
@@ -311,7 +311,7 @@ pub trait LoadPendingBlock:
                     // for regular transactions above.
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidPoolTransactionError::ExceedsGasLimit(
+                        &InvalidPoolTransactionError::ExceedsGasLimit(
                             tx_blob_gas,
                             blob_params.max_blob_gas_per_block(),
                         ),
@@ -332,7 +332,7 @@ pub trait LoadPendingBlock:
                             // descendants
                             best_txs.mark_invalid(
                                 &pool_tx,
-                                InvalidPoolTransactionError::Consensus(
+                                &InvalidPoolTransactionError::Consensus(
                                     InvalidTransactionError::TxTypeNotSupported,
                                 ),
                             );
@@ -369,12 +369,14 @@ pub trait LoadPendingBlock:
             vec![execution_result.requests],
         );
 
-        Ok(ExecutedBlock {
-            recovered_block: block.into(),
-            execution_output: Arc::new(execution_outcome),
-            hashed_state: Arc::new(hashed_state),
-            trie_updates: Arc::new(trie_updates),
-        })
+        Ok(ExecutedBlock::new(
+            block.into(),
+            Arc::new(execution_outcome),
+            ComputedTrieData::without_trie_input(
+                Arc::new(hashed_state.into_sorted()),
+                Arc::new(trie_updates.into_sorted()),
+            ),
+        ))
     }
 }
 
@@ -416,8 +418,28 @@ impl<H: BlockHeader> BuildPendingEnv<H> for NextBlockEnvAttributes {
             suggested_fee_recipient: parent.beneficiary(),
             prev_randao: B256::random(),
             gas_limit: parent.gas_limit(),
-            parent_beacon_block_root: parent.parent_beacon_block_root().map(|_| B256::ZERO),
+            parent_beacon_block_root: parent.parent_beacon_block_root(),
             withdrawals: parent.withdrawals_root().map(|_| Default::default()),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_consensus::Header;
+    use alloy_primitives::B256;
+    use reth_primitives_traits::SealedHeader;
+
+    #[test]
+    fn pending_env_keeps_parent_beacon_root() {
+        let mut header = Header::default();
+        let beacon_root = B256::repeat_byte(0x42);
+        header.parent_beacon_block_root = Some(beacon_root);
+        let sealed = SealedHeader::new(header, B256::ZERO);
+
+        let attrs = NextBlockEnvAttributes::build_pending_env(&sealed);
+
+        assert_eq!(attrs.parent_beacon_block_root, Some(beacon_root));
     }
 }
