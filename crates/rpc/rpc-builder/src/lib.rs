@@ -36,8 +36,8 @@ use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::{NodePrimitives, TxTy};
 use reth_rpc::{
-    AdminApi, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi, NetApi,
-    OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
+    AdminApi, BadBlockStore, DebugApi, EngineEthApi, EthApi, EthApiBuilder, EthBundle, MinerApi,
+    NetApi, OtterscanApi, RPCApi, RethApi, TraceApi, TxPoolApi, ValidationApiConfig, Web3Api,
 };
 use reth_rpc_api::servers::*;
 use reth_rpc_eth_api::{
@@ -52,8 +52,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_storage_api::{
-    AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, ProviderBlock,
-    StateProviderFactory,
+    AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
@@ -332,7 +331,8 @@ where
         RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>,
     )
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthApi:
+            FullEthApiServer<Provider = Provider, Pool = Pool> + RpcNodeCore<Provider = Provider>,
     {
         let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
 
@@ -359,7 +359,7 @@ where
         eth: EthApi,
     ) -> RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
     where
-        EthApi: EthApiTypes + 'static,
+        EthApi: EthApiTypes + RpcNodeCore<Provider = Provider> + 'static,
     {
         let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
         RpcRegistryInner::new(provider, pool, network, executor, consensus, config, evm_config, eth)
@@ -373,7 +373,8 @@ where
         eth: EthApi,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthApi:
+            FullEthApiServer<Provider = Provider, Pool = Pool> + RpcNodeCore<Provider = Provider>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -511,6 +512,8 @@ pub struct RpcRegistryInner<
     modules: HashMap<RethRpcModule, Methods>,
     /// eth config settings
     eth_config: EthConfig,
+    /// Recent bad blocks observed by the node.
+    bad_block_store: BadBlockStore<Provider::Block>,
 }
 
 // === impl RpcRegistryInner ===
@@ -527,7 +530,7 @@ where
         + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
-    EthApi: EthApiTypes + 'static,
+    EthApi: EthApiTypes + RpcNodeCore<Provider = Provider> + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
 {
     /// Creates a new, empty instance.
@@ -560,6 +563,7 @@ where
             blocking_pool_guard,
             eth_config: config.eth,
             evm_config,
+            bad_block_store: BadBlockStore::default(),
         }
     }
 }
@@ -593,6 +597,11 @@ where
     /// Returns a reference to the provider
     pub const fn provider(&self) -> &Provider {
         &self.provider
+    }
+
+    /// Returns the bad block store.
+    pub const fn bad_block_store(&self) -> &BadBlockStore<Provider::Block> {
+        &self.bad_block_store
     }
 
     /// Returns all installed methods
@@ -706,8 +715,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_debug(&mut self) -> &mut Self
     where
-        EthApi: EthApiSpec + EthTransactions + TraceExt,
-        EvmConfig::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
+        EthApi: EthApiSpec + EthTransactions + TraceExt + RpcNodeCore<Provider = Provider>,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -814,8 +822,15 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn debug_api(&self) -> DebugApi<EthApi> {
-        DebugApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone())
+    pub fn debug_api(&self) -> DebugApi<EthApi>
+    where
+        EthApi: EthApiTypes + RpcNodeCore<Provider = Provider>,
+    {
+        DebugApi::new(
+            self.eth_api().clone(),
+            self.blocking_pool_guard.clone(),
+            self.bad_block_store.clone(),
+        )
     }
 
     /// Instantiates `NetApi`
@@ -847,7 +862,7 @@ where
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    EthApi: FullEthApiServer,
+    EthApi: FullEthApiServer + RpcNodeCore<Provider = Provider>,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {
@@ -933,11 +948,13 @@ where
                         )
                         .into_rpc()
                         .into(),
-                        RethRpcModule::Debug => {
-                            DebugApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Debug => DebugApi::new(
+                            eth_api.clone(),
+                            self.blocking_pool_guard.clone(),
+                            self.bad_block_store.clone(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Eth => {
                             // merge all eth handlers
                             let mut module = eth_api.clone().into_rpc();
