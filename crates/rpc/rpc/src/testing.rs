@@ -30,19 +30,21 @@ use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 /// Trait for types that can build a block for `testing_buildBlockV1`.
 #[async_trait]
 pub trait TestingBlockBuilder: Send + Sync + std::fmt::Debug + 'static {
+    /// Request type accepted by this builder.
+    type Request: Send + Sync + 'static;
+    /// Response type returned by this builder.
+    type Response: Send + Sync + 'static;
+
     /// Build a block according to the testing API request.
-    async fn build_block(
-        &self,
-        request: TestingBuildBlockRequestV1,
-    ) -> RpcResult<ExecutionPayloadEnvelopeV4>;
+    async fn build_block(&self, request: Self::Request) -> RpcResult<Self::Response>;
 }
 
 #[async_trait]
 impl<T: TestingBlockBuilder + ?Sized> TestingBlockBuilder for Arc<T> {
-    async fn build_block(
-        &self,
-        request: TestingBuildBlockRequestV1,
-    ) -> RpcResult<ExecutionPayloadEnvelopeV4> {
+    type Request = T::Request;
+    type Response = T::Response;
+
+    async fn build_block(&self, request: Self::Request) -> RpcResult<Self::Response> {
         (**self).build_block(request).await
     }
 }
@@ -65,7 +67,14 @@ impl<B> TestingApi<B> {
 #[async_trait]
 impl<B> TestingApiServer for TestingApi<B>
 where
-    B: TestingBlockBuilder + Clone + Send + Sync,
+    B: TestingBlockBuilder<
+            Request = TestingBuildBlockRequestV1,
+            Response = ExecutionPayloadEnvelopeV4,
+        > + Clone
+        + Send
+        + Sync,
+    B::Request: Send + 'static,
+    B::Response: Send + 'static,
 {
     /// Handles `testing_buildBlockV1` by gating concurrency via a semaphore and offloading heavy
     /// work to the blocking pool to avoid stalling the async runtime.
@@ -175,12 +184,12 @@ where
     EthEvmConfig<ChainSpec>:
         ConfigureEvm<Primitives = EthPrimitives, NextBlockEnvCtx = NextBlockEnvAttributes>,
 {
+    type Request = TestingBuildBlockRequestV1;
+    type Response = ExecutionPayloadEnvelopeV4;
+
     /// Core build logic used by the testing RPC; wrapped by the RPC layer in a semaphore +
     /// blocking task to avoid exhausting the async runtime.
-    async fn build_block(
-        &self,
-        request: TestingBuildBlockRequestV1,
-    ) -> RpcResult<ExecutionPayloadEnvelopeV4> {
+    async fn build_block(&self, request: Self::Request) -> RpcResult<Self::Response> {
         Self::validate_extra_data(&request.extra_data)?;
         let recovered_txs = Self::decode_transactions(request.transactions)?;
 
