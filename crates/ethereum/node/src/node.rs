@@ -13,7 +13,7 @@ use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
 use reth_ethereum_payload_builder::EthereumBuilderConfig;
-use reth_ethereum_primitives::{Block as EthBlock, EthPrimitives, Receipt, TransactionSigned};
+use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
 };
@@ -36,11 +36,7 @@ use reth_node_builder::{
     BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
 };
 use reth_payload_primitives::PayloadTypes;
-use reth_primitives_traits::Block as BlockTrait;
-use reth_provider::{
-    providers::ProviderFactoryBuilder, BlockReaderIdExt, ChainSpecProvider, EthStorage,
-    StateProviderFactory,
-};
+use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
     EthTestingBlockBuilder, TestingApi, ValidationApi,
@@ -281,16 +277,6 @@ where
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
-    N::Provider: BlockReaderIdExt<
-            Block = EthBlock,
-            Header = <EthBlock as BlockTrait>::Header,
-            Transaction = TransactionSigned,
-            Receipt = Receipt,
-        > + StateProviderFactory
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + Send
-        + Sync
-        + 'static,
     EthB: EthApiBuilder<N>,
     PVB: Send,
     EB: EngineApiBuilder<N>,
@@ -364,16 +350,6 @@ where
         >,
         Evm: ConfigureEvm<NextBlockEnvCtx = NextBlockEnvAttributes>,
     >,
-    N::Provider: BlockReaderIdExt<
-            Block = EthBlock,
-            Header = <EthBlock as BlockTrait>::Header,
-            Transaction = TransactionSigned,
-            Receipt = Receipt,
-        > + StateProviderFactory
-        + ChainSpecProvider<ChainSpec = ChainSpec>
-        + Send
-        + Sync
-        + 'static,
     EthB: EthApiBuilder<N>,
     PVB: PayloadValidatorBuilder<N>,
     EB: EngineApiBuilder<N>,
