@@ -1683,22 +1683,7 @@ impl TransportRpcModules {
         if !self.module_config().contains_any(&module) {
             return Ok(());
         }
-
-        // Only create methods if needed
-        let methods = f();
-
-        // Apply to configured transports
-        if self.module_config().contains_http(&module) {
-            self.merge_http(methods.clone())?;
-        }
-        if self.module_config().contains_ws(&module) {
-            self.merge_ws(methods.clone())?;
-        }
-        if self.module_config().contains_ipc(&module) {
-            self.merge_ipc(methods)?;
-        }
-
-        Ok(())
+        self.merge_if_module_configured(module, f())
     }
 
     /// Merge the given [Methods] in the configured http methods.
