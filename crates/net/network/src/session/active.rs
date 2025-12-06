@@ -397,21 +397,23 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     }
 
     /// Request our peer's block range only when a throttle allows it.
-    fn maybe_request_block_range(&mut self) {
+    fn maybe_request_block_range(&mut self, tick: Option<Instant>) {
         if self.conn.version() < EthVersion::Eth70 {
             return
         }
 
         let needs_now = self.last_range_update.is_some() || self.last_range_request.is_some();
-        let now_for_eval = needs_now.then(Instant::now);
+        let now_for_eval = tick.or_else(|| needs_now.then(Instant::now));
 
         let stale_update = if let Some(last) = self.last_range_update {
-            now_for_eval.unwrap().saturating_duration_since(last) >= RANGE_REQUEST_INTERVAL
+            let now = now_for_eval.expect("now must be present when last_range_update is set");
+            now.saturating_duration_since(last) >= RANGE_REQUEST_INTERVAL
         } else {
             true
         };
         let can_request = if let Some(last) = self.last_range_request {
-            now_for_eval.unwrap().saturating_duration_since(last) >= RANGE_REQUEST_INTERVAL
+            let now = now_for_eval.expect("now must be present when last_range_request is set");
+            now.saturating_duration_since(last) >= RANGE_REQUEST_INTERVAL
         } else {
             true
         };
@@ -808,9 +810,12 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
         }
 
+        let mut interval_tick = None;
         if let Some(interval) = &mut this.range_update_interval {
             // Check if we should send a range update based on block height changes
-            while interval.poll_tick(cx).is_ready() {
+            while let Poll::Ready(now) = interval.poll_tick(cx) {
+                let now: Instant = now.into_std();
+                interval_tick = Some(now);
                 let current_latest = this.local_range_info.latest();
                 let should_send = if let Some(last_sent) = this.last_sent_latest_block {
                     // Only send if block height has advanced by at least one epoch (32 blocks)
@@ -838,7 +843,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
         }
 
-        this.maybe_request_block_range();
+        this.maybe_request_block_range(interval_tick);
 
         while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
             // check for timed out requests
