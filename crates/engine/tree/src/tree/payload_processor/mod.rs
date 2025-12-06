@@ -321,17 +321,16 @@ where
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
-            transactions.par_bridge().for_each_with(
-                (prewarm_tx, execute_tx),
-                |(prewarm_tx, execute_tx), tx| {
-                    let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
+            transactions
+                .par_bridge()
+                .map(|tx| tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) }))
+                .for_each_with((prewarm_tx, execute_tx), |(prewarm_tx, execute_tx), tx| {
                     // only send Ok(_) variants to prewarming task
                     if let Ok(tx) = &tx {
                         let _ = prewarm_tx.send(tx.clone());
                     }
                     let _ = execute_tx.send(tx);
-                },
-            );
+                });
         });
 
         (prewarm_rx, execute_rx, transaction_count_hint)
