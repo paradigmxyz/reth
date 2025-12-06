@@ -405,20 +405,20 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         let needs_now = self.last_range_update.is_some() || self.last_range_request.is_some();
         let now_for_eval = tick.or_else(|| needs_now.then(Instant::now));
 
-        let stale_update = if let Some(last) = self.last_range_update {
+        let stale_update = self.last_range_update.is_none_or(|last| {
+            // compare against interval tick (or freshly captured) to determine if the
+            // current view is stale.
             let now = now_for_eval.expect("now must be present when last_range_update is set");
             now.saturating_duration_since(last) >= RANGE_REQUEST_INTERVAL
-        } else {
-            true
-        };
-        let can_request = if let Some(last) = self.last_range_request {
+        });
+        let can_request = self.last_range_request.is_none_or(|last| {
             let now = now_for_eval.expect("now must be present when last_range_request is set");
             now.saturating_duration_since(last) >= RANGE_REQUEST_INTERVAL
-        } else {
-            true
-        };
+        });
 
         if stale_update && can_request {
+            // Only allocate a request ID and enqueue a message when both
+            // staleness and request-rate checks pass.
             let now = now_for_eval.unwrap_or_else(Instant::now);
             let request_id = self.next_id();
             self.queued_outgoing.push_back(
