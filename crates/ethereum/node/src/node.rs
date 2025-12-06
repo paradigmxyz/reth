@@ -52,6 +52,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
+use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
@@ -306,6 +307,7 @@ where
         let testing_provider = ctx.node.provider().clone();
         // Fixed concurrency limit for the hidden testing API.
         let testing_max_concurrent = 1usize;
+        let testing_executor: TaskExecutor = ctx.node.task_executor().clone();
         let ctx_clone = ctx.clone();
 
         self.inner
@@ -327,7 +329,8 @@ where
                     evm_config,
                     EthereumBuilderConfig::new(),
                 );
-                let testing_api = TestingApi::new(builder, testing_max_concurrent).into_rpc();
+                let testing_api =
+                    TestingApi::new(builder, testing_max_concurrent, testing_executor).into_rpc();
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Other("testing".to_string()),
                     testing_api,
