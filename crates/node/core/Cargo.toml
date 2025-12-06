@@ -60,6 +60,7 @@ ipnet.workspace = true
 # io
 dirs-next.workspace = true
 shellexpand.workspace = true
+sysinfo = { workspace = true, features = ["disk"] }
 
 # obs
 tracing.workspace = true

@@ -12,10 +12,14 @@ use reth_node_core::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, EraArgs, MetricArgs,
         NetworkArgs, PayloadBuilderArgs, PruningArgs, RpcServerArgs, StaticFilesArgs, TxPoolArgs,
     },
+    dirs::DataDirPath,
     node_config::NodeConfig,
+    utils::is_disk_space_low,
     version,
 };
+use reth_tasks::{shutdown::Shutdown, TaskExecutor};
 use std::{ffi::OsString, fmt, path::PathBuf, sync::Arc};
+use tracing::error;
 
 /// Start the node
 #[derive(Debug, Parser)]
@@ -172,6 +176,9 @@ where
             ext,
         } = self;
 
+        // Save min_free_disk before moving datadir
+        let min_free_disk_mb = datadir.min_free_disk;
+
         // set up node config
         let mut node_config = NodeConfig {
             datadir,
@@ -195,6 +202,17 @@ where
         let data_dir = node_config.datadir();
         let db_path = data_dir.db();
 
+        // Check disk space at startup if min_free_disk is configured
+        if min_free_disk_mb > 0 {
+            use reth_node_core::utils::is_disk_space_low;
+            if is_disk_space_low(data_dir.data_dir(), min_free_disk_mb) {
+                eyre::bail!(
+                    "Insufficient disk space: available space is below minimum threshold of {} MB",
+                    min_free_disk_mb
+                );
+            }
+        }
+
         tracing::info!(target: "reth::cli", path = ?db_path, "Opening database");
         let database = Arc::new(init_db(db_path.clone(), self.db.database_args())?.with_metrics());
 
@@ -202,9 +220,27 @@ where
             node_config = node_config.with_unused_ports();
         }
 
+        // Spawn disk space monitoring task if min_free_disk is configured
+        // Start monitoring immediately after database is opened
+        if min_free_disk_mb > 0 {
+            let data_dir_for_monitor = data_dir.clone();
+            let shutdown = ctx.task_executor.on_shutdown_signal().clone();
+            let task_executor = ctx.task_executor.clone();
+            
+            ctx.task_executor.spawn_critical(
+                "disk space monitor",
+                Box::pin(disk_space_monitor_task(
+                    data_dir_for_monitor,
+                    min_free_disk_mb,
+                    shutdown,
+                    task_executor,
+                )),
+            );
+        }
+
         let builder = NodeBuilder::new(node_config)
             .with_database(database)
-            .with_launch_context(ctx.task_executor);
+            .with_launch_context(ctx.task_executor.clone());
 
         launcher.entrypoint(builder, ext).await
     }
@@ -214,6 +250,47 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> NodeCommand<C, Ext> {
     /// Returns the underlying chain being used to run this command
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         Some(&self.chain)
+    }
+}
+
+/// Disk space monitoring task that periodically checks disk space and triggers shutdown if below threshold.
+async fn disk_space_monitor_task(
+    data_dir: reth_node_core::dirs::ChainPath<DataDirPath>,
+    min_free_disk_mb: u64,
+    mut shutdown: Shutdown,
+    task_executor: TaskExecutor,
+) {
+    use tokio::time::{interval, Duration as TokioDuration};
+    
+    let mut interval = interval(TokioDuration::from_secs(60)); // Check every minute
+    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+    
+    loop {
+        tokio::select! {
+            _ = interval.tick() => {
+                if is_disk_space_low(data_dir.data_dir(), min_free_disk_mb) {
+                    error!(
+                        target: "reth::cli",
+                        ?data_dir,
+                        available_threshold = min_free_disk_mb,
+                        "Disk space below minimum threshold, initiating shutdown"
+                    );
+                    // Trigger graceful shutdown
+                    if let Err(e) = task_executor.initiate_graceful_shutdown() {
+                        error!(
+                            target: "reth::cli",
+                            %e,
+                            "Failed to initiate graceful shutdown"
+                        );
+                    }
+                    return;
+                }
+            }
+            _ = &mut shutdown => {
+                // Normal shutdown signal received
+                return;
+            }
+        }
     }
 }
 
