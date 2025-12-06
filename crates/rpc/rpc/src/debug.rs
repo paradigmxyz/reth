@@ -9,27 +9,25 @@ use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
-    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext, TransactionInfo,
+    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext,
 };
 use alloy_rpc_types_trace::geth::{
-    call::FlatCallFrame, BlockTraceResult, FourByteFrame, GethDebugBuiltInTracerType,
-    GethDebugTracerType, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace,
-    NoopFrame, TraceResult,
+    BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
 use reth_errors::RethError;
-use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor, TxEnvFor};
+use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock};
-use reth_revm::{database::StateProviderDatabase, db::State, witness::ExecutionWitnessRecord};
+use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
     EthApiTypes, FromEthApiError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{EthApiError, StateCacheDb};
+use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
@@ -37,10 +35,8 @@ use reth_storage_api::{
 };
 use reth_tasks::pool::BlockingTaskGuard;
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
-use revm::{context::Block, context_interface::Transaction, state::EvmState, DatabaseCommit};
-use revm_inspectors::tracing::{
-    FourByteInspector, MuxInspector, TracingInspector, TracingInspectorConfig, TransactionContext,
-};
+use revm::DatabaseCommit;
+use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use std::sync::Arc;
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 
@@ -91,43 +87,44 @@ where
         evm_env: EvmEnvFor<Eth::Evm>,
         opts: GethDebugTracingOptions,
     ) -> Result<Vec<TraceResult>, Eth::Error> {
-        // replay all transactions of the block
-        let this = self.clone();
         self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash().into(), move |state| {
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
-                this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
-                let mut inspector = None;
+                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
                 while let Some((index, tx)) = transactions.next() {
                     let tx_hash = *tx.tx_hash();
+                    let tx_env = eth_api.evm_config().tx_env(tx);
 
-                    let tx_env = this.eth_api().evm_config().tx_env(tx);
-
-                    let (result, state_changes) = this.trace_transaction(
-                        &opts,
-                        evm_env.clone(),
-                        tx_env,
+                    let res = eth_api.inspect(
                         &mut db,
-                        Some(TransactionContext {
-                            block_hash: Some(block.hash()),
-                            tx_hash: Some(tx_hash),
-                            tx_index: Some(index),
-                        }),
+                        evm_env.clone(),
+                        tx_env.clone(),
                         &mut inspector,
                     )?;
-
-                    inspector = inspector.map(|insp| insp.fused());
+                    let result = inspector
+                        .get_result(
+                            Some(TransactionContext {
+                                block_hash: Some(block.hash()),
+                                tx_hash: Some(tx_hash),
+                                tx_index: Some(index),
+                            }),
+                            &tx_env,
+                            &evm_env.block_env,
+                            &res,
+                            &mut db,
+                        )
+                        .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
+                        inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        db.commit(state_changes)
+                        db.commit(res.state)
                     }
                 }
 
@@ -219,42 +216,43 @@ where
         let state_at: BlockId = block.parent_hash().into();
         let block_hash = block.hash();
 
-        let this = self.clone();
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |state| {
+            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
                 let block_txs = block.transactions_recovered();
 
                 // configure env for the target transaction
                 let tx = transaction.into_recovered();
 
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
-
-                this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 // replay all transactions prior to the targeted transaction
-                let index = this.eth_api().replay_transactions_until(
+                let index = eth_api.replay_transactions_until(
                     &mut db,
                     evm_env.clone(),
                     block_txs,
                     *tx.tx_hash(),
                 )?;
 
-                let tx_env = this.eth_api().evm_config().tx_env(&tx);
+                let tx_env = eth_api.evm_config().tx_env(&tx);
 
-                this.trace_transaction(
-                    &opts,
-                    evm_env,
-                    tx_env,
-                    &mut db,
-                    Some(TransactionContext {
-                        block_hash: Some(block_hash),
-                        tx_index: Some(index),
-                        tx_hash: Some(*tx.tx_hash()),
-                    }),
-                    &mut None,
-                )
-                .map(|(trace, _)| trace)
+                let mut inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
+                let res =
+                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let trace = inspector
+                    .get_result(
+                        Some(TransactionContext {
+                            block_hash: Some(block_hash),
+                            tx_index: Some(index),
+                            tx_hash: Some(*tx.tx_hash()),
+                        }),
+                        &tx_env,
+                        &evm_env.block_env,
+                        &res,
+                        &mut db,
+                    )
+                    .map_err(Eth::Error::from_eth_err)?;
+
+                Ok(trace)
             })
             .await
     }
@@ -290,214 +288,23 @@ where
                 .await;
         }
 
-        let GethDebugTracingOptions { config, tracer, tracer_config, .. } = tracing_options;
-
         let this = self.clone();
-        if let Some(tracer) = tracer {
-            #[allow(unreachable_patterns)]
-            return match tracer {
-                GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
-                    GethDebugBuiltInTracerType::FourByteTracer => {
-                        let mut inspector = FourByteInspector::default();
-                        let inspector = self
-                            .eth_api()
-                            .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                                this.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-                                Ok(inspector)
-                            })
-                            .await?;
-                        Ok(FourByteFrame::from(&inspector).into())
-                    }
-                    GethDebugBuiltInTracerType::CallTracer => {
-                        let call_config = tracer_config
-                            .into_call_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_call_config(&call_config),
-                        );
-
-                        let frame = self
-                            .eth_api()
-                            .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                                let gas_limit = tx_env.gas_limit();
-                                let res =
-                                    this.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-                                let frame = inspector
-                                    .with_transaction_gas_limit(gas_limit)
-                                    .into_geth_builder()
-                                    .geth_call_traces(call_config, res.result.gas_used());
-                                Ok(frame.into())
-                            })
-                            .await?;
-                        Ok(frame)
-                    }
-                    GethDebugBuiltInTracerType::PreStateTracer => {
-                        let prestate_config = tracer_config
-                            .into_pre_state_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-                        let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
-                        );
-
-                        let frame = self
-                            .eth_api()
-                            .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                                // wrapper is hack to get around 'higher-ranked lifetime error',
-                                // see <https://github.com/rust-lang/rust/issues/100013>
-                                let db = db.0;
-
-                                let gas_limit = tx_env.gas_limit();
-                                let res = this.eth_api().inspect(
-                                    &mut *db,
-                                    evm_env,
-                                    tx_env,
-                                    &mut inspector,
-                                )?;
-                                let frame = inspector
-                                    .with_transaction_gas_limit(gas_limit)
-                                    .into_geth_builder()
-                                    .geth_prestate_traces(&res, &prestate_config, db)
-                                    .map_err(Eth::Error::from_eth_err)?;
-                                Ok(frame)
-                            })
-                            .await?;
-                        Ok(frame.into())
-                    }
-                    GethDebugBuiltInTracerType::NoopTracer => Ok(NoopFrame::default().into()),
-                    GethDebugBuiltInTracerType::MuxTracer => {
-                        let mux_config = tracer_config
-                            .into_mux_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        let mut inspector = MuxInspector::try_from_config(mux_config)
-                            .map_err(Eth::Error::from_eth_err)?;
-
-                        let frame = self
-                            .inner
-                            .eth_api
-                            .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                                // wrapper is hack to get around 'higher-ranked lifetime error', see
-                                // <https://github.com/rust-lang/rust/issues/100013>
-                                let db = db.0;
-
-                                let tx_info = TransactionInfo {
-                                    block_number: Some(evm_env.block_env.number().saturating_to()),
-                                    base_fee: Some(evm_env.block_env.basefee()),
-                                    hash: None,
-                                    block_hash: None,
-                                    index: None,
-                                };
-
-                                let res = this.eth_api().inspect(
-                                    &mut *db,
-                                    evm_env,
-                                    tx_env,
-                                    &mut inspector,
-                                )?;
-                                let frame = inspector
-                                    .try_into_mux_frame(&res, db, tx_info)
-                                    .map_err(Eth::Error::from_eth_err)?;
-                                Ok(frame.into())
-                            })
-                            .await?;
-                        Ok(frame)
-                    }
-                    GethDebugBuiltInTracerType::FlatCallTracer => {
-                        let flat_call_config = tracer_config
-                            .into_flat_call_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_flat_call_config(&flat_call_config),
-                        );
-
-                        let frame: FlatCallFrame = self
-                            .inner
-                            .eth_api
-                            .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                                let gas_limit = tx_env.gas_limit();
-                                this.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-                                let tx_info = TransactionInfo::default();
-                                let frame: FlatCallFrame = inspector
-                                    .with_transaction_gas_limit(gas_limit)
-                                    .into_parity_builder()
-                                    .into_localized_transaction_traces(tx_info);
-                                Ok(frame)
-                            })
-                            .await?;
-
-                        Ok(frame.into())
-                    }
-                    _ => {
-                        // Note: this match is non-exhaustive in case we need to add support for
-                        // additional tracers
-                        Err(EthApiError::Unsupported("unsupported tracer").into())
-                    }
-                },
-                #[cfg(not(feature = "js-tracer"))]
-                GethDebugTracerType::JsTracer(_) => {
-                    Err(EthApiError::Unsupported("JS Tracer is not enabled").into())
-                }
-                #[cfg(feature = "js-tracer")]
-                GethDebugTracerType::JsTracer(code) => {
-                    let config = tracer_config.into_json();
-
-                    let (_, at) = self.eth_api().evm_env_at(at).await?;
-
-                    let res = self
-                        .eth_api()
-                        .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                            // wrapper is hack to get around 'higher-ranked lifetime error', see
-                            // <https://github.com/rust-lang/rust/issues/100013>
-                            let db = db.0;
-
-                            let mut inspector =
-                                revm_inspectors::tracing::js::JsInspector::new(code, config)
-                                    .map_err(Eth::Error::from_eth_err)?;
-                            let res = this.eth_api().inspect(
-                                &mut *db,
-                                evm_env.clone(),
-                                tx_env.clone(),
-                                &mut inspector,
-                            )?;
-                            inspector
-                                .json_result(res, &tx_env, &evm_env.block_env, db)
-                                .map_err(Eth::Error::from_eth_err)
-                        })
-                        .await?;
-
-                    Ok(GethTrace::JS(res))
-                }
-                _ => {
-                    // Note: this match is non-exhaustive in case we need to add support for
-                    // additional tracers
-                    Err(EthApiError::Unsupported("unsupported tracer").into())
-                }
-            }
-        }
-
-        // default structlog tracer
-        let inspector_config = TracingInspectorConfig::from_geth_config(&config);
-
-        let mut inspector = TracingInspector::new(inspector_config);
-
-        let (res, tx_gas_limit, inspector) = self
-            .eth_api()
+        self.eth_api()
             .spawn_with_call_at(call, at, overrides, move |db, evm_env, tx_env| {
-                let gas_limit = tx_env.gas_limit();
-                let res = this.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-                Ok((res, gas_limit, inspector))
+                let mut inspector =
+                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
+                let res = this.eth_api().inspect(
+                    &mut *db,
+                    evm_env.clone(),
+                    tx_env.clone(),
+                    &mut inspector,
+                )?;
+                let trace = inspector
+                    .get_result(None, &tx_env, &evm_env.block_env, &res, db)
+                    .map_err(Eth::Error::from_eth_err)?;
+                Ok(trace)
             })
-            .await?;
-        let gas_used = res.result.gas_used();
-        let return_value = res.result.into_output().unwrap_or_default();
-        let frame = inspector
-            .with_transaction_gas_limit(tx_gas_limit)
-            .into_geth_builder()
-            .geth_traces(gas_used, return_value, config);
-
-        Ok(frame.into())
+            .await
     }
 
     /// Helper method to execute `debug_trace_call` at a specific transaction index within a block.
@@ -531,37 +338,31 @@ where
         let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
 
         // execute after the parent block, replaying `tx_index` transactions
-        let state_at = block.parent_hash().into();
+        let state_at = block.parent_hash();
 
-        let this = self.clone();
         self.eth_api()
-            .spawn_with_state_at_block(state_at, move |state| {
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
-
+            .spawn_with_state_at_block(state_at, move |eth_api, mut db| {
                 // 1. apply pre-execution changes
-                this.eth_api().apply_pre_execution_changes(&block, &mut db, &evm_env)?;
+                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 // 2. replay the required number of transactions
                 for tx in block.transactions_recovered().take(tx_index) {
-                    let tx_env = this.eth_api().evm_config().tx_env(tx);
-                    let res = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
+                    let tx_env = eth_api.evm_config().tx_env(tx);
+                    let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                     db.commit(res.state);
                 }
 
                 // 3. now execute the trace call on this state
-                let (call_evm_env, call_tx_env) =
-                    this.eth_api().prepare_call_env(evm_env, call, &mut db, overrides)?;
+                let (evm_env, tx_env) =
+                    eth_api.prepare_call_env(evm_env, call, &mut db, overrides)?;
 
-                // Execute the trace call using trace_transaction
-                let (trace, _) = this.trace_transaction(
-                    &tracing_options,
-                    call_evm_env,
-                    call_tx_env,
-                    &mut db,
-                    None, // No transaction context for call tracing
-                    &mut None,
-                )?;
+                let mut inspector =
+                    DebugInspector::new(tracing_options).map_err(Eth::Error::from_eth_err)?;
+                let res =
+                    eth_api.inspect(&mut db, evm_env.clone(), tx_env.clone(), &mut inspector)?;
+                let trace = inspector
+                    .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
+                    .map_err(Eth::Error::from_eth_err)?;
 
                 Ok(trace)
             })
@@ -610,14 +411,10 @@ where
             replay_block_txs = false;
         }
 
-        let this = self.clone();
-
         self.eth_api()
-            .spawn_with_state_at_block(at.into(), move |state| {
+            .spawn_with_state_at_block(at, move |eth_api, mut db| {
                 // the outer vec for the bundles
                 let mut all_bundles = Vec::with_capacity(bundles.len());
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
 
                 if replay_block_txs {
                     // only need to replay the transactions in the block if not all transactions are
@@ -626,20 +423,21 @@ where
 
                     // Execute all transactions until index
                     for tx in transactions {
-                        let tx_env = this.eth_api().evm_config().tx_env(tx);
-                        let res = this.eth_api().transact(&mut db, evm_env.clone(), tx_env)?;
+                        let tx_env = eth_api.evm_config().tx_env(tx);
+                        let res = eth_api.transact(&mut db, evm_env.clone(), tx_env)?;
                         db.commit(res.state);
                     }
                 }
 
                 // Trace all bundles
                 let mut bundles = bundles.into_iter().peekable();
+                let mut inspector = DebugInspector::new(tracing_options.clone())
+                    .map_err(Eth::Error::from_eth_err)?;
                 while let Some(bundle) = bundles.next() {
                     let mut results = Vec::with_capacity(bundle.transactions.len());
                     let Bundle { transactions, block_override } = bundle;
 
                     let block_overrides = block_override.map(Box::new);
-                    let mut inspector = None;
 
                     let mut transactions = transactions.into_iter().peekable();
                     while let Some(tx) = transactions.next() {
@@ -647,28 +445,24 @@ where
                         let state_overrides = state_overrides.take();
                         let overrides = EvmOverrides::new(state_overrides, block_overrides.clone());
 
-                        let (evm_env, tx_env) = this.eth_api().prepare_call_env(
-                            evm_env.clone(),
-                            tx,
-                            &mut db,
-                            overrides,
-                        )?;
+                        let (evm_env, tx_env) =
+                            eth_api.prepare_call_env(evm_env.clone(), tx, &mut db, overrides)?;
 
-                        let (trace, state) = this.trace_transaction(
-                            &tracing_options,
-                            evm_env,
-                            tx_env,
+                        let res = eth_api.inspect(
                             &mut db,
-                            None,
+                            evm_env.clone(),
+                            tx_env.clone(),
                             &mut inspector,
                         )?;
-
-                        inspector = inspector.map(|insp| insp.fused());
+                        let trace = inspector
+                            .get_result(None, &tx_env, &evm_env.block_env, &res, &mut db)
+                            .map_err(Eth::Error::from_eth_err)?;
 
                         // If there is more transactions, commit the database
                         // If there is no transactions, but more bundles, commit to the database too
                         if transactions.peek().is_some() || bundles.peek().is_some() {
-                            db.commit(state);
+                            inspector.fuse().map_err(Eth::Error::from_eth_err)?;
+                            db.commit(res.state);
                         }
                         results.push(trace);
                     }
@@ -722,14 +516,12 @@ where
         &self,
         block: Arc<RecoveredBlock<ProviderBlock<Eth::Provider>>>,
     ) -> Result<ExecutionWitness, Eth::Error> {
-        let this = self.clone();
         let block_number = block.header().number();
 
         let (mut exec_witness, lowest_block_number) = self
             .eth_api()
-            .spawn_with_state_at_block(block.parent_hash().into(), move |state_provider| {
-                let db = StateProviderDatabase::new(&state_provider);
-                let block_executor = this.eth_api().evm_config().executor(db);
+            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
+                let block_executor = eth_api.evm_config().executor(&mut db);
 
                 let mut witness_record = ExecutionWitnessRecord::default();
 
@@ -742,7 +534,9 @@ where
                 let ExecutionWitnessRecord { hashed_state, codes, keys, lowest_block_number } =
                     witness_record;
 
-                let state = state_provider
+                let state = db
+                    .database
+                    .0
                     .witness(Default::default(), hashed_state)
                     .map_err(EthApiError::from)?;
                 Ok((
@@ -791,191 +585,6 @@ where
             .bytecode_by_hash(&hash)
             .map_err(Eth::Error::from_eth_err)?
             .map(|b| b.original_bytes()))
-    }
-
-    /// Executes the configured transaction with the environment on the given database.
-    ///
-    /// It optionally takes fused inspector ([`TracingInspector::fused`]) to avoid re-creating the
-    /// inspector for each transaction. This is useful when tracing multiple transactions in a
-    /// block. This is only useful for block tracing which uses the same tracer for all transactions
-    /// in the block.
-    ///
-    /// Caution: If the inspector is provided then `opts.tracer_config` is ignored.
-    ///
-    /// Returns the trace frame and the state that got updated after executing the transaction.
-    ///
-    /// Note: this does not apply any state overrides if they're configured in the `opts`.
-    ///
-    /// Caution: this is blocking and should be performed on a blocking task.
-    fn trace_transaction(
-        &self,
-        opts: &GethDebugTracingOptions,
-        evm_env: EvmEnvFor<Eth::Evm>,
-        tx_env: TxEnvFor<Eth::Evm>,
-        db: &mut StateCacheDb<'_>,
-        transaction_context: Option<TransactionContext>,
-        fused_inspector: &mut Option<TracingInspector>,
-    ) -> Result<(GethTrace, EvmState), Eth::Error> {
-        let GethDebugTracingOptions { config, tracer, tracer_config, .. } = opts;
-
-        let tx_info = TransactionInfo {
-            hash: transaction_context.as_ref().map(|c| c.tx_hash).unwrap_or_default(),
-            index: transaction_context
-                .as_ref()
-                .map(|c| c.tx_index.map(|i| i as u64))
-                .unwrap_or_default(),
-            block_hash: transaction_context.as_ref().map(|c| c.block_hash).unwrap_or_default(),
-            block_number: Some(evm_env.block_env.number().saturating_to()),
-            base_fee: Some(evm_env.block_env.basefee()),
-        };
-
-        if let Some(tracer) = tracer {
-            #[allow(unreachable_patterns)]
-            return match tracer {
-                GethDebugTracerType::BuiltInTracer(tracer) => match tracer {
-                    GethDebugBuiltInTracerType::FourByteTracer => {
-                        let mut inspector = FourByteInspector::default();
-                        let res = self.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-                        return Ok((FourByteFrame::from(&inspector).into(), res.state))
-                    }
-                    GethDebugBuiltInTracerType::CallTracer => {
-                        let call_config = tracer_config
-                            .clone()
-                            .into_call_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        let mut inspector = fused_inspector.get_or_insert_with(|| {
-                            TracingInspector::new(TracingInspectorConfig::from_geth_call_config(
-                                &call_config,
-                            ))
-                        });
-
-                        let gas_limit = tx_env.gas_limit();
-                        let res = self.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-
-                        inspector.set_transaction_gas_limit(gas_limit);
-
-                        let frame = inspector
-                            .geth_builder()
-                            .geth_call_traces(call_config, res.result.gas_used());
-
-                        return Ok((frame.into(), res.state))
-                    }
-                    GethDebugBuiltInTracerType::PreStateTracer => {
-                        let prestate_config = tracer_config
-                            .clone()
-                            .into_pre_state_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        let mut inspector = fused_inspector.get_or_insert_with(|| {
-                            TracingInspector::new(
-                                TracingInspectorConfig::from_geth_prestate_config(&prestate_config),
-                            )
-                        });
-                        let gas_limit = tx_env.gas_limit();
-                        let res =
-                            self.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
-
-                        inspector.set_transaction_gas_limit(gas_limit);
-                        let frame = inspector
-                            .geth_builder()
-                            .geth_prestate_traces(&res, &prestate_config, db)
-                            .map_err(Eth::Error::from_eth_err)?;
-
-                        return Ok((frame.into(), res.state))
-                    }
-                    GethDebugBuiltInTracerType::NoopTracer => {
-                        Ok((NoopFrame::default().into(), Default::default()))
-                    }
-                    GethDebugBuiltInTracerType::MuxTracer => {
-                        let mux_config = tracer_config
-                            .clone()
-                            .into_mux_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        let mut inspector = MuxInspector::try_from_config(mux_config)
-                            .map_err(Eth::Error::from_eth_err)?;
-
-                        let res =
-                            self.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
-                        let frame = inspector
-                            .try_into_mux_frame(&res, db, tx_info)
-                            .map_err(Eth::Error::from_eth_err)?;
-                        return Ok((frame.into(), res.state))
-                    }
-                    GethDebugBuiltInTracerType::FlatCallTracer => {
-                        let flat_call_config = tracer_config
-                            .clone()
-                            .into_flat_call_config()
-                            .map_err(|_| EthApiError::InvalidTracerConfig)?;
-
-                        let mut inspector = TracingInspector::new(
-                            TracingInspectorConfig::from_flat_call_config(&flat_call_config),
-                        );
-
-                        let gas_limit = tx_env.gas_limit();
-                        let res = self.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-                        let frame: FlatCallFrame = inspector
-                            .with_transaction_gas_limit(gas_limit)
-                            .into_parity_builder()
-                            .into_localized_transaction_traces(tx_info);
-
-                        return Ok((frame.into(), res.state));
-                    }
-                    _ => {
-                        // Note: this match is non-exhaustive in case we need to add support for
-                        // additional tracers
-                        Err(EthApiError::Unsupported("unsupported tracer").into())
-                    }
-                },
-                #[cfg(not(feature = "js-tracer"))]
-                GethDebugTracerType::JsTracer(_) => {
-                    Err(EthApiError::Unsupported("JS Tracer is not enabled").into())
-                }
-                #[cfg(feature = "js-tracer")]
-                GethDebugTracerType::JsTracer(code) => {
-                    let config = tracer_config.clone().into_json();
-                    let mut inspector =
-                        revm_inspectors::tracing::js::JsInspector::with_transaction_context(
-                            code.clone(),
-                            config,
-                            transaction_context.unwrap_or_default(),
-                        )
-                        .map_err(Eth::Error::from_eth_err)?;
-                    let res = self.eth_api().inspect(
-                        &mut *db,
-                        evm_env.clone(),
-                        tx_env.clone(),
-                        &mut inspector,
-                    )?;
-
-                    let state = res.state.clone();
-                    let result = inspector
-                        .json_result(res, &tx_env, &evm_env.block_env, db)
-                        .map_err(Eth::Error::from_eth_err)?;
-                    Ok((GethTrace::JS(result), state))
-                }
-                _ => {
-                    // Note: this match is non-exhaustive in case we need to add support for
-                    // additional tracers
-                    Err(EthApiError::Unsupported("unsupported tracer").into())
-                }
-            }
-        }
-
-        // default structlog tracer
-        let mut inspector = fused_inspector.get_or_insert_with(|| {
-            let inspector_config = TracingInspectorConfig::from_geth_config(config);
-            TracingInspector::new(inspector_config)
-        });
-        let gas_limit = tx_env.gas_limit();
-        let res = self.eth_api().inspect(db, evm_env, tx_env, &mut inspector)?;
-        let gas_used = res.result.gas_used();
-        let return_value = res.result.into_output().unwrap_or_default();
-        inspector.set_transaction_gas_limit(gas_limit);
-        let frame = inspector.geth_builder().geth_traces(gas_used, return_value, *config);
-
-        Ok((frame.into(), res.state))
     }
 
     /// Returns the state root of the `HashedPostState` on top of the state for the given block with

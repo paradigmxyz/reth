@@ -9,8 +9,9 @@ $ reth db settings set --help
 Usage: reth db settings set [OPTIONS] <COMMAND>
 
 Commands:
-  receipts_in_static_files  Store receipts in static files instead of the database
-  help                      Print this message or the help of the given subcommand(s)
+  receipts_in_static_files             Store receipts in static files instead of the database
+  transaction_senders_in_static_files  Store transaction senders in static files instead of the database
+  help                                 Print this message or the help of the given subcommand(s)
 
 Options:
   -h, --help
@@ -140,4 +141,13 @@ Tracing:
           Defaults to TRACE if not specified.
 
           [default: debug]
+
+      --tracing-otlp.sample-ratio <RATIO>
+          Trace sampling ratio to control the percentage of traces to export.
+
+          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
+
+          Example: --tracing-otlp.sample-ratio=0.0.
+
+          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```
