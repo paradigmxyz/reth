@@ -308,10 +308,10 @@ where
         // Fixed concurrency limit for the hidden testing API.
         let testing_max_concurrent = 1usize;
         let testing_executor: TaskExecutor = ctx.node.task_executor().clone();
-        let ctx_clone = ctx.clone();
+        let ctx_for_testing = ctx.clone();
 
         self.inner
-            .launch_add_ons_with(ctx_clone, move |container| {
+            .launch_add_ons_with(ctx_for_testing, move |container| {
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
@@ -323,7 +323,8 @@ where
 
                 // testing_buildBlockV1: only wire when the hidden testing module is explicitly
                 // requested on any transport. Default stays disabled to honor security guidance.
-                let evm_config: EthEvmConfig<ChainSpec> = EthEvmConfig::new(testing_chain.clone());
+                let evm_config = EthEvmConfig::new(testing_chain.clone());
+                let testing_provider = testing_provider.clone();
                 let builder = EthTestingBlockBuilder::new(
                     testing_provider,
                     evm_config,
