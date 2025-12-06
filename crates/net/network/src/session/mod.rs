@@ -550,7 +550,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     interval
                 });
-                let now = Instant::now();
 
                 let session = ActiveSession {
                     next_id: 0,
@@ -579,7 +578,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     range_update_interval,
                     last_sent_latest_block: None,
                     last_range_request: None,
-                    last_range_update: remote_range_info.as_ref().map(|_| now),
+                    last_range_update: remote_range_info.as_ref().map(|_| Instant::now()),
                 };
 
                 self.spawn(session);

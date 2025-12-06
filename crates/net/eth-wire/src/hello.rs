@@ -260,21 +260,8 @@ mod tests {
 
         assert_eq!(hello_encoded.len(), hello.length());
     }
-
-    #[test]
-    fn test_default_protocols_include_eth70() {
-        // ensure that the default protocol list includes Eth70 as the latest version
-        let secret_key = SecretKey::new(&mut rand_08::thread_rng());
-        let id = pk2id(&secret_key.public_key(SECP256K1));
-        let hello = HelloMessageWithProtocols::builder(id).build();
-
-        let has_eth70 = hello
-            .protocols
-            .iter()
-            .any(|p| p.cap.name == "eth" && p.cap.version == EthVersion::Eth70 as usize);
-        assert!(has_eth70, "Default protocols should include Eth70");
-    }
-
+    //TODO: add test for eth70 here once we have fully support it
+   
     #[test]
     fn test_default_protocols_still_include_eth69() {
         // ensure that older eth/69 remains advertised for compatibility

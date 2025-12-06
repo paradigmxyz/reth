@@ -396,6 +396,40 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         }
     }
 
+    /// Request our peer's block range only when a throttle allows it.
+    fn maybe_request_block_range(&mut self) {
+        if self.conn.version() < EthVersion::Eth70 {
+            return
+        }
+
+        let needs_now = self.last_range_update.is_some() || self.last_range_request.is_some();
+        let now_for_eval = needs_now.then(Instant::now);
+
+        let stale_update = if let Some(last) = self.last_range_update {
+            now_for_eval.unwrap().saturating_duration_since(last) >= RANGE_REQUEST_INTERVAL
+        } else {
+            true
+        };
+        let can_request = if let Some(last) = self.last_range_request {
+            now_for_eval.unwrap().saturating_duration_since(last) >= RANGE_REQUEST_INTERVAL
+        } else {
+            true
+        };
+
+        if stale_update && can_request {
+            let now = now_for_eval.unwrap_or_else(Instant::now);
+            let request_id = self.next_id();
+            self.queued_outgoing.push_back(
+                EthMessage::RequestBlockRange(RequestPair {
+                    request_id,
+                    message: RequestBlockRange,
+                })
+                .into(),
+            );
+            self.last_range_request = Some(now);
+        }
+    }
+
     /// Returns the deadline timestamp at which the request times out
     fn request_deadline(&self) -> Instant {
         Instant::now() +
@@ -804,28 +838,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
         }
 
-        if this.conn.version() >= EthVersion::Eth70 {
-            // If our view of the peer's range is stale, request an update (throttled).
-            let now = Instant::now();
-            let stale_update = this
-                .last_range_update
-                .is_none_or(|t| now.saturating_duration_since(t) >= RANGE_REQUEST_INTERVAL);
-            let can_request = this
-                .last_range_request
-                .is_none_or(|t| now.saturating_duration_since(t) >= RANGE_REQUEST_INTERVAL);
-
-            if stale_update && can_request {
-                let request_id = this.next_id();
-                this.queued_outgoing.push_back(
-                    EthMessage::RequestBlockRange(RequestPair {
-                        request_id,
-                        message: RequestBlockRange,
-                    })
-                    .into(),
-                );
-                this.last_range_request = Some(now);
-            }
-        }
+        this.maybe_request_block_range();
 
         while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
             // check for timed out requests
