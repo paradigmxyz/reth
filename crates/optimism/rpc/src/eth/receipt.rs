@@ -10,6 +10,7 @@ use op_revm::estimate_tx_compressed_size;
 use reth_chainspec::ChainSpecProvider;
 use reth_node_api::NodePrimitives;
 use reth_optimism_evm::RethL1BlockInfo;
+use reth_optimism_flashblocks::FlashblockPayload;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::OpReceipt;
 use reth_primitives_traits::SealedBlock;
@@ -22,10 +23,11 @@ use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
 use reth_storage_api::BlockReader;
 use std::fmt::Debug;
 
-impl<N, Rpc> LoadReceipt for OpEthApi<N, Rpc>
+impl<N, Rpc, F> LoadReceipt for OpEthApi<N, Rpc, F>
 where
     N: RpcNodeCore,
     Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
+    F: FlashblockPayload,
 {
 }
 

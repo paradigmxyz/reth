@@ -34,6 +34,7 @@ pub mod chainspec;
 pub mod engine;
 pub mod engine_api;
 pub mod evm;
+pub mod flashblock;
 pub mod pool;
 pub mod primitives;
 pub mod rpc;
