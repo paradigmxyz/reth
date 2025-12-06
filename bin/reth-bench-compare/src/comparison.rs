@@ -21,6 +21,8 @@ pub(crate) struct ComparisonGenerator {
     feature_ref_name: String,
     baseline_results: Option<BenchmarkResults>,
     feature_results: Option<BenchmarkResults>,
+    baseline_command: Option<String>,
+    feature_command: Option<String>,
 }
 
 /// Represents the results from a single benchmark run
@@ -89,6 +91,7 @@ pub(crate) struct RefInfo {
     pub summary: BenchmarkSummary,
     pub start_timestamp: Option<DateTime<Utc>>,
     pub end_timestamp: Option<DateTime<Utc>>,
+    pub reth_command: Option<String>,
 }
 
 /// Summary of the comparison between references.
@@ -142,6 +145,8 @@ impl ComparisonGenerator {
             feature_ref_name: args.feature_ref.clone(),
             baseline_results: None,
             feature_results: None,
+            baseline_command: None,
+            feature_command: None,
         }
     }
 
@@ -206,6 +211,21 @@ impl ComparisonGenerator {
         Ok(())
     }
 
+    /// Set the reth command for a reference
+    pub(crate) fn set_ref_command(&mut self, ref_type: &str, command: String) -> Result<()> {
+        match ref_type {
+            "baseline" => {
+                self.baseline_command = Some(command);
+            }
+            "feature" => {
+                self.feature_command = Some(command);
+            }
+            _ => return Err(eyre!("Unknown reference type: {}", ref_type)),
+        }
+
+        Ok(())
+    }
+
     /// Generate the final comparison report
     pub(crate) async fn generate_comparison_report(&self) -> Result<()> {
         info!("Generating comparison report...");
@@ -230,12 +250,14 @@ impl ComparisonGenerator {
                 summary: baseline.summary.clone(),
                 start_timestamp: baseline.start_timestamp,
                 end_timestamp: baseline.end_timestamp,
+                reth_command: self.baseline_command.clone(),
             },
             feature: RefInfo {
                 ref_name: feature.ref_name.clone(),
                 summary: feature.summary.clone(),
                 start_timestamp: feature.start_timestamp,
                 end_timestamp: feature.end_timestamp,
+                reth_command: self.feature_command.clone(),
             },
             comparison_summary,
             per_block_comparisons,
@@ -599,6 +621,9 @@ impl ComparisonGenerator {
                 end.format("%Y-%m-%d %H:%M:%S UTC")
             );
         }
+        if let Some(ref cmd) = report.baseline.reth_command {
+            println!("  Command: {}", cmd);
+        }
         println!();
 
         println!("Feature Summary:");
@@ -627,6 +652,9 @@ impl ComparisonGenerator {
                 start.format("%Y-%m-%d %H:%M:%S UTC"),
                 end.format("%Y-%m-%d %H:%M:%S UTC")
             );
+        }
+        if let Some(ref cmd) = report.feature.reth_command {
+            println!("  Command: {}", cmd);
         }
         println!();
     }
