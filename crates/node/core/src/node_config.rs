@@ -118,6 +118,12 @@ pub struct NodeConfig<ChainSpec> {
     /// - `IPC_PATH`: default + `instance`
     pub instance: Option<u16>,
 
+    /// File descriptor limit.
+    ///
+    /// Default: 0 (system default). When set to 0, uses the system's default file descriptor
+    /// limit. When set to a positive value, attempts to raise the limit to that value.
+    pub fdlimit: u64,
+
     /// All networking related arguments
     pub network: NetworkArgs,
 
@@ -169,6 +175,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             chain,
             metrics: MetricArgs::default(),
             instance: None,
+            fdlimit: 0,
             network: NetworkArgs::default(),
             rpc: RpcServerArgs::default(),
             txpool: TxPoolArgs::default(),
@@ -244,6 +251,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             config,
             metrics,
             instance,
+            fdlimit,
             network,
             rpc,
             txpool,
@@ -263,6 +271,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             chain: chain.into(),
             metrics,
             instance,
+            fdlimit,
             network,
             rpc,
             txpool,
@@ -533,6 +542,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             config: self.config,
             metrics: self.metrics,
             instance: self.instance,
+            fdlimit: self.fdlimit,
             network: self.network,
             rpc: self.rpc,
             txpool: self.txpool,
@@ -573,6 +583,7 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             config: self.config.clone(),
             metrics: self.metrics.clone(),
             instance: self.instance,
+            fdlimit: self.fdlimit,
             network: self.network.clone(),
             rpc: self.rpc.clone(),
             txpool: self.txpool.clone(),

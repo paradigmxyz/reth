@@ -9088,6 +9088,7 @@ dependencies = [
  "fdlimit",
  "futures",
  "jsonrpsee",
+ "libc",
  "rayon",
  "reth-basic-payload-builder",
  "reth-chain-state",
