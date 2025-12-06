@@ -3859,7 +3859,6 @@ name = "exex-subscription"
 version = "1.9.3"
 dependencies = [
  "alloy-primitives",
- "clap",
  "eyre",
  "futures",
  "jsonrpsee",
@@ -8052,7 +8051,6 @@ dependencies = [
  "reth-consensus",
  "reth-db",
  "reth-db-common",
- "reth-engine-local",
  "reth-engine-primitives",
  "reth-ethereum-primitives",
  "reth-network-api",
@@ -8960,10 +8958,8 @@ dependencies = [
 name = "reth-network-api"
 version = "1.9.3"
 dependencies = [
- "alloy-consensus",
  "alloy-primitives",
  "alloy-rpc-types-admin",
- "alloy-rpc-types-eth",
  "auto_impl",
  "derive_more",
  "enr",

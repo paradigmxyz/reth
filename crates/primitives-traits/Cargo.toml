@@ -29,9 +29,6 @@ revm-state.workspace = true
 # op
 op-alloy-consensus = { workspace = true, optional = true, features = ["k256"] }
 
-# crypto
-secp256k1 = { workspace = true, features = ["recovery"], optional = true }
-
 # misc
 auto_impl.workspace = true
 byteorder = { workspace = true, optional = true }
@@ -84,7 +81,6 @@ std = [
     "bytes/std",
     "derive_more/std",
     "once_cell/std",
-    "secp256k1?/std",
     "thiserror/std",
     "alloy-trie/std",
     "op-alloy-consensus?/std",
@@ -110,8 +106,6 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "revm-primitives/arbitrary",
     "reth-codecs?/arbitrary",
-    "secp256k1?/global-context",
-    "secp256k1?/rand",
     "op-alloy-consensus?/arbitrary",
     "alloy-trie/arbitrary",
     "reth-chainspec/arbitrary",
@@ -138,7 +132,6 @@ serde = [
     "revm-primitives/serde",
     "revm-primitives/serde",
     "op-alloy-consensus?/serde",
-    "secp256k1?/serde",
     "alloy-trie/serde",
     "revm-bytecode/serde",
     "revm-state/serde",
