@@ -2,10 +2,10 @@
 //!
 //! # Decoding
 //!
-//! This crate only handles compression/decompression. 
+//! This crate only handles compression/decompression.
 //! To decode the SSZ data into concrete beacon types, use the [Lighthouse `types`](https://github.com/sigp/lighthouse/tree/stable/consensus/types)
 //! crate or another SSZ-compatible library.
-//! 
+//!
 //! # Examples
 //!
 //! ## Decoding a [`CompressedBeaconState`]
