@@ -71,10 +71,6 @@ pub struct RpcServerArgs {
     #[arg(long)]
     pub ws: bool,
 
-    /// Max concurrent `testing_buildBlockV1` requests (hidden, defaults to 1).
-    #[arg(long = "testing.max-concurrent", default_value_t = 1usize, hide = true)]
-    pub testing_max_concurrent: usize,
-
     /// Ws server address to listen on
     #[arg(long = "ws.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     pub ws_addr: IpAddr,
@@ -399,7 +395,6 @@ impl Default for RpcServerArgs {
             http_api: None,
             http_corsdomain: None,
             ws: false,
-            testing_max_concurrent: 1,
             ws_addr: Ipv4Addr::LOCALHOST.into(),
             ws_port: constants::DEFAULT_WS_RPC_PORT,
             ws_allowed_origins: None,

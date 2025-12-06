@@ -318,7 +318,8 @@ where
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
         let testing_chain = ctx.config.chain.clone();
         let testing_provider = ctx.node.provider().clone();
-        let testing_max_concurrent = ctx.config.rpc.testing_max_concurrent();
+        // Fixed concurrency limit for the hidden testing API.
+        let testing_max_concurrent = 1usize;
         let ctx_clone = ctx.clone();
 
         self.inner
@@ -334,26 +335,17 @@ where
 
                 // testing_buildBlockV1: only wire when the hidden testing module is explicitly
                 // requested on any transport. Default stays disabled to honor security guidance.
-                let testing_requested = {
-                    let cfg = container.modules.module_config();
-                    cfg.contains_http(&RethRpcModule::Other("testing".to_string())) ||
-                        cfg.contains_ws(&RethRpcModule::Other("testing".to_string())) ||
-                        cfg.contains_ipc(&RethRpcModule::Other("testing".to_string()))
-                };
-                if testing_requested {
-                    let evm_config: EthEvmConfig<ChainSpec> =
-                        EthEvmConfig::new(testing_chain.clone());
-                    let builder = EthTestingBlockBuilder::new(
-                        testing_provider,
-                        evm_config,
-                        EthereumBuilderConfig::new(),
-                    );
-                    let testing_api = TestingApi::new(builder, testing_max_concurrent).into_rpc();
-                    container.modules.merge_if_module_configured(
-                        RethRpcModule::Other("testing".to_string()),
-                        testing_api,
-                    )?;
-                }
+                let evm_config: EthEvmConfig<ChainSpec> = EthEvmConfig::new(testing_chain.clone());
+                let builder = EthTestingBlockBuilder::new(
+                    testing_provider,
+                    evm_config,
+                    EthereumBuilderConfig::new(),
+                );
+                let testing_api = TestingApi::new(builder, testing_max_concurrent).into_rpc();
+                container.modules.merge_if_module_configured(
+                    RethRpcModule::Other("testing".to_string()),
+                    testing_api,
+                )?;
 
                 Ok(())
             })
