@@ -21,6 +21,7 @@ use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
@@ -320,14 +321,17 @@ where
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
-            for tx in transactions {
-                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
-                // only send Ok(_) variants to prewarming task
-                if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
-                }
-                let _ = execute_tx.send(tx);
-            }
+            transactions.par_bridge().for_each_with(
+                (prewarm_tx, execute_tx),
+                |(prewarm_tx, execute_tx), tx| {
+                    let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
+                    // only send Ok(_) variants to prewarming task
+                    if let Ok(tx) = &tx {
+                        let _ = prewarm_tx.send(tx.clone());
+                    }
+                    let _ = execute_tx.send(tx);
+                },
+            );
         });
 
         (prewarm_rx, execute_rx, transaction_count_hint)
