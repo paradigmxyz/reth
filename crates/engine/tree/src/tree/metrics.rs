@@ -79,9 +79,12 @@ impl EngineApiMetrics {
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
         let f = || {
+            let start = Instant::now();
             debug_span!(target: "engine::tree", "pre execution")
                 .entered()
                 .in_scope(|| executor.apply_pre_execution_changes())?;
+            self.executor.pre_execution_histogram.record(start.elapsed());
+
             let exec_span = debug_span!(target: "engine::tree", "execution").entered();
             loop {
                 let start = Instant::now();
@@ -103,10 +106,15 @@ impl EngineApiMetrics {
                 enter.record("gas_used", gas_used);
             }
             drop(exec_span);
-            debug_span!(target: "engine::tree", "finish")
+
+            let start = Instant::now();
+            let result = debug_span!(target: "engine::tree", "finish")
                 .entered()
                 .in_scope(|| executor.finish())
-                .map(|(evm, result)| (evm.into_db(), result))
+                .map(|(evm, result)| (evm.into_db(), result));
+            self.executor.post_execution_histogram.record(start.elapsed());
+
+            result
         };
 
         // Use metered to execute and track timing/gas metrics
