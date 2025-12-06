@@ -261,7 +261,7 @@ mod tests {
         assert_eq!(hello_encoded.len(), hello.length());
     }
     //TODO: add test for eth70 here once we have fully support it
-   
+
     #[test]
     fn test_default_protocols_still_include_eth69() {
         // ensure that older eth/69 remains advertised for compatibility
