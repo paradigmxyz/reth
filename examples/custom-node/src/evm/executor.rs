@@ -24,10 +24,9 @@ pub struct CustomBlockExecutor<Evm> {
     inner: OpBlockExecutor<Evm, OpRethReceiptBuilder, Arc<OpChainSpec>>,
 }
 
-impl<'db, DB, E> BlockExecutor for CustomBlockExecutor<E>
+impl<E> BlockExecutor for CustomBlockExecutor<E>
 where
-    DB: Database + 'db,
-    E: Evm<DB = &'db mut State<DB>, Tx = CustomTxEnv>,
+    E: Evm<DB: StateDB + DatabaseCommit + Database, Tx = CustomTxEnv>,
 {
     type Transaction = CustomTransaction;
     type Receipt = OpReceipt;
@@ -91,12 +90,12 @@ impl BlockExecutorFactory for CustomEvmConfig {
 
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: CustomEvm<&'a mut State<DB>, I, PrecompilesMap>,
+        evm: CustomEvm<DB, I, PrecompilesMap>,
         ctx: CustomBlockExecutionCtx,
     ) -> impl BlockExecutorFor<'a, Self, DB, I>
     where
-        DB: Database + 'a,
-        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+        DB: StateDB + DatabaseCommit + Database + 'a,
+        I: InspectorFor<Self, DB> + 'a,
     {
         CustomBlockExecutor {
             inner: OpBlockExecutor::new(

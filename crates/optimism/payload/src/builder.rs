@@ -598,9 +598,9 @@ where
     }
 
     /// Prepares a [`BlockBuilder`] for the next block.
-    pub fn block_builder<'a, DB: Database>(
+     pub fn block_builder<'a, DB: StateDB + DatabaseCommit + Database + 'a>(
         &'a self,
-        db: &'a mut State<DB>,
+        db: DB,
     ) -> Result<
         impl BlockBuilder<
                 Primitives = Evm::Primitives,
