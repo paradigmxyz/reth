@@ -9191,6 +9191,7 @@ dependencies = [
  "serde",
  "shellexpand",
  "strum 0.27.2",
+ "sysinfo",
  "thiserror 2.0.17",
  "tokio",
  "toml",
