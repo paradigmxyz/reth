@@ -849,7 +849,7 @@ impl MultiProofTask {
             self.multiproof_manager.proof_worker_handle.available_account_workers();
         let available_storage_workers =
             self.multiproof_manager.proof_worker_handle.available_storage_workers();
-        let outcome = dispatch_with_chunking(
+        let num_chunks = dispatch_with_chunking(
             proof_targets,
             chunking_len,
             self.chunk_size,
@@ -871,9 +871,9 @@ impl MultiProofTask {
                 );
             },
         );
-        self.metrics.prefetch_proof_chunks_histogram.record(outcome as f64);
+        self.metrics.prefetch_proof_chunks_histogram.record(num_chunks as f64);
 
-        outcome as u64
+        num_chunks as u64
     }
 
     // Returns true if all state updates finished and all proofs processed.
@@ -990,7 +990,7 @@ impl MultiProofTask {
             self.multiproof_manager.proof_worker_handle.available_account_workers();
         let available_storage_workers =
             self.multiproof_manager.proof_worker_handle.available_storage_workers();
-        let outcome = dispatch_with_chunking(
+        let num_chunks = dispatch_with_chunking(
             not_fetched_state_update,
             chunking_len,
             self.chunk_size,
@@ -1025,11 +1025,11 @@ impl MultiProofTask {
         self.metrics
             .state_update_proof_targets_storages_histogram
             .record(spawned_proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
-        self.metrics.state_update_proof_chunks_histogram.record(outcome as f64);
+        self.metrics.state_update_proof_chunks_histogram.record(num_chunks as f64);
 
         self.fetched_proof_targets.extend(spawned_proof_targets);
 
-        state_updates + outcome as u64
+        state_updates + num_chunks as u64
     }
 
     /// Handler for new proof calculated, aggregates all the existing sequential proofs.
