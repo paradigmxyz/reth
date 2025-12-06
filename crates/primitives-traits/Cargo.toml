@@ -132,6 +132,7 @@ serde = [
     "revm-primitives/serde",
     "revm-primitives/serde",
     "op-alloy-consensus?/serde",
+    "secp256k1?/serde",
     "alloy-trie/serde",
     "revm-bytecode/serde",
     "revm-state/serde",
