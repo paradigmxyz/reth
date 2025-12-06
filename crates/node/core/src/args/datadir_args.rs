@@ -28,7 +28,8 @@ pub struct DatadirArgs {
     )]
     pub static_files_path: Option<PathBuf>,
 
-    /// Minimum free disk space in MB, once reached triggers auto shut down (default = 0, disabled).
+    /// Minimum free disk space in MB, once reached triggers auto shut down (default = 0,
+    /// disabled).
     #[arg(
         long = "datadir.min-free-disk",
         alias = "datadir.min_free_disk",
@@ -69,21 +70,15 @@ mod tests {
     #[test]
     fn test_parse_min_free_disk_flag() {
         // Test with hyphen format
-        let args = CommandParser::<DatadirArgs>::parse_from([
-            "reth",
-            "--datadir.min-free-disk",
-            "1000",
-        ])
-        .args;
+        let args =
+            CommandParser::<DatadirArgs>::parse_from(["reth", "--datadir.min-free-disk", "1000"])
+                .args;
         assert_eq!(args.min_free_disk, 1000);
 
         // Test with underscore format (alias)
-        let args = CommandParser::<DatadirArgs>::parse_from([
-            "reth",
-            "--datadir.min_free_disk",
-            "500",
-        ])
-        .args;
+        let args =
+            CommandParser::<DatadirArgs>::parse_from(["reth", "--datadir.min_free_disk", "500"])
+                .args;
         assert_eq!(args.min_free_disk, 500);
 
         // Test default value (0 = disabled)

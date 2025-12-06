@@ -226,7 +226,7 @@ where
             let data_dir_for_monitor = data_dir.clone();
             let shutdown = ctx.task_executor.on_shutdown_signal().clone();
             let task_executor = ctx.task_executor.clone();
-            
+
             ctx.task_executor.spawn_critical(
                 "disk space monitor",
                 Box::pin(disk_space_monitor_task(
@@ -253,7 +253,8 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> NodeCommand<C, Ext> {
     }
 }
 
-/// Disk space monitoring task that periodically checks disk space and triggers shutdown if below threshold.
+/// Disk space monitoring task that periodically checks disk space and triggers shutdown if below
+/// threshold.
 async fn disk_space_monitor_task(
     data_dir: reth_node_core::dirs::ChainPath<DataDirPath>,
     min_free_disk_mb: u64,
@@ -261,10 +262,10 @@ async fn disk_space_monitor_task(
     task_executor: TaskExecutor,
 ) {
     use tokio::time::{interval, Duration as TokioDuration};
-    
+
     let mut interval = interval(TokioDuration::from_secs(60)); // Check every minute
     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-    
+
     loop {
         tokio::select! {
             _ = interval.tick() => {

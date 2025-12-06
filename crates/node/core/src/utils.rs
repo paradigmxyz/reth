@@ -95,15 +95,15 @@ where
 /// Returns the available space in MB, or None if the check fails.
 pub fn get_available_disk_space_mb(path: &Path) -> Option<u64> {
     use sysinfo::Disks;
-    
+
     // Find the disk that contains the given path
     let path_canonical = match std::fs::canonicalize(path) {
         Ok(p) => p,
         Err(_) => return None,
     };
-    
+
     let disks = Disks::new_with_refreshed_list();
-    
+
     // Find the disk that contains the given path
     for disk in disks.iter() {
         let mount_point = disk.mount_point();
@@ -113,7 +113,7 @@ pub fn get_available_disk_space_mb(path: &Path) -> Option<u64> {
             return Some(available_bytes / (1024 * 1024));
         }
     }
-    
+
     None
 }
 
@@ -169,7 +169,7 @@ mod tests {
         // and returns a boolean value
         let temp_dir = std::env::temp_dir();
         let result = is_disk_space_low(&temp_dir, 1_000_000_000); // Very large threshold
-        // Should return either true or false, but not panic
+                                                                  // Should return either true or false, but not panic
         assert!(result == true || result == false);
     }
 
@@ -213,20 +213,29 @@ mod tests {
     fn test_is_disk_space_low_threshold_comparison() {
         // Test that the function correctly compares available space with threshold
         let temp_dir = std::env::temp_dir();
-        
+
         if let Some(available_mb) = get_available_disk_space_mb(&temp_dir) {
-            // Test with a threshold smaller than available space (should pass - space is sufficient)
+            // Test with a threshold smaller than available space (should pass - space is
+            // sufficient)
             if available_mb > 0 {
                 let result_small = is_disk_space_low(&temp_dir, available_mb.saturating_sub(1));
-                assert!(!result_small, "Should pass (return false) when threshold is less than available space");
+                assert!(
+                    !result_small,
+                    "Should pass (return false) when threshold is less than available space"
+                );
             }
-            
-            // Test with a threshold larger than available space (should fail - space is insufficient)
+
+            // Test with a threshold larger than available space (should fail - space is
+            // insufficient)
             let result_large = is_disk_space_low(&temp_dir, available_mb.saturating_add(1));
-            assert!(result_large, "Should fail (return true) when threshold is greater than available space");
-            
+            assert!(
+                result_large,
+                "Should fail (return true) when threshold is greater than available space"
+            );
+
             // Test with threshold equal to available space (edge case)
-            // When available == threshold, should trigger shutdown (return true) because "once reached" includes equality
+            // When available == threshold, should trigger shutdown (return true) because "once
+            // reached" includes equality
             let result_equal = is_disk_space_low(&temp_dir, available_mb);
             assert!(result_equal, "Should fail (return true) when threshold equals available space, as 'once reached' includes equality");
         }
