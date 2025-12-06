@@ -230,20 +230,18 @@ impl LaunchContext {
             {
                 let result = unsafe {
                     let mut rlimit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
-                    if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlimit) == 0 {
+                    if libc::getrlimit(libc::RLIMIT_NOFILE, &raw mut rlimit) == 0 {
                         let old_limit = rlimit.rlim_cur;
-                        rlimit.rlim_cur = fdlimit.min(rlimit.rlim_max as u64) as libc::rlim_t;
-                        if libc::setrlimit(libc::RLIMIT_NOFILE, &rlimit) == 0 {
+                        rlimit.rlim_cur = fdlimit.min(rlimit.rlim_max) as libc::rlim_t;
+                        if libc::setrlimit(libc::RLIMIT_NOFILE, &raw const rlimit) == 0 {
                             if rlimit.rlim_cur != old_limit {
                                 debug!(
                                     from = old_limit,
                                     to = rlimit.rlim_cur,
                                     "Set file descriptor limit"
                                 );
-                                Ok(())
-                            } else {
-                                Ok(())
                             }
+                            Ok(())
                         } else {
                             Err(std::io::Error::last_os_error())
                         }
