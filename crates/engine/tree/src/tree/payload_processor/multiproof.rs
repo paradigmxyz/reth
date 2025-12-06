@@ -1120,23 +1120,9 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Dispatch first message immediately
-                let first_account_targets = targets.len();
-                let first_storage_targets =
-                    targets.values().map(|slots| slots.len()).sum::<usize>();
-                batch_metrics.prefetch_proofs_requested += self.on_prefetch_proof(targets);
-                debug!(
-                    target: "engine::tree::payload_processor::multiproof",
-                    account_targets = first_account_targets,
-                    storage_targets = first_storage_targets,
-                    prefetch_proofs_requested = batch_metrics.prefetch_proofs_requested,
-                    num_batched = 1,
-                    "Dispatched first prefetch immediately"
-                );
-
-                // Accumulate more messages while workers process
-                let mut accumulated_targets: Vec<MultiProofTargets> = Vec::new();
-                let mut accumulated_count = 0usize;
+                // Accumulate messages including the first one
+                let mut accumulated_count = targets.chunking_length();
+                let mut accumulated_targets: Vec<MultiProofTargets> = vec![targets];
 
                 loop {
                     if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS ||
@@ -1147,9 +1133,7 @@ impl MultiProofTask {
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
                             let next_count = next_targets.chunking_length();
-                            if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS &&
-                                !accumulated_targets.is_empty()
-                            {
+                            if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS {
                                 ctx.pending_msg =
                                     Some(MultiProofMessage::PrefetchProofs(next_targets));
                                 break;
@@ -1165,32 +1149,27 @@ impl MultiProofTask {
                     }
                 }
 
-                // Process accumulated batch
-                let total_batched = accumulated_targets.len() + 1; // include the immediately dispatched message
-                if accumulated_targets.is_empty() {
-                    self.metrics.prefetch_batch_size_histogram.record(1.0);
-                } else {
-                    let mut merged_targets = accumulated_targets.remove(0);
-                    for next_targets in accumulated_targets {
-                        merged_targets.extend(next_targets);
-                    }
+                // Process all accumulated messages in a single batch
+                let num_batched = accumulated_targets.len();
+                self.metrics.prefetch_batch_size_histogram.record(num_batched as f64);
 
-                    self.metrics.prefetch_batch_size_histogram.record(total_batched as f64);
-
-                    let account_targets = merged_targets.len();
-                    let storage_targets =
-                        merged_targets.values().map(|slots| slots.len()).sum::<usize>();
-                    batch_metrics.prefetch_proofs_requested +=
-                        self.on_prefetch_proof(merged_targets);
-                    debug!(
-                        target: "engine::tree::payload_processor::multiproof",
-                        account_targets,
-                        storage_targets,
-                        prefetch_proofs_requested = batch_metrics.prefetch_proofs_requested,
-                        num_batched = total_batched,
-                        "Dispatched accumulated prefetch batch"
-                    );
+                let mut merged_targets = accumulated_targets.remove(0);
+                for next_targets in accumulated_targets {
+                    merged_targets.extend(next_targets);
                 }
+
+                let account_targets = merged_targets.len();
+                let storage_targets =
+                    merged_targets.values().map(|slots| slots.len()).sum::<usize>();
+                batch_metrics.prefetch_proofs_requested += self.on_prefetch_proof(merged_targets);
+                debug!(
+                    target: "engine::tree::payload_processor::multiproof",
+                    account_targets,
+                    storage_targets,
+                    prefetch_proofs_requested = batch_metrics.prefetch_proofs_requested,
+                    num_batched,
+                    "Dispatched prefetch batch"
+                );
 
                 false
             }
@@ -1206,21 +1185,10 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Dispatch first message immediately
-                let first_len = update.len();
-                batch_metrics.state_update_proofs_requested += self.on_state_update(source, update);
-                debug!(
-                    target: "engine::tree::payload_processor::multiproof",
-                    ?source,
-                    len = first_len,
-                    state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
-                    num_batched = 1,
-                    "Dispatched first state update immediately"
-                );
-
-                // Accumulate more messages while workers process
-                let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> = Vec::new();
-                let mut accumulated_targets = 0usize;
+                // Accumulate messages including the first one
+                let mut accumulated_targets = estimate_evm_state_targets(&update);
+                let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> =
+                    vec![(source, update)];
 
                 loop {
                     if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
@@ -1228,14 +1196,13 @@ impl MultiProofTask {
                     }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                            if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                                !can_batch_state_update(
-                                    *batch_source,
-                                    batch_update,
-                                    next_source,
-                                    &next_update,
-                                )
-                            {
+                            let (batch_source, batch_update) = &accumulated_updates[0];
+                            if !can_batch_state_update(
+                                *batch_source,
+                                batch_update,
+                                next_source,
+                                &next_update,
+                            ) {
                                 ctx.pending_msg =
                                     Some(MultiProofMessage::StateUpdate(next_source, next_update));
                                 break;
@@ -1249,8 +1216,7 @@ impl MultiProofTask {
                                     Some(MultiProofMessage::StateUpdate(next_source, next_update));
                                 break;
                             }
-                            if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                                !accumulated_updates.is_empty()
+                            if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
                             {
                                 ctx.pending_msg =
                                     Some(MultiProofMessage::StateUpdate(next_source, next_update));
@@ -1267,37 +1233,33 @@ impl MultiProofTask {
                     }
                 }
 
-                // Process accumulated batch
-                let total_batched = accumulated_updates.len() + 1; // include the immediately dispatched message
-                if accumulated_updates.is_empty() {
-                    self.metrics.state_update_batch_size_histogram.record(1.0);
-                } else {
-                    let batch_source = accumulated_updates[0].0;
-                    {
-                        let batch_update = &accumulated_updates[0].1;
-                        debug_assert!(accumulated_updates.iter().all(|(source, update)| {
-                            can_batch_state_update(batch_source, batch_update, *source, update)
-                        }));
-                    }
-                    let mut merged_update = accumulated_updates.remove(0).1;
-                    for (_, next_update) in accumulated_updates {
-                        merged_update.extend(next_update);
-                    }
+                // Process all accumulated messages in a single batch
+                let num_batched = accumulated_updates.len();
+                self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
 
-                    self.metrics.state_update_batch_size_histogram.record(total_batched as f64);
-
-                    let batch_len = merged_update.len();
-                    batch_metrics.state_update_proofs_requested +=
-                        self.on_state_update(batch_source, merged_update);
-                    debug!(
-                        target: "engine::tree::payload_processor::multiproof",
-                        ?batch_source,
-                        len = batch_len,
-                        state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
-                        num_batched = total_batched,
-                        "Dispatched accumulated batch"
-                    );
+                let batch_source = accumulated_updates[0].0;
+                {
+                    let batch_update = &accumulated_updates[0].1;
+                    debug_assert!(accumulated_updates.iter().all(|(source, update)| {
+                        can_batch_state_update(batch_source, batch_update, *source, update)
+                    }));
                 }
+                let mut merged_update = accumulated_updates.remove(0).1;
+                for (_, next_update) in accumulated_updates {
+                    merged_update.extend(next_update);
+                }
+
+                let batch_len = merged_update.len();
+                batch_metrics.state_update_proofs_requested +=
+                    self.on_state_update(batch_source, merged_update);
+                debug!(
+                    target: "engine::tree::payload_processor::multiproof",
+                    ?batch_source,
+                    len = batch_len,
+                    state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
+                    num_batched,
+                    "Dispatched state update batch"
+                );
 
                 false
             }
