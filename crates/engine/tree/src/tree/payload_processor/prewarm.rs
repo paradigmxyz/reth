@@ -29,7 +29,7 @@ use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, StateProviderFactory, StateReader};
+use reth_provider::{BlockReader, StateProviderBox, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
 use reth_trie::MultiProofTargets;
 use std::{
@@ -255,31 +255,35 @@ where
             self;
         let hash = env.hash;
 
-        debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-        // Perform all cache operations atomically under the lock
-        execution_cache.update_with_guard(|cached| {
-            // consumes the `SavedCache` held by the prewarming task, which releases its usage guard
-            let (caches, cache_metrics) = saved_cache.split();
-            let new_cache = SavedCache::new(hash, caches, cache_metrics);
+        if let Some(saved_cache) = saved_cache {
+            debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
+            // Perform all cache operations atomically under the lock
+            execution_cache.update_with_guard(|cached| {
+                // consumes the `SavedCache` held by the prewarming task, which releases its usage
+                // guard
+                let (caches, cache_metrics) = saved_cache.split();
+                let new_cache = SavedCache::new(hash, caches, cache_metrics);
 
-            // Insert state into cache while holding the lock
-            if new_cache.cache().insert_state(&state).is_err() {
-                // Clear the cache on error to prevent having a polluted cache
-                *cached = None;
-                debug!(target: "engine::caching", "cleared execution cache on update error");
-                return;
-            }
+                // Insert state into cache while holding the lock
+                if new_cache.cache().insert_state(&state).is_err() {
+                    // Clear the cache on error to prevent having a polluted cache
+                    *cached = None;
+                    debug!(target: "engine::caching", "cleared execution cache on update error");
+                    return;
+                }
 
-            new_cache.update_metrics();
+                new_cache.update_metrics();
 
-            // Replace the shared cache with the new one; the previous cache (if any) is dropped.
-            *cached = Some(new_cache);
-        });
+                // Replace the shared cache with the new one; the previous cache (if any) is
+                // dropped.
+                *cached = Some(new_cache);
+            });
 
-        let elapsed = start.elapsed();
-        debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+            let elapsed = start.elapsed();
+            debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
 
-        metrics.cache_saving_duration.set(elapsed.as_secs_f64());
+            metrics.cache_saving_duration.set(elapsed.as_secs_f64());
+        }
     }
 
     /// Executes the task.
@@ -356,7 +360,7 @@ where
 {
     pub(super) env: ExecutionEnv<Evm>,
     pub(super) evm_config: Evm,
-    pub(super) saved_cache: SavedCache,
+    pub(super) saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,
     pub(super) metrics: PrewarmMetrics,
@@ -400,10 +404,13 @@ where
         };
 
         // Use the caches to create a new provider with caching
-        let caches = saved_cache.cache().clone();
-        let cache_metrics = saved_cache.metrics().clone();
-        let state_provider =
-            CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
+        let state_provider: StateProviderBox = if let Some(saved_cache) = saved_cache {
+            let caches = saved_cache.cache().clone();
+            let cache_metrics = saved_cache.metrics().clone();
+            Box::new(CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics))
+        } else {
+            state_provider
+        };
 
         let state_provider = StateProviderDatabase::new(state_provider);
 

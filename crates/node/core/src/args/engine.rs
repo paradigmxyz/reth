@@ -35,6 +35,10 @@ pub struct EngineArgs {
     #[deprecated]
     pub caching_and_prewarming_enabled: bool,
 
+    /// Disable state cache
+    #[arg(long = "engine.disable-state-cache")]
+    pub state_cache_disabled: bool,
+
     /// Disable parallel prewarming
     #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming")]
     pub prewarming_disabled: bool,
@@ -130,6 +134,7 @@ impl Default for EngineArgs {
             legacy_state_root_task_enabled: false,
             state_root_task_compare_updates: false,
             caching_and_prewarming_enabled: true,
+            state_cache_disabled: false,
             prewarming_disabled: false,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: false,
@@ -157,6 +162,7 @@ impl EngineArgs {
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
+            .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
             .with_disable_parallel_sparse_trie(self.parallel_sparse_trie_disabled)
             .with_state_provider_metrics(self.state_provider_metrics)
