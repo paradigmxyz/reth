@@ -105,7 +105,7 @@ pub fn get_available_disk_space_mb(path: &Path) -> Option<u64> {
     let disks = Disks::new_with_refreshed_list();
 
     // Find the disk that contains the given path
-    for disk in disks.iter() {
+    for disk in &disks {
         let mount_point = disk.mount_point();
         if path_canonical.starts_with(mount_point) {
             // Get available space in bytes, convert to MB
@@ -168,9 +168,8 @@ mod tests {
         // We can't easily mock sysinfo, so we just test that it doesn't panic
         // and returns a boolean value
         let temp_dir = std::env::temp_dir();
-        let result = is_disk_space_low(&temp_dir, 1_000_000_000); // Very large threshold
-                                                                  // Should return either true or false, but not panic
-        assert!(result == true || result == false);
+        // Should return either true or false, but not panic
+        let _result = is_disk_space_low(&temp_dir, 1_000_000_000); // Very large threshold
     }
 
     #[test]
@@ -178,9 +177,8 @@ mod tests {
         // Test with a non-existent path
         let invalid_path = Path::new("/nonexistent/path/that/does/not/exist");
         // Should not panic, but may return false (feature disabled) or handle gracefully
-        let result = is_disk_space_low(invalid_path, 1000);
-        // Should not panic, result depends on sysinfo behavior
-        assert!(result == true || result == false);
+        // Result depends on sysinfo behavior
+        let _result = is_disk_space_low(invalid_path, 1000);
     }
 
     #[test]
@@ -190,9 +188,9 @@ mod tests {
         let result = get_available_disk_space_mb(&temp_dir);
         // Should return Some(u64) if successful, or None if it fails
         match result {
-            Some(mb) => {
+            Some(_mb) => {
                 // If successful, should be a reasonable value (not 0 for temp dir)
-                assert!(mb > 0 || mb == 0, "Available space should be a valid number");
+                // Value is already validated as u64, so no need to check bounds
             }
             None => {
                 // It's okay if it fails, sysinfo might not work in all test environments
