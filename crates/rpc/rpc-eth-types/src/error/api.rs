@@ -5,6 +5,7 @@ use crate::{EthApiError, RevertError};
 use alloy_primitives::Bytes;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmErrorFor, HaltReasonFor};
+use reth_revm::db::bal::BalDatabaseError;
 use revm::{context::result::ExecutionResult, context_interface::result::HaltReason};
 
 use super::RpcInvalidTransactionError;
@@ -84,10 +85,12 @@ impl AsEthApiError for EthApiError {
 
 /// Helper trait to convert from revm errors.
 pub trait FromEvmError<Evm: ConfigureEvm>:
-    From<EvmErrorFor<Evm, ProviderError>> + FromEvmHalt<HaltReasonFor<Evm>> + FromRevert
+    From<EvmErrorFor<Evm, BalDatabaseError<ProviderError>>>
+    + FromEvmHalt<HaltReasonFor<Evm>>
+    + FromRevert
 {
     /// Converts from EVM error to this type.
-    fn from_evm_err(err: EvmErrorFor<Evm, ProviderError>) -> Self {
+    fn from_evm_err(err: EvmErrorFor<Evm, BalDatabaseError<ProviderError>>) -> Self {
         err.into()
     }
 
@@ -105,7 +108,9 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
 
 impl<T, Evm> FromEvmError<Evm> for T
 where
-    T: From<EvmErrorFor<Evm, ProviderError>> + FromEvmHalt<HaltReasonFor<Evm>> + FromRevert,
+    T: From<EvmErrorFor<Evm, BalDatabaseError<ProviderError>>>
+        + FromEvmHalt<HaltReasonFor<Evm>>
+        + FromRevert,
     Evm: ConfigureEvm,
 {
 }
