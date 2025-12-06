@@ -2,7 +2,7 @@ use crate::EthEvmConfig;
 use alloc::{boxed::Box, sync::Arc, vec, vec::Vec};
 use alloy_consensus::Header;
 use alloy_eips::eip7685::Requests;
-use alloy_evm::precompiles::PrecompilesMap;
+use alloy_evm::{block::StateDB, precompiles::PrecompilesMap};
 use alloy_primitives::Bytes;
 use alloy_rpc_types_engine::ExecutionData;
 use parking_lot::Mutex;
@@ -19,7 +19,6 @@ use reth_execution_types::{BlockExecutionResult, ExecutionOutcome};
 use reth_primitives_traits::{BlockTy, SealedBlock, SealedHeader};
 use revm::{
     context::result::{ExecutionResult, Output, ResultAndState, SuccessReason},
-    database::State,
     Inspector,
 };
 
@@ -129,7 +128,7 @@ impl<DB: StateDB + Database, I: Inspector<EthEvmContext<DB>>> BlockExecutor
             blob_gas_used: 0,
         };
 
-         *evm.db_mut().bundle_state_mut() = bundle;
+        *evm.db_mut().bundle_state_mut() = bundle;
 
         Ok((evm, result))
     }

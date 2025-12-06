@@ -18,7 +18,7 @@
 extern crate alloc;
 
 use crate::execute::{BasicBlockBuilder, Executor};
-use ::revm::{context::TxEnv, database::State};
+use ::revm::context::TxEnv;
 use alloc::vec::Vec;
 use alloy_eips::{
     eip2718::{EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
@@ -26,7 +26,7 @@ use alloy_eips::{
     eip4895::Withdrawals,
 };
 use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
+    block::{BlockExecutorFactory, BlockExecutorFor, StateDB},
     precompiles::PrecompilesMap,
 };
 use alloy_primitives::{Address, B256};
@@ -36,6 +36,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
+use revm::DatabaseCommit;
 
 pub mod either;
 /// EVM environment configuration.
@@ -401,7 +402,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// ```
     fn builder_for_next_block<'a, DB: StateDB + DatabaseCommit + Database + 'a>(
         &'a self,
-       db: DB,
+        db: DB,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<

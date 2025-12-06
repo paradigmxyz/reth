@@ -4,7 +4,7 @@ use crate::{
     OpPayloadBuilderAttributes, OpPayloadPrimitives,
 };
 use alloy_consensus::{BlockHeader, Transaction, Typed2718};
-use alloy_evm::Evm as AlloyEvm;
+use alloy_evm::{block::StateDB, Evm as AlloyEvm};
 use alloy_primitives::{B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_engine::PayloadId;
@@ -38,7 +38,10 @@ use reth_revm::{
 };
 use reth_storage_api::{errors::ProviderError, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::context::{Block, BlockEnv};
+use revm::{
+    context::{Block, BlockEnv},
+    DatabaseCommit,
+};
 use std::{marker::PhantomData, sync::Arc};
 use tracing::{debug, trace, warn};
 
@@ -598,7 +601,7 @@ where
     }
 
     /// Prepares a [`BlockBuilder`] for the next block.
-     pub fn block_builder<'a, DB: StateDB + DatabaseCommit + Database + 'a>(
+    pub fn block_builder<'a, DB: StateDB + DatabaseCommit + Database + 'a>(
         &'a self,
         db: DB,
     ) -> Result<

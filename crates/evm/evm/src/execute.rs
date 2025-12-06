@@ -1,12 +1,12 @@
 //! Traits for execution.
 
 use crate::{ConfigureEvm, Database, OnStateHook, TxEnvFor};
-use alloc::{boxed::Box, sync::Arc, vec::Vec};
+use alloc::{borrow::Cow, boxed::Box, sync::Arc, vec::Vec};
 use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::eip2718::WithEncoded;
 pub use alloy_evm::block::{BlockExecutor, BlockExecutorFactory};
 use alloy_evm::{
-    block::{CommitChanges, ExecutableTx},
+    block::{CommitChanges, ExecutableTx, StateDB},
     Evm, EvmEnv, EvmFactory, RecoveredTx, ToTxEnv,
 };
 use alloy_primitives::{Address, B256};
@@ -214,7 +214,7 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     /// Output of block execution.
     pub output: &'b BlockExecutionResult<F::Receipt>,
     /// [`BundleState`] after the block execution.
-     pub bundle_state: Cow<'a, BundleState>,
+    pub bundle_state: Cow<'a, BundleState>,
     /// Provider with access to state.
     #[debug(skip)]
     pub state_provider: &'b dyn StateProvider,
@@ -234,7 +234,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
         parent: &'a SealedHeader<H>,
         transactions: Vec<F::Transaction>,
         output: &'b BlockExecutionResult<F::Receipt>,
-       bundle_state: impl Into<Cow<'a, BundleState>>,
+        bundle_state: impl Into<Cow<'a, BundleState>>,
         state_provider: &'b dyn StateProvider,
         state_root: B256,
     ) -> Self {
@@ -506,13 +506,13 @@ where
         state: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
-         let (mut db, evm_env) = evm.finish();
+        let (mut db, evm_env) = evm.finish();
 
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
         // calculate the state root
-         let hashed_state = state.hashed_post_state(db.bundle_state());
+        let hashed_state = state.hashed_post_state(db.bundle_state());
         let (state_root, trie_updates) = state
             .state_root_with_updates(hashed_state.clone())
             .map_err(BlockExecutionError::other)?;

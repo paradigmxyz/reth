@@ -290,7 +290,7 @@ dependencies = [
  "derive_more",
  "op-alloy",
  "op-revm",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "thiserror 2.0.17",
  "tracing",
 ]
@@ -399,7 +399,7 @@ dependencies = [
  "auto_impl",
  "op-alloy",
  "op-revm",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "thiserror 2.0.17",
 ]
 
@@ -3236,7 +3236,7 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -3602,8 +3602,8 @@ dependencies = [
  "reth-payload-builder",
  "reth-rpc-api",
  "reth-rpc-engine-api",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm",
+ "revm-primitives",
  "serde",
  "thiserror 2.0.17",
 ]
@@ -6289,7 +6289,7 @@ version = "14.1.0"
 source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#d86e05673463cb83e0fb0c69e39b3119ba5916bd"
 dependencies = [
  "auto_impl",
- "revm 33.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm",
  "serde",
 ]
 
@@ -7501,8 +7501,8 @@ dependencies = [
  "reth-storage-api",
  "reth-testing-utils",
  "reth-trie",
- "revm-database 9.0.6 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-database",
+ "revm-state",
  "serde",
  "tokio",
  "tokio-stream",
@@ -8033,7 +8033,7 @@ dependencies = [
  "reth-tasks",
  "reth-tokio-util",
  "reth-tracing",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "serde_json",
  "tempfile",
  "tokio",
@@ -8207,9 +8207,9 @@ dependencies = [
  "reth-trie-parallel",
  "reth-trie-sparse",
  "reth-trie-sparse-parallel",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm",
+ "revm-primitives",
+ "revm-state",
  "schnellru",
  "serde_json",
  "smallvec",
@@ -8238,7 +8238,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-revm",
  "reth-storage-api",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "serde",
  "serde_json",
  "tokio",
@@ -8519,7 +8519,7 @@ dependencies = [
  "reth-revm",
  "reth-storage-api",
  "reth-transaction-pool",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "tracing",
 ]
 
@@ -8581,7 +8581,7 @@ dependencies = [
  "reth-storage-api",
  "reth-storage-errors",
  "reth-trie-common",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
 ]
 
 [[package]]
@@ -8605,7 +8605,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-storage-errors",
  "reth-testing-utils",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "secp256k1 0.30.0",
 ]
 
@@ -8636,7 +8636,7 @@ dependencies = [
  "reth-ethereum-primitives",
  "reth-primitives-traits",
  "reth-trie-common",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "serde",
  "serde_with",
 ]
@@ -8767,9 +8767,9 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "reth-trie",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-bytecode 7.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-database 9.0.6 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm",
+ "revm-bytecode",
+ "revm-database",
  "serde",
  "serde_json",
  "tempfile",
@@ -9210,7 +9210,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "reth-transaction-pool",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "serde",
  "serde_json",
  "similar-asserts",
@@ -9439,7 +9439,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie",
  "reth-trie-common",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "thiserror 2.0.17",
  "tracing",
 ]
@@ -9469,7 +9469,7 @@ dependencies = [
  "reth-revm",
  "reth-rpc-eth-api",
  "reth-storage-errors",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "thiserror 2.0.17",
 ]
 
@@ -9572,7 +9572,7 @@ dependencies = [
  "reth-tracing",
  "reth-transaction-pool",
  "reth-trie-common",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "serde",
  "serde_json",
  "tokio",
@@ -9611,7 +9611,7 @@ dependencies = [
  "reth-revm",
  "reth-storage-api",
  "reth-transaction-pool",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "serde",
  "sha2",
  "thiserror 2.0.17",
@@ -9698,7 +9698,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-transaction-pool",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
@@ -9877,9 +9877,9 @@ dependencies = [
  "rayon",
  "reth-chainspec",
  "reth-codecs",
- "revm-bytecode 7.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-bytecode",
+ "revm-primitives",
+ "revm-state",
  "secp256k1 0.30.0",
  "serde",
  "serde_json",
@@ -9927,9 +9927,9 @@ dependencies = [
  "reth-tracing",
  "reth-trie",
  "reth-trie-db",
- "revm-database 9.0.6 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-database",
+ "revm-database-interface",
+ "revm-state",
  "strum 0.27.2",
  "tempfile",
  "tokio",
@@ -10054,7 +10054,7 @@ dependencies = [
  "reth-storage-api",
  "reth-storage-errors",
  "reth-trie",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
 ]
 
 [[package]]
@@ -10126,9 +10126,9 @@ dependencies = [
  "reth-testing-utils",
  "reth-transaction-pool",
  "reth-trie-common",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "revm-inspectors",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-primitives",
  "serde",
  "serde_json",
  "sha2",
@@ -10359,7 +10359,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie-common",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "revm-inspectors",
  "tokio",
  "tracing",
@@ -10401,7 +10401,7 @@ dependencies = [
  "reth-tasks",
  "reth-transaction-pool",
  "reth-trie",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "revm-inspectors",
  "schnellru",
  "serde",
@@ -10633,7 +10633,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-errors",
  "reth-trie-common",
- "revm-database 9.0.6 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-database",
  "serde_json",
 ]
 
@@ -10648,7 +10648,7 @@ dependencies = [
  "reth-primitives-traits",
  "reth-prune-types",
  "reth-static-file-types",
- "revm-database-interface 8.0.5 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-database-interface",
  "thiserror 2.0.17",
 ]
 
@@ -10676,7 +10676,7 @@ dependencies = [
  "reth-stages-types",
  "reth-storage-api",
  "reth-trie",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "tokio",
  "tracing",
 ]
@@ -10788,8 +10788,8 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-tracing",
- "revm-interpreter 31.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-interpreter",
+ "revm-primitives",
  "rustc-hash",
  "schnellru",
  "serde",
@@ -10829,8 +10829,8 @@ dependencies = [
  "reth-tracing",
  "reth-trie-common",
  "reth-trie-sparse",
- "revm-database 9.0.6 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-database",
+ "revm-state",
  "tracing",
  "triehash",
 ]
@@ -10861,8 +10861,8 @@ dependencies = [
  "rayon",
  "reth-codecs",
  "reth-primitives-traits",
- "revm-database 9.0.6 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-database",
+ "revm-state",
  "serde",
  "serde_json",
  "serde_with",
@@ -10885,8 +10885,8 @@ dependencies = [
  "reth-provider",
  "reth-trie",
  "reth-trie-common",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-database 9.0.6 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm",
+ "revm-database",
  "serde_json",
  "similar-asserts",
  "tracing",
@@ -10995,48 +10995,19 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "33.1.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "revm-bytecode 7.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-context 12.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-context-interface 13.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-database 9.0.6 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-handler 14.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-inspector 14.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-interpreter 31.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-precompile 31.0.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
-]
-
-[[package]]
-name = "revm"
-version = "33.1.0"
 source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#d86e05673463cb83e0fb0c69e39b3119ba5916bd"
 dependencies = [
- "revm-bytecode 7.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-context 12.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-context-interface 13.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-database 9.0.6 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-handler 14.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-inspector 14.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-interpreter 31.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-precompile 31.0.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
-]
-
-[[package]]
-name = "revm-bytecode"
-version = "7.1.1"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "bitvec",
- "phf",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "serde",
+ "revm-bytecode",
+ "revm-context",
+ "revm-context-interface",
+ "revm-database",
+ "revm-database-interface",
+ "revm-handler",
+ "revm-inspector",
+ "revm-interpreter",
+ "revm-precompile",
+ "revm-primitives",
+ "revm-state",
 ]
 
 [[package]]
@@ -11046,23 +11017,7 @@ source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#d86e05673463
 dependencies = [
  "bitvec",
  "phf",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "serde",
-]
-
-[[package]]
-name = "revm-context"
-version = "12.1.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "bitvec",
- "cfg-if",
- "derive-where",
- "revm-bytecode 7.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-context-interface 13.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm-primitives",
  "serde",
 ]
 
@@ -11074,26 +11029,11 @@ dependencies = [
  "bitvec",
  "cfg-if",
  "derive-where",
- "revm-bytecode 7.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-context-interface 13.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "serde",
-]
-
-[[package]]
-name = "revm-context-interface"
-version = "13.1.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "alloy-eip2930",
- "alloy-eip7702",
- "auto_impl",
- "either",
- "revm-database-interface 8.0.5 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm-bytecode",
+ "revm-context-interface",
+ "revm-database-interface",
+ "revm-primitives",
+ "revm-state",
  "serde",
 ]
 
@@ -11106,22 +11046,9 @@ dependencies = [
  "alloy-eip7702",
  "auto_impl",
  "either",
- "revm-database-interface 8.0.5 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "serde",
-]
-
-[[package]]
-name = "revm-database"
-version = "9.0.6"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "alloy-eips",
- "revm-bytecode 7.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm-database-interface",
+ "revm-primitives",
+ "revm-state",
  "serde",
 ]
 
@@ -11131,24 +11058,11 @@ version = "9.0.6"
 source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#d86e05673463cb83e0fb0c69e39b3119ba5916bd"
 dependencies = [
  "alloy-eips",
- "revm-bytecode 7.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-bytecode",
+ "revm-database-interface",
+ "revm-primitives",
+ "revm-state",
  "serde",
-]
-
-[[package]]
-name = "revm-database-interface"
-version = "8.0.5"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "auto_impl",
- "either",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "serde",
- "thiserror 2.0.17",
 ]
 
 [[package]]
@@ -11158,28 +11072,10 @@ source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#d86e05673463
 dependencies = [
  "auto_impl",
  "either",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-primitives",
+ "revm-state",
  "serde",
  "thiserror 2.0.17",
-]
-
-[[package]]
-name = "revm-handler"
-version = "14.1.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "auto_impl",
- "derive-where",
- "revm-bytecode 7.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-context 12.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-context-interface 13.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-interpreter 31.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-precompile 31.0.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "serde",
 ]
 
 [[package]]
@@ -11189,32 +11085,15 @@ source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#d86e05673463
 dependencies = [
  "auto_impl",
  "derive-where",
- "revm-bytecode 7.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-context 12.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-context-interface 13.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-interpreter 31.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-precompile 31.0.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-bytecode",
+ "revm-context",
+ "revm-context-interface",
+ "revm-database-interface",
+ "revm-interpreter",
+ "revm-precompile",
+ "revm-primitives",
+ "revm-state",
  "serde",
-]
-
-[[package]]
-name = "revm-inspector"
-version = "14.1.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "auto_impl",
- "either",
- "revm-context 12.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-handler 14.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-interpreter 31.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "serde",
- "serde_json",
 ]
 
 [[package]]
@@ -11224,12 +11103,12 @@ source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#d86e05673463
 dependencies = [
  "auto_impl",
  "either",
- "revm-context 12.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-database-interface 8.0.5 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-handler 14.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-interpreter 31.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-context",
+ "revm-database-interface",
+ "revm-handler",
+ "revm-interpreter",
+ "revm-primitives",
+ "revm-state",
  "serde",
  "serde_json",
 ]
@@ -11248,7 +11127,7 @@ dependencies = [
  "boa_engine",
  "boa_gc",
  "colorchoice",
- "revm 33.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
+ "revm",
  "serde",
  "serde_json",
  "thiserror 2.0.17",
@@ -11257,49 +11136,13 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "31.1.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "revm-bytecode 7.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-context-interface 13.1.0 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "serde",
-]
-
-[[package]]
-name = "revm-interpreter"
-version = "31.1.0"
 source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#d86e05673463cb83e0fb0c69e39b3119ba5916bd"
 dependencies = [
- "revm-bytecode 7.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-context-interface 13.1.0 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-state 8.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-bytecode",
+ "revm-context-interface",
+ "revm-primitives",
+ "revm-state",
  "serde",
-]
-
-[[package]]
-name = "revm-precompile"
-version = "31.0.0"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "ark-bls12-381",
- "ark-bn254",
- "ark-ec",
- "ark-ff 0.5.0",
- "ark-serialize 0.5.0",
- "arrayref",
- "aurora-engine-modexp",
- "blst",
- "c-kzg",
- "cfg-if",
- "k256",
- "p256",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "ripemd",
- "rug",
- "secp256k1 0.31.1",
- "sha2",
 ]
 
 [[package]]
@@ -11319,7 +11162,7 @@ dependencies = [
  "cfg-if",
  "k256",
  "p256",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-primitives",
  "ripemd",
  "rug",
  "secp256k1 0.31.1",
@@ -11329,17 +11172,6 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "21.0.2"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "alloy-primitives",
- "num_enum",
- "once_cell",
- "serde",
-]
-
-[[package]]
-name = "revm-primitives"
-version = "21.0.2"
 source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#d86e05673463cb83e0fb0c69e39b3119ba5916bd"
 dependencies = [
  "alloy-primitives",
@@ -11351,24 +11183,12 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "8.1.1"
-source = "git+https://github.com/bluealloy/revm?branch=rakita%2Fbal#efd5899bfe43cc9b14efb7747f052f79080b8d7f"
-dependencies = [
- "alloy-eip7928",
- "bitflags 2.10.0",
- "revm-bytecode 7.1.1 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/bluealloy/revm?branch=rakita%2Fbal)",
- "serde",
-]
-
-[[package]]
-name = "revm-state"
-version = "8.1.1"
 source = "git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal#d86e05673463cb83e0fb0c69e39b3119ba5916bd"
 dependencies = [
  "alloy-eip7928",
  "bitflags 2.10.0",
- "revm-bytecode 7.1.1 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
- "revm-primitives 21.0.2 (git+https://github.com/Rimeeeeee/revm?branch=rakita%2Fbal)",
+ "revm-bytecode",
+ "revm-primitives",
  "serde",
 ]
 
