@@ -26,7 +26,8 @@ use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     message::{EthBroadcastMessage, MessageError, RequestPair},
-    Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
+    BlockRange, Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives,
+    NewBlockPayload, RequestBlockRange, SendBlockRange,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_metrics::common::mpsc::MeteredPollSender;
@@ -50,6 +51,9 @@ use tracing::{debug, trace};
 /// Updates are only sent when the block height has advanced by at least one epoch (32 blocks)
 /// since the last update. The interval is set to one epoch duration in seconds.
 pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(EPOCH_SLOTS * 12);
+
+/// Minimum interval between `RequestBlockRange` queries for eth/70 peers.
+pub(super) const RANGE_REQUEST_INTERVAL: Duration = Duration::from_secs(60);
 
 // Constants for timeout updating.
 
@@ -135,6 +139,10 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// The last latest block number we sent in a range update
     /// Used to avoid sending unnecessary updates when block height hasn't changed significantly
     pub(crate) last_sent_latest_block: Option<u64>,
+    /// The last time we requested the remote block range (eth/70).
+    pub(crate) last_range_request: Option<Instant>,
+    /// The last time we updated the remote block range information.
+    pub(crate) last_range_update: Option<Instant>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -276,6 +284,37 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             EthMessage::Receipts69(resp) => {
                 on_response!(resp, GetReceipts69)
             }
+            EthMessage::RequestBlockRange(req) => {
+                let response = EthMessage::SendBlockRange(RequestPair {
+                    request_id: req.request_id,
+                    message: SendBlockRange::from_range(BlockRange {
+                        start_block: self.local_range_info.earliest(),
+                        end_block: self.local_range_info.latest(),
+                    }),
+                });
+                self.queued_outgoing.push_back(response.into());
+                OnIncomingMessageOutcome::Ok
+            }
+            EthMessage::SendBlockRange(msg) => {
+                let range = msg.message.as_range();
+                if range.start_block > range.end_block {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(format!(
+                            "invalid block range: start ({}) > end ({})",
+                            range.start_block, range.end_block
+                        ))),
+                        message: EthMessage::SendBlockRange(msg),
+                    };
+                }
+
+                if let Some(range_info) = self.range_info.as_ref() {
+                    let latest_hash = range_info.latest_hash();
+                    range_info.update(range.start_block, range.end_block, latest_hash);
+                }
+                self.last_range_update = Some(Instant::now());
+
+                OnIncomingMessageOutcome::Ok
+            }
             EthMessage::BlockRangeUpdate(msg) => {
                 // Validate that earliest <= latest according to the spec
                 if msg.earliest > msg.latest {
@@ -301,6 +340,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 if let Some(range_info) = self.range_info.as_ref() {
                     range_info.update(msg.earliest, msg.latest, msg.latest_hash);
                 }
+                self.last_range_update = Some(Instant::now());
 
                 OnIncomingMessageOutcome::Ok
             }
@@ -353,6 +393,42 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             PeerMessage::Other(other) => {
                 self.queued_outgoing.push_back(OutgoingMessage::Raw(other));
             }
+        }
+    }
+
+    /// Request our peer's block range only when a throttle allows it.
+    fn maybe_request_block_range(&mut self, tick: Option<Instant>) {
+        if self.conn.version() < EthVersion::Eth70 {
+            return
+        }
+
+        let needs_now = self.last_range_update.is_some() || self.last_range_request.is_some();
+        let now_for_eval = tick.or_else(|| needs_now.then(Instant::now));
+
+        let stale_update = self.last_range_update.is_none_or(|last| {
+            // compare against interval tick (or freshly captured) to determine if the
+            // current view is stale.
+            let now = now_for_eval.expect("now must be present when last_range_update is set");
+            now.saturating_duration_since(last) >= RANGE_REQUEST_INTERVAL
+        });
+        let can_request = self.last_range_request.is_none_or(|last| {
+            let now = now_for_eval.expect("now must be present when last_range_request is set");
+            now.saturating_duration_since(last) >= RANGE_REQUEST_INTERVAL
+        });
+
+        if stale_update && can_request {
+            // Only allocate a request ID and enqueue a message when both
+            // staleness and request-rate checks pass.
+            let now = now_for_eval.unwrap_or_else(Instant::now);
+            let request_id = self.next_id();
+            self.queued_outgoing.push_back(
+                EthMessage::RequestBlockRange(RequestPair {
+                    request_id,
+                    message: RequestBlockRange,
+                })
+                .into(),
+            );
+            self.last_range_request = Some(now);
         }
     }
 
@@ -734,9 +810,12 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
             }
         }
 
+        let mut interval_tick = None;
         if let Some(interval) = &mut this.range_update_interval {
             // Check if we should send a range update based on block height changes
-            while interval.poll_tick(cx).is_ready() {
+            while let Poll::Ready(now) = interval.poll_tick(cx) {
+                let now: Instant = now.into_std();
+                interval_tick = Some(now);
                 let current_latest = this.local_range_info.latest();
                 let should_send = if let Some(last_sent) = this.last_sent_latest_block {
                     // Only send if block height has advanced by at least one epoch (32 blocks)
@@ -746,13 +825,25 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 };
 
                 if should_send {
-                    this.queued_outgoing.push_back(
-                        EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
-                    );
+                    // Prefer eth/70 SendBlockRange; fall back to eth/69 BlockRangeUpdate.
+                    let msg = if this.conn.version() >= EthVersion::Eth70 {
+                        EthMessage::SendBlockRange(RequestPair {
+                            request_id: 0,
+                            message: SendBlockRange::from_range(BlockRange {
+                                start_block: this.local_range_info.earliest(),
+                                end_block: this.local_range_info.latest(),
+                            }),
+                        })
+                    } else {
+                        EthMessage::BlockRangeUpdate(this.local_range_info.to_message())
+                    };
+                    this.queued_outgoing.push_back(msg.into());
                     this.last_sent_latest_block = Some(current_latest);
                 }
             }
         }
+
+        this.maybe_request_block_range(interval_tick);
 
         while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
             // check for timed out requests
@@ -1073,6 +1164,8 @@ mod tests {
                         ),
                         range_update_interval: None,
                         last_sent_latest_block: None,
+                        last_range_request: None,
+                        last_range_update: None,
                     }
                 }
                 ev => {

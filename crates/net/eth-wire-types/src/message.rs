@@ -1,4 +1,4 @@
-//! Implements Ethereum wire protocol for versions 66, 67, and 68.
+//! Implements Ethereum wire protocol for versions 66 through 70.
 //! Defines structs/enums for messages, request-response pairs, and broadcasts.
 //! Handles compatibility with [`EthVersion`].
 //!
@@ -9,8 +9,8 @@
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     GetNodeData, GetPooledTransactions, GetReceipts, NewPooledTransactionHashes66,
-    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, StatusEth69,
-    Transactions,
+    NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, RequestBlockRange,
+    SendBlockRange, Status, StatusEth69, StatusEth70, Transactions,
 };
 use crate::{
     status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
@@ -66,10 +66,12 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         // For EIP-7642 (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md):
         // pre-merge (legacy) status messages include total difficulty, whereas eth/69 omits it.
         let message = match message_type {
-            EthMessageID::Status => EthMessage::Status(if version < EthVersion::Eth69 {
-                StatusMessage::Legacy(Status::decode(buf)?)
-            } else {
+            EthMessageID::Status => EthMessage::Status(if version >= EthVersion::Eth70 {
+                StatusMessage::Eth70(StatusEth70::decode(buf)?)
+            } else if version >= EthVersion::Eth69 {
                 StatusMessage::Eth69(StatusEth69::decode(buf)?)
+            } else {
+                StatusMessage::Legacy(Status::decode(buf)?)
             }),
             EthMessageID::NewBlockHashes => {
                 EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
@@ -98,6 +100,18 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::PooledTransactions => {
                 EthMessage::PooledTransactions(RequestPair::decode(buf)?)
+            }
+            EthMessageID::RequestBlockRange => {
+                if version < EthVersion::Eth70 {
+                    return Err(MessageError::Invalid(version, EthMessageID::RequestBlockRange))
+                }
+                EthMessage::RequestBlockRange(RequestPair::decode(buf)?)
+            }
+            EthMessageID::SendBlockRange => {
+                if version < EthVersion::Eth70 {
+                    return Err(MessageError::Invalid(version, EthMessageID::SendBlockRange))
+                }
+                EthMessage::SendBlockRange(RequestPair::decode(buf)?)
             }
             EthMessageID::GetNodeData => {
                 if version >= EthVersion::Eth67 {
@@ -205,6 +219,9 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 ///
 /// The `eth/69` announces the historical block range served by the node. Removes total difficulty
 /// information. And removes the Bloom field from receipts transferred over the protocol.
+///
+/// The `eth/70` (EIP-7975) extends `Status` with `blockRange` and adds `RequestBlockRange` /
+/// `SendBlockRange` messages to query/announce the currently served block interval.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -253,6 +270,10 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::PooledTransaction: serde::Serialize + serde::de::DeserializeOwned")
     )]
     PooledTransactions(RequestPair<PooledTransactions<N::PooledTransaction>>),
+    /// Represents a `RequestBlockRange` request-response pair.
+    RequestBlockRange(RequestPair<RequestBlockRange>),
+    /// Represents a `SendBlockRange` request-response pair.
+    SendBlockRange(RequestPair<SendBlockRange>),
     /// Represents a `GetNodeData` request-response pair.
     GetNodeData(RequestPair<GetNodeData>),
     /// Represents a `NodeData` request-response pair.
@@ -298,6 +319,8 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::BlockBodies(_) => EthMessageID::BlockBodies,
             Self::GetPooledTransactions(_) => EthMessageID::GetPooledTransactions,
             Self::PooledTransactions(_) => EthMessageID::PooledTransactions,
+            Self::RequestBlockRange(_) => EthMessageID::RequestBlockRange,
+            Self::SendBlockRange(_) => EthMessageID::SendBlockRange,
             Self::GetNodeData(_) => EthMessageID::GetNodeData,
             Self::NodeData(_) => EthMessageID::NodeData,
             Self::GetReceipts(_) => EthMessageID::GetReceipts,
@@ -315,7 +338,8 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::GetBlockHeaders(_) |
                 Self::GetReceipts(_) |
                 Self::GetPooledTransactions(_) |
-                Self::GetNodeData(_)
+                Self::GetNodeData(_) |
+                Self::RequestBlockRange(_)
         )
     }
 
@@ -328,7 +352,8 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::Receipts69(_) |
                 Self::BlockHeaders(_) |
                 Self::BlockBodies(_) |
-                Self::NodeData(_)
+                Self::NodeData(_) |
+                Self::SendBlockRange(_)
         )
     }
 }
@@ -348,6 +373,8 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockBodies(bodies) => bodies.encode(out),
             Self::GetPooledTransactions(request) => request.encode(out),
             Self::PooledTransactions(transactions) => transactions.encode(out),
+            Self::RequestBlockRange(request) => request.encode(out),
+            Self::SendBlockRange(range) => range.encode(out),
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
@@ -371,6 +398,8 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::BlockBodies(bodies) => bodies.length(),
             Self::GetPooledTransactions(request) => request.length(),
             Self::PooledTransactions(transactions) => transactions.length(),
+            Self::RequestBlockRange(request) => request.length(),
+            Self::SendBlockRange(range) => range.length(),
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
@@ -452,6 +481,10 @@ pub enum EthMessageID {
     GetPooledTransactions = 0x09,
     /// Represents pooled transactions.
     PooledTransactions = 0x0a,
+    /// Requests block range (eth/70).
+    RequestBlockRange = 0x0b,
+    /// Responds with block range (eth/70).
+    SendBlockRange = 0x0c,
     /// Requests node data.
     GetNodeData = 0x0d,
     /// Represents node data.
@@ -483,6 +516,8 @@ impl EthMessageID {
             Self::NewPooledTransactionHashes => 0x08,
             Self::GetPooledTransactions => 0x09,
             Self::PooledTransactions => 0x0a,
+            Self::RequestBlockRange => 0x0b,
+            Self::SendBlockRange => 0x0c,
             Self::GetNodeData => 0x0d,
             Self::NodeData => 0x0e,
             Self::GetReceipts => 0x0f,
@@ -494,10 +529,9 @@ impl EthMessageID {
 
     /// Returns the max value for the given version.
     pub const fn max(version: EthVersion) -> u8 {
-        if version.is_eth69() {
-            Self::BlockRangeUpdate.to_u8()
-        } else {
-            Self::Receipts.to_u8()
+        match version {
+            EthVersion::Eth70 | EthVersion::Eth69 => Self::BlockRangeUpdate.to_u8(),
+            _ => Self::Receipts.to_u8(),
         }
     }
 
@@ -562,6 +596,8 @@ impl TryFrom<usize> for EthMessageID {
             0x08 => Ok(Self::NewPooledTransactionHashes),
             0x09 => Ok(Self::GetPooledTransactions),
             0x0a => Ok(Self::PooledTransactions),
+            0x0b => Ok(Self::RequestBlockRange),
+            0x0c => Ok(Self::SendBlockRange),
             0x0d => Ok(Self::GetNodeData),
             0x0e => Ok(Self::NodeData),
             0x0f => Ok(Self::GetReceipts),
