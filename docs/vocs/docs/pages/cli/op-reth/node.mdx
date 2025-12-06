@@ -35,6 +35,13 @@ Options:
 
           Mutually exclusive with `--instance`.
 
+      --fdlimit <LIMIT>
+          Raise the open file descriptor resource limit.
+
+          Default: 0 (system default). When set to 0, uses the system's default file descriptor limit. When set to a positive value, attempts to raise the limit to that value.
+
+          [default: 0]
+
   -h, --help
           Print help (see a summary with '-h')
 

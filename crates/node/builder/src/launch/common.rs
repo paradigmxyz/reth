@@ -201,8 +201,8 @@ impl LaunchContext {
     }
 
     /// Convenience function to [`Self::configure_globals`]
-    pub fn with_configured_globals(self, reserved_cpu_cores: usize) -> Self {
-        self.configure_globals(reserved_cpu_cores);
+    pub fn with_configured_globals(self, reserved_cpu_cores: usize, fdlimit: u64) -> Self {
+        self.configure_globals(reserved_cpu_cores, fdlimit);
         self
     }
 
@@ -212,15 +212,53 @@ impl LaunchContext {
     /// - Configuring the global rayon thread pool with available parallelism. Honoring
     ///   engine.reserved-cpu-cores to reserve given number of cores for O while using at least 1
     ///   core for the rayon thread pool
-    pub fn configure_globals(&self, reserved_cpu_cores: usize) {
+    pub fn configure_globals(&self, reserved_cpu_cores: usize, fdlimit: u64) {
         // Raise the fd limit of the process.
         // Does not do anything on windows.
-        match fdlimit::raise_fd_limit() {
-            Ok(fdlimit::Outcome::LimitRaised { from, to }) => {
-                debug!(from, to, "Raised file descriptor limit");
+        if fdlimit == 0 {
+            // Use system default (raise to maximum)
+            match fdlimit::raise_fd_limit() {
+                Ok(fdlimit::Outcome::LimitRaised { from, to }) => {
+                    debug!(from, to, "Raised file descriptor limit");
+                }
+                Ok(fdlimit::Outcome::Unsupported) => {}
+                Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
             }
-            Ok(fdlimit::Outcome::Unsupported) => {}
-            Err(err) => warn!(%err, "Failed to raise file descriptor limit"),
+        } else {
+            // Set to specific limit
+            #[cfg(unix)]
+            {
+                let result = unsafe {
+                    let mut rlimit = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+                    if libc::getrlimit(libc::RLIMIT_NOFILE, &mut rlimit) == 0 {
+                        let old_limit = rlimit.rlim_cur;
+                        rlimit.rlim_cur = fdlimit.min(rlimit.rlim_max as u64) as libc::rlim_t;
+                        if libc::setrlimit(libc::RLIMIT_NOFILE, &rlimit) == 0 {
+                            if rlimit.rlim_cur != old_limit {
+                                debug!(
+                                    from = old_limit,
+                                    to = rlimit.rlim_cur,
+                                    "Set file descriptor limit"
+                                );
+                                Ok(())
+                            } else {
+                                Ok(())
+                            }
+                        } else {
+                            Err(std::io::Error::last_os_error())
+                        }
+                    } else {
+                        Err(std::io::Error::last_os_error())
+                    }
+                };
+                if let Err(err) = result {
+                    warn!(%err, limit = fdlimit, "Failed to set file descriptor limit");
+                }
+            }
+            #[cfg(not(unix))]
+            {
+                warn!("File descriptor limit setting is not supported on this platform");
+            }
         }
 
         // Reserving the given number of CPU cores for the rest of OS.
@@ -261,8 +299,8 @@ impl<T> LaunchContextWith<T> {
     ///
     /// - Raising the file descriptor limit
     /// - Configuring the global rayon thread pool
-    pub fn configure_globals(&self, reserved_cpu_cores: u64) {
-        self.inner.configure_globals(reserved_cpu_cores.try_into().unwrap());
+    pub fn configure_globals(&self, reserved_cpu_cores: u64, fdlimit: u64) {
+        self.inner.configure_globals(reserved_cpu_cores.try_into().unwrap(), fdlimit);
     }
 
     /// Returns the data directory.
