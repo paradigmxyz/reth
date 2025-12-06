@@ -1331,7 +1331,7 @@ where
         tree_config: TreeConfig,
     ) -> eyre::Result<Self::EngineValidator> {
         let validator = self.payload_validator_builder.build(ctx).await?;
-        let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
+        let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.name().as_str());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
         Ok(BasicEngineValidator::new(
             ctx.node.provider().clone(),
