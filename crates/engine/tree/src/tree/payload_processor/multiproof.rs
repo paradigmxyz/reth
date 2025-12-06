@@ -783,6 +783,47 @@ pub(super) struct MultiProofTask {
     max_targets_for_chunking: usize,
 }
 
+/// Context for multiproof message batching loop.
+///
+/// Contains processing state that persists across loop iterations.
+struct MultiproofBatchCtx {
+    /// Message encountered during batching that couldn't be merged (different type).
+    /// Processed first in next iteration to preserve message ordering.
+    pending_msg: Option<MultiProofMessage>,
+    /// Timestamp when the first state update or prefetch was received.
+    first_update_time: Option<Instant>,
+    /// Timestamp before the first state update or prefetch was received.
+    start: Instant,
+    /// Whether all state updates have been received.
+    updates_finished: bool,
+    /// Timestamp when state updates finished.
+    updates_finished_time: Option<Instant>,
+}
+
+impl MultiproofBatchCtx {
+    /// Creates a new batch context with the given start time.
+    const fn new(start: Instant) -> Self {
+        Self {
+            pending_msg: None,
+            first_update_time: None,
+            start,
+            updates_finished: false,
+            updates_finished_time: None,
+        }
+    }
+}
+
+/// Counters for tracking proof requests and processing.
+#[derive(Default)]
+struct MultiproofBatchMetrics {
+    /// Number of proofs that have been processed.
+    proofs_processed: u64,
+    /// Number of state update proofs requested.
+    state_update_proofs_requested: u64,
+    /// Number of prefetch proofs requested.
+    prefetch_proofs_requested: u64,
+}
+
 impl MultiProofTask {
     /// Creates a new multi proof task with the unified message channel
     pub(super) fn new(
@@ -1060,29 +1101,22 @@ impl MultiProofTask {
     /// iteration (preserving order without sending back to channel).
     ///
     /// Returns `true` if done, `false` to continue.
-    #[allow(clippy::too_many_arguments)]
     fn process_multiproof_message(
         &mut self,
         msg: MultiProofMessage,
-        pending_msg: &mut Option<MultiProofMessage>,
-        first_update_time: &mut Option<Instant>,
-        start: Instant,
-        proofs_processed: &mut u64,
-        state_update_proofs_requested: &mut u64,
-        prefetch_proofs_requested: &mut u64,
-        updates_finished: &mut bool,
-        updates_finished_time: &mut Option<Instant>,
+        ctx: &mut MultiproofBatchCtx,
+        batch_metrics: &mut MultiproofBatchMetrics,
     ) -> bool {
         match msg {
             // Prefetch proofs: batch consecutive prefetch requests up to target/message limits
             MultiProofMessage::PrefetchProofs(targets) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::PrefetchProofs");
 
-                if first_update_time.is_none() {
+                if ctx.first_update_time.is_none() {
                     self.metrics
                         .first_update_wait_time_histogram
-                        .record(start.elapsed().as_secs_f64());
-                    *first_update_time = Some(Instant::now());
+                        .record(ctx.start.elapsed().as_secs_f64());
+                    ctx.first_update_time = Some(Instant::now());
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
@@ -1090,12 +1124,12 @@ impl MultiProofTask {
                 let first_account_targets = targets.len();
                 let first_storage_targets =
                     targets.values().map(|slots| slots.len()).sum::<usize>();
-                *prefetch_proofs_requested += self.on_prefetch_proof(targets);
+                batch_metrics.prefetch_proofs_requested += self.on_prefetch_proof(targets);
                 debug!(
                     target: "engine::tree::payload_processor::multiproof",
                     account_targets = first_account_targets,
                     storage_targets = first_storage_targets,
-                    prefetch_proofs_requested,
+                    prefetch_proofs_requested = batch_metrics.prefetch_proofs_requested,
                     num_batched = 1,
                     "Dispatched first prefetch immediately"
                 );
@@ -1116,7 +1150,7 @@ impl MultiProofTask {
                             if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS &&
                                 !accumulated_targets.is_empty()
                             {
-                                *pending_msg =
+                                ctx.pending_msg =
                                     Some(MultiProofMessage::PrefetchProofs(next_targets));
                                 break;
                             }
@@ -1124,7 +1158,7 @@ impl MultiProofTask {
                             accumulated_targets.push(next_targets);
                         }
                         Ok(other_msg) => {
-                            *pending_msg = Some(other_msg);
+                            ctx.pending_msg = Some(other_msg);
                             break;
                         }
                         Err(_) => break,
@@ -1146,12 +1180,13 @@ impl MultiProofTask {
                     let account_targets = merged_targets.len();
                     let storage_targets =
                         merged_targets.values().map(|slots| slots.len()).sum::<usize>();
-                    *prefetch_proofs_requested += self.on_prefetch_proof(merged_targets);
+                    batch_metrics.prefetch_proofs_requested +=
+                        self.on_prefetch_proof(merged_targets);
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         account_targets,
                         storage_targets,
-                        prefetch_proofs_requested,
+                        prefetch_proofs_requested = batch_metrics.prefetch_proofs_requested,
                         num_batched = total_batched,
                         "Dispatched accumulated prefetch batch"
                     );
@@ -1163,22 +1198,22 @@ impl MultiProofTask {
             MultiProofMessage::StateUpdate(source, update) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
 
-                if first_update_time.is_none() {
+                if ctx.first_update_time.is_none() {
                     self.metrics
                         .first_update_wait_time_histogram
-                        .record(start.elapsed().as_secs_f64());
-                    *first_update_time = Some(Instant::now());
+                        .record(ctx.start.elapsed().as_secs_f64());
+                    ctx.first_update_time = Some(Instant::now());
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
                 // Dispatch first message immediately
                 let first_len = update.len();
-                *state_update_proofs_requested += self.on_state_update(source, update);
+                batch_metrics.state_update_proofs_requested += self.on_state_update(source, update);
                 debug!(
                     target: "engine::tree::payload_processor::multiproof",
                     ?source,
                     len = first_len,
-                    ?state_update_proofs_requested,
+                    state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
                     num_batched = 1,
                     "Dispatched first state update immediately"
                 );
@@ -1201,7 +1236,7 @@ impl MultiProofTask {
                                     &next_update,
                                 )
                             {
-                                *pending_msg =
+                                ctx.pending_msg =
                                     Some(MultiProofMessage::StateUpdate(next_source, next_update));
                                 break;
                             }
@@ -1210,14 +1245,14 @@ impl MultiProofTask {
                             // Do not merge outlier updates that exceed the cap on their own.
                             // Leave them pending so they dispatch immediately on the next loop.
                             if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
-                                *pending_msg =
+                                ctx.pending_msg =
                                     Some(MultiProofMessage::StateUpdate(next_source, next_update));
                                 break;
                             }
                             if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
                                 !accumulated_updates.is_empty()
                             {
-                                *pending_msg =
+                                ctx.pending_msg =
                                     Some(MultiProofMessage::StateUpdate(next_source, next_update));
                                 break;
                             }
@@ -1225,7 +1260,7 @@ impl MultiProofTask {
                             accumulated_updates.push((next_source, next_update));
                         }
                         Ok(other_msg) => {
-                            *pending_msg = Some(other_msg);
+                            ctx.pending_msg = Some(other_msg);
                             break;
                         }
                         Err(_) => break,
@@ -1252,13 +1287,13 @@ impl MultiProofTask {
                     self.metrics.state_update_batch_size_histogram.record(total_batched as f64);
 
                     let batch_len = merged_update.len();
-                    *state_update_proofs_requested +=
+                    batch_metrics.state_update_proofs_requested +=
                         self.on_state_update(batch_source, merged_update);
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         ?batch_source,
                         len = batch_len,
-                        ?state_update_proofs_requested,
+                        state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
                         num_batched = total_batched,
                         "Dispatched accumulated batch"
                     );
@@ -1270,14 +1305,14 @@ impl MultiProofTask {
             MultiProofMessage::FinishedStateUpdates => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
 
-                *updates_finished = true;
-                *updates_finished_time = Some(Instant::now());
+                ctx.updates_finished = true;
+                ctx.updates_finished_time = Some(Instant::now());
 
                 if self.is_done(
-                    *proofs_processed,
-                    *state_update_proofs_requested,
-                    *prefetch_proofs_requested,
-                    *updates_finished,
+                    batch_metrics.proofs_processed,
+                    batch_metrics.state_update_proofs_requested,
+                    batch_metrics.prefetch_proofs_requested,
+                    ctx.updates_finished,
                 ) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
@@ -1291,7 +1326,7 @@ impl MultiProofTask {
             MultiProofMessage::EmptyProof { sequence_number, state } => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::EmptyProof");
 
-                *proofs_processed += 1;
+                batch_metrics.proofs_processed += 1;
 
                 if let Some(combined_update) = self.on_proof(
                     sequence_number,
@@ -1301,10 +1336,10 @@ impl MultiProofTask {
                 }
 
                 if self.is_done(
-                    *proofs_processed,
-                    *state_update_proofs_requested,
-                    *prefetch_proofs_requested,
-                    *updates_finished,
+                    batch_metrics.proofs_processed,
+                    batch_metrics.state_update_proofs_requested,
+                    batch_metrics.prefetch_proofs_requested,
+                    ctx.updates_finished,
                 ) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
@@ -1356,24 +1391,8 @@ impl MultiProofTask {
         skip_all
     )]
     pub(crate) fn run(mut self) {
-        // TODO convert those into fields
-        let mut prefetch_proofs_requested = 0;
-        let mut state_update_proofs_requested = 0;
-        let mut proofs_processed = 0;
-
-        let mut updates_finished = false;
-
-        // Timestamp before the first state update or prefetch was received
-        let start = Instant::now();
-
-        // Timestamp when the first state update or prefetch was received
-        let mut first_update_time = None;
-        // Timestamp when state updates have finished
-        let mut updates_finished_time = None;
-
-        // Stores a message encountered during batching that couldn't be merged (different type).
-        // Processed first in next iteration to preserve message ordering.
-        let mut pending_msg: Option<MultiProofMessage> = None;
+        let mut ctx = MultiproofBatchCtx::new(Instant::now());
+        let mut batch_metrics = MultiproofBatchMetrics::default();
 
         'main: loop {
             trace!(target: "engine::tree::payload_processor::multiproof", "entering main channel receiving loop");
@@ -1382,7 +1401,7 @@ impl MultiProofTask {
             // This prevents priority inversion where pending_msg would bypass select_biased!
             // and starve proof result processing.
             while let Ok(proof_result) = self.proof_result_rx.try_recv() {
-                proofs_processed += 1;
+                batch_metrics.proofs_processed += 1;
 
                 self.metrics.proof_calculation_duration_histogram.record(proof_result.elapsed);
 
@@ -1393,7 +1412,7 @@ impl MultiProofTask {
                         debug!(
                             target: "engine::tree::payload_processor::multiproof",
                             sequence = proof_result.sequence_number,
-                            total_proofs = proofs_processed,
+                            total_proofs = batch_metrics.proofs_processed,
                             "Processing calculated proof from worker (priority drain)"
                         );
 
@@ -1415,10 +1434,10 @@ impl MultiProofTask {
                 }
 
                 if self.is_done(
-                    proofs_processed,
-                    state_update_proofs_requested,
-                    prefetch_proofs_requested,
-                    updates_finished,
+                    batch_metrics.proofs_processed,
+                    batch_metrics.state_update_proofs_requested,
+                    batch_metrics.prefetch_proofs_requested,
+                    ctx.updates_finished,
                 ) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
@@ -1428,18 +1447,8 @@ impl MultiProofTask {
                 }
             }
 
-            if let Some(msg) = pending_msg.take() {
-                if self.process_multiproof_message(
-                    msg,
-                    &mut pending_msg,
-                    &mut first_update_time,
-                    start,
-                    &mut proofs_processed,
-                    &mut state_update_proofs_requested,
-                    &mut prefetch_proofs_requested,
-                    &mut updates_finished,
-                    &mut updates_finished_time,
-                ) {
+            if let Some(msg) = ctx.pending_msg.take() {
+                if self.process_multiproof_message(msg, &mut ctx, &mut batch_metrics) {
                     break 'main;
                 }
                 continue;
@@ -1451,7 +1460,7 @@ impl MultiProofTask {
                 recv(self.proof_result_rx) -> proof_msg => {
                     match proof_msg {
                         Ok(proof_result) => {
-                            proofs_processed += 1;
+                            batch_metrics.proofs_processed += 1;
 
                             self.metrics
                                 .proof_calculation_duration_histogram
@@ -1465,7 +1474,7 @@ impl MultiProofTask {
                                     debug!(
                                         target: "engine::tree::payload_processor::multiproof",
                                         sequence = proof_result.sequence_number,
-                                        total_proofs = proofs_processed,
+                                        total_proofs = batch_metrics.proofs_processed,
                                         "Processing calculated proof from worker"
                                     );
 
@@ -1487,10 +1496,10 @@ impl MultiProofTask {
                             }
 
                             if self.is_done(
-                                proofs_processed,
-                                state_update_proofs_requested,
-                                prefetch_proofs_requested,
-                                updates_finished,
+                                batch_metrics.proofs_processed,
+                                batch_metrics.state_update_proofs_requested,
+                                batch_metrics.prefetch_proofs_requested,
+                                ctx.updates_finished,
                             ) {
                                 debug!(
                                     target: "engine::tree::payload_processor::multiproof",
@@ -1514,17 +1523,7 @@ impl MultiProofTask {
                         }
                     };
 
-                    if self.process_multiproof_message(
-                        msg,
-                        &mut pending_msg,
-                        &mut first_update_time,
-                        start,
-                        &mut proofs_processed,
-                        &mut state_update_proofs_requested,
-                        &mut prefetch_proofs_requested,
-                        &mut updates_finished,
-                        &mut updates_finished_time,
-                    ) {
+                    if self.process_multiproof_message(msg, &mut ctx, &mut batch_metrics) {
                         break 'main;
                     }
                 }
@@ -1533,21 +1532,23 @@ impl MultiProofTask {
 
         debug!(
             target: "engine::tree::payload_processor::multiproof",
-            total_updates = state_update_proofs_requested,
-            total_proofs = proofs_processed,
-            total_time = ?first_update_time.map(|t|t.elapsed()),
-            time_since_updates_finished = ?updates_finished_time.map(|t|t.elapsed()),
+            total_updates = batch_metrics.state_update_proofs_requested,
+            total_proofs = batch_metrics.proofs_processed,
+            total_time = ?ctx.first_update_time.map(|t|t.elapsed()),
+            time_since_updates_finished = ?ctx.updates_finished_time.map(|t|t.elapsed()),
             "All proofs processed, ending calculation"
         );
 
         // update total metrics on finish
-        self.metrics.state_updates_received_histogram.record(state_update_proofs_requested as f64);
-        self.metrics.proofs_processed_histogram.record(proofs_processed as f64);
-        if let Some(total_time) = first_update_time.map(|t| t.elapsed()) {
+        self.metrics
+            .state_updates_received_histogram
+            .record(batch_metrics.state_update_proofs_requested as f64);
+        self.metrics.proofs_processed_histogram.record(batch_metrics.proofs_processed as f64);
+        if let Some(total_time) = ctx.first_update_time.map(|t| t.elapsed()) {
             self.metrics.multiproof_task_total_duration_histogram.record(total_time);
         }
 
-        if let Some(updates_finished_time) = updates_finished_time {
+        if let Some(updates_finished_time) = ctx.updates_finished_time {
             self.metrics
                 .last_proof_wait_time_histogram
                 .record(updates_finished_time.elapsed().as_secs_f64());
