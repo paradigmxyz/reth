@@ -70,7 +70,7 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
             // withdrawals root field in block header is used for storage root of L2 predeploy
             // `l2tol1-message-passer`
             Some(
-                isthmus::withdrawals_root(bundle_state, state_provider)
+                isthmus::withdrawals_root(&bundle_state, state_provider)
                     .map_err(BlockExecutionError::other)?,
             )
         } else if self.chain_spec.is_canyon_active_at_timestamp(timestamp) {
