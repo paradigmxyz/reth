@@ -51,49 +51,6 @@ pub struct DebugApi<Eth: EthApiTypes> {
     inner: Arc<DebugApiInner<Eth>>,
 }
 
-/// A bounded, deduplicating store of recently observed bad blocks.
-#[derive(Clone, Debug)]
-pub struct BadBlockStore<B: BlockTrait> {
-    inner: Arc<RwLock<VecDeque<Arc<RecoveredBlock<B>>>>>,
-    limit: usize,
-}
-
-impl<B: BlockTrait> BadBlockStore<B> {
-    /// Creates a new store with the given capacity.
-    pub fn new(limit: usize) -> Self {
-        Self { inner: Arc::new(RwLock::new(VecDeque::with_capacity(limit))), limit }
-    }
-
-    /// Inserts a recovered block, keeping only the most recent `limit` entries and deduplicating
-    /// by block hash.
-    pub fn insert(&self, block: RecoveredBlock<B>) {
-        let hash = block.hash();
-        let mut guard = self.inner.write();
-
-        // skip if we already recorded this bad block , and keep original ordering
-        if guard.iter().any(|b| b.hash() == hash) {
-            return;
-        }
-        guard.push_back(Arc::new(block));
-
-        while guard.len() > self.limit {
-            guard.pop_front();
-        }
-    }
-
-    /// Returns all cached bad blocks ordered from newest to oldest.
-    pub fn all(&self) -> Vec<Arc<RecoveredBlock<B>>> {
-        let guard = self.inner.read();
-        guard.iter().rev().cloned().collect()
-    }
-}
-
-impl<B: BlockTrait> Default for BadBlockStore<B> {
-    fn default() -> Self {
-        Self::new(64)
-    }
-}
-
 impl<Eth> DebugApi<Eth>
 where
     Eth: EthApiTypes,
@@ -1143,6 +1100,49 @@ impl<Eth: EthApiTypes> std::fmt::Debug for DebugApi<Eth> {
 impl<Eth: EthApiTypes> Clone for DebugApi<Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
+    }
+}
+
+/// A bounded, deduplicating store of recently observed bad blocks.
+#[derive(Clone, Debug)]
+pub struct BadBlockStore<B: BlockTrait> {
+    inner: Arc<RwLock<VecDeque<Arc<RecoveredBlock<B>>>>>,
+    limit: usize,
+}
+
+impl<B: BlockTrait> BadBlockStore<B> {
+    /// Creates a new store with the given capacity.
+    pub fn new(limit: usize) -> Self {
+        Self { inner: Arc::new(RwLock::new(VecDeque::with_capacity(limit))), limit }
+    }
+
+    /// Inserts a recovered block, keeping only the most recent `limit` entries and deduplicating
+    /// by block hash.
+    pub fn insert(&self, block: RecoveredBlock<B>) {
+        let hash = block.hash();
+        let mut guard = self.inner.write();
+
+        // skip if we already recorded this bad block , and keep original ordering
+        if guard.iter().any(|b| b.hash() == hash) {
+            return;
+        }
+        guard.push_back(Arc::new(block));
+
+        while guard.len() > self.limit {
+            guard.pop_front();
+        }
+    }
+
+    /// Returns all cached bad blocks ordered from newest to oldest.
+    pub fn all(&self) -> Vec<Arc<RecoveredBlock<B>>> {
+        let guard = self.inner.read();
+        guard.iter().rev().cloned().collect()
+    }
+}
+
+impl<B: BlockTrait> Default for BadBlockStore<B> {
+    fn default() -> Self {
+        Self::new(64)
     }
 }
 
