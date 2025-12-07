@@ -563,9 +563,12 @@ mod tests {
 
     #[test]
     fn test_http_vhosts_custom() {
-        let args =
-            CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.vhosts", "localhost,*.example.com"])
-                .args;
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.vhosts",
+            "localhost,*.example.com",
+        ])
+        .args;
         assert_eq!(args.http_vhosts, "localhost,*.example.com");
     }
 
@@ -577,9 +580,12 @@ mod tests {
 
     #[test]
     fn test_ws_vhosts_custom() {
-        let args =
-            CommandParser::<RpcServerArgs>::parse_from(["reth", "--ws.vhosts", "localhost,*.example.com"])
-                .args;
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--ws.vhosts",
+            "localhost,*.example.com",
+        ])
+        .args;
         assert_eq!(args.ws_vhosts, "localhost,*.example.com");
     }
 

@@ -307,6 +307,11 @@ RPC:
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
 
+      --http.vhosts <HTTP_VHOSTS>
+          Comma separated list of virtual hostnames from which to accept HTTP requests (server enforced). Accepts '*' wildcard
+
+          [default: localhost]
+
       --ws
           Enable the WS-RPC server
 
@@ -322,6 +327,11 @@ RPC:
 
       --ws.origins <ws.origins>
           Origins from which to accept `WebSocket` requests
+
+      --ws.vhosts <WS_VHOSTS>
+          Comma separated list of virtual hostnames from which to accept WebSocket requests (server enforced). Accepts '*' wildcard
+
+          [default: localhost]
 
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server

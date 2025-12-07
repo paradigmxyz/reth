@@ -9,8 +9,8 @@ use pin_project::pin_project;
 use std::{
     future::Future,
     net::IpAddr,
-    str::FromStr,
     pin::Pin,
+    str::FromStr,
     task::{Context, Poll},
 };
 use tower::{Layer, Service};
@@ -45,11 +45,8 @@ impl AllowedVHosts {
     /// let validator = AllowedVHosts::from_str("localhost,*.example.com");
     /// ```
     pub fn from_str(vhosts: &str) -> Self {
-        let patterns = vhosts
-            .split(',')
-            .map(|s| s.trim().to_lowercase())
-            .filter(|s| !s.is_empty())
-            .collect();
+        let patterns =
+            vhosts.split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect();
         Self { patterns }
     }
 
@@ -154,7 +151,7 @@ impl VHostValidator for AllowedVHosts {
 ///
 /// # Example
 /// ```rust
-/// use reth_rpc_layer::{VHostLayer, AllowedVHosts};
+/// use reth_rpc_layer::{AllowedVHosts, VHostLayer};
 /// use tower::ServiceBuilder;
 ///
 /// let validator = AllowedVHosts::from_str("localhost,*.example.com");
@@ -520,4 +517,3 @@ mod tests {
         server.start(module)
     }
 }
-
