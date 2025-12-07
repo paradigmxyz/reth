@@ -145,12 +145,10 @@ where
 
     /// Returns the [`SealedBlock`] if the request is complete and valid.
     fn take_block(&mut self) -> Option<SealedBlock<Client::Block>> {
-        if self.header.is_none() || self.body.is_none() {
-            return None
-        }
-
-        let header = self.header.take().unwrap();
-        let resp = self.body.take().unwrap();
+        let (header, resp) = match (self.header.as_ref(), self.body.as_ref()) {
+            (Some(_), Some(_)) => (self.header.take().unwrap(), self.body.take().unwrap()),
+            _ => return None,
+        };
         match resp {
             BodyResponse::Validated(body) => Some(SealedBlock::from_sealed_parts(header, body)),
             BodyResponse::PendingValidation(resp) => {
