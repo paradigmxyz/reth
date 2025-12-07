@@ -437,6 +437,11 @@ pub struct RpcServerArgs {
     #[arg(long = "http.corsdomain", default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_corsdomain.as_ref().map(|v| v.to_string().into())))]
     pub http_corsdomain: Option<String>,
 
+    /// Comma separated list of virtual hostnames from which to accept HTTP requests (server
+    /// enforced). Accepts '*' wildcard.
+    #[arg(long = "http.vhosts")]
+    pub http_vhosts: Option<String>,
+
     /// Enable the WS-RPC server
     #[arg(long, default_value_t = DefaultRpcServerArgs::get_global().ws)]
     pub ws: bool,
@@ -452,6 +457,11 @@ pub struct RpcServerArgs {
     /// Origins from which to accept `WebSocket` requests
     #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_allowed_origins.as_ref().map(|v| v.to_string().into())))]
     pub ws_allowed_origins: Option<String>,
+
+    /// Comma separated list of virtual hostnames from which to accept `WebSocket` requests (server
+    /// enforced). Accepts '*' wildcard.
+    #[arg(long = "ws.vhosts")]
+    pub ws_vhosts: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
     #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())))]
@@ -816,10 +826,12 @@ impl Default for RpcServerArgs {
             http_disable_compression,
             http_api,
             http_corsdomain,
+            http_vhosts: None,
             ws,
             ws_addr,
             ws_port,
             ws_allowed_origins,
+            ws_vhosts: None,
             ws_api,
             ipcdisable,
             ipcpath,
@@ -974,10 +986,12 @@ mod tests {
             http_disable_compression: false,
             http_api: Some(RpcModuleSelection::try_from_selection(["eth", "admin"]).unwrap()),
             http_corsdomain: Some("*".to_string()),
+            http_vhosts: None,
             ws: true,
             ws_addr: "127.0.0.1".parse().unwrap(),
             ws_port: 8546,
             ws_allowed_origins: Some("*".to_string()),
+            ws_vhosts: None,
             ws_api: Some(RpcModuleSelection::try_from_selection(["eth", "admin"]).unwrap()),
             ipcdisable: false,
             ipcpath: "reth.ipc".to_string(),
@@ -1118,5 +1132,51 @@ mod tests {
         .args;
 
         assert_eq!(parsed_args, args);
+    }
+
+    #[test]
+    fn test_http_vhosts_default() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.http_vhosts, None);
+    }
+
+    #[test]
+    fn test_http_vhosts_custom() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http.vhosts",
+            "localhost,*.example.com",
+        ])
+        .args;
+        assert_eq!(args.http_vhosts, Some("localhost,*.example.com".to_string()));
+    }
+
+    #[test]
+    fn test_ws_vhosts_default() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.ws_vhosts, None);
+    }
+
+    #[test]
+    fn test_ws_vhosts_custom() {
+        let args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--ws.vhosts",
+            "localhost,*.example.com",
+        ])
+        .args;
+        assert_eq!(args.ws_vhosts, Some("localhost,*.example.com".to_string()));
+    }
+
+    #[test]
+    fn test_http_vhosts_wildcard() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.vhosts", "*"]).args;
+        assert_eq!(args.http_vhosts, Some("*".to_string()));
+    }
+
+    #[test]
+    fn test_ws_vhosts_wildcard() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--ws.vhosts", "*"]).args;
+        assert_eq!(args.ws_vhosts, Some("*".to_string()));
     }
 }
