@@ -457,11 +457,12 @@ where
 
         // Check block size as per EIP-7934 (only applies when Osaka hardfork is active)
         let chain_spec = self.provider.chain_spec();
+        let rlp_length = block.rlp_length();
         if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
-            block.rlp_length() > MAX_RLP_BLOCK_SIZE
+            rlp_length > MAX_RLP_BLOCK_SIZE
         {
             return Err(ValidationApiError::Consensus(ConsensusError::BlockTooLarge {
-                rlp_length: block.rlp_length(),
+                rlp_length,
                 max_rlp_length: MAX_RLP_BLOCK_SIZE,
             }));
         }
