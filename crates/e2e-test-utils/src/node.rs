@@ -91,7 +91,10 @@ where
         AddOns::EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
             + EthTransactions
             + TraceExt
-            + reth_rpc_eth_api::RpcNodeCore<Provider = Node::Provider>,
+            + reth_rpc_eth_api::RpcNodeCore<
+                Provider = Node::Provider,
+                Primitives = <Node::Types as NodeTypes>::Primitives,
+            >,
     {
         let mut chain = Vec::with_capacity(length as usize);
         for i in 0..length {
