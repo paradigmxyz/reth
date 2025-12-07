@@ -1286,7 +1286,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
 
     /// Creates the [`VHostLayer`] if vhosts are configured
     fn maybe_vhost_layer(vhosts: Option<String>) -> Option<VHostLayer<AllowedVHosts>> {
-        vhosts.map(|vhosts| VHostLayer::new(AllowedVHosts::from_str(&vhosts)))
+        vhosts.map(|vhosts| VHostLayer::new(AllowedVHosts::parse(&vhosts)))
     }
 
     /// Builds and starts the configured server(s): http, ws, ipc.

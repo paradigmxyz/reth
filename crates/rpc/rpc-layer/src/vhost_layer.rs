@@ -1,4 +1,4 @@
-//! Virtual host filtering middleware for HTTP and WebSocket servers.
+//! Virtual host filtering middleware for HTTP and `WebSocket` servers.
 //!
 //! This module provides a middleware layer that validates the `Host` header in incoming requests
 //! against a list of allowed virtual hostnames. It supports wildcard matching with '*' character.
@@ -42,9 +42,9 @@ impl AllowedVHosts {
     /// ```
     /// use reth_rpc_layer::AllowedVHosts;
     ///
-    /// let validator = AllowedVHosts::from_str("localhost,*.example.com");
+    /// let validator = AllowedVHosts::parse("localhost,*.example.com");
     /// ```
-    pub fn from_str(vhosts: &str) -> Self {
+    pub fn parse(vhosts: &str) -> Self {
         let patterns =
             vhosts.split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect();
         Self { patterns }
@@ -114,8 +114,7 @@ impl AllowedVHosts {
         }
 
         // Handle wildcard patterns like "*.example.com"
-        if pattern.starts_with("*.") {
-            let suffix = &pattern[2..];
+        if let Some(suffix) = pattern.strip_prefix("*.") {
             // For "*.example.com", match "sub.example.com" but not "example.com"
             // The host must end with the suffix AND have at least one dot before it
             if host == suffix {
@@ -154,7 +153,7 @@ impl VHostValidator for AllowedVHosts {
 /// use reth_rpc_layer::{AllowedVHosts, VHostLayer};
 /// use tower::ServiceBuilder;
 ///
-/// let validator = AllowedVHosts::from_str("localhost,*.example.com");
+/// let validator = AllowedVHosts::parse("localhost,*.example.com");
 /// let layer = VHostLayer::new(validator);
 /// let middleware = ServiceBuilder::new().layer(layer);
 /// ```
@@ -268,7 +267,7 @@ mod tests {
 
     #[test]
     fn test_allowed_vhosts_from_str() {
-        let validator = AllowedVHosts::from_str("localhost,*.example.com");
+        let validator = AllowedVHosts::parse("localhost,*.example.com");
         assert!(validator.matches(Some("localhost")));
         assert!(validator.matches(Some("test.example.com")));
         assert!(validator.matches(Some("sub.test.example.com")));
@@ -278,7 +277,7 @@ mod tests {
 
     #[test]
     fn test_wildcard_all() {
-        let validator = AllowedVHosts::from_str("*");
+        let validator = AllowedVHosts::parse("*");
         assert!(validator.matches(Some("localhost")));
         assert!(validator.matches(Some("example.com")));
         assert!(validator.matches(Some("any.host.com")));
@@ -286,7 +285,7 @@ mod tests {
 
     #[test]
     fn test_wildcard_prefix() {
-        let validator = AllowedVHosts::from_str("*.example.com");
+        let validator = AllowedVHosts::parse("*.example.com");
         assert!(validator.matches(Some("test.example.com")));
         assert!(validator.matches(Some("sub.test.example.com")));
         assert!(!validator.matches(Some("example.com")));
@@ -295,7 +294,7 @@ mod tests {
 
     #[test]
     fn test_exact_match() {
-        let validator = AllowedVHosts::from_str("localhost,example.com");
+        let validator = AllowedVHosts::parse("localhost,example.com");
         assert!(validator.matches(Some("localhost")));
         assert!(validator.matches(Some("example.com")));
         assert!(!validator.matches(Some("test.example.com")));
@@ -303,14 +302,14 @@ mod tests {
 
     #[test]
     fn test_host_with_port() {
-        let validator = AllowedVHosts::from_str("localhost");
+        let validator = AllowedVHosts::parse("localhost");
         assert!(validator.matches(Some("localhost:8545")));
         assert!(validator.matches(Some("localhost:8080")));
     }
 
     #[test]
     fn test_case_insensitive() {
-        let validator = AllowedVHosts::from_str("LocalHost,EXAMPLE.COM");
+        let validator = AllowedVHosts::parse("LocalHost,EXAMPLE.COM");
         assert!(validator.matches(Some("localhost")));
         assert!(validator.matches(Some("LOCALHOST")));
         assert!(validator.matches(Some("example.com")));
@@ -319,19 +318,19 @@ mod tests {
 
     #[test]
     fn test_missing_host() {
-        let validator = AllowedVHosts::from_str("localhost");
+        let validator = AllowedVHosts::parse("localhost");
         assert!(!validator.matches(None));
     }
 
     #[test]
     fn test_empty_patterns() {
-        let validator = AllowedVHosts::from_str("");
+        let validator = AllowedVHosts::parse("");
         assert!(!validator.matches(Some("localhost")));
     }
 
     #[test]
     fn test_whitespace_handling() {
-        let validator = AllowedVHosts::from_str("localhost , example.com , *.test.com");
+        let validator = AllowedVHosts::parse("localhost , example.com , *.test.com");
         assert!(validator.matches(Some("localhost")));
         assert!(validator.matches(Some("example.com")));
         assert!(validator.matches(Some("sub.test.com")));
@@ -340,7 +339,7 @@ mod tests {
     #[test]
     fn test_ipv4_address_allowed() {
         // IP addresses should always be allowed, regardless of vhosts configuration
-        let validator = AllowedVHosts::from_str("localhost");
+        let validator = AllowedVHosts::parse("localhost");
         assert!(validator.matches(Some("127.0.0.1")));
         assert!(validator.matches(Some("192.168.1.1")));
         assert!(validator.matches(Some("0.0.0.0")));
@@ -349,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_ipv4_address_with_port_allowed() {
-        let validator = AllowedVHosts::from_str("localhost");
+        let validator = AllowedVHosts::parse("localhost");
         assert!(validator.matches(Some("127.0.0.1:8545")));
         assert!(validator.matches(Some("192.168.1.1:8080")));
         assert!(validator.matches(Some("0.0.0.0:3000")));
@@ -357,7 +356,7 @@ mod tests {
 
     #[test]
     fn test_ipv6_address_allowed() {
-        let validator = AllowedVHosts::from_str("localhost");
+        let validator = AllowedVHosts::parse("localhost");
         assert!(validator.matches(Some("::1")));
         assert!(validator.matches(Some("2001:0db8:85a3:0000:0000:8a2e:0370:7334")));
         assert!(validator.matches(Some("fe80::1")));
@@ -365,7 +364,7 @@ mod tests {
 
     #[test]
     fn test_ipv6_address_with_port_allowed() {
-        let validator = AllowedVHosts::from_str("localhost");
+        let validator = AllowedVHosts::parse("localhost");
         assert!(validator.matches(Some("[::1]:8545")));
         assert!(validator.matches(Some("[2001:0db8:85a3::8a2e:0370:7334]:8080")));
     }
@@ -373,7 +372,7 @@ mod tests {
     #[test]
     fn test_ip_allowed_even_with_strict_vhosts() {
         // Even with strict vhosts (only "localhost"), IPs should be allowed
-        let validator = AllowedVHosts::from_str("localhost");
+        let validator = AllowedVHosts::parse("localhost");
         assert!(validator.matches(Some("127.0.0.1")));
         assert!(validator.matches(Some("::1")));
         assert!(validator.matches(Some("192.168.1.1:8545")));
@@ -487,7 +486,7 @@ mod tests {
         };
         use std::net::SocketAddr;
 
-        let validator = AllowedVHosts::from_str(vhosts);
+        let validator = AllowedVHosts::parse(vhosts);
         let layer = VHostLayer::new(validator);
         let middleware = tower::ServiceBuilder::default().layer(layer);
 

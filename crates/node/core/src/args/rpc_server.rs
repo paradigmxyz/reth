@@ -88,7 +88,7 @@ pub struct RpcServerArgs {
     #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain")]
     pub ws_allowed_origins: Option<String>,
 
-    /// Comma separated list of virtual hostnames from which to accept WebSocket requests (server
+    /// Comma separated list of virtual hostnames from which to accept `WebSocket` requests (server
     /// enforced). Accepts '*' wildcard.
     #[arg(long = "ws.vhosts", default_value = "localhost")]
     pub ws_vhosts: String,
