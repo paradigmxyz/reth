@@ -114,6 +114,12 @@ where
     let storage_root = withdrawals_root_prehashed(hashed_storage_updates, state)
         .map_err(OpConsensusError::L2WithdrawalsRootCalculationFail)?;
 
+    if storage_root == EMPTY_ROOT_HASH {
+        // if there was no MessagePasser contract storage, something is wrong
+        // (it should at least store an implementation address and owner address)
+        warn!("isthmus: no storage root for L2ToL1MessagePasser contract");
+    }
+
     if header_storage_root != storage_root {
         return Err(OpConsensusError::L2WithdrawalsRootMismatch {
             header: header_storage_root,
