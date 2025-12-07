@@ -33,7 +33,8 @@ use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
-    RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
+    RethRpcModule, RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle,
+    TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
@@ -1003,6 +1004,11 @@ where
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
+        // Only start collecting bad blocks if the debug_ endpoint installed
+        let debug_enabled =
+            module_config.http().is_some_and(|sel| sel.contains(&RethRpcModule::Debug)) ||
+                module_config.ws().is_some_and(|sel| sel.contains(&RethRpcModule::Debug)) ||
+                module_config.ipc().is_some_and(|sel| sel.contains(&RethRpcModule::Debug));
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
         let (mut modules, mut auth_module, registry) = RpcModuleBuilder::default()
@@ -1020,22 +1026,24 @@ where
             registry.eth_api().signers().write().extend(signers);
         }
 
-        // keep track of invalid blocks for `debug_getBadBlocks`
-        let bad_block_store = registry.bad_block_store().clone();
-        let mut engine_events_stream = engine_events.new_listener();
-        node.task_executor().spawn_critical(
-            "collect bad blocks",
-            Box::pin(async move {
-                while let Some(event) = engine_events_stream.next().await {
-                    if let ConsensusEngineEvent::InvalidBlock(block) = event &&
-                        let Ok(recovered) =
-                            RecoveredBlock::try_recover_sealed(block.as_ref().clone())
-                    {
-                        bad_block_store.insert(recovered);
+        // keep track of invalid blocks for `debug_getBadBlocks` only if debug RPC is enabled
+        if debug_enabled {
+            let bad_block_store = registry.bad_block_store().clone();
+            let mut engine_events_stream = engine_events.new_listener();
+            node.task_executor().spawn_critical(
+                "collect bad blocks",
+                Box::pin(async move {
+                    while let Some(event) = engine_events_stream.next().await {
+                        if let ConsensusEngineEvent::InvalidBlock(block) = event &&
+                            let Ok(recovered) =
+                                RecoveredBlock::try_recover_sealed(block.as_ref().clone())
+                        {
+                            bad_block_store.insert(recovered);
+                        }
                     }
-                }
-            }),
-        );
+                }),
+            );
+        }
 
         let mut registry = RpcRegistry { registry };
         let ctx = RpcContext {
