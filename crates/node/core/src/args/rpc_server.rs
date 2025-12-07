@@ -67,6 +67,11 @@ pub struct RpcServerArgs {
     #[arg(long = "http.corsdomain")]
     pub http_corsdomain: Option<String>,
 
+    /// Comma separated list of virtual hostnames from which to accept HTTP requests (server
+    /// enforced). Accepts '*' wildcard.
+    #[arg(long = "http.vhosts", default_value = "localhost")]
+    pub http_vhosts: String,
+
     /// Enable the WS-RPC server
     #[arg(long)]
     pub ws: bool,
@@ -82,6 +87,11 @@ pub struct RpcServerArgs {
     /// Origins from which to accept `WebSocket` requests
     #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain")]
     pub ws_allowed_origins: Option<String>,
+
+    /// Comma separated list of virtual hostnames from which to accept WebSocket requests (server
+    /// enforced). Accepts '*' wildcard.
+    #[arg(long = "ws.vhosts", default_value = "localhost")]
+    pub ws_vhosts: String,
 
     /// Rpc Modules to be configured for the WS server
     #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default())]
@@ -394,10 +404,12 @@ impl Default for RpcServerArgs {
             http_disable_compression: false,
             http_api: None,
             http_corsdomain: None,
+            http_vhosts: "localhost".to_string(),
             ws: false,
             ws_addr: Ipv4Addr::LOCALHOST.into(),
             ws_port: constants::DEFAULT_WS_RPC_PORT,
             ws_allowed_origins: None,
+            ws_vhosts: "localhost".to_string(),
             ws_api: None,
             ipcdisable: false,
             ipcpath: constants::DEFAULT_IPC_ENDPOINT.to_string(),
@@ -541,5 +553,45 @@ mod tests {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         let expected = 1_000_000_000_000_000_000u128;
         assert_eq!(args.rpc_tx_fee_cap, expected); // 1 ETH default cap
+    }
+
+    #[test]
+    fn test_http_vhosts_default() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.http_vhosts, "localhost");
+    }
+
+    #[test]
+    fn test_http_vhosts_custom() {
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.vhosts", "localhost,*.example.com"])
+                .args;
+        assert_eq!(args.http_vhosts, "localhost,*.example.com");
+    }
+
+    #[test]
+    fn test_ws_vhosts_default() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
+        assert_eq!(args.ws_vhosts, "localhost");
+    }
+
+    #[test]
+    fn test_ws_vhosts_custom() {
+        let args =
+            CommandParser::<RpcServerArgs>::parse_from(["reth", "--ws.vhosts", "localhost,*.example.com"])
+                .args;
+        assert_eq!(args.ws_vhosts, "localhost,*.example.com");
+    }
+
+    #[test]
+    fn test_http_vhosts_wildcard() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--http.vhosts", "*"]).args;
+        assert_eq!(args.http_vhosts, "*");
+    }
+
+    #[test]
+    fn test_ws_vhosts_wildcard() {
+        let args = CommandParser::<RpcServerArgs>::parse_from(["reth", "--ws.vhosts", "*"]).args;
+        assert_eq!(args.ws_vhosts, "*");
     }
 }
