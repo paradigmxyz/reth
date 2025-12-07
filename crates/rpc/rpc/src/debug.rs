@@ -26,7 +26,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError, RpcConvert, RpcNodeCore,
+    EthApiTypes, FromEthApiError, RpcBlock, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -737,8 +737,8 @@ where
         let mut bad_blocks = Vec::with_capacity(blocks.len());
 
         #[derive(Serialize, Deserialize)]
-        struct BadBlockSerde<Tx, H> {
-            block: alloy_rpc_types_eth::Block<Tx, H>,
+        struct BadBlockSerde<T> {
+            block: T,
             hash: B256,
             rlp: Bytes,
         }
@@ -752,15 +752,14 @@ where
                 )
                 .map_err(|err| internal_rpc_err(err.to_string()))?;
 
-            // Convert to default RPC block via serde to align with BadBlock fields.
-            let rpc_block: alloy_rpc_types_eth::Block = serde_json::to_value(&rpc_block)
-                .and_then(serde_json::from_value)
-                .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
-
             let mut rlp = Vec::new();
             block.clone_sealed_block().encode(&mut rlp);
 
-            let wrapper = BadBlockSerde { block: rpc_block, hash: block.hash(), rlp: rlp.into() };
+            let wrapper = BadBlockSerde::<RpcBlock<Eth::NetworkTypes>> {
+                block: rpc_block,
+                hash: block.hash(),
+                rlp: rlp.into(),
+            };
             let bad_block: BadBlock = serde_json::to_value(wrapper)
                 .and_then(serde_json::from_value)
                 .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
