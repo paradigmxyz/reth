@@ -99,8 +99,13 @@ impl BlobStore for InMemoryBlobStore {
         &self,
         txs: Vec<B256>,
     ) -> Result<Vec<Arc<BlobTransactionSidecarVariant>>, BlobStoreError> {
+        if txs.is_empty() {
+            return Ok(Vec::new());
+        }
         let store = self.inner.store.read();
-        Ok(txs.into_iter().filter_map(|tx| store.get(&tx).cloned()).collect())
+        txs.into_iter()
+            .map(|tx| store.get(&tx).cloned().ok_or(BlobStoreError::MissingSidecar(tx)))
+            .collect()
     }
 
     fn get_by_versioned_hashes_v1(
