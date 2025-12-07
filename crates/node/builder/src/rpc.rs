@@ -1030,19 +1030,16 @@ where
         if debug_enabled {
             let bad_block_store = registry.bad_block_store().clone();
             let mut engine_events_stream = engine_events.new_listener();
-            node.task_executor().spawn_critical(
-                "collect bad blocks",
-                Box::pin(async move {
-                    while let Some(event) = engine_events_stream.next().await {
-                        if let ConsensusEngineEvent::InvalidBlock(block) = event &&
-                            let Ok(recovered) =
-                                RecoveredBlock::try_recover_sealed(block.as_ref().clone())
-                        {
-                            bad_block_store.insert(recovered);
-                        }
+            node.task_executor().spawn(Box::pin(async move {
+                while let Some(event) = engine_events_stream.next().await {
+                    if let ConsensusEngineEvent::InvalidBlock(block) = event &&
+                        let Ok(recovered) =
+                            RecoveredBlock::try_recover_sealed(block.as_ref().clone())
+                    {
+                        bad_block_store.insert(recovered);
                     }
-                }),
-            );
+                }
+            }));
         }
 
         let mut registry = RpcRegistry { registry };
