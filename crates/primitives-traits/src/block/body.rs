@@ -202,7 +202,8 @@ pub trait BlockBody:
     /// Returns an iterator over `Recovered<&Transaction>` for all transactions in the block body.
     ///
     /// This method recovers signers and returns an iterator without cloning transactions,
-    /// making it more efficient than [`BlockBody::recover_transactions`] when owned values are not required.
+    /// making it more efficient than [`BlockBody::recover_transactions`] when owned values are not
+    /// required.
     ///
     /// # Errors
     ///
