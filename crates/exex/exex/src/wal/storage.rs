@@ -83,8 +83,8 @@ where
                 let file_name = entry.file_name();
                 let file_id = Self::parse_filename(&file_name.to_string_lossy())?;
 
-                min_id = min_id.map_or(Some(file_id), |min_id: u32| Some(min_id.min(file_id)));
-                max_id = max_id.map_or(Some(file_id), |max_id: u32| Some(max_id.max(file_id)));
+                min_id = Some(min_id.map_or(file_id, |min_id: u32| min_id.min(file_id)));
+                max_id = Some(max_id.map_or(file_id, |max_id: u32| max_id.max(file_id)));
             }
         }
 
