@@ -21,7 +21,7 @@ pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reqwest::Url;
 use reth_chainspec::{EthereumHardforks, Hardforks};
 use reth_evm::ConfigureEvm;
-use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
+use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes, PrimitivesTy};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
     FlashBlockBuildInfo, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
@@ -38,7 +38,7 @@ use reth_rpc_eth_api::{
     RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock};
-use reth_storage_api::{BlockReaderIdExt, ProviderHeader};
+use reth_storage_api::{BlockReaderIdExt, ProviderBlock, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
@@ -193,6 +193,7 @@ where
     type Error = OpEthApiError;
     type NetworkTypes = Rpc::Network;
     type RpcConvert = Rpc;
+    type ProviderBlock = ProviderBlock<N::Provider>;
 
     fn converter(&self) -> &Self::RpcConvert {
         self.inner.eth_api.converter()
@@ -487,8 +488,8 @@ where
     >,
     NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
-    OpEthApi<N, OpRpcConvert<N, NetworkT>>:
-        FullEthApiServer<Provider = N::Provider, Pool = N::Pool>,
+    OpEthApi<N, OpRpcConvert<N, NetworkT>>: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>
+        + RpcNodeCore<Primitives = PrimitivesTy<N::Types>>,
 {
     type EthApi = OpEthApi<N, OpRpcConvert<N, NetworkT>>;
 

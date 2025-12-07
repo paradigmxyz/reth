@@ -331,8 +331,8 @@ where
         RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>,
     )
     where
-        EthApi:
-            FullEthApiServer<Provider = Provider, Pool = Pool> + RpcNodeCore<Provider = Provider>,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>
+            + RpcNodeCore<Provider = Provider, Primitives = N>,
     {
         let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
 
@@ -359,7 +359,7 @@ where
         eth: EthApi,
     ) -> RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
     where
-        EthApi: EthApiTypes + RpcNodeCore<Provider = Provider> + 'static,
+        EthApi: EthApiTypes + RpcNodeCore<Provider = Provider, Primitives = N> + 'static,
     {
         let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
         RpcRegistryInner::new(provider, pool, network, executor, consensus, config, evm_config, eth)
@@ -373,8 +373,8 @@ where
         eth: EthApi,
     ) -> TransportRpcModules<()>
     where
-        EthApi:
-            FullEthApiServer<Provider = Provider, Pool = Pool> + RpcNodeCore<Provider = Provider>,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>
+            + RpcNodeCore<Provider = Provider, Primitives = N>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -530,7 +530,7 @@ where
         + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
-    EthApi: EthApiTypes + RpcNodeCore<Provider = Provider> + 'static,
+    EthApi: EthApiTypes + RpcNodeCore<Provider = Provider, Primitives = N> + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
 {
     /// Creates a new, empty instance.
@@ -715,7 +715,10 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_debug(&mut self) -> &mut Self
     where
-        EthApi: EthApiSpec + EthTransactions + TraceExt + RpcNodeCore<Provider = Provider>,
+        EthApi: EthApiSpec
+            + EthTransactions
+            + TraceExt
+            + RpcNodeCore<Provider = Provider, Primitives = N>,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -824,7 +827,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn debug_api(&self) -> DebugApi<EthApi>
     where
-        EthApi: EthApiTypes + RpcNodeCore<Provider = Provider>,
+        EthApi: EthApiTypes + RpcNodeCore<Provider = Provider, Primitives = N>,
     {
         DebugApi::new(
             self.eth_api().clone(),
@@ -862,7 +865,7 @@ where
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    EthApi: FullEthApiServer + RpcNodeCore<Provider = Provider>,
+    EthApi: FullEthApiServer + RpcNodeCore<Provider = Provider, Primitives = N>,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {

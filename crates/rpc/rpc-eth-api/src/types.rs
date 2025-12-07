@@ -2,6 +2,7 @@
 
 use crate::{AsEthApiError, FromEthApiError, RpcNodeCore};
 use alloy_rpc_types_eth::Block;
+use reth_primitives_traits::Block as BlockTrait;
 use reth_rpc_convert::{RpcConvert, SignableTxRequest};
 pub use reth_rpc_convert::{RpcTransaction, RpcTxReq, RpcTypes};
 use reth_storage_api::ProviderTx;
@@ -15,7 +16,7 @@ use std::error::Error;
 ///
 /// This type is stateful so that it can provide additional context if necessary, e.g. populating
 /// receipts with additional data.
-pub trait EthApiTypes: Send + Sync + Clone {
+pub trait EthApiTypes: RpcNodeCore + Send + Sync + Clone {
     /// Extension of [`FromEthApiError`], with network specific errors.
     type Error: Into<jsonrpsee_types::error::ErrorObject<'static>>
         + FromEthApiError
@@ -28,6 +29,8 @@ pub trait EthApiTypes: Send + Sync + Clone {
     type NetworkTypes: RpcTypes;
     /// Conversion methods for transaction RPC type.
     type RpcConvert: RpcConvert<Network = Self::NetworkTypes>;
+    /// Provider block type used by RPC.
+    type ProviderBlock: BlockTrait;
 
     /// Returns reference to transaction response builder.
     fn converter(&self) -> &Self::RpcConvert;

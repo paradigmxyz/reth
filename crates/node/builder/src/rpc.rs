@@ -26,7 +26,7 @@ use reth_node_core::{
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_primitives_traits::RecoveredBlock;
 use reth_rpc::{
-    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
+    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer, RpcNodeCore},
     AdminApi,
 };
 use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
@@ -1208,6 +1208,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
 pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     /// The Ethapi implementation this builder will build.
     type EthApi: EthApiTypes
+        + RpcNodeCore<Primitives = PrimitivesTy<N::Types>>
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool>
         + Unpin
         + 'static;
