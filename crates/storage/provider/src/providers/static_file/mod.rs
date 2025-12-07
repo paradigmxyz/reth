@@ -570,7 +570,7 @@ mod tests {
     /// Returns the number of files in the provided path, excluding ".lock" files.
     fn count_files_without_lockfile(path: impl AsRef<Path>) -> eyre::Result<usize> {
         let is_lockfile =
-            |entry: &fs::DirEntry| entry.path().file_name().map_or(false, |name| name == "lock");
+            |entry: &fs::DirEntry| entry.path().file_name().is_some_and(|name| name == "lock");
         let count = fs::read_dir(path)?
             .filter_map(|entry| entry.ok())
             .filter(|entry| !is_lockfile(entry))

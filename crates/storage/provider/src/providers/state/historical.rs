@@ -514,13 +514,13 @@ impl LowestAvailableBlocks {
     /// Check if account history is available at the provided block number, i.e. lowest available
     /// block number for account history is less than or equal to the provided block number.
     pub fn is_account_history_available(&self, at: BlockNumber) -> bool {
-        self.account_history_block_number.map_or(true, |block_number| block_number <= at)
+        self.account_history_block_number.is_none_or(|block_number| block_number <= at)
     }
 
     /// Check if storage history is available at the provided block number, i.e. lowest available
     /// block number for storage history is less than or equal to the provided block number.
     pub fn is_storage_history_available(&self, at: BlockNumber) -> bool {
-        self.storage_history_block_number.map_or(true, |block_number| block_number <= at)
+        self.storage_history_block_number.is_none_or(|block_number| block_number <= at)
     }
 }
 
