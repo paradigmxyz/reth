@@ -11,7 +11,7 @@ use alloy_rpc_types_engine::PayloadId;
 use reth_basic_payload_builder::*;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{
-    block::BlockExecutorFor,
+    block::{BlockExecutorFor, StateDB},
     execute::{
         BlockBuilder, BlockBuilderOutcome, BlockExecutionError, BlockExecutor, BlockValidationError,
     },
@@ -38,7 +38,10 @@ use reth_revm::{
 };
 use reth_storage_api::{errors::ProviderError, StateProvider, StateProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
-use revm::context::{Block, BlockEnv};
+use revm::{
+    context::{Block, BlockEnv},
+    DatabaseCommit,
+};
 use std::{marker::PhantomData, sync::Arc};
 use tracing::{debug, trace, warn};
 
@@ -598,9 +601,9 @@ where
     }
 
     /// Prepares a [`BlockBuilder`] for the next block.
-    pub fn block_builder<'a, DB: Database>(
+    pub fn block_builder<'a, DB: StateDB + DatabaseCommit + Database + 'a>(
         &'a self,
-        db: &'a mut State<DB>,
+        db: DB,
     ) -> Result<
         impl BlockBuilder<
                 Primitives = Evm::Primitives,
