@@ -70,8 +70,10 @@ impl<B: BlockTrait> BadBlockStore<B> {
         let hash = block.hash();
         let mut guard = self.inner.write();
 
-        // drop existing entry with same hash to keep most recent order
-        guard.retain(|b| b.hash() != hash);
+        // skip if we already recorded this bad block , and keep original ordering
+        if guard.iter().any(|b| b.hash() == hash) {
+            return;
+        }
         guard.push_back(Arc::new(block));
 
         while guard.len() > self.limit {
