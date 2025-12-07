@@ -105,7 +105,7 @@ impl EngineApiMetrics {
         // Use metered to execute and track timing/gas metrics
         let (mut db, result) = self.metered(|| {
             let res = f();
-            let gas_used = res.as_ref().map(|r| r.1.gas_used).unwrap_or(0);
+            let gas_used = res.as_ref().map_or(0, |r| r.1.gas_used);
             (gas_used, res)
         })?;
 

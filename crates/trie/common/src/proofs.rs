@@ -250,7 +250,7 @@ impl MultiProof {
 
         // Retrieve proofs for requested storage slots.
         let storage_multiproof = self.storages.get(&hashed_address);
-        let storage_root = storage_multiproof.map(|m| m.root).unwrap_or(EMPTY_ROOT_HASH);
+        let storage_root = storage_multiproof.map_or(EMPTY_ROOT_HASH, |m| m.root);
         let mut storage_proofs = Vec::with_capacity(slots.len());
         for slot in slots {
             let proof = if let Some(multiproof) = &storage_multiproof {
@@ -378,7 +378,7 @@ impl DecodedMultiProof {
 
         // Retrieve proofs for requested storage slots.
         let storage_multiproof = self.storages.get(&hashed_address);
-        let storage_root = storage_multiproof.map(|m| m.root).unwrap_or(EMPTY_ROOT_HASH);
+        let storage_root = storage_multiproof.map_or(EMPTY_ROOT_HASH, |m| m.root);
         let mut storage_proofs = Vec::with_capacity(slots.len());
         for slot in slots {
             let proof = if let Some(multiproof) = &storage_multiproof {

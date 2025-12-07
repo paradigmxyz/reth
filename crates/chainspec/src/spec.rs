@@ -51,7 +51,7 @@ pub fn make_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Hea
     let base_fee_per_gas = hardforks
         .fork(EthereumHardfork::London)
         .active_at_block(0)
-        .then(|| genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(INITIAL_BASE_FEE));
+        .then(|| genesis.base_fee_per_gas.map_or(INITIAL_BASE_FEE, |fee| fee as u64));
 
     // If shanghai is activated, initialize the header with an empty withdrawals hash, and
     // empty withdrawals list.
@@ -505,7 +505,7 @@ impl<H: BlockHeader> ChainSpec<H> {
     pub fn initial_base_fee(&self) -> Option<u64> {
         // If the base fee is set in the genesis block, we use that instead of the default.
         let genesis_base_fee =
-            self.genesis.base_fee_per_gas.map(|fee| fee as u64).unwrap_or(INITIAL_BASE_FEE);
+            self.genesis.base_fee_per_gas.map_or(INITIAL_BASE_FEE, |fee| fee as u64);
 
         // If London is activated at genesis, we set the initial base fee as per EIP-1559.
         self.hardforks.fork(EthereumHardfork::London).active_at_block(0).then_some(genesis_base_fee)
