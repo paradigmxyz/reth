@@ -29,7 +29,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError, RpcBlock, RpcConvert,
+    EthApiTypes, FromEthApiError, RpcBlock, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -49,13 +49,13 @@ use tokio_stream::StreamExt;
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
-pub struct DebugApi<Eth: EthApiTypes> {
+pub struct DebugApi<Eth: EthApiTypes + RpcNodeCore> {
     inner: Arc<DebugApiInner<Eth>>,
 }
 
 impl<Eth> DebugApi<Eth>
 where
-    Eth: EthApiTypes,
+    Eth: EthApiTypes + RpcNodeCore,
 {
     /// Create a new instance of the [`DebugApi`]
     pub fn new(
@@ -87,7 +87,7 @@ where
 
 impl<Eth> DebugApi<Eth>
 where
-    Eth: EthApiTypes + TraceExt + 'static,
+    Eth: EthApiTypes + RpcNodeCore + TraceExt + 'static,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -624,7 +624,7 @@ where
 #[async_trait]
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
-    Eth: EthApiTypes + EthTransactions + TraceExt + 'static,
+    Eth: EthApiTypes + RpcNodeCore + EthTransactions + TraceExt + 'static,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -1093,13 +1093,13 @@ where
     }
 }
 
-impl<Eth: EthApiTypes> std::fmt::Debug for DebugApi<Eth> {
+impl<Eth: EthApiTypes + RpcNodeCore> std::fmt::Debug for DebugApi<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
 }
 
-impl<Eth: EthApiTypes> Clone for DebugApi<Eth> {
+impl<Eth: EthApiTypes + RpcNodeCore> Clone for DebugApi<Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
@@ -1107,7 +1107,7 @@ impl<Eth: EthApiTypes> Clone for DebugApi<Eth> {
 
 impl<Eth> DebugApi<Eth>
 where
-    Eth: EthApiTypes,
+    Eth: EthApiTypes + RpcNodeCore,
 {
     /// Listens for invalid blocks and records them in the bad block store.
     pub fn spawn_invalid_block_listener<S, St>(&self, mut stream: St, executor: S)
@@ -1175,7 +1175,7 @@ impl<B: BlockTrait> Default for BadBlockStore<B> {
     }
 }
 
-struct DebugApiInner<Eth: EthApiTypes> {
+struct DebugApiInner<Eth: EthApiTypes + RpcNodeCore> {
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls

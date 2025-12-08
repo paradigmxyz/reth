@@ -24,7 +24,7 @@ use reth_rpc_eth_types::{
     builder::config::PendingBlockKind, receipt::EthReceiptConverter, tx_forward::ForwardConfig,
     EthApiError, EthStateCache, FeeHistoryCache, GasCap, GasPriceOracle, PendingBlock,
 };
-use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderBlock, ProviderHeader};
+use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner, TokioTaskExecutor,
@@ -189,7 +189,6 @@ where
     type Error = EthApiError;
     type NetworkTypes = Rpc::Network;
     type RpcConvert = Rpc;
-    type ProviderBlock = ProviderBlock<N::Provider>;
 
     fn converter(&self) -> &Self::RpcConvert {
         &self.converter
