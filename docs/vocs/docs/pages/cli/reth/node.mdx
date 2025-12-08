@@ -332,6 +332,19 @@ RPC:
       --http.disable-compression
           Disable compression for HTTP responses
 
+      --http.compression <ALGOS>
+          Set allowed HTTP response compression algorithms.
+
+          Client Accept-Encoding quality values select among allowed algorithms; ties prefer zstd > br > gzip > deflate. List order is ignored.
+
+          Omitted quality values default to 1. Without an acceptable allowed algorithm, the response is uncompressed.
+
+          Brotli is opt-in. To disable compression entirely, use --http.disable-compression.
+
+          [default: zstd,gzip,deflate]
+
+          [possible values: zstd, gzip, deflate, br]
+
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
