@@ -341,6 +341,13 @@ RPC:
 
           [possible values: zstd, gzip, deflate, br]
 
+      --http.decompression <ALGOS>
+          Comma-separated list of allowed decompression algorithms for HTTP requests.
+
+          Request decompression is disabled when not specified.
+
+          [possible values: zstd, gzip, deflate, br]
+
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
@@ -422,7 +429,9 @@ RPC:
           Disable built-in RPC request metrics
 
       --rpc.max-request-size <RPC_MAX_REQUEST_SIZE>
-          Set the maximum RPC request payload size for both HTTP and WS in megabytes
+          Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+
+          For compressed HTTP requests, this limit applies to both the compressed and decompressed payloads.
 
           [default: 15]
 

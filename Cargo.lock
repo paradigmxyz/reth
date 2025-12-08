@@ -10199,6 +10199,8 @@ name = "reth-rpc-layer"
 version = "2.5.0"
 dependencies = [
  "alloy-rpc-types-engine",
+ "brotli",
+ "flate2",
  "http",
  "http-body-util",
  "jsonrpsee",
@@ -10209,6 +10211,7 @@ dependencies = [
  "tower",
  "tower-http",
  "tracing",
+ "zstd",
 ]
 
 [[package]]
