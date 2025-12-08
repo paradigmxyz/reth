@@ -64,7 +64,7 @@ rayon.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 # rocksdb: jemalloc is recommended production workload
-rocksdb = { workspace = true, features = ["jemalloc"] }
+rocksdb = { workspace = true, features = ["jemalloc"], optional = true }
 
 [dev-dependencies]
 reth-db = { workspace = true, features = ["test-utils"] }
@@ -86,6 +86,7 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
+rocksdb = ["dep:rocksdb"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",
