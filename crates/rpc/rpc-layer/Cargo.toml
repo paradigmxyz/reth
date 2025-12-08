@@ -12,6 +12,7 @@ workspace = true
 
 [dependencies]
 alloy-rpc-types-engine = { workspace = true, features = ["jwt", "serde"] }
+reth-rpc-server-types.workspace = true
 
 http.workspace = true
 jsonrpsee-http-client.workspace = true

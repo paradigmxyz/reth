@@ -1026,6 +1026,8 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     http_addr: Option<SocketAddr>,
     /// Control whether http responses should be compressed
     http_disable_compression: bool,
+    /// Compression algorithms for HTTP responses
+    http_compression_algorithms: Vec<String>,
     /// Configs for WS server
     ws_server_config: Option<ServerConfigBuilder>,
     /// Allowed CORS Domains for ws.
@@ -1052,6 +1054,7 @@ impl Default for RpcServerConfig<Identity> {
             http_cors_domains: None,
             http_addr: None,
             http_disable_compression: false,
+            http_compression_algorithms: Vec::new(),
             ws_server_config: None,
             ws_cors_domains: None,
             ws_addr: None,
@@ -1116,6 +1119,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             http_cors_domains: self.http_cors_domains,
             http_addr: self.http_addr,
             http_disable_compression: self.http_disable_compression,
+            http_compression_algorithms: self.http_compression_algorithms,
             ws_server_config: self.ws_server_config,
             ws_cors_domains: self.ws_cors_domains,
             ws_addr: self.ws_addr,
@@ -1137,15 +1141,20 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         self
     }
 
-    /// Configure whether HTTP responses should be compressed
-    pub const fn with_http_disable_compression(mut self, http_disable_compression: bool) -> Self {
-        self.http_disable_compression = http_disable_compression;
-        self
-    }
-
     /// Configure the cors domains for HTTP
     pub fn with_http_cors(mut self, cors_domain: Option<String>) -> Self {
         self.http_cors_domains = cors_domain;
+        self
+    }
+
+    /// Configure HTTP response compression.
+    pub fn with_http_compression(
+        mut self,
+        disable_compression: bool,
+        algos: &[String],
+    ) -> Self {
+        self.http_disable_compression = disable_compression;
+        self.http_compression_algorithms = algos.to_vec();
         self
     }
 
@@ -1253,12 +1262,20 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     }
 
     /// Returns a [`CompressionLayer`] that adds compression support (gzip, deflate, brotli, zstd)
-    /// based on the client's `Accept-Encoding` header
-    fn maybe_compression_layer(disable_compression: bool) -> Option<CompressionLayer> {
+    /// based on the client's `Accept-Encoding` header.
+    fn maybe_compression_layer(
+        disable_compression: bool,
+        algos: &[String],
+    ) -> Option<CompressionLayer> {
         if disable_compression {
             None
+        } else if algos.is_empty() {
+            // Use default algorithms when none are specified
+            Some(CompressionLayer::new(
+                &constants::DEFAULT_HTTP_COMPRESSION_ALGOS,
+            ))
         } else {
-            Some(CompressionLayer::new())
+            Some(CompressionLayer::new(algos))
         }
     }
 
@@ -1327,6 +1344,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
                             .option_layer(Self::maybe_compression_layer(
                                 self.http_disable_compression,
+                                &self.http_compression_algorithms,
                             )),
                     )
                     .set_rpc_middleware(
@@ -1404,7 +1422,10 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
-                        .option_layer(Self::maybe_compression_layer(self.http_disable_compression)),
+                        .option_layer(Self::maybe_compression_layer(
+                            self.http_disable_compression,
+                            &self.http_compression_algorithms,
+                        )),
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::default()

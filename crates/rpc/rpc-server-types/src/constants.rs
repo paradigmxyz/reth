@@ -32,6 +32,16 @@ pub fn default_max_tracing_requests() -> usize {
 /// The default number of getproof calls we are allowing to run concurrently.
 pub const DEFAULT_PROOF_PERMITS: usize = 25;
 
+/// Default algorithms for HTTP response compression.
+///
+/// Used when no explicit algorithms are configured via CLI.
+pub const DEFAULT_HTTP_COMPRESSION_ALGOS: [&str; 3] = ["zstd", "gzip", "deflate"];
+
+/// Default algorithms for HTTP response compression.
+pub fn default_http_compression_algos() -> Vec<String> {
+    DEFAULT_HTTP_COMPRESSION_ALGOS.map(str::to_owned).to_vec()
+}
+
 /// The default IPC endpoint
 #[cfg(windows)]
 pub const DEFAULT_IPC_ENDPOINT: &str = r"\\.\pipe\reth.ipc";
