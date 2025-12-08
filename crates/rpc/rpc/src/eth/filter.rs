@@ -546,6 +546,13 @@ where
                     .transpose()?
                     .flatten();
 
+                // Return error if toBlock exceeds current head
+                if let Some(t) = to &&
+                    t > info.best_number
+                {
+                    return Err(EthFilterError::BlockRangeExceedsHead);
+                }
+
                 if let Some(f) = from &&
                     f > info.best_number
                 {
@@ -894,6 +901,9 @@ pub enum EthFilterError {
     /// Invalid block range.
     #[error("invalid block range params")]
     InvalidBlockRangeParams,
+    /// Block range extends beyond current head.
+    #[error("block range extends beyond current head block")]
+    BlockRangeExceedsHead,
     /// Query scope is too broad.
     #[error("query exceeds max block range {0}")]
     QueryExceedsMaxBlocks(u64),
@@ -928,7 +938,8 @@ impl From<EthFilterError> for jsonrpsee::types::error::ErrorObject<'static> {
             EthFilterError::EthAPIError(err) => err.into(),
             err @ (EthFilterError::InvalidBlockRangeParams |
             EthFilterError::QueryExceedsMaxBlocks(_) |
-            EthFilterError::QueryExceedsMaxResults { .. }) => {
+            EthFilterError::QueryExceedsMaxResults { .. } |
+            EthFilterError::BlockRangeExceedsHead) => {
                 rpc_error_with_code(jsonrpsee::types::error::INVALID_PARAMS_CODE, err.to_string())
             }
         }
