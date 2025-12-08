@@ -91,6 +91,7 @@ impl Command {
         let mut settings @ StorageSettings {
             receipts_in_static_files: _,
             transaction_senders_in_static_files: _,
+            storages_history_in_rocksdb: _,
         } = settings.unwrap_or_else(StorageSettings::legacy);
 
         // Update the setting based on the key
