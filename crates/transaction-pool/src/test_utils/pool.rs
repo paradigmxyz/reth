@@ -74,6 +74,8 @@ pub(crate) struct MockTransactionSimulator<R: Rng> {
     executed: HashMap<Address, ExecutedScenarios>,
     /// "Validates" generated transactions.
     validator: MockTransactionFactory,
+    /// Represents the gaps in nonces for each sender.
+    nonce_gaps: HashMap<Address, u64>,
     /// The rng instance used to select senders and scenarios.
     rng: R,
 }
@@ -91,6 +93,7 @@ impl<R: Rng> MockTransactionSimulator<R> {
             tx_generator: config.tx_generator,
             executed: Default::default(),
             validator: Default::default(),
+            nonce_gaps: Default::default(),
             rng,
         }
     }
@@ -174,6 +177,9 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         );
                     }
                 }
+                // Track the nonce gap for potential filling later
+                self.nonce_gaps.insert(sender, higher_nonce);
+
                 self.executed
                     .entry(sender)
                     .or_insert_with(|| ExecutedScenarios { sender, scenarios: vec![] }) // in the case of a new sender
@@ -216,6 +222,61 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         scenario: Scenario::BelowBaseFee { fee },
                     });
             }
+
+            ScenarioType::FillNonceGap => {
+                // Get a random sender that has a nonce gap
+                if self.nonce_gaps.is_empty() {
+                    // No gaps to fill, skip this scenario
+                    return;
+                }
+
+                let gap_senders: Vec<Address> = self.nonce_gaps.keys().copied().collect();
+                let idx = self.rng.random_range(0..gap_senders.len());
+                let gap_sender = gap_senders[idx];
+                let queued_nonce = self.nonce_gaps[&gap_sender];
+
+                let sender_onchain_nonce = self.nonces[&gap_sender];
+                let sender_balance = self.balances[&gap_sender];
+
+                // Fill all nonces from on_chain_nonce to queued_nonce - 1
+                for fill_nonce in sender_onchain_nonce..queued_nonce {
+                    let tx = self.tx_generator.tx(fill_nonce, &mut self.rng);
+                    let valid_tx = self.validator.validated(tx);
+
+                    let res = pool
+                        .add_transaction(valid_tx, sender_balance, sender_onchain_nonce, None)
+                        .unwrap();
+
+                    match res {
+                        AddedTransaction::Pending(_) => {}
+                        AddedTransaction::Parked { .. } => {
+                            panic!("expected pending when filling gap")
+                        }
+                    }
+
+                    self.executed
+                        .entry(gap_sender)
+                        .or_insert_with(|| ExecutedScenarios {
+                            sender: gap_sender,
+                            scenarios: vec![],
+                        })
+                        .scenarios
+                        .push(ExecutedScenario {
+                            balance: sender_balance,
+                            nonce: fill_nonce,
+                            scenario: Scenario::FillNonceGap {
+                                filled_nonce: fill_nonce,
+                                promoted_nonce: queued_nonce,
+                            },
+                        });
+                }
+
+                // Update on-chain nonce
+                self.nonces.insert(gap_sender, queued_nonce);
+
+                // Remove from gaps since it's now filled
+                self.nonce_gaps.remove(&gap_sender);
+            }
         }
         // make sure everything is set
         pool.enforce_invariants()
@@ -248,6 +309,7 @@ pub(crate) enum ScenarioType {
     OnchainNonce,
     HigherNonce { skip: u64 },
     BelowBaseFee { fee: u128 },
+    FillNonceGap,
 }
 
 /// The actual scenario, ready to be executed
@@ -264,6 +326,8 @@ pub(crate) enum Scenario {
     HigherNonce { onchain: u64, nonce: u64 },
     /// Send a tx with a base fee below the base fee of the pool
     BelowBaseFee { fee: u128 },
+    /// Fill a nonce gap to promote queued transactions
+    FillNonceGap { filled_nonce: u64, promoted_nonce: u64 },
     /// Execute multiple test scenarios
     Multi { scenario: Vec<Self> },
 }
