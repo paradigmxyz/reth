@@ -210,7 +210,7 @@ impl<N: NetworkPrimitives> StateFetcher<N> {
                                 .queued_requests
                                 .iter()
                                 .position(|req| req.is_normal_priority())
-                                .unwrap_or(0);
+                                .unwrap_or(self.queued_requests.len());
                             self.queued_requests.insert(pos, request);
                         }
                         Priority::Normal => {
@@ -585,6 +585,7 @@ mod tests {
     use crate::{peers::PeersManager, PeersConfig};
     use alloy_consensus::Header;
     use alloy_primitives::B512;
+    use reth_network_api::HeadersClient;
     use std::future::poll_fn;
 
     #[tokio::test(flavor = "multi_thread")]
@@ -1145,5 +1146,47 @@ mod tests {
         assert!(
             !peer_short_end.is_better(&peer_exact, &BestPeerRequirements::FullBlockRange(range))
         );
+    }
+
+    #[tokio::test]
+    async fn test_high_priority_fifo_without_normal() {
+        use crate::{peers::PeersManager, PeersConfig};
+        use std::future::poll_fn;
+
+        let manager = PeersManager::new(PeersConfig::default());
+        let mut fetcher =
+            StateFetcher::<EthNetworkPrimitives>::new(manager.handle(), Default::default());
+
+        // Submit three High-priority header requests via the client channel.
+        let client = fetcher.client();
+
+        let mk = |limit: u64| HeadersRequest {
+            start: 0u64.into(),
+            limit,
+            direction: Default::default(),
+        };
+
+        std::mem::drop(client.get_headers_with_priority(mk(1), Priority::High));
+        std::mem::drop(client.get_headers_with_priority(mk(2), Priority::High));
+        std::mem::drop(client.get_headers_with_priority(mk(3), Priority::High));
+
+        // Poll once to drain the receiver and perform the insertions.
+        poll_fn(|cx| {
+            let _ = fetcher.poll(cx);
+            Poll::Ready(())
+        })
+        .await;
+
+        // Expect FIFO among High-priority requests: limits should be [1, 2, 3]
+        let limits: Vec<u64> = fetcher
+            .queued_requests
+            .iter()
+            .map(|req| match req {
+                DownloadRequest::GetBlockHeaders { request, .. } => request.limit,
+                _ => unreachable!(),
+            })
+            .collect();
+
+        assert_eq!(limits, vec![1, 2, 3]);
     }
 }
