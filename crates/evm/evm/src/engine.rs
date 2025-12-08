@@ -23,6 +23,9 @@ pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
 /// parallelize heavy work like decoding or recovery.
 pub trait ExecutableTxTuple: Into<(Self::Iter, Self::Convert)> + Send + 'static {
     /// Raw transaction that can be converted to an [`ExecutableTxIterator::Tx`]
+    ///
+    /// This can be any type that can be converted to an [`ExecutableTxIterator::Tx`]. For example,
+    /// an unrecovered transaction or just the transaction bytes.
     type RawTx: Send + Sync + 'static;
     /// The executable transaction type iterator yields.
     type Tx: Clone + Send + Sync + 'static;

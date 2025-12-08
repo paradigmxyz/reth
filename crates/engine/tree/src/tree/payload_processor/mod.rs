@@ -349,9 +349,10 @@ where
                     let _ = execute_tx.send(tx);
                     next_for_execution += 1;
 
-                    while queue.first_key_value().is_some_and(|(idx, _)| *idx == next_for_execution)
+                    while let Some(entry) = queue.first_entry() &&
+                        *entry.key() == next_for_execution
                     {
-                        let _ = execute_tx.send(queue.pop_first().unwrap().1);
+                        let _ = execute_tx.send(entry.remove());
                         next_for_execution += 1;
                     }
                 } else {
