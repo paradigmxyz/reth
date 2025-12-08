@@ -10,7 +10,6 @@ use crate::{
 };
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
-use futures::StreamExt;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
@@ -24,7 +23,6 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_primitives_traits::RecoveredBlock;
 use reth_rpc::{
     eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer, RpcNodeCore},
     AdminApi,
@@ -1028,18 +1026,10 @@ where
 
         // keep track of invalid blocks for `debug_getBadBlocks` only if debug RPC is enabled
         if debug_enabled {
-            let bad_block_store = registry.bad_block_store().clone();
-            let mut engine_events_stream = engine_events.new_listener();
-            node.task_executor().spawn(Box::pin(async move {
-                while let Some(event) = engine_events_stream.next().await {
-                    if let ConsensusEngineEvent::InvalidBlock(block) = event &&
-                        let Ok(recovered) =
-                            RecoveredBlock::try_recover_sealed(block.as_ref().clone())
-                    {
-                        bad_block_store.insert(recovered);
-                    }
-                }
-            }));
+            registry.debug_api().spawn_invalid_block_listener(
+                engine_events.new_listener(),
+                node.task_executor().clone(),
+            );
         }
 
         let mut registry = RpcRegistry { registry };

@@ -18,6 +18,7 @@ use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
 use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
@@ -36,13 +37,14 @@ use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ReceiptProviderIdExt, StateProofProvider,
     StateProviderFactory, StateRootProvider, TransactionVariant,
 };
-use reth_tasks::pool::BlockingTaskGuard;
+use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+use tokio_stream::StreamExt;
 
 /// `debug` API implementation.
 ///
@@ -1100,6 +1102,33 @@ impl<Eth: EthApiTypes> std::fmt::Debug for DebugApi<Eth> {
 impl<Eth: EthApiTypes> Clone for DebugApi<Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
+    }
+}
+
+impl<Eth> DebugApi<Eth>
+where
+    Eth: EthApiTypes,
+{
+    /// Listens for invalid blocks and records them in the bad block store.
+    pub fn spawn_invalid_block_listener<S, St>(&self, mut stream: St, executor: S)
+    where
+        S: TaskSpawner + Clone + 'static,
+        St: tokio_stream::Stream<Item = ConsensusEngineEvent<Eth::Primitives>>
+            + Send
+            + Unpin
+            + 'static,
+    {
+        let bad_block_store = self.bad_block_store().clone();
+        executor.spawn(Box::pin(async move {
+            while let Some(event) = stream.next().await {
+                if let ConsensusEngineEvent::InvalidBlock(block) = event &&
+                    let Ok(recovered) =
+                        RecoveredBlock::try_recover_sealed(block.as_ref().clone())
+                {
+                    bad_block_store.insert(recovered);
+                }
+            }
+        }));
     }
 }
 
