@@ -3,6 +3,7 @@
 #![allow(dead_code)]
 
 use crate::{
+    error::PoolErrorKind,
     pool::{state::SubPool, txpool::TxPool, AddedTransaction},
     test_utils::{MockOrdering, MockTransactionDistribution, MockTransactionFactory},
     TransactionOrdering,
@@ -136,7 +137,15 @@ impl<R: Rng> MockTransactionSimulator<R> {
                 let valid_tx = self.validator.validated(tx);
 
                 let res =
-                    pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None).unwrap();
+                    match pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None) {
+                        Ok(res) => res,
+                        Err(e) => match e.kind {
+                            // skip pool capacity/replacement errors (not relevant)
+                            PoolErrorKind::SpammerExceededCapacity(_)
+                            | PoolErrorKind::ReplacementUnderpriced => return,
+                            _ => panic!("unexpected error: {e:?}"),
+                        },
+                    };
 
                 match res {
                     AddedTransaction::Pending(_) => {}
@@ -171,7 +180,15 @@ impl<R: Rng> MockTransactionSimulator<R> {
                 let valid_tx = self.validator.validated(tx);
 
                 let res =
-                    pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None).unwrap();
+                    match pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None) {
+                        Ok(res) => res,
+                        Err(e) => match e.kind {
+                            // skip pool capacity/replacement errors (not relevant)
+                            PoolErrorKind::SpammerExceededCapacity(_)
+                            | PoolErrorKind::ReplacementUnderpriced => return,
+                            _ => panic!("unexpected error: {e:?}"),
+                        },
+                    };
 
                 match res {
                     AddedTransaction::Pending(_) => {
@@ -211,7 +228,15 @@ impl<R: Rng> MockTransactionSimulator<R> {
                 let valid_tx = self.validator.validated(tx);
 
                 let res =
-                    pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None).unwrap();
+                    match pool.add_transaction(valid_tx, on_chain_balance, on_chain_nonce, None) {
+                        Ok(res) => res,
+                        Err(e) => match e.kind {
+                            // skip pool capacity/replacement errors (not relevant)
+                            PoolErrorKind::SpammerExceededCapacity(_)
+                            | PoolErrorKind::ReplacementUnderpriced => return,
+                            _ => panic!("unexpected error: {e:?}"),
+                        },
+                    };
 
                 match res {
                     AddedTransaction::Pending(_) => panic!("expected parked"),
@@ -252,9 +277,20 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         self.tx_generator.tx(fill_nonce, &mut self.rng).with_sender(gap_sender);
                     let valid_tx = self.validator.validated(tx);
 
-                    let res = pool
-                        .add_transaction(valid_tx, sender_balance, sender_onchain_nonce, None)
-                        .unwrap();
+                    let res = match pool.add_transaction(
+                        valid_tx,
+                        sender_balance,
+                        sender_onchain_nonce,
+                        None,
+                    ) {
+                        Ok(res) => res,
+                        Err(e) => match e.kind {
+                            // skip pool capacity/replacement errors (not relevant)
+                            PoolErrorKind::SpammerExceededCapacity(_)
+                            | PoolErrorKind::ReplacementUnderpriced => return,
+                            _ => panic!("unexpected error: {e:?}"),
+                        },
+                    };
 
                     match res {
                         AddedTransaction::Pending(_) => {}
@@ -526,5 +562,46 @@ mod tests {
         assert_eq!(pool.pending().len(), expected_pending);
         assert_eq!(pool.queued().len(), 0);
         assert_eq!(pool.base_fee().len(), 0);
+    }
+
+    #[test]
+    fn test_random_scenarios() {
+        let transaction_ratio = MockTransactionRatio {
+            legacy_pct: 30,
+            dynamic_fee_pct: 70,
+            access_list_pct: 0,
+            blob_pct: 0,
+        };
+
+        let base_fee = 10u128;
+        let fee_ranges = MockFeeRange {
+            gas_price: (base_fee..100).try_into().unwrap(),
+            priority_fee: (1u128..10).try_into().unwrap(),
+            max_fee: (base_fee..110).try_into().unwrap(),
+            max_fee_blob: (1u128..100).try_into().unwrap(),
+        };
+
+        let config = MockSimulatorConfig {
+            num_senders: 10,
+            scenarios: vec![
+                ScenarioType::OnchainNonce,
+                ScenarioType::HigherNonce { skip: 2 },
+                ScenarioType::BelowBaseFee { fee: 8 },
+                ScenarioType::FillNonceGap,
+            ],
+            base_fee,
+            tx_generator: MockTransactionDistribution::new(
+                transaction_ratio,
+                fee_ranges,
+                10..100,
+                10..100,
+            ),
+        };
+        let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
+        let mut pool = simulator.create_pool();
+
+        for _ in 0..1000 {
+            simulator.next(&mut pool);
+        }
     }
 }
