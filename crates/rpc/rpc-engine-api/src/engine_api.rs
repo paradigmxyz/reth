@@ -1,5 +1,7 @@
 use crate::{
-    capabilities::EngineCapabilities, metrics::EngineApiMetrics, EngineApiError, EngineApiResult,
+    capabilities::{log_capability_mismatches, EngineCapabilities},
+    metrics::EngineApiMetrics,
+    EngineApiError, EngineApiResult,
 };
 use alloy_eips::{
     eip1898::BlockHashOrNumber,
@@ -1080,8 +1082,13 @@ where
 
     /// Handler for `engine_exchangeCapabilitiesV1`
     /// See also <https://github.com/ethereum/execution-apis/blob/6452a6b194d7db269bf1dbd087a267251d3cc7f8/src/engine/common.md#capabilities>
-    async fn exchange_capabilities(&self, _capabilities: Vec<String>) -> RpcResult<Vec<String>> {
-        Ok(self.capabilities().list())
+    async fn exchange_capabilities(&self, capabilities: Vec<String>) -> RpcResult<Vec<String>> {
+        trace!(target: "rpc::engine", "Serving engine_exchangeCapabilities");
+
+        let el_caps = self.capabilities();
+        log_capability_mismatches(&capabilities, el_caps);
+
+        Ok(el_caps.list())
     }
 
     async fn get_blobs_v1(
