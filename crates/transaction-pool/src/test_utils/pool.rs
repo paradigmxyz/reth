@@ -11,6 +11,7 @@ use alloy_primitives::{Address, U256};
 use rand::Rng;
 use std::{
     collections::HashMap,
+    io::SeekFrom,
     ops::{Deref, DerefMut},
 };
 
@@ -132,7 +133,7 @@ impl<R: Rng> MockTransactionSimulator<R> {
         match scenario {
             ScenarioType::OnchainNonce => {
                 // uses fee from fee_ranges
-                let tx = self.tx_generator.tx(on_chain_nonce, &mut self.rng);
+                let tx = self.tx_generator.tx(on_chain_nonce, &mut self.rng).with_sender(sender);
                 let valid_tx = self.validator.validated(tx);
 
                 let res =
@@ -144,6 +145,7 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         panic!("expected pending")
                     }
                 }
+
                 self.executed
                     .entry(sender)
                     .or_insert_with(|| ExecutedScenarios { sender, scenarios: vec![] }) // in the case of a new sender
@@ -153,13 +155,20 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         nonce: on_chain_nonce,
                         scenario: Scenario::OnchainNonce { nonce: on_chain_nonce },
                     });
+
+                self.nonces.insert(sender, on_chain_nonce + 1);
             }
 
             ScenarioType::HigherNonce { skip } => {
+                // if this sender already has a nonce gap, skip
+                if self.nonce_gaps.contains_key(&sender) {
+                    return;
+                }
+
                 let higher_nonce = on_chain_nonce + skip;
 
                 // uses fee from fee_ranges
-                let tx = self.tx_generator.tx(higher_nonce, &mut self.rng);
+                let tx = self.tx_generator.tx(higher_nonce, &mut self.rng).with_sender(sender);
                 let valid_tx = self.validator.validated(tx);
 
                 let res =
@@ -177,8 +186,6 @@ impl<R: Rng> MockTransactionSimulator<R> {
                         );
                     }
                 }
-                // Track the nonce gap for potential filling later
-                self.nonce_gaps.insert(sender, higher_nonce);
 
                 self.executed
                     .entry(sender)
@@ -192,11 +199,16 @@ impl<R: Rng> MockTransactionSimulator<R> {
                             nonce: higher_nonce,
                         },
                     });
+                self.nonce_gaps.insert(sender, higher_nonce);
             }
 
             ScenarioType::BelowBaseFee { fee } => {
                 // fee should be in [MIN_PROTOCOL_BASE_FEE, base_fee)
-                let tx = self.tx_generator.tx(on_chain_nonce, &mut self.rng).with_gas_price(fee);
+                let tx = self
+                    .tx_generator
+                    .tx(on_chain_nonce, &mut self.rng)
+                    .with_sender(sender)
+                    .with_gas_price(fee);
                 let valid_tx = self.validator.validated(tx);
 
                 let res =
@@ -224,9 +236,7 @@ impl<R: Rng> MockTransactionSimulator<R> {
             }
 
             ScenarioType::FillNonceGap => {
-                // Get a random sender that has a nonce gap
                 if self.nonce_gaps.is_empty() {
-                    // No gaps to fill, skip this scenario
                     return;
                 }
 
@@ -238,9 +248,9 @@ impl<R: Rng> MockTransactionSimulator<R> {
                 let sender_onchain_nonce = self.nonces[&gap_sender];
                 let sender_balance = self.balances[&gap_sender];
 
-                // Fill all nonces from on_chain_nonce to queued_nonce - 1
                 for fill_nonce in sender_onchain_nonce..queued_nonce {
-                    let tx = self.tx_generator.tx(fill_nonce, &mut self.rng);
+                    let tx =
+                        self.tx_generator.tx(fill_nonce, &mut self.rng).with_sender(gap_sender);
                     let valid_tx = self.validator.validated(tx);
 
                     let res = pool
@@ -270,16 +280,12 @@ impl<R: Rng> MockTransactionSimulator<R> {
                             },
                         });
                 }
-
-                // Update on-chain nonce
-                self.nonces.insert(gap_sender, queued_nonce);
-
-                // Remove from gaps since it's now filled
+                self.nonces.insert(gap_sender, queued_nonce + 1);
                 self.nonce_gaps.remove(&gap_sender);
             }
         }
         // make sure everything is set
-        pool.enforce_invariants()
+        pool.enforce_invariants();
     }
 }
 
@@ -471,7 +477,55 @@ mod tests {
     }
 
     #[test]
-    fn test_many_random_scenarios() {
-        // todo: we should use a more deterministic approach to test this
+    fn test_fill_nonce_gap_scenario() {
+        let transaction_ratio = MockTransactionRatio {
+            legacy_pct: 30,
+            dynamic_fee_pct: 70,
+            access_list_pct: 0,
+            blob_pct: 0,
+        };
+
+        let base_fee = 10u128;
+        let fee_ranges = MockFeeRange {
+            gas_price: (base_fee..100).try_into().unwrap(),
+            priority_fee: (1u128..10).try_into().unwrap(),
+            max_fee: (base_fee..110).try_into().unwrap(),
+            max_fee_blob: (1u128..100).try_into().unwrap(),
+        };
+
+        let config = MockSimulatorConfig {
+            num_senders: 5,
+            scenarios: vec![ScenarioType::HigherNonce { skip: 5 }],
+            base_fee,
+            tx_generator: MockTransactionDistribution::new(
+                transaction_ratio,
+                fee_ranges,
+                10..100,
+                10..100,
+            ),
+        };
+        let mut simulator = MockTransactionSimulator::new(rand::rng(), config);
+        let mut pool = simulator.create_pool();
+
+        // create some nonce gaps
+        for _ in 0..10 {
+            simulator.next(&mut pool);
+        }
+
+        let num_gaps = simulator.nonce_gaps.len();
+
+        assert_eq!(pool.pending().len(), 0);
+        assert_eq!(pool.queued().len(), num_gaps);
+        assert_eq!(pool.base_fee().len(), 0);
+
+        simulator.scenarios = vec![ScenarioType::FillNonceGap];
+        for _ in 0..num_gaps {
+            simulator.next(&mut pool);
+        }
+
+        let expected_pending = num_gaps * 6;
+        assert_eq!(pool.pending().len(), expected_pending);
+        assert_eq!(pool.queued().len(), 0);
+        assert_eq!(pool.base_fee().len(), 0);
     }
 }
