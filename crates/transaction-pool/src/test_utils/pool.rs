@@ -11,7 +11,6 @@ use alloy_primitives::{Address, U256};
 use rand::Rng;
 use std::{
     collections::HashMap,
-    io::SeekFrom,
     ops::{Deref, DerefMut},
 };
 
