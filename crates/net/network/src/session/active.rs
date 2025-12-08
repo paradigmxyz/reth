@@ -561,7 +561,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     ///
     /// This will queue the response to be sent to the peer
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
-        match resp.try_into_message(id) {
+        match resp.try_into_eth_snap_message(id) {
             Ok(msg) => {
                 self.queued_outgoing.push_back(msg.into());
             }

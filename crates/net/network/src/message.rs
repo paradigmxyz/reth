@@ -8,10 +8,10 @@ use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
 use reth_eth_wire::{
-    message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
-    EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
-    NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData, PooledTransactions,
-    Receipts, SharedTransactions, Transactions,
+    eth_snap_stream::EthSnapMessage, message::RequestPair, BlockBodies, BlockHeaders,
+    BlockRangeUpdate, EthMessage, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders,
+    NetworkPrimitives, NewBlock, NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes,
+    NodeData, PooledTransactions, Receipts, SharedTransactions, Transactions,
 };
 use reth_eth_wire_types::{
     snap::{
@@ -248,48 +248,74 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts69(resp) => {
                 to_message!(resp, Receipts69, id)
             }
+            // Snap responses cannot be represented as `EthMessage` directly.
+            // Callers that need snap support should use `try_into_eth_snap_message` instead.
             Self::SnapAccountRange(resp) => match resp {
-                Ok(resp) => {
-                    let snap = SnapProtocolMessage::AccountRange(resp);
-                    let encoded = snap.encode();
-                    Ok(EthMessage::Other(RawCapabilityMessage::new(
-                        snap.message_id() as usize,
-                        encoded.slice(1..).to_vec().into(),
-                    )))
-                }
+                Ok(_) => Err(RequestError::UnsupportedCapability),
                 Err(err) => Err(err),
             },
             Self::SnapStorageRanges(resp) => match resp {
-                Ok(resp) => {
-                    let snap = SnapProtocolMessage::StorageRanges(resp);
-                    let encoded = snap.encode();
-                    Ok(EthMessage::Other(RawCapabilityMessage::new(
-                        snap.message_id() as usize,
-                        encoded.slice(1..).to_vec().into(),
-                    )))
-                }
+                Ok(_) => Err(RequestError::UnsupportedCapability),
                 Err(err) => Err(err),
             },
             Self::SnapByteCodes(resp) => match resp {
-                Ok(resp) => {
-                    let snap = SnapProtocolMessage::ByteCodes(resp);
-                    let encoded = snap.encode();
-                    Ok(EthMessage::Other(RawCapabilityMessage::new(
-                        snap.message_id() as usize,
-                        encoded.slice(1..).to_vec().into(),
-                    )))
-                }
+                Ok(_) => Err(RequestError::UnsupportedCapability),
                 Err(err) => Err(err),
             },
             Self::SnapTrieNodes(resp) => match resp {
-                Ok(resp) => {
-                    let snap = SnapProtocolMessage::TrieNodes(resp);
-                    let encoded = snap.encode();
-                    Ok(EthMessage::Other(RawCapabilityMessage::new(
-                        snap.message_id() as usize,
-                        encoded.slice(1..).to_vec().into(),
-                    )))
+                Ok(_) => Err(RequestError::UnsupportedCapability),
+                Err(err) => Err(err),
+            },
+        }
+    }
+
+    /// Converts this response into an [`EthSnapMessage`].
+    pub fn try_into_eth_snap_message(self, id: u64) -> RequestResult<EthSnapMessage<N>> {
+        macro_rules! to_message {
+            ($response:ident, $item:ident, $request_id:ident) => {
+                match $response {
+                    Ok(res) => {
+                        let request = RequestPair { request_id: $request_id, message: $item(res) };
+                        Ok(EthSnapMessage::Eth(EthMessage::$item(request)))
+                    }
+                    Err(err) => Err(err),
                 }
+            };
+        }
+
+        match self {
+            Self::BlockHeaders(resp) => {
+                to_message!(resp, BlockHeaders, id)
+            }
+            Self::BlockBodies(resp) => {
+                to_message!(resp, BlockBodies, id)
+            }
+            Self::PooledTransactions(resp) => {
+                to_message!(resp, PooledTransactions, id)
+            }
+            Self::NodeData(resp) => {
+                to_message!(resp, NodeData, id)
+            }
+            Self::Receipts(resp) => {
+                to_message!(resp, Receipts, id)
+            }
+            Self::Receipts69(resp) => {
+                to_message!(resp, Receipts69, id)
+            }
+            Self::SnapAccountRange(resp) => match resp {
+                Ok(resp) => Ok(EthSnapMessage::Snap(SnapProtocolMessage::AccountRange(resp))),
+                Err(err) => Err(err),
+            },
+            Self::SnapStorageRanges(resp) => match resp {
+                Ok(resp) => Ok(EthSnapMessage::Snap(SnapProtocolMessage::StorageRanges(resp))),
+                Err(err) => Err(err),
+            },
+            Self::SnapByteCodes(resp) => match resp {
+                Ok(resp) => Ok(EthSnapMessage::Snap(SnapProtocolMessage::ByteCodes(resp))),
+                Err(err) => Err(err),
+            },
+            Self::SnapTrieNodes(resp) => match resp {
+                Ok(resp) => Ok(EthSnapMessage::Snap(SnapProtocolMessage::TrieNodes(resp))),
                 Err(err) => Err(err),
             },
         }
