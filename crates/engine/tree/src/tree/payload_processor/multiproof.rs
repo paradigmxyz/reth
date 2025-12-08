@@ -174,123 +174,6 @@ impl Drop for StateHookSender {
     }
 }
 
-pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
-
-    for (address, account) in update {
-        if account.is_touched() {
-            let hashed_address = keccak256(address);
-            trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
-
-            let destroyed = account.is_selfdestructed();
-            let info = if destroyed { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
-
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
-
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
-            }
-        }
-    }
-
-    hashed_state
-}
-
-/// Dispatches work items as a single unit or in chunks based on target size and worker
-/// availability.
-#[allow(clippy::too_many_arguments)]
-fn dispatch_with_chunking<T, I>(
-    items: T,
-    chunking_len: usize,
-    chunk_size: Option<usize>,
-    max_targets_for_chunking: usize,
-    available_account_workers: usize,
-    available_storage_workers: usize,
-    chunker: impl FnOnce(T, usize) -> I,
-    mut dispatch: impl FnMut(T),
-) -> usize
-where
-    I: IntoIterator<Item = T>,
-{
-    let should_chunk = chunking_len > max_targets_for_chunking ||
-        available_account_workers > 1 ||
-        available_storage_workers > 1;
-
-    if should_chunk &&
-        let Some(chunk_size) = chunk_size &&
-        chunking_len > chunk_size
-    {
-        let mut dispatched = 0usize;
-        for chunk in chunker(items, chunk_size) {
-            dispatch(chunk);
-            dispatched += 1;
-        }
-        return dispatched;
-    }
-
-    dispatch(items);
-    1
-}
-
-/// Checks whether two state updates can be merged in a batch.
-///
-/// Transaction updates that share the same `StateChangeSource::Transaction` are safe to merge
-/// because they originate from one logical execution and can be coalesced to amortize proof work.
-fn can_batch_state_update(
-    batch_source: StateChangeSource,
-    batch_update: &EvmState,
-    next_source: StateChangeSource,
-    next_update: &EvmState,
-) -> bool {
-    if !same_state_change_source(batch_source, next_source) {
-        return false;
-    }
-
-    match (batch_source, next_source) {
-        (StateChangeSource::PreBlock(_), StateChangeSource::PreBlock(_)) |
-        (StateChangeSource::PostBlock(_), StateChangeSource::PostBlock(_)) => {
-            batch_update == next_update
-        }
-        _ => true,
-    }
-}
-
-/// Checks whether two state change sources refer to the same origin.
-fn same_state_change_source(lhs: StateChangeSource, rhs: StateChangeSource) -> bool {
-    match (lhs, rhs) {
-        (StateChangeSource::Transaction(a), StateChangeSource::Transaction(b)) => a == b,
-        (StateChangeSource::PreBlock(a), StateChangeSource::PreBlock(b)) => {
-            mem::discriminant(&a) == mem::discriminant(&b)
-        }
-        (StateChangeSource::PostBlock(a), StateChangeSource::PostBlock(b)) => {
-            mem::discriminant(&a) == mem::discriminant(&b)
-        }
-        _ => false,
-    }
-}
-
-/// Estimates target count from `EvmState` for batching decisions.
-fn estimate_evm_state_targets(state: &EvmState) -> usize {
-    state
-        .values()
-        .filter(|account| account.is_touched())
-        .map(|account| {
-            let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
-            1 + changed_slots
-        })
-        .sum()
-}
-
 /// A pending multiproof task, either [`StorageMultiproofInput`] or [`MultiproofInput`].
 #[derive(Debug)]
 enum PendingMultiproofTask {
@@ -441,7 +324,7 @@ impl MultiproofManager {
                 "No proof targets, sending empty multiproof back immediately"
             );
             input.send_empty_proof();
-            return
+            return;
         }
 
         match input {
@@ -503,7 +386,7 @@ impl MultiproofManager {
             ),
         ) {
             error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch storage proof");
-            return
+            return;
         }
 
         self.metrics
@@ -585,7 +468,7 @@ impl MultiproofManager {
 
         if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(input) {
             error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch account multiproof");
-            return
+            return;
         }
 
         self.metrics
@@ -1133,12 +1016,12 @@ impl MultiProofTask {
                 accumulated_targets.push(targets);
 
                 // Fast-path dispatch if the first message already fills the batch.
-                if accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
-                    accumulated_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
+                if accumulated_count < PREFETCH_MAX_BATCH_TARGETS
+                    && accumulated_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
                 {
                     loop {
-                        if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS ||
-                            accumulated_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
+                        if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS
+                            || accumulated_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
                         {
                             break;
                         }
@@ -1419,7 +1302,7 @@ impl MultiProofTask {
                     }
                     Err(error) => {
                         error!(target: "engine::tree::payload_processor::multiproof", ?error, "proof calculation error from worker");
-                        return
+                        return;
                     }
                 }
 
@@ -1571,8 +1454,8 @@ fn get_proof_targets(
             .storage
             .keys()
             .filter(|slot| {
-                !fetched.is_some_and(|f| f.contains(*slot)) ||
-                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
+                !fetched.is_some_and(|f| f.contains(*slot))
+                    || storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
             })
             .peekable();
 
@@ -1587,6 +1470,123 @@ fn get_proof_targets(
     }
 
     targets
+}
+
+/// Dispatches work items as a single unit or in chunks based on target size and worker
+/// availability.
+#[allow(clippy::too_many_arguments)]
+fn dispatch_with_chunking<T, I>(
+    items: T,
+    chunking_len: usize,
+    chunk_size: Option<usize>,
+    max_targets_for_chunking: usize,
+    available_account_workers: usize,
+    available_storage_workers: usize,
+    chunker: impl FnOnce(T, usize) -> I,
+    mut dispatch: impl FnMut(T),
+) -> usize
+where
+    I: IntoIterator<Item = T>,
+{
+    let should_chunk = chunking_len > max_targets_for_chunking
+        || available_account_workers > 1
+        || available_storage_workers > 1;
+
+    if should_chunk
+        && let Some(chunk_size) = chunk_size
+        && chunking_len > chunk_size
+    {
+        let mut dispatched = 0usize;
+        for chunk in chunker(items, chunk_size) {
+            dispatch(chunk);
+            dispatched += 1;
+        }
+        return dispatched;
+    }
+
+    dispatch(items);
+    1
+}
+
+/// Checks whether two state updates can be merged in a batch.
+///
+/// Transaction updates that share the same `StateChangeSource::Transaction` are safe to merge
+/// because they originate from one logical execution and can be coalesced to amortize proof work.
+fn can_batch_state_update(
+    batch_source: StateChangeSource,
+    batch_update: &EvmState,
+    next_source: StateChangeSource,
+    next_update: &EvmState,
+) -> bool {
+    if !same_state_change_source(batch_source, next_source) {
+        return false;
+    }
+
+    match (batch_source, next_source) {
+        (StateChangeSource::PreBlock(_), StateChangeSource::PreBlock(_))
+        | (StateChangeSource::PostBlock(_), StateChangeSource::PostBlock(_)) => {
+            batch_update == next_update
+        }
+        _ => true,
+    }
+}
+
+/// Checks whether two state change sources refer to the same origin.
+fn same_state_change_source(lhs: StateChangeSource, rhs: StateChangeSource) -> bool {
+    match (lhs, rhs) {
+        (StateChangeSource::Transaction(a), StateChangeSource::Transaction(b)) => a == b,
+        (StateChangeSource::PreBlock(a), StateChangeSource::PreBlock(b)) => {
+            mem::discriminant(&a) == mem::discriminant(&b)
+        }
+        (StateChangeSource::PostBlock(a), StateChangeSource::PostBlock(b)) => {
+            mem::discriminant(&a) == mem::discriminant(&b)
+        }
+        _ => false,
+    }
+}
+
+/// Estimates target count from `EvmState` for batching decisions.
+fn estimate_evm_state_targets(state: &EvmState) -> usize {
+    state
+        .values()
+        .filter(|account| account.is_touched())
+        .map(|account| {
+            let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
+            1 + changed_slots
+        })
+        .sum()
+}
+
+pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
+
+    for (address, account) in update {
+        if account.is_touched() {
+            let hashed_address = keccak256(address);
+            trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
+
+            let destroyed = account.is_selfdestructed();
+            let info = if destroyed { None } else { Some(account.info.into()) };
+            hashed_state.accounts.insert(hashed_address, info);
+
+            let mut changed_storage_iter = account
+                .storage
+                .into_iter()
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .peekable();
+
+            if destroyed {
+                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+            } else if changed_storage_iter.peek().is_some() {
+                hashed_state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            }
+        }
+    }
+
+    hashed_state
 }
 
 #[cfg(test)]
@@ -2248,8 +2248,8 @@ mod tests {
                 }
                 match task.rx.try_recv() {
                     Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                            !can_batch_state_update(
+                        if let Some((batch_source, batch_update)) = accumulated_updates.first()
+                            && !can_batch_state_update(
                                 *batch_source,
                                 batch_update,
                                 next_source,
@@ -2267,8 +2267,8 @@ mod tests {
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
                             break;
                         }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                            !accumulated_updates.is_empty()
+                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
+                            && !accumulated_updates.is_empty()
                         {
                             pending_msg =
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
@@ -2370,8 +2370,8 @@ mod tests {
                 }
                 match task.rx.try_recv() {
                     Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                            !can_batch_state_update(
+                        if let Some((batch_source, batch_update)) = accumulated_updates.first()
+                            && !can_batch_state_update(
                                 *batch_source,
                                 batch_update,
                                 next_source,
@@ -2389,8 +2389,8 @@ mod tests {
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
                             break;
                         }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                            !accumulated_updates.is_empty()
+                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
+                            && !accumulated_updates.is_empty()
                         {
                             pending_msg =
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
