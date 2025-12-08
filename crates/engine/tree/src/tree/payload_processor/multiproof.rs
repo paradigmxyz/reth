@@ -441,7 +441,7 @@ impl MultiproofManager {
                 "No proof targets, sending empty multiproof back immediately"
             );
             input.send_empty_proof();
-            return;
+            return
         }
 
         match input {
@@ -503,7 +503,7 @@ impl MultiproofManager {
             ),
         ) {
             error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch storage proof");
-            return;
+            return
         }
 
         self.metrics
@@ -585,7 +585,7 @@ impl MultiproofManager {
 
         if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(input) {
             error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch account multiproof");
-            return;
+            return
         }
 
         self.metrics
@@ -1419,7 +1419,7 @@ impl MultiProofTask {
                     }
                     Err(error) => {
                         error!(target: "engine::tree::payload_processor::multiproof", ?error, "proof calculation error from worker");
-                        return;
+                        return
                     }
                 }
 
