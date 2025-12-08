@@ -23,8 +23,7 @@ jobs:
   test:
     name: test / ${{ matrix.network }}
     if: github.event_name != 'schedule'
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     env:
       RUST_BACKTRACE: 1
     strategy:
