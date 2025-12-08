@@ -38,7 +38,7 @@ use reth_rpc_eth_api::{
     RpcNodeCoreExt, RpcTypes,
 };
 use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock};
-use reth_storage_api::{BlockReaderIdExt, ProviderBlock, ProviderHeader};
+use reth_storage_api::{BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
@@ -193,7 +193,6 @@ where
     type Error = OpEthApiError;
     type NetworkTypes = Rpc::Network;
     type RpcConvert = Rpc;
-    type ProviderBlock = ProviderBlock<N::Provider>;
 
     fn converter(&self) -> &Self::RpcConvert {
         self.inner.eth_api.converter()
