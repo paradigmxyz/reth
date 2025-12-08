@@ -36,7 +36,9 @@ const PREFETCH_MAX_BATCH_TARGETS: usize = 500;
 const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
 
 /// Maximum number of targets to batch together for state updates.
-const STATE_UPDATE_MAX_BATCH_TARGETS: usize = 50;
+/// Lower than prefetch because state updates require additional processing (hashing, state
+/// partitioning) before dispatch.
+const STATE_UPDATE_MAX_BATCH_TARGETS: usize = 128;
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
@@ -199,6 +201,9 @@ fn same_state_change_source(lhs: StateChangeSource, rhs: StateChangeSource) -> b
 }
 
 /// Checks whether two state updates can be merged in a batch.
+///
+/// Transaction updates that share the same `StateChangeSource::Transaction` are safe to merge
+/// because they originate from one logical execution and can be coalesced to amortize proof work.
 fn can_batch_state_update(
     batch_source: StateChangeSource,
     batch_update: &EvmState,
@@ -1199,8 +1204,11 @@ impl MultiProofTask {
 
                 // Accumulate messages including the first one
                 let mut accumulated_targets = estimate_evm_state_targets(&update);
+                // Preallocate modestly; state updates are heavier per message, but we can see small
+                // bursts. 
                 let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> =
-                    vec![(source, update)];
+                    Vec::with_capacity(16);
+                accumulated_updates.push((source, update));
 
                 loop {
                     if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
@@ -1362,7 +1370,11 @@ impl MultiProofTask {
     ///    * Once this message is received, on every [`MultiProofMessage::EmptyProof`] and
     ///      [`ProofResultMessage`], we check if all proofs have been processed and if there are any
     ///      pending proofs in the proof sequencer left to be revealed.
-    /// 6. This task exits after all pending proofs are processed.
+    /// 6. While running, consecutive [`MultiProofMessage::PrefetchProofs`] and
+    ///    [`MultiProofMessage::StateUpdate`] messages are batched to reduce redundant work; if a
+    ///    different message type arrives mid-batch, it is held as `pending_msg` and processed on
+    ///    the next loop to preserve ordering.
+    /// 7. This task exits after all pending proofs are processed.
     #[instrument(
         level = "debug",
         name = "MultiProofTask::run",
