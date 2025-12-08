@@ -1016,12 +1016,12 @@ impl MultiProofTask {
                 accumulated_targets.push(targets);
 
                 // Fast-path dispatch if the first message already fills the batch.
-                if accumulated_count < PREFETCH_MAX_BATCH_TARGETS
-                    && accumulated_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
+                if accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
+                    accumulated_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
                 {
                     loop {
-                        if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS
-                            || accumulated_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
+                        if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS ||
+                            accumulated_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
                         {
                             break;
                         }
@@ -1454,8 +1454,8 @@ fn get_proof_targets(
             .storage
             .keys()
             .filter(|slot| {
-                !fetched.is_some_and(|f| f.contains(*slot))
-                    || storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
+                !fetched.is_some_and(|f| f.contains(*slot)) ||
+                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
             })
             .peekable();
 
@@ -1488,13 +1488,13 @@ fn dispatch_with_chunking<T, I>(
 where
     I: IntoIterator<Item = T>,
 {
-    let should_chunk = chunking_len > max_targets_for_chunking
-        || available_account_workers > 1
-        || available_storage_workers > 1;
+    let should_chunk = chunking_len > max_targets_for_chunking ||
+        available_account_workers > 1 ||
+        available_storage_workers > 1;
 
-    if should_chunk
-        && let Some(chunk_size) = chunk_size
-        && chunking_len > chunk_size
+    if should_chunk &&
+        let Some(chunk_size) = chunk_size &&
+        chunking_len > chunk_size
     {
         let mut dispatched = 0usize;
         for chunk in chunker(items, chunk_size) {
@@ -1523,8 +1523,8 @@ fn can_batch_state_update(
     }
 
     match (batch_source, next_source) {
-        (StateChangeSource::PreBlock(_), StateChangeSource::PreBlock(_))
-        | (StateChangeSource::PostBlock(_), StateChangeSource::PostBlock(_)) => {
+        (StateChangeSource::PreBlock(_), StateChangeSource::PreBlock(_)) |
+        (StateChangeSource::PostBlock(_), StateChangeSource::PostBlock(_)) => {
             batch_update == next_update
         }
         _ => true,
@@ -2248,8 +2248,8 @@ mod tests {
                 }
                 match task.rx.try_recv() {
                     Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first()
-                            && !can_batch_state_update(
+                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
+                            !can_batch_state_update(
                                 *batch_source,
                                 batch_update,
                                 next_source,
@@ -2267,8 +2267,8 @@ mod tests {
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
                             break;
                         }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
-                            && !accumulated_updates.is_empty()
+                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
+                            !accumulated_updates.is_empty()
                         {
                             pending_msg =
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
@@ -2370,8 +2370,8 @@ mod tests {
                 }
                 match task.rx.try_recv() {
                     Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first()
-                            && !can_batch_state_update(
+                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
+                            !can_batch_state_update(
                                 *batch_source,
                                 batch_update,
                                 next_source,
@@ -2389,8 +2389,8 @@ mod tests {
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
                             break;
                         }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
-                            && !accumulated_updates.is_empty()
+                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
+                            !accumulated_updates.is_empty()
                         {
                             pending_msg =
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
