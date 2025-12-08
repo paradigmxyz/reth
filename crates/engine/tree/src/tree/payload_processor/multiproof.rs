@@ -174,55 +174,6 @@ impl Drop for StateHookSender {
     }
 }
 
-/// Estimates target count from `EvmState` for batching decisions.
-fn estimate_evm_state_targets(state: &EvmState) -> usize {
-    state
-        .values()
-        .filter(|account| account.is_touched())
-        .map(|account| {
-            let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
-            1 + changed_slots
-        })
-        .sum()
-}
-
-/// Checks whether two state change sources refer to the same origin.
-fn same_state_change_source(lhs: StateChangeSource, rhs: StateChangeSource) -> bool {
-    match (lhs, rhs) {
-        (StateChangeSource::Transaction(a), StateChangeSource::Transaction(b)) => a == b,
-        (StateChangeSource::PreBlock(a), StateChangeSource::PreBlock(b)) => {
-            mem::discriminant(&a) == mem::discriminant(&b)
-        }
-        (StateChangeSource::PostBlock(a), StateChangeSource::PostBlock(b)) => {
-            mem::discriminant(&a) == mem::discriminant(&b)
-        }
-        _ => false,
-    }
-}
-
-/// Checks whether two state updates can be merged in a batch.
-///
-/// Transaction updates that share the same `StateChangeSource::Transaction` are safe to merge
-/// because they originate from one logical execution and can be coalesced to amortize proof work.
-fn can_batch_state_update(
-    batch_source: StateChangeSource,
-    batch_update: &EvmState,
-    next_source: StateChangeSource,
-    next_update: &EvmState,
-) -> bool {
-    if !same_state_change_source(batch_source, next_source) {
-        return false;
-    }
-
-    match (batch_source, next_source) {
-        (StateChangeSource::PreBlock(_), StateChangeSource::PreBlock(_)) |
-        (StateChangeSource::PostBlock(_), StateChangeSource::PostBlock(_)) => {
-            batch_update == next_update
-        }
-        _ => true,
-    }
-}
-
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
@@ -289,6 +240,55 @@ where
 
     dispatch(items);
     1
+}
+
+/// Checks whether two state updates can be merged in a batch.
+///
+/// Transaction updates that share the same `StateChangeSource::Transaction` are safe to merge
+/// because they originate from one logical execution and can be coalesced to amortize proof work.
+fn can_batch_state_update(
+    batch_source: StateChangeSource,
+    batch_update: &EvmState,
+    next_source: StateChangeSource,
+    next_update: &EvmState,
+) -> bool {
+    if !same_state_change_source(batch_source, next_source) {
+        return false;
+    }
+
+    match (batch_source, next_source) {
+        (StateChangeSource::PreBlock(_), StateChangeSource::PreBlock(_)) |
+        (StateChangeSource::PostBlock(_), StateChangeSource::PostBlock(_)) => {
+            batch_update == next_update
+        }
+        _ => true,
+    }
+}
+
+/// Checks whether two state change sources refer to the same origin.
+fn same_state_change_source(lhs: StateChangeSource, rhs: StateChangeSource) -> bool {
+    match (lhs, rhs) {
+        (StateChangeSource::Transaction(a), StateChangeSource::Transaction(b)) => a == b,
+        (StateChangeSource::PreBlock(a), StateChangeSource::PreBlock(b)) => {
+            mem::discriminant(&a) == mem::discriminant(&b)
+        }
+        (StateChangeSource::PostBlock(a), StateChangeSource::PostBlock(b)) => {
+            mem::discriminant(&a) == mem::discriminant(&b)
+        }
+        _ => false,
+    }
+}
+
+/// Estimates target count from `EvmState` for batching decisions.
+fn estimate_evm_state_targets(state: &EvmState) -> usize {
+    state
+        .values()
+        .filter(|account| account.is_touched())
+        .map(|account| {
+            let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
+            1 + changed_slots
+        })
+        .sum()
 }
 
 /// A pending multiproof task, either [`StorageMultiproofInput`] or [`MultiproofInput`].
@@ -2551,6 +2551,70 @@ mod tests {
                 assert!(targets.contains_key(&addr3));
             }
             _ => panic!("PrefetchProofs3 was lost!"),
+        }
+    }
+
+    /// Verifies that a pending message is processed before the next loop iteration (ordering).
+    #[test]
+    fn test_pending_message_processed_before_next_iteration() {
+        use alloy_evm::block::StateChangeSource;
+        use revm_state::Account;
+
+        let test_provider_factory = create_test_provider_factory();
+        let mut task = create_test_state_root_task(test_provider_factory);
+
+        // Queue: Prefetch1, StateUpdate, Prefetch2
+        let prefetch_addr1 = B256::random();
+        let prefetch_addr2 = B256::random();
+        let mut prefetch1 = MultiProofTargets::default();
+        prefetch1.insert(prefetch_addr1, HashSet::default());
+        let mut prefetch2 = MultiProofTargets::default();
+        prefetch2.insert(prefetch_addr2, HashSet::default());
+
+        let state_addr = alloy_primitives::Address::random();
+        let mut state_update = EvmState::default();
+        state_update.insert(
+            state_addr,
+            Account {
+                info: revm_state::AccountInfo {
+                    balance: U256::from(42),
+                    nonce: 1,
+                    code_hash: Default::default(),
+                    code: Default::default(),
+                },
+                transaction_id: Default::default(),
+                storage: Default::default(),
+                status: revm_state::AccountStatus::Touched,
+            },
+        );
+
+        let source = StateChangeSource::Transaction(99);
+
+        let tx = task.state_root_message_sender();
+        tx.send(MultiProofMessage::PrefetchProofs(prefetch1)).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source, state_update)).unwrap();
+        tx.send(MultiProofMessage::PrefetchProofs(prefetch2.clone())).unwrap();
+
+        let mut ctx = MultiproofBatchCtx::new(Instant::now());
+        let mut batch_metrics = MultiproofBatchMetrics::default();
+
+        // First message: Prefetch1 batches; StateUpdate becomes pending.
+        let first = task.rx.recv().unwrap();
+        assert!(matches!(first, MultiProofMessage::PrefetchProofs(_)));
+        assert!(!task.process_multiproof_message(first, &mut ctx, &mut batch_metrics));
+        let pending = ctx.pending_msg.take().expect("pending message captured");
+        assert!(matches!(pending, MultiProofMessage::StateUpdate(_, _)));
+
+        // Pending message should be handled before the next select loop.
+        assert!(!task.process_multiproof_message(pending, &mut ctx, &mut batch_metrics));
+
+        // The remaining message should still be Prefetch2 (ordering preserved).
+        match task.rx.try_recv() {
+            Ok(MultiProofMessage::PrefetchProofs(targets)) => {
+                assert_eq!(targets.len(), 1);
+                assert!(targets.contains_key(&prefetch_addr2));
+            }
+            other => panic!("Expected remaining PrefetchProofs2, got {:?}", other),
         }
     }
 
