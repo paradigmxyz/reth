@@ -1099,11 +1099,9 @@ impl MultiProofTask {
 
     /// Processes a multiproof message, batching consecutive same-type messages.
     ///
-    /// Drains queued messages of the same type and merges them into one batch before processing.
-    /// This reduces redundant trie traversals when messages arrive faster than proofs complete.
-    ///
-    /// If a different message type is encountered, it's stored in `pending_msg` for the next
-    /// iteration (preserving order without sending back to channel).
+    /// Drains queued messages of the same type and merges them into one batch before processing,
+    /// storing one pending message (different type or over-cap) to handle on the next iteration.
+    /// This preserves ordering without requeuing onto the channel.
     ///
     /// Returns `true` if done, `false` to continue.
     fn process_multiproof_message(
@@ -1372,8 +1370,8 @@ impl MultiProofTask {
     ///      pending proofs in the proof sequencer left to be revealed.
     /// 6. While running, consecutive [`MultiProofMessage::PrefetchProofs`] and
     ///    [`MultiProofMessage::StateUpdate`] messages are batched to reduce redundant work; if a
-    ///    different message type arrives mid-batch, it is held as `pending_msg` and processed on
-    ///    the next loop to preserve ordering.
+    ///    different message type arrives mid-batch or a batch cap is reached, it is held as
+    ///    `pending_msg` and processed on the next loop to preserve ordering.
     /// 7. This task exits after all pending proofs are processed.
     #[instrument(
         level = "debug",
