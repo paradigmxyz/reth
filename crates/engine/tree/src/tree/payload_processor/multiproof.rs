@@ -830,7 +830,8 @@ struct MultiproofBatchMetrics {
 }
 
 impl MultiProofTask {
-    /// Creates a new multi proof task with the unified message channel
+    /// Creates a multiproof task with separate channels: control on `tx`/`rx`, proof results on
+    /// `proof_result_rx`.
     pub(super) fn new(
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
