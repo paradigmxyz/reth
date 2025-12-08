@@ -1122,7 +1122,8 @@ impl MultiProofTask {
 
                 // Accumulate messages including the first one
                 let mut accumulated_count = targets.chunking_length();
-                // Preallocate up to the message cap; avoids repeated reallocations when bursts arrive.
+                // Preallocate up to the message cap; avoids repeated reallocations when bursts
+                // arrive.
                 let mut accumulated_targets: Vec<MultiProofTargets> =
                     Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES);
                 accumulated_targets.push(targets);
