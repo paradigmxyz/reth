@@ -259,14 +259,13 @@ impl EtlFile {
             return Ok(None)
         }
 
-        let mut buffer_key_length = [0; KV_LEN];
-        let mut buffer_value_length = [0; KV_LEN];
+        // Optimization: Read both key and value lengths (2 * 8 bytes) in a single syscall
+        let mut len_buf = [0u8; 2 * KV_LEN];
+        self.file.read_exact(&mut len_buf)?;
 
-        self.file.read_exact(&mut buffer_key_length)?;
-        self.file.read_exact(&mut buffer_value_length)?;
+        let key_length = usize::from_be_bytes(len_buf[..KV_LEN].try_into().unwrap());
+        let value_length = usize::from_be_bytes(len_buf[KV_LEN..].try_into().unwrap());
 
-        let key_length = usize::from_be_bytes(buffer_key_length);
-        let value_length = usize::from_be_bytes(buffer_value_length);
         let mut key = vec![0; key_length];
         let mut value = vec![0; value_length];
 
