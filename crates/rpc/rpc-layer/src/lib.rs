@@ -14,10 +14,12 @@ use jsonrpsee_http_client::HttpResponse;
 mod auth_client_layer;
 mod auth_layer;
 mod compression_layer;
+mod decompression_layer;
 mod jwt_validator;
 
 pub use auth_layer::{AuthService, ResponseFuture};
 pub use compression_layer::CompressionLayer;
+pub use decompression_layer::DecompressionLayer;
 
 // Export alloy JWT types
 pub use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};

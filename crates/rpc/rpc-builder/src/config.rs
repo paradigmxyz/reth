@@ -206,6 +206,10 @@ impl RethRpcServerConfig for RpcServerArgs {
                 .with_http_compression(
                     self.http_disable_compression,
                     &self.http_compression_algorithms,
+                )
+                .with_http_decompression(
+                    &self.http_decompression_algorithms,
+                    self.rpc_max_request_size_bytes(),
                 );
         }
 

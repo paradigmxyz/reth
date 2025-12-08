@@ -63,6 +63,13 @@ pub struct RpcServerArgs {
     #[arg(long = "http.compression", value_name = "ALGOS", value_delimiter = ',')]
     pub http_compression_algorithms: Vec<String>,
 
+    /// Decompression algorithms for HTTP requests.
+    ///
+    /// Comma-separated list of algorithms.
+    /// If not specified, decompression is disabled.
+    #[arg(long = "http.decompression", value_name = "ALGOS", value_delimiter = ',')]
+    pub http_decompression_algorithms: Vec<String>,
+
     /// Rpc Modules to be configured for the HTTP server
     #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default())]
     pub http_api: Option<RpcModuleSelection>,
@@ -397,6 +404,7 @@ impl Default for RpcServerArgs {
             http_port: constants::DEFAULT_HTTP_RPC_PORT,
             http_disable_compression: false,
             http_compression_algorithms: constants::default_http_compression_algos(),
+            http_decompression_algorithms: Vec::new(),
             http_api: None,
             http_corsdomain: None,
             ws: false,

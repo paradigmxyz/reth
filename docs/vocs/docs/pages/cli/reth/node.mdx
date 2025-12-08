@@ -310,6 +310,15 @@ RPC:
           
           [possible values: zstd, gzip, deflate, br]
 
+      --http.decompression <HTTP_DECOMPRESSION>
+          Enable HTTP request decompression with a comma-separated list of algorithms.
+          
+          Decompression is disabled by default and only enabled when algorithms are specified.
+          
+          Algorithm preference order is enforced: zstd > gzip > deflate > br
+
+          [possible values: zstd, gzip, deflate, br]
+
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
@@ -388,7 +397,9 @@ RPC:
           This is __not__ used for the authenticated engine-API RPC server, see `--authrpc.jwtsecret`.
 
       --rpc.max-request-size <RPC_MAX_REQUEST_SIZE>
-          Set the maximum RPC request payload size for both HTTP and WS in megabytes
+          Set the maximum RPC request payload size for both HTTP and WS in megabytes.
+          
+          When HTTP decompression is enabled (via --http.decompression), this limit applies to the decompressed payload size.
 
           [default: 15]
 
