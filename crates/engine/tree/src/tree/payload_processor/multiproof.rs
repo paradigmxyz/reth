@@ -1122,30 +1122,38 @@ impl MultiProofTask {
 
                 // Accumulate messages including the first one
                 let mut accumulated_count = targets.chunking_length();
-                let mut accumulated_targets: Vec<MultiProofTargets> = vec![targets];
+                // Preallocate up to the message cap; avoids repeated reallocations when bursts arrive.
+                let mut accumulated_targets: Vec<MultiProofTargets> =
+                    Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES);
+                accumulated_targets.push(targets);
 
-                loop {
-                    if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS ||
-                        accumulated_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
-                    {
-                        break;
-                    }
-                    match self.rx.try_recv() {
-                        Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
-                            let next_count = next_targets.chunking_length();
-                            if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS {
-                                ctx.pending_msg =
-                                    Some(MultiProofMessage::PrefetchProofs(next_targets));
-                                break;
-                            }
-                            accumulated_count += next_count;
-                            accumulated_targets.push(next_targets);
-                        }
-                        Ok(other_msg) => {
-                            ctx.pending_msg = Some(other_msg);
+                // Fast-path dispatch if the first message already fills the batch.
+                if accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
+                    accumulated_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
+                {
+                    loop {
+                        if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS ||
+                            accumulated_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
+                        {
                             break;
                         }
-                        Err(_) => break,
+                        match self.rx.try_recv() {
+                            Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
+                                let next_count = next_targets.chunking_length();
+                                if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS {
+                                    ctx.pending_msg =
+                                        Some(MultiProofMessage::PrefetchProofs(next_targets));
+                                    break;
+                                }
+                                accumulated_count += next_count;
+                                accumulated_targets.push(next_targets);
+                            }
+                            Ok(other_msg) => {
+                                ctx.pending_msg = Some(other_msg);
+                                break;
+                            }
+                            Err(_) => break,
+                        }
                     }
                 }
 
@@ -1153,8 +1161,11 @@ impl MultiProofTask {
                 let num_batched = accumulated_targets.len();
                 self.metrics.prefetch_batch_size_histogram.record(num_batched as f64);
 
-                let mut merged_targets = accumulated_targets.remove(0);
-                for next_targets in accumulated_targets {
+                // Merge all accumulated prefetch targets into a single dispatch payload.
+                let mut accumulated_iter = accumulated_targets.into_iter();
+                let mut merged_targets =
+                    accumulated_iter.next().expect("prefetch batch always has at least one entry");
+                for next_targets in accumulated_iter {
                     merged_targets.extend(next_targets);
                 }
 
@@ -1244,8 +1255,13 @@ impl MultiProofTask {
                         can_batch_state_update(batch_source, batch_update, *source, update)
                     }));
                 }
-                let mut merged_update = accumulated_updates.remove(0).1;
-                for (_, next_update) in accumulated_updates {
+
+                // Merge all accumulated updates into a single EvmState payload.
+                let mut accumulated_iter = accumulated_updates.into_iter();
+                let (batch_source, mut merged_update) = accumulated_iter
+                    .next()
+                    .expect("state update batch always has at least one entry");
+                for (_, next_update) in accumulated_iter {
                     merged_update.extend(next_update);
                 }
 
