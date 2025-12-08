@@ -2362,7 +2362,7 @@ where
         match self.insert_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
                 // check if we just inserted a block that's part of sync targets,
-                // head,safe,finalized
+                // i.e. head, safe, or finalized
                 if let Some(sync_target) = self.state.forkchoice_state_tracker.sync_target_state() &&
                     sync_target.contains(block_num_hash.hash)
                 {
