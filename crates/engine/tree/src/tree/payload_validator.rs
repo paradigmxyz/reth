@@ -226,13 +226,8 @@ where
                     convert(tx).map(Either::Left).map_err(Either::Left)
                 };
 
-                Ok((
-                    iter,
-                    Box::new(convert)
-                        as Box<
-                            dyn Fn(Either<_, _>) -> Result<Either<_, _>, _> + Send + Sync + 'static,
-                        >,
-                ))
+                // Box the closure to satisfy the `Fn` bound both here and in the branch below
+                Ok((iter, Box::new(convert) as Box<dyn Fn(_) -> _ + Send + Sync + 'static>))
             }
             BlockOrPayload::Block(block) => {
                 let iter =
