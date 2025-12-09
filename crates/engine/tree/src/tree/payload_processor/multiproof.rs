@@ -1299,6 +1299,8 @@ impl MultiProofTask {
         let mut ctx = MultiproofBatchCtx::new(Instant::now());
         let mut batch_metrics = MultiproofBatchMetrics::default();
 
+        // Main event loop that prioritizes draining proof results, then processes batched control
+        // messages; labeled so inner loops can `break 'main` once all work is complete.
         'main: loop {
             trace!(target: "engine::tree::payload_processor::multiproof", "entering main channel receiving loop");
 
