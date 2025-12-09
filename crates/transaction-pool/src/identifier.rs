@@ -66,6 +66,12 @@ impl SenderId {
         std::ops::Bound::Included(TransactionId::new(self, 0))
     }
 
+    /// Returns a `Range` for [`TransactionId`] starting with nonce `0` and ending with nonce
+    /// `u64::MAX`
+    pub fn range(self) -> std::ops::RangeInclusive<TransactionId> {
+        TransactionId::new(self, 0)..=TransactionId::new(self, u64::MAX)
+    }
+
     /// Converts the sender to a [`TransactionId`] with the given nonce.
     pub const fn into_transaction_id(self, nonce: u64) -> TransactionId {
         TransactionId::new(self, nonce)

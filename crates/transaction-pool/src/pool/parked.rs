@@ -186,11 +186,10 @@ impl<T: ParkedOrd> ParkedPool<T> {
         {
             // NOTE: This will not panic due to `!last_sender_transaction.is_empty()`
             let sender_id = self.last_sender_submission.last().unwrap().sender_id;
-            let list = self.get_txs_by_sender(sender_id);
 
             // Drop transactions from this sender until the pool is under limits
-            for txid in list.into_iter().rev() {
-                if let Some(tx) = self.remove_transaction(&txid) {
+            while let Some((tx_id, _)) = self.by_id.range(sender_id.range()).next_back() {
+                if let Some(tx) = self.remove_transaction(tx_id) {
                     removed.push(tx);
                 }
 
