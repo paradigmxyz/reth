@@ -1178,7 +1178,7 @@ impl MultiProofTask {
                 let num_batched = ctx.accumulated_state_updates.len();
                 self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
 
-                let batch_source = ctx.accumulated_state_updates[0].0;
+                #[cfg(debug_assertions)]
                 {
                     let batch_source = ctx.accumulated_state_updates[0].0;
                     let batch_update = &ctx.accumulated_state_updates[0].1;
