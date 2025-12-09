@@ -99,7 +99,7 @@ impl CliRunner {
 
     /// Executes a command in a blocking context with access to `CliContext`.
     ///
-    /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking)
+    /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking).
     pub fn run_blocking_command_until_exit<F, E>(
         self,
         command: impl FnOnce(CliContext) -> F + Send + 'static,
@@ -111,13 +111,10 @@ impl CliRunner {
         let AsyncCliRunner { context, mut task_manager, tokio_runtime } =
             AsyncCliRunner::new(self.tokio_runtime);
 
-        // Clone the context for use in the blocking task
-        let ctx = context;
-
         // Spawn the command on the blocking thread pool
         let handle = tokio_runtime.handle().clone();
         let command_handle =
-            tokio_runtime.handle().spawn_blocking(move || handle.block_on(command(ctx)));
+            tokio_runtime.handle().spawn_blocking(move || handle.block_on(command(context)));
 
         // Wait for the command to complete or ctrl-c
         let command_res = tokio_runtime.block_on(run_to_completion_or_panic(
