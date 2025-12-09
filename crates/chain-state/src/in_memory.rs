@@ -18,7 +18,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, ops::Deref, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -634,6 +634,8 @@ impl<N: NodePrimitives> BlockState<N> {
     /// We assume that the `Receipts` in the executed block `ExecutionOutcome`
     /// has only one element corresponding to the executed block associated to
     /// the state.
+    ///
+    /// This clones the vector of receipts. To avoid it, use [`Self::executed_block_receipts_ref`].
     pub fn executed_block_receipts(&self) -> Vec<N::Receipt> {
         let receipts = self.receipts();
 
@@ -644,6 +646,22 @@ impl<N: NodePrimitives> BlockState<N> {
         );
 
         receipts.first().cloned().unwrap_or_default()
+    }
+
+    /// Returns a slice of `Receipt` of executed block that determines the state.
+    /// We assume that the `Receipts` in the executed block `ExecutionOutcome`
+    /// has only one element corresponding to the executed block associated to
+    /// the state.
+    pub fn executed_block_receipts_ref(&self) -> &[N::Receipt] {
+        let receipts = self.receipts();
+
+        debug_assert!(
+            receipts.len() <= 1,
+            "Expected at most one block's worth of receipts, found {}",
+            receipts.len()
+        );
+
+        receipts.first().map(|receipts| receipts.deref()).unwrap_or_default()
     }
 
     /// Returns a vector of __parent__ `BlockStates`.

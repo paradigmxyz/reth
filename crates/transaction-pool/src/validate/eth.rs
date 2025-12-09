@@ -247,6 +247,20 @@ where
         }
     }
 
+    /// Validates a single transaction with the provided state provider.
+    pub fn validate_one_with_state_provider(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: impl AccountInfoReader,
+    ) -> TransactionValidationOutcome<Tx> {
+        let tx = match self.validate_one_no_state(origin, transaction) {
+            Ok(tx) => tx,
+            Err(invalid_outcome) => return invalid_outcome,
+        };
+        self.validate_one_against_state(origin, tx, state)
+    }
+
     /// Performs stateless validation on single transaction. Returns unaltered input transaction
     /// if all checks pass, so transaction can continue through to stateful validation as argument
     /// to [`validate_one_against_state`](Self::validate_one_against_state).
