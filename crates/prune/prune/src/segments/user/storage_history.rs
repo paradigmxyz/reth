@@ -81,7 +81,7 @@ where
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
         let mut highest_deleted_storages = FxHashMap::default();
         let (pruned_changesets, done) =
-            provider.tx_ref().prune_table_with_range::<tables::StorageChangeSets>(
+            provider.tx_ref().prune_dupsort_table_with_range::<tables::StorageChangeSets>(
                 BlockNumberAddress::range(range),
                 &mut limiter,
                 |_| false,

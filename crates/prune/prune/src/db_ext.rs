@@ -1,11 +1,14 @@
 use crate::PruneLimiter;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, RangeWalker},
-    table::{Table, TableRow},
+    table::{DupSort, Table, TableRow},
     transaction::DbTxMut,
     DatabaseError,
 };
-use std::{fmt::Debug, ops::RangeBounds};
+use std::{
+    fmt::Debug,
+    ops::{Bound, RangeBounds},
+};
 use tracing::debug;
 
 pub(crate) trait DbTxPruneExt: DbTxMut {
@@ -122,6 +125,55 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
         }
 
         Ok(false)
+    }
+
+    /// Prune a DUPSORT table for the specified key range.
+    ///
+    /// Returns number of rows pruned.
+    fn prune_dupsort_table_with_range<T: DupSort>(
+        &self,
+        keys: impl RangeBounds<T::Key> + Clone + Debug,
+        limiter: &mut PruneLimiter,
+        mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
+        mut delete_callback: impl FnMut(TableRow<T>),
+    ) -> Result<(usize, bool), DatabaseError> {
+        let mut cursor = self.cursor_dup_write::<T>()?;
+        let mut walker = cursor.walk_range(keys)?;
+
+        let mut deleted_entries = 0;
+
+        let done = loop {
+            if limiter.is_limit_reached() {
+                debug!(
+                    target: "providers::db",
+                    ?limiter,
+                    deleted_entries_limit = %limiter.is_deleted_entries_limit_reached(),
+                    time_limit = %limiter.is_time_limit_reached(),
+                    table = %T::NAME,
+                    "Pruning limit reached"
+                );
+                break false
+            }
+
+            let Some(res) = walker.next() else { break true };
+            let row = res?;
+
+            if !skip_filter(&row) {
+                walker.delete_current_duplicates()?;
+                limiter.increment_deleted_entries_count();
+                deleted_entries += 1;
+                delete_callback(row);
+            }
+        };
+
+        debug!(
+            target: "providers::db",
+            table=?T::NAME,
+            cursor_current=?cursor.current(),
+            "done walking",
+        );
+
+        Ok((deleted_entries, done))
     }
 }
 

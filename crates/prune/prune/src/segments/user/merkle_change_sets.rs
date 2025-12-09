@@ -71,7 +71,7 @@ where
 
         let mut last_storages_pruned_block = None;
         let (storages_pruned, done) =
-            provider.tx_ref().prune_table_with_range::<tables::StoragesTrieChangeSets>(
+            provider.tx_ref().prune_dupsort_table_with_range::<tables::StoragesTrieChangeSets>(
                 storage_range,
                 &mut limiter,
                 |_| false,
@@ -90,7 +90,7 @@ where
             .unwrap_or(block_range_end);
 
         let (accounts_pruned, done) =
-            provider.tx_ref().prune_table_with_range::<tables::AccountsTrieChangeSets>(
+            provider.tx_ref().prune_dupsort_table_with_range::<tables::AccountsTrieChangeSets>(
                 block_range,
                 &mut limiter,
                 |_| false,
