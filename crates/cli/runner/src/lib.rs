@@ -97,6 +97,61 @@ impl CliRunner {
         command_res
     }
 
+    /// Executes a command in a blocking context with access to CliContext.
+    ///
+    /// Similar to `run_command_until_exit`, but runs the command on the blocking thread pool
+    /// to avoid blocking the async runtime with heavy synchronous I/O operations.
+    pub fn run_blocking_command_until_exit<F, E>(
+        self,
+        command: impl FnOnce(CliContext) -> F + Send + 'static,
+    ) -> Result<(), E>
+    where
+        F: Future<Output = Result<(), E>> + Send + 'static,
+        E: Send + Sync + From<std::io::Error> + From<reth_tasks::PanickedTaskError> + 'static,
+    {
+        let AsyncCliRunner { context, mut task_manager, tokio_runtime } =
+            AsyncCliRunner::new(self.tokio_runtime);
+
+        // Clone the context for use in the blocking task
+        let ctx = context;
+
+        // Spawn the command on the blocking thread pool
+        let handle = tokio_runtime.handle().clone();
+        let command_handle =
+            tokio_runtime.handle().spawn_blocking(move || handle.block_on(command(ctx)));
+
+        // Wait for the command to complete or ctrl-c
+        let command_res = tokio_runtime.block_on(run_to_completion_or_panic(
+            &mut task_manager,
+            run_until_ctrl_c(
+                async move { command_handle.await.expect("Failed to join blocking task") },
+            ),
+        ));
+
+        if command_res.is_err() {
+            error!(target: "reth::cli", "shutting down due to error");
+        } else {
+            debug!(target: "reth::cli", "shutting down gracefully");
+            task_manager.graceful_shutdown_with_timeout(Duration::from_secs(5));
+        }
+
+        // Shutdown the runtime on a separate thread
+        let (tx, rx) = mpsc::channel();
+        std::thread::Builder::new()
+            .name("tokio-runtime-shutdown".to_string())
+            .spawn(move || {
+                drop(tokio_runtime);
+                let _ = tx.send(());
+            })
+            .unwrap();
+
+        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
+            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
+        });
+
+        command_res
+    }
+
     /// Executes a regular future until completion or until external signal received.
     pub fn run_until_ctrl_c<F, E>(self, fut: F) -> Result<(), E>
     where
