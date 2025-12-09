@@ -21,6 +21,7 @@ use crate::{
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::Sealable;
+use alloy_rlp::Encodable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
@@ -558,7 +559,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     }
 
     /// Builds an eth/70 `Receipts` response from the generic receipts
-    /// response produced by the [`EthRequestHandler`].
+    /// response produced by the `EthRequestHandler`.
     ///
     /// This applies the `firstBlockReceiptIndex` offset to the first block's
     /// receipts and always sets `lastBlockIncomplete = false` for now (we
