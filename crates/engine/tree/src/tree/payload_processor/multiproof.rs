@@ -717,22 +717,20 @@ struct MultiproofBatchCtx {
     first_update_time: Option<Instant>,
     /// Timestamp before the first state update or prefetch was received.
     start: Instant,
-    /// Whether all state updates have been received.
-    updates_finished: bool,
-    /// Timestamp when state updates finished.
+    /// Timestamp when state updates finished. `Some` indicates all state updates have been
+    /// received.
     updates_finished_time: Option<Instant>,
 }
 
 impl MultiproofBatchCtx {
     /// Creates a new batch context with the given start time.
     const fn new(start: Instant) -> Self {
-        Self {
-            pending_msg: None,
-            first_update_time: None,
-            start,
-            updates_finished: false,
-            updates_finished_time: None,
-        }
+        Self { pending_msg: None, first_update_time: None, start, updates_finished_time: None }
+    }
+
+    /// Returns `true` if all state updates have been received.
+    const fn updates_finished(&self) -> bool {
+        self.updates_finished_time.is_some()
     }
 }
 
@@ -1209,14 +1207,13 @@ impl MultiProofTask {
             MultiProofMessage::FinishedStateUpdates => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
 
-                ctx.updates_finished = true;
                 ctx.updates_finished_time = Some(Instant::now());
 
                 if self.is_done(
                     batch_metrics.proofs_processed,
                     batch_metrics.state_update_proofs_requested,
                     batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished,
+                    ctx.updates_finished(),
                 ) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
@@ -1243,7 +1240,7 @@ impl MultiProofTask {
                     batch_metrics.proofs_processed,
                     batch_metrics.state_update_proofs_requested,
                     batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished,
+                    ctx.updates_finished(),
                 ) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
@@ -1347,7 +1344,7 @@ impl MultiProofTask {
                     batch_metrics.proofs_processed,
                     batch_metrics.state_update_proofs_requested,
                     batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished,
+                    ctx.updates_finished(),
                 ) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
@@ -1409,7 +1406,7 @@ impl MultiProofTask {
                                 batch_metrics.proofs_processed,
                                 batch_metrics.state_update_proofs_requested,
                                 batch_metrics.prefetch_proofs_requested,
-                                ctx.updates_finished,
+                                ctx.updates_finished(),
                             ) {
                                 debug!(
                                     target: "engine::tree::payload_processor::multiproof",
