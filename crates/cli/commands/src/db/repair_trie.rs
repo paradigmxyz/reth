@@ -57,7 +57,7 @@ impl Command {
         // Set up metrics server if requested
         let _metrics_handle = if let Some(listen_addr) = self.metrics {
             let chain_name = tool.provider_factory.chain_spec().chain().to_string();
-            let executor_clone = task_executor.clone();
+            let executor = task_executor.clone();
 
             let handle = task_executor.spawn_critical("metrics server", async move {
                 let config = MetricServerConfig::new(
@@ -71,7 +71,7 @@ impl Command {
                         build_profile: version_metadata().build_profile_name.as_ref(),
                     },
                     ChainSpecInfo { name: chain_name },
-                    executor_clone,
+                    executor,
                     Hooks::builder().build(),
                 );
 
