@@ -99,7 +99,7 @@ where
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
             Commands::Db(command) => {
-                runner.run_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
+                runner.run_blocking_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
             }
             Commands::Stage(command) => {
                 runner.run_command_until_exit(|ctx| command.execute::<OpNode, _>(ctx, components))
