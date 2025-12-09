@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_primitives::B256;
-use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
+use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_ethereum_primitives::Receipt;
 
@@ -16,6 +16,23 @@ pub struct GetReceipts(
     /// The block hashes to request receipts for.
     pub Vec<B256>,
 );
+
+/// Eth/70 `GetReceipts` request that supports partial receipt queries.
+///
+/// This follows EIP-7975 and represents the full wire message
+/// `[request-id, firstBlockReceiptIndex, [blockhash₁, ...]]`.
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
+pub struct GetReceipts70 {
+    /// The request id used to correlate the response.
+    pub request_id: u64,
+    /// Index into the receipts of the first requested block hash.
+    pub first_block_receipt_index: u64,
+    /// The block hashes to request receipts for.
+    pub block_hashes: Vec<B256>,
+}
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
@@ -58,7 +75,13 @@ pub struct Receipts69<T = Receipt>(pub Vec<Vec<T>>);
 impl<T: TxReceipt> Receipts69<T> {
     /// Encodes all receipts with the bloom filter.
     ///
-    /// Note: This is an expensive operation that recalculates the bloom for each receipt.
+    /// Eth/69 omits bloom filters on the wire, while some internal callers
+    /// (and legacy APIs) still operate on [`Receipts`] with
+    /// [`ReceiptWithBloom`]. This helper reconstructs the bloom locally from
+    /// each receipt's logs so the older API can be used on top of eth/69 data.
+    ///
+    /// Note: This is an expensive operation that recalculates the bloom for
+    /// every receipt.
     pub fn into_with_bloom(self) -> Receipts<T> {
         Receipts(
             self.0
@@ -71,6 +94,49 @@ impl<T: TxReceipt> Receipts69<T> {
 
 impl<T: TxReceipt> From<Receipts69<T>> for Receipts<T> {
     fn from(receipts: Receipts69<T>) -> Self {
+        receipts.into_with_bloom()
+    }
+}
+
+/// Eth/70 `Receipts` response message.
+///
+/// This follows EIP-7975 and represents the full wire message
+/// `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+#[add_arbitrary_tests(rlp)]
+pub struct Receipts70<T = Receipt> {
+    /// The request id that this response corresponds to.
+    pub request_id: u64,
+    /// Whether the receipts list for the last block is incomplete.
+    pub last_block_incomplete: bool,
+    /// Receipts grouped by block.
+    pub receipts: Vec<Vec<T>>,
+}
+
+impl<T: TxReceipt> Receipts70<T> {
+    /// Encodes all receipts with the bloom filter.
+    ///
+    /// Just like eth/69, eth/70 does not transmit bloom filters over the wire.
+    /// When higher layers still expect the older bloom-bearing [`Receipts`]
+    /// type, this helper converts the eth/70 payload into that shape by
+    /// recomputing the bloom locally from the contained receipts.
+    ///
+    /// Note: This is an expensive operation that recalculates the bloom for
+    /// every receipt.
+    pub fn into_with_bloom(self) -> Receipts<T> {
+        Receipts(
+            self.receipts
+                .into_iter()
+                .map(|receipts| receipts.into_iter().map(|r| r.into_with_bloom()).collect())
+                .collect(),
+        )
+    }
+}
+
+impl<T: TxReceipt> From<Receipts70<T>> for Receipts<T> {
+    fn from(receipts: Receipts70<T>) -> Self {
         receipts.into_with_bloom()
     }
 }
