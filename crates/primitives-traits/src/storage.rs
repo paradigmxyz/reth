@@ -1,9 +1,9 @@
 use alloy_primitives::{B256, U256};
 
-/// Trait for DupSort table values that contain a subkey.
+/// Trait for `DupSort` table values that contain a subkey.
 ///
 /// This trait allows extracting the subkey from a value during database iteration,
-/// enabling proper range queries and filtering on DupSort tables.
+/// enabling proper range queries and filtering on `DupSort` tables.
 pub trait ValueWithSubKey {
     /// The type of the subkey.
     type SubKey;
