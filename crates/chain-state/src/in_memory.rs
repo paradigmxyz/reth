@@ -18,7 +18,7 @@ use reth_primitives_traits::{
 };
 use reth_storage_api::StateProviderBox;
 use reth_trie::{updates::TrieUpdatesSorted, HashedPostStateSorted, TrieInputSorted};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, ops::Deref, sync::Arc, time::Instant};
 use tokio::sync::{broadcast, watch};
 
 /// Size of the broadcast channel used to notify canonical state events.
@@ -652,9 +652,7 @@ impl<N: NodePrimitives> BlockState<N> {
     /// We assume that the `Receipts` in the executed block `ExecutionOutcome`
     /// has only one element corresponding to the executed block associated to
     /// the state.
-    ///
-    /// Returns [`None`] if no receipts are found.
-    pub fn executed_block_receipts_ref(&self) -> Option<&[N::Receipt]> {
+    pub fn executed_block_receipts_ref(&self) -> &[N::Receipt] {
         let receipts = self.receipts();
 
         debug_assert!(
@@ -663,7 +661,7 @@ impl<N: NodePrimitives> BlockState<N> {
             receipts.len()
         );
 
-        receipts.first().map(|receipts| receipts.as_slice())
+        receipts.first().map(|receipts| receipts.deref()).unwrap_or_default()
     }
 
     /// Returns a vector of __parent__ `BlockStates`.
