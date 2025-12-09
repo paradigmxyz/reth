@@ -64,7 +64,7 @@ jobs:
 
   state:
     name: Ethereum state tests
-    runs-on: depot-ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
@@ -98,7 +98,7 @@ jobs:
 
   doc:
     name: doc tests
-    runs-on: depot-ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     env:
       RUST_BACKTRACE: 1
     timeout-minutes: 30
