@@ -721,10 +721,8 @@ struct MultiproofBatchCtx {
     /// received.
     updates_finished_time: Option<Instant>,
     /// Reusable buffer for accumulating prefetch targets during batching.
-    /// Avoids repeated allocations when processing message bursts.
     accumulated_prefetch_targets: Vec<MultiProofTargets>,
     /// Reusable buffer for accumulating state updates during batching.
-    /// Avoids repeated allocations when processing message bursts.
     accumulated_state_updates: Vec<(StateChangeSource, EvmState)>,
 }
 
