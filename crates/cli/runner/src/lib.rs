@@ -97,7 +97,7 @@ impl CliRunner {
         command_res
     }
 
-    /// Executes a command in a blocking context with access to CliContext.
+    /// Executes a command in a blocking context with access to `CliContext`.
     ///
     /// Similar to `run_command_until_exit`, but runs the command on the blocking thread pool
     /// to avoid blocking the async runtime with heavy synchronous I/O operations.
