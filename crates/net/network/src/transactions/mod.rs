@@ -1327,6 +1327,8 @@ where
         transactions: PooledTransactions<N::PooledTransaction>,
         source: TransactionSource,
     ) {
+        let start = Instant::now();
+
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
             return
@@ -1459,6 +1461,8 @@ where
         if num_already_seen_by_peer > 0 {
             self.report_already_seen(peer_id);
         }
+
+        self.metrics.pool_imports_duration.record(start.elapsed());
     }
 
     /// Processes a [`FetchEvent`].

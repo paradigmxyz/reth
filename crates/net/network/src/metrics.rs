@@ -131,6 +131,8 @@ pub struct TransactionsManagerMetrics {
     /// capacity. Note, this is not a limit to the number of inflight requests, but a health
     /// measure.
     pub(crate) capacity_pending_pool_imports: Counter,
+    /// The time it took to import transactions.
+    pub(crate) pool_imports_duration: Histogram,
 
     /* ================ POLL DURATION ================ */
 
