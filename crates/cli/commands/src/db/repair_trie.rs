@@ -81,7 +81,7 @@ impl Command {
                 }
             });
 
-            Some(handle) // Just return the handle
+            Some(handle)
         } else {
             None
         };
