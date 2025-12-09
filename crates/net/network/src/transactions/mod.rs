@@ -1327,8 +1327,6 @@ where
         transactions: PooledTransactions<N::PooledTransaction>,
         source: TransactionSource,
     ) {
-        let start = Instant::now();
-
         // If the node is pipeline syncing, ignore transactions
         if self.network.is_initially_syncing() {
             return
@@ -1339,6 +1337,8 @@ where
 
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
         let mut transactions = transactions.0;
+
+        let start = Instant::now();
 
         // mark the transactions as received
         self.transaction_fetcher
@@ -1462,7 +1462,7 @@ where
             self.report_already_seen(peer_id);
         }
 
-        self.metrics.pool_imports_duration.record(start.elapsed());
+        self.metrics.pool_import_prepare_duration.record(start.elapsed());
     }
 
     /// Processes a [`FetchEvent`].
