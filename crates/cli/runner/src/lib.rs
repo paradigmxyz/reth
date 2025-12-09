@@ -99,8 +99,7 @@ impl CliRunner {
 
     /// Executes a command in a blocking context with access to `CliContext`.
     ///
-    /// Similar to `run_command_until_exit`, but runs the command on the blocking thread pool
-    /// to avoid blocking the async runtime with heavy synchronous I/O operations.
+    /// See [`Runtime::spawn_blocking`](tokio::runtime::Runtime::spawn_blocking)
     pub fn run_blocking_command_until_exit<F, E>(
         self,
         command: impl FnOnce(CliContext) -> F + Send + 'static,
