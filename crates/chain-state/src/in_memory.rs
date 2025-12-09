@@ -646,6 +646,24 @@ impl<N: NodePrimitives> BlockState<N> {
         receipts.first().cloned().unwrap_or_default()
     }
 
+    /// Returns a slice of `Receipt` of executed block that determines the state.
+    /// We assume that the `Receipts` in the executed block `ExecutionOutcome`
+    /// has only one element corresponding to the executed block associated to
+    /// the state.
+    ///
+    /// Returns [`None`] if no receipts are found.
+    pub fn executed_block_receipts_ref(&self) -> Option<&[N::Receipt]> {
+        let receipts = self.receipts();
+
+        debug_assert!(
+            receipts.len() <= 1,
+            "Expected at most one block's worth of receipts, found {}",
+            receipts.len()
+        );
+
+        receipts.first().map(|receipts| receipts.as_slice())
+    }
+
     /// Returns a vector of __parent__ `BlockStates`.
     ///
     /// The block state order in the output vector is newest to oldest (highest to lowest):

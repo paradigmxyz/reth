@@ -1046,7 +1046,10 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
             id.into(),
             |provider| provider.receipt(id),
             |tx_index, _, block_state| {
-                Ok(block_state.executed_block_receipts().get(tx_index).cloned())
+                Ok(block_state
+                    .executed_block_receipts_ref()
+                    .and_then(|receipts| receipts.get(tx_index))
+                    .cloned())
             },
         )
     }
@@ -1055,7 +1058,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
         for block_state in self.head_block.iter().flat_map(|b| b.chain()) {
             let executed_block = block_state.block_ref();
             let block = executed_block.recovered_block();
-            let receipts = block_state.executed_block_receipts();
+            let Some(receipts) = block_state.executed_block_receipts_ref() else { continue };
 
             // assuming 1:1 correspondence between transactions and receipts
             debug_assert_eq!(
