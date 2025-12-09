@@ -516,7 +516,7 @@ where
             transactions,
             ommers: block.body.ommers,
             withdrawals: block.body.withdrawals,
-            block_access_list: None,
+            block_access_list: block.body.block_access_list,
         };
 
         let block = alloy_consensus::Block::new(header, body);
