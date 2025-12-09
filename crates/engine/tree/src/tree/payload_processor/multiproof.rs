@@ -1051,38 +1051,30 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Accumulate messages including the first one; reuse buffer to avoid allocations.
                 let mut accumulated_count = targets.chunking_length();
                 ctx.accumulated_prefetch_targets.clear();
                 ctx.accumulated_prefetch_targets.push(targets);
 
-                // Only attempt batching if below limits; otherwise skip straight to dispatch.
-                if accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
+                // Batch consecutive prefetch messages up to limits.
+                while accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
                     ctx.accumulated_prefetch_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
                 {
-                    loop {
-                        if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS ||
-                            ctx.accumulated_prefetch_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
-                        {
-                            break;
-                        }
-                        match self.rx.try_recv() {
-                            Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
-                                let next_count = next_targets.chunking_length();
-                                if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS {
-                                    ctx.pending_msg =
-                                        Some(MultiProofMessage::PrefetchProofs(next_targets));
-                                    break;
-                                }
-                                accumulated_count += next_count;
-                                ctx.accumulated_prefetch_targets.push(next_targets);
-                            }
-                            Ok(other_msg) => {
-                                ctx.pending_msg = Some(other_msg);
+                    match self.rx.try_recv() {
+                        Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
+                            let next_count = next_targets.chunking_length();
+                            if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS {
+                                ctx.pending_msg =
+                                    Some(MultiProofMessage::PrefetchProofs(next_targets));
                                 break;
                             }
-                            Err(_) => break,
+                            accumulated_count += next_count;
+                            ctx.accumulated_prefetch_targets.push(next_targets);
                         }
+                        Ok(other_msg) => {
+                            ctx.pending_msg = Some(other_msg);
+                            break;
+                        }
+                        Err(_) => break,
                     }
                 }
 
@@ -1131,10 +1123,8 @@ impl MultiProofTask {
                 ctx.accumulated_state_updates.clear();
                 ctx.accumulated_state_updates.push((source, update));
 
-                loop {
-                    if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
-                        break;
-                    }
+                // Batch consecutive state update messages up to target limit.
+                while accumulated_targets < STATE_UPDATE_MAX_BATCH_TARGETS {
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
                             let (batch_source, batch_update) = &ctx.accumulated_state_updates[0];
@@ -1150,13 +1140,7 @@ impl MultiProofTask {
                             }
 
                             let next_estimate = estimate_evm_state_targets(&next_update);
-                            // Do not merge outlier updates that exceed the cap on their own.
-                            // Leave them pending so they dispatch immediately on the next loop.
-                            if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
-                                ctx.pending_msg =
-                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                                break;
-                            }
+                            // Would exceed batch cap; leave pending to dispatch on next iteration.
                             if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
                             {
                                 ctx.pending_msg =
@@ -1190,10 +1174,11 @@ impl MultiProofTask {
                 // Merge all accumulated updates into a single EvmState payload.
                 // Use drain to preserve the buffer allocation.
                 let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
-                let (batch_source, mut merged_update) = accumulated_iter
+                let (mut batch_source, mut merged_update) = accumulated_iter
                     .next()
                     .expect("state update batch always has at least one entry");
-                for (_, next_update) in accumulated_iter {
+                for (next_source, next_update) in accumulated_iter {
+                    batch_source = next_source;
                     merged_update.extend(next_update);
                 }
 
