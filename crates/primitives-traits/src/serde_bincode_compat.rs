@@ -146,7 +146,7 @@ mod block_bincode {
     use crate::serde_bincode_compat::SerdeBincodeCompat;
     use alloc::{borrow::Cow, vec::Vec};
     use alloy_consensus::TxEip4844;
-    use alloy_eips::eip4895::Withdrawals;
+    use alloy_eips::{eip4895::Withdrawals, eip7928::BlockAccessList};
     use serde::{Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -250,6 +250,7 @@ mod block_bincode {
         transactions: Vec<T::BincodeRepr<'a>>,
         ommers: Vec<H::BincodeRepr<'a>>,
         withdrawals: Cow<'a, Option<Withdrawals>>,
+        block_access_list: Cow<'a, Option<BlockAccessList>>,
     }
 
     impl<'a, T: SerdeBincodeCompat, H: SerdeBincodeCompat>
@@ -260,6 +261,7 @@ mod block_bincode {
                 transactions: value.transactions.iter().map(|tx| tx.as_repr()).collect(),
                 ommers: value.ommers.iter().map(|h| h.as_repr()).collect(),
                 withdrawals: Cow::Borrowed(&value.withdrawals),
+                block_access_list: Cow::Borrowed(&value.block_access_list),
             }
         }
     }
@@ -276,7 +278,7 @@ mod block_bincode {
                     .collect(),
                 ommers: value.ommers.into_iter().map(SerdeBincodeCompat::from_repr).collect(),
                 withdrawals: value.withdrawals.into_owned(),
-                block_access_list: None,
+                block_access_list: value.block_access_list.into_owned(),
             }
         }
     }
