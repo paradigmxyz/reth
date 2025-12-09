@@ -126,7 +126,8 @@ impl ParallelProof {
             )))
         })?;
 
-        // Extract storage proof directly from the result
+        // Extract storage proof directly from the result.
+        // The proof is Arc-wrapped for efficient batch sharing, so we unwrap it here.
         let storage_proof = match proof_msg.result? {
             crate::proof_task::ProofResult::StorageProof { hashed_address: addr, proof } => {
                 debug_assert_eq!(
@@ -134,7 +135,8 @@ impl ParallelProof {
                     hashed_address,
                     "storage worker must return same address: expected {hashed_address}, got {addr}"
                 );
-                proof
+                // Efficiently unwrap Arc: returns inner value if sole owner, clones otherwise.
+                Arc::try_unwrap(proof).unwrap_or_else(|arc| (*arc).clone())
             }
             crate::proof_task::ProofResult::AccountMultiproof { .. } => {
                 unreachable!("storage worker only sends StorageProof variant")
@@ -223,8 +225,12 @@ impl ParallelProof {
             )
         })?;
 
+        // The proof is Arc-wrapped for efficient batch sharing, so we unwrap it here.
         let (multiproof, stats) = match proof_result_msg.result? {
-            crate::proof_task::ProofResult::AccountMultiproof { proof, stats } => (proof, stats),
+            crate::proof_task::ProofResult::AccountMultiproof { proof, stats } => {
+                // Efficiently unwrap Arc: returns inner value if sole owner, clones otherwise.
+                (Arc::try_unwrap(proof).unwrap_or_else(|arc| (*arc).clone()), stats)
+            }
             crate::proof_task::ProofResult::StorageProof { .. } => {
                 unreachable!("account worker only sends AccountMultiproof variant")
             }
