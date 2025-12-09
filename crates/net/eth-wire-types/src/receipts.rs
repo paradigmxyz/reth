@@ -49,29 +49,11 @@ impl<T: RlpDecodableReceipt> alloy_rlp::Decodable for Receipts<T> {
 /// Eth/69 receipt response type that removes bloom filters from the protocol.
 ///
 /// This is effectively a subset of [`Receipts`].
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, RlpEncodableWrapper, RlpDecodableWrapper)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
 pub struct Receipts69<T = Receipt>(pub Vec<Vec<T>>);
-
-impl<T: RlpEncodableReceipt + alloy_rlp::Encodable> alloy_rlp::Encodable for Receipts69<T> {
-    #[inline]
-    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.0.encode(out)
-    }
-    #[inline]
-    fn length(&self) -> usize {
-        self.0.length()
-    }
-}
-
-impl<T: RlpDecodableReceipt + alloy_rlp::Decodable> alloy_rlp::Decodable for Receipts69<T> {
-    #[inline]
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        alloy_rlp::Decodable::decode(buf).map(Self)
-    }
-}
 
 impl<T: TxReceipt> Receipts69<T> {
     /// Encodes all receipts with the bloom filter.
@@ -223,5 +205,24 @@ mod tests {
                 ]),
             }
         );
+    }
+
+    #[test]
+    fn decode_receipts_69() {
+        let data = hex!("0xf9026605f90262f9025fc60201826590c0c7800183013cd9c0c702018301a2a5c0c7010183027a36c0c702018302e03ec0c7010183034646c0c702018303ac30c0c78001830483b8c0c702018304e9a2c0c780018305c17fc0c7020183062769c0c7800183068d71c0c702018306f35bc0c702018307cb77c0c701018308a382c0c7020183097ab6c0c78080830b0156c0c70101830b6740c0c70201830bcd48c0c70101830c32f6c0c70101830c98e0c0c70201830cfecac0c70201830d64b4c0c70280830dca9ec0c70101830e30a6c0c70201830f080dc0c70201830f6e15c0c78080830fd41dc0c702018310abbac0c701018310fdc2c0c7020183116370c0c780018311c95ac0c7010183122f44c0c701808312952ec0c7020183136c7dc0c70201831443c0c0c702018314a9c8c0c7020183150f94c0c7018083169634c0c7020183176d68c0c702808317d370c0c70201831838c4c0c701808319bf64c0c70201831a256cc0c78080831bac0cc0c70201831c11d8c0c70201831c77c2c0c78080831cdd34c0c70201831db57bc0c70101831e8d07c0c70101831ef2d3c0c70201831fcb37c0c70180832030e5c0c70201832096cfc0c701018320fcb9c0c70201832162c1c0c702018321c8abc0c7020183229ffac0c70201832305c6c0c7028083236bcec0c702808323d1d6c0c702018324a91cc0c7020183250f06c0c70201832574d2c0c7020183264c15c0c70201832723b6c0c70201832789a0c0c702018327ef8ac0c7020183285574c0c702018328bb40c0c702018329212ac0c7028083298714c0c70201832a5e4ec0c70201832ac438c0c70201832b9b72c0c70201832c017ac0");
+
+        let request = RequestPair::<Receipts69>::decode(&mut &data[..]).unwrap();
+        assert_eq!(
+            request.message.0[0][0],
+            Receipt {
+                tx_type: TxType::Eip1559,
+                success: true,
+                cumulative_gas_used: 26000,
+                logs: vec![],
+            }
+        );
+
+        let encoded = alloy_rlp::encode(&request);
+        assert_eq!(encoded, data);
     }
 }

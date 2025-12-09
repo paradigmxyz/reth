@@ -968,7 +968,7 @@ where
                         RethRpcModule::Web3 => Web3Api::new(self.network.clone()).into_rpc().into(),
                         RethRpcModule::Txpool => TxPoolApi::new(
                             self.eth.api.pool().clone(),
-                            dyn_clone::clone(self.eth.api.tx_resp_builder()),
+                            dyn_clone::clone(self.eth.api.converter()),
                         )
                         .into_rpc()
                         .into(),
@@ -1663,6 +1663,27 @@ impl TransportRpcModules {
         }
 
         Ok(())
+    }
+
+    /// Merge the given [`Methods`] in all configured transport modules if the given
+    /// [`RethRpcModule`] is configured for the transport, using a closure to lazily
+    /// create the methods only when needed.
+    ///
+    /// The closure is only called if at least one transport has the module configured.
+    /// Fails if any of the methods in the closure result is present already.
+    pub fn merge_if_module_configured_with<F>(
+        &mut self,
+        module: RethRpcModule,
+        f: F,
+    ) -> Result<(), RegisterMethodError>
+    where
+        F: FnOnce() -> Methods,
+    {
+        // Early return if module not configured for any transport
+        if !self.module_config().contains_any(&module) {
+            return Ok(());
+        }
+        self.merge_if_module_configured(module, f())
     }
 
     /// Merge the given [Methods] in the configured http methods.
@@ -2592,5 +2613,39 @@ mod tests {
         let ipc = modules.ipc.as_ref().unwrap();
         assert!(ipc.method("eth_existing").is_none());
         assert!(ipc.method("eth_new").is_none());
+    }
+
+    #[test]
+    fn test_merge_if_module_configured_with_lazy_evaluation() {
+        // Create a config that enables RethRpcModule::Eth for HTTP only
+        let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
+
+        let mut modules =
+            TransportRpcModules { config, http: Some(RpcModule::new(())), ws: None, ipc: None };
+
+        // Track whether closure was called
+        let mut closure_called = false;
+
+        // Test with configured module - closure should be called
+        let result = modules.merge_if_module_configured_with(RethRpcModule::Eth, || {
+            closure_called = true;
+            let mut methods = RpcModule::new(());
+            methods.register_method("eth_test", |_, _, _| "test").unwrap();
+            methods.into()
+        });
+
+        assert!(result.is_ok());
+        assert!(closure_called, "Closure should be called when module is configured");
+        assert!(modules.http.as_ref().unwrap().method("eth_test").is_some());
+
+        // Reset and test with unconfigured module - closure should NOT be called
+        closure_called = false;
+        let result = modules.merge_if_module_configured_with(RethRpcModule::Debug, || {
+            closure_called = true;
+            RpcModule::new(()).into()
+        });
+
+        assert!(result.is_ok());
+        assert!(!closure_called, "Closure should NOT be called when module is not configured");
     }
 }

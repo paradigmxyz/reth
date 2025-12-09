@@ -25,7 +25,7 @@ use reth_evm::{
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper,
@@ -172,7 +172,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             calls,
                             default_gas_limit,
                             chain_id,
-                            this.tx_resp_builder(),
+                            this.converter(),
                         )?
                     } else {
                         let evm = this.evm_config().evm_with_env(&mut db, evm_env);
@@ -182,7 +182,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             calls,
                             default_gas_limit,
                             chain_id,
-                            this.tx_resp_builder(),
+                            this.converter(),
                         )?
                     };
 
@@ -192,7 +192,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         result.block,
                         results,
                         return_full_transactions.into(),
-                        this.tx_resp_builder(),
+                        this.converter(),
                     )?;
 
                     blocks.push(block);
@@ -526,6 +526,11 @@ pub trait Call:
     }
 
     /// Executes the call request at the given [`BlockId`].
+    ///
+    /// This spawns a new task that obtains the state for the given [`BlockId`] and then transacts
+    /// the call [`Self::transact`]. If the future is dropped before the (blocking) transact
+    /// call is invoked, then the task is cancelled early, (for example if the request is terminated
+    /// early client-side).
     fn transact_call_at(
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
@@ -535,10 +540,23 @@ pub trait Call:
     where
         Self: LoadPendingBlock,
     {
-        let this = self.clone();
-        self.spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
-            this.transact(db, evm_env, tx_env)
-        })
+        async move {
+            let guard = CancelOnDrop::default();
+            let cancel = guard.clone();
+            let this = self.clone();
+
+            let res = self
+                .spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
+                    if cancel.is_cancelled() {
+                        // callsite dropped the guard
+                        return Err(EthApiError::InternalEthError.into())
+                    }
+                    this.transact(db, evm_env, tx_env)
+                })
+                .await;
+            drop(guard);
+            res
+        }
     }
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`] on a new task
@@ -711,7 +729,7 @@ pub trait Call:
             request.as_mut().set_nonce(nonce);
         }
 
-        Ok(self.tx_resp_builder().tx_env(request, evm_env)?)
+        Ok(self.converter().tx_env(request, evm_env)?)
     }
 
     /// Prepares the [`reth_evm::EvmEnv`] for execution of calls.

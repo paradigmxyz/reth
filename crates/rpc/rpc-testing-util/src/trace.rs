@@ -583,6 +583,7 @@ mod tests {
     use super::*;
     use alloy_eips::BlockNumberOrTag;
     use alloy_rpc_types_trace::filter::TraceFilterMode;
+    use futures::future::join;
     use jsonrpsee::http_client::HttpClientBuilder;
 
     const fn assert_is_stream<St: Stream>(_: &St) {}
@@ -747,5 +748,42 @@ mod tests {
         let mut stream = client.trace_block_opcode_gas_unordered(block, 2);
         assert_is_stream(&stream);
         let _opcodes = stream.next().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[ignore]
+    async fn compare_block_stream() {
+        let client_a = HttpClientBuilder::default().build("http://localhost:8545").unwrap();
+        let client_b = HttpClientBuilder::default().build("http://localhost:8544").unwrap();
+        let blocks = 0u64..=1681464;
+        let mut stream_a = client_a.trace_block_buffered(blocks.clone(), 2);
+        let mut stream_b = client_b.trace_block_buffered(blocks, 2);
+
+        let mut count = 0;
+        loop {
+            let (res_a, res_b) = join(stream_a.next(), stream_b.next()).await;
+
+            if res_a.is_none() && res_b.is_none() {
+                break;
+            }
+
+            match (res_a, res_b) {
+                (Some(Ok(res_a)), Some(Ok(res_b))) => {
+                    if res_a != res_b {
+                        println!("Received different trace results: {res_a:?}, res_b: {res_b:?}");
+                    }
+                }
+                (res_a, res_b) => {
+                    println!("Received different responses: {res_a:?}, res_b: {res_b:?}");
+                }
+            }
+
+            if count % 1000 == 0 {
+                println!("Blocks traced: {count}");
+            }
+
+            count += 1;
+        }
+        println!("Total blocks traced: {count}");
     }
 }
