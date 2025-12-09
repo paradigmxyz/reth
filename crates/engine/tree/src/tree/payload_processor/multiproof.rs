@@ -1180,6 +1180,7 @@ impl MultiProofTask {
 
                 let batch_source = ctx.accumulated_state_updates[0].0;
                 {
+                    let batch_source = ctx.accumulated_state_updates[0].0;
                     let batch_update = &ctx.accumulated_state_updates[0].1;
                     debug_assert!(ctx.accumulated_state_updates.iter().all(|(source, update)| {
                         can_batch_state_update(batch_source, batch_update, *source, update)
