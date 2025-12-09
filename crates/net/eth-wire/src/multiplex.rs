@@ -128,7 +128,6 @@ impl<St> RlpxProtocolMultiplexer<St> {
                 let st = handshake(proxy).await?;
                 Ok((st, ()))
             },
-            Vec::new(),
         )
         .await
         .map(|(st, _)| st)
@@ -147,7 +146,6 @@ impl<St> RlpxProtocolMultiplexer<St> {
         mut self,
         cap: &Capability,
         handshake: F,
-        additional_caps: Vec<SharedCapability>,
     ) -> Result<(RlpxSatelliteStream<St, Primary>, Extra), Err>
     where
         F: FnOnce(ProtocolProxy) -> Fut,
@@ -183,12 +181,12 @@ impl<St> RlpxProtocolMultiplexer<St> {
                         return Err(P2PStreamError::EmptyProtocolMessage.into())
                     };
                     if let Some(cap) = self.shared_capabilities().find_by_relative_offset(offset).cloned() {
-                        if cap == shared_cap || additional_caps.iter().any(|c| c == &cap) {
-                            // delegate to primary (eth and any additional caps like snap)
-                            let _ = to_primary.send(msg);
-                        } else {
+                        if self.inner.has_protocol_for_cap(&cap) {
                             // delegate to satellite
                             self.inner.delegate_message(&cap, msg);
+                        } else {
+                            // delegate to primary (eth or other non-multiplexed caps like snap)
+                            let _ = to_primary.send(msg);
                         }
                     } else {
                         return Err(P2PStreamError::UnknownReservedMessageId(offset).into())
@@ -242,7 +240,6 @@ impl<St> RlpxProtocolMultiplexer<St> {
                     Ok((eth_stream, their_status))
                 }
             },
-            Vec::new(),
         )
         .await
     }
@@ -262,14 +259,6 @@ impl<St> RlpxProtocolMultiplexer<St> {
         St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
     {
         let eth_cap = self.inner.conn.shared_capabilities().eth_version()?;
-        let snap_cap = self
-            .shared_capabilities()
-            .iter_caps()
-            .find(|cap| cap.name() == "snap")
-            .cloned()
-            .into_iter()
-            .collect::<Vec<_>>();
-
         self.into_satellite_stream_with_tuple_handshake(
             &Capability::eth(eth_cap),
             move |proxy| {
@@ -283,7 +272,6 @@ impl<St> RlpxProtocolMultiplexer<St> {
                     Ok((stream, their_status))
                 }
             },
-            snap_cap,
         )
         .await
     }
@@ -302,6 +290,10 @@ struct MultiplexInner<St> {
 impl<St> MultiplexInner<St> {
     const fn shared_capabilities(&self) -> &SharedCapabilities {
         self.conn.shared_capabilities()
+    }
+
+    fn has_protocol_for_cap(&self, cap: &SharedCapability) -> bool {
+        self.protocols.iter().any(|proto| proto.shared_cap == *cap)
     }
 
     /// Delegates a message to the matching protocol.
