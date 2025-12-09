@@ -213,40 +213,41 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     SnapTrieNodes(RequestResult<TrieNodesMessage>),
 }
 
+macro_rules! to_message {
+    ($response:expr, $item:ident, $request_id:expr, $wrap:expr) => {
+        match $response {
+            Ok(res) => {
+                let request = RequestPair { request_id: $request_id, message: $item(res) };
+                Ok($wrap(EthMessage::$item(request)))
+            }
+            Err(err) => Err(err),
+        }
+    };
+}
+
 // === impl PeerResponseResult ===
 
 impl<N: NetworkPrimitives> PeerResponseResult<N> {
     /// Converts this response into an [`EthMessage`]
     pub fn try_into_message(self, id: u64) -> RequestResult<EthMessage<N>> {
-        macro_rules! to_message {
-            ($response:ident, $item:ident, $request_id:ident) => {
-                match $response {
-                    Ok(res) => {
-                        let request = RequestPair { request_id: $request_id, message: $item(res) };
-                        Ok(EthMessage::$item(request))
-                    }
-                    Err(err) => Err(err),
-                }
-            };
-        }
         match self {
             Self::BlockHeaders(resp) => {
-                to_message!(resp, BlockHeaders, id)
+                to_message!(resp, BlockHeaders, id, |message| message)
             }
             Self::BlockBodies(resp) => {
-                to_message!(resp, BlockBodies, id)
+                to_message!(resp, BlockBodies, id, |message| message)
             }
             Self::PooledTransactions(resp) => {
-                to_message!(resp, PooledTransactions, id)
+                to_message!(resp, PooledTransactions, id, |message| message)
             }
             Self::NodeData(resp) => {
-                to_message!(resp, NodeData, id)
+                to_message!(resp, NodeData, id, |message| message)
             }
             Self::Receipts(resp) => {
-                to_message!(resp, Receipts, id)
+                to_message!(resp, Receipts, id, |message| message)
             }
             Self::Receipts69(resp) => {
-                to_message!(resp, Receipts69, id)
+                to_message!(resp, Receipts69, id, |message| message)
             }
             // Snap responses cannot be represented as `EthMessage` directly.
             // Callers that need snap support should use `try_into_eth_snap_message` instead.
@@ -271,36 +272,24 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
 
     /// Converts this response into an [`EthSnapMessage`].
     pub fn try_into_eth_snap_message(self, id: u64) -> RequestResult<EthSnapMessage<N>> {
-        macro_rules! to_message {
-            ($response:ident, $item:ident, $request_id:ident) => {
-                match $response {
-                    Ok(res) => {
-                        let request = RequestPair { request_id: $request_id, message: $item(res) };
-                        Ok(EthSnapMessage::Eth(EthMessage::$item(request)))
-                    }
-                    Err(err) => Err(err),
-                }
-            };
-        }
-
         match self {
             Self::BlockHeaders(resp) => {
-                to_message!(resp, BlockHeaders, id)
+                to_message!(resp, BlockHeaders, id, EthSnapMessage::Eth)
             }
             Self::BlockBodies(resp) => {
-                to_message!(resp, BlockBodies, id)
+                to_message!(resp, BlockBodies, id, EthSnapMessage::Eth)
             }
             Self::PooledTransactions(resp) => {
-                to_message!(resp, PooledTransactions, id)
+                to_message!(resp, PooledTransactions, id, EthSnapMessage::Eth)
             }
             Self::NodeData(resp) => {
-                to_message!(resp, NodeData, id)
+                to_message!(resp, NodeData, id, EthSnapMessage::Eth)
             }
             Self::Receipts(resp) => {
-                to_message!(resp, Receipts, id)
+                to_message!(resp, Receipts, id, EthSnapMessage::Eth)
             }
             Self::Receipts69(resp) => {
-                to_message!(resp, Receipts69, id)
+                to_message!(resp, Receipts69, id, EthSnapMessage::Eth)
             }
             Self::SnapAccountRange(resp) => match resp {
                 Ok(resp) => Ok(EthSnapMessage::Snap(SnapProtocolMessage::AccountRange(resp))),
