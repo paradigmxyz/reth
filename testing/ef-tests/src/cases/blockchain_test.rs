@@ -8,7 +8,6 @@ use alloy_rlp::{Decodable, Encodable};
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_chainspec::ChainSpec;
 use reth_consensus::{Consensus, HeaderValidator};
-use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
 use reth_db_common::init::{insert_genesis_hashes, insert_genesis_history, insert_genesis_state};
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
 use reth_ethereum_primitives::{Block, TransactionSigned};
@@ -16,10 +15,9 @@ use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_evm_ethereum::EthEvmConfig;
 use reth_primitives_traits::{Block as BlockTrait, RecoveredBlock, SealedBlock};
 use reth_provider::{
-    providers::StaticFileProvider, test_utils::MockNodeTypesWithDB, BlockWriter,
-    DatabaseProviderFactory, ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown,
-    ProviderFactory, StateProofProvider, StateWriter, StaticFileProviderFactory, StaticFileSegment,
-    StaticFileWriter,
+    test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
+    ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
+    StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::{
@@ -208,14 +206,7 @@ fn run_case(
 ) -> Result<Vec<(RecoveredBlock<Block>, ExecutionWitness)>, Error> {
     // Create a new test database and initialize a provider for the test case.
     let chain_spec: Arc<ChainSpec> = Arc::new(case.network.into());
-    let (static_dir, _) = create_test_static_files_dir();
-    let db = create_test_rw_db();
-    let factory = ProviderFactory::<MockNodeTypesWithDB>::new(
-        db,
-        chain_spec.clone(),
-        StaticFileProvider::read_write(&static_dir).expect("static file provider"),
-    )
-    .expect("failed to create test provider factory");
+    let factory = create_test_provider_factory_with_chain_spec(chain_spec.clone());
     let provider = factory.database_provider_rw().unwrap();
 
     // Insert initial test state into the provider.
