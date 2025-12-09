@@ -5,10 +5,7 @@ use reth_db_api::{
     transaction::DbTxMut,
     DatabaseError,
 };
-use std::{
-    fmt::Debug,
-    ops::{Bound, RangeBounds},
-};
+use std::{fmt::Debug, ops::RangeBounds};
 use tracing::debug;
 
 pub(crate) trait DbTxPruneExt: DbTxMut {
