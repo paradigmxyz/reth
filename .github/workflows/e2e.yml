@@ -19,7 +19,8 @@ concurrency:
 jobs:
   test:
     name: e2e-testsuite
-    runs-on: ubuntu-latest
+    runs-on:
+      group: Reth
     env:
       RUST_BACKTRACE: 1
     timeout-minutes: 90
@@ -42,3 +43,4 @@ jobs:
             --exclude 'op-reth' \
             --exclude 'reth' \
             -E 'binary(e2e_testsuite)'
+

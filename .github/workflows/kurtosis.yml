@@ -9,7 +9,7 @@ on:
 
   push:
     tags:
-      - "*"
+      - '*'
 
 env:
   CARGO_TERM_COLOR: always
@@ -30,7 +30,8 @@ jobs:
     strategy:
       fail-fast: false
     name: run kurtosis
-    runs-on: ubuntu-latest
+    runs-on:
+      group: Reth
     needs:
       - prepare-reth
     steps:
@@ -53,12 +54,13 @@ jobs:
       - name: Run kurtosis
         uses: ethpandaops/kurtosis-assertoor-github-action@v1
         with:
-          ethereum_package_args: ".github/assets/kurtosis_network_params.yaml"
+          ethereum_package_args: '.github/assets/kurtosis_network_params.yaml'
 
   notify-on-error:
     needs: test
     if: failure()
-    runs-on: ubuntu-latest
+    runs-on:
+      group: Reth
     steps:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2

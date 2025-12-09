@@ -26,7 +26,8 @@ jobs:
   prepare-reth:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on: ubuntu-latest
+    runs-on:
+      group: Reth
     steps:
       - uses: actions/checkout@v6
       - run: mkdir artifacts

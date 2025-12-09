@@ -9,7 +9,7 @@ on:
 
   push:
     tags:
-      - "*"
+      - '*'
 
 env:
   CARGO_TERM_COLOR: always
@@ -32,7 +32,8 @@ jobs:
     strategy:
       fail-fast: false
     name: run kurtosis
-    runs-on: ubuntu-latest
+    runs-on:
+      group: Reth
     needs:
       - prepare-reth
     steps:
@@ -82,10 +83,12 @@ jobs:
           kurtosis service logs -a op-devnet op-cl-2151908-2-op-node-op-reth-op-kurtosis
           exit 1
 
+
   notify-on-error:
     needs: test
     if: failure()
-    runs-on: ubuntu-latest
+    runs-on:
+      group: Reth
     steps:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2
