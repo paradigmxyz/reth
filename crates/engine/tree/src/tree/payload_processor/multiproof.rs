@@ -720,12 +720,25 @@ struct MultiproofBatchCtx {
     /// Timestamp when state updates finished. `Some` indicates all state updates have been
     /// received.
     updates_finished_time: Option<Instant>,
+    /// Reusable buffer for accumulating prefetch targets during batching.
+    /// Avoids repeated allocations when processing message bursts.
+    accumulated_prefetch_targets: Vec<MultiProofTargets>,
+    /// Reusable buffer for accumulating state updates during batching.
+    /// Avoids repeated allocations when processing message bursts.
+    accumulated_state_updates: Vec<(StateChangeSource, EvmState)>,
 }
 
 impl MultiproofBatchCtx {
     /// Creates a new batch context with the given start time.
-    const fn new(start: Instant) -> Self {
-        Self { pending_msg: None, first_update_time: None, start, updates_finished_time: None }
+    fn new(start: Instant) -> Self {
+        Self {
+            pending_msg: None,
+            first_update_time: None,
+            start,
+            updates_finished_time: None,
+            accumulated_prefetch_targets: Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES),
+            accumulated_state_updates: Vec::with_capacity(STATE_UPDATE_BATCH_PREALLOC),
+        }
     }
 
     /// Returns `true` if all state updates have been received.
@@ -1040,21 +1053,18 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Accumulate messages including the first one
+                // Accumulate messages including the first one; reuse buffer to avoid allocations.
                 let mut accumulated_count = targets.chunking_length();
-                // Preallocate up to the message cap; avoids repeated reallocations when bursts
-                // arrive.
-                let mut accumulated_targets: Vec<MultiProofTargets> =
-                    Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES);
-                accumulated_targets.push(targets);
+                ctx.accumulated_prefetch_targets.clear();
+                ctx.accumulated_prefetch_targets.push(targets);
 
                 // Only attempt batching if below limits; otherwise skip straight to dispatch.
                 if accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
-                    accumulated_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
+                    ctx.accumulated_prefetch_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
                 {
                     loop {
                         if accumulated_count >= PREFETCH_MAX_BATCH_TARGETS ||
-                            accumulated_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
+                            ctx.accumulated_prefetch_targets.len() >= PREFETCH_MAX_BATCH_MESSAGES
                         {
                             break;
                         }
@@ -1067,7 +1077,7 @@ impl MultiProofTask {
                                     break;
                                 }
                                 accumulated_count += next_count;
-                                accumulated_targets.push(next_targets);
+                                ctx.accumulated_prefetch_targets.push(next_targets);
                             }
                             Ok(other_msg) => {
                                 ctx.pending_msg = Some(other_msg);
@@ -1079,11 +1089,12 @@ impl MultiProofTask {
                 }
 
                 // Process all accumulated messages in a single batch
-                let num_batched = accumulated_targets.len();
+                let num_batched = ctx.accumulated_prefetch_targets.len();
                 self.metrics.prefetch_batch_size_histogram.record(num_batched as f64);
 
                 // Merge all accumulated prefetch targets into a single dispatch payload.
-                let mut accumulated_iter = accumulated_targets.into_iter();
+                // Use drain to preserve the buffer allocation.
+                let mut accumulated_iter = ctx.accumulated_prefetch_targets.drain(..);
                 let mut merged_targets =
                     accumulated_iter.next().expect("prefetch batch always has at least one entry");
                 for next_targets in accumulated_iter {
@@ -1117,13 +1128,10 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Accumulate messages including the first one
+                // Accumulate messages including the first one; reuse buffer to avoid allocations.
                 let mut accumulated_targets = estimate_evm_state_targets(&update);
-                // Preallocate modestly; state updates are heavier per message, but we can see small
-                // bursts.
-                let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> =
-                    Vec::with_capacity(STATE_UPDATE_BATCH_PREALLOC);
-                accumulated_updates.push((source, update));
+                ctx.accumulated_state_updates.clear();
+                ctx.accumulated_state_updates.push((source, update));
 
                 loop {
                     if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
@@ -1131,7 +1139,7 @@ impl MultiProofTask {
                     }
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                            let (batch_source, batch_update) = &accumulated_updates[0];
+                            let (batch_source, batch_update) = &ctx.accumulated_state_updates[0];
                             if !can_batch_state_update(
                                 *batch_source,
                                 batch_update,
@@ -1158,7 +1166,7 @@ impl MultiProofTask {
                                 break;
                             }
                             accumulated_targets += next_estimate;
-                            accumulated_updates.push((next_source, next_update));
+                            ctx.accumulated_state_updates.push((next_source, next_update));
                         }
                         Ok(other_msg) => {
                             ctx.pending_msg = Some(other_msg);
@@ -1169,19 +1177,20 @@ impl MultiProofTask {
                 }
 
                 // Process all accumulated messages in a single batch
-                let num_batched = accumulated_updates.len();
+                let num_batched = ctx.accumulated_state_updates.len();
                 self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
 
-                let batch_source = accumulated_updates[0].0;
+                let batch_source = ctx.accumulated_state_updates[0].0;
                 {
-                    let batch_update = &accumulated_updates[0].1;
-                    debug_assert!(accumulated_updates.iter().all(|(source, update)| {
+                    let batch_update = &ctx.accumulated_state_updates[0].1;
+                    debug_assert!(ctx.accumulated_state_updates.iter().all(|(source, update)| {
                         can_batch_state_update(batch_source, batch_update, *source, update)
                     }));
                 }
 
                 // Merge all accumulated updates into a single EvmState payload.
-                let mut accumulated_iter = accumulated_updates.into_iter();
+                // Use drain to preserve the buffer allocation.
+                let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
                 let (batch_source, mut merged_update) = accumulated_iter
                     .next()
                     .expect("state update batch always has at least one entry");
