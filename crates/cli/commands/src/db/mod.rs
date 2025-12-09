@@ -82,7 +82,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
     /// Execute `db` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
         self,
-        _ctx: CliContext,
+        ctx: CliContext,
     ) -> eyre::Result<()> {
         let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
         let db_path = data_dir.db();
@@ -162,7 +162,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
                 db_exec!(self.env, tool, N, access_rights, {
-                    command.execute(&tool)?;
+                    command.execute(&tool, ctx.task_executor.clone())?;
                 });
             }
             Subcommands::StaticFileHeader(command) => {
