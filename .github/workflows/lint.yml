@@ -232,10 +232,14 @@ jobs:
       - name: Ensure no arbitrary or proptest dependency on default build
         run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
 
-  # Checks that selected rates can compile with power set of features
+  # Checks that selected crates can compile with power set of features
   features:
-    name: features
+    name: features (${{ matrix.partition }}/${{ matrix.total_partitions }})
     runs-on: depot-ubuntu-latest-16
+    strategy:
+      matrix:
+        partition: [1, 2]
+        total_partitions: [2]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -246,7 +250,13 @@ jobs:
           cache-on-failure: true
       - name: cargo install cargo-hack
         uses: taiki-e/install-action@cargo-hack
-      - run: make check-features
+      - run: |
+          cargo hack check \
+            --package reth-codecs \
+            --package reth-primitives-traits \
+            --package reth-primitives \
+            --feature-powerset \
+            --partition ${{ matrix.partition }}/${{ matrix.total_partitions }}
         env:
           RUSTFLAGS: -D warnings
 
