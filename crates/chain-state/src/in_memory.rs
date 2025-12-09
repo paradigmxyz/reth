@@ -634,6 +634,8 @@ impl<N: NodePrimitives> BlockState<N> {
     /// We assume that the `Receipts` in the executed block `ExecutionOutcome`
     /// has only one element corresponding to the executed block associated to
     /// the state.
+    ///
+    /// This clones the vector of receipts. To avoid it, use [`Self::executed_block_receipts_ref`].
     pub fn executed_block_receipts(&self) -> Vec<N::Receipt> {
         let receipts = self.receipts();
 
