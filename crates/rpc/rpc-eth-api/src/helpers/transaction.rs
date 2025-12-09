@@ -79,7 +79,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
         tx: Bytes,
     ) -> impl Future<Output = Result<B256, Self::Error>> + Send {
         async move {
-            let recovered = recover_raw_transaction::<PoolPooledTx<Self::Pool>>(&tx)?;
+            let recovered = recover_raw_transaction::<PoolPooledTx<Self::Pool>>(&tx).await?;
             self.send_transaction(WithEncoded::new(tx, recovered)).await
         }
     }
@@ -622,9 +622,8 @@ pub trait LoadTransaction: SpawnBlocking + FullEthApiTypes + RpcNodeCoreExt {
                 // Note: we assume this transaction is valid, because it's mined (or
                 // part of pending block) and already. We don't need to
                 // check for pre EIP-2 because this transaction could be pre-EIP-2.
-                let transaction = tx
-                    .try_into_recovered_unchecked()
-                    .map_err(|_| EthApiError::InvalidTransactionSignature)?;
+                let transaction =
+                    tx.try_into_recovered_unchecked().map_err(Self::Error::from_eth_err)?;
 
                 return Ok(Some(TransactionSource::Block {
                     transaction,

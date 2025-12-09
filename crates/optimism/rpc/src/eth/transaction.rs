@@ -15,7 +15,7 @@ use reth_rpc_eth_api::{
     try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
     RpcReceipt, TxInfoMapper,
 };
-use reth_rpc_eth_types::{EthApiError, TransactionSource};
+use reth_rpc_eth_types::{EthApiError, RpcInvalidTransactionError, TransactionSource};
 use reth_storage_api::{errors::ProviderError, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool,
@@ -196,7 +196,7 @@ where
         {
             let transaction = tx
                 .try_into_recovered_unchecked()
-                .map_err(|_| EthApiError::InvalidTransactionSignature)?;
+                .map_err(|_| RpcInvalidTransactionError::InvalidTransactionSignature)?;
 
             return Ok(Some(TransactionSource::Block {
                 transaction,

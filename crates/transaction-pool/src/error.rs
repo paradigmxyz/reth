@@ -278,6 +278,9 @@ pub enum InvalidPoolTransactionError {
         /// Minimum required priority fee.
         minimum_priority_fee: u128,
     },
+    /// Thrown if the transaction signature is invalid.
+    #[error("invalid signature")]
+    InvalidSignature,
 }
 
 // === impl InvalidPoolTransactionError ===
@@ -393,6 +396,7 @@ impl InvalidPoolTransactionError {
                 Eip7702PoolTransactionError::AuthorityReserved => false,
             },
             Self::PriorityFeeBelowMinimum { .. } => false,
+            Self::InvalidSignature => true,
         }
     }
 

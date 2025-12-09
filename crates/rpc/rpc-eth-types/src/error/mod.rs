@@ -63,9 +63,6 @@ pub enum EthApiError {
     /// When decoding a signed transaction fails
     #[error("failed to decode signed transaction")]
     FailedToDecodeSignedTransaction,
-    /// When the transaction signature is invalid
-    #[error("invalid transaction signature")]
-    InvalidTransactionSignature,
     /// Errors related to the transaction pool
     #[error(transparent)]
     PoolError(#[from] RpcPoolError),
@@ -265,7 +262,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(error: EthApiError) -> Self {
         match error {
             EthApiError::FailedToDecodeSignedTransaction |
-            EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
             EthApiError::InvalidBlockRange |
             EthApiError::ExceedsMaxProofWindow |
@@ -525,7 +521,7 @@ where
 
 impl From<RecoveryError> for EthApiError {
     fn from(_: RecoveryError) -> Self {
-        Self::InvalidTransactionSignature
+        Self::InvalidTransaction(RpcInvalidTransactionError::InvalidTransactionSignature)
     }
 }
 
@@ -694,6 +690,9 @@ pub enum RpcInvalidTransactionError {
         /// Minimum required priority fee.
         minimum_priority_fee: u128,
     },
+    /// When the transaction signature is invalid
+    #[error("invalid transaction signature")]
+    InvalidTransactionSignature,
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -1026,6 +1025,9 @@ impl From<PoolError> for RpcPoolError {
 impl From<InvalidPoolTransactionError> for RpcPoolError {
     fn from(err: InvalidPoolTransactionError) -> Self {
         match err {
+            InvalidPoolTransactionError::InvalidSignature => {
+                Self::Invalid(RpcInvalidTransactionError::InvalidTransactionSignature)
+            }
             InvalidPoolTransactionError::Consensus(err) => Self::Invalid(err.into()),
             InvalidPoolTransactionError::ExceedsGasLimit(_, _) => Self::ExceedsGasLimit,
             InvalidPoolTransactionError::MaxTxGasLimitExceeded(_, _) => Self::MaxTxGasLimitExceeded,
