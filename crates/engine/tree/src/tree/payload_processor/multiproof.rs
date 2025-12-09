@@ -1292,60 +1292,10 @@ impl MultiProofTask {
         let mut ctx = MultiproofBatchCtx::new(Instant::now());
         let mut batch_metrics = MultiproofBatchMetrics::default();
 
-        // Main event loop that prioritizes draining proof results, then processes batched control
-        // messages; labeled so inner loops can `break 'main` once all work is complete.
+        // Main event loop; select_biased! prioritizes proof results over control messages.
+        // Labeled so inner match arms can `break 'main` once all work is complete.
         'main: loop {
             trace!(target: "engine::tree::payload_processor::multiproof", "entering main channel receiving loop");
-
-            // Always drain proof results first to maintain priority over pending messages.
-            // This prevents priority inversion where pending_msg would bypass select_biased!
-            // and starve proof result processing.
-            while let Ok(proof_result) = self.proof_result_rx.try_recv() {
-                batch_metrics.proofs_processed += 1;
-
-                self.metrics.proof_calculation_duration_histogram.record(proof_result.elapsed);
-
-                self.multiproof_manager.on_calculation_complete();
-
-                match proof_result.result {
-                    Ok(proof_result_data) => {
-                        debug!(
-                            target: "engine::tree::payload_processor::multiproof",
-                            sequence = proof_result.sequence_number,
-                            total_proofs = batch_metrics.proofs_processed,
-                            "Processing calculated proof from worker (priority drain)"
-                        );
-
-                        let update = SparseTrieUpdate {
-                            state: proof_result.state,
-                            multiproof: proof_result_data.into_multiproof(),
-                        };
-
-                        if let Some(combined_update) =
-                            self.on_proof(proof_result.sequence_number, update)
-                        {
-                            let _ = self.to_sparse_trie.send(combined_update);
-                        }
-                    }
-                    Err(error) => {
-                        error!(target: "engine::tree::payload_processor::multiproof", ?error, "proof calculation error from worker");
-                        return;
-                    }
-                }
-
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
-                    debug!(
-                        target: "engine::tree::payload_processor::multiproof",
-                        "State updates finished and all proofs processed, ending calculation"
-                    );
-                    break 'main;
-                }
-            }
 
             if let Some(msg) = ctx.pending_msg.take() {
                 if self.process_multiproof_message(msg, &mut ctx, &mut batch_metrics) {
