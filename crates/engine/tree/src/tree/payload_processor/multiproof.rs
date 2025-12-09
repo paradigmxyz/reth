@@ -2614,13 +2614,13 @@ mod tests {
         // Pending message should be handled before the next select loop.
         assert!(!task.process_multiproof_message(pending, &mut ctx, &mut batch_metrics));
 
-        // The remaining message should still be Prefetch2 (ordering preserved).
-        match task.rx.try_recv() {
-            Ok(MultiProofMessage::PrefetchProofs(targets)) => {
+        // Prefetch2 should now be in pending_msg (captured by StateUpdate's batching loop).
+        match ctx.pending_msg.take() {
+            Some(MultiProofMessage::PrefetchProofs(targets)) => {
                 assert_eq!(targets.len(), 1);
                 assert!(targets.contains_key(&prefetch_addr2));
             }
-            other => panic!("Expected remaining PrefetchProofs2, got {:?}", other),
+            other => panic!("Expected remaining PrefetchProofs2 in pending_msg, got {:?}", other),
         }
     }
 
