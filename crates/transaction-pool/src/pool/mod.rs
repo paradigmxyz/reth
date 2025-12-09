@@ -361,20 +361,6 @@ where
             .collect()
     }
 
-    /// Returns only the first `max` hashes of transactions in the pool that can be propagated.
-    pub fn pooled_transactions_hashes_max(&self, max: usize) -> Vec<TxHash> {
-        if max == 0 {
-            return Vec::new();
-        }
-        self.get_pool_data()
-            .all()
-            .transactions_iter()
-            .filter(|tx| tx.propagate)
-            .take(max)
-            .map(|tx| *tx.hash())
-            .collect()
-    }
-
     /// Converts the internally tracked transaction to the pooled format.
     ///
     /// If the transaction is an EIP-4844 transaction, the blob sidecar is fetched from the blob
