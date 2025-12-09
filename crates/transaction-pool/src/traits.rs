@@ -287,7 +287,9 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     ///
     /// This is a convenience wrapper around [`Self::new_transactions_listener`] that filters for
     /// [`SubPool::Blob`](crate::SubPool).
-    fn new_blob_pool_transactions_listener(&self) -> NewSubpoolTransactionStream<Self::Transaction> {
+    fn new_blob_pool_transactions_listener(
+        &self,
+    ) -> NewSubpoolTransactionStream<Self::Transaction> {
         NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Blob)
     }
 
