@@ -19,7 +19,7 @@ use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
 use revm_primitives::Address;
 use std::time::Instant;
-use tracing::{debug_span, trace};
+use tracing::trace;
 
 /// Metrics for the `EngineApi`.
 #[derive(Debug, Default)]
@@ -85,8 +85,10 @@ impl EngineApiMetrics {
             let exec_span = debug_span!(target: "engine::tree", "execution").entered();
             for tx in transactions {
                 let tx = tx?;
-                let span =
-                    debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
+                // Use trace_span instead of debug_span to reduce high-frequency span volume
+                // when OTLP tracing is enabled. This prevents performance degradation from
+                // exporting thousands of per-transaction spans on busy networks.
+                let span = tracing::trace_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
                 let enter = span.entered();
                 trace!(target: "engine::tree", "Executing transaction");
                 senders.push(*tx.signer());
