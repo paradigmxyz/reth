@@ -480,7 +480,7 @@ revm-primitives = { version = "21.0.2", default-features = false }
 revm-interpreter = { version = "31.1.0", default-features = false }
 revm-database-interface = { version = "8.0.5", default-features = false }
 op-revm = { version = "14.1.0", default-features = false }
-revm-inspectors = "0.33.0"
+revm-inspectors = "0.33.1"
 
 # eth
 alloy-chains = { version = "0.2.5", default-features = false }
@@ -493,35 +493,35 @@ alloy-sol-macro = "1.4.1"
 alloy-sol-types = { version = "1.4.1", default-features = false }
 alloy-trie = { version = "0.9.1", default-features = false }
 
-alloy-hardforks = "0.4.4"
+alloy-hardforks = "0.4.5"
 
-alloy-consensus = { version = "1.1.2", default-features = false }
-alloy-contract = { version = "1.1.2", default-features = false }
-alloy-eips = { version = "1.1.2", default-features = false }
-alloy-genesis = { version = "1.1.2", default-features = false }
-alloy-json-rpc = { version = "1.1.2", default-features = false }
-alloy-network = { version = "1.1.2", default-features = false }
-alloy-network-primitives = { version = "1.1.2", default-features = false }
-alloy-provider = { version = "1.1.2", features = ["reqwest", "debug-api"], default-features = false }
-alloy-pubsub = { version = "1.1.2", default-features = false }
-alloy-rpc-client = { version = "1.1.2", default-features = false }
-alloy-rpc-types = { version = "1.1.2", features = ["eth"], default-features = false }
-alloy-rpc-types-admin = { version = "1.1.2", default-features = false }
-alloy-rpc-types-anvil = { version = "1.1.2", default-features = false }
-alloy-rpc-types-beacon = { version = "1.1.2", default-features = false }
-alloy-rpc-types-debug = { version = "1.1.2", default-features = false }
-alloy-rpc-types-engine = { version = "1.1.2", default-features = false }
-alloy-rpc-types-eth = { version = "1.1.2", default-features = false }
-alloy-rpc-types-mev = { version = "1.1.2", default-features = false }
-alloy-rpc-types-trace = { version = "1.1.2", default-features = false }
-alloy-rpc-types-txpool = { version = "1.1.2", default-features = false }
-alloy-serde = { version = "1.1.2", default-features = false }
-alloy-signer = { version = "1.1.2", default-features = false }
-alloy-signer-local = { version = "1.1.2", default-features = false }
-alloy-transport = { version = "1.1.2" }
-alloy-transport-http = { version = "1.1.2", features = ["reqwest-rustls-tls"], default-features = false }
-alloy-transport-ipc = { version = "1.1.2", default-features = false }
-alloy-transport-ws = { version = "1.1.2", default-features = false }
+alloy-consensus = { version = "1.1.3", default-features = false }
+alloy-contract = { version = "1.1.3", default-features = false }
+alloy-eips = { version = "1.1.3", default-features = false }
+alloy-genesis = { version = "1.1.3", default-features = false }
+alloy-json-rpc = { version = "1.1.3", default-features = false }
+alloy-network = { version = "1.1.3", default-features = false }
+alloy-network-primitives = { version = "1.1.3", default-features = false }
+alloy-provider = { version = "1.1.3", features = ["reqwest", "debug-api"], default-features = false }
+alloy-pubsub = { version = "1.1.3", default-features = false }
+alloy-rpc-client = { version = "1.1.3", default-features = false }
+alloy-rpc-types = { version = "1.1.3", features = ["eth"], default-features = false }
+alloy-rpc-types-admin = { version = "1.1.3", default-features = false }
+alloy-rpc-types-anvil = { version = "1.1.3", default-features = false }
+alloy-rpc-types-beacon = { version = "1.1.3", default-features = false }
+alloy-rpc-types-debug = { version = "1.1.3", default-features = false }
+alloy-rpc-types-engine = { version = "1.1.3", default-features = false }
+alloy-rpc-types-eth = { version = "1.1.3", default-features = false }
+alloy-rpc-types-mev = { version = "1.1.3", default-features = false }
+alloy-rpc-types-trace = { version = "1.1.3", default-features = false }
+alloy-rpc-types-txpool = { version = "1.1.3", default-features = false }
+alloy-serde = { version = "1.1.3", default-features = false }
+alloy-signer = { version = "1.1.3", default-features = false }
+alloy-signer-local = { version = "1.1.3", default-features = false }
+alloy-transport = { version = "1.1.3" }
+alloy-transport-http = { version = "1.1.3", features = ["reqwest-rustls-tls"], default-features = false }
+alloy-transport-ipc = { version = "1.1.3", default-features = false }
+alloy-transport-ws = { version = "1.1.3", default-features = false }
 
 # op
 alloy-op-evm = { version = "0.24.1", default-features = false }
@@ -652,6 +652,9 @@ c-kzg = "2.1.5"
 
 # config
 toml = "0.8"
+
+# rocksdb
+rocksdb = { version = "0.24" }
 
 # otlp obs
 opentelemetry_sdk = "0.31"

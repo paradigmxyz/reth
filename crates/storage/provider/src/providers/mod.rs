@@ -29,6 +29,13 @@ pub use blockchain_provider::BlockchainProvider;
 mod consistent;
 pub use consistent::ConsistentProvider;
 
+// RocksDB currently only supported on Unix platforms
+// Windows support is planned for future releases
+#[cfg(all(unix, feature = "rocksdb"))]
+mod rocksdb;
+#[cfg(all(unix, feature = "rocksdb"))]
+pub use rocksdb::{RocksDBBuilder, RocksDBProvider};
+
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy
 /// [`ProviderNodeTypes`].
 pub trait NodeTypesForProvider

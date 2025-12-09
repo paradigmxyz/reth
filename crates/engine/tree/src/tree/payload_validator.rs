@@ -28,7 +28,8 @@ use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
 };
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
+    AlloyBlockHeader, BlockBody, BlockTy, GotExpected, NodePrimitives, RecoveredBlock, SealedBlock,
+    SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
@@ -39,6 +40,7 @@ use reth_provider::{
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
+use revm_primitives::Address;
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
@@ -176,12 +178,12 @@ where
     pub fn convert_to_block<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &self,
         input: BlockOrPayload<T>,
-    ) -> Result<RecoveredBlock<N::Block>, NewPayloadError>
+    ) -> Result<SealedBlock<N::Block>, NewPayloadError>
     where
         V: PayloadValidator<T, Block = N::Block>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => self.validator.ensure_well_formed_payload(payload),
+            BlockOrPayload::Payload(payload) => self.validator.convert_payload_to_block(payload),
             BlockOrPayload::Block(block) => Ok(block),
         }
     }
@@ -205,21 +207,37 @@ where
     pub fn tx_iterator_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &'a self,
         input: &'a BlockOrPayload<T>,
-    ) -> Result<impl ExecutableTxIterator<Evm> + 'a, NewPayloadError>
+    ) -> Result<impl ExecutableTxIterator<Evm>, NewPayloadError>
     where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => Ok(Either::Left(
-                self.evm_config
+            BlockOrPayload::Payload(payload) => {
+                let (iter, convert) = self
+                    .evm_config
                     .tx_iterator_for_payload(payload)
                     .map_err(NewPayloadError::other)?
-                    .map(|res| res.map(Either::Left)),
-            )),
+                    .into();
+
+                let iter = Either::Left(iter.into_iter().map(Either::Left));
+                let convert = move |tx| {
+                    let Either::Left(tx) = tx else { unreachable!() };
+                    convert(tx).map(Either::Left).map_err(Either::Left)
+                };
+
+                // Box the closure to satisfy the `Fn` bound both here and in the branch below
+                Ok((iter, Box::new(convert) as Box<dyn Fn(_) -> _ + Send + Sync + 'static>))
+            }
             BlockOrPayload::Block(block) => {
-                let transactions = block.clone_transactions_recovered().collect::<Vec<_>>();
-                Ok(Either::Right(transactions.into_iter().map(|tx| Ok(Either::Right(tx)))))
+                let iter =
+                    Either::Right(block.body().clone_transactions().into_iter().map(Either::Right));
+                let convert = move |tx: Either<_, N::SignedTx>| {
+                    let Either::Right(tx) = tx else { unreachable!() };
+                    tx.try_into_recovered().map(Either::Right).map_err(Either::Right)
+                };
+
+                Ok((iter, Box::new(convert)))
             }
         }
     }
@@ -266,7 +284,7 @@ where
         // Validate block consensus rules which includes header validation
         if let Err(consensus_err) = self.validate_block_inner(&block) {
             // Header validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block.into_sealed_block(), consensus_err.into()).into())
+            return Err(InsertBlockError::new(block, consensus_err.into()).into())
         }
 
         // Also validate against the parent
@@ -274,11 +292,11 @@ where
             self.consensus.validate_header_against_parent(block.sealed_header(), parent_block)
         {
             // Parent validation error takes precedence over execution error
-            return Err(InsertBlockError::new(block.into_sealed_block(), consensus_err.into()).into())
+            return Err(InsertBlockError::new(block, consensus_err.into()).into())
         }
 
         // No header validation errors, return the original execution error
-        Err(InsertBlockError::new(block.into_sealed_block(), execution_err).into())
+        Err(InsertBlockError::new(block, execution_err).into())
     }
 
     /// Validates a block that has already been converted from a payload.
@@ -314,9 +332,7 @@ where
                     Ok(val) => val,
                     Err(e) => {
                         let block = self.convert_to_block(input)?;
-                        return Err(
-                            InsertBlockError::new(block.into_sealed_block(), e.into()).into()
-                        )
+                        return Err(InsertBlockError::new(block, e.into()).into())
                     }
                 }
             };
@@ -347,7 +363,7 @@ where
         else {
             // this is pre-validated in the tree
             return Err(InsertBlockError::new(
-                self.convert_to_block(input)?.into_sealed_block(),
+                self.convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -359,7 +375,7 @@ where
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
-                self.convert_to_block(input)?.into_sealed_block(),
+                self.convert_to_block(input)?,
                 ProviderError::HeaderNotFound(parent_hash.into()).into(),
             )
             .into())
@@ -402,7 +418,7 @@ where
         );
 
         // Execute the block and handle any execution errors
-        let output = match if self.config.state_provider_metrics() {
+        let (output, senders) = match if self.config.state_provider_metrics() {
             let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
             let result = self.execute_block(&state_provider, env, &input, &mut handle);
             state_provider.record_total_latency();
@@ -417,7 +433,7 @@ where
         // After executing the block we can stop prewarming transactions
         handle.stop_prewarming_execution();
 
-        let block = self.convert_to_block(input)?;
+        let block = self.convert_to_block(input)?.with_senders(senders);
 
         let hashed_state = ensure_ok_post_block!(
             self.validate_post_execution(&block, &parent_block, &output, &mut ctx),
@@ -555,13 +571,13 @@ where
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
-    fn validate_block_inner(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
+    fn validate_block_inner(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block.sealed_block()) {
+        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
             error!(target: "engine::tree::payload_validator", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
@@ -577,7 +593,7 @@ where
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
-    ) -> Result<BlockExecutionOutput<N::Receipt>, InsertBlockErrorKind>
+    ) -> Result<(BlockExecutionOutput<N::Receipt>, Vec<Address>), InsertBlockErrorKind>
     where
         S: StateProvider,
         Err: core::error::Error + Send + Sync + 'static,
@@ -617,7 +633,7 @@ where
 
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
-        let output = self.metrics.execute_metered(
+        let (output, senders) = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
@@ -625,7 +641,7 @@ where
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, "Executed block");
-        Ok(output)
+        Ok((output, senders))
     }
 
     /// Compute state root for the given hashed post state in parallel.
@@ -647,7 +663,7 @@ where
 
         // Extend state overlay with current block's sorted state.
         input.prefix_sets.extend(hashed_state.construct_prefix_sets());
-        let sorted_hashed_state = hashed_state.clone().into_sorted();
+        let sorted_hashed_state = hashed_state.clone_into_sorted();
         Arc::make_mut(&mut input.state).extend_ref(&sorted_hashed_state);
 
         let TrieInputSorted { nodes, state, prefix_sets: prefix_sets_mut } = input;
@@ -856,7 +872,7 @@ where
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
     const fn plan_state_root_computation(&self) -> StateRootStrategy {
-        if self.config.state_root_fallback() {
+        if self.config.state_root_fallback() || !self.config.has_enough_parallelism() {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
             StateRootStrategy::StateRootTask
@@ -1097,10 +1113,10 @@ pub trait EngineValidator<
     ///
     /// Implementers should ensure that the checks are done in the order that conforms with the
     /// engine-API specification.
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: Types::ExecutionData,
-    ) -> Result<RecoveredBlock<N::Block>, NewPayloadError>;
+    ) -> Result<SealedBlock<N::Block>, NewPayloadError>;
 
     /// Validates a payload received from engine API.
     fn validate_payload(
@@ -1112,7 +1128,7 @@ pub trait EngineValidator<
     /// Validates a block downloaded from the network.
     fn validate_block(
         &mut self,
-        block: RecoveredBlock<N::Block>,
+        block: SealedBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N>;
 
@@ -1146,11 +1162,11 @@ where
         self.validator.validate_payload_attributes_against_header(attr, header)
     }
 
-    fn ensure_well_formed_payload(
+    fn convert_payload_to_block(
         &self,
         payload: Types::ExecutionData,
-    ) -> Result<RecoveredBlock<N::Block>, NewPayloadError> {
-        let block = self.validator.ensure_well_formed_payload(payload)?;
+    ) -> Result<SealedBlock<N::Block>, NewPayloadError> {
+        let block = self.validator.convert_payload_to_block(payload)?;
         Ok(block)
     }
 
@@ -1164,7 +1180,7 @@ where
 
     fn validate_block(
         &mut self,
-        block: RecoveredBlock<N::Block>,
+        block: SealedBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
     ) -> ValidationOutcome<N> {
         self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
@@ -1184,7 +1200,7 @@ pub enum BlockOrPayload<T: PayloadTypes> {
     /// Payload.
     Payload(T::ExecutionData),
     /// Block.
-    Block(RecoveredBlock<BlockTy<<T::BuiltPayload as BuiltPayload>::Primitives>>),
+    Block(SealedBlock<BlockTy<<T::BuiltPayload as BuiltPayload>::Primitives>>),
 }
 
 impl<T: PayloadTypes> BlockOrPayload<T> {
