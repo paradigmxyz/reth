@@ -40,6 +40,9 @@ const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
 /// partitioning) before dispatch.
 const STATE_UPDATE_MAX_BATCH_TARGETS: usize = 64;
 
+/// Preallocation hint for state update batching to avoid repeated reallocations on small bursts.
+const STATE_UPDATE_BATCH_PREALLOC: usize = 16;
+
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
@@ -1121,7 +1124,7 @@ impl MultiProofTask {
                 // Preallocate modestly; state updates are heavier per message, but we can see small
                 // bursts.
                 let mut accumulated_updates: Vec<(StateChangeSource, EvmState)> =
-                    Vec::with_capacity(16);
+                    Vec::with_capacity(STATE_UPDATE_BATCH_PREALLOC);
                 accumulated_updates.push((source, update));
 
                 loop {
