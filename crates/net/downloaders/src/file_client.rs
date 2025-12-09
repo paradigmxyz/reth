@@ -256,6 +256,10 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
                     Err(err) => return Err(err),
                 };
 
+                tracing::debug!(target: "downloaders::file",
+                    block=?block,
+                    "decoded block from file chunk"
+                );
                 let block = SealedBlock::seal_slow(block);
 
                 // Validate standalone header
@@ -272,6 +276,11 @@ impl<B: FullBlock<Header: reth_primitives_traits::BlockHeader>> FromReader
                 let block_hash = block.hash();
                 let block_number = block.number();
                 let (header, body) = block.split_sealed_header_body();
+                tracing::debug!(target: "downloaders::file",
+                    header=?header,
+                    body=?body,
+                    "adding block to file client buffers"
+                );
                 headers.insert(block_number, header.unseal());
                 hash_to_number.insert(block_hash, block_number);
                 bodies.insert(block_hash, body);
