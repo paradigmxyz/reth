@@ -283,6 +283,16 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Queued)
     }
 
+    /// Returns a new Stream that yields new transactions added to the blob sub-pool.
+    ///
+    /// This is a convenience wrapper around [`Self::new_transactions_listener`] that filters for
+    /// [`SubPool::Blob`](crate::SubPool).
+    fn new_blob_pool_transactions_listener(
+        &self,
+    ) -> NewSubpoolTransactionStream<Self::Transaction> {
+        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Blob)
+    }
+
     /// Returns the _hashes_ of all transactions in the pool that are allowed to be propagated.
     ///
     /// This excludes hashes that aren't allowed to be propagated.
