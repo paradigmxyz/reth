@@ -21,7 +21,6 @@ use crate::{
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::Sealable;
-use alloy_rlp::Encodable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
