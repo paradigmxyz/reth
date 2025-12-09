@@ -382,7 +382,7 @@ where
 
         let mut all_traces = Vec::new();
         let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
-        for chunk_start in (start..end).step_by(self.inner.eth_config.max_tracing_requests) {
+        for chunk_start in (start..=end).step_by(self.inner.eth_config.max_tracing_requests) {
             let chunk_end =
                 std::cmp::min(chunk_start + self.inner.eth_config.max_tracing_requests as u64, end);
 

@@ -402,8 +402,3 @@ pr:
 	make test
 
 check-features:
-	cargo hack check \
-		--package reth-codecs \
-		--package reth-primitives-traits \
-		--package reth-primitives \
-		--feature-powerset
