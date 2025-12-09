@@ -189,7 +189,8 @@ impl<T: ParkedOrd> ParkedPool<T> {
 
             // Drop transactions from this sender until the pool is under limits
             while let Some((tx_id, _)) = self.by_id.range(sender_id.range()).next_back() {
-                if let Some(tx) = self.remove_transaction(tx_id) {
+                let tx_id = *tx_id;
+                if let Some(tx) = self.remove_transaction(&tx_id) {
                     removed.push(tx);
                 }
 

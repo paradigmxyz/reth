@@ -68,7 +68,7 @@ impl SenderId {
 
     /// Returns a `Range` for [`TransactionId`] starting with nonce `0` and ending with nonce
     /// `u64::MAX`
-    pub fn range(self) -> std::ops::RangeInclusive<TransactionId> {
+    pub const fn range(self) -> std::ops::RangeInclusive<TransactionId> {
         TransactionId::new(self, 0)..=TransactionId::new(self, u64::MAX)
     }
 
