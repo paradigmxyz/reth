@@ -29,6 +29,14 @@ Returns an EIP-2718 binary-encoded transaction.
 | ------ | ------------------------------------------------------------ |
 | RPC    | `{"method": "debug_getRawTransaction", "params": [tx_hash]}` |
 
+## `debug_getRawTransactions`
+
+Returns an array of EIP-2718 binary-encoded transactions for the given block.
+
+| Client | Method invocation                                              |
+| ------ | -------------------------------------------------------------- |
+| RPC    | `{"method": "debug_getRawTransactions", "params": [block]}` |
+
 ## `debug_getRawReceipts`
 
 Returns an array of EIP-2718 binary-encoded receipts.
@@ -102,3 +110,31 @@ The block can optionally be specified either by hash or by number as the second 
 | Client | Method invocation                                                     |
 | ------ | --------------------------------------------------------------------- |
 | RPC    | `{"method": "debug_traceCall", "params": [call, block_number, opts]}` |
+
+## `debug_traceCallMany`
+
+The `debug_traceCallMany` method lets you run multiple `eth_call`s within the context of the given block execution using the final state of the parent block as the base, followed by n transactions.
+
+The first argument is a list of bundles. Each bundle can overwrite the block headers, which will affect all transactions in that bundle. The trace can be configured similar to `debug_traceTransaction`.
+
+This method returns nested lists of traces, where the outer list length is the number of bundles and the inner list length is the number of transactions in each bundle.
+
+| Client | Method invocation                                                                  |
+| ------ | ---------------------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_traceCallMany", "params": [bundles, state_context, opts]}` |
+
+## `debug_executionWitness`
+
+Allows for re-execution of a block with the purpose of generating an execution witness. The witness comprises a map of all hashed trie nodes to their preimages that were required during the execution of the block, including during state root recomputation.
+
+| Client | Method invocation                                            |
+| ------ | ------------------------------------------------------------ |
+| RPC    | `{"method": "debug_executionWitness", "params": [block]}` |
+
+## `debug_executionWitnessByBlockHash`
+
+Similar to [`debug_executionWitness`](#debug_executionwitness), but accepts a block hash instead of a block number or tag.
+
+| Client | Method invocation                                                      |
+| ------ | ---------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_executionWitnessByBlockHash", "params": [hash]}` |
