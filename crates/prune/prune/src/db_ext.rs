@@ -2,13 +2,13 @@ use crate::PruneLimiter;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, RangeWalker},
     table::{DupSort, Table, TableRow},
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
 use std::{fmt::Debug, ops::RangeBounds};
 use tracing::debug;
 
-pub(crate) trait DbTxPruneExt: DbTxMut {
+pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
     /// Prune the table for the specified pre-sorted key iterator.
     ///
     /// Returns number of rows pruned.
@@ -133,10 +133,9 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
         limiter: &mut PruneLimiter,
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> Result<(usize, bool), DatabaseError> {
+        let starting_entries = self.entries::<T>()?;
         let mut cursor = self.cursor_dup_write::<T>()?;
         let mut walker = cursor.walk_range(keys)?;
-
-        let mut deleted_entries = 0;
 
         let done = loop {
             if limiter.is_limit_reached() {
@@ -156,7 +155,6 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
 
             walker.delete_current_duplicates()?;
             limiter.increment_deleted_entries_count();
-            deleted_entries += 1;
             delete_callback(row);
         };
 
@@ -167,11 +165,13 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
             "done walking",
         );
 
-        Ok((deleted_entries, done))
+        let ending_entries = self.entries::<T>()?;
+
+        Ok((starting_entries - ending_entries, done))
     }
 }
 
-impl<Tx> DbTxPruneExt for Tx where Tx: DbTxMut {}
+impl<Tx> DbTxPruneExt for Tx where Tx: DbTxMut + DbTx {}
 
 #[cfg(test)]
 mod tests {
