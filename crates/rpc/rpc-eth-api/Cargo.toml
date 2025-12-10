@@ -68,4 +68,19 @@ op = [
     "reth-rpc-convert/op",
     "alloy-evm/op",
 ]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-chainspec/std",
+	"reth-errors/std",
+	"reth-evm/std",
+	"reth-network-api/std",
+	"reth-node-api/std",
+	"reth-primitives-traits/std",
+	"reth-revm/std",
+	"reth-rpc-convert/std",
+	"reth-rpc-eth-types/std",
+	"reth-storage-api/std",
+	"reth-transaction-pool/std",
+	"reth-trie-common/std",
+	"reth-rpc-server-types/std"
+]

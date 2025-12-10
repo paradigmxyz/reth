@@ -33,4 +33,6 @@ serde = [
     "alloy-eip2124/serde",
 ]
 test-utils = []
-std = []
+std = [
+	"reth-network-peers/std"
+]

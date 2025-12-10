@@ -136,7 +136,25 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-consensus/std",
+	"reth-discv4/std",
+	"reth-discv5/std",
+	"reth-dns-discovery/std",
+	"reth-ecies/std",
+	"reth-eth-wire/std",
+	"reth-ethereum-forks/std",
+	"reth-ethereum-primitives/std",
+	"reth-network/std",
+	"reth-network-api/std",
+	"reth-network-peers/std",
+	"reth-network-types/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-storage-api/std",
+	"reth-transaction-pool/std"
+]
 
 [[bench]]
 name = "broadcast"

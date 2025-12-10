@@ -37,4 +37,15 @@ eyre.workspace = true
 tracing.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-errors/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-node-api/std",
+	"reth-primitives-traits/std",
+	"reth-ress-protocol/std",
+	"reth-revm/std",
+	"reth-storage-api/std",
+	"reth-trie/std"
+]

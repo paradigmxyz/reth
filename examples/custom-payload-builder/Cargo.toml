@@ -18,4 +18,8 @@ futures-util.workspace = true
 eyre.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-basic-payload-builder/std",
+	"reth-ethereum-payload-builder/std",
+	"reth-payload-builder/std"
+]

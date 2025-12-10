@@ -81,4 +81,22 @@ serde = [
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
 ]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-chainspec/std",
+	"reth-config/std",
+	"reth-db-common/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-evm-ethereum/std",
+	"reth-exex-types/std",
+	"reth-node-api/std",
+	"reth-node-core/std",
+	"reth-payload-builder/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-prune-types/std",
+	"reth-revm/std",
+	"reth-stages-api/std",
+	"reth-testing-utils/std"
+]

@@ -46,4 +46,8 @@ secp256k1 = { workspace = true, features = ["std", "rand"] }
 rand_08.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-ethereum-forks/std",
+	"reth-network-peers/std"
+]

@@ -44,4 +44,6 @@ cipher = { workspace = true, features = ["block-padding"] }
 tokio = { workspace = true, features = ["net", "rt", "macros"] }
 
 [features]
-std = []
+std = [
+	"reth-network-peers/std"
+]

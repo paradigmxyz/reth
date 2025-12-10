@@ -22,4 +22,8 @@ thiserror.workspace = true
 serde.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-basic-payload-builder/std",
+	"reth-ethereum-payload-builder/std",
+	"reth-payload-builder/std"
+]

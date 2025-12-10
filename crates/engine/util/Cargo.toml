@@ -45,4 +45,13 @@ itertools.workspace = true
 tracing.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-engine-primitives/std",
+	"reth-engine-tree/std",
+	"reth-errors/std",
+	"reth-evm/std",
+	"reth-primitives-traits/std",
+	"reth-revm/std",
+	"reth-storage-api/std"
+]

@@ -18,3 +18,8 @@ reth-transaction-pool.workspace = true
 # alloy
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+
+[features]
+std = [
+	"reth-transaction-pool/std"
+]

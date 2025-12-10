@@ -91,4 +91,26 @@ client = [
     "jsonrpsee/async-client",
     "reth-rpc-eth-api/client",
 ]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-chainspec/std",
+	"reth-evm/std",
+	"reth-node-api/std",
+	"reth-node-builder/std",
+	"reth-optimism-chainspec/std",
+	"reth-optimism-evm/std",
+	"reth-optimism-flashblocks/std",
+	"reth-optimism-forks/std",
+	"reth-optimism-payload-builder/std",
+	"reth-optimism-primitives/std",
+	"reth-optimism-txpool/std",
+	"reth-primitives-traits/std",
+	"reth-rpc/std",
+	"reth-rpc-api/std",
+	"reth-rpc-engine-api/std",
+	"reth-rpc-eth-api/std",
+	"reth-rpc-eth-types/std",
+	"reth-storage-api/std",
+	"reth-transaction-pool/std",
+	"reth-rpc-server-types/std"
+]

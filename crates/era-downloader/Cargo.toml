@@ -42,3 +42,8 @@ futures.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+std = [
+	"reth-era/std"
+]

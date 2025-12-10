@@ -105,4 +105,32 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-db/std",
+	"reth-e2e-test-utils/std",
+	"reth-engine-local/std",
+	"reth-engine-primitives/std",
+	"reth-ethereum-consensus/std",
+	"reth-ethereum-engine-primitives/std",
+	"reth-ethereum-payload-builder/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-evm-ethereum/std",
+	"reth-exex/std",
+	"reth-network/std",
+	"reth-node-api/std",
+	"reth-node-builder/std",
+	"reth-node-core/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-revm/std",
+	"reth-rpc/std",
+	"reth-rpc-api/std",
+	"reth-rpc-builder/std",
+	"reth-rpc-eth-api/std",
+	"reth-rpc-eth-types/std",
+	"reth-testing-utils/std",
+	"reth-transaction-pool/std",
+	"reth-rpc-server-types/std"
+]

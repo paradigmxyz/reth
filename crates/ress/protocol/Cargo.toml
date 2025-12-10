@@ -63,4 +63,12 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "alloy-consensus/arbitrary",
 ]
-std = []
+std = [
+	"reth-eth-wire/std",
+	"reth-ethereum-primitives/std",
+	"reth-network/std",
+	"reth-network-api/std",
+	"reth-provider/std",
+	"reth-ress-protocol/std",
+	"reth-storage-errors/std"
+]

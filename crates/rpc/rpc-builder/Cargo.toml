@@ -76,4 +76,28 @@ serde_json.workspace = true
 clap = { workspace = true, features = ["derive"] }
 
 [features]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-chainspec/std",
+	"reth-consensus/std",
+	"reth-engine-primitives/std",
+	"reth-ethereum-engine-primitives/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-evm-ethereum/std",
+	"reth-network-api/std",
+	"reth-network-peers/std",
+	"reth-node-core/std",
+	"reth-node-ethereum/std",
+	"reth-payload-builder/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-rpc/std",
+	"reth-rpc-api/std",
+	"reth-rpc-engine-api/std",
+	"reth-rpc-eth-api/std",
+	"reth-rpc-eth-types/std",
+	"reth-storage-api/std",
+	"reth-transaction-pool/std",
+	"reth-rpc-server-types/std"
+]

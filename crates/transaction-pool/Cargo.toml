@@ -119,7 +119,15 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "revm-primitives/arbitrary",
 ]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-chainspec/std",
+	"reth-ethereum-primitives/std",
+	"reth-execution-types/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-storage-api/std"
+]
 
 [[bench]]
 name = "truncate"

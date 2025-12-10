@@ -45,4 +45,9 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "tokio/rt",
 ]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-ethereum-engine-primitives/std",
+	"reth-payload-builder-primitives/std",
+	"reth-primitives-traits/std"
+]

@@ -39,7 +39,13 @@ serde = [
     "alloy-primitives/serde",
     "url/serde",
 ]
-std = []
+std = [
+	"reth-network-peers/std",
+	"reth-network-types/std",
+	"reth-prune-types/std",
+	"reth-stages-types/std",
+	"reth-static-file-types/std"
+]
 
 [dev-dependencies]
 tempfile.workspace = true

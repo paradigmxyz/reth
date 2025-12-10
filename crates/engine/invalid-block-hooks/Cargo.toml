@@ -51,4 +51,16 @@ reth-testing-utils.workspace = true
 tempfile.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-engine-primitives/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-evm-ethereum/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-revm/std",
+	"reth-rpc-api/std",
+	"reth-testing-utils/std",
+	"reth-trie/std"
+]

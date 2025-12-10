@@ -45,4 +45,10 @@ client = [
     "jsonrpsee/async-client",
     "reth-rpc-eth-api/client",
 ]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-engine-primitives/std",
+	"reth-network-peers/std",
+	"reth-rpc-eth-api/std",
+	"reth-trie-common/std"
+]

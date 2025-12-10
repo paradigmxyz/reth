@@ -33,4 +33,16 @@ alloy-rpc-types-engine.workspace = true
 eyre.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-basic-payload-builder/std",
+	"reth-consensus/std",
+	"reth-db-api/std",
+	"reth-engine-primitives/std",
+	"reth-evm/std",
+	"reth-network-api/std",
+	"reth-node-core/std",
+	"reth-payload-builder/std",
+	"reth-payload-builder-primitives/std",
+	"reth-provider/std",
+	"reth-transaction-pool/std"
+]

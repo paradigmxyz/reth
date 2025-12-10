@@ -19,4 +19,6 @@ eyre.workspace = true
 serde_json.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-e2e-test-utils/std"
+]

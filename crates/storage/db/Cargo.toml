@@ -97,7 +97,13 @@ op = [
     "reth-primitives-traits/op",
 ]
 disable-lock = []
-std = []
+std = [
+	"reth-db-api/std",
+	"reth-primitives-traits/std",
+	"reth-prune-types/std",
+	"reth-static-file-types/std",
+	"reth-storage-errors/std"
+]
 
 [[bench]]
 name = "hash_keys"

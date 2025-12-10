@@ -60,4 +60,16 @@ alloy-consensus.workspace = true
 op-alloy-consensus.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-engine-primitives/std",
+	"reth-errors/std",
+	"reth-evm/std",
+	"reth-execution-types/std",
+	"reth-optimism-payload-builder/std",
+	"reth-optimism-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-revm/std",
+	"reth-rpc-eth-types/std",
+	"reth-storage-api/std"
+]

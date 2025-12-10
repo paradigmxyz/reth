@@ -45,4 +45,23 @@ tempfile.workspace = true
 thiserror.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-config/std",
+	"reth-consensus/std",
+	"reth-db/std",
+	"reth-db-common/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm-ethereum/std",
+	"reth-execution-types/std",
+	"reth-exex/std",
+	"reth-network/std",
+	"reth-node-api/std",
+	"reth-node-builder/std",
+	"reth-node-core/std",
+	"reth-node-ethereum/std",
+	"reth-payload-builder/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-transaction-pool/std"
+]

@@ -37,4 +37,7 @@ serde_json.workspace = true
 ringbuffer.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-node-api/std",
+	"reth-primitives-traits/std"
+]

@@ -17,4 +17,6 @@ reth-op = { workspace = true, features = ["full", "cli"] }
 tokio = { workspace = true, features = ["sync"] }
 
 [features]
-std = []
+std = [
+	"reth-op/std"
+]

@@ -94,4 +94,7 @@ min-trace-logs = [
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-node-core/std"
+]

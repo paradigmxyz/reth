@@ -116,7 +116,37 @@ test-utils = [
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
-std = []
+std = [
+	"reth-chainspec?/std",
+	"reth-config/std",
+	"reth-consensus/std",
+	"reth-db/std",
+	"reth-db-api/std",
+	"reth-downloaders/std",
+	"reth-era/std",
+	"reth-era-utils/std",
+	"reth-ethereum-consensus/std",
+	"reth-ethereum-primitives?/std",
+	"reth-evm/std",
+	"reth-evm-ethereum/std",
+	"reth-execution-types/std",
+	"reth-exex/std",
+	"reth-network-peers/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-prune/std",
+	"reth-prune-types/std",
+	"reth-revm/std",
+	"reth-stages-api/std",
+	"reth-static-file/std",
+	"reth-static-file-types/std",
+	"reth-storage-errors/std",
+	"reth-testing-utils?/std",
+	"reth-trie/std",
+	"reth-trie-db/std",
+	"reth-era-downloader/std",
+	"reth-etl/std"
+]
 
 [[bench]]
 name = "criterion"

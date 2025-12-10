@@ -32,13 +32,14 @@ alloy-consensus.workspace = true
 [features]
 default = ["std"]
 std = [
-    "reth-primitives-traits/std",
-    "alloy-primitives/std",
-    "revm/std",
-    "alloy-consensus/std",
-    "reth-ethereum-forks/std",
-    "reth-storage-api/std",
-    "reth-storage-errors/std",
+	"reth-primitives-traits/std",
+	"alloy-primitives/std",
+	"revm/std",
+	"alloy-consensus/std",
+	"reth-ethereum-forks/std",
+	"reth-storage-api/std",
+	"reth-storage-errors/std",
+	"reth-trie?/std"
 ]
 witness = ["dep:reth-trie"]
 test-utils = [

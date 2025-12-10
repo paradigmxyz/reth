@@ -54,4 +54,17 @@ serde = [
     "reth-network/serde",
     "reth-network-api/serde",
 ]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-discv4/std",
+	"reth-engine-primitives/std",
+	"reth-eth-wire/std",
+	"reth-ethereum-forks/std",
+	"reth-network/std",
+	"reth-network-api/std",
+	"reth-network-peers/std",
+	"reth-node-ethereum/std",
+	"reth-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std"
+]

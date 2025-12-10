@@ -38,4 +38,8 @@ reth-rpc-eth-api.workspace = true
 jsonrpsee-http-client.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-ethereum-primitives/std",
+	"reth-rpc-api/std",
+	"reth-rpc-eth-api/std"
+]

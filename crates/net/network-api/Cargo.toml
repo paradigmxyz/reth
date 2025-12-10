@@ -49,4 +49,8 @@ serde = [
     "alloy-consensus/serde",
     "alloy-rpc-types-eth/serde",
 ]
-std = []
+std = [
+	"reth-ethereum-forks/std",
+	"reth-network-peers/std",
+	"reth-network-types/std"
+]

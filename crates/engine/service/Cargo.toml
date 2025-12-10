@@ -45,4 +45,21 @@ tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-consensus/std",
+	"reth-engine-primitives/std",
+	"reth-engine-tree/std",
+	"reth-ethereum-consensus/std",
+	"reth-ethereum-engine-primitives/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-evm-ethereum/std",
+	"reth-exex-types/std",
+	"reth-node-ethereum/std",
+	"reth-payload-builder/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-prune/std",
+	"reth-stages-api/std"
+]

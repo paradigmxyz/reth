@@ -49,4 +49,17 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 workspace = true
 
 [features]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-config/std",
+	"reth-db/std",
+	"reth-db-api/std",
+	"reth-execution-errors/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-stages-types/std",
+	"reth-static-file-types/std",
+	"reth-trie/std",
+	"reth-trie-db/std",
+	"reth-etl/std"
+]

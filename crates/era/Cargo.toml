@@ -39,4 +39,7 @@ test-case.workspace = true
 workspace = true
 
 [features]
-std = []
+std = [
+	"reth-ethereum-primitives/std",
+	"reth-era-downloader/std"
+]

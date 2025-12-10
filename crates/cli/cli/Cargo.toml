@@ -21,3 +21,8 @@ clap.workspace = true
 shellexpand.workspace = true
 eyre.workspace = true
 serde_json.workspace = true
+
+[features]
+std = [
+	"reth-db/std"
+]

@@ -40,4 +40,11 @@ metrics.workspace = true
 tracing.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-payload-builder/std",
+	"reth-payload-builder-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-revm/std",
+	"reth-storage-api/std"
+]

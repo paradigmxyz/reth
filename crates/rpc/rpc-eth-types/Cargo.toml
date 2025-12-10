@@ -68,4 +68,18 @@ serde_json.workspace = true
 
 [features]
 js-tracer = ["revm-inspectors/js-tracer"]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-chainspec/std",
+	"reth-errors/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-execution-types/std",
+	"reth-primitives-traits/std",
+	"reth-revm/std",
+	"reth-rpc-convert/std",
+	"reth-storage-api/std",
+	"reth-transaction-pool/std",
+	"reth-trie/std",
+	"reth-rpc-server-types/std"
+]

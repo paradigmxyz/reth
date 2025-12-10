@@ -38,4 +38,14 @@ assert_matches.workspace = true
 tempfile.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-db-api/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-prune-types/std",
+	"reth-stages/std",
+	"reth-stages-types/std",
+	"reth-static-file-types/std",
+	"reth-storage-errors/std",
+	"reth-testing-utils/std"
+]

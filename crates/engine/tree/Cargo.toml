@@ -138,7 +138,37 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-chainspec?/std",
+	"reth-consensus/std",
+	"reth-db/std",
+	"reth-db-common/std",
+	"reth-e2e-test-utils/std",
+	"reth-engine-primitives/std",
+	"reth-errors/std",
+	"reth-ethereum-consensus/std",
+	"reth-ethereum-engine-primitives/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-evm-ethereum/std",
+	"reth-execution-types/std",
+	"reth-exex-types/std",
+	"reth-node-ethereum/std",
+	"reth-payload-builder/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-prune/std",
+	"reth-prune-types?/std",
+	"reth-revm/std",
+	"reth-stages?/std",
+	"reth-stages-api/std",
+	"reth-static-file?/std",
+	"reth-testing-utils/std",
+	"reth-trie/std",
+	"reth-trie-parallel/std",
+	"reth-trie-sparse/std"
+]
 
 [[test]]
 name = "e2e_testsuite"

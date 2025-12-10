@@ -84,7 +84,16 @@ test-utils = [
     "reth-trie/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-errors/std",
+	"reth-ethereum-primitives/std",
+	"reth-execution-types/std",
+	"reth-primitives-traits/std",
+	"reth-storage-api/std",
+	"reth-testing-utils/std",
+	"reth-trie/std"
+]
 
 [[bench]]
 name = "canonical_hashes_range"

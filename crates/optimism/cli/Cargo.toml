@@ -106,4 +106,29 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-optimism-chainspec/serde",
 ]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-cli-commands/std",
+	"reth-consensus/std",
+	"reth-db/std",
+	"reth-db-api/std",
+	"reth-db-common/std",
+	"reth-downloaders/std",
+	"reth-execution-types/std",
+	"reth-node-builder/std",
+	"reth-node-core/std",
+	"reth-node-events/std",
+	"reth-optimism-chainspec/std",
+	"reth-optimism-consensus/std",
+	"reth-optimism-evm/std",
+	"reth-optimism-node/std",
+	"reth-optimism-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-prune/std",
+	"reth-stages/std",
+	"reth-static-file/std",
+	"reth-static-file-types/std",
+	"reth-cli/std",
+	"reth-rpc-server-types/std"
+]

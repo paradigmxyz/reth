@@ -88,7 +88,29 @@ min-warn-logs = ["tracing/release_max_level_warn"]
 min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-config/std",
+	"reth-consensus/std",
+	"reth-db/std",
+	"reth-discv4/std",
+	"reth-discv5/std",
+	"reth-engine-local/std",
+	"reth-engine-primitives/std",
+	"reth-ethereum-forks/std",
+	"reth-network/std",
+	"reth-network-peers/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-prune-types/std",
+	"reth-rpc-convert/std",
+	"reth-rpc-eth-types/std",
+	"reth-stages-types/std",
+	"reth-storage-api/std",
+	"reth-storage-errors/std",
+	"reth-transaction-pool/std",
+	"reth-rpc-server-types/std"
+]
 
 [build-dependencies]
 vergen = { workspace = true, features = ["build", "cargo", "emit_and_set"] }

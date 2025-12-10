@@ -14,7 +14,23 @@ workspace = true
 [features]
 ef-tests = []
 asm-keccak = ["alloy-primitives/asm-keccak", "revm/asm-keccak"]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-consensus/std",
+	"reth-db/std",
+	"reth-db-api/std",
+	"reth-db-common/std",
+	"reth-ethereum-consensus/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-evm-ethereum/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-revm/std",
+	"reth-stateless/std",
+	"reth-trie/std",
+	"reth-trie-db/std"
+]
 
 [dependencies]
 reth-chainspec.workspace = true

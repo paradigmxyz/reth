@@ -17,3 +17,8 @@ rayon.workspace = true
 
 [dev-dependencies]
 alloy-primitives.workspace = true
+
+[features]
+std = [
+	"reth-db-api/std"
+]

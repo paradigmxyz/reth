@@ -58,4 +58,15 @@ reth-optimism-chainspec.workspace = true
 reth-provider = { workspace = true, features = ["test-utils"] }
 
 [features]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-chainspec/std",
+	"reth-optimism-chainspec/std",
+	"reth-optimism-evm/std",
+	"reth-optimism-forks/std",
+	"reth-optimism-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-storage-api/std",
+	"reth-transaction-pool/std"
+]

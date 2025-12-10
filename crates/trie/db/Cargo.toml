@@ -68,4 +68,13 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-trie/test-utils",
 ]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-db/std",
+	"reth-db-api/std",
+	"reth-execution-errors/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-trie/std",
+	"reth-trie-common/std"
+]

@@ -54,4 +54,20 @@ serde.workspace = true
 either.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-basic-payload-builder/std",
+	"reth-chainspec/std",
+	"reth-evm/std",
+	"reth-execution-types/std",
+	"reth-optimism-evm/std",
+	"reth-optimism-forks/std",
+	"reth-optimism-primitives/std",
+	"reth-optimism-txpool/std",
+	"reth-payload-builder/std",
+	"reth-payload-builder-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-revm/std",
+	"reth-storage-api/std",
+	"reth-transaction-pool/std",
+	"reth-payload-util/std"
+]

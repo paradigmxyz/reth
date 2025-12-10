@@ -27,3 +27,9 @@ jsonrpsee-types.workspace = true
 # misc
 strum = { workspace = true, features = ["derive"] }
 serde = { workspace = true, features = ["derive"] }
+
+[features]
+std = [
+	"reth-errors/std",
+	"reth-network-api/std"
+]

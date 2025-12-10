@@ -27,4 +27,7 @@ rand_08.workspace = true
 alloy-rlp.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-ethereum-primitives/std",
+	"reth-primitives-traits/std"
+]

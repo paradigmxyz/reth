@@ -104,4 +104,22 @@ test-utils = [
     "revm-state",
     "tokio",
 ]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-chainspec/std",
+	"reth-db/std",
+	"reth-db-api/std",
+	"reth-errors/std",
+	"reth-ethereum-engine-primitives?/std",
+	"reth-ethereum-primitives/std",
+	"reth-execution-types/std",
+	"reth-primitives-traits/std",
+	"reth-prune-types/std",
+	"reth-stages-types/std",
+	"reth-static-file-types/std",
+	"reth-storage-api/std",
+	"reth-storage-errors/std",
+	"reth-testing-utils/std",
+	"reth-trie/std",
+	"reth-trie-db/std"
+]

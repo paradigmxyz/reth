@@ -53,4 +53,14 @@ tempfile.workspace = true
 workspace = true
 
 [features]
-std = []
+std = [
+	"reth-db-api/std",
+	"reth-db-common/std",
+	"reth-era/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-stages-types/std",
+	"reth-storage-api/std",
+	"reth-era-downloader/std",
+	"reth-etl/std"
+]

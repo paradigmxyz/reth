@@ -15,4 +15,9 @@ reth-optimism-chainspec.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 
 [features]
-std = []
+std = [
+	"reth-db/std",
+	"reth-node-builder/std",
+	"reth-optimism-chainspec/std",
+	"reth-optimism-node/std"
+]

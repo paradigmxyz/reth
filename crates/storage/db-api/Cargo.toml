@@ -93,4 +93,13 @@ op = [
     "reth-primitives-traits/op",
 ]
 bench = []
-std = []
+std = [
+	"reth-db-models/std",
+	"reth-ethereum-primitives/std",
+	"reth-optimism-primitives?/std",
+	"reth-primitives-traits/std",
+	"reth-prune-types/std",
+	"reth-stages-types/std",
+	"reth-storage-errors/std",
+	"reth-trie-common/std"
+]

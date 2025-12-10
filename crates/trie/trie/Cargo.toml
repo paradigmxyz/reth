@@ -94,7 +94,15 @@ test-utils = [
     "reth-trie-sparse/test-utils",
     "reth-stages-types/test-utils",
 ]
-std = []
+std = [
+	"reth-ethereum-primitives/std",
+	"reth-execution-errors/std",
+	"reth-primitives-traits/std",
+	"reth-stages-types/std",
+	"reth-storage-errors/std",
+	"reth-trie-common/std",
+	"reth-trie-sparse/std"
+]
 
 [[bench]]
 name = "hash_post_state"

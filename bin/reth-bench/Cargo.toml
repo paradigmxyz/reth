@@ -104,7 +104,11 @@ min-trace-logs = [
 
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
-std = []
+std = [
+	"reth-node-api/std",
+	"reth-node-core/std",
+	"reth-primitives-traits/std"
+]
 
 [[bin]]
 name = "reth-bench"

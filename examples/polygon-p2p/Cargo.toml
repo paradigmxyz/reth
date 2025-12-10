@@ -16,4 +16,6 @@ reth-discv4 = { workspace = true, features = ["test-utils"] }
 alloy-genesis.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-discv4/std"
+]

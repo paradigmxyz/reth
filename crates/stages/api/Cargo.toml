@@ -62,4 +62,17 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-stages-types/test-utils",
 ]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-consensus/std",
+	"reth-db/std",
+	"reth-db-api/std",
+	"reth-errors/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-prune/std",
+	"reth-stages-types/std",
+	"reth-static-file/std",
+	"reth-static-file-types/std",
+	"reth-testing-utils/std"
+]

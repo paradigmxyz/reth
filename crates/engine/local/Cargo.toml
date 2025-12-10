@@ -46,4 +46,13 @@ op = [
     "reth-payload-primitives/op",
     "reth-primitives-traits/op",
 ]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-engine-primitives/std",
+	"reth-ethereum-engine-primitives/std",
+	"reth-optimism-chainspec?/std",
+	"reth-payload-builder/std",
+	"reth-primitives-traits/std",
+	"reth-storage-api/std",
+	"reth-transaction-pool/std"
+]

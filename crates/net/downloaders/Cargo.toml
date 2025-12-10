@@ -84,4 +84,14 @@ test-utils = [
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
 ]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-config/std",
+	"reth-consensus/std",
+	"reth-ethereum-primitives?/std",
+	"reth-network-peers/std",
+	"reth-primitives-traits/std",
+	"reth-provider?/std",
+	"reth-storage-api/std",
+	"reth-testing-utils?/std"
+]

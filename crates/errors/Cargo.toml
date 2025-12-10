@@ -19,4 +19,8 @@ reth-storage-errors.workspace = true
 thiserror.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-consensus/std",
+	"reth-execution-errors/std",
+	"reth-storage-errors/std"
+]

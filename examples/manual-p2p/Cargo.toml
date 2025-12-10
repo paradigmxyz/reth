@@ -21,4 +21,8 @@ tokio.workspace = true
 eyre.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-discv4/std",
+	"reth-ecies/std",
+	"reth-network-peers/std"
+]

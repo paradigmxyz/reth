@@ -40,4 +40,12 @@ humantime.workspace = true
 derive_more.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-engine-primitives/std",
+	"reth-network-api/std",
+	"reth-primitives-traits/std",
+	"reth-prune-types/std",
+	"reth-stages/std",
+	"reth-static-file-types/std",
+	"reth-storage-api/std"
+]

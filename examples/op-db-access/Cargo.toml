@@ -11,4 +11,6 @@ reth-op = { workspace = true, features = ["node"] }
 eyre.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-op/std"
+]

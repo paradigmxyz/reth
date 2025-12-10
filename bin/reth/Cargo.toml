@@ -162,7 +162,35 @@ min-trace-logs = [
     "reth-ethereum-cli/min-trace-logs",
     "reth-node-core/min-trace-logs",
 ]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-consensus/std",
+	"reth-consensus-common/std",
+	"reth-db/std",
+	"reth-ethereum-cli/std",
+	"reth-ethereum-payload-builder/std",
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-network/std",
+	"reth-network-api/std",
+	"reth-node-api/std",
+	"reth-node-builder/std",
+	"reth-node-core/std",
+	"reth-node-ethereum/std",
+	"reth-payload-builder/std",
+	"reth-primitives/std",
+	"reth-provider/std",
+	"reth-ress-protocol/std",
+	"reth-ress-provider/std",
+	"reth-revm/std",
+	"reth-rpc/std",
+	"reth-rpc-api/std",
+	"reth-rpc-builder/std",
+	"reth-rpc-convert/std",
+	"reth-rpc-eth-types/std",
+	"reth-transaction-pool/std",
+	"reth-rpc-server-types/std"
+]
 
 [[bin]]
 name = "reth"

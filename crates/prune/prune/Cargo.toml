@@ -52,4 +52,17 @@ reth-tracing.workspace = true
 assert_matches.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-config/std",
+	"reth-db/std",
+	"reth-db-api/std",
+	"reth-errors/std",
+	"reth-exex-types/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-prune-types/std",
+	"reth-stages/std",
+	"reth-stages-types/std",
+	"reth-static-file-types/std",
+	"reth-testing-utils/std"
+]

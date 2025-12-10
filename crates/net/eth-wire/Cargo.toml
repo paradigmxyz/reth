@@ -89,7 +89,12 @@ serde = [
     "alloy-consensus/serde",
     "rand_08/serde",
 ]
-std = []
+std = [
+	"reth-ecies/std",
+	"reth-ethereum-forks/std",
+	"reth-network-peers/std",
+	"reth-primitives-traits/std"
+]
 
 [[test]]
 name = "fuzz_roundtrip"

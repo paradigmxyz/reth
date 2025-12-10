@@ -56,4 +56,18 @@ reth-node-ethereum.workspace = true
 assert_matches.workspace = true
 
 [features]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-engine-primitives/std",
+	"reth-ethereum-engine-primitives/std",
+	"reth-ethereum-primitives/std",
+	"reth-node-ethereum/std",
+	"reth-payload-builder/std",
+	"reth-payload-builder-primitives/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-rpc-api/std",
+	"reth-storage-api/std",
+	"reth-testing-utils/std",
+	"reth-transaction-pool/std"
+]

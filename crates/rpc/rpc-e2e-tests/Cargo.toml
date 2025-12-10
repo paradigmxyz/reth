@@ -43,4 +43,10 @@ name = "e2e_testsuite"
 path = "tests/e2e-testsuite/main.rs"
 
 [features]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-e2e-test-utils/std",
+	"reth-node-api/std",
+	"reth-node-ethereum/std",
+	"reth-rpc-api/std"
+]

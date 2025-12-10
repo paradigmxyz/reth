@@ -34,4 +34,10 @@ chrono.workspace = true
 thiserror = { workspace = true, features = ["std"] }
 
 [features]
-std = []
+std = [
+	"reth-chain-state/std",
+	"reth-network-api/std",
+	"reth-primitives-traits/std",
+	"reth-storage-api/std",
+	"reth-transaction-pool/std"
+]

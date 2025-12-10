@@ -57,4 +57,10 @@ op = [
     "reth-primitives-traits/op",
     "alloy-evm/op",
 ]
-std = []
+std = [
+	"reth-ethereum-primitives/std",
+	"reth-evm/std",
+	"reth-optimism-primitives?/std",
+	"reth-primitives-traits/std",
+	"reth-storage-api?/std"
+]

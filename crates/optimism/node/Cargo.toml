@@ -120,7 +120,39 @@ test-utils = [
     "reth-trie-common/test-utils",
 ]
 reth-codec = ["reth-optimism-primitives/reth-codec"]
-std = []
+std = [
+	"reth-chainspec/std",
+	"reth-consensus/std",
+	"reth-db/std",
+	"reth-e2e-test-utils?/std",
+	"reth-engine-local/std",
+	"reth-evm/std",
+	"reth-network/std",
+	"reth-node-api/std",
+	"reth-node-builder/std",
+	"reth-node-core/std",
+	"reth-optimism-chainspec/std",
+	"reth-optimism-consensus/std",
+	"reth-optimism-evm/std",
+	"reth-optimism-forks/std",
+	"reth-optimism-node/std",
+	"reth-optimism-payload-builder/std",
+	"reth-optimism-primitives/std",
+	"reth-optimism-rpc/std",
+	"reth-optimism-txpool/std",
+	"reth-payload-builder/std",
+	"reth-primitives-traits/std",
+	"reth-provider/std",
+	"reth-revm/std",
+	"reth-rpc/std",
+	"reth-rpc-api/std",
+	"reth-rpc-engine-api/std",
+	"reth-rpc-eth-types/std",
+	"reth-transaction-pool/std",
+	"reth-trie-common/std",
+	"reth-payload-util/std",
+	"reth-rpc-server-types/std"
+]
 
 [[test]]
 name = "e2e_testsuite"
