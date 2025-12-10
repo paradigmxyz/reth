@@ -12,6 +12,7 @@ use std::{
 };
 
 use crate::{
+    eth_requests::SOFT_RESPONSE_LIMIT,
     message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
     session::{
         conn::EthRlpxConnection,
@@ -21,6 +22,7 @@ use crate::{
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::Sealable;
+use alloy_rlp::Encodable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
@@ -561,8 +563,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// response produced by the `EthRequestHandler`.
     ///
     /// This applies the `firstBlockReceiptIndex` offset to the first block's
-    /// receipts and always sets `lastBlockIncomplete = false` for now (we
-    /// currently serve complete lists in a single message).
+    /// receipts and enforces the soft response size limit (`SOFT_RESPONSE_LIMIT`)
+    /// by potentially truncating the last block's receipts and setting
+    /// `lastBlockIncomplete = true` as defined in EIP-7975.
     fn build_eth70_receipts_response(
         &self,
         id: u64,
@@ -571,6 +574,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     ) -> RequestResult<EthMessage<N>> {
         match resp {
             PeerResponseResult::Receipts69(Ok(mut receipts)) => {
+                // Apply `firstBlockReceiptIndex` to the first block's receipts.
                 if let Some(first_block) = receipts.first_mut() {
                     let idx = first_block_receipt_index as usize;
                     if idx >= first_block.len() {
@@ -580,10 +584,46 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     }
                 }
 
+                // Truncate the receipts to respect the soft response limit. We
+                // include full blocks as long as they fit into the remaining
+                // budget; once a full block would exceed the limit we include
+                // as many receipts from that block as possible and mark the
+                // last block as incomplete.
+                let mut truncated_receipts = Vec::with_capacity(receipts.len());
+                let mut total_bytes = 0usize;
+                let mut last_block_incomplete = false;
+
+                for block_receipts in receipts {
+                    // RLP size of the full block's receipts list.
+                    let block_size = block_receipts.length();
+
+                    if total_bytes + block_size <= SOFT_RESPONSE_LIMIT {
+                        total_bytes += block_size;
+                        truncated_receipts.push(block_receipts);
+                        continue;
+                    }
+
+                    // Full block does not fit: include as many receipts from
+                    // this block as possible within the remaining budget.
+                    let mut partial_block = Vec::new();
+                    for receipt in block_receipts {
+                        let receipt_size = receipt.length();
+                        if total_bytes + receipt_size > SOFT_RESPONSE_LIMIT {
+                            break;
+                        }
+                        total_bytes += receipt_size;
+                        partial_block.push(receipt);
+                    }
+
+                    truncated_receipts.push(partial_block);
+                    last_block_incomplete = true;
+                    break;
+                }
+
                 let message = reth_eth_wire::Receipts70 {
                     request_id: id,
-                    last_block_incomplete: false,
-                    receipts,
+                    last_block_incomplete,
+                    receipts: truncated_receipts,
                 };
                 Ok(EthMessage::Receipts70(message))
             }
