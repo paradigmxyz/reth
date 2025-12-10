@@ -219,14 +219,9 @@ where
                     }
                 }
                 if let StatusMessage::Eth70(s) = their_status_message {
-                    if !s.block_range.is_valid() {
-                        return Err(EthHandshakeError::EarliestBlockGreaterThanLatestBlock {
-                            got: s.block_range.start_block,
-                            latest: s.block_range.end_block,
-                        }
-                        .into());
-                    }
-
+                    // For eth/70 we no longer track an advertised history
+                    // range in the status message, so we only enforce that
+                    // the head hash is non-zero.
                     if s.blockhash.is_zero() {
                         return Err(EthHandshakeError::BlockhashZero.into());
                     }

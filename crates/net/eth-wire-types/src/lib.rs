@@ -15,7 +15,7 @@ mod status;
 pub use status::{Status, StatusBuilder, StatusEth69, StatusEth70, StatusMessage, UnifiedStatus};
 
 mod block_range;
-pub use block_range::{BlockRange, RequestBlockRange, SendBlockRange};
+pub use block_range::BlockRange;
 
 pub mod version;
 pub use version::{EthVersion, ProtocolVersion};

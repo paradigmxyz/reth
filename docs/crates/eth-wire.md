@@ -415,5 +415,4 @@ additional "satellite" protocols (e.g. `snap`) using negotiated `SharedCapabilit
   - Receipts omit bloom: encoded as `Receipts69` instead of `Receipts`.
 - Starting with ETH70:
   - Status is encoded as `StatusEth70` with an explicit `blockRange`.
-  - `RequestBlockRange` / `SendBlockRange` messages are added for querying the current block range.
   - Receipts continue to omit bloom; `Receipts` messages for eth/70 are decoded as the `Receipts70` variant (same on-wire format as `Receipts69`).

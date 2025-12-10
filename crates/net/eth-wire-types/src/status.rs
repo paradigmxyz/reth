@@ -1,4 +1,4 @@
-use crate::{BlockRange, EthVersion};
+use crate::EthVersion;
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{EthereumHardfork, ForkId, Head};
 use alloy_primitives::{hex, B256, U256};
@@ -29,8 +29,6 @@ pub struct UnifiedStatus {
     pub earliest_block: Option<u64>,
     /// The latest block number this node has (eth/69 only).
     pub latest_block: Option<u64>,
-    /// The block range this node can serve (eth/70).
-    pub block_range: Option<BlockRange>,
 }
 
 impl Default for UnifiedStatus {
@@ -47,7 +45,6 @@ impl Default for UnifiedStatus {
             total_difficulty: Some(U256::from(17_179_869_184u64)),
             earliest_block: Some(0),
             latest_block: Some(0),
-            block_range: None,
         }
     }
 }
@@ -71,7 +68,6 @@ impl UnifiedStatus {
             .total_difficulty(Some(head.total_difficulty))
             .earliest_block(Some(0))
             .latest_block(Some(head.number))
-            .block_range(Some(BlockRange { start_block: 0, end_block: head.number }))
             .build()
     }
 
@@ -80,19 +76,11 @@ impl UnifiedStatus {
     pub const fn set_history_range(&mut self, earliest: u64, latest: u64) {
         self.earliest_block = Some(earliest);
         self.latest_block = Some(latest);
-        self.block_range = Some(BlockRange { start_block: earliest, end_block: latest });
     }
 
     /// Sets the [`EthVersion`] for the status.
     pub const fn set_eth_version(&mut self, v: EthVersion) {
         self.version = v;
-    }
-
-    /// Sets the block range for eth/70 peers.
-    pub const fn set_block_range(&mut self, block_range: BlockRange) {
-        self.block_range = Some(block_range);
-        self.earliest_block = Some(block_range.start_block);
-        self.latest_block = Some(block_range.end_block);
     }
 
     /// Consume this `UnifiedStatus` and produce the legacy [`Status`] message used by all
@@ -122,22 +110,12 @@ impl UnifiedStatus {
     }
 
     /// Consume this `UnifiedStatus` and produce the [`StatusEth70`] message used by `eth/70`.
-    pub fn into_eth70(self) -> StatusEth70 {
-        let block_range = self
-            .block_range
-            .or_else(|| {
-                self.earliest_block
-                    .zip(self.latest_block)
-                    .map(|(start_block, end_block)| BlockRange { start_block, end_block })
-            })
-            .unwrap_or(BlockRange { start_block: 0, end_block: 0 });
-
+    pub const fn into_eth70(self) -> StatusEth70 {
         StatusEth70 {
             version: self.version,
             chain: self.chain,
             genesis: self.genesis,
             forkid: self.forkid,
-            block_range,
             blockhash: self.blockhash,
         }
     }
@@ -163,7 +141,6 @@ impl UnifiedStatus {
                 total_difficulty: Some(s.total_difficulty),
                 earliest_block: None,
                 latest_block: None,
-                block_range: None,
             },
             StatusMessage::Eth69(e) => Self {
                 version: e.version,
@@ -174,7 +151,6 @@ impl UnifiedStatus {
                 total_difficulty: None,
                 earliest_block: Some(e.earliest),
                 latest_block: Some(e.latest),
-                block_range: Some(BlockRange { start_block: e.earliest, end_block: e.latest }),
             },
             StatusMessage::Eth70(e) => Self {
                 version: e.version,
@@ -183,9 +159,10 @@ impl UnifiedStatus {
                 forkid: e.forkid,
                 blockhash: e.blockhash,
                 total_difficulty: None,
-                earliest_block: Some(e.block_range.start_block),
-                latest_block: Some(e.block_range.end_block),
-                block_range: Some(e.block_range),
+                // eth/70 status currently does not carry an earliest/latest
+                // range. We treat these fields as unknown here.
+                earliest_block: None,
+                latest_block: None,
             },
         }
     }
@@ -199,13 +176,7 @@ pub struct StatusBuilder {
 
 impl StatusBuilder {
     /// Consumes the builder and returns the constructed [`UnifiedStatus`].
-    pub const fn build(mut self) -> UnifiedStatus {
-        // If earliest/latest were set (eth/69 path), also populate block_range so eth/70 can reuse
-        // the same values without requiring a separate setter. eth/69 conversion ignores
-        // block_range, so this is safe for all versions.
-        if let (Some(start), Some(end)) = (self.status.earliest_block, self.status.latest_block) {
-            self.status.block_range = Some(BlockRange { start_block: start, end_block: end });
-        }
+    pub const fn build(self) -> UnifiedStatus {
         self.status
     }
 
@@ -254,18 +225,6 @@ impl StatusBuilder {
     /// Sets the latest known block, if known (Some for eth/69).
     pub const fn latest_block(mut self, latest: Option<u64>) -> Self {
         self.status.latest_block = latest;
-        self
-    }
-
-    /// Sets the block range, if known (eth/70).
-    pub const fn block_range(mut self, block_range: Option<BlockRange>) -> Self {
-        if let Some(block_range) = block_range {
-            self.status.block_range = Some(block_range);
-            self.status.earliest_block = Some(block_range.start_block);
-            self.status.latest_block = Some(block_range.end_block);
-        } else {
-            self.status.block_range = None;
-        }
         self
     }
 }
@@ -460,9 +419,6 @@ pub struct StatusEth70 {
     /// Fork identifier as defined by EIP-2124.
     pub forkid: ForkId,
 
-    /// The block range the peer can serve.
-    pub block_range: BlockRange,
-
     /// Hash of the latest block this node has (current head).
     pub blockhash: B256,
 }
@@ -473,14 +429,8 @@ impl Display for StatusEth70 {
         let hexed_genesis = hex::encode(self.genesis);
         write!(
             f,
-            "StatusEth70 {{ version: {}, chain: {}, genesis: {}, forkid: {:X?}, block_range: [{}, {}], blockhash: {} }}",
-            self.version,
-            self.chain,
-            hexed_genesis,
-            self.forkid,
-            self.block_range.start_block,
-            self.block_range.end_block,
-            hexed_blockhash,
+            "StatusEth70 {{ version: {}, chain: {}, genesis: {}, forkid: {:X?}, blockhash: {} }}",
+            self.version, self.chain, hexed_genesis, self.forkid, hexed_blockhash,
         )
     }
 }
@@ -492,25 +442,21 @@ impl Debug for StatusEth70 {
         if f.alternate() {
             write!(
                 f,
-                "StatusEth70 {{\n\tversion: {:?},\n\tchain: {:?},\n\tgenesis: {},\n\tforkid: {:X?},\n\tblock_range: [{}, {}],\n\tblockhash: {}\n}}",
+                "StatusEth70 {{\n\tversion: {:?},\n\tchain: {:?},\n\tgenesis: {},\n\tforkid: {:X?},\n\tblockhash: {}\n}}",
                 self.version,
                 self.chain,
                 hexed_genesis,
                 self.forkid,
-                self.block_range.start_block,
-                self.block_range.end_block,
                 hexed_blockhash
             )
         } else {
             write!(
                 f,
-                "StatusEth70 {{ version: {:?}, chain: {:?}, genesis: {}, forkid: {:X?}, block_range: [{}, {}], blockhash: {} }}",
+                "StatusEth70 {{ version: {:?}, chain: {:?}, genesis: {}, forkid: {:X?}, blockhash: {} }}",
                 self.version,
                 self.chain,
                 hexed_genesis,
                 self.forkid,
-                self.block_range.start_block,
-                self.block_range.end_block,
                 hexed_blockhash
             )
         }
@@ -526,7 +472,7 @@ pub enum StatusMessage {
     Legacy(Status),
     /// The new `eth/69` status with no `total_difficulty`.
     Eth69(StatusEth69),
-    /// The `eth/70` status which includes the `block_range`.
+    /// The `eth/70` status which includes `firstBlockReceiptIndex`
     Eth70(StatusEth70),
 }
 
@@ -606,7 +552,7 @@ impl Display for StatusMessage {
 }
 #[cfg(test)]
 mod tests {
-    use crate::{BlockRange, EthVersion, Status, StatusEth69, StatusMessage, UnifiedStatus};
+    use crate::{EthVersion, Status, StatusEth69, StatusMessage, UnifiedStatus};
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
     use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
@@ -704,19 +650,11 @@ mod tests {
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
             .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .total_difficulty(None)
-            .block_range(Some(BlockRange { start_block: 1, end_block: 2 }))
             .build();
 
         let status_message = unified_status.into_message();
         let roundtripped_unified_status = UnifiedStatus::from_message(status_message);
         assert_eq!(unified_status, roundtripped_unified_status);
-
-        if let StatusMessage::Eth70(status70) = status_message {
-            assert_eq!(status70.block_range.start_block, 1);
-            assert_eq!(status70.block_range.end_block, 2);
-        } else {
-            panic!("expected StatusMessage::Eth70 variant");
-        }
     }
 
     #[test]
