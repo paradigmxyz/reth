@@ -1593,7 +1593,7 @@ pub struct PoolSize {
     pub queued_size: usize,
     /// Number of all transactions of all sub-pools
     ///
-    /// Note: this is the sum of ```pending + basefee + queued```
+    /// Note: this is the sum of ```pending + basefee + queued + blob```
     pub total: usize,
 }
 
