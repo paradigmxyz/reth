@@ -138,3 +138,19 @@ Similar to [`debug_executionWitness`](#debug_executionwitness), but accepts a bl
 | Client | Method invocation                                                      |
 | ------ | ---------------------------------------------------------------------- |
 | RPC    | `{"method": "debug_executionWitnessByBlockHash", "params": [hash]}` |
+
+## `debug_dbGet`
+
+Retrieves a raw value from the database.
+
+| Client | Method invocation                                  |
+| ------ | -------------------------------------------------- |
+| RPC    | `{"method": "debug_dbGet", "params": [key]}` |
+
+## `debug_storageRangeAt`
+
+Returns the storage at the given block height and transaction index. The result can be paged by providing a `maxResult` to cap the number of storage slots returned as well as specifying the offset via `keyStart`.
+
+| Client | Method invocation                                                                                 |
+| ------ | ------------------------------------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_storageRangeAt", "params": [block_hash, tx_index, address, key_start, limit]}` |
