@@ -17,7 +17,7 @@ concurrency:
 jobs:
   sync:
     name: sync (${{ matrix.chain.bin }})
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
