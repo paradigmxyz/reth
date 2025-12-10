@@ -7,15 +7,13 @@ use futures::StreamExt;
 use op_alloy_consensus::{transaction::OpTransactionInfo, OpTransaction};
 use reth_chain_state::CanonStateSubscriptions;
 use reth_optimism_primitives::DepositReceipt;
-use reth_primitives_traits::{
-    BlockBody, Recovered, SignedTransaction, SignerRecoverable, WithEncoded,
-};
+use reth_primitives_traits::{BlockBody, SignedTransaction, SignerRecoverable};
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadReceipt, LoadTransaction, SpawnBlocking},
     try_into_op_tx_info, EthApiTypes as _, FromEthApiError, FromEvmError, RpcConvert, RpcNodeCore,
     RpcReceipt, TxInfoMapper,
 };
-use reth_rpc_eth_types::{EthApiError, TransactionSource};
+use reth_rpc_eth_types::{utils::recover_raw_transaction, EthApiError, TransactionSource};
 use reth_storage_api::{errors::ProviderError, ProviderTx, ReceiptProvider, TransactionsProvider};
 use reth_transaction_pool::{
     AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
