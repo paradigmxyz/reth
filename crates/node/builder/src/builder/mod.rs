@@ -553,7 +553,8 @@ where
     /// # See also
     ///
     /// - [`NodeAddOns`] trait for available addon types
-    /// - [`NodeBuilderWithComponents::extend_rpc_modules`] for RPC module configuration
+    /// - [`reth_node_builder::NodeBuilderWithComponents::extend_rpc_modules`] for RPC module
+    ///   configuration
     pub fn map_add_ons<F>(self, f: F) -> Self
     where
         F: FnOnce(AO) -> AO,
@@ -600,10 +601,10 @@ where
     ///     .extend_rpc_modules(|ctx| {
     ///         // Access node components, so they can used by the CustomApi
     ///         let pool = ctx.pool().clone();
-    ///         
+    ///
     ///         // Add custom RPC namespace
     ///         ctx.modules.merge_configured(CustomApi { pool }.into_rpc())?;
-    ///         
+    ///
     ///         Ok(())
     ///     })
     ///     .build()?;
