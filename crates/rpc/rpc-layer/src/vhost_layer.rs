@@ -5,23 +5,16 @@
 
 use http::{Response, StatusCode};
 use jsonrpsee_http_client::{HttpBody, HttpRequest, HttpResponse};
-use pin_project::pin_project;
 use std::{
-    future::Future,
+    collections::HashSet,
+    future::{ready, Future},
     net::IpAddr,
     pin::Pin,
     str::FromStr,
+    sync::Arc,
     task::{Context, Poll},
 };
 use tower::{Layer, Service};
-
-/// A trait for validating virtual hostnames from the Host header.
-pub trait VHostValidator {
-    /// Validates the Host header value against allowed virtual hostnames.
-    /// Returns `Ok(())` if the host is allowed, or an error response if not.
-    #[expect(clippy::result_large_err)]
-    fn validate(&self, host: Option<&str>) -> Result<(), HttpResponse>;
-}
 
 /// A validator that checks Host headers against a list of allowed virtual hostnames.
 ///
@@ -31,8 +24,8 @@ pub trait VHostValidator {
 /// - `"localhost"` matches exactly "localhost"
 #[derive(Clone, Debug)]
 pub struct AllowedVHosts {
-    /// List of allowed virtual hostname patterns
-    patterns: Vec<String>,
+    /// Set of allowed virtual hostname patterns
+    patterns: Arc<HashSet<String>>,
 }
 
 impl AllowedVHosts {
@@ -45,9 +38,9 @@ impl AllowedVHosts {
     /// let validator = AllowedVHosts::parse("localhost,*.example.com");
     /// ```
     pub fn parse(vhosts: &str) -> Self {
-        let patterns =
+        let patterns: HashSet<String> =
             vhosts.split(',').map(|s| s.trim().to_lowercase()).filter(|s| !s.is_empty()).collect();
-        Self { patterns }
+        Self { patterns: Arc::new(patterns) }
     }
 
     /// Checks if a hostname matches any of the allowed patterns.
@@ -98,7 +91,13 @@ impl AllowedVHosts {
             host.split(':').next().unwrap_or(&host)
         };
 
-        for pattern in &self.patterns {
+        // First check for exact match (O(1) lookup)
+        if self.patterns.contains(host_without_port) {
+            return true;
+        }
+
+        // Then check wildcard patterns
+        for pattern in &*self.patterns {
             if Self::pattern_matches(pattern, host_without_port) {
                 return true;
             }
@@ -126,10 +125,11 @@ impl AllowedVHosts {
         // Exact match
         pattern == host
     }
-}
 
-impl VHostValidator for AllowedVHosts {
-    fn validate(&self, host: Option<&str>) -> Result<(), HttpResponse> {
+    /// Validates the Host header value against allowed virtual hostnames.
+    /// Returns `Ok(())` if the host is allowed, or an error response if not.
+    #[expect(clippy::result_large_err)]
+    pub fn validate(&self, host: Option<&str>) -> Result<(), HttpResponse> {
         if self.matches(host) {
             Ok(())
         } else {
@@ -158,22 +158,19 @@ impl VHostValidator for AllowedVHosts {
 /// let middleware = ServiceBuilder::new().layer(layer);
 /// ```
 #[expect(missing_debug_implementations)]
-pub struct VHostLayer<V> {
-    validator: V,
+pub struct VHostLayer {
+    validator: AllowedVHosts,
 }
 
-impl<V> VHostLayer<V> {
+impl VHostLayer {
     /// Creates a new [`VHostLayer`] with the given validator.
-    pub const fn new(validator: V) -> Self {
+    pub const fn new(validator: AllowedVHosts) -> Self {
         Self { validator }
     }
 }
 
-impl<S, V> Layer<S> for VHostLayer<V>
-where
-    V: Clone,
-{
-    type Service = VHostService<S, V>;
+impl<S> Layer<S> for VHostLayer {
+    type Service = VHostService<S>;
 
     fn layer(&self, inner: S) -> Self::Service {
         VHostService { validator: self.validator.clone(), inner }
@@ -182,22 +179,23 @@ where
 
 /// Service implementation that validates Host headers before forwarding requests.
 #[derive(Clone, Debug)]
-pub struct VHostService<S, V> {
+pub struct VHostService<S> {
     /// Validates the Host header
-    validator: V,
+    validator: AllowedVHosts,
     /// Inner service that handles validated requests
     inner: S,
 }
 
-impl<S, V> Service<HttpRequest> for VHostService<S, V>
+impl<S> Service<HttpRequest> for VHostService<S>
 where
     S: Service<HttpRequest, Response = HttpResponse>,
-    V: VHostValidator,
+    S::Future: Send + 'static,
+    S::Error: Send + 'static,
     Self: Clone,
 {
     type Response = HttpResponse;
     type Error = S::Error;
-    type Future = ResponseFuture<S::Future>;
+    type Future = Pin<Box<dyn Future<Output = Result<HttpResponse, S::Error>> + Send>>;
 
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         self.inner.poll_ready(cx)
@@ -208,55 +206,8 @@ where
         let host = req.headers().get(http::header::HOST).and_then(|h| h.to_str().ok());
 
         match self.validator.validate(host) {
-            Ok(_) => ResponseFuture::future(self.inner.call(req)),
-            Err(res) => ResponseFuture::invalid_vhost(res),
-        }
-    }
-}
-
-/// A future representing the response of an RPC request
-#[pin_project]
-#[expect(missing_debug_implementations)]
-pub struct ResponseFuture<F> {
-    /// The kind of response future, error or pending
-    #[pin]
-    kind: Kind<F>,
-}
-
-impl<F> ResponseFuture<F> {
-    const fn future(future: F) -> Self {
-        Self { kind: Kind::Future { future } }
-    }
-
-    const fn invalid_vhost(err_res: HttpResponse) -> Self {
-        Self { kind: Kind::Error { response: Some(err_res) } }
-    }
-}
-
-#[pin_project(project = KindProj)]
-enum Kind<F> {
-    Future {
-        #[pin]
-        future: F,
-    },
-    Error {
-        response: Option<HttpResponse>,
-    },
-}
-
-impl<F, E> Future for ResponseFuture<F>
-where
-    F: Future<Output = Result<HttpResponse, E>>,
-{
-    type Output = F::Output;
-
-    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
-        match self.project().kind.project() {
-            KindProj::Future { future } => future.poll(cx),
-            KindProj::Error { response } => {
-                let response = response.take().unwrap();
-                Poll::Ready(Ok(response))
-            }
+            Ok(_) => Box::pin(self.inner.call(req)),
+            Err(res) => Box::pin(ready(Ok(res))),
         }
     }
 }

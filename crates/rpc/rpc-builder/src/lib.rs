@@ -1285,7 +1285,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     }
 
     /// Creates the [`VHostLayer`] if vhosts are configured
-    fn maybe_vhost_layer(vhosts: Option<String>) -> Option<VHostLayer<AllowedVHosts>> {
+    fn maybe_vhost_layer(vhosts: Option<String>) -> Option<VHostLayer> {
         vhosts.map(|vhosts| VHostLayer::new(AllowedVHosts::parse(&vhosts)))
     }
 

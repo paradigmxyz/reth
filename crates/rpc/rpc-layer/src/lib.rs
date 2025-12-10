@@ -26,7 +26,7 @@ pub use alloy_rpc_types_engine::{Claims, JwtError, JwtSecret};
 pub use auth_client_layer::{secret_to_bearer_header, AuthClientLayer, AuthClientService};
 pub use auth_layer::AuthLayer;
 pub use jwt_validator::JwtAuthValidator;
-pub use vhost_layer::{AllowedVHosts, VHostLayer, VHostValidator};
+pub use vhost_layer::{AllowedVHosts, VHostLayer};
 
 /// General purpose trait to validate Http Authorization headers. It's supposed to be integrated as
 /// a validator trait into an [`AuthLayer`].
