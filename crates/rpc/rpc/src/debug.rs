@@ -7,10 +7,9 @@ use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
+use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{
-    state::EvmOverrides, BlockError, BlockTransactionsKind, Bundle, StateContext,
-};
+use alloy_rpc_types_eth::{state::EvmOverrides, BlockError, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
@@ -30,7 +29,7 @@ use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    FromEthApiError, RpcBlock, RpcConvert, RpcNodeCore,
+    FromEthApiError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -722,23 +721,18 @@ where
         }
 
         for block in blocks {
-            let rpc_block = block
+            let rlp = alloy_rlp::encode(block.sealed_block()).into();
+            let hash = block.hash();
+
+            let block = block
                 .clone_into_rpc_block(
                     BlockTransactionsKind::Full,
                     |tx, tx_info| self.eth_api().converter().fill(tx, tx_info),
                     |header, size| self.eth_api().converter().convert_header(header, size),
                 )
-                .map_err(|err| internal_rpc_err(err.to_string()))?;
+                .map_err(|err| Eth::Error::from(err).into())?;
 
-            let mut rlp = Vec::new();
-            block.sealed_block().encode(&mut rlp);
-
-            let wrapper = BadBlockSerde::<RpcBlock<Eth::NetworkTypes>> {
-                block: rpc_block,
-                hash: block.hash(),
-                rlp: rlp.into(),
-            };
-            let bad_block = serde_json::to_value(wrapper)
+            let bad_block = serde_json::to_value(BadBlockSerde { block, hash, rlp })
                 .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
 
             bad_blocks.push(bad_block);
