@@ -18,6 +18,7 @@
 extern crate alloc;
 
 use crate::execute::{BasicBlockBuilder, Executor};
+use ::revm::context::TxEnv;
 use alloc::vec::Vec;
 use alloy_eips::{
     eip2718::{EIP2930_TX_TYPE_ID, LEGACY_TX_TYPE_ID},
@@ -25,7 +26,7 @@ use alloy_eips::{
     eip4895::Withdrawals,
 };
 use alloy_evm::{
-    block::{BlockExecutorFactory, BlockExecutorFor},
+    block::{BlockExecutorFactory, BlockExecutorFor, StateDB},
     precompiles::PrecompilesMap,
 };
 use alloy_primitives::{Address, B256};
@@ -35,7 +36,7 @@ use reth_execution_errors::BlockExecutionError;
 use reth_primitives_traits::{
     BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SealedBlock, SealedHeader, TxTy,
 };
-use revm::{context::TxEnv, database::State};
+use revm::DatabaseCommit;
 
 pub mod either;
 /// EVM environment configuration.
@@ -312,20 +313,20 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// Creates a strategy with given EVM and execution context.
     fn create_executor<'a, DB, I>(
         &'a self,
-        evm: EvmFor<Self, &'a mut State<DB>, I>,
+        evm: EvmFor<Self, DB, I>,
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
     ) -> impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>
     where
-        DB: Database,
-        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+        DB: StateDB + DatabaseCommit + Database + 'a,
+        I: InspectorFor<Self, DB> + 'a,
     {
         self.block_executor_factory().create_executor(evm, ctx)
     }
 
     /// Creates a strategy for execution of a given block.
-    fn executor_for_block<'a, DB: Database>(
+    fn executor_for_block<'a, DB: StateDB + DatabaseCommit + Database + 'a>(
         &'a self,
-        db: &'a mut State<DB>,
+        db: DB,
         block: &'a SealedBlock<<Self::Primitives as NodePrimitives>::Block>,
     ) -> Result<impl BlockExecutorFor<'a, Self::BlockExecutorFactory, DB>, Self::Error> {
         let evm = self.evm_for_block(db, block.header())?;
@@ -350,7 +351,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// ```
     fn create_block_builder<'a, DB, I>(
         &'a self,
-        evm: EvmFor<Self, &'a mut State<DB>, I>,
+        evm: EvmFor<Self, DB, I>,
         parent: &'a SealedHeader<HeaderTy<Self::Primitives>>,
         ctx: <Self::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>,
     ) -> impl BlockBuilder<
@@ -358,8 +359,8 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         Executor: BlockExecutorFor<'a, Self::BlockExecutorFactory, DB, I>,
     >
     where
-        DB: Database,
-        I: InspectorFor<Self, &'a mut State<DB>> + 'a,
+        DB: StateDB + DatabaseCommit + Database + 'a,
+        I: InspectorFor<Self, DB> + 'a,
     {
         BasicBlockBuilder {
             executor: self.create_executor(evm, ctx.clone()),
@@ -399,9 +400,9 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
     /// // Complete block building
     /// let outcome = builder.finish(state_provider)?;
     /// ```
-    fn builder_for_next_block<'a, DB: Database>(
+    fn builder_for_next_block<'a, DB: StateDB + DatabaseCommit + Database + 'a>(
         &'a self,
-        db: &'a mut State<DB>,
+        db: DB,
         parent: &'a SealedHeader<<Self::Primitives as NodePrimitives>::BlockHeader>,
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<

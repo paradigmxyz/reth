@@ -276,9 +276,9 @@ mod tests {
         let dyn_precompile: DynPrecompile = (|_input: PrecompileInput<'_>| -> PrecompileResult {
             Ok(PrecompileOutput {
                 gas_used: 0,
-                gas_refunded: 0,
                 bytes: Bytes::default(),
                 reverted: false,
+                gas_refunded: 0,
             })
         })
         .into();
@@ -288,9 +288,9 @@ mod tests {
 
         let output = PrecompileOutput {
             gas_used: 50,
-            gas_refunded: 0,
             bytes: alloy_primitives::Bytes::copy_from_slice(b"cached_result"),
             reverted: false,
+            gas_refunded: 0,
         };
 
         let key = CacheKey::new(SpecId::PRAGUE, b"test_input".into());
@@ -321,9 +321,9 @@ mod tests {
 
                 Ok(PrecompileOutput {
                     gas_used: 5000,
-                    gas_refunded: 0,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_1"),
                     reverted: false,
+                    gas_refunded: 0,
                 })
             }
         })
@@ -336,9 +336,9 @@ mod tests {
 
                 Ok(PrecompileOutput {
                     gas_used: 7000,
-                    gas_refunded: 0,
                     bytes: alloy_primitives::Bytes::copy_from_slice(b"output_from_precompile_2"),
                     reverted: false,
+                    gas_refunded: 0,
                 })
             }
         })

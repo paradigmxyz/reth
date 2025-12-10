@@ -2903,6 +2903,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let mut next_tx_num = tx_block_cursor.last()?.map(|(id, _)| id + 1).unwrap_or_default();
 
         for (block_number, body) in &bodies {
+            tracing::debug!(
+                target: "providers::db",
+                body = ?body,
+                "Appending block bodies"
+            );
             // Increment block on static file header.
             tx_writer.increment_block(*block_number)?;
 
