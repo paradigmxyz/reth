@@ -731,7 +731,7 @@ where
                 .map_err(|err| internal_rpc_err(err.to_string()))?;
 
             let mut rlp = Vec::new();
-            block.clone_sealed_block().encode(&mut rlp);
+            block.sealed_block().encode(&mut rlp);
 
             let wrapper = BadBlockSerde::<RpcBlock<Eth::NetworkTypes>> {
                 block: rpc_block,
