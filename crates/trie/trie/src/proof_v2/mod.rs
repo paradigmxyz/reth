@@ -25,6 +25,9 @@ pub use value::*;
 mod node;
 use node::*;
 
+mod target;
+pub use target::*;
+
 /// Target to use with the `tracing` crate.
 static TRACE_TARGET: &str = "trie::proof_v2";
 
@@ -185,7 +188,7 @@ where
     /// the common-case, then this is equivalent to lexicographical order.
     fn should_retain(
         &self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
         path: &Nibbles,
     ) -> bool {
         trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), "should_retain: called");
@@ -202,13 +205,13 @@ where
 
         loop {
             // If the node in question is a prefix of the target then we retain
-            if lower.starts_with(path) {
+            if lower.key.starts_with(path) {
                 return true
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
             // there is no upper bound, indicating unbounded).
-            if upper.is_some_and(|upper| depth_first::cmp(path, &upper) != Ordering::Less) {
+            if upper.is_some_and(|upper| depth_first::cmp(path, &upper.key) != Ordering::Less) {
                 targets.next();
                 trace!(target: TRACE_TARGET, target = ?targets.peek(), "upper target <= path, next target");
                 let &(l, u) = targets.peek().expect("targets is never exhausted");
@@ -226,7 +229,7 @@ where
     /// therefore can be retained as a proof node if applicable.
     fn commit_child(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
     ) -> Result<RlpNode, StateProofError> {
@@ -312,7 +315,7 @@ where
     /// to this method.
     fn commit_last_child(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
     ) -> Result<(), StateProofError> {
         let Some(child) = self.child_stack.pop() else { return Ok(()) };
 
@@ -343,7 +346,7 @@ where
     /// - If the leaf's nibble is already set in the branch's `state_mask`.
     fn push_new_leaf(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
         leaf_nibble: u8,
         leaf_short_key: Nibbles,
         leaf_val: VE::DeferredEncoder,
@@ -450,7 +453,7 @@ where
     /// This method panics if `branch_stack` is empty.
     fn pop_branch(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
     ) -> Result<(), StateProofError> {
         trace!(
             target: TRACE_TARGET,
@@ -532,7 +535,7 @@ where
     /// creating a new one depending on the path of the key.
     fn push_leaf(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
         key: Nibbles,
         val: VE::DeferredEncoder,
     ) -> Result<(), StateProofError> {
@@ -619,7 +622,7 @@ where
     fn calculate_key_range(
         &mut self,
         value_encoder: &VE,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
         hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
@@ -680,7 +683,7 @@ where
     /// cached branch will be a child of that splitting branch.
     fn push_cached_branch(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
         cached_path: Nibbles,
         cached_branch: &BranchNodeCompact,
     ) -> Result<(), StateProofError> {
@@ -853,7 +856,7 @@ where
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn next_uncached_key_range(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
         trie_cursor_state: &mut TrieCursorState,
         hashed_key_current_path: Option<Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
@@ -1073,30 +1076,24 @@ where
     fn proof_inner(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = B256>,
+        targets: impl IntoIterator<Item = Target>,
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         trace!(target: TRACE_TARGET, "proof_inner: called");
 
         // In debug builds, verify that targets are sorted
         #[cfg(debug_assertions)]
         let targets = {
-            let mut prev: Option<B256> = None;
+            let mut prev: Option<Nibbles> = None;
             targets.into_iter().inspect(move |target| {
                 if let Some(prev) = prev {
-                    debug_assert!(&prev <= target, "prev:{prev:?} target:{target:?}");
+                    debug_assert!(prev <= target.key, "prev:{prev:?} target:{target:?}");
                 }
-                prev = Some(*target);
+                prev = Some(target.key);
             })
         };
 
         #[cfg(not(debug_assertions))]
         let targets = targets.into_iter();
-
-        // Convert B256 targets into Nibbles.
-        let targets = targets.into_iter().map(|key| {
-            // SAFETY: key is a B256 and so is exactly 32-bytes.
-            unsafe { Nibbles::unpack_unchecked(key.as_slice()) }
-        });
 
         // Wrap targets into a `TargetsIter`.
         let mut targets = WindowIter::new(targets).peekable();
@@ -1204,7 +1201,7 @@ where
     pub fn proof(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = B256>,
+        targets: impl IntoIterator<Item = Target>,
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
@@ -1237,7 +1234,7 @@ where
     pub fn storage_proof(
         &mut self,
         hashed_address: B256,
-        targets: impl IntoIterator<Item = B256>,
+        targets: impl IntoIterator<Item = Target>,
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         /// Static storage value encoder instance used by all storage proofs.
         static STORAGE_VALUE_ENCODER: StorageValueEncoder = StorageValueEncoder;
@@ -1457,7 +1454,7 @@ mod tests {
         /// the results.
         fn assert_proof(
             &self,
-            targets: impl IntoIterator<Item = B256>,
+            targets: impl IntoIterator<Item = Target>,
         ) -> Result<(), StateProofError> {
             let targets_vec = targets.into_iter().sorted().collect::<Vec<_>>();
 
@@ -1465,7 +1462,7 @@ mod tests {
             // For account-only proofs, each account maps to an empty storage set
             let legacy_targets = targets_vec
                 .iter()
-                .map(|addr| (*addr, B256Set::default()))
+                .map(|target| (B256::from_slice(&target.key.pack()), B256Set::default()))
                 .collect::<MultiProofTargets>();
 
             // Create ProofCalculator (proof_v2) with account cursors
@@ -1628,7 +1625,7 @@ mod tests {
                 let harness = ProofTestHarness::new(post_state);
 
                 // Pass generated targets to both implementations
-                harness.assert_proof(targets).expect("Proof generation failed");
+                harness.assert_proof(targets.into_iter().map(Into::into)).expect("Proof generation failed");
             }
         }
     }
@@ -1668,7 +1665,7 @@ mod tests {
         let harness = ProofTestHarness::new(post_state);
 
         // Assert the proof
-        harness.assert_proof(targets).expect("Proof generation failed");
+        harness.assert_proof(targets.into_iter().map(Into::into)).expect("Proof generation failed");
     }
 
     #[test]

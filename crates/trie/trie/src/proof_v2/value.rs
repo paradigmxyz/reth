@@ -123,7 +123,7 @@ where
         // Compute storage root by calling storage_proof with the root path as a target.
         // This returns just the root node of the storage trie.
         let storage_root = storage_proof_calculator
-            .storage_proof(self.hashed_address, [B256::ZERO])
+            .storage_proof(self.hashed_address, [B256::ZERO.into()])
             .map(|nodes| {
                 // Encode the root node to RLP and hash it
                 let root_node =
