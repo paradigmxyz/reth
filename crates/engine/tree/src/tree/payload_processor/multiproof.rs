@@ -706,56 +706,6 @@ pub(super) struct MultiProofTask {
     max_targets_for_chunking: usize,
 }
 
-/// Context for multiproof message batching loop.
-///
-/// Contains processing state that persists across loop iterations.
-struct MultiproofBatchCtx {
-    /// Message encountered during batching that couldn't be merged (different type).
-    /// Processed first in next iteration to preserve message ordering.
-    pending_msg: Option<MultiProofMessage>,
-    /// Timestamp when the first state update or prefetch was received.
-    first_update_time: Option<Instant>,
-    /// Timestamp before the first state update or prefetch was received.
-    start: Instant,
-    /// Timestamp when state updates finished. `Some` indicates all state updates have been
-    /// received.
-    updates_finished_time: Option<Instant>,
-    /// Reusable buffer for accumulating prefetch targets during batching.
-    accumulated_prefetch_targets: Vec<MultiProofTargets>,
-    /// Reusable buffer for accumulating state updates during batching.
-    accumulated_state_updates: Vec<(StateChangeSource, EvmState)>,
-}
-
-impl MultiproofBatchCtx {
-    /// Creates a new batch context with the given start time.
-    fn new(start: Instant) -> Self {
-        Self {
-            pending_msg: None,
-            first_update_time: None,
-            start,
-            updates_finished_time: None,
-            accumulated_prefetch_targets: Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES),
-            accumulated_state_updates: Vec::with_capacity(STATE_UPDATE_BATCH_PREALLOC),
-        }
-    }
-
-    /// Returns `true` if all state updates have been received.
-    const fn updates_finished(&self) -> bool {
-        self.updates_finished_time.is_some()
-    }
-}
-
-/// Counters for tracking proof requests and processing.
-#[derive(Default)]
-struct MultiproofBatchMetrics {
-    /// Number of proofs that have been processed.
-    proofs_processed: u64,
-    /// Number of state update proofs requested.
-    state_update_proofs_requested: u64,
-    /// Number of prefetch proofs requested.
-    prefetch_proofs_requested: u64,
-}
-
 impl MultiProofTask {
     /// Creates a multiproof task with separate channels: control on `tx`/`rx`, proof results on
     /// `proof_result_rx`.
@@ -1404,6 +1354,57 @@ impl MultiProofTask {
                 .record(updates_finished_time.elapsed().as_secs_f64());
         }
     }
+}
+
+/// Context for multiproof message batching loop.
+///
+/// Contains processing state that persists across loop iterations.
+struct MultiproofBatchCtx {
+    /// Buffers a non-matching message type encountered during batching.
+    /// Processed first in next iteration to preserve ordering while allowing same-type
+    /// messages to batch.
+    pending_msg: Option<MultiProofMessage>,
+    /// Timestamp when the first state update or prefetch was received.
+    first_update_time: Option<Instant>,
+    /// Timestamp before the first state update or prefetch was received.
+    start: Instant,
+    /// Timestamp when state updates finished. `Some` indicates all state updates have been
+    /// received.
+    updates_finished_time: Option<Instant>,
+    /// Reusable buffer for accumulating prefetch targets during batching.
+    accumulated_prefetch_targets: Vec<MultiProofTargets>,
+    /// Reusable buffer for accumulating state updates during batching.
+    accumulated_state_updates: Vec<(StateChangeSource, EvmState)>,
+}
+
+impl MultiproofBatchCtx {
+    /// Creates a new batch context with the given start time.
+    fn new(start: Instant) -> Self {
+        Self {
+            pending_msg: None,
+            first_update_time: None,
+            start,
+            updates_finished_time: None,
+            accumulated_prefetch_targets: Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES),
+            accumulated_state_updates: Vec::with_capacity(STATE_UPDATE_BATCH_PREALLOC),
+        }
+    }
+
+    /// Returns `true` if all state updates have been received.
+    const fn updates_finished(&self) -> bool {
+        self.updates_finished_time.is_some()
+    }
+}
+
+/// Counters for tracking proof requests and processing.
+#[derive(Default)]
+struct MultiproofBatchMetrics {
+    /// Number of proofs that have been processed.
+    proofs_processed: u64,
+    /// Number of state update proofs requested.
+    state_update_proofs_requested: u64,
+    /// Number of prefetch proofs requested.
+    prefetch_proofs_requested: u64,
 }
 
 /// Returns accounts only with those storages that were not already fetched, and
