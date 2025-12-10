@@ -4,7 +4,7 @@ use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
 use alloy_consensus::{BlockHeader, Receipt, ReceiptWithBloom, TxReceipt};
 use alloy_eips::eip2718::Encodable2718;
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
-use op_alloy_consensus::{OpReceipt as OpConsensusReceipt, OpTransaction};
+use op_alloy_consensus::{OpReceipt, OpTransaction};
 use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
 use op_revm::estimate_tx_compressed_size;
 use reth_chainspec::ChainSpecProvider;
@@ -270,7 +270,7 @@ impl OpReceiptFieldsBuilder {
 #[derive(Debug)]
 pub struct OpReceiptBuilder {
     /// Core receipt, has all the fields of an L1 receipt and is the basis for the OP receipt.
-    pub core_receipt: TransactionReceipt<ReceiptWithBloom<OpConsensusReceipt<Log>>>,
+    pub core_receipt: TransactionReceipt<ReceiptWithBloom<OpReceipt<Log>>>,
     /// Additional OP receipt fields.
     pub op_receipt_fields: OpTransactionReceiptFields,
 }
@@ -294,14 +294,12 @@ impl OpReceiptBuilder {
                 let logs = Log::collect_for_receipt(next_log_index, meta, logs);
                 Receipt { status, cumulative_gas_used, logs }
             };
-            let mapped_receipt: OpConsensusReceipt<Log> = match receipt {
-                OpReceipt::Legacy(receipt) => OpConsensusReceipt::Legacy(map_logs(receipt)),
-                OpReceipt::Eip2930(receipt) => OpConsensusReceipt::Eip2930(map_logs(receipt)),
-                OpReceipt::Eip1559(receipt) => OpConsensusReceipt::Eip1559(map_logs(receipt)),
-                OpReceipt::Eip7702(receipt) => OpConsensusReceipt::Eip7702(map_logs(receipt)),
-                OpReceipt::Deposit(receipt) => {
-                    OpConsensusReceipt::Deposit(receipt.map_inner(map_logs))
-                }
+            let mapped_receipt: OpReceipt<Log> = match receipt {
+                OpReceipt::Legacy(receipt) => OpReceipt::Legacy(map_logs(receipt)),
+                OpReceipt::Eip2930(receipt) => OpReceipt::Eip2930(map_logs(receipt)),
+                OpReceipt::Eip1559(receipt) => OpReceipt::Eip1559(map_logs(receipt)),
+                OpReceipt::Eip7702(receipt) => OpReceipt::Eip7702(map_logs(receipt)),
+                OpReceipt::Deposit(receipt) => OpReceipt::Deposit(receipt.map_inner(map_logs)),
             };
             mapped_receipt.into_with_bloom()
         });
