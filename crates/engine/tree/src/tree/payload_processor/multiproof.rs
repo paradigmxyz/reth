@@ -2275,11 +2275,8 @@ mod tests {
             create_state_update(addr_preblock, 1, 1),
         ))
         .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(
-            source_tx,
-            create_state_update(addr_tx, 2, 2),
-        ))
-        .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source_tx, create_state_update(addr_tx, 2, 2)))
+            .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source_postblock,
             create_state_update(addr_postblock, 3, 3),
@@ -2325,8 +2322,8 @@ mod tests {
                 merged_update.extend(next_update);
             }
 
-            // Batch source should stay the first source that arrived.
-            assert_eq!(batch_source, source_preblock);
+            // Batch source should stay the first source that arrived (PreBlock).
+            assert!(matches!(batch_source, StateChangeSource::PreBlock(_)));
             assert_eq!(merged_update.len(), 3);
             assert!(merged_update.contains_key(&addr_preblock));
             assert!(merged_update.contains_key(&addr_tx));
