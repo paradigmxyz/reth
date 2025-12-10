@@ -419,9 +419,9 @@ impl DbTxMut for Tx<RW> {
     }
 
     fn clear<T: Table>(&self) -> Result<(), DatabaseError> {
-        self.inner.clear_db(self.get_dbi::<T>()?).map_err(|e| DatabaseError::Delete(e.into()))?;
-
-        Ok(())
+        self.execute_with_operation_metric::<T, _>(Operation::Clear, None, |tx| {
+            tx.clear_db(self.get_dbi::<T>()?).map_err(|e| DatabaseError::Delete(e.into()))
+        })
     }
 
     fn cursor_write<T: Table>(&self) -> Result<Self::CursorMut<T>, DatabaseError> {
