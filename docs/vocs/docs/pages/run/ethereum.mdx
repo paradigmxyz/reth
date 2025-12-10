@@ -35,6 +35,24 @@ reth node --full
 
 On differences between archive and full nodes, see [Pruning & Full Node](/run/faq/pruning#basic-concepts) section.
 
+### Running on testnets
+
+By default, `reth node` runs on the Ethereum mainnet. To run on a different built-in network, use the `--chain` flag.
+
+Built-in chains include `mainnet`, `sepolia`, `holesky`, `hoodi`, and `dev`. For example, to run an archive node on the Sepolia testnet, use:
+
+```bash
+reth node --chain sepolia
+```
+
+Or to run a full node on the Holesky testnet, use:
+
+```bash
+reth node --chain holesky --full
+```
+
+The rest of the setup (Engine API, JWT secret, and consensus client) is the same as for mainnet, but your consensus client must also be configured for the corresponding testnet.
+
 :::note
 These commands will not open any HTTP/WS ports by default.
 
