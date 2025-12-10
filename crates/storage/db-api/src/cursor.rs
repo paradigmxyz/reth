@@ -318,6 +318,14 @@ impl<T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> RangeWalker<'_, T, CURSOR>
     }
 }
 
+impl<T: DupSort, CURSOR: DbDupCursorRW<T> + DbCursorRO<T>> RangeWalker<'_, T, CURSOR> {
+    /// Delete all duplicate entries for current key that walker points to.
+    pub fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
+        self.start.take();
+        self.cursor.delete_current_duplicates()
+    }
+}
+
 /// Provides an iterator to `Cursor` when handling a `DupSort` table.
 ///
 /// Reason why we have two lifetimes is to distinguish between `'cursor` lifetime
