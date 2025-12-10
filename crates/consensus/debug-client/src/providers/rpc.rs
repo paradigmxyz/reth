@@ -29,8 +29,7 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
                 ProviderBuilder::default()
                     .connect_with_config(
                         rpc_url,
-                        ConnectionConfig::default()
-                            .with_max_retries(u32::MAX),
+                        ConnectionConfig::default().with_max_retries(u32::MAX),
                     )
                     .await?,
             ),
