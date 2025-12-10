@@ -38,6 +38,7 @@ alloy-genesis.workspace = true
 
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
+serde_json.workspace = true
 
 [features]
 client = [
