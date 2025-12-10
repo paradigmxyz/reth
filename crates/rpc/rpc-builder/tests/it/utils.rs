@@ -93,7 +93,7 @@ pub async fn launch_http_ws(modules: impl Into<RpcModuleSelection>) -> RpcServer
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
         eth_api,
-        EventSender::new(0),
+        EventSender::new(1),
     );
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
@@ -113,7 +113,7 @@ pub async fn launch_http_ws_same_port(modules: impl Into<RpcModuleSelection>) ->
     let server = builder.build(
         TransportRpcModuleConfig::set_ws(modules.clone()).with_http(modules),
         eth_api,
-        EventSender::new(0),
+        EventSender::new(1),
     );
     let addr = test_address();
     RpcServerConfig::ws(Default::default())

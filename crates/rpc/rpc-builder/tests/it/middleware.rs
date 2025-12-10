@@ -77,7 +77,7 @@ async fn test_rpc_middleware() {
     let modules = builder.build(
         TransportRpcModuleConfig::set_http(RpcModuleSelection::All),
         eth_api,
-        EventSender::new(0),
+        EventSender::new(1),
     );
 
     let mylayer = MyMiddlewareLayer::default();
