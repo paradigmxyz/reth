@@ -126,12 +126,9 @@ impl<T: TxReceipt> Receipts70<T> {
     /// Note: This is an expensive operation that recalculates the bloom for
     /// every receipt.
     pub fn into_with_bloom(self) -> Receipts<T> {
-        Receipts(
-            self.receipts
-                .into_iter()
-                .map(|receipts| receipts.into_iter().map(|r| r.into_with_bloom()).collect())
-                .collect(),
-        )
+        // Reuse the eth/69 helper, since both variants carry the same
+        // receipt list shape (only eth/70 adds request metadata).
+        Receipts69(self.receipts).into_with_bloom()
     }
 }
 
