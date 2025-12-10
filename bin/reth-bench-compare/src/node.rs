@@ -240,18 +240,23 @@ impl NodeManager {
     }
 
     /// Start a reth node using the specified binary path and return the process handle
+    /// along with the formatted reth command string for reporting.
     pub(crate) async fn start_node(
         &mut self,
         binary_path: &std::path::Path,
         _git_ref: &str,
         ref_type: &str,
         additional_args: &[String],
-    ) -> Result<tokio::process::Child> {
+    ) -> Result<(tokio::process::Child, String)> {
         // Store the binary path for later use (e.g., in unwind_to_block)
         self.binary_path = Some(binary_path.to_path_buf());
 
         let binary_path_str = binary_path.to_string_lossy();
         let (reth_args, _) = self.build_reth_args(&binary_path_str, additional_args, ref_type);
+
+        // Format the reth command string for reporting
+        let reth_command = shlex::try_join(reth_args.iter().map(|s| s.as_str()))
+            .wrap_err("Failed to format reth command string")?;
 
         // Log additional arguments if any
         if !self.additional_reth_args.is_empty() {
@@ -346,7 +351,7 @@ impl NodeManager {
         // Give the node a moment to start up
         sleep(Duration::from_secs(5)).await;
 
-        Ok(child)
+        Ok((child, reth_command))
     }
 
     /// Wait for the node to be ready and return its current tip
