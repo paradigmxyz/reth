@@ -153,6 +153,7 @@ members = [
     "examples/custom-node-components/",
     "examples/custom-payload-builder/",
     "examples/custom-rlpx-subprotocol",
+    "examples/custom-rpc-middleware",
     "examples/custom-node",
     "examples/db-access",
     "examples/engine-api-access",

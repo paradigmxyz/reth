@@ -20,7 +20,7 @@ concurrency:
 jobs:
   test:
     name: test / ${{ matrix.type }} (${{ matrix.partition }}/${{ matrix.total_partitions }})
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     env:
       RUST_BACKTRACE: 1
     strategy:
@@ -65,7 +65,7 @@ jobs:
 
   state:
     name: Ethereum state tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-4
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
@@ -99,7 +99,7 @@ jobs:
 
   doc:
     name: doc tests
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     env:
       RUST_BACKTRACE: 1
     timeout-minutes: 30

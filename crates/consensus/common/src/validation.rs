@@ -369,7 +369,7 @@ pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + Ethere
     Ok(())
 }
 
-/// Validates the timestamp against the parent to make sure it is in the past.
+/// Validates that the block timestamp is greater than the parent block timestamp.
 #[inline]
 pub fn validate_against_parent_timestamp<H: BlockHeader>(
     header: &H,

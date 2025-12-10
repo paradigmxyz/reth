@@ -12,7 +12,7 @@ env:
 jobs:
   clippy-binaries:
     name: clippy binaries / ${{ matrix.type }}
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
@@ -40,7 +40,7 @@ jobs:
 
   clippy:
     name: clippy
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -56,7 +56,7 @@ jobs:
           RUSTFLAGS: -D warnings
 
   wasm:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -75,7 +75,7 @@ jobs:
           .github/assets/check_wasm.sh
 
   riscv:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
@@ -93,7 +93,7 @@ jobs:
 
   crate-checks:
     name: crate-checks (${{ matrix.partition }}/${{ matrix.total_partitions }})
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     strategy:
       matrix:
         partition: [1, 2]
@@ -111,7 +111,7 @@ jobs:
 
   msrv:
     name: MSRV
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     strategy:
       matrix:
@@ -133,7 +133,7 @@ jobs:
 
   docs:
     name: docs
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -150,7 +150,7 @@ jobs:
 
   fmt:
     name: fmt
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -163,7 +163,7 @@ jobs:
 
   udeps:
     name: udeps
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -177,7 +177,7 @@ jobs:
 
   book:
     name: book
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -232,10 +232,14 @@ jobs:
       - name: Ensure no arbitrary or proptest dependency on default build
         run: cargo tree --package reth -e=features,no-dev | grep -Eq "arbitrary|proptest" && exit 1 || exit 0
 
-  # Checks that selected rates can compile with power set of features
+  # Checks that selected crates can compile with power set of features
   features:
-    name: features
-    runs-on: ubuntu-latest
+    name: features (${{ matrix.partition }}/${{ matrix.total_partitions }})
+    runs-on: depot-ubuntu-latest-16
+    strategy:
+      matrix:
+        partition: [1, 2]
+        total_partitions: [2]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
@@ -246,13 +250,19 @@ jobs:
           cache-on-failure: true
       - name: cargo install cargo-hack
         uses: taiki-e/install-action@cargo-hack
-      - run: make check-features
+      - run: |
+          cargo hack check \
+            --package reth-codecs \
+            --package reth-primitives-traits \
+            --package reth-primitives \
+            --feature-powerset \
+            --partition ${{ matrix.partition }}/${{ matrix.total_partitions }}
         env:
           RUSTFLAGS: -D warnings
 
   # Check crates correctly propagate features
   feature-propagation:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v6

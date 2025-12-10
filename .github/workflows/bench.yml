@@ -15,7 +15,7 @@ env:
 name: bench
 jobs:
   codspeed:
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     steps:
       - uses: actions/checkout@v6
         with:

@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
     name: run kurtosis
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     needs:
       - prepare-reth
     steps:
@@ -58,7 +58,7 @@ jobs:
   notify-on-error:
     needs: test
     if: failure()
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest
     steps:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2

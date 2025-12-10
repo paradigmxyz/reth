@@ -3655,6 +3655,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-rpc-middleware"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "jsonrpsee",
+ "reth-ethereum",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
