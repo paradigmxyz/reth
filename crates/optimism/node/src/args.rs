@@ -76,6 +76,14 @@ pub struct RollupArgs {
     #[arg(long)]
     pub flashblocks_url: Option<Url>,
 
+    /// Enable flashblock consensus client to drive the chain forward
+    ///
+    /// When enabled, the flashblock consensus client will process flashblock sequences and submit
+    /// them to the engine API to advance the chain.
+    /// Requires `flashblocks_url` to be set.
+    #[arg(long, default_value_t = false, requires = "flashblocks_url")]
+    pub flashblock_consensus: bool,
+
     /// X Layer specific configuration
     #[command(flatten)]
     pub xlayer_args: XLayerArgs,
@@ -95,6 +103,7 @@ impl Default for RollupArgs {
             historical_rpc: None,
             min_suggested_priority_fee: 1_000_000,
             flashblocks_url: None,
+            flashblock_consensus: false,
             xlayer_args: XLayerArgs::default(),
         }
     }

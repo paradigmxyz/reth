@@ -17,6 +17,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{B256, U256};
 use eyre::WrapErr;
 use op_alloy_network::Optimism;
+use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reqwest::Url;
 use reth_chainspec::{EthereumHardforks, Hardforks};
@@ -24,8 +25,9 @@ use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
-    ExecutionPayloadBaseV1, FlashBlockBuildInfo, FlashBlockCompleteSequenceRx, FlashBlockRx,
-    FlashBlockService, FlashblocksListeners, PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
+    FlashBlockBuildInfo, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
+    FlashBlockConsensusClient, FlashBlockRx, FlashBlockService, FlashblocksListeners,
+    PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
 };
 use reth_rpc::eth::core::EthApiInner;
 use reth_rpc_eth_api::{
@@ -401,6 +403,12 @@ pub struct OpEthApiBuilder<NetworkT = Optimism> {
     ///
     /// [flashblocks]: reth_optimism_flashblocks
     flashblocks_url: Option<Url>,
+    /// Enable flashblock consensus client to drive the chain forward.
+    ///
+    /// When enabled, flashblock sequences are submitted to the engine API via
+    /// `newPayload` and `forkchoiceUpdated` calls, advancing the canonical chain state.
+    /// Requires `flashblocks_url` to be set.
+    flashblock_consensus: bool,
     /// Marker for network types.
     _nt: PhantomData<NetworkT>,
 }
@@ -412,6 +420,7 @@ impl<NetworkT> Default for OpEthApiBuilder<NetworkT> {
             sequencer_headers: Vec::new(),
             min_suggested_priority_fee: 1_000_000,
             flashblocks_url: None,
+            flashblock_consensus: false,
             _nt: PhantomData,
         }
     }
@@ -425,6 +434,7 @@ impl<NetworkT> OpEthApiBuilder<NetworkT> {
             sequencer_headers: Vec::new(),
             min_suggested_priority_fee: 1_000_000,
             flashblocks_url: None,
+            flashblock_consensus: false,
             _nt: PhantomData,
         }
     }
@@ -452,6 +462,12 @@ impl<NetworkT> OpEthApiBuilder<NetworkT> {
         self.flashblocks_url = flashblocks_url;
         self
     }
+
+    /// With flashblock consensus client enabled to drive chain forward
+    pub const fn with_flashblock_consensus(mut self, flashblock_consensus: bool) -> Self {
+        self.flashblock_consensus = flashblock_consensus;
+        self
+    }
 }
 
 impl<N, NetworkT> EthApiBuilder<N> for OpEthApiBuilder<NetworkT>
@@ -459,10 +475,18 @@ where
     N: FullNodeComponents<
         Evm: ConfigureEvm<
             NextBlockEnvCtx: BuildPendingEnv<HeaderTy<N::Types>>
-                                 + From<ExecutionPayloadBaseV1>
+                                 + From<OpFlashblockPayloadBase>
                                  + Unpin,
         >,
-        Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>,
+        Types: NodeTypes<
+            ChainSpec: Hardforks + EthereumHardforks,
+            Payload: reth_node_api::PayloadTypes<
+                ExecutionData: for<'a> TryFrom<
+                    &'a FlashBlockCompleteSequence,
+                    Error: std::fmt::Display,
+                >,
+            >,
+        >,
     >,
     NetworkT: RpcTypes,
     OpRpcConvert<N, NetworkT>: RpcConvert<Network = NetworkT>,
@@ -477,6 +501,7 @@ where
             sequencer_headers,
             min_suggested_priority_fee,
             flashblocks_url,
+            flashblock_consensus,
             ..
         } = self;
         let rpc_converter =
@@ -503,13 +528,23 @@ where
                 ctx.components.evm_config().clone(),
                 ctx.components.provider().clone(),
                 ctx.components.task_executor().clone(),
+                // enable state root calculation if flashblock_consensus is enabled.
+                flashblock_consensus,
             );
 
             let flashblocks_sequence = service.block_sequence_broadcaster().clone();
             let received_flashblocks = service.flashblocks_broadcaster().clone();
             let in_progress_rx = service.subscribe_in_progress();
-
             ctx.components.task_executor().spawn(Box::pin(service.run(tx)));
+
+            if flashblock_consensus {
+                info!(target: "reth::cli", "Launching FlashBlockConsensusClient");
+                let flashblock_client = FlashBlockConsensusClient::new(
+                    ctx.engine_handle.clone(),
+                    flashblocks_sequence.subscribe(),
+                )?;
+                ctx.components.task_executor().spawn(Box::pin(flashblock_client.run()));
+            }
 
             Some(FlashblocksListeners::new(
                 pending_rx,

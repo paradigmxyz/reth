@@ -68,6 +68,17 @@ impl ExecutionPayload for CustomExecutionData {
     }
 }
 
+impl TryFrom<&reth_optimism_flashblocks::FlashBlockCompleteSequence> for CustomExecutionData {
+    type Error = &'static str;
+
+    fn try_from(
+        sequence: &reth_optimism_flashblocks::FlashBlockCompleteSequence,
+    ) -> Result<Self, Self::Error> {
+        let inner = OpExecutionData::try_from(sequence)?;
+        Ok(Self { inner, extension: sequence.last().diff.gas_used })
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomPayloadAttributes {
     #[serde(flatten)]
