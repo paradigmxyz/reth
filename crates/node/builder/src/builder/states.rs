@@ -255,8 +255,7 @@ where
     /// # See also
     ///
     /// - [`NodeAddOns`] trait for available addon types
-    /// - [`reth_node_builder::NodeBuilderWithComponents::extend_rpc_modules`] for RPC module
-    ///   configuration
+    /// - [`crate::NodeBuilderWithComponents::extend_rpc_modules`] for RPC module configuration
     pub fn map_add_ons<F>(mut self, f: F) -> Self
     where
         F: FnOnce(AO) -> AO,
