@@ -96,8 +96,8 @@ jobs:
     runs-on: depot-ubuntu-latest-16
     strategy:
       matrix:
-        partition: [1, 2]
-        total_partitions: [2]
+        partition: [1, 2, 3]
+        total_partitions: [3]
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v6
