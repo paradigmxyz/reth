@@ -64,7 +64,7 @@ pub async fn launch_http(modules: impl Into<RpcModuleSelection>) -> RpcServerHan
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
     let server =
-        builder.build(TransportRpcModuleConfig::set_http(modules), eth_api, EventSender::new(0));
+        builder.build(TransportRpcModuleConfig::set_http(modules), eth_api, EventSender::new(1));
     RpcServerConfig::http(Default::default())
         .with_http_address(test_address())
         .start(&server)
@@ -77,7 +77,7 @@ pub async fn launch_ws(modules: impl Into<RpcModuleSelection>) -> RpcServerHandl
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
     let server =
-        builder.build(TransportRpcModuleConfig::set_ws(modules), eth_api, EventSender::new(0));
+        builder.build(TransportRpcModuleConfig::set_ws(modules), eth_api, EventSender::new(1));
     RpcServerConfig::ws(Default::default())
         .with_ws_address(test_address())
         .start(&server)
