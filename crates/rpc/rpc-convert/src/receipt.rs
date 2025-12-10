@@ -35,7 +35,9 @@ impl TryFromReceiptResponse<op_alloy_network::Optimism> for reth_optimism_primit
     fn from_receipt_response(
         receipt_response: op_alloy_rpc_types::OpTransactionReceipt,
     ) -> Result<Self, Self::Error> {
-        Ok(receipt_response.inner.inner.map_logs(Into::into).into())
+        // Convert ReceiptWithBloom<OpReceipt<Log>> to OpReceiptEnvelope, then map logs
+        let envelope = op_alloy_consensus::OpReceiptEnvelope::from(receipt_response.inner.inner);
+        Ok(envelope.map_logs(Into::into).into())
     }
 }
 
@@ -70,14 +72,18 @@ mod tests {
     #[cfg(feature = "op")]
     #[test]
     fn test_try_from_receipt_response_optimism() {
-        use op_alloy_consensus::OpReceiptEnvelope;
+        use alloy_consensus::ReceiptWithBloom;
+        use op_alloy_consensus::OpReceipt as OpConsensusReceipt;
         use op_alloy_network::Optimism;
         use op_alloy_rpc_types::OpTransactionReceipt;
         use reth_optimism_primitives::OpReceipt;
 
         let op_receipt = OpTransactionReceipt {
             inner: alloy_rpc_types_eth::TransactionReceipt {
-                inner: OpReceiptEnvelope::Eip1559(Default::default()),
+                inner: ReceiptWithBloom {
+                    receipt: OpConsensusReceipt::Eip1559(Default::default()),
+                    logs_bloom: Default::default(),
+                },
                 transaction_hash: Default::default(),
                 transaction_index: None,
                 block_hash: None,
