@@ -17,5 +17,8 @@ alloy-genesis.workspace = true
 
 [features]
 std = [
-	"reth-discv4/std"
+    "reth-discv4/std",
+    "alloy-genesis/std",
+    "secp256k1/std",
+    "serde_json/std",
 ]

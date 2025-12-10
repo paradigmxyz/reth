@@ -24,5 +24,7 @@ serde_json.workspace = true
 
 [features]
 std = [
-	"reth-db/std"
+    "reth-db/std",
+    "alloy-genesis/std",
+    "serde_json/std",
 ]

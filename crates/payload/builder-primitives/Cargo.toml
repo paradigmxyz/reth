@@ -24,4 +24,6 @@ tokio-stream.workspace = true
 tracing.workspace = true
 
 [features]
-std = []
+std = [
+    "tracing/std",
+]

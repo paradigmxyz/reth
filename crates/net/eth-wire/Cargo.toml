@@ -90,10 +90,21 @@ serde = [
     "rand_08/serde",
 ]
 std = [
-	"reth-ecies/std",
-	"reth-ethereum-forks/std",
-	"reth-network-peers/std",
-	"reth-primitives-traits/std"
+    "reth-ecies/std",
+    "reth-ethereum-forks/std",
+    "reth-network-peers/std",
+    "reth-primitives-traits/std",
+    "alloy-chains/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "bytes/std",
+    "derive_more/std",
+    "secp256k1/std",
+    "serde?/std",
+    "thiserror/std",
+    "tracing/std",
 ]
 
 [[test]]

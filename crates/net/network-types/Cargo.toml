@@ -34,5 +34,9 @@ serde = [
 ]
 test-utils = []
 std = [
-	"reth-network-peers/std"
+    "reth-network-peers/std",
+    "alloy-eip2124/std",
+    "serde?/std",
+    "serde_json/std",
+    "tracing/std",
 ]

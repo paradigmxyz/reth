@@ -50,7 +50,13 @@ serde = [
     "alloy-rpc-types-eth/serde",
 ]
 std = [
-	"reth-ethereum-forks/std",
-	"reth-network-peers/std",
-	"reth-network-types/std"
+    "reth-ethereum-forks/std",
+    "reth-network-peers/std",
+    "reth-network-types/std",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-eth/std",
+    "derive_more/std",
+    "serde?/std",
+    "thiserror/std",
 ]

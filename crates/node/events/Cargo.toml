@@ -41,11 +41,17 @@ derive_more.workspace = true
 
 [features]
 std = [
-	"reth-engine-primitives/std",
-	"reth-network-api/std",
-	"reth-primitives-traits/std",
-	"reth-prune-types/std",
-	"reth-stages/std",
-	"reth-static-file-types/std",
-	"reth-storage-api/std"
+    "reth-engine-primitives/std",
+    "reth-network-api/std",
+    "reth-primitives-traits/std",
+    "reth-prune-types/std",
+    "reth-stages/std",
+    "reth-static-file-types/std",
+    "reth-storage-api/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "derive_more/std",
+    "tracing/std",
 ]

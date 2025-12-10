@@ -38,14 +38,17 @@ tracing.workspace = true
 
 [features]
 std = [
-	"reth-chain-state/std",
-	"reth-errors/std",
-	"reth-ethereum-primitives/std",
-	"reth-evm/std",
-	"reth-node-api/std",
-	"reth-primitives-traits/std",
-	"reth-ress-protocol/std",
-	"reth-revm/std",
-	"reth-storage-api/std",
-	"reth-trie/std"
+    "reth-chain-state/std",
+    "reth-errors/std",
+    "reth-ethereum-primitives/std",
+    "reth-evm/std",
+    "reth-node-api/std",
+    "reth-primitives-traits/std",
+    "reth-ress-protocol/std",
+    "reth-revm/std",
+    "reth-storage-api/std",
+    "reth-trie/std",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "tracing/std",
 ]

@@ -20,7 +20,8 @@ thiserror.workspace = true
 
 [features]
 std = [
-	"reth-consensus/std",
-	"reth-execution-errors/std",
-	"reth-storage-errors/std"
+    "reth-consensus/std",
+    "reth-execution-errors/std",
+    "reth-storage-errors/std",
+    "thiserror/std",
 ]

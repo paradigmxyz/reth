@@ -52,15 +52,16 @@ min-info-logs = ["tracing/release_max_level_info"]
 min-debug-logs = ["tracing/release_max_level_debug"]
 min-trace-logs = ["tracing/release_max_level_trace"]
 std = [
-	"reth-optimism-chainspec/std",
-	"reth-optimism-cli/std",
-	"reth-optimism-consensus/std",
-	"reth-optimism-evm/std",
-	"reth-optimism-forks/std",
-	"reth-optimism-node/std",
-	"reth-optimism-payload-builder/std",
-	"reth-optimism-primitives/std",
-	"reth-optimism-rpc/std"
+    "reth-optimism-chainspec/std",
+    "reth-optimism-cli/std",
+    "reth-optimism-consensus/std",
+    "reth-optimism-evm/std",
+    "reth-optimism-forks/std",
+    "reth-optimism-node/std",
+    "reth-optimism-payload-builder/std",
+    "reth-optimism-primitives/std",
+    "reth-optimism-rpc/std",
+    "tracing/std",
 ]
 
 [[bin]]

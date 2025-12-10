@@ -95,13 +95,21 @@ test-utils = [
     "reth-stages-types/test-utils",
 ]
 std = [
-	"reth-ethereum-primitives/std",
-	"reth-execution-errors/std",
-	"reth-primitives-traits/std",
-	"reth-stages-types/std",
-	"reth-storage-errors/std",
-	"reth-trie-common/std",
-	"reth-trie-sparse/std"
+    "reth-ethereum-primitives/std",
+    "reth-execution-errors/std",
+    "reth-primitives-traits/std",
+    "reth-stages-types/std",
+    "reth-storage-errors/std",
+    "reth-trie-common/std",
+    "reth-trie-sparse/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "alloy-trie/std",
+    "revm-database/std",
+    "revm-state/std",
+    "tracing/std",
 ]
 
 [[bench]]

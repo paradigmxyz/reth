@@ -12,5 +12,5 @@ eyre.workspace = true
 
 [features]
 std = [
-	"reth-op/std"
+    "reth-op/std",
 ]

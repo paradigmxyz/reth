@@ -21,5 +21,7 @@ alloy-consensus.workspace = true
 
 [features]
 std = [
-	"reth-transaction-pool/std"
+    "reth-transaction-pool/std",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
 ]

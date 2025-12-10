@@ -45,5 +45,17 @@ tokio = { workspace = true, features = ["net", "rt", "macros"] }
 
 [features]
 std = [
-	"reth-network-peers/std"
+    "reth-network-peers/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "block-padding/std",
+    "cipher/std",
+    "concat-kdf/std",
+    "ctr/std",
+    "digest/std",
+    "hmac/std",
+    "secp256k1/std",
+    "sha2/std",
+    "thiserror/std",
+    "tracing/std",
 ]

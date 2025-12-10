@@ -20,5 +20,6 @@ alloy-primitives.workspace = true
 
 [features]
 std = [
-	"reth-db-api/std"
+    "reth-db-api/std",
+    "alloy-primitives/std",
 ]

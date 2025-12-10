@@ -38,6 +38,13 @@ ringbuffer.workspace = true
 
 [features]
 std = [
-	"reth-node-api/std",
-	"reth-primitives-traits/std"
+    "reth-node-api/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "derive_more/std",
+    "serde/std",
+    "serde_json/std",
 ]

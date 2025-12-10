@@ -15,4 +15,7 @@ tracing.workspace = true
 alloy-primitives.workspace = true
 
 [features]
-std = []
+std = [
+    "alloy-primitives/std",
+    "tracing/std",
+]

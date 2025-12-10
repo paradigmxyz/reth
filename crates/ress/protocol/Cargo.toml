@@ -64,11 +64,16 @@ arbitrary = [
     "alloy-consensus/arbitrary",
 ]
 std = [
-	"reth-eth-wire/std",
-	"reth-ethereum-primitives/std",
-	"reth-network/std",
-	"reth-network-api/std",
-	"reth-provider/std",
-	"reth-ress-protocol/std",
-	"reth-storage-errors/std"
+    "reth-eth-wire/std",
+    "reth-ethereum-primitives/std",
+    "reth-network/std",
+    "reth-network-api/std",
+    "reth-provider/std",
+    "reth-ress-protocol/std",
+    "reth-storage-errors/std",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "strum/std",
+    "tracing/std",
 ]

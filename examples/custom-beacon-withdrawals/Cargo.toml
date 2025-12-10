@@ -16,4 +16,8 @@ alloy-eips.workspace = true
 eyre.workspace = true
 
 [features]
-std = []
+std = [
+    "alloy-eips/std",
+    "alloy-evm/std",
+    "alloy-sol-types/std",
+]

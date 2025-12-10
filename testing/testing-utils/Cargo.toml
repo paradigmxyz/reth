@@ -28,6 +28,12 @@ alloy-rlp.workspace = true
 
 [features]
 std = [
-	"reth-ethereum-primitives/std",
-	"reth-primitives-traits/std"
+    "reth-ethereum-primitives/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "secp256k1/std",
 ]

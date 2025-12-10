@@ -94,12 +94,18 @@ op = [
 ]
 bench = []
 std = [
-	"reth-db-models/std",
-	"reth-ethereum-primitives/std",
-	"reth-optimism-primitives?/std",
-	"reth-primitives-traits/std",
-	"reth-prune-types/std",
-	"reth-stages-types/std",
-	"reth-storage-errors/std",
-	"reth-trie-common/std"
+    "reth-db-models/std",
+    "reth-ethereum-primitives/std",
+    "reth-optimism-primitives?/std",
+    "reth-primitives-traits/std",
+    "reth-prune-types/std",
+    "reth-stages-types/std",
+    "reth-storage-errors/std",
+    "reth-trie-common/std",
+    "alloy-consensus/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "bytes/std",
+    "derive_more/std",
+    "serde/std",
 ]

@@ -45,5 +45,9 @@ workspace = true
 
 [features]
 std = [
-	"reth-era/std"
+    "reth-era/std",
+    "alloy-primitives/std",
+    "bytes/std",
+    "futures-util/std",
+    "sha2/std",
 ]

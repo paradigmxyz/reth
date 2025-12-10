@@ -22,4 +22,12 @@ serde.workspace = true
 thiserror.workspace = true
 
 [features]
-std = []
+std = [
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "futures-util/std",
+    "serde/std",
+    "serde_json/std",
+    "thiserror/std",
+]

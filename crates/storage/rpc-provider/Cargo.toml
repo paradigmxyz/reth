@@ -50,15 +50,21 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 
 [features]
 std = [
-	"reth-chainspec/std",
-	"reth-db-api/std",
-	"reth-errors/std",
-	"reth-execution-types/std",
-	"reth-primitives/std",
-	"reth-provider/std",
-	"reth-prune-types/std",
-	"reth-rpc-convert/std",
-	"reth-stages-types/std",
-	"reth-storage-api/std",
-	"reth-trie/std"
+    "reth-chainspec/std",
+    "reth-db-api/std",
+    "reth-errors/std",
+    "reth-execution-types/std",
+    "reth-primitives/std",
+    "reth-provider/std",
+    "reth-prune-types/std",
+    "reth-rpc-convert/std",
+    "reth-stages-types/std",
+    "reth-storage-api/std",
+    "reth-trie/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "revm/std",
+    "tracing/std",
 ]

@@ -41,10 +41,15 @@ tracing.workspace = true
 
 [features]
 std = [
-	"reth-chain-state/std",
-	"reth-payload-builder/std",
-	"reth-payload-builder-primitives/std",
-	"reth-primitives-traits/std",
-	"reth-revm/std",
-	"reth-storage-api/std"
+    "reth-chain-state/std",
+    "reth-payload-builder/std",
+    "reth-payload-builder-primitives/std",
+    "reth-primitives-traits/std",
+    "reth-revm/std",
+    "reth-storage-api/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "futures-util/std",
+    "tracing/std",
 ]

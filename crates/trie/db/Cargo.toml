@@ -69,12 +69,19 @@ test-utils = [
     "reth-trie/test-utils",
 ]
 std = [
-	"reth-chainspec/std",
-	"reth-db/std",
-	"reth-db-api/std",
-	"reth-execution-errors/std",
-	"reth-primitives-traits/std",
-	"reth-provider/std",
-	"reth-trie/std",
-	"reth-trie-common/std"
+    "reth-chainspec/std",
+    "reth-db/std",
+    "reth-db-api/std",
+    "reth-execution-errors/std",
+    "reth-primitives-traits/std",
+    "reth-provider/std",
+    "reth-trie/std",
+    "reth-trie-common/std",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "revm/std",
+    "revm-database/std",
+    "serde_json/std",
+    "tracing/std",
 ]

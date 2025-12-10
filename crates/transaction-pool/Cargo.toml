@@ -120,13 +120,26 @@ arbitrary = [
     "revm-primitives/arbitrary",
 ]
 std = [
-	"reth-chain-state/std",
-	"reth-chainspec/std",
-	"reth-ethereum-primitives/std",
-	"reth-execution-types/std",
-	"reth-primitives-traits/std",
-	"reth-provider/std",
-	"reth-storage-api/std"
+    "reth-chain-state/std",
+    "reth-chainspec/std",
+    "reth-ethereum-primitives/std",
+    "reth-execution-types/std",
+    "reth-primitives-traits/std",
+    "reth-provider/std",
+    "reth-storage-api/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "bitflags/std",
+    "futures-util/std",
+    "revm-interpreter/std",
+    "revm-primitives/std",
+    "rustc-hash/std",
+    "serde/std",
+    "serde_json/std",
+    "thiserror/std",
+    "tracing/std",
 ]
 
 [[bench]]

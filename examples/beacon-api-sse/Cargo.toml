@@ -17,4 +17,7 @@ tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true
 
 [features]
-std = []
+std = [
+    "futures-util/std",
+    "tracing/std",
+]

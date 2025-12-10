@@ -24,4 +24,9 @@ serde_json.workspace = true
 tracing.workspace = true
 
 [features]
-std = []
+std = [
+    "alloy-primitives/std",
+    "serde/std",
+    "serde_json/std",
+    "tracing/std",
+]

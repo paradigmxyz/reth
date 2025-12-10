@@ -53,18 +53,18 @@ rand_08.workspace = true
 [features]
 default = ["std", "metrics"]
 std = [
-	"dep:rayon",
-	"alloy-primitives/std",
-	"alloy-rlp/std",
-	"alloy-trie/std",
-	"reth-execution-errors/std",
-	"reth-primitives-traits/std",
-	"reth-trie-common/std",
-	"reth-trie-sparse/std",
-	"tracing/std",
-	"reth-provider/std",
-	"reth-trie/std",
-	"reth-trie-db/std"
+    "dep:rayon",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "alloy-trie/std",
+    "reth-execution-errors/std",
+    "reth-primitives-traits/std",
+    "reth-trie-common/std",
+    "reth-trie-sparse/std",
+    "tracing/std",
+    "reth-provider/std",
+    "reth-trie/std",
+    "reth-trie-db/std",
 ]
 metrics = [
     "dep:reth-metrics",

@@ -82,13 +82,14 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 std = [
-	"reth-chainspec/std",
-	"reth-cli-commands/std",
-	"reth-db/std",
-	"reth-node-api/std",
-	"reth-node-builder/std",
-	"reth-node-core/std",
-	"reth-node-ethereum/std",
-	"reth-cli/std",
-	"reth-rpc-server-types/std"
+    "reth-chainspec/std",
+    "reth-cli-commands/std",
+    "reth-db/std",
+    "reth-node-api/std",
+    "reth-node-builder/std",
+    "reth-node-core/std",
+    "reth-node-ethereum/std",
+    "reth-cli/std",
+    "reth-rpc-server-types/std",
+    "tracing/std",
 ]

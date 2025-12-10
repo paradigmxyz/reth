@@ -44,9 +44,14 @@ path = "tests/e2e-testsuite/main.rs"
 
 [features]
 std = [
-	"reth-chainspec/std",
-	"reth-e2e-test-utils/std",
-	"reth-node-api/std",
-	"reth-node-ethereum/std",
-	"reth-rpc-api/std"
+    "reth-chainspec/std",
+    "reth-e2e-test-utils/std",
+    "reth-node-api/std",
+    "reth-node-ethereum/std",
+    "reth-rpc-api/std",
+    "alloy-genesis/std",
+    "alloy-rpc-types-engine/std",
+    "futures-util/std",
+    "serde_json/std",
+    "tracing/std",
 ]

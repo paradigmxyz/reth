@@ -12,4 +12,6 @@ alloy-primitives.workspace = true
 eyre.workspace = true
 
 [features]
-std = []
+std = [
+    "alloy-primitives/std",
+]

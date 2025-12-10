@@ -95,6 +95,11 @@ min-trace-logs = [
 # no-op feature flag for switching between the `optimism` and default functionality in CI matrices
 ethereum = []
 std = [
-	"reth-chainspec/std",
-	"reth-node-core/std"
+    "reth-chainspec/std",
+    "reth-node-core/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-eth/std",
+    "serde/std",
+    "serde_json/std",
+    "tracing/std",
 ]

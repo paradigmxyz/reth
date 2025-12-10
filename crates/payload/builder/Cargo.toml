@@ -46,8 +46,12 @@ test-utils = [
     "tokio/rt",
 ]
 std = [
-	"reth-chain-state/std",
-	"reth-ethereum-engine-primitives/std",
-	"reth-payload-builder-primitives/std",
-	"reth-primitives-traits/std"
+    "reth-chain-state/std",
+    "reth-ethereum-engine-primitives/std",
+    "reth-payload-builder-primitives/std",
+    "reth-primitives-traits/std",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "futures-util/std",
+    "tracing/std",
 ]

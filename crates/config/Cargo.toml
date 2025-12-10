@@ -40,11 +40,14 @@ serde = [
     "url/serde",
 ]
 std = [
-	"reth-network-peers/std",
-	"reth-network-types/std",
-	"reth-prune-types/std",
-	"reth-stages-types/std",
-	"reth-static-file-types/std"
+    "reth-network-peers/std",
+    "reth-network-types/std",
+    "reth-prune-types/std",
+    "reth-stages-types/std",
+    "reth-static-file-types/std",
+    "alloy-primitives/std",
+    "serde?/std",
+    "url/std",
 ]
 
 [dev-dependencies]

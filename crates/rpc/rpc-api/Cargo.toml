@@ -46,9 +46,15 @@ client = [
     "reth-rpc-eth-api/client",
 ]
 std = [
-	"reth-chain-state/std",
-	"reth-engine-primitives/std",
-	"reth-network-peers/std",
-	"reth-rpc-eth-api/std",
-	"reth-trie-common/std"
+    "reth-chain-state/std",
+    "reth-engine-primitives/std",
+    "reth-network-peers/std",
+    "reth-rpc-eth-api/std",
+    "reth-trie-common/std",
+    "alloy-eips/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "alloy-rpc-types-eth/std",
+    "alloy-serde/std",
 ]

@@ -35,9 +35,17 @@ thiserror = { workspace = true, features = ["std"] }
 
 [features]
 std = [
-	"reth-chain-state/std",
-	"reth-network-api/std",
-	"reth-primitives-traits/std",
-	"reth-storage-api/std",
-	"reth-transaction-pool/std"
+    "reth-chain-state/std",
+    "reth-network-api/std",
+    "reth-primitives-traits/std",
+    "reth-storage-api/std",
+    "reth-transaction-pool/std",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "futures-util/std",
+    "serde/std",
+    "serde_json/std",
+    "thiserror/std",
+    "tracing/std",
+    "url/std",
 ]

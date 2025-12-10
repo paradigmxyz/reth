@@ -39,13 +39,15 @@ tempfile.workspace = true
 
 [features]
 std = [
-	"reth-db-api/std",
-	"reth-primitives-traits/std",
-	"reth-provider/std",
-	"reth-prune-types/std",
-	"reth-stages/std",
-	"reth-stages-types/std",
-	"reth-static-file-types/std",
-	"reth-storage-errors/std",
-	"reth-testing-utils/std"
+    "reth-db-api/std",
+    "reth-primitives-traits/std",
+    "reth-provider/std",
+    "reth-prune-types/std",
+    "reth-stages/std",
+    "reth-stages-types/std",
+    "reth-static-file-types/std",
+    "reth-storage-errors/std",
+    "reth-testing-utils/std",
+    "alloy-primitives/std",
+    "tracing/std",
 ]

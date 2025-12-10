@@ -98,11 +98,19 @@ op = [
 ]
 disable-lock = []
 std = [
-	"reth-db-api/std",
-	"reth-primitives-traits/std",
-	"reth-prune-types/std",
-	"reth-static-file-types/std",
-	"reth-storage-errors/std"
+    "reth-db-api/std",
+    "reth-primitives-traits/std",
+    "reth-prune-types/std",
+    "reth-static-file-types/std",
+    "reth-storage-errors/std",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "derive_more/std",
+    "rustc-hash?/std",
+    "serde/std",
+    "serde_json/std",
+    "strum?/std",
+    "thiserror/std",
 ]
 
 [[bench]]

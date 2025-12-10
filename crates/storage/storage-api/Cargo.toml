@@ -37,22 +37,22 @@ serde_json = { workspace = true, optional = true }
 [features]
 default = ["std"]
 std = [
-	"reth-chainspec/std",
-	"alloy-consensus/std",
-	"alloy-eips/std",
-	"alloy-primitives/std",
-	"alloy-rpc-types-engine/std",
-	"reth-primitives-traits/std",
-	"reth-stages-types/std",
-	"revm-database/std",
-	"reth-ethereum-primitives/std",
-	"reth-execution-types/std",
-	"reth-prune-types/std",
-	"reth-storage-errors/std",
-	"reth-db-models/std",
-	"reth-trie-common/std",
-	"serde_json?/std",
-	"reth-db-api?/std"
+    "reth-chainspec/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "reth-primitives-traits/std",
+    "reth-stages-types/std",
+    "revm-database/std",
+    "reth-ethereum-primitives/std",
+    "reth-execution-types/std",
+    "reth-prune-types/std",
+    "reth-storage-errors/std",
+    "reth-db-models/std",
+    "reth-trie-common/std",
+    "serde_json?/std",
+    "reth-db-api?/std",
 ]
 
 db-api = [

@@ -18,4 +18,8 @@ schnellru.workspace = true
 tokio.workspace = true
 
 [features]
-std = []
+std = [
+    "alloy-evm/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+]

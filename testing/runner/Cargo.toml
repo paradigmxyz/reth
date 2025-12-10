@@ -17,5 +17,5 @@ workspace = true
 
 [features]
 std = [
-	"ef-tests/std"
+    "ef-tests/std",
 ]

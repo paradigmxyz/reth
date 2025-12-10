@@ -40,6 +40,11 @@ workspace = true
 
 [features]
 std = [
-	"reth-ethereum-primitives/std",
-	"reth-era-downloader/std"
+    "reth-ethereum-primitives/std",
+    "reth-era-downloader/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "thiserror/std",
 ]

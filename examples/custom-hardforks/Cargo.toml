@@ -17,6 +17,10 @@ serde = { version = "1.0", features = ["derive"] }
 
 [features]
 std = [
-	"reth-chainspec/std",
-	"reth-network-peers/std"
+    "reth-chainspec/std",
+    "reth-network-peers/std",
+    "alloy-consensus/std",
+    "alloy-eips/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
 ]

@@ -47,7 +47,13 @@ rand_08.workspace = true
 
 [features]
 std = [
-	"reth-chainspec/std",
-	"reth-ethereum-forks/std",
-	"reth-network-peers/std"
+    "reth-chainspec/std",
+    "reth-ethereum-forks/std",
+    "reth-network-peers/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "derive_more/std",
+    "secp256k1/std",
+    "thiserror/std",
+    "tracing/std",
 ]

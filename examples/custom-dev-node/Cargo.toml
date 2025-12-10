@@ -17,4 +17,9 @@ alloy-genesis.workspace = true
 alloy-primitives.workspace = true
 
 [features]
-std = []
+std = [
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "futures-util/std",
+    "serde_json/std",
+]

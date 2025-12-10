@@ -58,9 +58,18 @@ op = [
     "alloy-evm/op",
 ]
 std = [
-	"reth-ethereum-primitives/std",
-	"reth-evm/std",
-	"reth-optimism-primitives?/std",
-	"reth-primitives-traits/std",
-	"reth-storage-api?/std"
+    "reth-ethereum-primitives/std",
+    "reth-evm/std",
+    "reth-optimism-primitives?/std",
+    "reth-primitives-traits/std",
+    "reth-storage-api?/std",
+    "alloy-consensus/std",
+    "alloy-evm/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-eth/std",
+    "op-alloy-consensus?/std",
+    "op-alloy-network?/std",
+    "op-alloy-rpc-types?/std",
+    "serde_json/std",
+    "thiserror/std",
 ]

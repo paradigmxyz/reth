@@ -17,4 +17,7 @@ futures-util.workspace = true
 eyre.workspace = true
 
 [features]
-std = []
+std = [
+    "alloy-primitives/std",
+    "futures-util/std",
+]

@@ -66,14 +66,19 @@ test-utils = [
     "reth-trie/test-utils",
 ]
 std = [
-	"reth-execution-errors/std",
-	"reth-primitives-traits/std",
-	"reth-provider/std",
-	"reth-storage-errors/std",
-	"reth-trie/std",
-	"reth-trie-common/std",
-	"reth-trie-db/std",
-	"reth-trie-sparse/std"
+    "reth-execution-errors/std",
+    "reth-primitives-traits/std",
+    "reth-provider/std",
+    "reth-storage-errors/std",
+    "reth-trie/std",
+    "reth-trie-common/std",
+    "reth-trie-db/std",
+    "reth-trie-sparse/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "derive_more/std",
+    "thiserror/std",
+    "tracing/std",
 ]
 
 [[bench]]

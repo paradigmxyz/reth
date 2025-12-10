@@ -22,7 +22,9 @@ eyre.workspace = true
 
 [features]
 std = [
-	"reth-discv4/std",
-	"reth-ecies/std",
-	"reth-network-peers/std"
+    "reth-discv4/std",
+    "reth-ecies/std",
+    "reth-network-peers/std",
+    "alloy-consensus/std",
+    "secp256k1/std",
 ]

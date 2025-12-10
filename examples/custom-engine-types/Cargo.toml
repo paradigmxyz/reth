@@ -23,7 +23,12 @@ serde.workspace = true
 
 [features]
 std = [
-	"reth-basic-payload-builder/std",
-	"reth-ethereum-payload-builder/std",
-	"reth-payload-builder/std"
+    "reth-basic-payload-builder/std",
+    "reth-ethereum-payload-builder/std",
+    "reth-payload-builder/std",
+    "alloy-eips/std",
+    "alloy-genesis/std",
+    "alloy-primitives/std",
+    "serde/std",
+    "thiserror/std",
 ]

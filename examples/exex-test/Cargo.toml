@@ -20,5 +20,7 @@ serde_json.workspace = true
 
 [features]
 std = [
-	"reth-e2e-test-utils/std"
+    "reth-e2e-test-utils/std",
+    "futures-util/std",
+    "serde_json/std",
 ]

@@ -47,12 +47,18 @@ op = [
     "reth-primitives-traits/op",
 ]
 std = [
-	"reth-chainspec/std",
-	"reth-engine-primitives/std",
-	"reth-ethereum-engine-primitives/std",
-	"reth-optimism-chainspec?/std",
-	"reth-payload-builder/std",
-	"reth-primitives-traits/std",
-	"reth-storage-api/std",
-	"reth-transaction-pool/std"
+    "reth-chainspec/std",
+    "reth-engine-primitives/std",
+    "reth-ethereum-engine-primitives/std",
+    "reth-optimism-chainspec?/std",
+    "reth-payload-builder/std",
+    "reth-primitives-traits/std",
+    "reth-storage-api/std",
+    "reth-transaction-pool/std",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "futures-util/std",
+    "op-alloy-rpc-types-engine?/std",
+    "tracing/std",
 ]

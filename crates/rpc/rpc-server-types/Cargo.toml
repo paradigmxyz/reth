@@ -30,6 +30,11 @@ serde = { workspace = true, features = ["derive"] }
 
 [features]
 std = [
-	"reth-errors/std",
-	"reth-network-api/std"
+    "reth-errors/std",
+    "reth-network-api/std",
+    "alloy-eips/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-engine/std",
+    "serde/std",
+    "strum/std",
 ]

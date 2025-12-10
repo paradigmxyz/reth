@@ -15,4 +15,10 @@ alloy-primitives.workspace = true
 alloy-eips.workspace = true
 
 [features]
-std = []
+std = [
+    "alloy-eips/std",
+    "alloy-evm/std",
+    "alloy-primitives/std",
+    "alloy-rpc-types-eth/std",
+    "futures-util/std",
+]

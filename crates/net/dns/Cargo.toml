@@ -63,7 +63,15 @@ serde = [
     "reth-ethereum-forks/serde",
 ]
 std = [
-	"reth-chainspec/std",
-	"reth-ethereum-forks/std",
-	"reth-network-peers/std"
+    "reth-chainspec/std",
+    "reth-ethereum-forks/std",
+    "reth-network-peers/std",
+    "alloy-chains/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "secp256k1/std",
+    "serde?/std",
+    "serde_with?/std",
+    "thiserror/std",
+    "tracing/std",
 ]

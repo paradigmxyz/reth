@@ -59,6 +59,12 @@ serde = [
 ]
 test-utils = ["dep:rand_08"]
 std = [
-	"reth-ethereum-forks/std",
-	"reth-network-peers/std"
+    "reth-ethereum-forks/std",
+    "reth-network-peers/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "secp256k1/std",
+    "serde?/std",
+    "thiserror/std",
+    "tracing/std",
 ]

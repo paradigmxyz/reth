@@ -16,4 +16,6 @@ serde_json.workspace = true
 [dev-dependencies]
 
 [features]
-std = []
+std = [
+    "serde_json/std",
+]
