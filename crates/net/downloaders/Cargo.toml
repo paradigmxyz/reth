@@ -84,3 +84,4 @@ test-utils = [
     "dep:reth-ethereum-primitives",
     "reth-ethereum-primitives?/test-utils",
 ]
+std = []

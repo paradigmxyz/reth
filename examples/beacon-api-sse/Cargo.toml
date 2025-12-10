@@ -15,3 +15,6 @@ futures-util.workspace = true
 mev-share-sse.workspace = true
 tokio = { workspace = true, features = ["time"] }
 tracing.workspace = true
+
+[features]
+std = []

@@ -136,6 +136,7 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-ethereum-primitives/test-utils",
 ]
+std = []
 
 [[bench]]
 name = "broadcast"

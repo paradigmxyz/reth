@@ -9,3 +9,6 @@ license.workspace = true
 reth-op = { workspace = true, features = ["node"] }
 
 eyre.workspace = true
+
+[features]
+std = []

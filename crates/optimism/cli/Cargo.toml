@@ -106,3 +106,4 @@ serde = [
     "reth-primitives-traits/serde",
     "reth-optimism-chainspec/serde",
 ]
+std = []

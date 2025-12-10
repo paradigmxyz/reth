@@ -104,3 +104,4 @@ test-utils = [
     "revm-state",
     "tokio",
 ]
+std = []

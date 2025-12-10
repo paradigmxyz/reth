@@ -22,3 +22,6 @@ tokio-stream.workspace = true
 
 # misc
 tracing.workspace = true
+
+[features]
+std = []

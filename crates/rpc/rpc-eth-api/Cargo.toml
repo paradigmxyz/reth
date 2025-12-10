@@ -68,3 +68,4 @@ op = [
     "reth-rpc-convert/op",
     "alloy-evm/op",
 ]
+std = []

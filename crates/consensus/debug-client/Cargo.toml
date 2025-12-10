@@ -35,3 +35,6 @@ tokio = { workspace = true, features = ["time"] }
 serde_json.workspace = true
 
 ringbuffer.workspace = true
+
+[features]
+std = []

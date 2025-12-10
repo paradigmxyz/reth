@@ -47,3 +47,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 
 [lints]
 workspace = true
+
+[features]
+std = []

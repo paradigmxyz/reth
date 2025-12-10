@@ -119,6 +119,7 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "revm-primitives/arbitrary",
 ]
+std = []
 
 [[bench]]
 name = "truncate"

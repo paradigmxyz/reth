@@ -41,3 +41,6 @@ alloy-genesis.workspace = true
 [[test]]
 name = "e2e_testsuite"
 path = "tests/e2e-testsuite/main.rs"
+
+[features]
+std = []

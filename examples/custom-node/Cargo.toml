@@ -69,3 +69,4 @@ arbitrary = [
     "op-alloy-rpc-types/arbitrary",
 ]
 default = []
+std = []

@@ -15,3 +15,6 @@ futures.workspace = true
 clap = { workspace = true, features = ["derive"] }
 reth-op = { workspace = true, features = ["full", "cli"] }
 tokio = { workspace = true, features = ["sync"] }
+
+[features]
+std = []

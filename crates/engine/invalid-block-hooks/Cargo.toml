@@ -49,3 +49,6 @@ reth-provider = { workspace = true, features = ["test-utils"] }
 reth-revm = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 tempfile.workspace = true
+
+[features]
+std = []

@@ -58,3 +58,6 @@ derive_more.workspace = true
 test-case.workspace = true
 alloy-consensus.workspace = true
 op-alloy-consensus.workspace = true
+
+[features]
+std = []

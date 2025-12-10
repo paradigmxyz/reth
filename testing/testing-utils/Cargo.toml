@@ -25,3 +25,6 @@ rand_08.workspace = true
 
 [dev-dependencies]
 alloy-rlp.workspace = true
+
+[features]
+std = []

@@ -14,3 +14,6 @@ reth-tracing.workspace = true
 tokio-stream.workspace = true
 reth-discv4 = { workspace = true, features = ["test-utils"] }
 alloy-genesis.workspace = true
+
+[features]
+std = []

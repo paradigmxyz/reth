@@ -14,3 +14,6 @@ eyre.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+std = []

@@ -13,3 +13,6 @@ reth-optimism-node.workspace = true
 reth-optimism-chainspec.workspace = true
 
 tokio = { workspace = true, features = ["sync"] }
+
+[features]
+std = []

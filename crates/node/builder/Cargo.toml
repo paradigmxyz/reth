@@ -125,3 +125,4 @@ op = [
     "reth-evm/op",
     "reth-primitives-traits/op",
 ]
+std = []

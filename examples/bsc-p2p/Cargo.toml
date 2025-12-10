@@ -54,3 +54,4 @@ serde = [
     "reth-network/serde",
     "reth-network-api/serde",
 ]
+std = []

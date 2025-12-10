@@ -94,6 +94,7 @@ test-utils = [
     "reth-trie-sparse/test-utils",
     "reth-stages-types/test-utils",
 ]
+std = []
 
 [[bench]]
 name = "hash_post_state"

@@ -39,6 +39,7 @@ serde = [
     "alloy-primitives/serde",
     "url/serde",
 ]
+std = []
 
 [dev-dependencies]
 tempfile.workspace = true

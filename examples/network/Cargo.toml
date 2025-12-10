@@ -10,3 +10,6 @@ reth-ethereum = { workspace = true, features = ["test-utils", "network", "provid
 futures.workspace = true
 tokio.workspace = true
 eyre.workspace = true
+
+[features]
+std = []

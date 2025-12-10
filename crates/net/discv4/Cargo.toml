@@ -58,3 +58,4 @@ serde = [
     "reth-ethereum-forks/serde",
 ]
 test-utils = ["dep:rand_08"]
+std = []

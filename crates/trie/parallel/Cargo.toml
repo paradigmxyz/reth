@@ -65,6 +65,7 @@ test-utils = [
     "reth-trie-sparse/test-utils",
     "reth-trie/test-utils",
 ]
+std = []
 
 [[bench]]
 name = "root"

@@ -129,3 +129,4 @@ arbitrary = [
     "reth-primitives-traits/arbitrary",
     "reth-ethereum-primitives/arbitrary",
 ]
+std = []

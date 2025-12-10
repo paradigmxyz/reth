@@ -81,3 +81,4 @@ serde = [
     "reth-ethereum-primitives/serde",
     "reth-chain-state/serde",
 ]
+std = []

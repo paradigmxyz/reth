@@ -89,6 +89,7 @@ serde = [
     "alloy-consensus/serde",
     "rand_08/serde",
 ]
+std = []
 
 [[test]]
 name = "fuzz_roundtrip"

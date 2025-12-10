@@ -46,3 +46,4 @@ op = [
     "reth-payload-primitives/op",
     "reth-primitives-traits/op",
 ]
+std = []

@@ -17,3 +17,6 @@ reth-storage-errors.workspace = true
 
 # misc
 thiserror.workspace = true
+
+[features]
+std = []

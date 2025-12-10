@@ -138,6 +138,7 @@ test-utils = [
     "reth-node-ethereum/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
+std = []
 
 [[test]]
 name = "e2e_testsuite"

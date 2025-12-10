@@ -63,3 +63,4 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
     "alloy-consensus/arbitrary",
 ]
+std = []

@@ -51,3 +51,4 @@ serde-bincode-compat = [
     "reth-primitives-traits/serde-bincode-compat",
     "reth-ethereum-primitives/serde-bincode-compat",
 ]
+std = []

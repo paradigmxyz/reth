@@ -35,3 +35,6 @@ parking_lot.workspace = true
 schnellru.workspace = true
 eyre.workspace = true
 tracing.workspace = true
+
+[features]
+std = []

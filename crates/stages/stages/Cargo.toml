@@ -116,6 +116,7 @@ test-utils = [
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
+std = []
 
 [[bench]]
 name = "criterion"

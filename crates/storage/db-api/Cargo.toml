@@ -93,3 +93,4 @@ op = [
     "reth-primitives-traits/op",
 ]
 bench = []
+std = []

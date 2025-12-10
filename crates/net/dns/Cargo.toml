@@ -62,3 +62,4 @@ serde = [
     "hickory-resolver/serde",
     "reth-ethereum-forks/serde",
 ]
+std = []

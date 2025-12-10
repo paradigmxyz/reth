@@ -81,3 +81,4 @@ min-trace-logs = [
     "tracing/release_max_level_trace",
     "reth-node-core/min-trace-logs",
 ]
+std = []

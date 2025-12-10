@@ -97,6 +97,7 @@ op = [
     "reth-primitives-traits/op",
 ]
 disable-lock = []
+std = []
 
 [[bench]]
 name = "hash_keys"

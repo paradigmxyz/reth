@@ -54,3 +54,6 @@ alloy-rlp.workspace = true
 reth-node-ethereum.workspace = true
 
 assert_matches.workspace = true
+
+[features]
+std = []

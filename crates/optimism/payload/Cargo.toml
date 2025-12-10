@@ -52,3 +52,6 @@ thiserror.workspace = true
 sha2.workspace = true
 serde.workspace = true
 either.workspace = true
+
+[features]
+std = []

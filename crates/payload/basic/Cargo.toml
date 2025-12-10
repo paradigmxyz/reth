@@ -38,3 +38,6 @@ metrics.workspace = true
 
 # misc
 tracing.workspace = true
+
+[features]
+std = []
