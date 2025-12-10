@@ -9,7 +9,7 @@ use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_rpc_types_eth::{
-    state::EvmOverrides, BadBlock, BlockError, BlockTransactionsKind, Bundle, StateContext,
+    state::EvmOverrides, BlockError, BlockTransactionsKind, Bundle, StateContext,
 };
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
@@ -710,7 +710,7 @@ where
     }
 
     /// Handler for `debug_getBadBlocks`
-    async fn bad_blocks(&self) -> RpcResult<Vec<BadBlock>> {
+    async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>> {
         let blocks = self.inner.bad_block_store.all();
         let mut bad_blocks = Vec::with_capacity(blocks.len());
 
@@ -738,8 +738,7 @@ where
                 hash: block.hash(),
                 rlp: rlp.into(),
             };
-            let bad_block: BadBlock = serde_json::to_value(wrapper)
-                .and_then(serde_json::from_value)
+            let bad_block = serde_json::to_value(wrapper)
                 .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
 
             bad_blocks.push(bad_block);
