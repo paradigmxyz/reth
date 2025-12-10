@@ -49,7 +49,7 @@ mod web3;
 
 pub use admin::AdminApi;
 pub use aliases::*;
-pub use debug::{BadBlockStore, DebugApi};
+pub use debug::DebugApi;
 pub use engine::{EngineApi, EngineEthApi};
 pub use eth::{helpers::SyncListener, EthApi, EthApiBuilder, EthBundle, EthFilter, EthPubSub};
 pub use miner::MinerApi;

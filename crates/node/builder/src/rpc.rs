@@ -31,8 +31,7 @@ use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
-    RethRpcModule, RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle,
-    TransportRpcModules,
+    RpcModuleBuilder, RpcRegistryInner, RpcServerConfig, RpcServerHandle, TransportRpcModules,
 };
 use reth_rpc_engine_api::{capabilities::EngineCapabilities, EngineApi};
 use reth_rpc_eth_types::{cache::cache_new_blocks_task, EthConfig, EthStateCache};
@@ -1002,11 +1001,6 @@ where
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
         let module_config = config.rpc.transport_rpc_module_config();
-        // Only start collecting bad blocks if the debug_ endpoint installed
-        let debug_enabled =
-            module_config.http().is_some_and(|sel| sel.contains(&RethRpcModule::Debug)) ||
-                module_config.ws().is_some_and(|sel| sel.contains(&RethRpcModule::Debug)) ||
-                module_config.ipc().is_some_and(|sel| sel.contains(&RethRpcModule::Debug));
         debug!(target: "reth::cli", http=?module_config.http(), ws=?module_config.ws(), "Using RPC module config");
 
         let (mut modules, mut auth_module, registry) = RpcModuleBuilder::default()
@@ -1016,20 +1010,12 @@ where
             .with_executor(Box::new(node.task_executor().clone()))
             .with_evm_config(node.evm_config().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(module_config, engine_api, eth_api);
+            .build_with_auth_server(module_config, engine_api, eth_api, engine_events.clone());
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
             let signers = DevSigner::from_mnemonic(config.dev.dev_mnemonic.as_str(), 20);
             registry.eth_api().signers().write().extend(signers);
-        }
-
-        // keep track of invalid blocks for `debug_getBadBlocks` only if debug RPC is enabled
-        if debug_enabled {
-            registry.debug_api().spawn_invalid_block_listener(
-                engine_events.new_listener(),
-                node.task_executor().clone(),
-            );
         }
 
         let mut registry = RpcRegistry { registry };

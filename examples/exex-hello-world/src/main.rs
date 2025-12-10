@@ -66,11 +66,7 @@ async fn ethapi_exex<Node, EthApi>(
 ) -> eyre::Result<()>
 where
     Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
-    EthApi: FullEthApi
-        + reth_ethereum::rpc::eth::RpcNodeCore<
-            Provider = Node::Provider,
-            Primitives = <Node::Types as NodeTypes>::Primitives,
-        >,
+    EthApi: FullEthApi,
 {
     // Wait for the ethapi to be sent from the main function
     let rpc_handle = rpc_handle.await?;
