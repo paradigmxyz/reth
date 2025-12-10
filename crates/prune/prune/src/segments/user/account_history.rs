@@ -79,7 +79,7 @@ where
         // additionally limited by the `max_reorg_depth`, so no OOM is expected here.
         let mut highest_deleted_accounts = FxHashMap::default();
         let (pruned_changesets, done) =
-            provider.tx_ref().prune_dupsort_table_with_range::<tables::AccountChangeSets>(
+            provider.tx_ref().prune_table_with_range::<tables::AccountChangeSets>(
                 range,
                 &mut limiter,
                 |_| false,

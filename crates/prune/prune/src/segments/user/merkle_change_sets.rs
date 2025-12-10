@@ -74,7 +74,6 @@ where
             provider.tx_ref().prune_dupsort_table_with_range::<tables::StoragesTrieChangeSets>(
                 storage_range,
                 &mut limiter,
-                |_| false,
                 |(BlockNumberHashedAddress((block_number, _)), _)| {
                     last_storages_pruned_block = Some(block_number);
                 },
@@ -93,7 +92,6 @@ where
             provider.tx_ref().prune_dupsort_table_with_range::<tables::AccountsTrieChangeSets>(
                 block_range,
                 &mut limiter,
-                |_| false,
                 |row| last_accounts_pruned_block = row.0,
             )?;
 

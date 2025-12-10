@@ -131,7 +131,6 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
         &self,
         keys: impl RangeBounds<T::Key> + Clone + Debug,
         limiter: &mut PruneLimiter,
-        mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> Result<(usize, bool), DatabaseError> {
         let mut cursor = self.cursor_dup_write::<T>()?;
@@ -155,12 +154,10 @@ pub(crate) trait DbTxPruneExt: DbTxMut {
             let Some(res) = walker.next() else { break true };
             let row = res?;
 
-            if !skip_filter(&row) {
-                walker.delete_current_duplicates()?;
-                limiter.increment_deleted_entries_count();
-                deleted_entries += 1;
-                delete_callback(row);
-            }
+            walker.delete_current_duplicates()?;
+            limiter.increment_deleted_entries_count();
+            deleted_entries += 1;
+            delete_callback(row);
         };
 
         debug!(
