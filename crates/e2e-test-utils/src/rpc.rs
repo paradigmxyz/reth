@@ -9,7 +9,7 @@ use reth_provider::BlockReader;
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_eth_api::{
     helpers::{EthApiSpec, EthTransactions, TraceExt},
-    EthApiTypes, RpcNodeCore,
+    EthApiTypes,
 };
 
 #[expect(missing_debug_implementations)]
@@ -22,8 +22,7 @@ where
     Node: FullNodeComponents<Types: NodeTypes<ChainSpec: EthereumHardforks>>,
     EthApi: EthApiSpec<Provider: BlockReader<Block = BlockTy<Node::Types>>>
         + EthTransactions
-        + TraceExt
-        + RpcNodeCore<Provider = Node::Provider, Primitives = <Node::Types as NodeTypes>::Primitives>,
+        + TraceExt,
 {
     /// Injects a raw transaction into the node tx pool via RPC server
     pub async fn inject_tx(&self, raw_tx: Bytes) -> Result<B256, EthApi::Error> {

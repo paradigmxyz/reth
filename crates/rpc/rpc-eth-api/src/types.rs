@@ -28,6 +28,7 @@ pub trait EthApiTypes: Send + Sync + Clone {
     type NetworkTypes: RpcTypes;
     /// Conversion methods for transaction RPC type.
     type RpcConvert: RpcConvert<Network = Self::NetworkTypes>;
+
     /// Returns reference to transaction response builder.
     fn converter(&self) -> &Self::RpcConvert;
 }

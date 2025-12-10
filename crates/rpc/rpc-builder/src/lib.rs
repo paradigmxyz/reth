@@ -53,7 +53,7 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 use reth_storage_api::{
-    AccountReader, BlockReader, ChangeSetReader, FullRpcProvider,
+    AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, NodePrimitivesProvider,
     StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
@@ -335,8 +335,7 @@ where
         RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>,
     )
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>
-            + RpcNodeCore<Provider = Provider, Primitives = N>,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
         let config = module_config.config.clone().unwrap_or_default();
 
@@ -358,9 +357,7 @@ where
         engine_events: EventSender<ConsensusEngineEvent<N>>,
     ) -> RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
     where
-        EthApi: EthApiTypes<RpcConvert: RpcConvert<Primitives = N>>
-            + RpcNodeCore<Provider = Provider, Primitives = N>
-            + 'static,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
         let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
         RpcRegistryInner::new(
@@ -385,8 +382,7 @@ where
         engine_events: EventSender<ConsensusEngineEvent<N>>,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>
-            + RpcNodeCore<Provider = Provider, Primitives = N>,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -524,9 +520,7 @@ where
         + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
-    EthApi: EthApiTypes<RpcConvert: RpcConvert<Primitives = N>>
-        + RpcNodeCore<Provider = Provider, Primitives = N>
-        + 'static,
+    EthApi: FullEthApiTypes + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
 {
     /// Creates a new, empty instance.
@@ -540,7 +534,9 @@ where
         config: RpcModuleConfig,
         evm_config: EvmConfig,
         eth_api: EthApi,
-        engine_events: EventSender<ConsensusEngineEvent<N>>,
+        engine_events: EventSender<
+            ConsensusEngineEvent<<EthApi::Provider as NodePrimitivesProvider>::Primitives>,
+        >,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Primitives = N>,
@@ -706,10 +702,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_debug(&mut self) -> &mut Self
     where
-        EthApi: EthApiSpec
-            + EthTransactions
-            + TraceExt
-            + RpcNodeCore<Provider = Provider, Primitives = N>,
+        EthApi: EthTransactions + TraceExt,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -857,7 +850,7 @@ where
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    EthApi: FullEthApiServer + RpcNodeCore<Provider = Provider, Primitives = N>,
+    EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {

@@ -72,6 +72,7 @@ where
             bad_block_store: bad_block_store.clone(),
         });
 
+        // Spawn a task caching bad blocks
         executor.spawn(Box::pin(async move {
             while let Some(event) = stream.next().await {
                 if let ConsensusEngineEvent::InvalidBlock(block) = event &&
