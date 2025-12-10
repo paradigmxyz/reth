@@ -9972,6 +9972,7 @@ dependencies = [
  "revm-database-interface",
  "revm-state",
  "rocksdb",
+ "schnellru",
  "strum 0.27.2",
  "tempfile",
  "tokio",

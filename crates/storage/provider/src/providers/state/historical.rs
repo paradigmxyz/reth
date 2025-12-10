@@ -30,7 +30,21 @@ use reth_trie_db::{
     DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
 };
 
-use std::fmt::Debug;
+use parking_lot::RwLock;
+use schnellru::{ByLength, LruMap};
+use std::{
+    fmt::Debug,
+    sync::{Arc, LazyLock},
+};
+
+/// Type alias for the LRU cache used to store reverted state.
+type RevertStateCache =
+    RwLock<LruMap<(BlockNumber, BlockNumber), Arc<HashedPostStateSorted>, ByLength>>;
+
+/// Global cache for reverted state - shared across all [`HistoricalStateProviderRef`] instances.
+/// Cache key: (`block_number`, `db_tip`) - tip ensures cache invalidation on DB changes.
+static REVERT_STATE_CACHE: LazyLock<RevertStateCache> =
+    LazyLock::new(|| RwLock::new(LruMap::new(ByLength::new(16))));
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -126,6 +140,15 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
+        let tip = self.provider.last_block_number()?;
+        let cache_key = (self.block_number, tip);
+
+        // Check cache first (requires write lock since get() updates LRU order)
+        if let Some(cached) = REVERT_STATE_CACHE.write().get(&cache_key) {
+            return Ok((**cached).clone());
+        }
+
+        // Cache miss - compute revert state
         if self.check_distance_against_limit(EPOCH_SLOTS)? {
             tracing::warn!(
                 target: "provider::historical_sp",
@@ -134,8 +157,14 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             );
         }
 
-        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(self.tx(), self.block_number..)
-            .map_err(ProviderError::from)
+        let result =
+            HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(self.tx(), self.block_number..)?;
+
+        // Store in cache and return
+        let cached = Arc::new(result);
+        REVERT_STATE_CACHE.write().insert(cache_key, Arc::clone(&cached));
+
+        Ok(Arc::unwrap_or_clone(cached))
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.

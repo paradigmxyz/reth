@@ -52,6 +52,7 @@ itertools.workspace = true
 notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 parking_lot.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
+schnellru.workspace = true
 strum.workspace = true
 eyre.workspace = true
 
