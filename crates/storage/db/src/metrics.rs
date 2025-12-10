@@ -203,6 +203,8 @@ pub(crate) enum Operation {
     PutAppend,
     /// Database delete operation.
     Delete,
+    /// Database clear operation.
+    Clear,
     /// Database cursor upsert operation.
     CursorUpsert,
     /// Database cursor insert operation.
@@ -225,6 +227,7 @@ impl Operation {
             Self::PutUpsert => "put-upsert",
             Self::PutAppend => "put-append",
             Self::Delete => "delete",
+            Self::Clear => "clear",
             Self::CursorUpsert => "cursor-upsert",
             Self::CursorInsert => "cursor-insert",
             Self::CursorAppend => "cursor-append",
