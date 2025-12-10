@@ -11,7 +11,6 @@ use reth_chainspec::ChainSpecProvider;
 use reth_node_api::NodePrimitives;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
-use reth_optimism_primitives::OpReceipt;
 use reth_primitives_traits::SealedBlock;
 use reth_rpc_eth_api::{
     helpers::LoadReceipt,
