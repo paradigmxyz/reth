@@ -30,8 +30,11 @@ pub trait EraFileFormat: Sized {
 
 /// Era file identifiers
 pub trait EraFileId: Clone {
-    /// Convert to standardized file name
-    fn to_file_name(&self) -> String;
+    /// File type for this identifier
+    const FILE_TYPE: EraFileType;
+
+    /// Number of items, slots for `era`, blocks for `era1`, per era
+    const ITEMS_PER_ERA: u64;
 
     /// Get the network name
     fn network_name(&self) -> &str;
@@ -41,37 +44,42 @@ pub trait EraFileId: Clone {
 
     /// Get the count of items
     fn count(&self) -> u32;
-}
 
-/// Generate era file name
-///
-/// Standard format: `<config-name>-<era-number>-<short-historical-root>.<ext>`
-/// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
-///
-/// With era count, for custom exports:
-/// `<config-name>-<era-number>-<era-count>-<short-historical-root>.<ext>`
-pub fn format_era_filename(
-    network_name: &str,
-    era_number: u64,
-    hash: Option<[u8; 4]>,
-    include_era_count: bool,
-    era_count: u64,
-    extension: &str,
-) -> String {
-    let hash_str = format_hash(hash);
+    /// Get the optional hash identifier
+    fn hash(&self) -> Option<[u8; 4]>;
 
-    if include_era_count {
-        format!("{}-{:05}-{:05}-{}{}", network_name, era_number, era_count, hash_str, extension)
-    } else {
-        format!("{}-{:05}-{}{}", network_name, era_number, hash_str, extension)
+    /// Whether to include era count in filename
+    fn include_era_count(&self) -> bool;
+
+    /// Calculate era number
+    fn era_number(&self) -> u64 {
+        self.start_number() / Self::ITEMS_PER_ERA
     }
-}
 
-/// Format hash as hex string, or placeholder if none
-pub fn format_hash(hash: Option<[u8; 4]>) -> String {
-    match hash {
-        Some(h) => format!("{:02x}{:02x}{:02x}{:02x}", h[0], h[1], h[2], h[3]),
-        None => "00000000".to_string(),
+    /// Calculate the number of eras spanned per file.
+    ///
+    /// If the user can decide how many slots/blocks per era file there are, we need to calculate
+    /// it. Most of the time it should be 1, but it can never be more than 2 eras per file
+    /// as there is a maximum of 8192 slots/blocks per era file.
+    fn era_count(&self) -> u64 {
+        if self.count() == 0 {
+            return 0;
+        }
+        let first_era = self.era_number();
+        let last_number = self.start_number() + self.count() as u64 - 1;
+        let last_era = last_number / Self::ITEMS_PER_ERA;
+        last_era - first_era + 1
+    }
+
+    /// Convert to standardized file name.
+    fn to_file_name(&self) -> String {
+        Self::FILE_TYPE.format_filename(
+            self.network_name(),
+            self.era_number(),
+            self.hash(),
+            self.include_era_count(),
+            self.era_count(),
+        )
     }
 }
 
@@ -186,6 +194,37 @@ impl EraFileType {
         }
     }
 
+    /// Generate era file name.
+    ///
+    /// Standard format: `<config-name>-<era-number>-<short-historical-root>.<ext>`
+    /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
+    ///
+    /// With era count (for custom exports):
+    /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.<ext>`
+    pub fn format_filename(
+        &self,
+        network_name: &str,
+        era_number: u64,
+        hash: Option<[u8; 4]>,
+        include_era_count: bool,
+        era_count: u64,
+    ) -> String {
+        let hash = format_hash(hash);
+
+        if include_era_count {
+            format!(
+                "{}-{:05}-{:05}-{}{}",
+                network_name,
+                era_number,
+                era_count,
+                hash,
+                self.extension()
+            )
+        } else {
+            format!("{}-{:05}-{}{}", network_name, era_number, hash, self.extension())
+        }
+    }
+
     /// Detect file type from URL
     /// By default, it assumes `Era` type
     pub fn from_url(url: &str) -> Self {
@@ -194,5 +233,13 @@ impl EraFileType {
         } else {
             Self::Era
         }
+    }
+}
+
+/// Format hash as hex string, or placeholder if none
+pub fn format_hash(hash: Option<[u8; 4]>) -> String {
+    match hash {
+        Some(h) => format!("{:02x}{:02x}{:02x}{:02x}", h[0], h[1], h[2], h[3]),
+        None => "00000000".to_string(),
     }
 }

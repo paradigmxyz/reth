@@ -3,7 +3,7 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
 
 use crate::{
-    common::file_ops::{format_era_filename, EraFileId},
+    common::file_ops::{EraFileId, EraFileType},
     e2s::types::{Entry, IndexEntry, SLOT_INDEX},
     era::types::consensus::{CompressedBeaconState, CompressedSignedBeaconBlock},
 };
@@ -192,29 +192,13 @@ impl EraId {
         self.include_era_count = true;
         self
     }
-
-    /// Calculate which era number the file starts at
-    pub const fn era_number(&self) -> u64 {
-        self.start_slot / SLOTS_PER_HISTORICAL_ROOT
-    }
-
-    // Helper function to calculate the number of eras spanned by the file.
-    //
-    // If the user can decide how many slots per era file there are, we need to calculate it.
-    // Most of the time it should be 1, but it can never be more than 2 eras per file
-    // as there is a maximum of 8192 slots per era file.
-    const fn era_count(&self) -> u64 {
-        if self.slot_count == 0 {
-            return 0;
-        }
-        let first_era = self.era_number();
-        let last_slot = self.start_slot + self.slot_count as u64 - 1;
-        let last_era = last_slot / SLOTS_PER_HISTORICAL_ROOT;
-        last_era - first_era + 1
-    }
 }
 
 impl EraFileId for EraId {
+    const FILE_TYPE: EraFileType = EraFileType::Era;
+
+    const ITEMS_PER_ERA: u64 = SLOTS_PER_HISTORICAL_ROOT;
+
     fn network_name(&self) -> &str {
         &self.network_name
     }
@@ -226,19 +210,13 @@ impl EraFileId for EraId {
     fn count(&self) -> u32 {
         self.slot_count
     }
-    /// Convert to file name following the era file naming:
-    /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era`
-    /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
-    /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
-    fn to_file_name(&self) -> String {
-        format_era_filename(
-            &self.network_name,
-            self.era_number(),
-            self.hash,
-            self.include_era_count,
-            self.era_count(),
-            ".era",
-        )
+
+    fn hash(&self) -> Option<[u8; 4]> {
+        self.hash
+    }
+
+    fn include_era_count(&self) -> bool {
+        self.include_era_count
     }
 }
 

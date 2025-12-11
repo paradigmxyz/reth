@@ -3,7 +3,7 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
 use crate::{
-    common::file_ops::{format_era_filename, EraFileId},
+    common::file_ops::{EraFileId, EraFileType},
     e2s::types::{Entry, IndexEntry},
     era1::types::execution::{Accumulator, BlockTuple, MAX_BLOCKS_PER_ERA1},
 };
@@ -138,33 +138,12 @@ impl Era1Id {
         self.include_era_count = true;
         self
     }
-
-    /// Calculate which era number the file starts at
-    pub const fn era_number(&self) -> u64 {
-        self.start_block / MAX_BLOCKS_PER_ERA1 as u64
-    }
-
-    // Helper function to calculate the number of eras spanned by the file.
-    //
-    // If the user can decide how many blocks per era1 file there are, we need to calculate it.
-    // Most of the time it should be 1, but it can never be more than 2 eras per file
-    // as there is a maximum of 8192 blocks per era1 file.
-    const fn era_count(&self) -> u64 {
-        if self.block_count == 0 {
-            return 0;
-        }
-        let first_era = self.era_number();
-
-        // Calculate the actual last block number in the range
-        let last_block = self.start_block + self.block_count as u64 - 1;
-        // Find which era the last block belongs to
-        let last_era = last_block / MAX_BLOCKS_PER_ERA1 as u64;
-        // Count how many eras we span
-        last_era - first_era + 1
-    }
 }
 
 impl EraFileId for Era1Id {
+    const FILE_TYPE: EraFileType = EraFileType::Era1;
+
+    const ITEMS_PER_ERA: u64 = MAX_BLOCKS_PER_ERA1 as u64;
     fn network_name(&self) -> &str {
         &self.network_name
     }
@@ -177,15 +156,12 @@ impl EraFileId for Era1Id {
         self.block_count
     }
 
-    fn to_file_name(&self) -> String {
-        format_era_filename(
-            &self.network_name,
-            self.era_number(),
-            self.hash,
-            self.include_era_count,
-            self.era_count(),
-            ".era1",
-        )
+    fn hash(&self) -> Option<[u8; 4]> {
+        self.hash
+    }
+
+    fn include_era_count(&self) -> bool {
+        self.include_era_count
     }
 }
 
