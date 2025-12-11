@@ -13,6 +13,10 @@ mod tests {
     use alloy_trie::EMPTY_ROOT_HASH;
     use reth_primitives_traits::Account;
 
+    /// Tests conversion from `GenesisAccount` with default values.
+    ///
+    /// Verifies that all fields are set to their default/empty values and that
+    /// the conversion matches the default `Account` conversion.
     #[test]
     fn test_from_genesis_account_with_default_values() {
         let genesis_account = GenesisAccount::default();
@@ -30,6 +34,10 @@ mod tests {
         assert_eq!(Account::default().into_trie_account(EMPTY_ROOT_HASH), trie_account);
     }
 
+    /// Tests conversion from `GenesisAccount` with non-empty values.
+    ///
+    /// Verifies that nonce, balance, code hash, and storage root are correctly
+    /// computed and match the equivalent `Account` conversion.
     #[test]
     fn test_from_genesis_account_with_values() {
         // Create a GenesisAccount with specific values
@@ -70,6 +78,10 @@ mod tests {
         );
     }
 
+    /// Tests conversion from `GenesisAccount` with zeroed storage values.
+    ///
+    /// Verifies that storage entries with zero values result in `EMPTY_ROOT_HASH`
+    /// and that missing code is handled correctly.
     #[test]
     fn test_from_genesis_account_with_zeroed_storage_values() {
         // Create a GenesisAccount with storage containing zero values
