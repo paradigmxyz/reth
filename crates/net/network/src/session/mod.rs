@@ -538,11 +538,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 // negotiated version
                 let version = conn.version();
 
-                let remote_range_info =
-                    status.earliest_block.zip(status.latest_block).map(|(earliest, latest)| {
-                        BlockRangeInfo::new(earliest, latest, status.blockhash)
-                    });
-
                 // Configure the interval at which the range information is updated (eth/69 only)
                 let range_update_interval = (conn.version() == EthVersion::Eth69).then(|| {
                     let mut interval = tokio::time::interval(RANGE_UPDATE_INTERVAL);
@@ -572,7 +567,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     internal_request_timeout: Arc::clone(&timeout),
                     protocol_breach_request_timeout: self.protocol_breach_request_timeout,
                     terminate_message: None,
-                    range_info: remote_range_info.clone(),
+                    range_info: None,
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
                     last_sent_latest_block: None,
@@ -612,7 +607,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     messages,
                     direction,
                     timeout,
-                    range_info: remote_range_info,
+                    range_info: None,
                 })
             }
             PendingSessionEvent::Disconnected { remote_addr, session_id, direction, error } => {
