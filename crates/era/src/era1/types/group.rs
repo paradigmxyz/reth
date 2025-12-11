@@ -180,7 +180,7 @@ impl EraFileId for Era1Id {
     /// Convert to file name following the era file naming:
     ///
     /// Standard format: `<config-name>-<era-number>-<short-historical-root>.era1`
-    /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
+    /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
     ///
     /// With era count, for custom exports:
     /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era1`
