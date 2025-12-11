@@ -277,6 +277,8 @@ pub enum EitherWriterDestination {
     Database,
     /// Write to static file
     StaticFile,
+    /// Write to `RocksDB`
+    RocksDB,
 }
 
 impl EitherWriterDestination {
@@ -288,6 +290,34 @@ impl EitherWriterDestination {
         // Write senders to static files only if they're explicitly enabled
         if provider.cached_storage_settings().transaction_senders_in_static_files {
             Self::StaticFile
+        } else {
+            Self::Database
+        }
+    }
+
+    /// Returns the destination for storages history writes based on storage settings.
+    pub fn storages_history<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        if cfg!(all(unix, feature = "rocksdb")) &&
+            provider.cached_storage_settings().storages_history_in_rocksdb
+        {
+            Self::RocksDB
+        } else {
+            Self::Database
+        }
+    }
+
+    /// Returns the destination for transaction hash numbers writes based on storage settings.
+    pub fn transaction_hash_numbers<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        if cfg!(all(unix, feature = "rocksdb")) &&
+            provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb
+        {
+            Self::RocksDB
         } else {
             Self::Database
         }
@@ -346,6 +376,30 @@ mod tests {
                 senders.iter().copied().collect::<HashMap<_, _>>(),
                 "{reader}"
             );
+        }
+    }
+
+    #[test]
+    fn rocksdb_destinations_follow_flags_with_cfg_fallback() {
+        let factory = create_test_provider_factory();
+        let settings = StorageSettings::legacy()
+            .with_storages_history_in_rocksdb(true)
+            .with_transaction_hash_numbers_in_rocksdb(true);
+        factory.set_storage_settings_cache(settings);
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        let expect_rocks = cfg!(all(unix, feature = "rocksdb"));
+
+        let storages_dest = EitherWriterDestination::storages_history(&provider);
+        let tx_hash_dest = EitherWriterDestination::transaction_hash_numbers(&provider);
+
+        if expect_rocks {
+            assert!(matches!(storages_dest, EitherWriterDestination::RocksDB));
+            assert!(matches!(tx_hash_dest, EitherWriterDestination::RocksDB));
+        } else {
+            assert!(matches!(storages_dest, EitherWriterDestination::Database));
+            assert!(matches!(tx_hash_dest, EitherWriterDestination::Database));
         }
     }
 }
