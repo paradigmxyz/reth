@@ -91,6 +91,9 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
         err.into()
     }
 
+    /// Converts from EVM error to this type with transaction index context.
+    fn from_evm_err_at_index(err: EvmErrorFor<Evm, ProviderError>, tx_index: usize) -> Self;
+
     /// Ensures the execution result is successful or returns an error,
     fn ensure_success(result: ExecutionResult<HaltReasonFor<Evm>>) -> Result<Bytes, Self> {
         match result {
@@ -105,9 +108,17 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
 
 impl<T, Evm> FromEvmError<Evm> for T
 where
-    T: From<EvmErrorFor<Evm, ProviderError>> + FromEvmHalt<HaltReasonFor<Evm>> + FromRevert,
+    T: From<EvmErrorFor<Evm, ProviderError>>
+        + FromEvmHalt<HaltReasonFor<Evm>>
+        + FromRevert
+        + From<EthApiError>,
     Evm: ConfigureEvm,
+    EthApiError: From<EvmErrorFor<Evm, ProviderError>>,
 {
+    fn from_evm_err_at_index(err: EvmErrorFor<Evm, ProviderError>, tx_index: usize) -> Self {
+        let inner: EthApiError = err.into();
+        EthApiError::indexed_evm_error(tx_index, inner).into()
+    }
 }
 
 /// Helper trait to convert from revm errors.

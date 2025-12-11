@@ -195,6 +195,14 @@ pub enum EthApiError {
         /// The underlying error object
         error: jsonrpsee_types::ErrorObject<'static>,
     },
+    /// Error that occurred during multi-transaction execution with transaction index context.
+    #[error("transaction execution failed (index {tx_index}): {error}")]
+    IndexedEvmError {
+        /// Transaction index where the error occurred
+        tx_index: usize,
+        /// The underlying error
+        error: Box<EthApiError>,
+    },
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -213,6 +221,11 @@ impl EthApiError {
         error: jsonrpsee_types::ErrorObject<'static>,
     ) -> Self {
         Self::CallManyError { bundle_index, tx_index, error }
+    }
+
+    /// Creates a new [`EthApiError::IndexedEvmError`] variant.
+    pub fn indexed_evm_error(tx_index: usize, error: Self) -> Self {
+        Self::IndexedEvmError { tx_index, error: Box::new(error) }
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
@@ -330,6 +343,17 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                         error.message()
                     ),
                     error.data(),
+                )
+            }
+            EthApiError::IndexedEvmError { tx_index, error } => {
+                let inner_err: jsonrpsee_types::error::ErrorObject<'static> = (*error).into();
+                jsonrpsee_types::error::ErrorObject::owned(
+                    inner_err.code(),
+                    format!(
+                        "transaction execution failed (index {tx_index}): {}",
+                        inner_err.message()
+                    ),
+                    inner_err.data(),
                 )
             }
         }
