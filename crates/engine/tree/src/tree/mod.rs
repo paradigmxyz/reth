@@ -546,6 +546,12 @@ where
 
         let block_hash = num_hash.hash;
 
+        // X Layer: Log block receive end (record immediately after receiving the block,
+        // before processing/insertion starts, to ensure correct timestamp ordering)
+        if let Some(tracer) = get_global_tracer() {
+            tracer.log_block(block_hash, block_number, TransactionProcessId::RpcBlockReceiveEnd);
+        }
+
         // Check for invalid ancestors
         if let Some(invalid) = self.find_invalid_ancestor(&payload) {
             let status = self.handle_invalid_ancestor_payload(payload, invalid)?;
@@ -574,11 +580,6 @@ where
 
         // record total newPayload duration
         self.metrics.block_validation.total_duration.record(start.elapsed().as_secs_f64());
-
-        // X Layer: Log block receive end
-        if let Some(tracer) = get_global_tracer() {
-            tracer.log_block(block_hash, block_number, TransactionProcessId::RpcBlockReceiveEnd);
-        }
 
         Ok(outcome)
     }
