@@ -381,10 +381,7 @@ mod tests {
             receipts: vec![vec![Receipt::default()]],
         };
 
-        let resp = Receipts70(RequestPair {
-            request_id: 7,
-            message: payload,
-        });
+        let resp = Receipts70(RequestPair { request_id: 7, message: payload });
 
         let mut out = vec![];
         resp.encode(&mut out);
