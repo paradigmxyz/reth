@@ -685,7 +685,7 @@ struct StateRoot {
 /// An account as in the state dump file. This contains a [`GenesisAccount`] and the account's
 /// address.
 #[derive(Debug, Serialize, Deserialize)]
-struct GenesisAccountWithAddress {
+pub struct GenesisAccountWithAddress {
     /// The account's balance, nonce, code, and storage.
     #[serde(flatten)]
     genesis_account: GenesisAccount,
