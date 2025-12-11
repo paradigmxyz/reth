@@ -1,5 +1,5 @@
 use crate::BlockProvider;
-use alloy_provider::{ConnectionConfig, Network, Provider, ProviderBuilder};
+use alloy_provider::{ConnectionConfig, Network, Provider, ProviderBuilder, WebSocketConfig};
 use alloy_transport::TransportResult;
 use futures::{Stream, StreamExt};
 use reth_node_api::Block;
@@ -29,7 +29,11 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
                 ProviderBuilder::default()
                     .connect_with_config(
                         rpc_url,
-                        ConnectionConfig::default().with_max_retries(u32::MAX),
+                        ConnectionConfig::default().with_max_retries(u32::MAX).with_ws_config(
+                            WebSocketConfig::default()
+                                // allow larger frames for bigger blocks
+                                .max_frame_size(Some(64 << 20)),
+                        ),
                     )
                     .await?,
             ),
