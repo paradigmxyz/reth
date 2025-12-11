@@ -24,7 +24,7 @@ jobs:
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on: depot-ubuntu-latest-16
+    runs-on: depot-ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - name: Checkout hive tests
@@ -178,7 +178,7 @@ jobs:
       - prepare-reth
       - prepare-hive
     name: run ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
-    runs-on: depot-ubuntu-latest-16
+    runs-on: depot-ubuntu-latest
     permissions:
       issues: write
     steps:
@@ -245,7 +245,7 @@ jobs:
   notify-on-error:
     needs: test
     if: failure()
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2
