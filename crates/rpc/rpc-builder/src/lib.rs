@@ -52,6 +52,7 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
+pub use reth_rpc_server_types::RethRpcModule;
 use reth_storage_api::{
     AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, NodePrimitivesProvider,
     StateProviderFactory,
@@ -76,7 +77,7 @@ use jsonrpsee::server::ServerConfigBuilder;
 pub use reth_ipc::server::{
     Builder as IpcServerBuilder, RpcServiceBuilder as IpcRpcServiceBuilder,
 };
-pub use reth_rpc_server_types::{constants, RethRpcModule, RpcModuleSelection};
+pub use reth_rpc_server_types::{constants, RpcModuleSelection};
 pub use tower::layer::util::{Identity, Stack};
 
 /// Auth server utilities.
@@ -561,8 +562,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EthApi, BlockExecutor, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, EthApi, BlockExecutor, Consensus>
+impl<Provider, Pool, Network, EthApi, Evm, Consensus>
+    RpcRegistryInner<Provider, Pool, Network, EthApi, Evm, Consensus>
 where
     EthApi: EthApiTypes,
 {
@@ -589,6 +590,11 @@ where
     /// Returns a reference to the provider
     pub const fn provider(&self) -> &Provider {
         &self.provider
+    }
+
+    /// Returns a reference to the evm config
+    pub const fn evm_config(&self) -> &Evm {
+        &self.evm_config
     }
 
     /// Returns all installed methods
@@ -992,18 +998,18 @@ where
                                 .into_rpc()
                                 .into()
                         }
-                        // only relevant for Ethereum and configured in `EthereumAddOns`
-                        // implementation
-                        // TODO: can we get rid of this here?
-                        // Custom modules are not handled here - they should be registered via
-                        // extend_rpc_modules
-                        RethRpcModule::Flashbots | RethRpcModule::Other(_) => Default::default(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
                                 .into_rpc()
                                 .into()
                         }
+                        // these are implementation specific and need to be handled during
+                        // initialization and should be registered via extend_rpc_modules in the
+                        // nodebuilder rpc addon stack
+                        RethRpcModule::Flashbots |
+                        RethRpcModule::Testing |
+                        RethRpcModule::Other(_) => Default::default(),
                     })
                     .clone()
             })
