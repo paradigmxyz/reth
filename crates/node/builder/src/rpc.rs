@@ -1154,6 +1154,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
             .proof_permits(self.config.proof_permits)
             .gas_oracle_config(self.config.gas_oracle)
             .max_batch_size(self.config.max_batch_size)
+            .max_blocking_io_requests(self.config.max_blocking_io_requests)
             .pending_block_kind(self.config.pending_block_kind)
             .raw_tx_forwarder(self.config.raw_tx_forwarder)
             .evm_memory_limit(self.config.rpc_evm_memory_limit)
