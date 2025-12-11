@@ -141,19 +141,19 @@ impl RethRpcServerConfig for RpcServerArgs {
             .with_config(RpcModuleConfig::new(self.eth_config(), self.flashbots_config()));
 
         if self.http {
-            let http_modules = self
-                .http_api
-                .clone()
-                .unwrap_or_else(|| RpcModuleSelection::standard_modules().into());
-            config = config.with_http(http_modules);
+            config = config.with_http(
+                self.http_api
+                    .clone()
+                    .unwrap_or_else(|| RpcModuleSelection::standard_modules().into()),
+            );
         }
 
         if self.ws {
-            let ws_modules = self
-                .ws_api
-                .clone()
-                .unwrap_or_else(|| RpcModuleSelection::standard_modules().into());
-            config = config.with_ws(ws_modules);
+            config = config.with_ws(
+                self.ws_api
+                    .clone()
+                    .unwrap_or_else(|| RpcModuleSelection::standard_modules().into()),
+            );
         }
 
         if self.is_ipc_enabled() {
