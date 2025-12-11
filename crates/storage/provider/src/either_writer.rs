@@ -3,6 +3,8 @@
 
 use std::ops::Range;
 
+#[cfg(all(unix, feature = "rocksdb"))]
+use crate::{providers::RocksDBProvider, RocksDBProviderFactory};
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
@@ -34,13 +36,25 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
-/// Represents a destination for writing data, either to database or static files.
+#[cfg(all(unix, feature = "rocksdb"))]
+type RocksDBReader = RocksDBProvider;
+#[cfg(not(all(unix, feature = "rocksdb")))]
+type RocksDBReader = ();
+
+#[cfg(all(unix, feature = "rocksdb"))]
+type RocksDBWriter = RocksDBProvider;
+#[cfg(not(all(unix, feature = "rocksdb")))]
+type RocksDBWriter = ();
+
+/// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherWriter<'a, CURSOR, N> {
     /// Write to database table via cursor
     Database(CURSOR),
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
+    /// Write to `RocksDB`
+    RocksDB(RocksDBWriter),
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -109,6 +123,40 @@ impl<'a> EitherWriter<'a, (), ()> {
             ))
         }
     }
+
+    /// Creates a new [`EitherWriter`] for transaction hash numbers based on storage settings.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pub fn new_transaction_hash_numbers<P>(
+        provider: &'a P,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionHashNumbers>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + RocksDBProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+            Ok(EitherWriter::RocksDB(provider.rocksdb_provider()))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_write::<tables::TransactionHashNumbers>()?,
+            ))
+        }
+    }
+
+    /// Creates a new [`EitherWriter`] for storages history based on storage settings.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pub fn new_storages_history<P>(
+        provider: &'a P,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::StoragesHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + RocksDBProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().storages_history_in_rocksdb {
+            Ok(EitherWriter::RocksDB(provider.rocksdb_provider()))
+        } else {
+            Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
+        }
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
@@ -119,6 +167,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) => Ok(()),
             Self::StaticFile(writer) => writer.increment_block(expected_block_number),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -132,6 +181,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) => Ok(()),
             Self::StaticFile(writer) => writer.ensure_at_block(block_number),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -146,6 +196,7 @@ where
         match self {
             Self::Database(cursor) => Ok(cursor.append(tx_num, receipt)?),
             Self::StaticFile(writer) => writer.append_receipt(tx_num, receipt),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -159,6 +210,7 @@ where
         match self {
             Self::Database(cursor) => Ok(cursor.append(tx_num, sender)?),
             Self::StaticFile(writer) => writer.append_transaction_sender(tx_num, sender),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -175,6 +227,7 @@ where
                 Ok(())
             }
             Self::StaticFile(writer) => writer.append_transaction_senders(senders),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -206,19 +259,22 @@ where
 
                 writer.prune_transaction_senders(to_delete, block)?;
             }
+            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
         }
 
         Ok(())
     }
 }
 
-/// Represents a source for reading data, either from database or static files.
+/// Represents a source for reading data, either from database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherReader<CURSOR, N> {
     /// Read from database table via cursor
     Database(CURSOR),
     /// Read from static file
     StaticFile(StaticFileProvider<N>),
+    /// Read from `RocksDB`
+    RocksDB(RocksDBReader),
 }
 
 impl EitherReader<(), ()> {
@@ -236,6 +292,40 @@ impl EitherReader<(), ()> {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_read::<tables::TransactionSenders>()?,
             ))
+        }
+    }
+
+    /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pub fn new_transaction_hash_numbers<P>(
+        provider: &P,
+    ) -> ProviderResult<EitherReaderTy<P, tables::TransactionHashNumbers>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + RocksDBProviderFactory,
+        P::Tx: DbTx,
+    {
+        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+            Ok(EitherReader::RocksDB(provider.rocksdb_provider()))
+        } else {
+            Ok(EitherReader::Database(
+                provider.tx_ref().cursor_read::<tables::TransactionHashNumbers>()?,
+            ))
+        }
+    }
+
+    /// Creates a new [`EitherReader`] for storages history based on storage settings.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pub fn new_storages_history<P>(
+        provider: &P,
+    ) -> ProviderResult<EitherReaderTy<P, tables::StoragesHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + RocksDBProviderFactory,
+        P::Tx: DbTx,
+    {
+        if provider.cached_storage_settings().storages_history_in_rocksdb {
+            Ok(EitherReader::RocksDB(provider.rocksdb_provider()))
+        } else {
+            Ok(EitherReader::Database(provider.tx_ref().cursor_read::<tables::StoragesHistory>()?))
         }
     }
 }
@@ -266,6 +356,7 @@ where
                     Some(result.map(|sender| (tx_num, sender)))
                 })
                 .collect::<ProviderResult<HashMap<_, _>>>(),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -277,6 +368,8 @@ pub enum EitherWriterDestination {
     Database,
     /// Write to static file
     StaticFile,
+    /// Write to `RocksDB`
+    RocksDB,
 }
 
 impl EitherWriterDestination {
