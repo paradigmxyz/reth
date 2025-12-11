@@ -3,7 +3,7 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
 
 use crate::{
-    common::file_ops::{EraFileId, format_era_filename},
+    common::file_ops::{format_era_filename, EraFileId},
     e2s::types::{Entry, IndexEntry, SLOT_INDEX},
     era::types::consensus::{CompressedBeaconState, CompressedSignedBeaconBlock},
 };
@@ -172,7 +172,13 @@ pub struct EraId {
 impl EraId {
     /// Create a new [`EraId`]
     pub fn new(network_name: impl Into<String>, start_slot: u64, slot_count: u32) -> Self {
-        Self { network_name: network_name.into(), start_slot, slot_count, hash: None, include_era_count: false }
+        Self {
+            network_name: network_name.into(),
+            start_slot,
+            slot_count,
+            hash: None,
+            include_era_count: false,
+        }
     }
 
     /// Add a hash identifier to  [`EraId`]
@@ -180,13 +186,12 @@ impl EraId {
         self.hash = Some(hash);
         self
     }
-    
+
     /// Include era count in filename, for custom slot-per-file exports
     pub const fn with_era_count(mut self) -> Self {
         self.include_era_count = true;
         self
     }
-
 
     /// Calculate which era number the file starts at
     pub const fn era_number(&self) -> u64 {
@@ -198,7 +203,7 @@ impl EraId {
     // If the user can decide how many slots per era file there are, we need to calculate it.
     // Most of the time it should be 1, but it can never be more than 2 eras per file
     // as there is a maximum of 8192 slots per era file.
-     const fn era_count(&self) -> u64 {
+    const fn era_count(&self) -> u64 {
         if self.slot_count == 0 {
             return 0;
         }
@@ -225,7 +230,7 @@ impl EraFileId for EraId {
     /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era`
     /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
     /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
-     fn to_file_name(&self) -> String {
+    fn to_file_name(&self) -> String {
         format_era_filename(
             &self.network_name,
             self.era_number(),

@@ -187,7 +187,6 @@ impl EraFileId for Era1Id {
             ".era1",
         )
     }
-
 }
 
 #[cfg(test)]

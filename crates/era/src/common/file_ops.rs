@@ -44,7 +44,7 @@ pub trait EraFileId: Clone {
 }
 
 /// Generate era file name
-/// 
+///
 /// Standard format: `<config-name>-<era-number>-<short-historical-root>.<ext>`
 /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
 ///
@@ -59,17 +59,11 @@ pub fn format_era_filename(
     extension: &str,
 ) -> String {
     let hash_str = format_hash(hash);
-    
+
     if include_era_count {
-        format!(
-            "{}-{:05}-{:05}-{}{}",
-            network_name, era_number, era_count, hash_str, extension
-        )
+        format!("{}-{:05}-{:05}-{}{}", network_name, era_number, era_count, hash_str, extension)
     } else {
-        format!(
-            "{}-{:05}-{}{}",
-            network_name, era_number, hash_str, extension
-        )
+        format!("{}-{:05}-{}{}", network_name, era_number, hash_str, extension)
     }
 }
 
@@ -80,7 +74,6 @@ pub fn format_hash(hash: Option<[u8; 4]>) -> String {
         None => "00000000".to_string(),
     }
 }
-
 
 /// [`StreamReader`] for reading era-format files
 pub trait StreamReader<R: Read + Seek>: Sized {
