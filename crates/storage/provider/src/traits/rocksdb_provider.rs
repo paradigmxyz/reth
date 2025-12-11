@@ -4,6 +4,6 @@ use crate::providers::RocksDBProvider;
 ///
 /// This trait provides access to the `RocksDB` provider
 pub trait RocksDBProviderFactory {
-    /// Returns a reference to the `RocksDB` provider.
-    fn rocksdb_provider(&self) -> &RocksDBProvider;
+    /// Returns the `RocksDB` provider.
+    fn rocksdb_provider(&self) -> RocksDBProvider;
 }

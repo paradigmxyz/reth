@@ -4,7 +4,7 @@
 //! available (either on non-Unix platforms or when the `rocksdb` feature is not enabled).
 //! Operations will produce errors if actually attempted.
 
-use reth_db_api::table::{Decompress, Table};
+use reth_db_api::table::{Encode, Table};
 use reth_storage_errors::{
     db::LogLevel,
     provider::{ProviderError::UnsupportedProvider, ProviderResult},
@@ -24,37 +24,44 @@ impl RocksDBProvider {
     /// Creates a new stub `RocksDB` provider.
     ///
     /// On non-Unix platforms, this returns an error indicating `RocksDB` is not supported.
-    pub fn new<P: AsRef<Path>>(_path: P) -> ProviderResult<Self> {
+    pub fn new(_path: impl AsRef<Path>) -> ProviderResult<Self> {
         Ok(Self)
     }
 
     /// Creates a new stub `RocksDB` provider builder.
-    pub fn builder<P: AsRef<Path>>(path: P) -> RocksDBBuilder {
+    pub fn builder(path: impl AsRef<Path>) -> RocksDBBuilder {
         RocksDBBuilder::new(path)
     }
 
     /// Get a value from `RocksDB` (stub implementation).
-    pub fn get<T>(&self, _key: T::Key) -> ProviderResult<Option<T::Value>>
-    where
-        T: Table,
-        T::Value: Decompress,
-    {
+    pub fn get<T: Table>(&self, _key: T::Key) -> ProviderResult<Option<T::Value>> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Get a value from `RocksDB` using pre-encoded key (stub implementation).
+    pub const fn get_encoded<T: Table>(
+        &self,
+        _key: &<T::Key as Encode>::Encoded,
+    ) -> ProviderResult<Option<T::Value>> {
         Err(UnsupportedProvider)
     }
 
     /// Put a value into `RocksDB` (stub implementation).
-    pub fn put<T>(&self, _key: T::Key, _value: T::Value) -> ProviderResult<()>
-    where
-        T: Table,
-    {
+    pub fn put<T: Table>(&self, _key: T::Key, _value: &T::Value) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Put a value into `RocksDB` using pre-encoded key (stub implementation).
+    pub const fn put_encoded<T: Table>(
+        &self,
+        _key: &<T::Key as Encode>::Encoded,
+        _value: &T::Value,
+    ) -> ProviderResult<()> {
         Err(UnsupportedProvider)
     }
 
     /// Delete a value from `RocksDB` (stub implementation).
-    pub fn delete<T>(&self, _key: T::Key) -> ProviderResult<()>
-    where
-        T: Table,
-    {
+    pub fn delete<T: Table>(&self, _key: T::Key) -> ProviderResult<()> {
         Err(UnsupportedProvider)
     }
 
@@ -72,11 +79,22 @@ impl RocksDBProvider {
 pub struct RocksDBBatch;
 
 impl RocksDBBatch {
-    /// Put a value into the batch (stub implementation).
-    pub fn put<T>(&self, _key: T::Key, _value: T::Value) -> ProviderResult<()>
-    where
-        T: Table,
-    {
+    /// Puts a value into the batch (stub implementation).
+    pub fn put<T: Table>(&self, _key: T::Key, _value: &T::Value) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Puts a value into the batch using pre-encoded key (stub implementation).
+    pub const fn put_encoded<T: Table>(
+        &self,
+        _key: &<T::Key as Encode>::Encoded,
+        _value: &T::Value,
+    ) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Deletes a value from the batch (stub implementation).
+    pub fn delete<T: Table>(&self, _key: T::Key) -> ProviderResult<()> {
         Err(UnsupportedProvider)
     }
 }
