@@ -175,8 +175,6 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if calls.peek().is_some() {
-                        // need to apply the state changes of this call before executing
-                        // the next call
                         db.commit(res.state)
                     }
                 }
