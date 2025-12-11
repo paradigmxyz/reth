@@ -22,8 +22,7 @@ use tokio::sync::oneshot;
 async fn testing_rpc_build_block_works() -> eyre::Result<()> {
     let tasks = TaskManager::current();
     let mut rpc_args = reth_node_core::args::RpcServerArgs::default().with_http();
-    rpc_args.http_api =
-        Some(RpcModuleSelection::from_iter([RethRpcModule::Other("testing".to_string())]));
+    rpc_args.http_api = Some(RpcModuleSelection::from_iter([RethRpcModule::Testing]));
     let tempdir = tempdir().expect("temp datadir");
     let datadir_args = DatadirArgs {
         datadir: MaybePlatformPath::<DataDirPath>::from_str(tempdir.path().to_str().unwrap())
