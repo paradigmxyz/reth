@@ -30,7 +30,7 @@ impl Target {
     pub fn with_min_len(mut self, min_len: u8) -> Self {
         debug_assert!(min_len <= 64);
         self.lower_bound = self.key;
-        self.lower_bound.truncate(64 - min_len as usize);
+        self.lower_bound.truncate(min_len as usize);
         self
     }
 
@@ -62,7 +62,9 @@ pub(crate) struct SubTrieTargets<'a> {
 
 /// Given a set of [`Target`]s, returns an iterator over those same [`Target`]s chunked by the
 /// sub-tries they apply to within the overall trie.
-pub fn sub_trie_targets<'a>(targets: &'a mut [Target]) -> impl Iterator<Item = SubTrieTargets<'a>> {
+pub(crate) fn iter_sub_trie_targets<'a>(
+    targets: &'a mut [Target],
+) -> impl Iterator<Item = SubTrieTargets<'a>> {
     // First sort lexicographically by lower bound. We will use this for chunking targets into
     // contiguous sections in the next steps based on their bounds.
     targets.sort_unstable_by_key(|target| target.lower_bound);
@@ -106,4 +108,199 @@ pub fn sub_trie_targets<'a>(targets: &'a mut [Target]) -> impl Iterator<Item = S
         target_chunk.sort_unstable_by_key(|target| target.key);
         SubTrieTargets { lower_bound, upper_bound, targets: target_chunk }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_iter_sub_trie_targets() {
+        // Helper to create nibbles from hex string (each character is a nibble)
+        let nibbles = |hex: &str| -> Nibbles {
+            if hex.is_empty() {
+                return Nibbles::new();
+            }
+            format!("0x{}", hex).parse().expect("valid nibbles hex string")
+        };
+
+        // Test cases: (input_targets, expected_output)
+        // Expected output format: Vec<(lower_bound_hex, upper_bound_hex_opt, Vec<key_hex>)>
+        let test_cases = vec![
+            // Case 1: Empty targets
+            (vec![], vec![]),
+            // Case 2: Single target without min_len
+            // lower_bound is empty, upper_bound is None (unbounded)
+            (
+                vec![Target::new(B256::repeat_byte(0x20))],
+                vec![(
+                    "",
+                    None,
+                    vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                )],
+            ),
+            // Case 3: Multiple targets in same sub-trie (no min_len)
+            // Both have empty lower_bound, so they're in the same sub-trie
+            (
+                vec![Target::new(B256::repeat_byte(0x20)), Target::new(B256::repeat_byte(0x21))],
+                vec![(
+                    "",
+                    None,
+                    vec![
+                        "2020202020202020202020202020202020202020202020202020202020202020",
+                        "2121212121212121212121212121212121212121212121212121212121212121",
+                    ],
+                )],
+            ),
+            // Case 4: Multiple targets in different sub-tries
+            // with_min_len(1) gives lower_bound with first 1 nibble
+            // First has lower_bound=0x2, upper_bound=0x3
+            // Second has lower_bound=0x4, upper_bound=0x5
+            (
+                vec![
+                    Target::new(B256::repeat_byte(0x20)).with_min_len(1),
+                    Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                ],
+                vec![
+                    (
+                        "2",
+                        Some("3"),
+                        vec!["2020202020202020202020202020202020202020202020202020202020202020"],
+                    ),
+                    (
+                        "4",
+                        Some("5"),
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
+                    ),
+                ],
+            ),
+            // Case 5: Three targets, two in same sub-trie, one separate
+            // 0x20 and 0x2f both have lower_bound=0x2, upper_bound=0x3
+            // 0x40 has lower_bound=0x4, upper_bound=0x5
+            (
+                vec![
+                    Target::new(B256::repeat_byte(0x20)).with_min_len(1),
+                    Target::new(B256::repeat_byte(0x2f)).with_min_len(1),
+                    Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                ],
+                vec![
+                    (
+                        "2",
+                        Some("3"),
+                        vec![
+                            "2020202020202020202020202020202020202020202020202020202020202020",
+                            "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
+                        ],
+                    ),
+                    (
+                        "4",
+                        Some("5"),
+                        vec!["4040404040404040404040404040404040404040404040404040404040404040"],
+                    ),
+                ],
+            ),
+            // Case 6: Targets with different min_len values in same sub-trie
+            // First has min_len=1 (lower=0x2), second has min_len=2 (lower=0x2f)
+            // Second's lower bound (0x2f) < first's upper bound (0x3), so same sub-trie
+            (
+                vec![
+                    Target::new(B256::repeat_byte(0x20)).with_min_len(1),
+                    Target::new(B256::repeat_byte(0x2f)).with_min_len(2),
+                ],
+                vec![(
+                    "2",
+                    Some("3"),
+                    vec![
+                        "2020202020202020202020202020202020202020202020202020202020202020",
+                        "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
+                    ],
+                )],
+            ),
+            // Case 7: More complex chunking with multiple sub-tries
+            // As described in the function comments: [0x2, 0x2fa, 0x4c, 0x4ce, 0x4e]
+            (
+                vec![
+                    Target::new(B256::repeat_byte(0x20)).with_min_len(1), // lower_bound: 0x2
+                    Target::new(B256::repeat_byte(0x2f)).with_min_len(3), // lower_bound: 0x2f2
+                    Target::new(B256::repeat_byte(0x4c)).with_min_len(2), // lower_bound: 0x4c
+                    Target::new(B256::repeat_byte(0x4c)).with_min_len(3), // lower_bound: 0x4c4
+                    Target::new(B256::repeat_byte(0x4e)).with_min_len(2), // lower_bound: 0x4e
+                ],
+                vec![
+                    (
+                        "2",
+                        Some("3"),
+                        vec![
+                            "2020202020202020202020202020202020202020202020202020202020202020",
+                            "2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f2f",
+                        ],
+                    ),
+                    (
+                        "4c",
+                        Some("4d"),
+                        vec![
+                            "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
+                            "4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c4c",
+                        ],
+                    ),
+                    (
+                        "4e",
+                        Some("4f"),
+                        vec!["4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e"],
+                    ),
+                ],
+            ),
+        ];
+
+        for (i, (mut input_targets, expected)) in test_cases.into_iter().enumerate() {
+            let sub_tries: Vec<_> = iter_sub_trie_targets(&mut input_targets).collect();
+
+            assert_eq!(
+                sub_tries.len(),
+                expected.len(),
+                "Test case {} failed: expected {} sub-tries, got {}",
+                i,
+                expected.len(),
+                sub_tries.len()
+            );
+
+            for (j, (sub_trie, (exp_lower_hex, exp_upper_hex_opt, exp_keys))) in
+                sub_tries.iter().zip(expected.iter()).enumerate()
+            {
+                let exp_lower = nibbles(exp_lower_hex);
+                let exp_upper = exp_upper_hex_opt.map(|hex| nibbles(hex));
+
+                assert_eq!(
+                    sub_trie.lower_bound, exp_lower,
+                    "Test case {} sub-trie {}: lower_bound mismatch",
+                    i, j
+                );
+                assert_eq!(
+                    sub_trie.upper_bound, exp_upper,
+                    "Test case {} sub-trie {}: upper_bound mismatch",
+                    i, j
+                );
+                assert_eq!(
+                    sub_trie.targets.len(),
+                    exp_keys.len(),
+                    "Test case {} sub-trie {}: expected {} targets, got {}",
+                    i,
+                    j,
+                    exp_keys.len(),
+                    sub_trie.targets.len()
+                );
+
+                for (k, (target, exp_key_hex)) in
+                    sub_trie.targets.iter().zip(exp_keys.iter()).enumerate()
+                {
+                    let exp_key = nibbles(exp_key_hex);
+                    assert_eq!(
+                        target.key, exp_key,
+                        "Test case {} sub-trie {} target {}: key mismatch",
+                        i, j, k
+                    );
+                }
+            }
+        }
+    }
 }

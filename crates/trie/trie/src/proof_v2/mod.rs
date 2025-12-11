@@ -115,7 +115,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
 }
 
 /// Helper type for the [`Iterator`] used to pass targets in from the caller.
-type TargetsIter<'a, I> = Peekable<WindowIter<'a, I>>;
+type TargetsIter<I> = Peekable<WindowIter<I>>;
 
 impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
@@ -188,7 +188,7 @@ where
     /// the common-case, then this is equivalent to lexicographical order.
     fn should_retain<'a>(
         &self,
-        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
         path: &Nibbles,
     ) -> bool {
         trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), "should_retain: called");
@@ -229,7 +229,7 @@ where
     /// therefore can be retained as a proof node if applicable.
     fn commit_child<'a>(
         &mut self,
-        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
     ) -> Result<RlpNode, StateProofError> {
@@ -315,7 +315,7 @@ where
     /// to this method.
     fn commit_last_child<'a>(
         &mut self,
-        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
     ) -> Result<(), StateProofError> {
         let Some(child) = self.child_stack.pop() else { return Ok(()) };
 
@@ -346,7 +346,7 @@ where
     /// - If the leaf's nibble is already set in the branch's `state_mask`.
     fn push_new_leaf<'a>(
         &mut self,
-        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
         leaf_nibble: u8,
         leaf_short_key: Nibbles,
         leaf_val: VE::DeferredEncoder,
@@ -453,7 +453,7 @@ where
     /// This method panics if `branch_stack` is empty.
     fn pop_branch<'a>(
         &mut self,
-        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
     ) -> Result<(), StateProofError> {
         trace!(
             target: TRACE_TARGET,
@@ -535,7 +535,7 @@ where
     /// creating a new one depending on the path of the key.
     fn push_leaf<'a>(
         &mut self,
-        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
         key: Nibbles,
         val: VE::DeferredEncoder,
     ) -> Result<(), StateProofError> {
@@ -622,7 +622,7 @@ where
     fn calculate_key_range<'a>(
         &mut self,
         value_encoder: &VE,
-        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
         hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
@@ -683,7 +683,7 @@ where
     /// cached branch will be a child of that splitting branch.
     fn push_cached_branch<'a>(
         &mut self,
-        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
         cached_path: Nibbles,
         cached_branch: &BranchNodeCompact,
     ) -> Result<(), StateProofError> {
@@ -856,7 +856,7 @@ where
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn next_uncached_key_range<'a>(
         &mut self,
-        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
         trie_cursor_state: &mut TrieCursorState,
         hashed_key_current_path: Option<Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
@@ -1071,18 +1071,17 @@ where
         }
     }
 
-    /// Internal implementation of proof calculation. Assumes both cursors have already been reset.
-    /// See docs on [`Self::proof`] for expected behavior.
-    fn proof_inner(
+    /// Calculates trie nodes and retains proofs for targetted nodes within a sub-trie. The
+    /// sub-trie's bounds are denoted by the `lower_bound` and `upper_bound` arguments,
+    /// `upper_bound` is exclusive, None indicates unbounded.
+    #[instrument(target = TRACE_TARGET, level = "trace", skip(self, value_encoder, targets))]
+    fn proof_subtrie<'a>(
         &mut self,
         value_encoder: &VE,
-        targets: &mut [Target],
-    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
-        trace!(target: TRACE_TARGET, "proof_inner: called");
-
-        // TODO remove once SparseTrieTargets is used
-        let targets = targets.iter();
-
+        lower_bound: Nibbles,
+        upper_bound: Option<Nibbles>,
+        targets: impl Iterator<Item = &'a Target>,
+    ) -> Result<(), StateProofError> {
         // In debug builds, verify that targets are sorted
         #[cfg(debug_assertions)]
         let targets = {
@@ -1100,12 +1099,6 @@ where
 
         // Wrap targets into a `TargetsIter`.
         let mut targets = WindowIter::new(targets).peekable();
-
-        // If there are no targets then nothing could be returned, return early.
-        if targets.peek().is_none() {
-            trace!(target: TRACE_TARGET, "Empty targets, returning");
-            return Ok(Vec::new())
-        }
 
         // Ensure initial state is cleared. By the end of the method call these should be empty once
         // again.
@@ -1176,6 +1169,33 @@ where
             }
         };
         self.retained_proofs.push(root_node);
+
+        Ok(())
+    }
+
+    /// Internal implementation of proof calculation. Assumes both cursors have already been reset.
+    /// See docs on [`Self::proof`] for expected behavior.
+    fn proof_inner(
+        &mut self,
+        value_encoder: &VE,
+        targets: &mut [Target],
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
+        trace!(target: TRACE_TARGET, "proof_inner: called");
+
+        // If there are no targets then nothing could be returned, return early.
+        if targets.is_empty() {
+            trace!(target: TRACE_TARGET, "Empty targets, returning");
+            return Ok(Vec::new())
+        }
+
+        for sub_trie_targets in iter_sub_trie_targets(targets) {
+            self.proof_subtrie(
+                value_encoder,
+                sub_trie_targets.lower_bound,
+                sub_trie_targets.upper_bound,
+                sub_trie_targets.targets.iter(),
+            )?;
+        }
 
         trace!(
             target: TRACE_TARGET,
@@ -1266,32 +1286,32 @@ where
 /// `WindowIter` is a wrapper around an [`Iterator`] which allows viewing both previous and current
 /// items on every iteration. It is similar to `itertools::tuple_windows`, except that the final
 /// item returned will contain the previous item and `None` as the current.
-struct WindowIter<'a, V, I: Iterator<Item = &'a V>> {
+struct WindowIter<I: Iterator> {
     iter: I,
-    prev: Option<&'a V>,
+    prev: Option<I::Item>,
 }
 
-impl<'a, V, I: Iterator<Item = &'a V>> WindowIter<'a, V, I> {
+impl<I: Iterator> WindowIter<I> {
     /// Wraps an iterator with a [`WindowIter`].
     const fn new(iter: I) -> Self {
         Self { iter, prev: None }
     }
 }
 
-impl<'a, V, I: Iterator<Item = &'a V>> Iterator for WindowIter<'a, I> {
+impl<I: Iterator<Item: Copy>> Iterator for WindowIter<I> {
     /// The iterator returns the previous and current items, respectively. If the underlying
     /// iterator is exhausted then `Some(prev, None)` is returned on the subsequent call to
     /// `WindowIter::next`, and `None` from the call after that.
-    type Item = (&'a V, Option<&'a V>);
+    type Item = (I::Item, Option<I::Item>);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match (self.prev, self.iter.next()) {
                 (None, None) => return None,
-                (None, Some(ref v)) => {
+                (None, Some(v)) => {
                     self.prev = Some(v);
                 }
-                (Some(ref v), next) => {
+                (Some(v), next) => {
                     self.prev = next;
                     return Some((v, next))
                 }
