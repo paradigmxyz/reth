@@ -17,6 +17,27 @@ initiated by Reth.
 
 Read more about things you can build with Execution Extensions in the [Paradigm blog](https://www.paradigm.xyz/2024/05/reth-exex).
 
+## Architecture
+
+```mermaid
+graph LR
+    subgraph "Reth Process"
+        Reth[Reth Core]
+
+        Reth -->|Notifications| ExEx1[ExEx 1]
+        Reth -->|Notifications| ExEx2[ExEx 2]
+        Reth -->|Notifications| ExEx3[ExEx N]
+
+        ExEx1 -->|Events| Reth
+        ExEx2 -->|Events| Reth
+        ExEx3 -->|Events| Reth
+    end
+
+    ExEx1 --> External1[External System 1]
+    ExEx2 --> External2[External System 2]
+    ExEx3 --> External3[External System N]
+```
+
 ## What Execution Extensions are not
 
 Execution Extensions are not separate processes that connect to the main Reth node process.
