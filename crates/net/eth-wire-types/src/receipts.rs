@@ -376,12 +376,14 @@ mod tests {
 
     #[test]
     fn encode_receipts70_inline_shape() {
+        let payload: Receipts70Payload<Receipt> = Receipts70Payload {
+            last_block_incomplete: true,
+            receipts: vec![vec![Receipt::default()]],
+        };
+
         let resp = Receipts70(RequestPair {
             request_id: 7,
-            message: Receipts70Payload {
-                last_block_incomplete: true,
-                receipts: vec![vec![Receipt::default()]],
-            },
+            message: payload,
         });
 
         let mut out = vec![];
