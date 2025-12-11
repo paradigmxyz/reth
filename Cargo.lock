@@ -10472,17 +10472,22 @@ dependencies = [
 name = "reth-rpc-layer"
 version = "1.9.3"
 dependencies = [
+ "alloy-primitives",
  "alloy-rpc-types-engine",
+ "brotli",
+ "flate2",
  "http",
  "http-body-util",
  "jsonrpsee",
  "jsonrpsee-http-client",
  "pin-project",
  "reqwest",
+ "reth-rpc-server-types",
  "tokio",
  "tower",
  "tower-http",
  "tracing",
+ "zstd",
 ]
 
 [[package]]

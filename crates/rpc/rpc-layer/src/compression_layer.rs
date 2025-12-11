@@ -1,4 +1,5 @@
 use jsonrpsee_http_client::{HttpBody, HttpRequest, HttpResponse};
+use reth_rpc_server_types::constants::DEFAULT_HTTP_COMPRESSION_ALGOS;
 use std::{
     future::Future,
     pin::Pin,
@@ -9,7 +10,7 @@ use tower_http::compression::{Compression, CompressionLayer as TowerCompressionL
 
 /// This layer is a wrapper around [`tower_http::compression::CompressionLayer`] that integrates
 /// with jsonrpsee's HTTP types. It automatically compresses responses based on the client's
-/// Accept-Encoding header.
+/// `Accept-Encoding` header.
 #[expect(missing_debug_implementations)]
 #[derive(Clone)]
 pub struct CompressionLayer {
@@ -17,19 +18,41 @@ pub struct CompressionLayer {
 }
 
 impl CompressionLayer {
-    /// Creates a new compression layer with zstd, gzip, brotli and deflate enabled.
-    pub fn new() -> Self {
-        Self {
-            inner_layer: TowerCompressionLayer::new().gzip(true).br(true).deflate(true).zstd(true),
+    /// Creates a new compression layer from a list of algorithm names.
+    /// Supported: zstd, gzip, deflate, br
+    ///
+    /// Note: The algorithm preference order is enforced by `tower_http` as:
+    /// **zstd > gzip > deflate > br**.
+    pub fn new(algos: &[impl AsRef<str>]) -> Self {
+        // Start with all algorithms explicitly disabled
+        let mut layer =
+            TowerCompressionLayer::new()
+            .no_zstd()
+            .no_gzip()
+            .no_deflate()
+            .no_br();
+        
+        // Only enable the algorithms that were explicitly enabled
+        for algo in algos {
+            match algo.as_ref() {
+                "zstd" => layer = layer.zstd(true),
+                "deflate" => layer = layer.deflate(true),
+                "gzip" => layer = layer.gzip(true),
+                "br" | "brotli" => layer = layer.br(true),
+                _ => {}
+            }
         }
+
+        Self { inner_layer: layer }
     }
 }
 
 impl Default for CompressionLayer {
     /// Creates a new compression layer with default settings.
-    /// See [`CompressionLayer::new`] for details.
+    ///
+    /// See [`DEFAULT_HTTP_COMPRESSION_ALGOS`].
     fn default() -> Self {
-        Self::new()
+        Self::new(&DEFAULT_HTTP_COMPRESSION_ALGOS)
     }
 }
 
@@ -111,7 +134,7 @@ mod tests {
 
     fn setup_compression_service(
     ) -> impl Service<HttpRequest, Response = HttpResponse, Error = Infallible> {
-        CompressionLayer::new().layer(MockRequestService)
+        CompressionLayer::default().layer(MockRequestService)
     }
 
     async fn get_response_size(response: HttpResponse) -> usize {

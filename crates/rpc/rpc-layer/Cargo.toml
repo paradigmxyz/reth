@@ -11,9 +11,12 @@ repository.workspace = true
 workspace = true
 
 [dependencies]
+alloy-primitives.workspace = true
 alloy-rpc-types-engine = { workspace = true, features = ["jwt", "serde"] }
+reth-rpc-server-types.workspace = true
 
 http.workspace = true
+http-body-util.workspace = true
 jsonrpsee-http-client.workspace = true
 pin-project.workspace = true
 tower.workspace = true
@@ -25,3 +28,7 @@ reqwest.workspace = true
 tokio = { workspace = true, features = ["macros"] }
 jsonrpsee = { workspace = true, features = ["server"] }
 http-body-util.workspace = true
+
+flate2 = "1.0"
+brotli.workspace = true
+zstd.workspace = true
