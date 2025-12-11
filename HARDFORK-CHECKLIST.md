@@ -22,7 +22,7 @@
 - Add new endpoints to the `EngineApi` trait and implement endpoints.
 - Update the `ExecutionPayload` + `ExecutionPayloadSidecar` to `Block` conversion if there are any additional
   parameters.
- Update version specific validation checks in the `EngineValidator` trait.
+- Update version specific validation checks in the `EngineValidator` trait.
 
 ## Op-Reth changes
 
