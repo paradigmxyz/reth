@@ -20,7 +20,7 @@ pub struct GetReceipts(
 /// Eth/70 `GetReceipts` request payload that supports partial receipt queries.
 ///
 /// When used with eth/70, the request id is carried by the surrounding
-/// [`RequestPair`], and the on-wire shape is the flattened list
+/// [`crate::message::RequestPair`], and the on-wire shape is the flattened list
 /// `[request-id, firstBlockReceiptIndex, [blockhash₁, ...]]`.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -103,7 +103,7 @@ impl<T: TxReceipt> From<Receipts69<T>> for Receipts<T> {
 
 /// Eth/70 `Receipts` response payload.
 ///
-/// This is used in conjunction with [`RequestPair`] to encode the full wire
+/// This is used in conjunction with [`crate::message::RequestPair`] to encode the full wire
 /// message `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
