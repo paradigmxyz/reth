@@ -12,7 +12,7 @@ on:
 
 jobs:
   build:
-    runs-on: depot-ubuntu-latest
+    runs-on: depot-ubuntu-latest-4
     timeout-minutes: 90
     steps:
       - name: Checkout
