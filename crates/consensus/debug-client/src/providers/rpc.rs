@@ -32,8 +32,8 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
                         ConnectionConfig::default().with_max_retries(u32::MAX).with_ws_config(
                             WebSocketConfig::default()
                                 // allow larger messages/frames for big blocks
-                                .max_frame_size(Some(128 << 20))
-                                .max_message_size(Some(128 << 20)),
+                                .max_frame_size(Some(128 * 1024 * 1024))
+                                .max_message_size(Some(128 * 1024 * 1024)),
                         ),
                     )
                     .await?,
