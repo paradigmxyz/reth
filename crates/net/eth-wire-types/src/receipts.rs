@@ -3,7 +3,7 @@
 use alloc::vec::Vec;
 use alloy_consensus::{ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt};
 use alloy_primitives::B256;
-use alloy_rlp::{RlpDecodable, RlpDecodableWrapper, RlpEncodable, RlpEncodableWrapper};
+use alloy_rlp::{RlpDecodableWrapper, RlpEncodableWrapper};
 use reth_codecs_derive::add_arbitrary_tests;
 use reth_ethereum_primitives::Receipt;
 
@@ -22,10 +22,9 @@ pub struct GetReceipts(
 /// When used with eth/70, the request id is carried by the surrounding
 /// [`crate::message::RequestPair`], and the on-wire shape is the flattened list
 /// `[request-id, firstBlockReceiptIndex, [blockhash₁, ...]]`.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
 pub struct GetReceipts70Payload {
     /// Index into the receipts of the first requested block hash.
     pub first_block_receipt_index: u64,
