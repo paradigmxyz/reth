@@ -27,10 +27,10 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
-    message::{EthBroadcastMessage, MessageError, RequestPair},
+    message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{message::RequestPair, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -281,10 +281,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 // delegate the actual receipt lookup to the existing
                 // `GetReceipts69` handler and apply the index when building the
                 // response.
-                let reth_eth_wire::GetReceipts70 {
+                let RequestPair {
                     request_id,
-                    first_block_receipt_index,
-                    block_hashes,
+                    message:
+                        reth_eth_wire::GetReceipts70Payload { first_block_receipt_index, block_hashes },
                 } = req70;
 
                 let (tx, response) = oneshot::channel();
@@ -314,8 +314,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 // `PeerRequest::GetReceipts` (with bloom) and
                 // `PeerRequest::GetReceipts69` (without bloom) by converting
                 // the payload accordingly.
-                let reth_eth_wire::Receipts70 { request_id, last_block_incomplete: _, receipts } =
-                    resp;
+                let RequestPair {
+                    request_id,
+                    message: reth_eth_wire::Receipts70Payload { last_block_incomplete: _, receipts },
+                } = resp;
 
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
@@ -397,10 +399,12 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 EthMessage::GetReceipts(pair) => {
                     let RequestPair { request_id, message } = pair;
                     let reth_eth_wire::GetReceipts(block_hashes) = message;
-                    let get70 = reth_eth_wire::GetReceipts70 {
+                    let get70 = RequestPair {
                         request_id,
-                        first_block_receipt_index: 0,
-                        block_hashes,
+                        message: reth_eth_wire::GetReceipts70Payload {
+                            first_block_receipt_index: 0,
+                            block_hashes,
+                        },
                     };
                     EthMessage::GetReceipts70(get70)
                 }
@@ -547,10 +551,12 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     break;
                 }
 
-                let message = reth_eth_wire::Receipts70 {
+                let message = RequestPair {
                     request_id: id,
-                    last_block_incomplete,
-                    receipts: truncated_receipts,
+                    message: reth_eth_wire::Receipts70Payload {
+                        last_block_incomplete,
+                        receipts: truncated_receipts,
+                    },
                 };
                 Ok(EthMessage::Receipts70(message))
             }

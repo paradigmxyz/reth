@@ -17,22 +17,25 @@ pub struct GetReceipts(
     pub Vec<B256>,
 );
 
-/// Eth/70 `GetReceipts` request that supports partial receipt queries.
+/// Eth/70 `GetReceipts` request payload that supports partial receipt queries.
 ///
-/// This follows EIP-7975 and represents the full wire message
+/// When used with eth/70, the request id is carried by the surrounding
+/// [`RequestPair`], and the on-wire shape is the flattened list
 /// `[request-id, firstBlockReceiptIndex, [blockhash₁, ...]]`.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
-pub struct GetReceipts70 {
-    /// The request id used to correlate the response.
-    pub request_id: u64,
+pub struct GetReceipts70Payload {
     /// Index into the receipts of the first requested block hash.
     pub first_block_receipt_index: u64,
     /// The block hashes to request receipts for.
     pub block_hashes: Vec<B256>,
 }
+
+/// Helper alias for the full eth/70 request carrying the request id alongside
+/// the payload.
+pub type GetReceipts70 = crate::message::RequestPair<GetReceipts70Payload>;
 
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
@@ -98,24 +101,26 @@ impl<T: TxReceipt> From<Receipts69<T>> for Receipts<T> {
     }
 }
 
-/// Eth/70 `Receipts` response message.
+/// Eth/70 `Receipts` response payload.
 ///
-/// This follows EIP-7975 and represents the full wire message
-/// `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
+/// This is used in conjunction with [`RequestPair`] to encode the full wire
+/// message `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
 #[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(rlp)]
-pub struct Receipts70<T = Receipt> {
-    /// The request id that this response corresponds to.
-    pub request_id: u64,
+pub struct Receipts70Payload<T = Receipt> {
     /// Whether the receipts list for the last block is incomplete.
     pub last_block_incomplete: bool,
     /// Receipts grouped by block.
     pub receipts: Vec<Vec<T>>,
 }
 
-impl<T: TxReceipt> Receipts70<T> {
+/// Helper alias for the full eth/70 response carrying the request id alongside
+/// the payload.
+pub type Receipts70<T = Receipt> = crate::message::RequestPair<Receipts70Payload<T>>;
+
+impl<T: TxReceipt> Receipts70Payload<T> {
     /// Encodes all receipts with the bloom filter.
     ///
     /// Just like eth/69, eth/70 does not transmit bloom filters over the wire.
@@ -134,7 +139,7 @@ impl<T: TxReceipt> Receipts70<T> {
 
 impl<T: TxReceipt> From<Receipts70<T>> for Receipts<T> {
     fn from(receipts: Receipts70<T>) -> Self {
-        receipts.into_with_bloom()
+        receipts.message.into_with_bloom()
     }
 }
 
@@ -287,5 +292,36 @@ mod tests {
 
         let encoded = alloy_rlp::encode(&request);
         assert_eq!(encoded, data);
+    }
+
+    #[test]
+    fn encode_get_receipts70_inline_shape() {
+        let req = RequestPair {
+            request_id: 1111,
+            message: GetReceipts70Payload {
+                first_block_receipt_index: 0,
+                block_hashes: vec![
+                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                    hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
+                ],
+            },
+        };
+
+        let mut out = vec![];
+        req.encode_inline(&mut out);
+
+        let mut buf = out.as_slice();
+        let header = alloy_rlp::Header::decode(&mut buf).unwrap();
+        let payload_start = buf.len();
+        let request_id = u64::decode(&mut buf).unwrap();
+        let first_block_receipt_index = u64::decode(&mut buf).unwrap();
+        let block_hashes = Vec::<B256>::decode(&mut buf).unwrap();
+
+        assert!(buf.is_empty(), "buffer not fully consumed");
+        assert_eq!(request_id, 1111);
+        assert_eq!(first_block_receipt_index, 0);
+        assert_eq!(block_hashes.len(), 2);
+        // ensure payload length matches header
+        assert_eq!(payload_start - buf.len(), header.payload_length);
     }
 }

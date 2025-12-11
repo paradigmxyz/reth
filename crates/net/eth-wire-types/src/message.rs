@@ -16,7 +16,7 @@ use crate::{
     status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
     RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
 };
-use alloc::{boxed::Box, string::String, sync::Arc};
+use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
 use alloy_primitives::{
     bytes::{Buf, BufMut},
     Bytes,
@@ -115,7 +115,9 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::GetReceipts => {
                 if version >= EthVersion::Eth70 {
-                    EthMessage::GetReceipts70(GetReceipts70::decode(buf)?)
+                    EthMessage::GetReceipts70(
+                        RequestPair::<crate::receipts::GetReceipts70Payload>::decode_inline(buf)?,
+                    )
                 } else {
                     EthMessage::GetReceipts(RequestPair::decode(buf)?)
                 }
@@ -130,7 +132,9 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                     // eth/70 continues to omit bloom filters and adds the
                     // `lastBlockIncomplete` flag, encoded as
                     // `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
-                    EthMessage::Receipts70(Receipts70::decode(buf)?)
+                    EthMessage::Receipts70(RequestPair::<
+                        crate::receipts::Receipts70Payload<N::Receipt>,
+                    >::decode_inline(buf)?)
                 }
             }
             EthMessageID::BlockRangeUpdate => {
@@ -385,10 +389,10 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
-            Self::GetReceipts70(request) => request.encode(out),
+            Self::GetReceipts70(request) => request.encode_inline(out),
             Self::Receipts(receipts) => receipts.encode(out),
             Self::Receipts69(receipt69) => receipt69.encode(out),
-            Self::Receipts70(receipt70) => receipt70.encode(out),
+            Self::Receipts70(receipt70) => receipt70.encode_inline(out),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.encode(out),
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
@@ -410,10 +414,10 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
-            Self::GetReceipts70(request) => request.length(),
+            Self::GetReceipts70(request) => request.length_inline(),
             Self::Receipts(receipts) => receipts.length(),
             Self::Receipts69(receipt69) => receipt69.length(),
-            Self::Receipts70(receipt70) => receipt70.length(),
+            Self::Receipts70(receipt70) => receipt70.length_inline(),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.length(),
             Self::Other(unknown) => unknown.length(),
         }
@@ -639,6 +643,100 @@ impl<T> RequestPair<T> {
     {
         let Self { request_id, message } = self;
         RequestPair { request_id, message: f(message) }
+    }
+}
+
+impl RequestPair<crate::receipts::GetReceipts70Payload> {
+    /// Encodes the request id and payload in a flattened list:
+    /// `[request-id, firstBlockReceiptIndex, [blockhashes...]]`.
+    pub fn encode_inline(&self, out: &mut dyn alloy_rlp::BufMut) {
+        let payload_length = self.request_id.length() +
+            self.message.first_block_receipt_index.length() +
+            self.message.block_hashes.length();
+        let header = Header { list: true, payload_length };
+        header.encode(out);
+        self.request_id.encode(out);
+        self.message.first_block_receipt_index.encode(out);
+        self.message.block_hashes.encode(out);
+    }
+
+    /// Returns the length of the flattened encoding.
+    pub fn length_inline(&self) -> usize {
+        let mut length = 0;
+        length += self.request_id.length();
+        length += self.message.first_block_receipt_index.length();
+        length += self.message.block_hashes.length();
+        length += length_of_length(length);
+        length
+    }
+
+    /// Decodes the flattened eth/70 `GetReceipts` payload.
+    pub fn decode_inline(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let header = Header::decode(buf)?;
+        let initial_length = buf.len();
+        let request_id = u64::decode(buf)?;
+        let first_block_receipt_index = u64::decode(buf)?;
+        let block_hashes = Vec::<alloy_primitives::B256>::decode(buf)?;
+
+        let consumed_len = initial_length - buf.len();
+        if consumed_len != header.payload_length {
+            return Err(alloy_rlp::Error::UnexpectedLength)
+        }
+
+        Ok(Self {
+            request_id,
+            message: crate::receipts::GetReceipts70Payload {
+                first_block_receipt_index,
+                block_hashes,
+            },
+        })
+    }
+}
+
+impl<T> RequestPair<crate::receipts::Receipts70Payload<T>>
+where
+    T: Decodable + Encodable,
+{
+    /// Encodes the request id and payload in a flattened list:
+    /// `[request-id, lastBlockIncomplete, [[receipts...], ...]]`.
+    pub fn encode_inline(&self, out: &mut dyn alloy_rlp::BufMut) {
+        let payload_length = self.request_id.length() +
+            self.message.last_block_incomplete.length() +
+            self.message.receipts.length();
+        let header = Header { list: true, payload_length };
+        header.encode(out);
+        self.request_id.encode(out);
+        self.message.last_block_incomplete.encode(out);
+        self.message.receipts.encode(out);
+    }
+
+    /// Returns the length of the flattened encoding.
+    pub fn length_inline(&self) -> usize {
+        let mut length = 0;
+        length += self.request_id.length();
+        length += self.message.last_block_incomplete.length();
+        length += self.message.receipts.length();
+        length += length_of_length(length);
+        length
+    }
+
+    /// Decodes the flattened eth/70 Receipts payload.
+    pub fn decode_inline(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let header = Header::decode(buf)?;
+        let initial_length = buf.len();
+        let request_id = u64::decode(buf)?;
+        let last_block_incomplete = bool::decode(buf)?;
+        let receipts = Vec::<Vec<T>>::decode(buf)?;
+
+        let consumed_len = initial_length - buf.len();
+        if consumed_len != header.payload_length {
+            return Err(alloy_rlp::Error::UnexpectedLength)
+        }
+
+        Ok(Self {
+            request_id,
+            message: crate::receipts::Receipts70Payload { last_block_incomplete, receipts },
+        })
     }
 }
 
