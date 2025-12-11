@@ -7,7 +7,7 @@ use crate::args::{
 use alloy_primitives::Address;
 use alloy_rpc_types_engine::JwtSecret;
 use clap::{
-    builder::{PossibleValue, RangedU64ValueParser, TypedValueParser},
+    builder::{PossibleValue, RangedU64ValueParser, Resettable, TypedValueParser},
     Arg, Args, Command,
 };
 use rand::Rng;
@@ -430,11 +430,11 @@ pub struct RpcServerArgs {
     pub http_disable_compression: bool,
 
     /// Rpc Modules to be configured for the HTTP server
-    #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default())]
+    #[arg(long = "http.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_api.as_ref().map(|v| v.to_string().into())))]
     pub http_api: Option<RpcModuleSelection>,
 
     /// Http Corsdomain to allow request from
-    #[arg(long = "http.corsdomain")]
+    #[arg(long = "http.corsdomain", default_value = Resettable::from(DefaultRpcServerArgs::get_global().http_corsdomain.as_ref().map(|v| v.to_string().into())))]
     pub http_corsdomain: Option<String>,
 
     /// Enable the WS-RPC server
@@ -450,11 +450,11 @@ pub struct RpcServerArgs {
     pub ws_port: u16,
 
     /// Origins from which to accept `WebSocket` requests
-    #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain")]
+    #[arg(id = "ws.origins", long = "ws.origins", alias = "ws.corsdomain", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_allowed_origins.as_ref().map(|v| v.to_string().into())))]
     pub ws_allowed_origins: Option<String>,
 
     /// Rpc Modules to be configured for the WS server
-    #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default())]
+    #[arg(long = "ws.api", value_parser = RpcModuleSelectionValueParser::default(), default_value = Resettable::from(DefaultRpcServerArgs::get_global().ws_api.as_ref().map(|v| v.to_string().into())))]
     pub ws_api: Option<RpcModuleSelection>,
 
     /// Disable the IPC-RPC server
@@ -468,7 +468,7 @@ pub struct RpcServerArgs {
     /// Set the permissions for the IPC socket file, in octal format.
     ///
     /// If not specified, the permissions will be set by the system's umask.
-    #[arg(long = "ipc.permissions")]
+    #[arg(long = "ipc.permissions", default_value = Resettable::from(DefaultRpcServerArgs::get_global().ipc_socket_permissions.as_ref().map(|v| v.to_string().into())))]
     pub ipc_socket_permissions: Option<String>,
 
     /// Auth server address to listen on
@@ -485,7 +485,7 @@ pub struct RpcServerArgs {
     ///
     /// If no path is provided, a secret will be generated and stored in the datadir under
     /// `<DIR>/<CHAIN_ID>/jwt.hex`. For mainnet this would be `~/.reth/mainnet/jwt.hex` by default.
-    #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false)]
+    #[arg(long = "authrpc.jwtsecret", value_name = "PATH", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().auth_jwtsecret.as_ref().map(|v| v.to_string_lossy().into())))]
     pub auth_jwtsecret: Option<PathBuf>,
 
     /// Enable auth engine API over IPC
@@ -508,7 +508,7 @@ pub struct RpcServerArgs {
     ///
     /// This is __not__ used for the authenticated engine-API RPC server, see
     /// `--authrpc.jwtsecret`.
-    #[arg(long = "rpc.jwtsecret", value_name = "HEX", global = true, required = false)]
+    #[arg(long = "rpc.jwtsecret", value_name = "HEX", global = true, required = false, default_value = Resettable::from(DefaultRpcServerArgs::get_global().rpc_jwtsecret.as_ref().map(|v| format!("{:?}", v).into())))]
     pub rpc_jwtsecret: Option<JwtSecret>,
 
     /// Set the maximum RPC request payload size for both HTTP and WS in megabytes.
@@ -621,7 +621,7 @@ pub struct RpcServerArgs {
 
     /// Path to file containing disallowed addresses, json-encoded list of strings. Block
     /// validation API will reject blocks containing transactions from these addresses.
-    #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>)]
+    #[arg(long = "builder.disallow", value_name = "PATH", value_parser = reth_cli_util::parsers::read_json_from_file::<HashSet<Address>>, default_value = Resettable::from(DefaultRpcServerArgs::get_global().builder_disallow.as_ref().map(|v| format!("{:?}", v).into())))]
     pub builder_disallow: Option<HashSet<Address>>,
 
     /// State cache configuration.
@@ -963,5 +963,151 @@ mod tests {
         let args = CommandParser::<RpcServerArgs>::parse_from(["reth"]).args;
         let expected = 1_000_000_000_000_000_000u128;
         assert_eq!(args.rpc_tx_fee_cap, expected); // 1 ETH default cap
+    }
+
+    #[test]
+    fn test_rpc_server_args() {
+        let args = RpcServerArgs {
+            http: true,
+            http_addr: "127.0.0.1".parse().unwrap(),
+            http_port: 8545,
+            http_disable_compression: false,
+            http_api: Some(RpcModuleSelection::try_from_selection(["eth", "admin"]).unwrap()),
+            http_corsdomain: Some("*".to_string()),
+            ws: true,
+            ws_addr: "127.0.0.1".parse().unwrap(),
+            ws_port: 8546,
+            ws_allowed_origins: Some("*".to_string()),
+            ws_api: Some(RpcModuleSelection::try_from_selection(["eth", "admin"]).unwrap()),
+            ipcdisable: false,
+            ipcpath: "reth.ipc".to_string(),
+            ipc_socket_permissions: Some("0o666".to_string()),
+            auth_addr: "127.0.0.1".parse().unwrap(),
+            auth_port: 8551,
+            auth_jwtsecret: Some(std::path::PathBuf::from("/tmp/jwt.hex")),
+            auth_ipc: false,
+            auth_ipc_path: "engine.ipc".to_string(),
+            disable_auth_server: false,
+            rpc_jwtsecret: None,
+            rpc_max_request_size: 15u32.into(),
+            rpc_max_response_size: 160u32.into(),
+            rpc_max_subscriptions_per_connection: 1024u32.into(),
+            rpc_max_connections: 500u32.into(),
+            rpc_max_tracing_requests: 16,
+            rpc_max_blocking_io_requests: 256,
+            rpc_max_trace_filter_blocks: 4000,
+            rpc_max_blocks_per_filter: 1000u64.into(),
+            rpc_max_logs_per_response: 10000u64.into(),
+            rpc_gas_cap: 50_000_000,
+            rpc_evm_memory_limit: 256,
+            rpc_tx_fee_cap: 2_000_000_000_000_000_000u128,
+            rpc_max_simulate_blocks: 256,
+            rpc_eth_proof_window: 100_000,
+            rpc_proof_permits: 16,
+            rpc_pending_block: PendingBlockKind::Full,
+            rpc_forwarder: None,
+            builder_disallow: None,
+            rpc_state_cache: RpcStateCacheArgs {
+                max_blocks: 5000,
+                max_receipts: 2000,
+                max_headers: 1000,
+                max_concurrent_db_requests: 512,
+            },
+            gas_price_oracle: GasPriceOracleArgs {
+                blocks: 20,
+                ignore_price: 2,
+                max_price: 500_000_000_000,
+                percentile: 60,
+                default_suggested_fee: None,
+            },
+            rpc_send_raw_transaction_sync_timeout: std::time::Duration::from_secs(30),
+        };
+
+        let parsed_args = CommandParser::<RpcServerArgs>::parse_from([
+            "reth",
+            "--http",
+            "--http.addr",
+            "127.0.0.1",
+            "--http.port",
+            "8545",
+            "--http.api",
+            "eth,admin",
+            "--http.corsdomain",
+            "*",
+            "--ws",
+            "--ws.addr",
+            "127.0.0.1",
+            "--ws.port",
+            "8546",
+            "--ws.origins",
+            "*",
+            "--ws.api",
+            "eth,admin",
+            "--ipcpath",
+            "reth.ipc",
+            "--ipc.permissions",
+            "0o666",
+            "--authrpc.addr",
+            "127.0.0.1",
+            "--authrpc.port",
+            "8551",
+            "--authrpc.jwtsecret",
+            "/tmp/jwt.hex",
+            "--auth-ipc.path",
+            "engine.ipc",
+            "--rpc.max-request-size",
+            "15",
+            "--rpc.max-response-size",
+            "160",
+            "--rpc.max-subscriptions-per-connection",
+            "1024",
+            "--rpc.max-connections",
+            "500",
+            "--rpc.max-tracing-requests",
+            "16",
+            "--rpc.max-blocking-io-requests",
+            "256",
+            "--rpc.max-trace-filter-blocks",
+            "4000",
+            "--rpc.max-blocks-per-filter",
+            "1000",
+            "--rpc.max-logs-per-response",
+            "10000",
+            "--rpc.gascap",
+            "50000000",
+            "--rpc.evm-memory-limit",
+            "256",
+            "--rpc.txfeecap",
+            "2.0",
+            "--rpc.max-simulate-blocks",
+            "256",
+            "--rpc.eth-proof-window",
+            "100000",
+            "--rpc.proof-permits",
+            "16",
+            "--rpc.pending-block",
+            "full",
+            "--rpc-cache.max-blocks",
+            "5000",
+            "--rpc-cache.max-receipts",
+            "2000",
+            "--rpc-cache.max-headers",
+            "1000",
+            "--rpc-cache.max-concurrent-db-requests",
+            "512",
+            "--gpo.blocks",
+            "20",
+            "--gpo.ignoreprice",
+            "2",
+            "--gpo.maxprice",
+            "500000000000",
+            "--gpo.percentile",
+            "60",
+            "--rpc.send-raw-transaction-sync-timeout",
+            "30s",
+        ])
+        .args;
+
+        assert_eq!(parsed_args, args);
     }
 }
