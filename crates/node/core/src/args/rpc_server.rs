@@ -227,7 +227,7 @@ impl DefaultRpcServerArgs {
     }
 
     /// Set the default RPC JWT secret
-    pub fn with_rpc_jwtsecret(mut self, v: Option<JwtSecret>) -> Self {
+    pub const fn with_rpc_jwtsecret(mut self, v: Option<JwtSecret>) -> Self {
         self.rpc_jwtsecret = v;
         self
     }
