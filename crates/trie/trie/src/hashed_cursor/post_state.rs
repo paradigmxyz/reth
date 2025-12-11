@@ -423,14 +423,15 @@ mod tests {
                 result.sort_by(|a, b| a.0.cmp(&b.0));
                 result.dedup_by(|a, b| a.0 == b.0);
                 result
-            })
-        }
+            },
+        )
+    }
 
         /// Generate a sorted vector of (B256, U256) entries (including deletions as ZERO)
         fn sorted_post_state_nodes_strategy() -> impl Strategy<Value = Vec<(B256, U256)>> {
             // Explicitly inject ZERO values to model post-state deletions.
-            prop::collection::vec((any::<u8>(), u256_strategy(), any::<bool>()), 0..20)
-                .prop_map(|entries| {
+            prop::collection::vec((any::<u8>(), u256_strategy(), any::<bool>()), 0..20).prop_map(
+                |entries| {
                     let mut result: Vec<(B256, U256)> = entries
                         .into_iter()
                         .map(|(byte, value, is_deletion)| {
