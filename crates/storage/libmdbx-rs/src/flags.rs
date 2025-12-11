@@ -1,8 +1,10 @@
+use std::str::FromStr;
+
 use bitflags::bitflags;
 use ffi::*;
 
 /// MDBX sync mode
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(PartialEq, Eq, Clone, Copy, Debug, Default)]
 pub enum SyncMode {
     /// Default robust and durable sync mode.
     /// Metadata is written and flushed to disk after a data is written and flushed, which
@@ -116,6 +118,21 @@ impl Default for Mode {
 impl From<Mode> for EnvironmentFlags {
     fn from(mode: Mode) -> Self {
         Self { mode, ..Default::default() }
+    }
+}
+
+impl FromStr for SyncMode {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        let val = s.trim().to_ascii_lowercase();
+        match val.as_str() {
+            "durable" => Ok(Self::Durable),
+            "safe-no-sync" | "safenosync" | "safe_no_sync" => Ok(Self::SafeNoSync),
+            _ => Err(format!(
+                "invalid value '{s}' for sync mode. valid values: durable, safe-no-sync"
+            )),
+        }
     }
 }
 

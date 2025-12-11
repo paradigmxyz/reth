@@ -4,6 +4,7 @@ pub mod canyon;
 pub mod isthmus;
 
 // Re-export the decode_holocene_base_fee function for compatibility
+use reth_execution_types::BlockExecutionResult;
 pub use reth_optimism_chainspec::decode_holocene_base_fee;
 
 use crate::proof::calculate_receipt_root_optimism;
@@ -87,8 +88,24 @@ where
 pub fn validate_block_post_execution<R: DepositReceipt>(
     header: impl BlockHeader,
     chain_spec: impl OpHardforks,
-    receipts: &[R],
+    result: &BlockExecutionResult<R>,
 ) -> Result<(), ConsensusError> {
+    // Validate that the blob gas used is present and correctly computed if Jovian is active.
+    if chain_spec.is_jovian_active_at_timestamp(header.timestamp()) {
+        let computed_blob_gas_used = result.blob_gas_used;
+        let header_blob_gas_used =
+            header.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
+
+        if computed_blob_gas_used != header_blob_gas_used {
+            return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
+                got: computed_blob_gas_used,
+                expected: header_blob_gas_used,
+            }));
+        }
+    }
+
+    let receipts = &result.receipts;
+
     // Before Byzantium, receipts contained state root that would mean that expensive
     // operation as hashing that is required for state root got calculated in every
     // transaction This was replaced with is_success flag.
@@ -176,19 +193,24 @@ fn compare_receipts_root_and_logs_bloom(
 mod tests {
     use super::*;
     use alloy_consensus::Header;
+    use alloy_eips::eip7685::Requests;
     use alloy_primitives::{b256, hex, Bytes, U256};
     use op_alloy_consensus::OpTxEnvelope;
     use reth_chainspec::{BaseFeeParams, ChainSpec, EthChainSpec, ForkCondition, Hardfork};
     use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
     use reth_optimism_forks::{OpHardfork, BASE_SEPOLIA_HARDFORKS};
+    use reth_optimism_primitives::OpReceipt;
     use std::sync::Arc;
 
-    const JOVIAN_TIMESTAMP: u64 = 1900000000;
+    const HOLOCENE_TIMESTAMP: u64 = 1700000000;
+    const ISTHMUS_TIMESTAMP: u64 = 1750000000;
+    const JOVIAN_TIMESTAMP: u64 = 1800000000;
     const BLOCK_TIME_SECONDS: u64 = 2;
 
     fn holocene_chainspec() -> Arc<OpChainSpec> {
         let mut hardforks = BASE_SEPOLIA_HARDFORKS.clone();
-        hardforks.insert(OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(1800000000));
+        hardforks
+            .insert(OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(HOLOCENE_TIMESTAMP));
         Arc::new(OpChainSpec {
             inner: ChainSpec {
                 chain: BASE_SEPOLIA.inner.chain,
@@ -208,7 +230,7 @@ mod tests {
         chainspec
             .inner
             .hardforks
-            .insert(OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(1800000000));
+            .insert(OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(ISTHMUS_TIMESTAMP));
         chainspec
     }
 
@@ -217,7 +239,7 @@ mod tests {
         chainspec
             .inner
             .hardforks
-            .insert(OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(1900000000));
+            .insert(OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(JOVIAN_TIMESTAMP));
         chainspec
     }
 
@@ -245,14 +267,14 @@ mod tests {
             base_fee_per_gas: Some(1),
             gas_used: 15763614,
             gas_limit: 144000000,
-            timestamp: 1800000003,
+            timestamp: HOLOCENE_TIMESTAMP + 3,
             extra_data: Bytes::from_static(&[0, 0, 0, 0, 0, 0, 0, 0, 0]),
             ..Default::default()
         };
         let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
             &op_chain_spec,
             &parent,
-            1800000005,
+            HOLOCENE_TIMESTAMP + 5,
         );
         assert_eq!(
             base_fee.unwrap(),
@@ -267,14 +289,14 @@ mod tests {
             gas_used: 15763614,
             gas_limit: 144000000,
             extra_data: Bytes::from_static(&[0, 0, 0, 0, 8, 0, 0, 0, 8]),
-            timestamp: 1800000003,
+            timestamp: HOLOCENE_TIMESTAMP + 3,
             ..Default::default()
         };
 
         let base_fee = reth_optimism_chainspec::OpChainSpec::next_block_base_fee(
             &holocene_chainspec(),
             &parent,
-            1800000005,
+            HOLOCENE_TIMESTAMP + 5,
         );
         assert_eq!(
             base_fee.unwrap(),
@@ -501,5 +523,53 @@ mod tests {
 
         body.withdrawals.take();
         validate_body_against_header_op(&chainspec, &body, &header).unwrap_err();
+    }
+
+    #[test]
+    fn test_jovian_blob_gas_used_validation() {
+        const BLOB_GAS_USED: u64 = 1000;
+        const GAS_USED: u64 = 5000;
+
+        let chainspec = jovian_chainspec();
+        let header = Header {
+            timestamp: JOVIAN_TIMESTAMP,
+            blob_gas_used: Some(BLOB_GAS_USED),
+            ..Default::default()
+        };
+
+        let result = BlockExecutionResult::<OpReceipt> {
+            blob_gas_used: BLOB_GAS_USED,
+            receipts: vec![],
+            requests: Requests::default(),
+            gas_used: GAS_USED,
+        };
+        validate_block_post_execution(&header, &chainspec, &result).unwrap();
+    }
+
+    #[test]
+    fn test_jovian_blob_gas_used_validation_mismatched() {
+        const BLOB_GAS_USED: u64 = 1000;
+        const GAS_USED: u64 = 5000;
+
+        let chainspec = jovian_chainspec();
+        let header = Header {
+            timestamp: JOVIAN_TIMESTAMP,
+            blob_gas_used: Some(BLOB_GAS_USED + 1),
+            ..Default::default()
+        };
+
+        let result = BlockExecutionResult::<OpReceipt> {
+            blob_gas_used: BLOB_GAS_USED,
+            receipts: vec![],
+            requests: Requests::default(),
+            gas_used: GAS_USED,
+        };
+        assert_eq!(
+            validate_block_post_execution(&header, &chainspec, &result),
+            Err(ConsensusError::BlobGasUsedDiff(GotExpected {
+                got: BLOB_GAS_USED,
+                expected: BLOB_GAS_USED + 1,
+            }))
+        );
     }
 }

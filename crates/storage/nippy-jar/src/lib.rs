@@ -200,6 +200,9 @@ impl<H: NippyJarHeader> NippyJar<H> {
         // Read [`Self`] located at the data file.
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
         let config_file = File::open(&config_path)
+            .inspect_err(|e| {
+                warn!( ?path, %e, "Failed to load static file jar");
+            })
             .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
         let mut obj = Self::load_from_reader(config_file)?;

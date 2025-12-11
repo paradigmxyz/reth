@@ -158,4 +158,14 @@ mod tests {
         let config = OpBuilderConfig::default();
         assert!(config.constrained_da_config().is_none());
     }
+
+    #[test]
+    fn test_gas_limit() {
+        let gas_limit = OpGasLimitConfig::default();
+        assert_eq!(gas_limit.gas_limit(), None);
+        gas_limit.set_gas_limit(50000);
+        assert_eq!(gas_limit.gas_limit(), Some(50000));
+        gas_limit.set_gas_limit(0);
+        assert_eq!(gas_limit.gas_limit(), None);
+    }
 }

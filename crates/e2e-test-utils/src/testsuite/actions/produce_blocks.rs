@@ -11,6 +11,7 @@ use alloy_rpc_types_engine::{
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::{collections::HashSet, marker::PhantomData, time::Duration};
@@ -79,6 +80,7 @@ where
                 Block,
                 Receipt,
                 Header,
+                TransactionSigned,
             >::block_by_number(
                 rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
             )
@@ -96,31 +98,66 @@ where
                 finalized_block_hash: parent_hash,
             };
 
-            let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v2(
+            // Try v2 first for backwards compatibility, fall back to v3 on error.
+            match EngineApiClient::<Engine>::fork_choice_updated_v2(
                 &engine_client,
                 fork_choice_state,
                 Some(self.payload_attributes.clone()),
             )
-            .await?;
-
-            debug!("FCU result: {:?}", fcu_result);
-
-            // check if we got a valid payload ID
-            match fcu_result.payload_status.status {
-                PayloadStatusEnum::Valid => {
-                    if let Some(payload_id) = fcu_result.payload_id {
-                        debug!("Got payload ID: {payload_id}");
-
-                        // get the payload that was built
-                        let _engine_payload =
-                            EngineApiClient::<Engine>::get_payload_v2(&engine_client, payload_id)
+            .await
+            {
+                Ok(fcu_result) => {
+                    debug!(?fcu_result, "FCU v2 result");
+                    match fcu_result.payload_status.status {
+                        PayloadStatusEnum::Valid => {
+                            if let Some(payload_id) = fcu_result.payload_id {
+                                debug!(id=%payload_id, "Got payload");
+                                let _engine_payload = EngineApiClient::<Engine>::get_payload_v2(
+                                    &engine_client,
+                                    payload_id,
+                                )
                                 .await?;
-                        Ok(())
-                    } else {
-                        Err(eyre::eyre!("No payload ID returned from forkchoiceUpdated"))
+                                Ok(())
+                            } else {
+                                Err(eyre::eyre!("No payload ID returned from forkchoiceUpdated"))
+                            }
+                        }
+                        _ => Err(eyre::eyre!(
+                            "Payload status not valid: {:?}",
+                            fcu_result.payload_status
+                        ))?,
                     }
                 }
-                _ => Err(eyre::eyre!("Payload status not valid: {:?}", fcu_result.payload_status)),
+                Err(_) => {
+                    // If v2 fails due to unsupported fork/missing fields, try v3
+                    let fcu_result = EngineApiClient::<Engine>::fork_choice_updated_v3(
+                        &engine_client,
+                        fork_choice_state,
+                        Some(self.payload_attributes.clone()),
+                    )
+                    .await?;
+
+                    debug!(?fcu_result, "FCU v3 result");
+                    match fcu_result.payload_status.status {
+                        PayloadStatusEnum::Valid => {
+                            if let Some(payload_id) = fcu_result.payload_id {
+                                debug!(id=%payload_id, "Got payload");
+                                let _engine_payload = EngineApiClient::<Engine>::get_payload_v3(
+                                    &engine_client,
+                                    payload_id,
+                                )
+                                .await?;
+                                Ok(())
+                            } else {
+                                Err(eyre::eyre!("No payload ID returned from forkchoiceUpdated"))
+                            }
+                        }
+                        _ => Err(eyre::eyre!(
+                            "Payload status not valid: {:?}",
+                            fcu_result.payload_status
+                        )),
+                    }
+                }
             }
         })
     }
@@ -348,6 +385,7 @@ where
                     Block,
                     Receipt,
                     Header,
+                    TransactionSigned,
                 >::block_by_number(
                     rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
                 )
@@ -421,6 +459,7 @@ where
                 Block,
                 Receipt,
                 Header,
+                TransactionSigned,
             >::block_by_number(
                 rpc_client, alloy_eips::BlockNumberOrTag::Latest, false
             )
@@ -531,6 +570,7 @@ where
                     Block,
                     Receipt,
                     Header,
+                    TransactionSigned,
                 >::header_by_number(
                     rpc_client, alloy_eips::BlockNumberOrTag::Latest
                 )

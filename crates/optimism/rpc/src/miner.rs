@@ -18,7 +18,7 @@ pub struct OpMinerExtApi {
 
 impl OpMinerExtApi {
     /// Instantiate the miner API extension with the given, sharable data availability
-    /// configuration and gas limit configuration.
+    /// configuration.
     pub fn new(da_config: OpDAConfig, gas_limit_config: OpGasLimitConfig) -> Self {
         Self { da_config, gas_limit_config, metrics: OpMinerMetrics::default() }
     }
@@ -37,7 +37,6 @@ impl MinerApiExtServer for OpMinerExtApi {
         Ok(true)
     }
 
-    /// Handler for `miner_setGasLimit` RPC method.
     async fn set_gas_limit(&self, gas_limit: U64) -> RpcResult<bool> {
         debug!(target: "rpc", "Setting gas limit: {}", gas_limit);
         self.gas_limit_config.set_gas_limit(gas_limit.to());
@@ -73,7 +72,7 @@ impl OpMinerMetrics {
 
     /// Sets the gas limit gauge value
     #[inline]
-    pub fn set_gas_limit(&self, limit: u64) {
-        self.gas_limit.set(limit as f64);
+    pub fn set_gas_limit(&self, gas_limit: u64) {
+        self.gas_limit.set(gas_limit as f64);
     }
 }

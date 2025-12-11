@@ -18,9 +18,9 @@ use core::fmt::Debug;
 use reth_chainspec::EthChainSpec;
 use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
 use reth_consensus_common::validation::{
-    validate_against_parent_4844, validate_against_parent_eip1559_base_fee,
-    validate_against_parent_hash_number, validate_against_parent_timestamp, validate_cancun_gas,
-    validate_header_base_fee, validate_header_extra_data, validate_header_gas,
+    validate_against_parent_eip1559_base_fee, validate_against_parent_hash_number,
+    validate_against_parent_timestamp, validate_cancun_gas, validate_header_base_fee,
+    validate_header_extra_data, validate_header_gas,
 };
 use reth_execution_types::BlockExecutionResult;
 use reth_optimism_forks::OpHardforks;
@@ -65,7 +65,7 @@ where
         block: &RecoveredBlock<N::Block>,
         result: &BlockExecutionResult<N::Receipt>,
     ) -> Result<(), ConsensusError> {
-        validate_block_post_execution(block.header(), &self.chain_spec, &result.receipts)
+        validate_block_post_execution(block.header(), &self.chain_spec, result)
     }
 }
 
@@ -111,7 +111,13 @@ where
             return Ok(())
         }
 
-        if self.chain_spec.is_ecotone_active_at_timestamp(block.timestamp()) {
+        // Blob gas used validation
+        // In Jovian, the blob gas used computation has changed. We are moving the blob base fee
+        // validation to post-execution since the DA footprint calculation is stateful.
+        // Pre-execution we only validate that the blob gas used is present in the header.
+        if self.chain_spec.is_jovian_active_at_timestamp(block.timestamp()) {
+            block.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
+        } else if self.chain_spec.is_ecotone_active_at_timestamp(block.timestamp()) {
             validate_cancun_gas(block)?;
         }
 
@@ -182,11 +188,575 @@ where
             &self.chain_spec,
         )?;
 
-        // ensure that the blob gas fields for this block
-        if let Some(blob_params) = self.chain_spec.blob_params_at_timestamp(header.timestamp()) {
-            validate_against_parent_4844(header.header(), parent.header(), blob_params)?;
+        // Ensure that the blob gas fields for this block are correctly set.
+        // In the op-stack, the excess blob gas is always 0 for all blocks after ecotone.
+        // The blob gas used and the excess blob gas should both be set after ecotone.
+        // After Jovian, the blob gas used contains the current DA footprint.
+        if self.chain_spec.is_ecotone_active_at_timestamp(header.timestamp()) {
+            let blob_gas_used = header.blob_gas_used().ok_or(ConsensusError::BlobGasUsedMissing)?;
+
+            // Before Jovian and after ecotone, the blob gas used should be 0.
+            if !self.chain_spec.is_jovian_active_at_timestamp(header.timestamp()) &&
+                blob_gas_used != 0
+            {
+                return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
+                    got: blob_gas_used,
+                    expected: 0,
+                }));
+            }
+
+            let excess_blob_gas =
+                header.excess_blob_gas().ok_or(ConsensusError::ExcessBlobGasMissing)?;
+            if excess_blob_gas != 0 {
+                return Err(ConsensusError::ExcessBlobGasDiff {
+                    diff: GotExpected { got: excess_blob_gas, expected: 0 },
+                    parent_excess_blob_gas: parent.excess_blob_gas().unwrap_or(0),
+                    parent_blob_gas_used: parent.blob_gas_used().unwrap_or(0),
+                })
+            }
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use alloy_consensus::{BlockBody, Eip658Value, Header, Receipt, TxEip7702, TxReceipt};
+    use alloy_eips::{eip4895::Withdrawals, eip7685::Requests};
+    use alloy_primitives::{Address, Bytes, Signature, U256};
+    use op_alloy_consensus::{
+        encode_holocene_extra_data, encode_jovian_extra_data, OpTypedTransaction,
+    };
+    use reth_chainspec::BaseFeeParams;
+    use reth_consensus::{Consensus, ConsensusError, FullConsensus, HeaderValidator};
+    use reth_optimism_chainspec::{OpChainSpec, OpChainSpecBuilder, OP_MAINNET};
+    use reth_optimism_primitives::{OpPrimitives, OpReceipt, OpTransactionSigned};
+    use reth_primitives_traits::{proofs, GotExpected, RecoveredBlock, SealedBlock, SealedHeader};
+    use reth_provider::BlockExecutionResult;
+
+    use crate::OpBeaconConsensus;
+
+    fn mock_tx(nonce: u64) -> OpTransactionSigned {
+        let tx = TxEip7702 {
+            chain_id: 1u64,
+            nonce,
+            max_fee_per_gas: 0x28f000fff,
+            max_priority_fee_per_gas: 0x28f000fff,
+            gas_limit: 10,
+            to: Address::default(),
+            value: U256::from(3_u64),
+            input: Bytes::from(vec![1, 2]),
+            access_list: Default::default(),
+            authorization_list: Default::default(),
+        };
+
+        let signature = Signature::new(U256::default(), U256::default(), true);
+
+        OpTransactionSigned::new_unhashed(OpTypedTransaction::Eip7702(tx), signature)
+    }
+
+    #[test]
+    fn test_block_blob_gas_used_validation_isthmus() {
+        let chain_spec = OpChainSpecBuilder::default()
+            .isthmus_activated()
+            .genesis(OP_MAINNET.genesis.clone())
+            .chain(OP_MAINNET.chain)
+            .build();
+
+        // create a tx
+        let transaction = mock_tx(0);
+
+        let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
+
+        let header = Header {
+            base_fee_per_gas: Some(1337),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(0),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            timestamp: u64::MAX,
+            ..Default::default()
+        };
+        let body = BlockBody {
+            transactions: vec![transaction],
+            ommers: vec![],
+            withdrawals: Some(Withdrawals::default()),
+        };
+
+        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
+
+        // validate blob, it should pass blob gas used validation
+        let pre_execution = beacon_consensus.validate_block_pre_execution(&block);
+
+        assert!(pre_execution.is_ok());
+    }
+
+    #[test]
+    fn test_block_blob_gas_used_validation_failure_isthmus() {
+        let chain_spec = OpChainSpecBuilder::default()
+            .isthmus_activated()
+            .genesis(OP_MAINNET.genesis.clone())
+            .chain(OP_MAINNET.chain)
+            .build();
+
+        // create a tx
+        let transaction = mock_tx(0);
+
+        let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
+
+        let header = Header {
+            base_fee_per_gas: Some(1337),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(10),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            timestamp: u64::MAX,
+            ..Default::default()
+        };
+        let body = BlockBody {
+            transactions: vec![transaction],
+            ommers: vec![],
+            withdrawals: Some(Withdrawals::default()),
+        };
+
+        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
+
+        // validate blob, it should fail blob gas used validation
+        let pre_execution = beacon_consensus.validate_block_pre_execution(&block);
+
+        assert!(pre_execution.is_err());
+        assert_eq!(
+            pre_execution.unwrap_err(),
+            ConsensusError::BlobGasUsedDiff(GotExpected { got: 10, expected: 0 })
+        );
+    }
+
+    #[test]
+    fn test_block_blob_gas_used_validation_jovian() {
+        const BLOB_GAS_USED: u64 = 1000;
+        const GAS_USED: u64 = 10;
+
+        let chain_spec = OpChainSpecBuilder::default()
+            .jovian_activated()
+            .genesis(OP_MAINNET.genesis.clone())
+            .chain(OP_MAINNET.chain)
+            .build();
+
+        // create a tx
+        let transaction = mock_tx(0);
+
+        let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
+
+        let receipt = OpReceipt::Eip7702(Receipt {
+            status: Eip658Value::success(),
+            cumulative_gas_used: GAS_USED,
+            logs: vec![],
+        });
+
+        let header = Header {
+            base_fee_per_gas: Some(1337),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(BLOB_GAS_USED),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            timestamp: u64::MAX,
+            gas_used: GAS_USED,
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(
+                &receipt.with_bloom_ref(),
+            )),
+            logs_bloom: receipt.bloom(),
+            ..Default::default()
+        };
+        let body = BlockBody {
+            transactions: vec![transaction],
+            ommers: vec![],
+            withdrawals: Some(Withdrawals::default()),
+        };
+
+        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
+
+        let result = BlockExecutionResult::<OpReceipt> {
+            blob_gas_used: BLOB_GAS_USED,
+            receipts: vec![receipt],
+            requests: Requests::default(),
+            gas_used: GAS_USED,
+        };
+
+        // validate blob, it should pass blob gas used validation
+        let pre_execution = beacon_consensus.validate_block_pre_execution(&block);
+
+        assert!(pre_execution.is_ok());
+
+        let block = RecoveredBlock::new_sealed(block, vec![Address::default()]);
+
+        let post_execution = <OpBeaconConsensus<OpChainSpec> as FullConsensus<OpPrimitives>>::validate_block_post_execution(
+            &beacon_consensus,
+            &block,
+            &result
+        );
+
+        // validate blob, it should pass blob gas used validation
+        assert!(post_execution.is_ok());
+    }
+
+    #[test]
+    fn test_block_blob_gas_used_validation_failure_jovian() {
+        const BLOB_GAS_USED: u64 = 1000;
+        const GAS_USED: u64 = 10;
+
+        let chain_spec = OpChainSpecBuilder::default()
+            .jovian_activated()
+            .genesis(OP_MAINNET.genesis.clone())
+            .chain(OP_MAINNET.chain)
+            .build();
+
+        // create a tx
+        let transaction = mock_tx(0);
+
+        let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
+
+        let receipt = OpReceipt::Eip7702(Receipt {
+            status: Eip658Value::success(),
+            cumulative_gas_used: GAS_USED,
+            logs: vec![],
+        });
+
+        let header = Header {
+            base_fee_per_gas: Some(1337),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(BLOB_GAS_USED),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            gas_used: GAS_USED,
+            timestamp: u64::MAX,
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            logs_bloom: receipt.bloom(),
+            ..Default::default()
+        };
+        let body = BlockBody {
+            transactions: vec![transaction],
+            ommers: vec![],
+            withdrawals: Some(Withdrawals::default()),
+        };
+
+        let block = SealedBlock::seal_slow(alloy_consensus::Block { header, body });
+
+        let result = BlockExecutionResult::<OpReceipt> {
+            blob_gas_used: BLOB_GAS_USED + 1,
+            receipts: vec![receipt],
+            requests: Requests::default(),
+            gas_used: GAS_USED,
+        };
+
+        // validate blob, it should pass blob gas used validation
+        let pre_execution = beacon_consensus.validate_block_pre_execution(&block);
+
+        assert!(pre_execution.is_ok());
+
+        let block = RecoveredBlock::new_sealed(block, vec![Address::default()]);
+
+        let post_execution = <OpBeaconConsensus<OpChainSpec> as FullConsensus<OpPrimitives>>::validate_block_post_execution(
+            &beacon_consensus,
+            &block,
+            &result
+        );
+
+        // validate blob, it should fail blob gas used validation post execution.
+        assert!(post_execution.is_err());
+        assert_eq!(
+            post_execution.unwrap_err(),
+            ConsensusError::BlobGasUsedDiff(GotExpected {
+                got: BLOB_GAS_USED + 1,
+                expected: BLOB_GAS_USED,
+            })
+        );
+    }
+
+    #[test]
+    fn test_header_min_base_fee_validation() {
+        const MIN_BASE_FEE: u64 = 1000;
+
+        let chain_spec = OpChainSpecBuilder::default()
+            .jovian_activated()
+            .genesis(OP_MAINNET.genesis.clone())
+            .chain(OP_MAINNET.chain)
+            .build();
+
+        // create a tx
+        let transaction = mock_tx(0);
+
+        let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
+
+        let receipt = OpReceipt::Eip7702(Receipt {
+            status: Eip658Value::success(),
+            cumulative_gas_used: 0,
+            logs: vec![],
+        });
+
+        let parent = Header {
+            number: 0,
+            base_fee_per_gas: Some(MIN_BASE_FEE / 10),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            gas_used: 0,
+            timestamp: u64::MAX - 1,
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            logs_bloom: receipt.bloom(),
+            extra_data: encode_jovian_extra_data(
+                Default::default(),
+                BaseFeeParams::optimism(),
+                MIN_BASE_FEE,
+            )
+            .unwrap(),
+            ..Default::default()
+        };
+        let parent = SealedHeader::seal_slow(parent);
+
+        let header = Header {
+            number: 1,
+            base_fee_per_gas: Some(MIN_BASE_FEE),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            gas_used: 0,
+            timestamp: u64::MAX,
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            logs_bloom: receipt.bloom(),
+            parent_hash: parent.hash(),
+            ..Default::default()
+        };
+        let header = SealedHeader::seal_slow(header);
+
+        let result = beacon_consensus.validate_header_against_parent(&header, &parent);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_header_min_base_fee_validation_failure() {
+        const MIN_BASE_FEE: u64 = 1000;
+
+        let chain_spec = OpChainSpecBuilder::default()
+            .jovian_activated()
+            .genesis(OP_MAINNET.genesis.clone())
+            .chain(OP_MAINNET.chain)
+            .build();
+
+        // create a tx
+        let transaction = mock_tx(0);
+
+        let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
+
+        let receipt = OpReceipt::Eip7702(Receipt {
+            status: Eip658Value::success(),
+            cumulative_gas_used: 0,
+            logs: vec![],
+        });
+
+        let parent = Header {
+            number: 0,
+            base_fee_per_gas: Some(MIN_BASE_FEE / 10),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            gas_used: 0,
+            timestamp: u64::MAX - 1,
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            logs_bloom: receipt.bloom(),
+            extra_data: encode_jovian_extra_data(
+                Default::default(),
+                BaseFeeParams::optimism(),
+                MIN_BASE_FEE,
+            )
+            .unwrap(),
+            ..Default::default()
+        };
+        let parent = SealedHeader::seal_slow(parent);
+
+        let header = Header {
+            number: 1,
+            base_fee_per_gas: Some(MIN_BASE_FEE - 1),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(0),
+            excess_blob_gas: Some(0),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            gas_used: 0,
+            timestamp: u64::MAX,
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            logs_bloom: receipt.bloom(),
+            parent_hash: parent.hash(),
+            ..Default::default()
+        };
+        let header = SealedHeader::seal_slow(header);
+
+        let result = beacon_consensus.validate_header_against_parent(&header, &parent);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            ConsensusError::BaseFeeDiff(GotExpected {
+                got: MIN_BASE_FEE - 1,
+                expected: MIN_BASE_FEE,
+            })
+        );
+    }
+
+    #[test]
+    fn test_header_da_footprint_validation() {
+        const MIN_BASE_FEE: u64 = 100_000;
+        const DA_FOOTPRINT: u64 = GAS_LIMIT - 1;
+        const GAS_LIMIT: u64 = 100_000_000;
+
+        let chain_spec = OpChainSpecBuilder::default()
+            .jovian_activated()
+            .genesis(OP_MAINNET.genesis.clone())
+            .chain(OP_MAINNET.chain)
+            .build();
+
+        // create a tx
+        let transaction = mock_tx(0);
+
+        let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
+
+        let receipt = OpReceipt::Eip7702(Receipt {
+            status: Eip658Value::success(),
+            cumulative_gas_used: 0,
+            logs: vec![],
+        });
+
+        let parent = Header {
+            number: 0,
+            base_fee_per_gas: Some(MIN_BASE_FEE),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(DA_FOOTPRINT),
+            excess_blob_gas: Some(0),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            gas_used: 0,
+            timestamp: u64::MAX - 1,
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            logs_bloom: receipt.bloom(),
+            extra_data: encode_jovian_extra_data(
+                Default::default(),
+                BaseFeeParams::optimism(),
+                MIN_BASE_FEE,
+            )
+            .unwrap(),
+            gas_limit: GAS_LIMIT,
+            ..Default::default()
+        };
+        let parent = SealedHeader::seal_slow(parent);
+
+        let header = Header {
+            number: 1,
+            base_fee_per_gas: Some(MIN_BASE_FEE + MIN_BASE_FEE / 10),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(DA_FOOTPRINT),
+            excess_blob_gas: Some(0),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            gas_used: 0,
+            timestamp: u64::MAX,
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            logs_bloom: receipt.bloom(),
+            parent_hash: parent.hash(),
+            ..Default::default()
+        };
+        let header = SealedHeader::seal_slow(header);
+
+        let result = beacon_consensus.validate_header_against_parent(&header, &parent);
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn test_header_isthmus_validation() {
+        const MIN_BASE_FEE: u64 = 100_000;
+        const DA_FOOTPRINT: u64 = GAS_LIMIT - 1;
+        const GAS_LIMIT: u64 = 100_000_000;
+
+        let chain_spec = OpChainSpecBuilder::default()
+            .isthmus_activated()
+            .genesis(OP_MAINNET.genesis.clone())
+            .chain(OP_MAINNET.chain)
+            .build();
+
+        // create a tx
+        let transaction = mock_tx(0);
+
+        let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
+
+        let receipt = OpReceipt::Eip7702(Receipt {
+            status: Eip658Value::success(),
+            cumulative_gas_used: 0,
+            logs: vec![],
+        });
+
+        let parent = Header {
+            number: 0,
+            base_fee_per_gas: Some(MIN_BASE_FEE),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(DA_FOOTPRINT),
+            excess_blob_gas: Some(0),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            gas_used: 0,
+            timestamp: u64::MAX - 1,
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            logs_bloom: receipt.bloom(),
+            extra_data: encode_holocene_extra_data(Default::default(), BaseFeeParams::optimism())
+                .unwrap(),
+            gas_limit: GAS_LIMIT,
+            ..Default::default()
+        };
+        let parent = SealedHeader::seal_slow(parent);
+
+        let header = Header {
+            number: 1,
+            base_fee_per_gas: Some(MIN_BASE_FEE - 2 * MIN_BASE_FEE / 100),
+            withdrawals_root: Some(proofs::calculate_withdrawals_root(&[])),
+            blob_gas_used: Some(DA_FOOTPRINT),
+            excess_blob_gas: Some(0),
+            transactions_root: proofs::calculate_transaction_root(std::slice::from_ref(
+                &transaction,
+            )),
+            gas_used: 0,
+            timestamp: u64::MAX,
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            logs_bloom: receipt.bloom(),
+            parent_hash: parent.hash(),
+            ..Default::default()
+        };
+        let header = SealedHeader::seal_slow(header);
+
+        let result = beacon_consensus.validate_header_against_parent(&header, &parent);
+
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err(),
+            ConsensusError::BlobGasUsedDiff(GotExpected { got: DA_FOOTPRINT, expected: 0 })
+        );
     }
 }

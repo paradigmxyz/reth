@@ -70,7 +70,8 @@ impl Compact for AlloyTxDeposit {
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (tx, _) = TxDeposit::from_compact(buf, len);
+        // Return the remaining slice from the inner from_compact to advance the cursor correctly.
+        let (tx, remaining) = TxDeposit::from_compact(buf, len);
         let alloy_tx = Self {
             source_hash: tx.source_hash,
             from: tx.from,
@@ -83,7 +84,7 @@ impl Compact for AlloyTxDeposit {
             eth_value: tx.eth_value,
             eth_tx_value: tx.eth_tx_value,
         };
-        (alloy_tx, buf)
+        (alloy_tx, remaining)
     }
 }
 

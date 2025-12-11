@@ -1,11 +1,5 @@
 //! `StaticFile` segment implementations and utilities.
 
-mod transactions;
-pub use transactions::Transactions;
-
-mod headers;
-pub use headers::Headers;
-
 mod receipts;
 pub use receipts::Receipts;
 

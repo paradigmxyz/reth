@@ -4,7 +4,8 @@ use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::Bytes;
 use jsonrpsee::types::ErrorObject;
 use jsonrpsee_core::RpcResult;
-use reth_rpc_eth_api::{EthApiServer, EthApiTypes, MantleEthApiExtServer, PreconfTxEvent, RpcBlock};
+use reth_primitives_traits::TxTy;
+use reth_rpc_eth_api::{EthApiServer, EthApiTypes, MantleEthApiExtServer, PreconfTxEvent, RpcBlock, RpcNodeCore};
 use reth_rpc_server_types::result::invalid_params_rpc_err;
 use reth_storage_api::{BlockNumReader, BlockReaderIdExt, StateProviderFactory};
 use std::sync::Arc;
@@ -56,13 +57,15 @@ impl<Provider, EthApi> MantleEthApiExtServer<RpcBlock<EthApi::NetworkTypes>>
     for MantleEthApiExt<Provider, EthApi>
 where
     Provider: BlockReaderIdExt + BlockNumReader + StateProviderFactory + Clone + 'static,
-    EthApi: EthApiTypes
+    EthApi: RpcNodeCore
+        + EthApiTypes
         + EthApiServer<
             reth_rpc_eth_api::RpcTxReq<EthApi::NetworkTypes>,
             reth_rpc_eth_api::RpcTransaction<EthApi::NetworkTypes>,
             RpcBlock<EthApi::NetworkTypes>,
             reth_rpc_eth_api::RpcReceipt<EthApi::NetworkTypes>,
             reth_rpc_eth_api::RpcHeader<EthApi::NetworkTypes>,
+            TxTy<EthApi::Primitives>,
         > + Send
         + Sync
         + 'static,

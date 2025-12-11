@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
 use super::setup;
-use alloy_primitives::BlockNumber;
+use alloy_primitives::{Address, BlockNumber};
 use eyre::Result;
 use reth_config::config::EtlConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::DatabaseEnv;
-use reth_db_api::{database::Database, table::TableImporter, tables};
+use reth_db_api::{database::Database, models::BlockNumberAddress, table::TableImporter, tables};
 use reth_db_common::DbTool;
 use reth_evm::ConfigureEvm;
 use reth_exex::ExExManagerHandle;
@@ -135,9 +135,13 @@ fn unwind_and_copy<N: ProviderNodeTypes>(
 
     let unwind_inner_tx = provider.into_tx();
 
-    // TODO optimize we can actually just get the entries we need
-    output_db
-        .update(|tx| tx.import_dupsort::<tables::StorageChangeSets, _>(&unwind_inner_tx))??;
+    output_db.update(|tx| {
+        tx.import_table_with_range::<tables::StorageChangeSets, _>(
+            &unwind_inner_tx,
+            Some(BlockNumberAddress((from, Address::ZERO))),
+            BlockNumberAddress((to, Address::repeat_byte(0xff))),
+        )
+    })??;
 
     output_db.update(|tx| tx.import_table::<tables::HashedAccounts, _>(&unwind_inner_tx))??;
     output_db.update(|tx| tx.import_dupsort::<tables::HashedStorages, _>(&unwind_inner_tx))??;

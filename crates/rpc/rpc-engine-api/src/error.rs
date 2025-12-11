@@ -1,4 +1,4 @@
-use alloy_primitives::{B256, U256};
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::{
     ForkchoiceUpdateError, INVALID_FORK_CHOICE_STATE_ERROR, INVALID_FORK_CHOICE_STATE_ERROR_MSG,
     INVALID_PAYLOAD_ATTRIBUTES_ERROR, INVALID_PAYLOAD_ATTRIBUTES_ERROR_MSG,
@@ -58,17 +58,6 @@ pub enum EngineApiError {
         start: u64,
         /// Requested number of items
         count: u64,
-    },
-    /// Terminal total difficulty mismatch during transition configuration exchange.
-    #[error(
-        "invalid transition terminal total difficulty: \
-         execution: {execution}, consensus: {consensus}"
-    )]
-    TerminalTD {
-        /// Execution terminal total difficulty value.
-        execution: U256,
-        /// Consensus terminal total difficulty value.
-        consensus: U256,
     },
     /// Terminal block hash mismatch during transition configuration exchange.
     #[error(
@@ -202,7 +191,6 @@ impl From<EngineApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 }
             },
             // Any other server error
-            EngineApiError::TerminalTD { .. } |
             EngineApiError::TerminalBlockHash { .. } |
             EngineApiError::NewPayload(_) |
             EngineApiError::Internal(_) |

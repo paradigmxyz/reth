@@ -114,7 +114,7 @@ pub trait MantleHardforks: OpHardforks {
     fn revm_spec_at_timestamp(&self, timestamp: u64) -> op_revm::OpSpecId {
         // Check Mantle Skadi first
         if self.is_skadi_active_at_timestamp(timestamp) {
-            op_revm::OpSpecId::OSAKA
+            op_revm::OpSpecId::ISTHMUS
         } else {
             // Fall back to OP Stack hardforks
             alloy_op_evm::spec_by_timestamp_after_bedrock(self, timestamp)

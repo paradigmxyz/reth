@@ -1,4 +1,4 @@
-//! Contains a precompile cache that is backed by a moka cache.
+//! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
 
 use alloy_primitives::Bytes;
 use parking_lot::Mutex;
@@ -273,9 +273,9 @@ mod tests {
 
     #[test]
     fn test_precompile_cache_basic() {
-        let dyn_precompile: DynPrecompile = |_input: PrecompileInput<'_>| -> PrecompileResult {
+        let dyn_precompile: DynPrecompile = (|_input: PrecompileInput<'_>| -> PrecompileResult {
             Ok(PrecompileOutput { gas_used: 0, bytes: Bytes::default(), reverted: false })
-        }
+        })
         .into();
 
         let cache =

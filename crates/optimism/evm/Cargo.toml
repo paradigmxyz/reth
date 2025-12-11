@@ -38,6 +38,7 @@ reth-optimism-primitives.workspace = true
 
 # Mantle
 reth-mantle-forks.workspace = true
+tracing.workspace = true
 
 # revm
 revm.workspace = true

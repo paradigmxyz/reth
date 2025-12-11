@@ -330,6 +330,7 @@ where
     EthB: EthApiBuilder<N>,
 {
     /// Creates a new instance from components.
+    #[allow(clippy::too_many_arguments)]
     pub const fn new(
         rpc_add_ons: RpcAddOns<N, EthB, PVB, EB, EVB, RpcMiddleware>,
         da_config: OpDAConfig,
@@ -596,7 +597,7 @@ where
                 modules.merge_if_module_configured(RethRpcModule::Debug, debug_ext.into_rpc())?;
 
                 // extend the miner namespace if configured in the regular http server
-                modules.merge_if_module_configured(
+                modules.add_or_replace_if_module_configured(
                     RethRpcModule::Miner,
                     miner_ext.clone().into_rpc(),
                 )?;
@@ -1188,7 +1189,8 @@ impl OpNetworkBuilder {
         Node: FullNodeTypes<Types: NodeTypes<ChainSpec: Hardforks>>,
         NetworkP: NetworkPrimitives,
     {
-        let Self { disable_txpool_gossip, disable_discovery_v4, .. } = self.clone();
+        let disable_txpool_gossip = self.disable_txpool_gossip;
+        let disable_discovery_v4 = self.disable_discovery_v4;
         let args = &ctx.config().network;
         let network_builder = ctx
             .network_config_builder()?

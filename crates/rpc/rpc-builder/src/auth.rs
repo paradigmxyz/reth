@@ -354,7 +354,9 @@ impl AuthServerHandle {
     /// Returns a http client connected to the server.
     ///
     /// This client uses the JWT token to authenticate requests.
-    pub fn http_client(&self) -> impl SubscriptionClientT + Clone + Send + Sync + Unpin + 'static {
+    pub fn http_client(
+        &self,
+    ) -> impl SubscriptionClientT + use<> + Clone + Send + Sync + Unpin + 'static {
         // Create a middleware that adds a new JWT token to every request.
         let secret_layer = AuthClientLayer::new(self.secret);
         let middleware = tower::ServiceBuilder::default().layer(secret_layer);

@@ -429,6 +429,20 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
     /// Consumer: Utility
     fn all_transaction_hashes(&self) -> Vec<TxHash>;
 
+    /// Removes a single transaction corresponding to the given hash.
+    ///
+    /// Note: This removes the transaction as if it got discarded (_not_ mined).
+    ///
+    /// Returns the removed transaction if it was found in the pool.
+    ///
+    /// Consumer: Utility
+    fn remove_transaction(
+        &self,
+        hash: TxHash,
+    ) -> Option<Arc<ValidPoolTransaction<Self::Transaction>>> {
+        self.remove_transactions(vec![hash]).pop()
+    }
+
     /// Removes all transactions corresponding to the given hashes.
     ///
     /// Note: This removes the transactions as if they got discarded (_not_ mined).

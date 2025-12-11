@@ -1,6 +1,7 @@
 //! Invalid block hook helpers for the node builder.
 
 use crate::AddOnsContext;
+use alloy_consensus::TxEnvelope;
 use alloy_rpc_types::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::OptionExt;
 use reth_chainspec::EthChainSpec;
@@ -128,10 +129,16 @@ where
     let client = jsonrpsee::http_client::HttpClientBuilder::default().build(url)?;
 
     // Verify that the healthy node is running the same chain as the current node.
-    let healthy_chain_id =
-        EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::chain_id(&client)
-            .await?
-            .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
+    let healthy_chain_id = EthApiClient::<
+        TransactionRequest,
+        Transaction,
+        Block,
+        Receipt,
+        Header,
+        TxEnvelope,
+    >::chain_id(&client)
+    .await?
+    .ok_or_eyre("healthy node rpc client didn't return a chain id")?;
 
     if healthy_chain_id.to::<u64>() != chain_id {
         eyre::bail!("Invalid chain ID. Expected {}, got {}", chain_id, healthy_chain_id);

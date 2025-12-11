@@ -1,23 +1,19 @@
 //! Utilities for end-to-end tests.
 
 use node::NodeTestContext;
-use reth_chainspec::{ChainSpec, EthChainSpec};
+use reth_chainspec::ChainSpec;
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
     components::NodeComponentsBuilder,
     rpc::{EngineValidatorAddOn, RethRpcAddOns},
-    EngineNodeLauncher, FullNodeTypesAdapter, Node, NodeAdapter, NodeBuilder, NodeComponents,
-    NodeConfig, NodeHandle, NodePrimitives, NodeTypes, NodeTypesWithDBAdapter,
+    FullNodeTypesAdapter, Node, NodeAdapter, NodeComponents, NodeTypes, NodeTypesWithDBAdapter,
     PayloadAttributesBuilder, PayloadTypes,
 };
-use reth_node_core::args::{DiscoveryArgs, NetworkArgs, RpcServerArgs};
 use reth_provider::providers::{BlockchainProvider, NodeTypesForProvider};
-use reth_rpc_server_types::RpcModuleSelection;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
-use tracing::{span, Level};
 use wallet::Wallet;
 
 /// Wrapper type to create test nodes
@@ -45,6 +41,10 @@ mod rpc;
 /// Utilities for creating and writing RLP test data
 pub mod test_rlp_utils;
 
+/// Builder for configuring test node setups
+mod setup_builder;
+pub use setup_builder::E2ETestSetupBuilder;
+
 /// Creates the initial setup with `num_nodes` started and interconnected.
 pub async fn setup<N>(
     num_nodes: usize,
@@ -53,60 +53,14 @@ pub async fn setup<N>(
     attributes_generator: impl Fn(u64) -> <<N as NodeTypes>::Payload as PayloadTypes>::PayloadBuilderAttributes + Send + Sync + Copy + 'static,
 ) -> eyre::Result<(Vec<NodeHelperType<N>>, TaskManager, Wallet)>
 where
-    N: Default + Node<TmpNodeAdapter<N>> + NodeTypesForProvider,
-    N::ComponentsBuilder: NodeComponentsBuilder<
-        TmpNodeAdapter<N>,
-        Components: NodeComponents<TmpNodeAdapter<N>, Network: PeersHandleProvider>,
-    >,
-    N::AddOns: RethRpcAddOns<Adapter<N>> + EngineValidatorAddOn<Adapter<N>>,
+    N: NodeBuilderHelper,
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes>,
 {
-    let tasks = TaskManager::current();
-    let exec = tasks.executor();
-
-    let network_config = NetworkArgs {
-        discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
-        ..NetworkArgs::default()
-    };
-
-    // Create nodes and peer them
-    let mut nodes: Vec<NodeTestContext<_, _>> = Vec::with_capacity(num_nodes);
-
-    for idx in 0..num_nodes {
-        let node_config = NodeConfig::new(chain_spec.clone())
-            .with_network(network_config.clone())
-            .with_unused_ports()
-            .with_rpc(RpcServerArgs::default().with_unused_ports().with_http())
-            .set_dev(is_dev);
-
-        let span = span!(Level::INFO, "node", idx);
-        let _enter = span.enter();
-        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-            .testing_node(exec.clone())
-            .node(Default::default())
-            .launch()
-            .await?;
-
-        let mut node = NodeTestContext::new(node, attributes_generator).await?;
-
-        // Connect each node in a chain.
-        if let Some(previous_node) = nodes.last_mut() {
-            previous_node.connect(&mut node).await;
-        }
-
-        // Connect last node with the first if there are more than two
-        if idx + 1 == num_nodes &&
-            num_nodes > 2 &&
-            let Some(first_node) = nodes.first_mut()
-        {
-            node.connect(first_node).await;
-        }
-
-        nodes.push(node);
-    }
-
-    Ok((nodes, tasks, Wallet::default().with_chain_id(chain_spec.chain().into())))
+    E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
+        .with_node_config_modifier(move |config| config.set_dev(is_dev))
+        .build()
+        .await
 }
 
 /// Creates the initial setup with `num_nodes` started and interconnected.
@@ -155,71 +109,12 @@ where
     LocalPayloadAttributesBuilder<N::ChainSpec>:
         PayloadAttributesBuilder<<N::Payload as PayloadTypes>::PayloadAttributes>,
 {
-    let tasks = TaskManager::current();
-    let exec = tasks.executor();
-
-    let network_config = NetworkArgs {
-        discovery: DiscoveryArgs { disable_discovery: true, ..DiscoveryArgs::default() },
-        ..NetworkArgs::default()
-    };
-
-    // Create nodes and peer them
-    let mut nodes: Vec<NodeTestContext<_, _>> = Vec::with_capacity(num_nodes);
-
-    for idx in 0..num_nodes {
-        let node_config = NodeConfig::new(chain_spec.clone())
-            .with_network(network_config.clone())
-            .with_unused_ports()
-            .with_rpc(
-                RpcServerArgs::default()
-                    .with_unused_ports()
-                    .with_http()
-                    .with_http_api(RpcModuleSelection::All),
-            )
-            .set_dev(is_dev);
-
-        let span = span!(Level::INFO, "node", idx);
-        let _enter = span.enter();
-        let node = N::default();
-        let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config.clone())
-            .testing_node(exec.clone())
-            .with_types_and_provider::<N, BlockchainProvider<_>>()
-            .with_components(node.components_builder())
-            .with_add_ons(node.add_ons())
-            .launch_with_fn(|builder| {
-                let launcher = EngineNodeLauncher::new(
-                    builder.task_executor().clone(),
-                    builder.config().datadir(),
-                    tree_config.clone(),
-                );
-                builder.launch_with(launcher)
-            })
-            .await?;
-
-        let mut node = NodeTestContext::new(node, attributes_generator).await?;
-
-        let genesis = node.block_hash(0);
-        node.update_forkchoice(genesis, genesis).await?;
-
-        // Connect each node in a chain if requested.
-        if connect_nodes {
-            if let Some(previous_node) = nodes.last_mut() {
-                previous_node.connect(&mut node).await;
-            }
-
-            // Connect last node with the first if there are more than two
-            if idx + 1 == num_nodes &&
-                num_nodes > 2 &&
-                let Some(first_node) = nodes.first_mut()
-            {
-                node.connect(first_node).await;
-            }
-        }
-
-        nodes.push(node);
-    }
-
-    Ok((nodes, tasks, Wallet::default().with_chain_id(chain_spec.chain().into())))
+    E2ETestSetupBuilder::new(num_nodes, chain_spec, attributes_generator)
+        .with_tree_config_modifier(move |_| tree_config.clone())
+        .with_node_config_modifier(move |config| config.set_dev(is_dev))
+        .with_connect_nodes(connect_nodes)
+        .build()
+        .await
 }
 
 // Type aliases
@@ -251,12 +146,6 @@ where
             >,
         > + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-            Primitives: NodePrimitives<
-                BlockHeader = alloy_consensus::Header,
-                BlockBody = alloy_consensus::BlockBody<
-                    <Self::Primitives as NodePrimitives>::SignedTx,
-                >,
-            >,
             ComponentsBuilder: NodeComponentsBuilder<
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
                 Components: NodeComponents<
@@ -285,12 +174,6 @@ where
             >,
         > + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
-            Primitives: NodePrimitives<
-                BlockHeader = alloy_consensus::Header,
-                BlockBody = alloy_consensus::BlockBody<
-                    <Self::Primitives as NodePrimitives>::SignedTx,
-                >,
-            >,
             ComponentsBuilder: NodeComponentsBuilder<
                 TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
                 Components: NodeComponents<

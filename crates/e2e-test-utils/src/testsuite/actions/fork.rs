@@ -8,6 +8,7 @@ use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::EthApiClient;
 use std::marker::PhantomData;
@@ -136,6 +137,7 @@ where
                 Block,
                 Receipt,
                 Header,
+                TransactionSigned,
             >::block_by_number(
                 rpc_client,
                 alloy_eips::BlockNumberOrTag::Number(self.fork_base_block),
@@ -248,11 +250,14 @@ where
 
             // walk backwards through the chain until we reach the fork base
             while current_number > self.fork_base_number {
-                let block = EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::block_by_hash(
-                    rpc_client,
-                    current_hash,
-                    false,
-                )
+                let block = EthApiClient::<
+                    TransactionRequest,
+                    Transaction,
+                    Block,
+                    Receipt,
+                    Header,
+                    TransactionSigned,
+                >::block_by_hash(rpc_client, current_hash, false)
                 .await?
                 .ok_or_else(|| {
                     eyre::eyre!("Block with hash {} not found during fork validation", current_hash)

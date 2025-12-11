@@ -23,8 +23,8 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_rpc::eth::{core::EthRpcConverterFor, EthApiTypes, FullEthApiServer};
-use reth_rpc_api::{eth::helpers::AddDevSigners, IntoEngineApiRpcModule};
+use reth_rpc::eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer};
+use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
     config::RethRpcServerConfig,
@@ -991,7 +991,8 @@ where
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
-            registry.eth_api().with_dev_accounts();
+            let signers = DevSigner::from_mnemonic(config.dev.dev_mnemonic.as_str(), 20);
+            registry.eth_api().signers().write().extend(signers);
         }
 
         let mut registry = RpcRegistry { registry };
@@ -1155,6 +1156,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
             .max_batch_size(self.config.max_batch_size)
             .pending_block_kind(self.config.pending_block_kind)
             .raw_tx_forwarder(self.config.raw_tx_forwarder)
+            .evm_memory_limit(self.config.rpc_evm_memory_limit)
     }
 }
 
@@ -1163,7 +1165,6 @@ pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     /// The Ethapi implementation this builder will build.
     type EthApi: EthApiTypes
         + FullEthApiServer<Provider = N::Provider, Pool = N::Pool>
-        + AddDevSigners
         + Unpin
         + 'static;
 

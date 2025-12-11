@@ -34,7 +34,7 @@ impl TrieInput {
     /// Create new trie input from the provided blocks, from oldest to newest. See the documentation
     /// for [`Self::extend_with_blocks`] for details.
     pub fn from_blocks<'a>(
-        blocks: impl IntoIterator<Item = (&'a HashedPostState, Option<&'a TrieUpdates>)>,
+        blocks: impl IntoIterator<Item = (&'a HashedPostState, &'a TrieUpdates)>,
     ) -> Self {
         let mut input = Self::default();
         input.extend_with_blocks(blocks);
@@ -47,14 +47,10 @@ impl TrieInput {
     /// constructed from the state of this block and the state itself, **without** trie updates.
     pub fn extend_with_blocks<'a>(
         &mut self,
-        blocks: impl IntoIterator<Item = (&'a HashedPostState, Option<&'a TrieUpdates>)>,
+        blocks: impl IntoIterator<Item = (&'a HashedPostState, &'a TrieUpdates)>,
     ) {
         for (hashed_state, trie_updates) in blocks {
-            if let Some(nodes) = trie_updates.as_ref() {
-                self.append_cached_ref(nodes, hashed_state);
-            } else {
-                self.append_ref(hashed_state);
-            }
+            self.append_cached_ref(trie_updates, hashed_state);
         }
     }
 

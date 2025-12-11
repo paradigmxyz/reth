@@ -16,15 +16,14 @@ use alloy_consensus::{BlockHeader, Header};
 use alloy_eips::Decodable2718;
 use alloy_evm::{EvmFactory, FromRecoveredTx, FromTxWithEncoded};
 use alloy_op_evm::block::{receipt_builder::OpReceiptBuilder, OpTxEnv};
-use alloy_primitives::U256;
 use core::fmt::Debug;
 use op_alloy_consensus::EIP1559ParamError;
 use op_alloy_rpc_types_engine::OpExecutionData;
 use op_revm::{OpSpecId, OpTransaction};
 use reth_chainspec::EthChainSpec;
 use reth_evm::{
-    eth::NextEvmEnvAttributes, precompiles::PrecompilesMap, ConfigureEngineEvm, ConfigureEvm,
-    EvmEnv, EvmEnvFor, ExecutableTxIterator, ExecutionCtxFor, TransactionEnv,
+    precompiles::PrecompilesMap, ConfigureEngineEvm, ConfigureEvm, EvmEnv, EvmEnvFor,
+    ExecutableTxIterator, ExecutionCtxFor, TransactionEnv,
 };
 use reth_mantle_forks::MantleHardforks;
 use reth_optimism_chainspec::OpChainSpec;
@@ -34,11 +33,7 @@ use reth_primitives_traits::{
     NodePrimitives, SealedBlock, SealedHeader, SignedTransaction, TxTy, WithEncoded,
 };
 use reth_storage_errors::any::AnyError;
-use revm::{
-    context::{BlockEnv, CfgEnv, TxEnv},
-    context_interface::block::BlobExcessGasAndPrice,
-    primitives::hardfork::SpecId,
-};
+use revm::context::{BlockEnv, TxEnv};
 
 mod config;
 pub use config::{revm_spec, revm_spec_by_timestamp_after_bedrock, OpNextBlockEnvAttributes};
@@ -53,6 +48,9 @@ pub use build::OpBlockAssembler;
 
 mod error;
 pub use error::OpBlockExecutionError;
+
+mod mantle;
+pub(crate) use mantle::MantleEvmEnvInput;
 
 pub use alloy_op_evm::{OpBlockExecutionCtx, OpBlockExecutorFactory, OpEvm, OpEvmFactory};
 
@@ -155,7 +153,7 @@ where
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<OpSpecId>, Self::Error> {
-        Ok(EvmEnv::for_op_block(header, self.chain_spec(), self.chain_spec().chain().id()))
+        Ok(self.for_mantle(MantleEvmEnvInput::from_block_header(header)))
     }
 
     fn next_evm_env(
@@ -163,18 +161,10 @@ where
         parent: &Header,
         attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnv<OpSpecId>, Self::Error> {
-        Ok(EvmEnv::for_op_next_block(
-            parent,
-            NextEvmEnvAttributes {
-                timestamp: attributes.timestamp,
-                suggested_fee_recipient: attributes.suggested_fee_recipient,
-                prev_randao: attributes.prev_randao,
-                gas_limit: attributes.gas_limit,
-            },
-            self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
-            self.chain_spec(),
-            self.chain_spec().chain().id(),
-        ))
+        let base_fee =
+            self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default();
+
+        Ok(self.for_mantle(MantleEvmEnvInput::for_next(parent, attributes, base_fee)))
     }
 
     fn context_for_block(
@@ -219,37 +209,7 @@ where
         &self,
         payload: &OpExecutionData,
     ) -> Result<EvmEnvFor<Self>, Self::Error> {
-        let timestamp = payload.payload.timestamp();
-        let block_number = payload.payload.block_number();
-
-        // Use trait method that automatically handles Mantle-specific hardforks
-        let spec = self.chain_spec().revm_spec_at_timestamp(timestamp);
-
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
-
-        let blob_excess_gas_and_price = spec
-            .into_eth_spec()
-            .is_enabled_in(SpecId::CANCUN)
-            .then_some(BlobExcessGasAndPrice { excess_blob_gas: 0, blob_gasprice: 1 });
-
-        let block_env = BlockEnv {
-            number: U256::from(block_number),
-            beneficiary: payload.payload.as_v1().fee_recipient,
-            timestamp: U256::from(timestamp),
-            difficulty: if spec.into_eth_spec() >= SpecId::MERGE {
-                U256::ZERO
-            } else {
-                payload.payload.as_v1().prev_randao.into()
-            },
-            prevrandao: (spec.into_eth_spec() >= SpecId::MERGE)
-                .then(|| payload.payload.as_v1().prev_randao),
-            gas_limit: payload.payload.as_v1().gas_limit,
-            basefee: payload.payload.as_v1().base_fee_per_gas.to(),
-            // EIP-4844 excess blob gas of this block, introduced in Cancun
-            blob_excess_gas_and_price,
-        };
-
-        Ok(EvmEnv { cfg_env, block_env })
+        Ok(self.for_mantle(MantleEvmEnvInput::from_op_payload(payload)))
     }
 
     fn context_for_payload<'a>(
@@ -282,7 +242,7 @@ mod tests {
     use alloy_consensus::{Header, Receipt};
     use alloy_eips::eip7685::Requests;
     use alloy_genesis::Genesis;
-    use alloy_primitives::{bytes, map::HashMap, Address, LogData, B256};
+    use alloy_primitives::{bytes, map::HashMap, Address, LogData, B256, U256};
     use op_revm::OpSpecId;
     use reth_chainspec::ChainSpec;
     use reth_evm::execute::ProviderError;
@@ -293,6 +253,7 @@ mod tests {
     use reth_optimism_primitives::{OpBlock, OpPrimitives, OpReceipt};
     use reth_primitives_traits::{Account, RecoveredBlock};
     use revm::{
+        context::CfgEnv,
         database::{BundleState, CacheDB},
         database_interface::EmptyDBTyped,
         inspector::NoOpInspector,

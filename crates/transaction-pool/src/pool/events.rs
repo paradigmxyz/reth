@@ -2,6 +2,7 @@ use crate::{traits::PropagateKind, PoolTransaction, SubPool, ValidPoolTransactio
 use alloy_primitives::{TxHash, B256};
 use std::sync::Arc;
 
+use crate::pool::QueuedReason;
 #[cfg(feature = "serde")]
 use serde::{Deserialize, Serialize};
 
@@ -11,7 +12,9 @@ pub enum FullTransactionEvent<T: PoolTransaction> {
     /// Transaction has been added to the pending pool.
     Pending(TxHash),
     /// Transaction has been added to the queued pool.
-    Queued(TxHash),
+    ///
+    /// If applicable, attached the specific reason why this was queued.
+    Queued(TxHash, Option<QueuedReason>),
     /// Transaction has been included in the block belonging to this hash.
     Mined {
         /// The hash of the mined transaction.
@@ -40,7 +43,7 @@ impl<T: PoolTransaction> Clone for FullTransactionEvent<T> {
     fn clone(&self) -> Self {
         match self {
             Self::Pending(hash) => Self::Pending(*hash),
-            Self::Queued(hash) => Self::Queued(*hash),
+            Self::Queued(hash, reason) => Self::Queued(*hash, reason.clone()),
             Self::Mined { tx_hash, block_hash } => {
                 Self::Mined { tx_hash: *tx_hash, block_hash: *block_hash }
             }

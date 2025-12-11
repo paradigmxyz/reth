@@ -57,7 +57,7 @@ use reth_transaction_pool::{
     TransactionPool, TransactionValidationTaskExecutor,
 };
 use revm::context::TxEnv;
-use std::{default::Default, marker::PhantomData, sync::Arc, time::SystemTime};
+use std::{marker::PhantomData, sync::Arc, time::SystemTime};
 
 /// Type configuration for a regular Ethereum node.
 #[derive(Debug, Default, Clone, Copy)]

@@ -1,6 +1,5 @@
 //! Command that initializes the node from a genesis file.
 
-use alloy_primitives::{B256, U256};
 use clap::Parser;
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
@@ -15,7 +14,7 @@ use reth_provider::DBProvider;
 use reth_provider::{
     BlockNumReader, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter,
 };
-use std::{io::BufReader, str::FromStr, sync::Arc};
+use std::{io::BufReader, sync::Arc};
 use tracing::info;
 
 /// Initializes the database with the genesis block.
@@ -24,12 +23,11 @@ pub struct InitStateCommandOp<C: ChainSpecParser> {
     #[command(flatten)]
     init_state: reth_cli_commands::init_state::InitStateCommand<C>,
 
-    /// **Optimism Mainnet Only**
-    ///
-    /// Specifies whether to initialize the state without relying on OVM historical data.
+    /// Specifies whether to initialize the state without relying on OVM or EVM historical data.
     ///
     /// When enabled, and before inserting the state, it creates a dummy chain up to the last OVM
-    /// block (#105235062) (14GB / 90 seconds). It then, appends the Bedrock block.
+    /// block (#105235062) (14GB / 90 seconds). It then, appends the Bedrock block. This is
+    /// hardcoded for OP mainnet, for other OP chains you will need to pass in a header.
     ///
     /// - **Note**: **Do not** import receipts and blocks beforehand, or this will fail or be
     ///   ignored.
@@ -40,13 +38,33 @@ pub struct InitStateCommandOp<C: ChainSpecParser> {
 impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
     /// Execute the `init` command
     pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = OpPrimitives>>(
+        mut self,
+    ) -> eyre::Result<()> {
+        // If using --without-ovm for OP mainnet, handle the special case with hardcoded Bedrock
+        // header. Otherwise delegate to the base InitStateCommand implementation.
+        if self.without_ovm {
+            if self.init_state.env.chain.is_optimism_mainnet() {
+                return self.execute_with_bedrock_header::<N>();
+            }
+
+            // For non-mainnet OP chains with --without-ovm, use the base implementation
+            // by setting the without_evm flag
+            self.init_state.without_evm = true;
+        }
+
+        self.init_state.execute::<N>().await
+    }
+
+    /// Execute init-state with hardcoded Bedrock header for OP mainnet.
+    fn execute_with_bedrock_header<
+        N: CliNodeTypes<ChainSpec = C::ChainSpec, Primitives = OpPrimitives>,
+    >(
         self,
     ) -> eyre::Result<()> {
-        info!(target: "reth::cli", "Reth init-state starting");
+        info!(target: "reth::cli", "Reth init-state starting for OP mainnet");
+        let env = self.init_state.env.init::<N>(AccessRights::RW)?;
 
-        let Environment { config, provider_factory, .. } =
-            self.init_state.env.init::<N>(AccessRights::RW)?;
-
+        let Environment { config, provider_factory, .. } = env;
         let static_file_provider = provider_factory.static_file_provider();
         let provider_rw = provider_factory.database_provider_rw()?;
 
@@ -57,30 +75,21 @@ impl<C: ChainSpecParser<ChainSpec = OpChainSpec>> InitStateCommandOp<C> {
                 .init_state
                 .header
                 .ok_or_else(|| eyre::eyre!("Header file must be provided"))?;
-            let header: alloy_consensus::Header = without_evm::read_header_from_file(header)?;
+            let header: alloy_consensus::Header = without_evm::read_header_from_file(&header)?;
 
             let header_hash = self
                 .init_state
                 .header_hash
-                .or_else(|| Some(header.hash_slow().to_string()))
+                .or_else(|| Some(header.hash_slow()))
                 .ok_or_else(|| eyre::eyre!("Header hash must be provided"))?;
-            let header_hash = B256::from_str(&header_hash)?;
-
-            let total_difficulty = self
-                .init_state
-                .total_difficulty
-                .or_else(|| Some(header.difficulty.to_string()))
-                .ok_or_else(|| eyre::eyre!("Total difficulty must be provided"))?;
-            let total_difficulty = U256::from_str(&total_difficulty)?;
 
             let last_block_number = provider_rw.last_block_number()?;
 
             if last_block_number == 0 {
-                info!(target: "reth::cli", "header: {:?}, header_hash: {:?}, total_difficulty: {:?}", header, header_hash, total_difficulty);
+                info!(target: "reth::cli", "header: {:?}, header_hash: {:?}", header, header_hash);
                 without_evm::setup_without_evm(
                     &provider_rw,
                     SealedHeader::new(header, header_hash),
-                    total_difficulty,
                     |_| alloy_consensus::Header::default(),
                 )?;
 

@@ -8,7 +8,7 @@ use alloy_rpc_types_trace::{
 use futures::StreamExt;
 use jsonrpsee::http_client::HttpClientBuilder;
 use jsonrpsee_http_client::HttpClient;
-use reth_ethereum_primitives::Receipt;
+use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_rpc_api_testing_util::{debug::DebugApiExt, trace::TraceApiExt, utils::parse_env_url};
 use reth_rpc_eth_api::EthApiClient;
 use std::time::Instant;
@@ -118,6 +118,7 @@ async fn debug_trace_block_entire_chain() {
         Block,
         Receipt,
         Header,
+        TransactionSigned,
     >>::block_number(&client)
     .await
     .unwrap()
@@ -152,6 +153,7 @@ async fn debug_trace_block_opcodes_entire_chain() {
         Block,
         Receipt,
         Header,
+        TransactionSigned,
     >>::block_number(&client)
     .await
     .unwrap()

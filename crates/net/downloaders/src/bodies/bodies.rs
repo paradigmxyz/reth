@@ -21,7 +21,6 @@ use std::{
     cmp::Ordering,
     collections::BinaryHeap,
     fmt::Debug,
-    mem,
     ops::RangeInclusive,
     pin::Pin,
     sync::Arc,
@@ -215,9 +214,7 @@ where
 
     /// Adds a new response to the internal buffer
     fn buffer_bodies_response(&mut self, response: Vec<BlockResponse<B>>) {
-        // take into account capacity
-        let size = response.iter().map(BlockResponse::size).sum::<usize>() +
-            response.capacity() * mem::size_of::<BlockResponse<B>>();
+        let size = response.iter().map(BlockResponse::size).sum::<usize>();
 
         let response = OrderedBodiesResponse { resp: response, size };
         let response_len = response.len();
@@ -347,6 +344,12 @@ where
         // written by external services (e.g. BlockchainTree).
         tracing::trace!(target: "downloaders::bodies", ?range, prev_range = ?self.download_range, "Download range reset");
         info!(target: "downloaders::bodies", count, ?range, "Downloading bodies");
+        // Increment out-of-order requests metric if the new start is below the last returned block
+        if let Some(last_returned) = self.latest_queued_block_number &&
+            *range.start() < last_returned
+        {
+            self.metrics.out_of_order_requests.increment(1);
+        }
         self.clear();
         self.download_range = range;
         Ok(())

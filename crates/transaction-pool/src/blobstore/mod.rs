@@ -5,6 +5,7 @@ use alloy_eips::{
     eip7594::BlobTransactionSidecarVariant,
 };
 use alloy_primitives::B256;
+pub use converter::BlobSidecarConverter;
 pub use disk::{DiskFileBlobStore, DiskFileBlobStoreConfig, OpenDiskFileBlobStore};
 pub use mem::InMemoryBlobStore;
 pub use noop::NoopBlobStore;
@@ -17,6 +18,7 @@ use std::{
 };
 pub use tracker::{BlobStoreCanonTracker, BlobStoreUpdates};
 
+mod converter;
 pub mod disk;
 mod mem;
 mod noop;

@@ -9,7 +9,7 @@ use alloy_eips::{
 use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
-use reth_chain_state::ExecutedBlockWithTrieUpdates;
+use reth_chain_state::ExecutedBlock;
 use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
 /// Represents a successfully built execution payload (block).
@@ -30,7 +30,7 @@ pub trait BuiltPayload: Send + Sync + fmt::Debug {
     /// Returns the complete execution result including state updates.
     ///
     /// Returns `None` if execution data is not available or not tracked.
-    fn executed_block(&self) -> Option<ExecutedBlockWithTrieUpdates<Self::Primitives>> {
+    fn executed_block(&self) -> Option<ExecutedBlock<Self::Primitives>> {
         None
     }
 

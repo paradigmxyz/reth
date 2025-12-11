@@ -176,7 +176,11 @@ impl Decode for AddressStorageKey {
     }
 }
 
-impl_fixed_arbitrary!((BlockNumberAddress, 28), (AddressStorageKey, 52));
+impl_fixed_arbitrary!(
+    (BlockNumberAddress, 28),
+    (BlockNumberHashedAddress, 40),
+    (AddressStorageKey, 52)
+);
 
 #[cfg(test)]
 mod tests {
@@ -206,6 +210,31 @@ mod tests {
         let mut bytes = [0u8; 28];
         rng().fill(bytes.as_mut_slice());
         let key = BlockNumberAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
+        assert_eq!(bytes, Encode::encode(key));
+    }
+
+    #[test]
+    fn test_block_number_hashed_address() {
+        let num = 1u64;
+        let hash = B256::from_slice(&[0xba; 32]);
+        let key = BlockNumberHashedAddress((num, hash));
+
+        let mut bytes = [0u8; 40];
+        bytes[..8].copy_from_slice(&num.to_be_bytes());
+        bytes[8..].copy_from_slice(hash.as_slice());
+
+        let encoded = Encode::encode(key);
+        assert_eq!(encoded, bytes);
+
+        let decoded: BlockNumberHashedAddress = Decode::decode(&encoded).unwrap();
+        assert_eq!(decoded, key);
+    }
+
+    #[test]
+    fn test_block_number_hashed_address_rand() {
+        let mut bytes = [0u8; 40];
+        rng().fill(bytes.as_mut_slice());
+        let key = BlockNumberHashedAddress::arbitrary(&mut Unstructured::new(&bytes)).unwrap();
         assert_eq!(bytes, Encode::encode(key));
     }
 

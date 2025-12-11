@@ -1,4 +1,4 @@
-use crate::{any::AnyError, db::DatabaseError, writer::UnifiedStorageWriterError};
+use crate::{any::AnyError, db::DatabaseError};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
@@ -58,9 +58,6 @@ pub enum ProviderError {
         /// The account address.
         address: Address,
     },
-    /// The total difficulty for a block is missing.
-    #[error("total difficulty not found for block #{_0}")]
-    TotalDifficultyNotFound(BlockNumber),
     /// When required header related data was not found but was required.
     #[error("no header found for {_0:?}")]
     HeaderNotFound(BlockHashOrNumber),
@@ -128,15 +125,20 @@ pub enum ProviderError {
     /// Consistent view error.
     #[error("failed to initialize consistent view: {_0}")]
     ConsistentView(Box<ConsistentViewError>),
-    /// Storage writer error.
-    #[error(transparent)]
-    UnifiedStorageWriterError(#[from] UnifiedStorageWriterError),
     /// Received invalid output from configured storage implementation.
     #[error("received invalid output from storage")]
     InvalidStorageOutput,
     /// Missing trie updates.
     #[error("missing trie updates for block {0}")]
     MissingTrieUpdates(B256),
+    /// Insufficient changesets to revert to the requested block.
+    #[error("insufficient changesets to revert to block #{requested}. Available changeset range: {available:?}")]
+    InsufficientChangesets {
+        /// The block number requested for reversion
+        requested: BlockNumber,
+        /// The available range of blocks with changesets
+        available: core::ops::RangeInclusive<BlockNumber>,
+    },
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),

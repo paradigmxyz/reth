@@ -35,9 +35,12 @@
 
 extern crate alloc;
 
+mod recover_block;
 /// Sparse trie implementation for stateless validation
 pub mod trie;
 
+#[doc(inline)]
+pub use recover_block::UncompressedPublicKey;
 #[doc(inline)]
 pub use trie::StatelessTrie;
 #[doc(inline)]

@@ -310,6 +310,18 @@ mod tests {
     }
 
     #[test]
+    fn test_node_record() {
+        let url = "enode://fc8a2ff614e848c0af4c99372a81b8655edb8e11b617cffd0aab1a0691bcca66ca533626a528ee567f05f70c8cb529bda2c0a864cc0aec638a367fd2bb8e49fb@127.0.0.1:35481?discport=0";
+        let node: NodeRecord = url.parse().unwrap();
+        assert_eq!(node, NodeRecord {
+            address: IpAddr::V4([127,0,0, 1].into()),
+            tcp_port: 35481,
+            udp_port: 0,
+            id: "0xfc8a2ff614e848c0af4c99372a81b8655edb8e11b617cffd0aab1a0691bcca66ca533626a528ee567f05f70c8cb529bda2c0a864cc0aec638a367fd2bb8e49fb".parse().unwrap(),
+        })
+    }
+
+    #[test]
     fn test_url_parse() {
         let url = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
         let node: NodeRecord = url.parse().unwrap();

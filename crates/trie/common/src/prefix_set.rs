@@ -71,16 +71,18 @@ pub struct TriePrefixSets {
 /// This data structure stores a set of `Nibbles` and provides methods to insert
 /// new elements and check whether any existing element has a given prefix.
 ///
-/// Internally, this implementation uses a `Vec` and aims to act like a `BTreeSet` in being both
-/// sorted and deduplicated. It does this by keeping a `sorted` flag. The `sorted` flag represents
-/// whether or not the `Vec` is definitely sorted. When a new element is added, it is set to
-/// `false.`. The `Vec` is sorted and deduplicated when `sorted` is `true` and:
-///  * An element is being checked for inclusion (`contains`), or
-///  * The set is being converted into an immutable `PrefixSet` (`freeze`)
+/// Internally, this implementation stores keys in an unsorted `Vec<Nibbles>` together with an
+/// `all` flag. The `all` flag indicates that every entry should be considered changed and that
+/// individual keys can be ignored.
 ///
-/// This means that a `PrefixSet` will always be sorted and deduplicated when constructed from a
-/// `PrefixSetMut`.
+/// Sorting and deduplication do not happen during insertion or membership checks on this mutable
+/// structure. Instead, keys are sorted and deduplicated when converting into the immutable
+/// `PrefixSet` via `freeze()`. The immutable `PrefixSet` provides `contains` and relies on the
+/// sorted and unique keys produced by `freeze()`; it does not perform additional sorting or
+/// deduplication.
 ///
+/// This guarantees that a `PrefixSet` constructed from a `PrefixSetMut` is always sorted and
+/// deduplicated.
 /// # Examples
 ///
 /// ```
@@ -165,8 +167,7 @@ impl PrefixSetMut {
         } else {
             self.keys.sort_unstable();
             self.keys.dedup();
-            // We need to shrink in both the sorted and non-sorted cases because deduping may have
-            // occurred either on `freeze`, or during `contains`.
+            // Shrink after deduplication to release unused capacity.
             self.keys.shrink_to_fit();
             PrefixSet { index: 0, all: false, keys: Arc::new(self.keys) }
         }
@@ -280,8 +281,8 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
-        assert_eq!(prefix_set_mut.keys.len(), 4); // Length should be 3 (including duplicate)
-        assert_eq!(prefix_set_mut.keys.capacity(), 4); // Capacity should be 4 (including duplicate)
+        assert_eq!(prefix_set_mut.keys.len(), 4); // Length is 4 (before deduplication)
+        assert_eq!(prefix_set_mut.keys.capacity(), 4); // Capacity is 4 (before deduplication)
 
         let mut prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));
@@ -300,8 +301,8 @@ mod tests {
         prefix_set_mut.insert(Nibbles::from_nibbles([4, 5, 6]));
         prefix_set_mut.insert(Nibbles::from_nibbles([1, 2, 3])); // Duplicate
 
-        assert_eq!(prefix_set_mut.keys.len(), 4); // Length should be 3 (including duplicate)
-        assert_eq!(prefix_set_mut.keys.capacity(), 101); // Capacity should be 101 (including duplicate)
+        assert_eq!(prefix_set_mut.keys.len(), 4); // Length is 4 (before deduplication)
+        assert_eq!(prefix_set_mut.keys.capacity(), 101); // Capacity is 101 (before deduplication)
 
         let mut prefix_set = prefix_set_mut.freeze();
         assert!(prefix_set.contains(&Nibbles::from_nibbles_unchecked([1, 2])));

@@ -2402,7 +2402,7 @@ pub enum DiscoveryUpdate {
     /// Node that was removed from the table
     Removed(PeerId),
     /// A series of updates
-    Batch(Vec<DiscoveryUpdate>),
+    Batch(Vec<Self>),
 }
 
 #[cfg(test)]

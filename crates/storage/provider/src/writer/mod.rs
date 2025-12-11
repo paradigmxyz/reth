@@ -909,7 +909,7 @@ mod tests {
         }
 
         let (_, updates) = StateRoot::from_tx(tx).root_with_updates().unwrap();
-        provider_rw.write_trie_updates(&updates).unwrap();
+        provider_rw.write_trie_updates(updates).unwrap();
 
         let mut state = State::builder().with_bundle_update().build();
 
@@ -1127,7 +1127,10 @@ mod tests {
         assert_eq!(storage_root, storage_root_prehashed(init_storage.storage));
         assert!(!storage_updates.is_empty());
         provider_rw
-            .write_storage_trie_updates(core::iter::once((&hashed_address, &storage_updates)))
+            .write_storage_trie_updates_sorted(core::iter::once((
+                &hashed_address,
+                &storage_updates.into_sorted(),
+            )))
             .unwrap();
 
         // destroy the storage and re-create with new slots

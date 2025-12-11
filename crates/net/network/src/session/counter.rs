@@ -3,7 +3,7 @@ use reth_network_api::Direction;
 use reth_network_types::SessionLimits;
 
 /// Keeps track of all sessions.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct SessionCounter {
     /// Limits to enforce.
     limits: SessionLimits,

@@ -6,7 +6,7 @@ use clap::{builder::RangedU64ValueParser, Args};
 use reth_chainspec::EthereumHardforks;
 use reth_config::config::PruneConfig;
 use reth_prune_types::{PruneMode, PruneModes, ReceiptsLogPruneConfig, MINIMUM_PRUNING_DISTANCE};
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, ops::Not};
 
 /// Parameters for pruning and full node
 #[derive(Debug, Clone, Args, PartialEq, Eq, Default)]
@@ -17,33 +17,33 @@ pub struct PruningArgs {
     pub full: bool,
 
     /// Minimum pruning interval measured in blocks.
-    #[arg(long, value_parser = RangedU64ValueParser::<u64>::new().range(1..),)]
+    #[arg(long = "prune.block-interval", alias = "block-interval", value_parser = RangedU64ValueParser::<u64>::new().range(1..))]
     pub block_interval: Option<u64>,
 
     // Sender Recovery
     /// Prunes all sender recovery data.
-    #[arg(long = "prune.senderrecovery.full", conflicts_with_all = &["sender_recovery_distance", "sender_recovery_before"])]
+    #[arg(long = "prune.sender-recovery.full", alias = "prune.senderrecovery.full", conflicts_with_all = &["sender_recovery_distance", "sender_recovery_before"])]
     pub sender_recovery_full: bool,
     /// Prune sender recovery data before the `head-N` block number. In other words, keep last N +
     /// 1 blocks.
-    #[arg(long = "prune.senderrecovery.distance", value_name = "BLOCKS", conflicts_with_all = &["sender_recovery_full", "sender_recovery_before"])]
+    #[arg(long = "prune.sender-recovery.distance", alias = "prune.senderrecovery.distance", value_name = "BLOCKS", conflicts_with_all = &["sender_recovery_full", "sender_recovery_before"])]
     pub sender_recovery_distance: Option<u64>,
     /// Prune sender recovery data before the specified block number. The specified block number is
     /// not pruned.
-    #[arg(long = "prune.senderrecovery.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["sender_recovery_full", "sender_recovery_distance"])]
+    #[arg(long = "prune.sender-recovery.before", alias = "prune.senderrecovery.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["sender_recovery_full", "sender_recovery_distance"])]
     pub sender_recovery_before: Option<BlockNumber>,
 
     // Transaction Lookup
     /// Prunes all transaction lookup data.
-    #[arg(long = "prune.transactionlookup.full", conflicts_with_all = &["transaction_lookup_distance", "transaction_lookup_before"])]
+    #[arg(long = "prune.transaction-lookup.full", alias = "prune.transactionlookup.full", conflicts_with_all = &["transaction_lookup_distance", "transaction_lookup_before"])]
     pub transaction_lookup_full: bool,
     /// Prune transaction lookup data before the `head-N` block number. In other words, keep last N
     /// + 1 blocks.
-    #[arg(long = "prune.transactionlookup.distance", value_name = "BLOCKS", conflicts_with_all = &["transaction_lookup_full", "transaction_lookup_before"])]
+    #[arg(long = "prune.transaction-lookup.distance", alias = "prune.transactionlookup.distance", value_name = "BLOCKS", conflicts_with_all = &["transaction_lookup_full", "transaction_lookup_before"])]
     pub transaction_lookup_distance: Option<u64>,
     /// Prune transaction lookup data before the specified block number. The specified block number
     /// is not pruned.
-    #[arg(long = "prune.transactionlookup.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["transaction_lookup_full", "transaction_lookup_distance"])]
+    #[arg(long = "prune.transaction-lookup.before", alias = "prune.transactionlookup.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["transaction_lookup_full", "transaction_lookup_distance"])]
     pub transaction_lookup_before: Option<BlockNumber>,
 
     // Receipts
@@ -68,27 +68,27 @@ pub struct PruningArgs {
 
     // Account History
     /// Prunes all account history.
-    #[arg(long = "prune.accounthistory.full", conflicts_with_all = &["account_history_distance", "account_history_before"])]
+    #[arg(long = "prune.account-history.full", alias = "prune.accounthistory.full", conflicts_with_all = &["account_history_distance", "account_history_before"])]
     pub account_history_full: bool,
     /// Prune account before the `head-N` block number. In other words, keep last N + 1 blocks.
-    #[arg(long = "prune.accounthistory.distance", value_name = "BLOCKS", conflicts_with_all = &["account_history_full", "account_history_before"])]
+    #[arg(long = "prune.account-history.distance", alias = "prune.accounthistory.distance", value_name = "BLOCKS", conflicts_with_all = &["account_history_full", "account_history_before"])]
     pub account_history_distance: Option<u64>,
     /// Prune account history before the specified block number. The specified block number is not
     /// pruned.
-    #[arg(long = "prune.accounthistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["account_history_full", "account_history_distance"])]
+    #[arg(long = "prune.account-history.before", alias = "prune.accounthistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["account_history_full", "account_history_distance"])]
     pub account_history_before: Option<BlockNumber>,
 
     // Storage History
     /// Prunes all storage history data.
-    #[arg(long = "prune.storagehistory.full", conflicts_with_all = &["storage_history_distance", "storage_history_before"])]
+    #[arg(long = "prune.storage-history.full", alias = "prune.storagehistory.full", conflicts_with_all = &["storage_history_distance", "storage_history_before"])]
     pub storage_history_full: bool,
     /// Prune storage history before the `head-N` block number. In other words, keep last N + 1
     /// blocks.
-    #[arg(long = "prune.storagehistory.distance", value_name = "BLOCKS", conflicts_with_all = &["storage_history_full", "storage_history_before"])]
+    #[arg(long = "prune.storage-history.distance", alias = "prune.storagehistory.distance", value_name = "BLOCKS", conflicts_with_all = &["storage_history_full", "storage_history_before"])]
     pub storage_history_distance: Option<u64>,
     /// Prune storage history before the specified block number. The specified block number is not
     /// pruned.
-    #[arg(long = "prune.storagehistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["storage_history_full", "storage_history_distance"])]
+    #[arg(long = "prune.storage-history.before", alias = "prune.storagehistory.before", value_name = "BLOCK_NUMBER", conflicts_with_all = &["storage_history_full", "storage_history_distance"])]
     pub storage_history_before: Option<BlockNumber>,
 
     // Bodies
@@ -107,6 +107,9 @@ pub struct PruningArgs {
 
 impl PruningArgs {
     /// Returns pruning configuration.
+    ///
+    /// Returns [`None`] if no parameters are specified and default pruning configuration should be
+    /// used.
     pub fn prune_config<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneConfig>
     where
         ChainSpec: EthereumHardforks,
@@ -124,8 +127,11 @@ impl PruningArgs {
                     receipts: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     account_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
                     storage_history: Some(PruneMode::Distance(MINIMUM_PRUNING_DISTANCE)),
-                    // TODO: set default to pre-merge block if available
-                    bodies_history: None,
+                    bodies_history: chain_spec
+                        .ethereum_fork_activation(EthereumHardfork::Paris)
+                        .block_number()
+                        .map(PruneMode::Before),
+                    merkle_changesets: PruneMode::Distance(MINIMUM_PRUNING_DISTANCE),
                     receipts_log_filter: Default::default(),
                 },
             }
@@ -162,7 +168,7 @@ impl PruningArgs {
             config.segments.receipts.take();
         }
 
-        Some(config)
+        config.is_default().not().then_some(config)
     }
 
     fn bodies_prune_mode<ChainSpec>(&self, chain_spec: &ChainSpec) -> Option<PruneMode>

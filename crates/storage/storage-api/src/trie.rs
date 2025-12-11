@@ -1,8 +1,8 @@
 use alloc::vec::Vec;
-use alloy_primitives::{Address, Bytes, B256};
+use alloy_primitives::{Address, BlockNumber, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
-    updates::{StorageTrieUpdates, TrieUpdates},
+    updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,
 };
@@ -89,25 +89,93 @@ pub trait StateProofProvider: Send + Sync {
     fn witness(&self, input: TrieInput, target: HashedPostState) -> ProviderResult<Vec<Bytes>>;
 }
 
+/// Trie Reader
+#[auto_impl::auto_impl(&, Arc, Box)]
+pub trait TrieReader: Send + Sync {
+    /// Returns the [`TrieUpdatesSorted`] for reverting the trie database to its state prior to the
+    /// given block and onwards having been processed.
+    fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted>;
+
+    /// Returns the trie updates that were applied by the specified block.
+    fn get_block_trie_updates(
+        &self,
+        block_number: BlockNumber,
+    ) -> ProviderResult<TrieUpdatesSorted>;
+}
+
 /// Trie Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait TrieWriter: Send + Sync {
     /// Writes trie updates to the database.
     ///
     /// Returns the number of entries modified.
-    fn write_trie_updates(&self, trie_updates: &TrieUpdates) -> ProviderResult<usize>;
+    fn write_trie_updates(&self, trie_updates: TrieUpdates) -> ProviderResult<usize> {
+        self.write_trie_updates_sorted(&trie_updates.into_sorted())
+    }
+
+    /// Writes trie updates to the database with already sorted updates.
+    ///
+    /// Returns the number of entries modified.
+    fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize>;
+
+    /// Records the current values of all trie nodes which will be updated using the [`TrieUpdates`]
+    /// into the trie changesets tables.
+    ///
+    /// The intended usage of this method is to call it _prior_ to calling `write_trie_updates` with
+    /// the same [`TrieUpdates`].
+    ///
+    /// The `updates_overlay` parameter allows providing additional in-memory trie updates that
+    /// should be considered when looking up current node values. When provided, these overlay
+    /// updates are applied on top of the database state, allowing the method to see a view that
+    /// includes both committed database values and pending in-memory changes. This is useful
+    /// when writing changesets for updates that depend on previous uncommitted trie changes.
+    ///
+    /// Returns the number of keys written.
+    fn write_trie_changesets(
+        &self,
+        block_number: BlockNumber,
+        trie_updates: &TrieUpdatesSorted,
+        updates_overlay: Option<&TrieUpdatesSorted>,
+    ) -> ProviderResult<usize>;
+
+    /// Clears contents of trie changesets completely
+    fn clear_trie_changesets(&self) -> ProviderResult<()>;
+
+    /// Clears contents of trie changesets starting from the given block number (inclusive) onwards.
+    fn clear_trie_changesets_from(&self, from: BlockNumber) -> ProviderResult<()>;
 }
 
 /// Storage Trie Writer
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait StorageTrieWriter: Send + Sync {
-    /// Writes storage trie updates from the given storage trie map.
+    /// Writes storage trie updates from the given storage trie map with already sorted updates.
     ///
-    /// First sorts the storage trie updates by the hashed address key, writing in sorted order.
+    /// Expects the storage trie updates to already be sorted by the hashed address key.
     ///
     /// Returns the number of entries modified.
-    fn write_storage_trie_updates<'a>(
+    fn write_storage_trie_updates_sorted<'a>(
         &self,
-        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdates)>,
+        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
+    ) -> ProviderResult<usize>;
+
+    /// Records the current values of all trie nodes which will be updated using the
+    /// [`StorageTrieUpdatesSorted`] into the storage trie changesets table.
+    ///
+    /// The intended usage of this method is to call it _prior_ to calling
+    /// `write_storage_trie_updates` with the same set of [`StorageTrieUpdatesSorted`].
+    ///
+    /// The `updates_overlay` parameter allows providing additional in-memory trie updates that
+    /// should be considered when looking up current node values. When provided, these overlay
+    /// updates are applied on top of the database state for each storage trie, allowing the
+    /// method to see a view that includes both committed database values and pending in-memory
+    /// changes. This is useful when writing changesets for storage updates that depend on
+    /// previous uncommitted trie changes.
+    ///
+    /// Returns the number of keys written.
+    fn write_storage_trie_changesets<'a>(
+        &self,
+        block_number: BlockNumber,
+        storage_tries: impl Iterator<Item = (&'a B256, &'a StorageTrieUpdatesSorted)>,
+        updates_overlay: Option<&TrieUpdatesSorted>,
     ) -> ProviderResult<usize>;
 }

@@ -17,7 +17,7 @@ pub enum CustomPooledTransaction {
     /// A regular Optimism transaction as defined by [`OpPooledTransaction`].
     #[envelope(flatten)]
     Op(OpPooledTransaction),
-    /// A [`TxPayment`] tagged with type 0x7E.
+    /// A [`TxPayment`] tagged with type 0x2A (decimal 42).
     #[envelope(ty = 42)]
     Payment(Signed<TxPayment>),
 }

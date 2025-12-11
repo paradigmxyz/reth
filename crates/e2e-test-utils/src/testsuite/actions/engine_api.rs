@@ -8,6 +8,7 @@ use alloy_rpc_types_engine::{
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
+use reth_ethereum_primitives::TransactionSigned;
 use reth_node_api::{EngineTypes, PayloadTypes};
 use reth_rpc_api::clients::{EngineApiClient, EthApiClient};
 use std::marker::PhantomData;
@@ -85,7 +86,14 @@ where
             const MAX_RETRIES: u32 = 5;
 
             while retries < MAX_RETRIES {
-                match EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::block_by_number(
+                match EthApiClient::<
+                    TransactionRequest,
+                    Transaction,
+                    Block,
+                    Receipt,
+                    Header,
+                    TransactionSigned,
+                >::block_by_number(
                     source_rpc,
                     alloy_eips::BlockNumberOrTag::Number(self.block_number),
                     true, // include transactions

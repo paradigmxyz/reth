@@ -66,11 +66,6 @@ fn header_provider_example<T: HeaderProvider>(provider: T, number: u64) -> eyre:
         provider.header(sealed_header.hash())?.ok_or(eyre::eyre!("header by hash not found"))?;
     assert_eq!(sealed_header.header(), &header_by_hash);
 
-    // The header's total difficulty is stored in a separate table, so we have a separate call for
-    // it. This is not needed for post PoS transition chains.
-    let td = provider.header_td_by_number(number)?.ok_or(eyre::eyre!("header td not found"))?;
-    assert!(!td.is_zero());
-
     // Can query headers by range as well, already sealed!
     let headers = provider.sealed_headers_range(100..200)?;
     assert_eq!(headers.len(), 100);

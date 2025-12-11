@@ -179,14 +179,16 @@ where
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
     ///
     /// This will send authenticated http requests to the node's auth server.
-    pub fn engine_http_client(&self) -> impl EngineApiClient<Engine> {
+    pub fn engine_http_client(&self) -> impl EngineApiClient<Engine> + use<Engine, Node, AddOns> {
         self.auth_server_handle().http_client()
     }
 
     /// Returns the [`EngineApiClient`] interface for the authenticated engine API.
     ///
     /// This will send authenticated ws requests to the node's auth server.
-    pub async fn engine_ws_client(&self) -> impl EngineApiClient<Engine> {
+    pub async fn engine_ws_client(
+        &self,
+    ) -> impl EngineApiClient<Engine> + use<Engine, Node, AddOns> {
         self.auth_server_handle().ws_client().await
     }
 
@@ -194,7 +196,9 @@ where
     ///
     /// This will send not authenticated IPC requests to the node's auth server.
     #[cfg(unix)]
-    pub async fn engine_ipc_client(&self) -> Option<impl EngineApiClient<Engine>> {
+    pub async fn engine_ipc_client(
+        &self,
+    ) -> Option<impl EngineApiClient<Engine> + use<Engine, Node, AddOns>> {
         self.auth_server_handle().ipc_client().await
     }
 }

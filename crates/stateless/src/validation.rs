@@ -1,4 +1,5 @@
 use crate::{
+    recover_block::{recover_block_with_public_keys, UncompressedPublicKey},
     trie::{StatelessSparseTrie, StatelessTrie},
     witness_db::WitnessDatabase,
     ExecutionWitness,
@@ -16,8 +17,11 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
 use reth_ethereum_consensus::{validate_block_post_execution, EthBeaconConsensus};
-use reth_ethereum_primitives::{Block, EthPrimitives};
-use reth_evm::{execute::Executor, ConfigureEvm};
+use reth_ethereum_primitives::{Block, EthPrimitives, EthereumReceipt};
+use reth_evm::{
+    execute::{BlockExecutionOutput, Executor},
+    ConfigureEvm,
+};
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_trie_common::{HashedPostState, KeccakKeyHasher};
 
@@ -89,6 +93,14 @@ pub enum StatelessValidationError {
         expected: B256,
     },
 
+    /// Error during signer recovery.
+    #[error("signer recovery failed")]
+    SignerRecovery,
+
+    /// Error when signature has non-normalized s value in homestead block.
+    #[error("signature s value not normalized for homestead block")]
+    HomesteadSignatureNotNormalized,
+
     /// Custom error.
     #[error("{0}")]
     Custom(&'static str),
@@ -130,17 +142,19 @@ pub enum StatelessValidationError {
 /// If all steps succeed the function returns `Some` containing the hash of the validated
 /// `current_block`.
 pub fn stateless_validation<ChainSpec, E>(
-    current_block: RecoveredBlock<Block>,
+    current_block: Block,
+    public_keys: Vec<UncompressedPublicKey>,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
     evm_config: E,
-) -> Result<B256, StatelessValidationError>
+) -> Result<(B256, BlockExecutionOutput<EthereumReceipt>), StatelessValidationError>
 where
     ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
     stateless_validation_with_trie::<StatelessSparseTrie, ChainSpec, E>(
         current_block,
+        public_keys,
         witness,
         chain_spec,
         evm_config,
@@ -154,16 +168,19 @@ where
 ///
 /// See `stateless_validation` for detailed documentation of the validation process.
 pub fn stateless_validation_with_trie<T, ChainSpec, E>(
-    current_block: RecoveredBlock<Block>,
+    current_block: Block,
+    public_keys: Vec<UncompressedPublicKey>,
     witness: ExecutionWitness,
     chain_spec: Arc<ChainSpec>,
     evm_config: E,
-) -> Result<B256, StatelessValidationError>
+) -> Result<(B256, BlockExecutionOutput<EthereumReceipt>), StatelessValidationError>
 where
     T: StatelessTrie,
     ChainSpec: Send + Sync + EthChainSpec<Header = Header> + EthereumHardforks + Debug,
     E: ConfigureEvm<Primitives = EthPrimitives> + Clone + 'static,
 {
+    let current_block = recover_block_with_public_keys(current_block, public_keys, &*chain_spec)?;
+
     let mut ancestor_headers: Vec<_> = witness
         .headers
         .iter()
@@ -228,7 +245,7 @@ where
     }
 
     // Return block hash
-    Ok(current_block.hash_slow())
+    Ok((current_block.hash_slow(), output))
 }
 
 /// Performs consensus validation checks on a block without execution or state validation.

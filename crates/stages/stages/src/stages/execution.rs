@@ -39,7 +39,6 @@ use super::missing_static_data_error;
 /// Input tables:
 /// - [`tables::CanonicalHeaders`] get next block to execute.
 /// - [`tables::Headers`] get for revm environment variables.
-/// - [`tables::HeaderTerminalDifficulties`]
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
@@ -896,7 +895,7 @@ mod tests {
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
-        let modes = [None, Some(PruneModes::none())];
+        let modes = [None, Some(PruneModes::default())];
         let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
             Address::random(),
             PruneMode::Distance(100000),
@@ -1033,7 +1032,7 @@ mod tests {
 
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
-        let modes = [None, Some(PruneModes::none())];
+        let modes = [None, Some(PruneModes::default())];
         let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
             Address::random(),
             PruneMode::Before(100000),
