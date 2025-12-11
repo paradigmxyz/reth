@@ -111,16 +111,15 @@ impl UnifiedStatus {
 
     /// Consume this `UnifiedStatus` and produce the [`StatusEth70`] message used by `eth/70`.
     pub fn into_eth70(self) -> StatusEth70 {
-        // eth/70 status 与 eth/69 保持相同格式，继续携带 earliest/latest 区间
         self.into_eth69()
     }
 
     /// Convert this `UnifiedStatus` into the appropriate `StatusMessage` variant based on version.
     pub fn into_message(self) -> StatusMessage {
-        match self.version {
-            v if v >= EthVersion::Eth70 => StatusMessage::Eth70(self.into_eth70()),
-            v if v >= EthVersion::Eth69 => StatusMessage::Eth69(self.into_eth69()),
-            _ => StatusMessage::Legacy(self.into_legacy()),
+         if self.version >= EthVersion::Eth69 {
+            StatusMessage::Eth69(self.into_eth69())
+        } else {
+            StatusMessage::Legacy(self.into_legacy())
         }
     }
 
