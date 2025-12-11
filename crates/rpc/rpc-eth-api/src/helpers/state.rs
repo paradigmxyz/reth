@@ -96,6 +96,8 @@ pub trait EthState: LoadState + SpawnBlocking {
     {
         Ok(async move {
             let _permit = self
+                // allow up to 5 concurrent requests for this, because we expect this to be fairly
+                // memory and io heavy
                 .acquire_weighted_blocking_io(5)
                 .await
                 .map_err(RethError::other)
