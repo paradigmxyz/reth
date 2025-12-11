@@ -50,10 +50,22 @@ proptest-arbitrary-interop.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
 
-criterion.workspace = true
-rand.workspace = true
-
 [features]
+default = ["std"]
+std = [
+    "dep:rayon",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "reth-chainspec/std",
+    "reth-execution-errors/std",
+    "reth-primitives-traits/std",
+    "revm/std",
+    "revm-database/std",
+    "serde_json/std",
+    "reth-trie-common/std",
+    "tracing/std",
+]
 metrics = ["reth-trie/metrics"]
 serde = [
     "similar-asserts/serde",
@@ -64,7 +76,6 @@ serde = [
     "reth-primitives-traits/serde",
     "revm-database/serde",
     "revm/serde",
-    "rand/serde",
 ]
 test-utils = [
     "reth-trie-common/test-utils",
@@ -75,14 +86,3 @@ test-utils = [
     "reth-provider/test-utils",
     "reth-trie/test-utils",
 ]
-
-parallel-from-reverts = ["dep:rayon"]
-
-[[bench]]
-name = "sorting_par_exp"
-harness = false
-required-features = ["parallel-from-reverts"]
-
-[[bench]]
-name = "integration_bench"
-harness = false
