@@ -14,7 +14,7 @@ env:
 
 jobs:
   check-reth:
-    runs-on: depot-ubuntu-latest-16
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 60
 
     steps:
@@ -34,7 +34,7 @@ jobs:
         run: cargo check --target x86_64-pc-windows-gnu
 
   check-op-reth:
-    runs-on: depot-ubuntu-latest-16
+    runs-on: depot-ubuntu-latest
     timeout-minutes: 60
 
     steps:
