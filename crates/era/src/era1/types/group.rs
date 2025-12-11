@@ -3,7 +3,7 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era1.md>
 
 use crate::{
-    common::file_ops::EraFileId,
+    common::file_ops::{format_era_filename, EraFileId},
     e2s::types::{Entry, IndexEntry},
     era1::types::execution::{Accumulator, BlockTuple, MAX_BLOCKS_PER_ERA1},
 };
@@ -177,27 +177,17 @@ impl EraFileId for Era1Id {
         self.block_count
     }
 
-    /// Convert to file name following the era file naming:
-    ///
-    /// Standard format: `<config-name>-<era-number>-<short-historical-root>.era1`
-    /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
-    ///
-    /// With era count, for custom exports:
-    /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era1`
     fn to_file_name(&self) -> String {
-        // Find which era the first block belongs to
-        let era_number = self.era_number();
-        let hash = match self.hash {
-            Some(h) => format!("{:02x}{:02x}{:02x}{:02x}", h[0], h[1], h[2], h[3]),
-            None => "00000000".to_string(),
-        };
-        if self.include_era_count {
-            let era_count = self.era_count();
-            format!("{}-{:05}-{:05}-{}.era1", self.network_name, era_number, era_count, hash)
-        } else {
-            format!("{}-{:05}-{}.era1", self.network_name, era_number, hash)
-        }
+        format_era_filename(
+            &self.network_name,
+            self.era_number(),
+            self.hash,
+            self.include_era_count,
+            self.era_count(),
+            ".era1",
+        )
     }
+
 }
 
 #[cfg(test)]
@@ -372,7 +362,7 @@ mod tests {
         "sepolia-12345-abcdef12.era1";
         "Large block number era 12345"
     )]
-    fn test_era1id_file_naming(id: Era1Id, expected_file_name: &str) {
+    fn test_era1_id_file_naming(id: Era1Id, expected_file_name: &str) {
         let actual_file_name = id.to_file_name();
         assert_eq!(actual_file_name, expected_file_name);
     }
@@ -388,7 +378,7 @@ mod tests {
         "mainnet-00000-00002-abcdef12.era1";
         "Spanning two eras with count"
     )]
-    fn test_era1id_file_naming_with_era_count(id: Era1Id, expected_file_name: &str) {
+    fn test_era1_id_file_naming_with_era_count(id: Era1Id, expected_file_name: &str) {
         let actual_file_name = id.to_file_name();
         assert_eq!(actual_file_name, expected_file_name);
     }
