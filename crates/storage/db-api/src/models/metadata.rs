@@ -22,6 +22,9 @@ pub struct StorageSettings {
     /// Whether `StoragesHistory` is stored in `RocksDB`.
     #[serde(default)]
     pub storages_history_in_rocksdb: bool,
+    /// Whether `TransactionHashNumbers` is stored in `RocksDB`.
+    #[serde(default)]
+    pub transaction_hash_numbers_in_rocksdb: bool,
 }
 
 impl StorageSettings {
@@ -35,6 +38,7 @@ impl StorageSettings {
             receipts_in_static_files: false,
             transaction_senders_in_static_files: false,
             storages_history_in_rocksdb: false,
+            transaction_hash_numbers_in_rocksdb: false,
         }
     }
 
@@ -53,6 +57,12 @@ impl StorageSettings {
     /// Sets the `storages_history_in_rocksdb` flag to the provided value.
     pub const fn with_storages_history_in_rocksdb(mut self, value: bool) -> Self {
         self.storages_history_in_rocksdb = value;
+        self
+    }
+
+    /// Sets the `transaction_hash_numbers_in_rocksdb` flag to the provided value.
+    pub const fn with_transaction_hash_numbers_in_rocksdb(mut self, value: bool) -> Self {
+        self.transaction_hash_numbers_in_rocksdb = value;
         self
     }
 }
