@@ -53,3 +53,6 @@ tracing.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
 serde.workspace = true
+
+# xlayer
+xlayer-db.workspace = true

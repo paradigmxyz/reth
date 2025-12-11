@@ -26,8 +26,6 @@ tracing.workspace = true
 
 # xlayer
 xlayer-rpc.workspace = true
-reth-rpc.workspace = true
-xlayer-exex.workspace = true
 xlayer-db.workspace = true
 
 [lints]

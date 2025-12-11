@@ -45,6 +45,7 @@ reth-testing-utils = { workspace = true, optional = true }
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-rlp.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
@@ -62,6 +63,8 @@ tempfile = { workspace = true, optional = true }
 bincode.workspace = true
 reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots", "blocking"] }
 eyre.workspace = true
+
+xlayer-db.workspace = true
 
 [dev-dependencies]
 # reth

@@ -1,14 +1,14 @@
 use crate::stages::MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD;
-use alloy_consensus::BlockHeader;
-use alloy_primitives::BlockNumber;
+use alloy_consensus::{BlockHeader, Transaction};
+use alloy_primitives::{BlockNumber, TxHash};
 use num_traits::Zero;
 use reth_config::config::ExecutionConfig;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_db::{static_file::HeaderMask, tables};
 use reth_evm::{execute::Executor, metrics::ExecutorMetrics, ConfigureEvm};
-use reth_execution_types::Chain;
+use reth_execution_types::{BlockExecutionResult, Chain};
 use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
-use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
+use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives, RecoveredBlock};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
@@ -352,6 +352,12 @@ where
             results.push(result);
 
             execution_duration += execute_start.elapsed();
+
+            if is_inner_tx_enabled() {
+                if let Err(err) = extract(&self.evm_config, provider, &block) {
+                    error!(target:"reth::cli", "XLayer execute extract failed for block {:#?} error {:#?}", block.hash(), err);
+                }
+            }
 
             // Log execution throughput
             if last_log_instant.elapsed() >= log_duration {
@@ -1240,4 +1246,116 @@ mod tests {
             ]
         );
     }
+}
+
+use alloy_consensus::{transaction::TxHashRef, TxReceipt};
+use alloy_rlp::encode;
+use reth_evm::{block::BlockExecutionError, execute::BlockExecutor};
+use reth_revm::State;
+use xlayer_db::{
+    internal_transaction_inspector::TraceCollector,
+    structs::{BlockTable, TxTable},
+    utils::{is_inner_tx_enabled, rw_batch_end, rw_batch_start, rw_batch_write, write_single},
+};
+
+fn extract<E, Provider>(
+    evm_config: &E,
+    provider: &Provider,
+    block: &RecoveredBlock<<<E as ConfigureEvm>::Primitives as NodePrimitives>::Block>,
+) -> Result<(), BlockExecutionError>
+where
+    E: ConfigureEvm,
+    Provider: DBProvider
+        + BlockReader<
+            Block = <<E as ConfigureEvm>::Primitives as NodePrimitives>::Block,
+            Header = <<E as ConfigureEvm>::Primitives as NodePrimitives>::BlockHeader,
+        >,
+{
+    let mut replay_db = State::builder()
+        .with_database(StateProviderDatabase::new(LatestStateProviderRef::new(provider)))
+        .with_bundle_update()
+        .without_state_clear()
+        .build();
+
+    let mut inspector = TraceCollector::default();
+    let evm_env = evm_config.evm_env(block.header()).map_err(BlockExecutionError::other)?;
+    let evm =
+        evm_config.evm_with_env_and_inspector(&mut replay_db, evm_env.clone(), &mut inspector);
+    let ctx = evm_config.context_for_block(block).map_err(BlockExecutionError::other)?;
+    let executor = evm_config.create_executor(evm, ctx);
+
+    let output = executor.execute_block(block.transactions_recovered())?;
+
+    // XLayer internal transactions
+    write_internal_transactions::<E>(&mut inspector, block, &output)?;
+
+    Ok(())
+}
+
+/// Writes internal transactions to XLayer database for execution stage.
+fn write_internal_transactions<E>(
+    inspector: &mut TraceCollector,
+    block: &RecoveredBlock<<<E as ConfigureEvm>::Primitives as NodePrimitives>::Block>,
+    output: &BlockExecutionResult<<<E as ConfigureEvm>::Primitives as NodePrimitives>::Receipt>,
+) -> Result<(), BlockExecutionError>
+where
+    E: ConfigureEvm,
+{
+    let mut internal_transactions = inspector.get();
+    let mut tx_hashes = Vec::<TxHash>::default();
+
+    let (rw_tx, rw_db) = rw_batch_start::<TxTable>().map_err(|e| {
+        BlockExecutionError::other(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("XLayer db error: {e}"),
+        ))
+    })?;
+
+    let mut prev_cumulative_gas = 0u64;
+    for (index, tx) in block.transactions_recovered().enumerate() {
+        let receipt = &output.receipts[index];
+        let success = receipt.status();
+
+        let current_cumulative_gas = receipt.cumulative_gas_used();
+        let tx_gas_used = current_cumulative_gas - prev_cumulative_gas;
+        prev_cumulative_gas = current_cumulative_gas;
+
+        if !success || (!internal_transactions.is_empty() && internal_transactions[index].len() > 0)
+        {
+            if !internal_transactions.is_empty() && !internal_transactions[index].is_empty() {
+                if let Some(first_inner_tx) = internal_transactions[index].first_mut() {
+                    first_inner_tx.set_transaction_gas(tx.gas_limit(), tx_gas_used);
+                }
+            }
+
+            tx_hashes.push(*tx.tx_hash());
+            rw_batch_write::<TxTable>(
+                &rw_tx,
+                &rw_db,
+                tx.tx_hash().to_vec(),
+                encode(internal_transactions[index].clone()),
+            )
+            .map_err(|e| {
+                BlockExecutionError::other(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("XLayer db write error: {e}"),
+                ))
+            })?;
+        }
+    }
+    rw_batch_end::<TxTable>(rw_tx).map_err(|e| {
+        BlockExecutionError::other(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("XLayer db commit error: {e}"),
+        ))
+    })?;
+
+    write_single::<BlockTable, Vec<TxHash>>(block.hash().to_vec(), tx_hashes).map_err(|e| {
+        BlockExecutionError::other(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("XLayer db write error: {e}"),
+        ))
+    })?;
+
+    Ok(())
 }

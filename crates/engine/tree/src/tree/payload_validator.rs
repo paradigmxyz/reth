@@ -11,7 +11,7 @@ use crate::tree::{
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
     StateProviderDatabase, TreeConfig,
 };
-use alloy_consensus::transaction::Either;
+use alloy_consensus::{transaction::Either, Transaction};
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
@@ -42,6 +42,16 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInput};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use std::{collections::HashMap, sync::Arc, time::Instant};
 use tracing::{debug, debug_span, error, info, instrument, trace, warn};
+
+use alloy_consensus::TxReceipt;
+use alloy_rlp::encode;
+use reth_primitives_traits::transaction::TxHashRef;
+use reth_revm::primitives::alloy_primitives::TxHash;
+use xlayer_db::{
+    internal_transaction_inspector::TraceCollector,
+    structs::{BlockTable, TxTable},
+    utils::{is_inner_tx_enabled, rw_batch_end, rw_batch_start, rw_batch_write, write_single},
+};
 
 /// Context providing access to tree state during validation.
 ///
@@ -591,7 +601,13 @@ where
             .without_state_clear()
             .build();
 
-        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
+        let mut inspector = TraceCollector::default();
+        let evm = self.evm_config.evm_with_env_and_inspector(
+            &mut db,
+            env.evm_env.clone(),
+            &mut inspector,
+        );
+
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let mut executor = self.evm_config.create_executor(evm, ctx);
@@ -615,14 +631,35 @@ where
 
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
+        let mut tx_hashes = Vec::<TxHash>::default();
+        let mut tx_gas_limits = Vec::<u64>::default();
         let output = self.metrics.execute_metered(
             executor,
-            handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
+            handle.iter_transactions().map(|res| {
+                res.map(|tx| {
+                    tx_hashes.push(*tx.tx().tx_hash());
+                    tx_gas_limits.push(tx.tx().gas_limit());
+                    tx
+                })
+                .map_err(BlockExecutionError::other)
+            }),
             state_hook,
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);
         debug!(target: "engine::tree::payload_validator", elapsed = ?execution_time, "Executed block");
+
+        // XLayer internal transactions
+        if is_inner_tx_enabled() {
+            write_internal_transactions::<N>(
+                &mut inspector,
+                &tx_hashes,
+                &tx_gas_limits,
+                &output.receipts,
+                input.hash(),
+            )?;
+        }
+
         Ok(output)
     }
 
@@ -1041,6 +1078,76 @@ where
     ) -> ValidationOutcome<N> {
         self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
     }
+}
+
+/// Writes internal transactions to XLayer database for payload validator execution.
+fn write_internal_transactions<N>(
+    inspector: &mut TraceCollector,
+    tx_hashes: &[TxHash],
+    tx_gas_limits: &[u64],
+    receipts: &[N::Receipt],
+    block_hash: B256,
+) -> Result<(), InsertBlockErrorKind>
+where
+    N: NodePrimitives,
+{
+    let mut internal_transactions = inspector.get();
+
+    let (rw_tx, rw_db) = rw_batch_start::<TxTable>().map_err(|e| {
+        InsertBlockErrorKind::Other(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("XLayer db error: {e}"),
+        )))
+    })?;
+
+    let mut prev_cumulative_gas = 0u64;
+    for (index, _) in tx_hashes.iter().enumerate() {
+        let receipt = &receipts[index];
+        let success = receipt.status();
+
+        let current_cumulative_gas = receipt.cumulative_gas_used();
+        let tx_gas_used = current_cumulative_gas - prev_cumulative_gas;
+        prev_cumulative_gas = current_cumulative_gas;
+
+        if !success || (!internal_transactions.is_empty() && internal_transactions[index].len() > 0)
+        {
+            if !internal_transactions.is_empty() && !internal_transactions[index].is_empty() {
+                if let Some(first_inner_tx) = internal_transactions[index].first_mut() {
+                    first_inner_tx.set_transaction_gas(tx_gas_limits[index], tx_gas_used);
+                }
+            }
+
+            rw_batch_write::<TxTable>(
+                &rw_tx,
+                &rw_db,
+                tx_hashes[index].to_vec(),
+                encode(internal_transactions[index].clone()),
+            )
+            .map_err(|e| {
+                InsertBlockErrorKind::Other(Box::new(std::io::Error::new(
+                    std::io::ErrorKind::Other,
+                    format!("XLayer db write error: {e}"),
+                )))
+            })?;
+        }
+    }
+    rw_batch_end::<TxTable>(rw_tx).map_err(|e| {
+        InsertBlockErrorKind::Other(Box::new(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            format!("XLayer db commit error: {e}"),
+        )))
+    })?;
+
+    write_single::<BlockTable, Vec<TxHash>>(block_hash.to_vec(), Vec::from(tx_hashes)).map_err(
+        |e| {
+            InsertBlockErrorKind::Other(Box::new(std::io::Error::new(
+                std::io::ErrorKind::Other,
+                format!("XLayer db write error: {e}"),
+            )))
+        },
+    )?;
+
+    Ok(())
 }
 
 /// Enum representing either block or payload being validated.

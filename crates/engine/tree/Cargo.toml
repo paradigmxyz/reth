@@ -73,6 +73,8 @@ reth-stages = { workspace = true, optional = true }
 reth-static-file = { workspace = true, optional = true }
 reth-tracing = { workspace = true, optional = true }
 
+xlayer-db.workspace = true
+
 [dev-dependencies]
 # reth
 reth-evm-ethereum = { workspace = true, features = ["test-utils"] }

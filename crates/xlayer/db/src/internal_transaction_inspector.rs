@@ -2,6 +2,7 @@ use alloy_rlp::{RlpDecodable, RlpEncodable};
 use serde::{Deserialize, Serialize};
 use std::cmp::Ordering;
 
+use crate::utils;
 use alloy_primitives::{Address, Bytes, U256};
 
 use reth_revm::{
@@ -43,6 +44,7 @@ impl InternalTransaction {
 
 #[derive(Debug, Clone)]
 pub struct TraceCollector {
+    enabled: bool,
     all_traces: Vec<Vec<InternalTransaction>>,
     traces: Vec<InternalTransaction>,
     // depth
@@ -55,7 +57,15 @@ pub struct TraceCollector {
 
 impl Default for TraceCollector {
     fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl TraceCollector {
+    /// Create a new `TraceCollector` with the enabled state from global configuration.
+    pub fn new() -> Self {
         Self {
+            enabled: utils::is_inner_tx_enabled(),
             all_traces: Vec::<Vec<InternalTransaction>>::default(),
             traces: Vec::<InternalTransaction>::default(),
             current_path: Vec::<usize>::default(),
@@ -64,9 +74,7 @@ impl Default for TraceCollector {
             trace_stack: Vec::<usize>::default(),
         }
     }
-}
 
-impl TraceCollector {
     fn format_error(result: &InstructionResult) -> String {
         match result {
             InstructionResult::Revert => "execution reverted".to_string(),
@@ -143,6 +151,9 @@ impl TraceCollector {
         gas_limit: u64,
         code_address: String,
     ) {
+        if !self.enabled {
+            return;
+        }
         let mut txn = InternalTransaction::default();
         txn.call_type = call_type;
         txn.from = from.clone();
@@ -172,6 +183,9 @@ impl TraceCollector {
     }
 
     fn before_op(&mut self) {
+        if !self.enabled {
+            return;
+        }
         let depth = self.current_path.len();
 
         match depth.cmp(&self.last_depth) {
@@ -209,6 +223,9 @@ impl TraceCollector {
     }
 
     fn after_op(&mut self) {
+        if !self.enabled {
+            return;
+        }
         self.current_path.pop();
         if self.trace_stack.is_empty() {
             self.all_traces.push(self.traces.clone());
@@ -217,6 +234,9 @@ impl TraceCollector {
     }
 
     pub fn get(&mut self) -> Vec<Vec<InternalTransaction>> {
+        if !self.enabled {
+            return Vec::new();
+        }
         self.all_traces.clone()
     }
 
@@ -234,6 +254,9 @@ where
     CTX: ContextTr,
 {
     fn call(&mut self, ctx: &mut CTX, inputs: &mut CallInputs) -> Option<CallOutcome> {
+        if !self.enabled {
+            return None;
+        }
         let call_type = match inputs.scheme {
             reth_revm::interpreter::CallScheme::Call => "call",
             reth_revm::interpreter::CallScheme::CallCode => "callcode",
@@ -267,6 +290,9 @@ where
     }
 
     fn call_end(&mut self, _ctx: &mut CTX, _inputs: &CallInputs, outcome: &mut CallOutcome) {
+        if !self.enabled {
+            return;
+        }
         let trace_index = self.trace_stack.pop().unwrap_or_default();
         let (_, after) = self.traces.split_at_mut(trace_index);
 
@@ -290,6 +316,9 @@ where
     }
 
     fn create(&mut self, _ctx: &mut CTX, inputs: &mut CreateInputs) -> Option<CreateOutcome> {
+        if !self.enabled {
+            return None;
+        }
         let call_type = match inputs.scheme {
             reth_revm::interpreter::CreateScheme::Create => "create".to_string(),
             reth_revm::interpreter::CreateScheme::Create2 { salt: _ } => "create2".to_string(), /* code_address */
@@ -312,6 +341,9 @@ where
     }
 
     fn create_end(&mut self, _ctx: &mut CTX, _inputs: &CreateInputs, outcome: &mut CreateOutcome) {
+        if !self.enabled {
+            return;
+        }
         let trace_index = self.trace_stack.pop().unwrap_or_default();
         let (_, after) = self.traces.split_at_mut(trace_index);
 
@@ -336,6 +368,9 @@ where
     }
 
     fn selfdestruct(&mut self, contract: Address, target: Address, value: U256) {
+        if !self.enabled {
+            return;
+        }
         self.init_op(
             "selfdestruct".to_string(),
             contract.to_string(),

@@ -16,6 +16,7 @@ use reth_db::{
 };
 
 static XLAYERDB: OnceCell<DatabaseEnv> = OnceCell::new();
+static ENABLE_INNER_TX: OnceCell<bool> = OnceCell::new();
 
 pub fn initialize(db_path: PathBuf) -> Result<(), Report> {
     let db_create_result = create_db(db_path.join("xlayerdb"), DatabaseArguments::default());
@@ -39,6 +40,20 @@ pub fn initialize(db_path: PathBuf) -> Result<(), Report> {
     }
 
     Ok(())
+}
+
+/// Set the global enable_inner_tx flag.
+/// This should be called once during node startup.
+pub fn set_enable_inner_tx(enabled: bool) -> Result<(), Report> {
+    ENABLE_INNER_TX
+        .set(enabled)
+        .map_err(|_| Report::msg("enable_inner_tx was set more than once"))?;
+    Ok(())
+}
+
+/// Check if inner transaction processing is enabled.
+pub fn is_inner_tx_enabled() -> bool {
+    ENABLE_INNER_TX.get().copied().unwrap_or(false)
 }
 
 pub fn write_single<T: Table, P: Encodable + Debug>(key: Vec<u8>, value: P) -> Result<(), Report> {
