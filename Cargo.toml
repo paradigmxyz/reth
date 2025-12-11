@@ -487,7 +487,7 @@ revm-inspectors = "0.33.1"
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.4.1"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.25.0", default-features = false }
+alloy-evm = { version = "0.25.1", default-features = false }
 alloy-primitives = { version = "1.4.1", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.4.1"
@@ -739,10 +739,7 @@ vergen-git2 = "1.0.5"
 # networking
 ipnet = "2.11"
 
-[patch.crates-io]
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "a7da37d" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "a7da37d" }
-
+# [patch.crates-io]
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
