@@ -3,6 +3,8 @@
 
 use std::ops::Range;
 
+#[cfg(all(unix, feature = "rocksdb"))]
+use crate::providers::RocksDBProvider;
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
@@ -34,13 +36,20 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
-/// Represents a destination for writing data, either to database or static files.
+#[cfg(all(unix, feature = "rocksdb"))]
+type RocksDBWriter = RocksDBProvider;
+#[cfg(not(all(unix, feature = "rocksdb")))]
+type RocksDBWriter = ();
+
+/// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherWriter<'a, CURSOR, N> {
     /// Write to database table via cursor
     Database(CURSOR),
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
+    /// Write to `RocksDB`
+    RocksDB(RocksDBWriter),
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -119,6 +128,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) => Ok(()),
             Self::StaticFile(writer) => writer.increment_block(expected_block_number),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -132,6 +142,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) => Ok(()),
             Self::StaticFile(writer) => writer.ensure_at_block(block_number),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -146,6 +157,7 @@ where
         match self {
             Self::Database(cursor) => Ok(cursor.append(tx_num, receipt)?),
             Self::StaticFile(writer) => writer.append_receipt(tx_num, receipt),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -159,6 +171,7 @@ where
         match self {
             Self::Database(cursor) => Ok(cursor.append(tx_num, sender)?),
             Self::StaticFile(writer) => writer.append_transaction_sender(tx_num, sender),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -175,6 +188,7 @@ where
                 Ok(())
             }
             Self::StaticFile(writer) => writer.append_transaction_senders(senders),
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -206,6 +220,7 @@ where
 
                 writer.prune_transaction_senders(to_delete, block)?;
             }
+            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
         }
 
         Ok(())
