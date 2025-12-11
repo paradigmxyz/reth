@@ -1,6 +1,6 @@
 //! Loads chain configuration.
 
-use alloy_consensus::{BlockHeader, Header};
+use alloy_consensus::BlockHeader;
 use alloy_eips::{
     eip7840::BlobParams,
     eip7910::{EthConfig, EthForkConfig, SystemContract},
@@ -155,9 +155,9 @@ where
 impl<Provider, Evm> EthConfigApiServer for EthConfigHandler<Provider, Evm>
 where
     Provider: ChainSpecProvider<ChainSpec: Hardforks + EthereumHardforks>
-        + BlockReaderIdExt<Header = Header>
+        + BlockReaderIdExt<Header: HeaderMut>
         + 'static,
-    Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Header>> + 'static,
+    Evm: ConfigureEvm<Primitives: NodePrimitives<BlockHeader = Provider::Header>> + 'static,
 {
     fn config(&self) -> RpcResult<EthConfig> {
         Ok(self.config().map_err(EthApiError::from)?)
