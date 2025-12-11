@@ -150,8 +150,8 @@ impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
 }
 
 impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
-    fn rocksdb_provider(&self) -> &RocksDBProvider {
-        &self.rocksdb_provider
+    fn rocksdb_provider(&self) -> RocksDBProvider {
+        self.rocksdb_provider.clone()
     }
 }
 

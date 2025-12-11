@@ -762,10 +762,10 @@ mod tests {
         // Try to init db with a different genesis block
         let genesis_hash = init_genesis(
             &ProviderFactory::<MockNodeTypesWithDB>::new(
-                factory.clone().into_db(),
+                factory.into_db(),
                 MAINNET.clone(),
                 static_file_provider,
-                rocksdb_provider.clone(),
+                rocksdb_provider,
             )
             .unwrap(),
         );
