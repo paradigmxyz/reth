@@ -423,9 +423,8 @@ mod tests {
                 result.sort_by(|a, b| a.0.cmp(&b.0));
                 result.dedup_by(|a, b| a.0 == b.0);
                 result
-            },
-        )
-    }
+            })
+        }
 
         /// Generate a sorted vector of (B256, U256) entries (including deletions as ZERO)
         fn sorted_post_state_nodes_strategy() -> impl Strategy<Value = Vec<(B256, U256)>> {
@@ -442,7 +441,8 @@ mod tests {
                     result.sort_by(|a, b| a.0.cmp(&b.0));
                     result.dedup_by(|a, b| a.0 == b.0);
                     result
-                })
+                },
+            )
         }
 
         proptest! {
