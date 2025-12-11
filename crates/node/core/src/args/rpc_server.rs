@@ -42,6 +42,55 @@ pub(crate) const RPC_DEFAULT_MAX_RESPONSE_SIZE_MB: u32 = 160;
 /// Once exceeded, the server can reject new connections.
 pub(crate) const RPC_DEFAULT_MAX_CONNECTIONS: u32 = 500;
 
+/// Default values for RPC server that can be customized
+///
+/// Global defaults can be set via [`DefaultRpcServerArgs::try_init`].
+#[derive(Debug, Clone)]
+pub struct DefaultRpcServerArgs {
+    http: bool,
+    http_addr: IpAddr,
+    http_port: u16,
+    http_disable_compression: bool,
+    http_api: Option<RpcModuleSelection>,
+    http_corsdomain: Option<String>,
+    ws: bool,
+    ws_addr: IpAddr,
+    ws_port: u16,
+    ws_allowed_origins: Option<String>,
+    ws_api: Option<RpcModuleSelection>,
+    ipcdisable: bool,
+    ipcpath: String,
+    ipc_socket_permissions: Option<String>,
+    auth_addr: IpAddr,
+    auth_port: u16,
+    auth_jwtsecret: Option<PathBuf>,
+    auth_ipc: bool,
+    auth_ipc_path: String,
+    disable_auth_server: bool,
+    rpc_jwtsecret: Option<JwtSecret>,
+    rpc_max_request_size: MaxU32,
+    rpc_max_response_size: MaxU32,
+    rpc_max_subscriptions_per_connection: MaxU32,
+    rpc_max_connections: MaxU32,
+    rpc_max_tracing_requests: usize,
+    rpc_max_blocking_io_requests: usize,
+    rpc_max_trace_filter_blocks: u64,
+    rpc_max_blocks_per_filter: ZeroAsNoneU64,
+    rpc_max_logs_per_response: ZeroAsNoneU64,
+    rpc_gas_cap: u64,
+    rpc_evm_memory_limit: u64,
+    rpc_tx_fee_cap: u128,
+    rpc_max_simulate_blocks: u64,
+    rpc_eth_proof_window: u64,
+    rpc_proof_permits: usize,
+    rpc_pending_block: PendingBlockKind,
+    rpc_forwarder: Option<Url>,
+    builder_disallow: Option<HashSet<Address>>,
+    rpc_state_cache: RpcStateCacheArgs,
+    gas_price_oracle: GasPriceOracleArgs,
+    rpc_send_raw_transaction_sync_timeout: Duration,
+}
+
 /// Parameters for configuring the rpc more granularity via CLI
 #[derive(Debug, Clone, Args, PartialEq, Eq)]
 #[command(next_help_heading = "RPC")]
