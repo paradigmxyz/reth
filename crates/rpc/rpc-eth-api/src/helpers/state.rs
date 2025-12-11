@@ -16,7 +16,8 @@ use reth_rpc_eth_types::{
     error::FromEvmError, EthApiError, PendingBlockEnv, RpcInvalidTransactionError,
 };
 use reth_storage_api::{
-    BlockIdReader, BlockNumReader, StateProvider, StateProviderBox, StateProviderFactory,
+    BlockIdReader, BlockNumReader, BlockReaderIdExt, StateProvider, StateProviderBox,
+    StateProviderFactory,
 };
 use reth_transaction_pool::TransactionPool;
 
@@ -273,21 +274,20 @@ pub trait LoadState:
                 let PendingBlockEnv { evm_env, origin } = self.pending_block_env_and_cfg()?;
                 Ok((evm_env, origin.state_block_id()))
             } else {
-                // Use cached values if there is no pending block
-                let block_hash = RpcNodeCore::provider(self)
-                    .block_hash_for_id(at)
+                // we can assume that the blockid will be predominantly `Latest` (e.g. for
+                // `eth_call`) and if requested by number or hash we can quickly fetch just the
+                // header
+                let header = RpcNodeCore::provider(self)
+                    .sealed_header_by_id(at)
                     .map_err(Self::Error::from_eth_err)?
-                    .ok_or(EthApiError::HeaderNotFound(at))?;
-
-                let header =
-                    self.cache().get_header(block_hash).await.map_err(Self::Error::from_eth_err)?;
+                    .ok_or_else(|| EthApiError::HeaderNotFound(at))?;
                 let evm_env = self
                     .evm_config()
                     .evm_env(&header)
                     .map_err(RethError::other)
                     .map_err(Self::Error::from_eth_err)?;
 
-                Ok((evm_env, block_hash.into()))
+                Ok((evm_env, header.hash().into()))
             }
         }
     }
