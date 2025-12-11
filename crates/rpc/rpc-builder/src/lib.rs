@@ -998,18 +998,18 @@ where
                                 .into_rpc()
                                 .into()
                         }
-                        // only relevant for Ethereum and configured in `EthereumAddOns`
-                        // implementation
-                        // TODO: can we get rid of this here?
-                        // Custom modules are not handled here - they should be registered via
-                        // extend_rpc_modules
-                        RethRpcModule::Flashbots | RethRpcModule::Other(_) => Default::default(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
                                 .into_rpc()
                                 .into()
                         }
+                        // these are implementation specific and need to be handled during
+                        // intialisation and should be registered via extend_rpc_modules in the
+                        // nodebuilder rpc addon stack
+                        RethRpcModule::Flashbots |
+                        RethRpcModule::Testing |
+                        RethRpcModule::Other(_) => Default::default(),
                     })
                     .clone()
             })

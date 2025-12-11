@@ -320,10 +320,9 @@ where
                     container.registry.evm_config().clone(),
                 )
                 .into_rpc();
-                container.modules.merge_if_module_configured(
-                    RethRpcModule::Other("testing".to_string()),
-                    testing_api,
-                )?;
+                container
+                    .modules
+                    .merge_if_module_configured(RethRpcModule::Testing, testing_api)?;
 
                 Ok(())
             })
