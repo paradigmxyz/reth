@@ -323,6 +323,8 @@ pub enum RethRpcModule {
     Miner,
     /// `mev_` module
     Mev,
+    /// `testing_` module
+    Testing,
     /// Custom RPC module not part of the standard set
     #[strum(default)]
     #[serde(untagged)]
@@ -347,6 +349,7 @@ impl RethRpcModule {
         Self::Flashbots,
         Self::Miner,
         Self::Mev,
+        Self::Testing,
     ];
 
     /// Returns the number of standard variants (excludes Other)
@@ -406,6 +409,7 @@ impl AsRef<str> for RethRpcModule {
             Self::Flashbots => "flashbots",
             Self::Miner => "miner",
             Self::Mev => "mev",
+            Self::Testing => "testing",
         }
     }
 }
@@ -428,6 +432,7 @@ impl FromStr for RethRpcModule {
             "flashbots" => Self::Flashbots,
             "miner" => Self::Miner,
             "mev" => Self::Mev,
+            "testing" => Self::Testing,
             // Any unknown module becomes Other
             other => Self::Other(other.to_string()),
         })
