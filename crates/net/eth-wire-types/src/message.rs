@@ -16,7 +16,7 @@ use crate::{
     status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
     RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
 };
-use alloc::{boxed::Box, string::String, sync::Arc, vec::Vec};
+use alloc::{boxed::Box, string::String, sync::Arc};
 use alloy_primitives::{
     bytes::{Buf, BufMut},
     Bytes,
