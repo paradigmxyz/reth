@@ -124,10 +124,9 @@ impl<T: TxReceipt> From<Receipts69<T>> for Receipts<T> {
 ///
 /// This is used in conjunction with [`crate::message::RequestPair`] to encode the full wire
 /// message `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
-#[derive(Clone, Debug, PartialEq, Eq, RlpEncodable, RlpDecodable)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
 pub struct Receipts70Payload<T = Receipt> {
     /// Whether the receipts list for the last block is incomplete.
     pub last_block_incomplete: bool,
