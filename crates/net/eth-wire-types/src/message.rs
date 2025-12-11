@@ -143,8 +143,6 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 }
                 EthMessage::BlockRangeUpdate(BlockRangeUpdate::decode(buf)?)
             }
-            EthMessageID::RequestBlockRange |
-            EthMessageID::SendBlockRange |
             EthMessageID::Other(_) => {
                 let raw_payload = Bytes::copy_from_slice(buf);
                 buf.advance(raw_payload.len());
@@ -494,10 +492,6 @@ pub enum EthMessageID {
     GetPooledTransactions = 0x09,
     /// Represents pooled transactions.
     PooledTransactions = 0x0a,
-    /// Requests block range (eth/70).
-    RequestBlockRange = 0x0b,
-    /// Responds with block range (eth/70).
-    SendBlockRange = 0x0c,
     /// Requests node data.
     GetNodeData = 0x0d,
     /// Represents node data.
@@ -529,8 +523,6 @@ impl EthMessageID {
             Self::NewPooledTransactionHashes => 0x08,
             Self::GetPooledTransactions => 0x09,
             Self::PooledTransactions => 0x0a,
-            Self::RequestBlockRange => 0x0b,
-            Self::SendBlockRange => 0x0c,
             Self::GetNodeData => 0x0d,
             Self::NodeData => 0x0e,
             Self::GetReceipts => 0x0f,
@@ -609,8 +601,6 @@ impl TryFrom<usize> for EthMessageID {
             0x08 => Ok(Self::NewPooledTransactionHashes),
             0x09 => Ok(Self::GetPooledTransactions),
             0x0a => Ok(Self::PooledTransactions),
-            0x0b => Ok(Self::RequestBlockRange),
-            0x0c => Ok(Self::SendBlockRange),
             0x0d => Ok(Self::GetNodeData),
             0x0e => Ok(Self::NodeData),
             0x0f => Ok(Self::GetReceipts),
