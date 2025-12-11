@@ -11,6 +11,7 @@ use crate::tree::{
     StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
@@ -1242,5 +1243,11 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(_) => "payload",
             Self::Block(_) => "block",
         }
+    }
+
+    /// Returns the block access list if available.
+    pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
+        // TODO decode and return `BlockAccessList`
+        None
     }
 }
