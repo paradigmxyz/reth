@@ -97,7 +97,7 @@ pub trait EthState: LoadState + SpawnBlocking {
     {
         Ok(async move {
             let _permit = self
-                .acquire_owned()
+                .acquire_owned_tracing()
                 .await
                 .map_err(RethError::other)
                 .map_err(EthApiError::Internal)?;
