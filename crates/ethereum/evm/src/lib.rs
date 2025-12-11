@@ -116,12 +116,6 @@ impl<ChainSpec, EvmFactory> EthEvmConfig<ChainSpec, EvmFactory> {
     pub const fn chain_spec(&self) -> &Arc<ChainSpec> {
         self.executor_factory.spec()
     }
-
-    /// Sets the extra data for the block assembler.
-    pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
-        self.block_assembler.extra_data = extra_data;
-        self
-    }
 }
 
 impl<ChainSpec, EvmF> ConfigureEvm for EthEvmConfig<ChainSpec, EvmF>
@@ -193,6 +187,7 @@ where
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             ommers: &block.body().ommers,
             withdrawals: block.body().withdrawals.as_ref().map(Cow::Borrowed),
+            extra_data: block.header().extra_data.clone(),
         })
     }
 
@@ -206,6 +201,7 @@ where
             parent_beacon_block_root: attributes.parent_beacon_block_root,
             ommers: &[],
             withdrawals: attributes.withdrawals.map(Cow::Owned),
+            extra_data: attributes.extra_data,
         })
     }
 }
@@ -282,6 +278,7 @@ where
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root(),
             ommers: &[],
             withdrawals: payload.payload.withdrawals().map(|w| Cow::Owned(w.clone().into())),
+            extra_data: payload.payload.as_v1().extra_data.clone(),
         })
     }
 
