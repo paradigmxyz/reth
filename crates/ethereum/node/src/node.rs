@@ -38,9 +38,9 @@ use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
-    ValidationApi,
+    TestingApi, ValidationApi,
 };
-use reth_rpc_api::servers::BlockSubmissionValidationApiServer;
+use reth_rpc_api::servers::{BlockSubmissionValidationApiServer, TestingApiServer};
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
 use reth_rpc_eth_api::{
     helpers::{
@@ -312,6 +312,17 @@ where
                 container
                     .modules
                     .merge_if_module_configured(RethRpcModule::Eth, eth_config.into_rpc())?;
+
+                // testing_buildBlockV1: only wire when the hidden testing module is explicitly
+                // requested on any transport. Default stays disabled to honor security guidance.
+                let testing_api = TestingApi::new(
+                    container.registry.eth_api().clone(),
+                    container.registry.evm_config().clone(),
+                )
+                .into_rpc();
+                container
+                    .modules
+                    .merge_if_module_configured(RethRpcModule::Testing, testing_api)?;
 
                 Ok(())
             })

@@ -1,5 +1,5 @@
 use crate::BlockProvider;
-use alloy_provider::{Network, Provider, ProviderBuilder};
+use alloy_provider::{ConnectionConfig, Network, Provider, ProviderBuilder};
 use alloy_transport::TransportResult;
 use futures::{Stream, StreamExt};
 use reth_node_api::Block;
@@ -25,7 +25,14 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
         convert: impl Fn(N::BlockResponse) -> PrimitiveBlock + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         Ok(Self {
-            provider: Arc::new(ProviderBuilder::default().connect(rpc_url).await?),
+            provider: Arc::new(
+                ProviderBuilder::default()
+                    .connect_with_config(
+                        rpc_url,
+                        ConnectionConfig::default().with_max_retries(u32::MAX),
+                    )
+                    .await?,
+            ),
             url: rpc_url.to_string(),
             convert: Arc::new(convert),
         })
