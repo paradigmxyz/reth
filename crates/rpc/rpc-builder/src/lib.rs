@@ -1005,7 +1005,7 @@ where
                                 .into()
                         }
                         // these are implementation specific and need to be handled during
-                        // intialization and should be registered via extend_rpc_modules in the
+                        // initialization and should be registered via extend_rpc_modules in the
                         // nodebuilder rpc addon stack
                         RethRpcModule::Flashbots |
                         RethRpcModule::Testing |
