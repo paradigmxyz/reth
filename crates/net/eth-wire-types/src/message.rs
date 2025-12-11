@@ -115,9 +115,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::GetReceipts => {
                 if version >= EthVersion::Eth70 {
-                    EthMessage::GetReceipts70(
-                        RequestPair::<crate::receipts::GetReceipts70Payload>::decode_inline(buf)?,
-                    )
+                    EthMessage::GetReceipts70(crate::receipts::GetReceipts70::decode(buf)?)
                 } else {
                     EthMessage::GetReceipts(RequestPair::decode(buf)?)
                 }
@@ -132,9 +130,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                     // eth/70 continues to omit bloom filters and adds the
                     // `lastBlockIncomplete` flag, encoded as
                     // `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
-                    EthMessage::Receipts70(RequestPair::<
-                        crate::receipts::Receipts70Payload<N::Receipt>,
-                    >::decode_inline(buf)?)
+                    EthMessage::Receipts70(crate::receipts::Receipts70::<N::Receipt>::decode(buf)?)
                 }
             }
             EthMessageID::BlockRangeUpdate => {
@@ -281,8 +277,8 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a `GetReceipts` request for eth/70.
     ///
     /// Note: Unlike earlier protocol versions, the eth/70 encoding for
-    /// `GetReceipts` in EIP-7975 inlines the request id instead of using a
-    /// generic [`RequestPair`].
+    /// `GetReceipts` in EIP-7975 inlines the request id. The type still wraps
+    /// a [`RequestPair`], but with a custom inline encoding.
     GetReceipts70(GetReceipts70),
     /// Represents a Receipts request-response pair.
     #[cfg_attr(
@@ -303,7 +299,8 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     )]
     ///
     /// Note: The eth/70 encoding for `Receipts` in EIP-7975 inlines the
-    /// request id instead of using a generic [`RequestPair`].
+    /// request id. The type still wraps a [`RequestPair`], but with a custom
+    /// inline encoding.
     Receipts70(Receipts70<N::Receipt>),
     /// Represents a `BlockRangeUpdate` message broadcast to the network.
     #[cfg_attr(
@@ -387,10 +384,10 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
-            Self::GetReceipts70(request) => request.encode_inline(out),
+            Self::GetReceipts70(request) => request.encode(out),
             Self::Receipts(receipts) => receipts.encode(out),
             Self::Receipts69(receipt69) => receipt69.encode(out),
-            Self::Receipts70(receipt70) => receipt70.encode_inline(out),
+            Self::Receipts70(receipt70) => receipt70.encode(out),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.encode(out),
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
@@ -412,10 +409,10 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
-            Self::GetReceipts70(request) => request.length_inline(),
+            Self::GetReceipts70(request) => request.length(),
             Self::Receipts(receipts) => receipts.length(),
             Self::Receipts69(receipt69) => receipt69.length(),
-            Self::Receipts70(receipt70) => receipt70.length_inline(),
+            Self::Receipts70(receipt70) => receipt70.length(),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.length(),
             Self::Other(unknown) => unknown.length(),
         }

@@ -283,7 +283,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     request_id,
                     message:
                         reth_eth_wire::GetReceipts70Payload { first_block_receipt_index, block_hashes },
-                } = req70;
+                } = req70.0;
 
                 let (tx, response) = oneshot::channel();
                 let received = ReceivedRequest {
@@ -315,7 +315,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let RequestPair {
                     request_id,
                     message: reth_eth_wire::Receipts70Payload { last_block_incomplete: _, receipts },
-                } = resp;
+                } = resp.0;
 
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
                     match req.request {
@@ -396,13 +396,13 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 EthMessage::GetReceipts(pair) => {
                     let RequestPair { request_id, message } = pair;
                     let reth_eth_wire::GetReceipts(block_hashes) = message;
-                    let get70 = RequestPair {
+                    let get70 = reth_eth_wire::GetReceipts70(RequestPair {
                         request_id,
                         message: reth_eth_wire::GetReceipts70Payload {
                             first_block_receipt_index: 0,
                             block_hashes,
                         },
-                    };
+                    });
                     EthMessage::GetReceipts70(get70)
                 }
                 other => other,
@@ -555,7 +555,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                         receipts: truncated_receipts,
                     },
                 };
-                Ok(EthMessage::Receipts70(message))
+                Ok(EthMessage::Receipts70(reth_eth_wire::Receipts70(message)))
             }
             PeerResponseResult::Receipts69(Err(err)) => Err(err),
             // Fallback: if we somehow didn't get Receipts69 here, use the
