@@ -531,10 +531,11 @@ impl EthMessageID {
     }
 
     /// Returns the max value for the given version.
-    pub const fn max(version: EthVersion) -> u8 {
-        match version {
-            EthVersion::Eth69 => Self::BlockRangeUpdate.to_u8(),
-            _ => Self::Receipts.to_u8(),
+     pub const fn max(version: EthVersion) -> u8 {
+        if version.is_eth69() {
+            Self::BlockRangeUpdate.to_u8()
+        } else {
+            Self::Receipts.to_u8()
         }
     }
 
