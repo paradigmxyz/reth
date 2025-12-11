@@ -115,7 +115,7 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
 }
 
 /// Helper type for the [`Iterator`] used to pass targets in from the caller.
-type TargetsIter<I> = Peekable<WindowIter<I>>;
+type TargetsIter<'a, I> = Peekable<WindowIter<'a, I>>;
 
 impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
@@ -186,9 +186,9 @@ where
     /// Because paths in the trie are visited in depth-first order, it's imperative that targets are
     /// given in depth-first order as well. If the targets were generated off of B256s, which is
     /// the common-case, then this is equivalent to lexicographical order.
-    fn should_retain(
+    fn should_retain<'a>(
         &self,
-        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
+        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
         path: &Nibbles,
     ) -> bool {
         trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), "should_retain: called");
@@ -227,9 +227,9 @@ where
     ///
     /// Calling this method indicates that the child will not undergo any further modifications, and
     /// therefore can be retained as a proof node if applicable.
-    fn commit_child(
+    fn commit_child<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
+        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
     ) -> Result<RlpNode, StateProofError> {
@@ -313,9 +313,9 @@ where
     /// `branch_stack` to determine the last child's path. When committing the last child prior to
     /// pushing a new child, it's important to set the new child's `state_mask` bit _after_ the call
     /// to this method.
-    fn commit_last_child(
+    fn commit_last_child<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
+        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
     ) -> Result<(), StateProofError> {
         let Some(child) = self.child_stack.pop() else { return Ok(()) };
 
@@ -344,9 +344,9 @@ where
     ///
     /// - If `branch_stack` is empty
     /// - If the leaf's nibble is already set in the branch's `state_mask`.
-    fn push_new_leaf(
+    fn push_new_leaf<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
+        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
         leaf_nibble: u8,
         leaf_short_key: Nibbles,
         leaf_val: VE::DeferredEncoder,
@@ -451,9 +451,9 @@ where
     /// # Panics
     ///
     /// This method panics if `branch_stack` is empty.
-    fn pop_branch(
+    fn pop_branch<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
+        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
     ) -> Result<(), StateProofError> {
         trace!(
             target: TRACE_TARGET,
@@ -533,9 +533,9 @@ where
 
     /// Adds a single leaf for a key to the stack, possibly collapsing an existing branch and/or
     /// creating a new one depending on the path of the key.
-    fn push_leaf(
+    fn push_leaf<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
+        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
         key: Nibbles,
         val: VE::DeferredEncoder,
     ) -> Result<(), StateProofError> {
@@ -619,10 +619,10 @@ where
         level = "trace",
         skip(self, value_encoder, targets, hashed_cursor_current),
     )]
-    fn calculate_key_range(
+    fn calculate_key_range<'a>(
         &mut self,
         value_encoder: &VE,
-        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
+        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
         hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
@@ -681,9 +681,9 @@ where
     /// If there is already a child at the top branch of `branch_stack` occupying this new branch's
     /// nibble then that child will have its short-key split with another new branch, and this
     /// cached branch will be a child of that splitting branch.
-    fn push_cached_branch(
+    fn push_cached_branch<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
+        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
         cached_path: Nibbles,
         cached_branch: &BranchNodeCompact,
     ) -> Result<(), StateProofError> {
@@ -854,9 +854,9 @@ where
     /// - `Some(lower, Some(upper))`: Indicates to call `push_leaf` on all keys starting at `lower`,
     ///   up to but excluding `upper`, and then call this method once done.
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
-    fn next_uncached_key_range(
+    fn next_uncached_key_range<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Target>>,
+        targets: &mut TargetsIter<'a, impl Iterator<Item = &'a Target>>,
         trie_cursor_state: &mut TrieCursorState,
         hashed_key_current_path: Option<Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
@@ -1076,9 +1076,12 @@ where
     fn proof_inner(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = Target>,
+        targets: &mut [Target],
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         trace!(target: TRACE_TARGET, "proof_inner: called");
+
+        // TODO remove once SparseTrieTargets is used
+        let targets = targets.iter();
 
         // In debug builds, verify that targets are sorted
         #[cfg(debug_assertions)]
@@ -1191,8 +1194,8 @@ where
 {
     /// Generate a proof for the given targets.
     ///
-    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
-    /// target. The returned nodes will be sorted lexicographically by path.
+    /// Given a set of [`Target`]s, returns nodes whose paths are a prefix of any target. The
+    /// returned nodes will be sorted depth-first by path.
     ///
     /// # Panics
     ///
@@ -1201,7 +1204,7 @@ where
     pub fn proof(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = Target>,
+        targets: &mut [Target],
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
@@ -1224,8 +1227,8 @@ where
 
     /// Generate a proof for a storage trie at the given hashed address.
     ///
-    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
-    /// target. The returned nodes will be sorted lexicographically by path.
+    /// Given a set of [`Target`]s, returns nodes whose paths are a prefix of any target. The
+    /// returned nodes will be sorted depth-first by path.
     ///
     /// # Panics
     ///
@@ -1234,7 +1237,7 @@ where
     pub fn storage_proof(
         &mut self,
         hashed_address: B256,
-        targets: impl IntoIterator<Item = Target>,
+        targets: &mut [Target],
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         /// Static storage value encoder instance used by all storage proofs.
         static STORAGE_VALUE_ENCODER: StorageValueEncoder = StorageValueEncoder;
@@ -1263,32 +1266,32 @@ where
 /// `WindowIter` is a wrapper around an [`Iterator`] which allows viewing both previous and current
 /// items on every iteration. It is similar to `itertools::tuple_windows`, except that the final
 /// item returned will contain the previous item and `None` as the current.
-struct WindowIter<I: Iterator> {
+struct WindowIter<'a, V, I: Iterator<Item = &'a V>> {
     iter: I,
-    prev: Option<I::Item>,
+    prev: Option<&'a V>,
 }
 
-impl<I: Iterator> WindowIter<I> {
+impl<'a, V, I: Iterator<Item = &'a V>> WindowIter<'a, V, I> {
     /// Wraps an iterator with a [`WindowIter`].
     const fn new(iter: I) -> Self {
         Self { iter, prev: None }
     }
 }
 
-impl<I: Iterator<Item: Copy>> Iterator for WindowIter<I> {
+impl<'a, V, I: Iterator<Item = &'a V>> Iterator for WindowIter<'a, I> {
     /// The iterator returns the previous and current items, respectively. If the underlying
     /// iterator is exhausted then `Some(prev, None)` is returned on the subsequent call to
     /// `WindowIter::next`, and `None` from the call after that.
-    type Item = (I::Item, Option<I::Item>);
+    type Item = (&'a V, Option<&'a V>);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             match (self.prev, self.iter.next()) {
                 (None, None) => return None,
-                (None, Some(v)) => {
+                (None, Some(ref v)) => {
                     self.prev = Some(v);
                 }
-                (Some(v), next) => {
+                (Some(ref v), next) => {
                     self.prev = next;
                     return Some((v, next))
                 }
@@ -1456,7 +1459,7 @@ mod tests {
             &self,
             targets: impl IntoIterator<Item = Target>,
         ) -> Result<(), StateProofError> {
-            let targets_vec = targets.into_iter().sorted().collect::<Vec<_>>();
+            let targets_vec = targets.into_iter().collect::<Vec<_>>();
 
             // Convert B256 targets to MultiProofTargets for legacy implementation
             // For account-only proofs, each account maps to an empty storage set
@@ -1482,7 +1485,8 @@ mod tests {
                 self.hashed_cursor_factory.clone(),
             );
             let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
-            let proof_v2_result = proof_calculator.proof(&value_encoder, targets_vec.clone())?;
+            let proof_v2_result =
+                proof_calculator.proof(&value_encoder, &mut targets_vec.clone())?;
 
             // Output metrics
             trace!(target: TRACE_TARGET, ?trie_cursor_metrics, "V2 trie cursor metrics");
