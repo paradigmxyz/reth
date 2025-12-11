@@ -323,7 +323,7 @@ pub enum RethRpcModule {
     Miner,
     /// `mev_` module
     Mev,
-    /// `testing_` modile
+    /// `testing_` module
     Testing,
     /// Custom RPC module not part of the standard set
     #[strum(default)]
