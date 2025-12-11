@@ -7,7 +7,6 @@ use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::StateOverride, BlockId};
 use futures::Future;
-use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
 use reth_revm::{database::StateProviderDatabase, db::State};
@@ -115,23 +114,24 @@ pub trait EstimateCall: Call {
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
 
+        // Mantle not working for basic transfers MIN_TRANSACTION_GAS, so we disable it for now
         // For basic transfers, try using minimum gas before running full binary search
-        if is_basic_transfer {
-            // If the tx is a simple transfer (call to an account with no code) we can
-            // shortcircuit. But simply returning
-            // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
-            // field combos that bump the price up, so we try executing the function
-            // with the minimum gas limit to make sure.
-            let mut min_tx_env = tx_env.clone();
-            min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
+        // if is_basic_transfer {
+        //     // If the tx is a simple transfer (call to an account with no code) we can
+        //     // shortcircuit. But simply returning
+        //     // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
+        //     // field combos that bump the price up, so we try executing the function
+        //     // with the minimum gas limit to make sure.
+        //     let mut min_tx_env = tx_env.clone();
+        //     min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
 
-            // Reuse the same EVM instance
-            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err)
-                && res.result.is_success()
-            {
-                return Ok(U256::from(MIN_TRANSACTION_GAS));
-            }
-        }
+        //     // Reuse the same EVM instance
+        //     if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err)
+        //         && res.result.is_success()
+        //     {
+        //         return Ok(U256::from(MIN_TRANSACTION_GAS));
+        //     }
+        // }
 
         trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = tx_env.gas_limit(), is_basic_transfer, "Starting gas estimation");
 

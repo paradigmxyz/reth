@@ -446,6 +446,12 @@ where
             "Computed state root does not match state root in state dump"
         );
 
+        // Export computed state for debugging purposes
+        info!(target: "reth::cli", "Exporting computed state for debugging...");
+        if let Err(e) = export_state_on_mismatch(provider_rw, "computed_state_mismatch.json", Some(computed_state_root)) {
+            tracing::warn!(target: "reth::cli", error = ?e, "Failed to export computed state for debugging");
+        }
+
         return Err(InitStorageError::StateRootMismatch(GotExpected {
             got: computed_state_root,
             expected: expected_state_root,
@@ -658,6 +664,37 @@ struct GenesisAccountWithAddress {
     genesis_account: GenesisAccount,
     /// The account's address.
     address: Address,
+}
+
+/// Export computed state for debugging when state root mismatch occurs.
+///
+/// This function exports all accounts and their storage from the database to a JSON file.
+/// It's useful for debugging state root mismatches by comparing the computed state with
+/// the expected state.
+///
+/// In the init stage, all state has been written to the database, so `bundle_state` is empty.
+/// We pass `false` to export all account storage details from the database.
+fn export_state_on_mismatch<Provider>(
+    provider: &Provider,
+    filename: &str,
+    state_root: Option<B256>,
+) -> eyre::Result<()>
+where
+    Provider: DBProvider<Tx: reth_db_api::transaction::DbTx>,
+{
+    use reth_mantle_forks::debug::state_export::export_full_state_with_bundle;
+    use revm::database::BundleState;
+
+    info!(target: "reth::cli", "Starting full state export to file: {}", filename);
+
+    // In init stage, all state is in the database, bundle_state is empty
+    let empty_bundle = BundleState::default();
+    
+    // Export with false to include all account storage (init scenario)
+    export_full_state_with_bundle(provider, &empty_bundle, filename, state_root, false)?;
+
+    info!(target: "reth::cli", "State export completed: {}", filename);
+    Ok(())
 }
 
 #[cfg(test)]

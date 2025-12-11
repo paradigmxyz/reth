@@ -405,6 +405,7 @@ impl From<Genesis> for OpChainSpec {
             (EthereumHardfork::Shanghai.boxed(), mantle_genesis_info.mantle_skadi_time),
             (EthereumHardfork::Cancun.boxed(), mantle_genesis_info.mantle_skadi_time),
             (EthereumHardfork::Prague.boxed(), mantle_genesis_info.mantle_skadi_time),
+            (EthereumHardfork::Osaka.boxed(), mantle_genesis_info.mantle_limb_time),
             // OP
             (OpHardfork::Regolith.boxed(), genesis_info.regolith_time),
             (OpHardfork::Canyon.boxed(), genesis_info.canyon_time),
@@ -417,6 +418,7 @@ impl From<Genesis> for OpChainSpec {
             (OpHardfork::Interop.boxed(), genesis_info.interop_time),
             // Mantle
             (MantleHardfork::Skadi.boxed(), mantle_genesis_info.mantle_skadi_time),
+            (MantleHardfork::Limb.boxed(), mantle_genesis_info.mantle_limb_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts
@@ -521,11 +523,11 @@ impl OpGenesisInfo {
 pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> Header {
     let mut header = reth_chainspec::make_genesis_header(genesis, hardforks);
 
-    // If Isthmus is active, overwrite the withdrawals root with the storage root of predeploy
+    // If Skadi(Isthmus) is active, overwrite the withdrawals root with the storage root of predeploy
     // `L2ToL1MessagePasser.sol`
-    if hardforks.fork(MantleHardfork::Skadi).active_at_timestamp(header.timestamp) {
-        if let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER) {
-            if let Some(storage) = &predeploy.storage {
+    if hardforks.fork(MantleHardfork::Skadi).active_at_timestamp(header.timestamp)
+        && let Some(predeploy) = genesis.alloc.get(&ADDRESS_L2_TO_L1_MESSAGE_PASSER)
+            && let Some(storage) = &predeploy.storage {
                 header.withdrawals_root =
                     Some(storage_root_unhashed(storage.iter().filter_map(|(k, v)| {
                         if v.is_zero() {
@@ -535,9 +537,6 @@ pub fn make_op_genesis_header(genesis: &Genesis, hardforks: &ChainHardforks) -> 
                         }
                     })));
             }
-        }
-    }
-
     header
 }
 
