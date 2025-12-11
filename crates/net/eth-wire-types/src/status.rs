@@ -401,7 +401,7 @@ impl Debug for StatusEth69 {
     }
 }
 
-/// Status message for `eth/70` including the block range as per EIP-7975.
+/// Status message for `eth/70`.
 #[derive(Copy, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]

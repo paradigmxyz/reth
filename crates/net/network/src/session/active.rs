@@ -137,8 +137,6 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// The last latest block number we sent in a range update
     /// Used to avoid sending unnecessary updates when block height hasn't changed significantly
     pub(crate) last_sent_latest_block: Option<u64>,
-    /// The last time we updated the remote block range information.
-    pub(crate) last_range_update: Option<Instant>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -376,7 +374,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 if let Some(range_info) = self.range_info.as_ref() {
                     range_info.update(msg.earliest, msg.latest, msg.latest_hash);
                 }
-                self.last_range_update = Some(Instant::now());
 
                 OnIncomingMessageOutcome::Ok
             }
@@ -1274,7 +1271,6 @@ mod tests {
                         ),
                         range_update_interval: None,
                         last_sent_latest_block: None,
-                        last_range_update: None,
                     }
                 }
                 ev => {

@@ -577,7 +577,6 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
                     last_sent_latest_block: None,
-                    last_range_update: remote_range_info.as_ref().map(|_| Instant::now()),
                 };
 
                 self.spawn(session);
