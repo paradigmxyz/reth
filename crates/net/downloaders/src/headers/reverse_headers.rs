@@ -1218,7 +1218,9 @@ impl ReverseHeadersDownloaderBuilder {
             next_request_block_number: 0,
             next_chain_tip_block_number: 0,
             lowest_validated_header: None,
-            request_limit,
+            // TODO(mattsse): tmp hotfix to prevent issues with syncing from besu which has an upper
+            // limit of 512
+            request_limit: request_limit.min(512),
             min_concurrent_requests,
             max_concurrent_requests,
             stream_batch_size,
