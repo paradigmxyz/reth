@@ -9,8 +9,8 @@ use reth_codecs_derive::add_arbitrary_tests;
 
 /// `UnifiedStatus` is an internal superset of all ETH status fields for all `eth/` versions.
 ///
-/// This type can be converted into [`Status`], [`StatusEth69`], or [`StatusEth70`] depending on
-/// the negotiated version and unsupported fields are stripped out.
+/// This type can be converted into [`Status`] or [`StatusEth69`] depending on the version and
+/// unsupported fields are stripped out.
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub struct UnifiedStatus {
     /// The eth protocol version (e.g. eth/66 to eth/70).
