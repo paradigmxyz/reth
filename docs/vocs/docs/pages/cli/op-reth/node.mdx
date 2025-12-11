@@ -404,6 +404,13 @@ RPC:
 
           [default: <NUM CPU CORES-2>]
 
+      --rpc.max-blocking-io-requests <COUNT>
+          Maximum number of concurrent blocking IO requests.
+
+          Blocking IO requests include `eth_call`, `eth_estimateGas`, and similar methods that require EVM execution. These are spawned as blocking tasks to avoid blocking the async runtime.
+
+          [default: 256]
+
       --rpc.max-trace-filter-blocks <COUNT>
           Maximum number of blocks for `trace_filter` requests
 
