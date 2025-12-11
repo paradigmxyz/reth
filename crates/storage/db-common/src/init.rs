@@ -688,9 +688,9 @@ struct StateRoot {
 pub struct GenesisAccountWithAddress {
     /// The account's balance, nonce, code, and storage.
     #[serde(flatten)]
-    genesis_account: GenesisAccount,
+    pub genesis_account: GenesisAccount,
     /// The account's address.
-    address: Address,
+    pub address: Address,
 }
 
 #[cfg(test)]
