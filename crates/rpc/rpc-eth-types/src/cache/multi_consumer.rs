@@ -43,7 +43,7 @@ where
 
 impl<K, V, L, S> MultiConsumerLruCache<K, V, L, S>
 where
-    K: Hash + Eq + Debug,
+    K: Hash + Eq,
     L: Limiter<K, V>,
 {
     /// Adds the sender to the queue for the given key.
