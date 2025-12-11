@@ -116,6 +116,8 @@ where
 
         let mut config = EthConfig { current, next: None, last: None };
 
+        let last_fork_timestamp = fork_timestamps.last().copied().unwrap();
+
         if let Some(next_fork_timestamp) = fork_timestamps.get(current_fork_idx + 1).copied() {
             let fake_header = {
                 let mut header = latest.clone();
@@ -128,13 +130,19 @@ where
                     .map_err(RethError::other)?,
             );
 
-            config.next = Some(self.build_fork_config_at(next_fork_timestamp, next_precompiles));
+            let next = self.build_fork_config_at(next_fork_timestamp, next_precompiles);
+            config.next = Some(next.clone());
+
+            // next and last refer to the same fork, share the configuration
+            if next_fork_timestamp == last_fork_timestamp {
+                config.last = Some(next);
+                return Ok(config);
+            }
         } else {
             // If there is no fork scheduled, there is no "last" or "final" fork scheduled.
             return Ok(config);
         }
 
-        let last_fork_timestamp = fork_timestamps.last().copied().unwrap();
         let fake_header = {
             let mut header = latest;
             header.set_timestamp(last_fork_timestamp);
