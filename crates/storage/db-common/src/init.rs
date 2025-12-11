@@ -435,7 +435,14 @@ where
 
     // first line can be state root
     let dump_state_root = parse_state_root(&mut reader)?;
-    if expected_state_root != dump_state_root {
+    if dump_state_root == B256::ZERO {
+        info!(
+            target: "reth::cli",
+            ?expected_state_root,
+            header=?header.num_hash(),
+            "Dump state root is zero, using expected state root"
+        );
+    } else if expected_state_root != dump_state_root {
         error!(target: "reth::cli",
             ?dump_state_root,
             ?expected_state_root,
