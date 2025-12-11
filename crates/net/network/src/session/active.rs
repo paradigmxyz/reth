@@ -12,7 +12,6 @@ use std::{
 };
 
 use crate::{
-    eth_requests::SOFT_RESPONSE_LIMIT,
     message::{NewBlockMessage, PeerMessage, PeerResponse, PeerResponseResult},
     session::{
         conn::EthRlpxConnection,
@@ -22,7 +21,6 @@ use crate::{
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::Sealable;
-use alloy_rlp::Encodable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
@@ -33,7 +31,7 @@ use reth_eth_wire::{
 use reth_eth_wire_types::{message::RequestPair, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
-use reth_network_p2p::error::{RequestError, RequestResult};
+use reth_network_p2p::error::RequestError;
 use reth_network_peers::PeerId;
 use reth_network_types::session::config::INITIAL_REQUEST_TIMEOUT;
 use reth_primitives_traits::Block;
@@ -178,7 +176,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     request_id,
                     rx: PeerResponse::$resp_item { response },
                     received: Instant::now(),
-                    metadata: ReceivedRequestMetadata::None,
                 };
                 self.received_requests_from_remote.push(received);
                 self.try_emit_request(PeerMessage::EthRequest(PeerRequest::$req_item {
@@ -274,11 +271,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 }
             }
             EthMessage::GetReceipts70(req70) => {
-                // Handle eth/70 GetReceipts requests with support for
-                // `firstBlockReceiptIndex` as defined in EIP-7975. We still
-                // delegate the actual receipt lookup to the existing
-                // `GetReceipts69` handler and apply the index when building the
-                // response.
                 let RequestPair {
                     request_id,
                     message:
@@ -288,14 +280,14 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 let (tx, response) = oneshot::channel();
                 let received = ReceivedRequest {
                     request_id,
-                    rx: PeerResponse::Receipts69 { response },
+                    rx: PeerResponse::Receipts70 { response },
                     received: Instant::now(),
-                    metadata: ReceivedRequestMetadata::Eth70Receipts { first_block_receipt_index },
                 };
                 self.received_requests_from_remote.push(received);
 
-                let request = reth_eth_wire::GetReceipts(block_hashes);
-                self.try_emit_request(PeerMessage::EthRequest(PeerRequest::GetReceipts69 {
+                let request =
+                    reth_eth_wire::GetReceipts70Payload { first_block_receipt_index, block_hashes };
+                self.try_emit_request(PeerMessage::EthRequest(PeerRequest::GetReceipts70 {
                     request,
                     response: tx,
                 }))
@@ -308,13 +300,11 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 on_response!(resp, GetReceipts69)
             }
             EthMessage::Receipts70(resp) => {
-                // Handle eth/70 receipts responses. We support both
-                // `PeerRequest::GetReceipts` (with bloom) and
-                // `PeerRequest::GetReceipts69` (without bloom) by converting
-                // the payload accordingly.
+                // Handle eth/70 receipts responses. Support `GetReceipts`,
+                // `GetReceipts69`, and `GetReceipts70` by converting the payload as needed.
                 let RequestPair {
                     request_id,
-                    message: reth_eth_wire::Receipts70Payload { last_block_incomplete: _, receipts },
+                    message: reth_eth_wire::Receipts70Payload { last_block_incomplete, receipts },
                 } = resp.0;
 
                 if let Some(req) = self.inflight_requests.remove(&request_id) {
@@ -322,6 +312,15 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                         RequestState::Waiting(PeerRequest::GetReceipts69 { response, .. }) => {
                             trace!(peer_id=?self.remote_peer_id, ?request_id, "received eth/70 Receipts for GetReceipts69");
                             let message = reth_eth_wire::Receipts69(receipts);
+                            let _ = response.send(Ok(message));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(PeerRequest::GetReceipts70 { response, .. }) => {
+                            trace!(peer_id=?self.remote_peer_id, ?request_id, "received eth/70 Receipts for GetReceipts70");
+                            let message = reth_eth_wire::Receipts70Payload {
+                                last_block_incomplete,
+                                receipts,
+                            };
                             let _ = response.send(Ok(message));
                             self.update_request_timeout(req.timestamp, Instant::now());
                         }
@@ -460,23 +459,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle a Response to the peer
     ///
     /// This will queue the response to be sent to the peer
-    fn handle_outgoing_response(
-        &mut self,
-        id: u64,
-        metadata: ReceivedRequestMetadata,
-        resp: PeerResponseResult<N>,
-    ) {
-        let msg_result = match metadata {
-            ReceivedRequestMetadata::Eth70Receipts { first_block_receipt_index } => {
-                // For eth/70 GetReceipts requests we construct a `Receipts70`
-                // message that respects `firstBlockReceiptIndex` but still
-                // reuses the existing receipts lookup path.
-                self.build_eth70_receipts_response(id, first_block_receipt_index, resp)
-            }
-            ReceivedRequestMetadata::None => resp.try_into_message(id),
-        };
-
-        match msg_result {
+    fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
+        match resp.try_into_message(id) {
             Ok(msg) => {
                 let msg: EthMessage<N> = msg;
                 self.queued_outgoing.push_back(msg.into());
@@ -484,83 +468,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
             Err(err) => {
                 debug!(target: "net", %err, "Failed to respond to received request");
             }
-        }
-    }
-
-    /// Builds an eth/70 `Receipts` response from the generic receipts
-    /// response produced by the `EthRequestHandler`.
-    ///
-    /// This applies the `firstBlockReceiptIndex` offset to the first block's
-    /// receipts and enforces the soft response size limit (`SOFT_RESPONSE_LIMIT`)
-    /// by potentially truncating the last block's receipts and setting
-    /// `lastBlockIncomplete = true` as defined in EIP-7975.
-    fn build_eth70_receipts_response(
-        &self,
-        id: u64,
-        first_block_receipt_index: u64,
-        resp: PeerResponseResult<N>,
-    ) -> RequestResult<EthMessage<N>> {
-        match resp {
-            PeerResponseResult::Receipts69(Ok(mut receipts)) => {
-                // Apply `firstBlockReceiptIndex` to the first block's receipts.
-                if let Some(first_block) = receipts.first_mut() {
-                    let idx = first_block_receipt_index as usize;
-                    if idx >= first_block.len() {
-                        first_block.clear();
-                    } else if idx > 0 {
-                        first_block.drain(0..idx);
-                    }
-                }
-
-                // Truncate the receipts to respect the soft response limit. We
-                // include full blocks as long as they fit into the remaining
-                // budget; once a full block would exceed the limit we include
-                // as many receipts from that block as possible and mark the
-                // last block as incomplete.
-                let mut truncated_receipts = Vec::with_capacity(receipts.len());
-                let mut total_bytes = 0usize;
-                let mut last_block_incomplete = false;
-
-                for block_receipts in receipts {
-                    // RLP size of the full block's receipts list.
-                    let block_size = block_receipts.length();
-
-                    if total_bytes + block_size <= SOFT_RESPONSE_LIMIT {
-                        total_bytes += block_size;
-                        truncated_receipts.push(block_receipts);
-                        continue;
-                    }
-
-                    // Full block does not fit: include as many receipts from
-                    // this block as possible within the remaining budget.
-                    let mut partial_block = Vec::new();
-                    for receipt in block_receipts {
-                        let receipt_size = receipt.length();
-                        if total_bytes + receipt_size > SOFT_RESPONSE_LIMIT {
-                            break;
-                        }
-                        total_bytes += receipt_size;
-                        partial_block.push(receipt);
-                    }
-
-                    truncated_receipts.push(partial_block);
-                    last_block_incomplete = true;
-                    break;
-                }
-
-                let message = RequestPair {
-                    request_id: id,
-                    message: reth_eth_wire::Receipts70Payload {
-                        last_block_incomplete,
-                        receipts: truncated_receipts,
-                    },
-                };
-                Ok(EthMessage::Receipts70(reth_eth_wire::Receipts70(message)))
-            }
-            PeerResponseResult::Receipts69(Err(err)) => Err(err),
-            // Fallback: if we somehow didn't get Receipts69 here, use the
-            // default mapping.
-            other => other.try_into_message(id),
         }
     }
 
@@ -805,7 +712,7 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                         this.received_requests_from_remote.push(req);
                     }
                     Poll::Ready(resp) => {
-                        this.handle_outgoing_response(req.request_id, req.metadata, resp);
+                        this.handle_outgoing_response(req.request_id, resp);
                     }
                 }
             }
@@ -966,17 +873,6 @@ pub(crate) struct ReceivedRequest<N: NetworkPrimitives> {
     /// Timestamp when we read this msg from the wire.
     #[expect(dead_code)]
     received: Instant,
-    /// Optional extra metadata used when constructing the response.
-    metadata: ReceivedRequestMetadata,
-}
-
-/// Additional metadata associated with certain incoming requests.
-pub(crate) enum ReceivedRequestMetadata {
-    /// No additional metadata.
-    None,
-    /// Metadata for eth/70 `GetReceipts` requests, carrying the
-    /// `firstBlockReceiptIndex` value defined in EIP-7975.
-    Eth70Receipts { first_block_receipt_index: u64 },
 }
 
 /// A request that waits for a response from the peer
