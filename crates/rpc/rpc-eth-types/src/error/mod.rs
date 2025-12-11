@@ -201,7 +201,7 @@ pub enum EthApiError {
         /// Transaction index where the error occurred
         tx_index: usize,
         /// The underlying error
-        error: Box<EthApiError>,
+        error: Box<Self>,
     },
     /// Any other error
     #[error("{0}")]
