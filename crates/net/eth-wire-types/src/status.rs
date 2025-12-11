@@ -650,6 +650,8 @@ mod tests {
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
             .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .total_difficulty(None)
+            .earliest_block(None)
+            .latest_block(None)
             .build();
 
         let status_message = unified_status.into_message();
