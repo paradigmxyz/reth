@@ -19,7 +19,7 @@ use std::{
 };
 use tracing::{debug, instrument};
 
-#[cfg(feature = "parallel-from-reverts")]
+#[cfg(feature = "std")]
 use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
@@ -286,12 +286,14 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostStateSorted {
         // Threshold based on benchmark
         const PARALLEL_THRESHOLD: usize = 2_500;
 
-        // Check Feature Flag AND Threshold
-        let use_parallel =
-            cfg!(feature = "parallel-from-reverts") && storages.len() >= PARALLEL_THRESHOLD;
+        #[cfg(feature = "std")]
+        let use_parallel = storages.len() >= PARALLEL_THRESHOLD;
+
+        #[cfg(not(feature = "std"))]
+        let use_parallel = false;
 
         let hashed_storages = if use_parallel {
-            #[cfg(feature = "parallel-from-reverts")]
+            #[cfg(feature = "std")]
             {
                 storages
                     .into_par_iter()
@@ -301,7 +303,7 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostStateSorted {
                     })
                     .collect()
             }
-            #[cfg(not(feature = "parallel-from-reverts"))]
+            #[cfg(not(feature = "std"))]
             {
                 unreachable!()
             }
