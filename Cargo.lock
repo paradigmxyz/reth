@@ -267,8 +267,7 @@ dependencies = [
 [[package]]
 name = "alloy-evm"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "70cd39002a40b8d528f4a3f8ecc7e59dc2204d9bfae249296d7d379f291f9cba"
+source = "git+https://github.com/alloy-rs/evm?rev=a7da37d#a7da37da0fa49204580611bfba6ed93c29a89e54"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -384,8 +383,7 @@ dependencies = [
 [[package]]
 name = "alloy-op-evm"
 version = "0.25.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6bec5d35135e72ab8096f9b7713840725dc0cd0f9e20ed283156808874da76f4"
+source = "git+https://github.com/alloy-rs/evm?rev=a7da37d#a7da37da0fa49204580611bfba6ed93c29a89e54"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
