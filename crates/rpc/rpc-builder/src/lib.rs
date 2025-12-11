@@ -532,8 +532,8 @@ where
     }
 }
 
-impl<Provider, Pool, Network, EthApi, BlockExecutor, Consensus>
-    RpcRegistryInner<Provider, Pool, Network, EthApi, BlockExecutor, Consensus>
+impl<Provider, Pool, Network, EthApi, Evm, Consensus>
+    RpcRegistryInner<Provider, Pool, Network, EthApi, Evm, Consensus>
 where
     Provider: BlockReader,
     EthApi: EthApiTypes,
@@ -561,6 +561,11 @@ where
     /// Returns a reference to the provider
     pub const fn provider(&self) -> &Provider {
         &self.provider
+    }
+
+    /// Returns a reference to the evm config
+    pub const fn evm_config(&self) -> &Evm {
+        &self.evm_config
     }
 
     /// Returns all installed methods

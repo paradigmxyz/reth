@@ -7,7 +7,7 @@
 
 use alloy_primitives::{Bytes, B256};
 use alloy_rpc_types_engine::{
-    ExecutionPayloadEnvelopeV4, PayloadAttributes as EthPayloadAttributes,
+    ExecutionPayloadEnvelopeV5, PayloadAttributes as EthPayloadAttributes,
 };
 use jsonrpsee::proc_macros::rpc;
 use serde::{Deserialize, Serialize};
@@ -41,5 +41,5 @@ pub trait TestingApi {
     async fn build_block_v1(
         &self,
         request: TestingBuildBlockRequestV1,
-    ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV4>;
+    ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV5>;
 }

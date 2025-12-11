@@ -12,7 +12,6 @@ use reth_ethereum_consensus::EthBeaconConsensus;
 use reth_ethereum_engine_primitives::{
     EthBuiltPayload, EthPayloadAttributes, EthPayloadBuilderAttributes,
 };
-use reth_ethereum_payload_builder::EthereumBuilderConfig;
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     eth::spec::EthExecutorSpec, ConfigureEvm, EvmFactory, EvmFactoryFor, NextBlockEnvAttributes,
@@ -39,7 +38,7 @@ use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
 use reth_rpc::{
     eth::core::{EthApiFor, EthRpcConverterFor},
-    EthTestingBlockBuilder, TestingApi, ValidationApi,
+    TestingApi, ValidationApi,
 };
 use reth_rpc_api::servers::{BlockSubmissionValidationApiServer, TestingApiServer};
 use reth_rpc_builder::{config::RethRpcServerConfig, middleware::RethRpcMiddleware};
@@ -52,7 +51,6 @@ use reth_rpc_eth_api::{
 };
 use reth_rpc_eth_types::{error::FromEvmError, EthApiError};
 use reth_rpc_server_types::RethRpcModule;
-use reth_tasks::TaskExecutor;
 use reth_tracing::tracing::{debug, info};
 use reth_transaction_pool::{
     blobstore::DiskFileBlobStore, EthTransactionPool, PoolPooledTx, PoolTransaction,
@@ -272,7 +270,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> NodeAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec = ChainSpec,
+            ChainSpec: Hardforks + EthereumHardforks,
             Primitives = EthPrimitives,
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
@@ -303,15 +301,9 @@ where
 
         let eth_config =
             EthConfigHandler::new(ctx.node.provider().clone(), ctx.node.evm_config().clone());
-        let testing_chain = ctx.config.chain.clone();
-        let testing_provider = ctx.node.provider().clone();
-        // Fixed concurrency limit for the hidden testing API.
-        let testing_max_concurrent = 1usize;
-        let testing_executor: TaskExecutor = ctx.node.task_executor().clone();
-        let ctx_for_testing = ctx.clone();
 
         self.inner
-            .launch_add_ons_with(ctx_for_testing, move |container| {
+            .launch_add_ons_with(ctx, move |container| {
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Flashbots,
                     validation_api.into_rpc(),
@@ -323,15 +315,11 @@ where
 
                 // testing_buildBlockV1: only wire when the hidden testing module is explicitly
                 // requested on any transport. Default stays disabled to honor security guidance.
-                let evm_config = EthEvmConfig::new(testing_chain.clone());
-                let testing_provider = testing_provider.clone();
-                let builder = EthTestingBlockBuilder::new(
-                    testing_provider,
-                    evm_config,
-                    EthereumBuilderConfig::new(),
-                );
-                let testing_api =
-                    TestingApi::new(builder, testing_max_concurrent, testing_executor).into_rpc();
+                let testing_api = TestingApi::new(
+                    container.registry.eth_api().clone(),
+                    container.registry.evm_config().clone(),
+                )
+                .into_rpc();
                 container.modules.merge_if_module_configured(
                     RethRpcModule::Other("testing".to_string()),
                     testing_api,
@@ -348,7 +336,7 @@ impl<N, EthB, PVB, EB, EVB, RpcMiddleware> RethRpcAddOns<N>
 where
     N: FullNodeComponents<
         Types: NodeTypes<
-            ChainSpec = ChainSpec,
+            ChainSpec: Hardforks + EthereumHardforks,
             Primitives = EthPrimitives,
             Payload: EngineTypes<ExecutionData = ExecutionData>,
         >,
