@@ -988,7 +988,12 @@ mod tests {
             auth_ipc: false,
             auth_ipc_path: "engine.ipc".to_string(),
             disable_auth_server: false,
-            rpc_jwtsecret: None,
+            rpc_jwtsecret: Some(
+                JwtSecret::from_hex(
+                    "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
+                )
+                .unwrap(),
+            ),
             rpc_max_request_size: 15u32.into(),
             rpc_max_response_size: 160u32.into(),
             rpc_max_subscriptions_per_connection: 1024u32.into(),
@@ -1005,7 +1010,7 @@ mod tests {
             rpc_eth_proof_window: 100_000,
             rpc_proof_permits: 16,
             rpc_pending_block: PendingBlockKind::Full,
-            rpc_forwarder: None,
+            rpc_forwarder: Some("http://localhost:8545".parse().unwrap()),
             builder_disallow: None,
             rpc_state_cache: RpcStateCacheArgs {
                 max_blocks: 5000,
@@ -1055,6 +1060,8 @@ mod tests {
             "/tmp/jwt.hex",
             "--auth-ipc.path",
             "engine.ipc",
+            "--rpc.jwtsecret",
+            "0x1234567890abcdef1234567890abcdef1234567890abcdef1234567890abcdef",
             "--rpc.max-request-size",
             "15",
             "--rpc.max-response-size",
@@ -1087,6 +1094,8 @@ mod tests {
             "16",
             "--rpc.pending-block",
             "full",
+            "--rpc.forwarder",
+            "http://localhost:8545",
             "--rpc-cache.max-blocks",
             "5000",
             "--rpc-cache.max-receipts",
