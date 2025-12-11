@@ -3,8 +3,6 @@
 
 use std::ops::Range;
 
-#[cfg(all(unix, feature = "rocksdb"))]
-use crate::providers::RocksDBProvider;
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
@@ -36,25 +34,13 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
-#[cfg(all(unix, feature = "rocksdb"))]
-type RocksDBWriter = RocksDBProvider;
-#[cfg(not(all(unix, feature = "rocksdb")))]
-type RocksDBWriter = ();
-
-#[cfg(all(unix, feature = "rocksdb"))]
-type RocksDBReader = RocksDBProvider;
-#[cfg(not(all(unix, feature = "rocksdb")))]
-type RocksDBReader = ();
-
-/// Represents a destination for writing data, either to database, static files, or `RocksDB`.
+/// Represents a destination for writing data, either to database or static files.
 #[derive(Debug, Display)]
 pub enum EitherWriter<'a, CURSOR, N> {
     /// Write to database table via cursor
     Database(CURSOR),
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
-    /// Write to `RocksDB`
-    RocksDB(RocksDBWriter),
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -133,7 +119,6 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) => Ok(()),
             Self::StaticFile(writer) => writer.increment_block(expected_block_number),
-            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -147,7 +132,6 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) => Ok(()),
             Self::StaticFile(writer) => writer.ensure_at_block(block_number),
-            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -162,7 +146,6 @@ where
         match self {
             Self::Database(cursor) => Ok(cursor.append(tx_num, receipt)?),
             Self::StaticFile(writer) => writer.append_receipt(tx_num, receipt),
-            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -176,7 +159,6 @@ where
         match self {
             Self::Database(cursor) => Ok(cursor.append(tx_num, sender)?),
             Self::StaticFile(writer) => writer.append_transaction_sender(tx_num, sender),
-            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -193,7 +175,6 @@ where
                 Ok(())
             }
             Self::StaticFile(writer) => writer.append_transaction_senders(senders),
-            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -225,7 +206,6 @@ where
 
                 writer.prune_transaction_senders(to_delete, block)?;
             }
-            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
         }
 
         Ok(())
@@ -239,8 +219,6 @@ pub enum EitherReader<CURSOR, N> {
     Database(CURSOR),
     /// Read from static file
     StaticFile(StaticFileProvider<N>),
-    /// Read from `RocksDB`
-    RocksDB(RocksDBReader),
 }
 
 impl EitherReader<(), ()> {
@@ -288,7 +266,6 @@ where
                     Some(result.map(|sender| (tx_num, sender)))
                 })
                 .collect::<ProviderResult<HashMap<_, _>>>(),
-            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -300,8 +277,6 @@ pub enum EitherWriterDestination {
     Database,
     /// Write to static file
     StaticFile,
-    /// Write to `RocksDB`
-    RocksDB,
 }
 
 impl EitherWriterDestination {
@@ -313,48 +288,6 @@ impl EitherWriterDestination {
         // Write senders to static files only if they're explicitly enabled
         if provider.cached_storage_settings().transaction_senders_in_static_files {
             Self::StaticFile
-        } else {
-            Self::Database
-        }
-    }
-
-    /// Returns the destination for account history writes based on storage settings.
-    pub fn account_history<P>(provider: &P) -> Self
-    where
-        P: StorageSettingsCache,
-    {
-        if cfg!(all(unix, feature = "rocksdb")) &&
-            provider.cached_storage_settings().account_history_in_rocksdb
-        {
-            Self::RocksDB
-        } else {
-            Self::Database
-        }
-    }
-
-    /// Returns the destination for storages history writes based on storage settings.
-    pub fn storages_history<P>(provider: &P) -> Self
-    where
-        P: StorageSettingsCache,
-    {
-        if cfg!(all(unix, feature = "rocksdb")) &&
-            provider.cached_storage_settings().storages_history_in_rocksdb
-        {
-            Self::RocksDB
-        } else {
-            Self::Database
-        }
-    }
-
-    /// Returns the destination for transaction hash numbers writes based on storage settings.
-    pub fn transaction_hash_numbers<P>(provider: &P) -> Self
-    where
-        P: StorageSettingsCache,
-    {
-        if cfg!(all(unix, feature = "rocksdb")) &&
-            provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb
-        {
-            Self::RocksDB
         } else {
             Self::Database
         }
@@ -413,34 +346,6 @@ mod tests {
                 senders.iter().copied().collect::<HashMap<_, _>>(),
                 "{reader}"
             );
-        }
-    }
-
-    #[test]
-    fn rocksdb_destinations_follow_flags_with_cfg_fallback() {
-        let factory = create_test_provider_factory();
-        let settings = StorageSettings::legacy()
-            .with_storages_history_in_rocksdb(true)
-            .with_transaction_hash_numbers_in_rocksdb(true)
-            .with_account_history_in_rocksdb(true);
-        factory.set_storage_settings_cache(settings);
-
-        let provider = factory.database_provider_ro().unwrap();
-
-        let expect_rocks = cfg!(all(unix, feature = "rocksdb"));
-
-        let account_dest = EitherWriterDestination::account_history(&provider);
-        let storages_dest = EitherWriterDestination::storages_history(&provider);
-        let tx_hash_dest = EitherWriterDestination::transaction_hash_numbers(&provider);
-
-        if expect_rocks {
-            assert!(matches!(account_dest, EitherWriterDestination::RocksDB));
-            assert!(matches!(storages_dest, EitherWriterDestination::RocksDB));
-            assert!(matches!(tx_hash_dest, EitherWriterDestination::RocksDB));
-        } else {
-            assert!(matches!(account_dest, EitherWriterDestination::Database));
-            assert!(matches!(storages_dest, EitherWriterDestination::Database));
-            assert!(matches!(tx_hash_dest, EitherWriterDestination::Database));
         }
     }
 }
