@@ -219,7 +219,8 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 /// The `eth/69` announces the historical block range served by the node. Removes total difficulty
 /// information. And removes the Bloom field from receipts transferred over the protocol.
 ///
-/// The `eth/70` (EIP-7975) extends `Status` with `blockRange`.
+/// The `eth/70` (EIP-7975) keeps the eth/69 status format and introduces partial receipts
+/// requests/responses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {

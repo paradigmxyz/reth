@@ -205,7 +205,7 @@ where
                     return Err(err.into());
                 }
 
-                if let StatusMessage::Eth69(s) = their_status_message {
+                if let StatusMessage::Eth69(s) | StatusMessage::Eth70(s) = their_status_message {
                     if s.earliest > s.latest {
                         return Err(EthHandshakeError::EarliestBlockGreaterThanLatestBlock {
                             got: s.earliest,
@@ -214,14 +214,6 @@ where
                         .into());
                     }
 
-                    if s.blockhash.is_zero() {
-                        return Err(EthHandshakeError::BlockhashZero.into());
-                    }
-                }
-                if let StatusMessage::Eth70(s) = their_status_message {
-                    // For eth/70 we no longer track an advertised history
-                    // range in the status message, so we only enforce that
-                    // the head hash is non-zero.
                     if s.blockhash.is_zero() {
                         return Err(EthHandshakeError::BlockhashZero.into());
                     }

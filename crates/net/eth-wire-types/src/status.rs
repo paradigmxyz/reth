@@ -110,14 +110,9 @@ impl UnifiedStatus {
     }
 
     /// Consume this `UnifiedStatus` and produce the [`StatusEth70`] message used by `eth/70`.
-    pub const fn into_eth70(self) -> StatusEth70 {
-        StatusEth70 {
-            version: self.version,
-            chain: self.chain,
-            genesis: self.genesis,
-            forkid: self.forkid,
-            blockhash: self.blockhash,
-        }
+    pub fn into_eth70(self) -> StatusEth70 {
+        // eth/70 status 与 eth/69 保持相同格式，继续携带 earliest/latest 区间
+        self.into_eth69()
     }
 
     /// Convert this `UnifiedStatus` into the appropriate `StatusMessage` variant based on version.
@@ -142,7 +137,7 @@ impl UnifiedStatus {
                 earliest_block: None,
                 latest_block: None,
             },
-            StatusMessage::Eth69(e) => Self {
+            StatusMessage::Eth69(e) | StatusMessage::Eth70(e) => Self {
                 version: e.version,
                 chain: e.chain,
                 genesis: e.genesis,
@@ -151,18 +146,6 @@ impl UnifiedStatus {
                 total_difficulty: None,
                 earliest_block: Some(e.earliest),
                 latest_block: Some(e.latest),
-            },
-            StatusMessage::Eth70(e) => Self {
-                version: e.version,
-                chain: e.chain,
-                genesis: e.genesis,
-                forkid: e.forkid,
-                blockhash: e.blockhash,
-                total_difficulty: None,
-                // eth/70 status currently does not carry an earliest/latest
-                // range. We treat these fields as unknown here.
-                earliest_block: None,
-                latest_block: None,
             },
         }
     }
@@ -401,70 +384,11 @@ impl Debug for StatusEth69 {
     }
 }
 
-/// Status message for `eth/70`.
-#[derive(Copy, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-#[add_arbitrary_tests(rlp)]
-pub struct StatusEth70 {
-    /// The current protocol version (eth/70).
-    pub version: EthVersion,
+/// Share eth/69 status with eth/70
+pub type StatusEth70 = StatusEth69;
 
-    /// The chain id, as introduced in EIP-155.
-    pub chain: Chain,
-
-    /// The genesis hash of the peer's chain.
-    pub genesis: B256,
-
-    /// Fork identifier as defined by EIP-2124.
-    pub forkid: ForkId,
-
-    /// Hash of the latest block this node has (current head).
-    pub blockhash: B256,
-}
-
-impl Display for StatusEth70 {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let hexed_blockhash = hex::encode(self.blockhash);
-        let hexed_genesis = hex::encode(self.genesis);
-        write!(
-            f,
-            "StatusEth70 {{ version: {}, chain: {}, genesis: {}, forkid: {:X?}, blockhash: {} }}",
-            self.version, self.chain, hexed_genesis, self.forkid, hexed_blockhash,
-        )
-    }
-}
-
-impl Debug for StatusEth70 {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        let hexed_blockhash = hex::encode(self.blockhash);
-        let hexed_genesis = hex::encode(self.genesis);
-        if f.alternate() {
-            write!(
-                f,
-                "StatusEth70 {{\n\tversion: {:?},\n\tchain: {:?},\n\tgenesis: {},\n\tforkid: {:X?},\n\tblockhash: {}\n}}",
-                self.version,
-                self.chain,
-                hexed_genesis,
-                self.forkid,
-                hexed_blockhash
-            )
-        } else {
-            write!(
-                f,
-                "StatusEth70 {{ version: {:?}, chain: {:?}, genesis: {}, forkid: {:X?}, blockhash: {} }}",
-                self.version,
-                self.chain,
-                hexed_genesis,
-                self.forkid,
-                hexed_blockhash
-            )
-        }
-    }
-}
-
-/// `StatusMessage` can store either the Legacy version (with TD), the
-/// eth/69 version (omits TD), or the eth/70 version (with block range).
+/// `StatusMessage` can store either the Legacy version (with TD), or the eth/69+/eth/70 version
+/// (omits TD, includes block range).
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatusMessage {
@@ -472,7 +396,7 @@ pub enum StatusMessage {
     Legacy(Status),
     /// The new `eth/69` status with no `total_difficulty`.
     Eth69(StatusEth69),
-    /// The `eth/70` status which includes `firstBlockReceiptIndex`
+    /// The `eth/70` status, identical to `eth/69` encoding.
     Eth70(StatusEth70),
 }
 
@@ -527,16 +451,14 @@ impl Encodable for StatusMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             Self::Legacy(s) => s.encode(out),
-            Self::Eth69(s) => s.encode(out),
-            Self::Eth70(s) => s.encode(out),
+            Self::Eth69(s) | Self::Eth70(s) => s.encode(out),
         }
     }
 
     fn length(&self) -> usize {
         match self {
             Self::Legacy(s) => s.length(),
-            Self::Eth69(s) => s.length(),
-            Self::Eth70(s) => s.length(),
+            Self::Eth69(s) | Self::Eth70(s) => s.length(),
         }
     }
 }
@@ -650,8 +572,8 @@ mod tests {
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
             .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .total_difficulty(None)
-            .earliest_block(None)
-            .latest_block(None)
+            .earliest_block(Some(1))
+            .latest_block(Some(2))
             .build();
 
         let status_message = unified_status.into_message();
