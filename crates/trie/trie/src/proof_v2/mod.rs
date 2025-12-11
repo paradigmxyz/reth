@@ -191,6 +191,7 @@ where
         targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
         path: &Nibbles,
     ) -> bool {
+        // TODO check target lower bound
         trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), "should_retain: called");
         debug_assert!(self.retained_proofs.last().is_none_or(
                 |ProofTrieNode { path: last_retained_path, .. }| {
@@ -773,6 +774,7 @@ where
     fn try_pop_cached_branch(
         &mut self,
         trie_cursor_state: &mut TrieCursorState,
+        sub_trie_prefix: &Nibbles,
         uncalculated_lower_bound: &Option<Nibbles>,
     ) -> Result<PopCachedBranchOutcome, StateProofError> {
         // If there is a branch on top of the stack we use that.
@@ -785,14 +787,14 @@ where
         // attempts to find it.
 
         // If the `uncalculated_lower_bound` is None it indicates that there can be no more
-        // leaf data, so similarly there be no more branches.
+        // leaf data, so similarly there can be no more branches.
         let Some(uncalculated_lower_bound) = uncalculated_lower_bound else {
             return Ok(PopCachedBranchOutcome::Exhausted)
         };
 
         // If [`TrieCursorState::path`] returns None it means that the cursor has been
         // exhausted, so there can be no more cached data.
-        let Some(trie_cursor_path) = trie_cursor_state.path() else {
+        let Some(mut trie_cursor_path) = trie_cursor_state.path() else {
             return Ok(PopCachedBranchOutcome::Exhausted)
         };
 
@@ -800,16 +802,24 @@ where
         // then we can't use it, instead we seek forward and try again.
         if trie_cursor_path < uncalculated_lower_bound {
             *trie_cursor_state =
-                TrieCursorState::new(self.trie_cursor.seek(*uncalculated_lower_bound)?);
+                TrieCursorState::seeked(self.trie_cursor.seek(*uncalculated_lower_bound)?);
 
-            // Having just seeked forward we need to check if the cursor is now exhausted.
-            if matches!(trie_cursor_state, TrieCursorState::Exhausted) {
+            // Having just seeked forward we need to check if the cursor is now exhausted,
+            // extracting the new path at the same time.
+            if let Some(new_trie_cursor_path) = trie_cursor_state.path() {
+                trie_cursor_path = new_trie_cursor_path
+            } else {
                 return Ok(PopCachedBranchOutcome::Exhausted)
             };
         }
 
+        // If the trie cursor has exceeded the sub-trie then we consider it to be exhausted.
+        if !trie_cursor_path.starts_with(sub_trie_prefix) {
+            return Ok(PopCachedBranchOutcome::Exhausted)
+        }
+
         // At this point we can be sure that the cursor is in an `Available` state. We know for
-        // sure it's not `Exhausted` because of the call to `path` above, and we know it's not
+        // sure it's not `Exhausted` because of the calls to `path` above, and we know it's not
         // `Taken` because we push all taken branches onto the `cached_branch_stack`, and the
         // stack is empty.
         //
@@ -858,7 +868,8 @@ where
         &mut self,
         targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
         trie_cursor_state: &mut TrieCursorState,
-        hashed_key_current_path: Option<Nibbles>,
+        sub_trie_prefix: &Nibbles,
+        uncalculated_lower_bound: Nibbles,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
         // Pop any under-construction branches that are now complete.
         // All trie data prior to the current cached branch, if any, has been computed. Any branches
@@ -874,10 +885,7 @@ where
         // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
         // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor (this
         // method). If this is None then there are no further nodes which could exist.
-        //
-        // This starts off being based on the hashed cursor's current position, which is the
-        // next hashed key which hasn't been processed. If that is None then we start from zero.
-        let mut uncalculated_lower_bound = Some(hashed_key_current_path.unwrap_or_default());
+        let mut uncalculated_lower_bound = Some(uncalculated_lower_bound);
 
         loop {
             // Pop the currently cached branch node.
@@ -885,9 +893,11 @@ where
             // NOTE we pop off the `cached_branch_stack` because cloning the `BranchNodeCompact`
             // means cloning an Arc, which incurs synchronization overhead. We have to be sure to
             // push the cached branch back onto the stack once done.
-            let (cached_path, cached_branch) = match self
-                .try_pop_cached_branch(trie_cursor_state, &uncalculated_lower_bound)?
-            {
+            let (cached_path, cached_branch) = match self.try_pop_cached_branch(
+                trie_cursor_state,
+                sub_trie_prefix,
+                &uncalculated_lower_bound,
+            )? {
                 PopCachedBranchOutcome::Popped(cached) => cached,
                 PopCachedBranchOutcome::Exhausted => {
                     // If cached branches are exhausted it's possible that there is still an
@@ -1029,7 +1039,7 @@ where
             // trie cursor to the next cached node at-or-after `child_path`.
             if trie_cursor_state.path().is_some_and(|path| path < &child_path) {
                 trace!(target: TRACE_TARGET, ?child_path, "Seeking trie cursor to child path");
-                *trie_cursor_state = TrieCursorState::new(self.trie_cursor.seek(child_path)?);
+                *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor.seek(child_path)?);
             }
 
             // If the next cached branch node is a child of `child_path` then we can assume it is
@@ -1074,19 +1084,24 @@ where
     /// Calculates trie nodes and retains proofs for targetted nodes within a sub-trie. The
     /// sub-trie's bounds are denoted by the `lower_bound` and `upper_bound` arguments,
     /// `upper_bound` is exclusive, None indicates unbounded.
-    #[instrument(target = TRACE_TARGET, level = "trace", skip(self, value_encoder, targets))]
+    #[instrument(
+        target = TRACE_TARGET,
+        level = "trace",
+        skip_all,
+        fields(prefix=?sub_trie_targets.prefix),
+    )]
     fn proof_subtrie<'a>(
         &mut self,
         value_encoder: &VE,
-        lower_bound: Nibbles,
-        upper_bound: Option<Nibbles>,
-        targets: impl Iterator<Item = &'a Target>,
+        trie_cursor_state: &mut TrieCursorState,
+        hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
+        sub_trie_targets: SubTrieTargets<'a>,
     ) -> Result<(), StateProofError> {
         // In debug builds, verify that targets are sorted
         #[cfg(debug_assertions)]
         let targets = {
             let mut prev: Option<Nibbles> = None;
-            targets.into_iter().inspect(move |target| {
+            sub_trie_targets.targets.iter().inspect(move |target| {
                 if let Some(prev) = prev {
                     debug_assert!(prev <= target.key, "prev:{prev:?} target:{target:?}");
                 }
@@ -1095,7 +1110,7 @@ where
         };
 
         #[cfg(not(debug_assertions))]
-        let targets = targets.into_iter();
+        let targets = sub_trie_targets.targets.into_iter();
 
         // Wrap targets into a `TargetsIter`.
         let mut targets = WindowIter::new(targets).peekable();
@@ -1106,18 +1121,32 @@ where
         debug_assert!(self.branch_path.is_empty());
         debug_assert!(self.child_stack.is_empty());
 
-        // Initialize the hashed cursor to None to indicate it hasn't been seeked yet.
-        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+        // `next_uncached_key_range`, which will be called in the loop below, expects the trie
+        // cursor to have already been seeked. If it's never been seeked before then we seek it to
+        // the prefix (the first possible node) to initialize it.
+        if matches!(trie_cursor_state, TrieCursorState::Unseeked) {
+            trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
+            *trie_cursor_state =
+                TrieCursorState::seeked(self.trie_cursor.seek(sub_trie_targets.prefix)?);
+        }
 
-        // Initialize the `trie_cursor_state` with the node closest to root.
-        let mut trie_cursor_state = TrieCursorState::new(self.trie_cursor.seek(Nibbles::new())?);
-
+        trace!(target: TRACE_TARGET, "Starting loop");
         loop {
+            // Calculate the uncalculated lower bound that `next_uncached_key_range` should use.
+            //
+            // The lower bound is the higher of the sub-trie's prefix (ie its first possible node)
+            // and the hashed cursor's current position (which is the next key which a trie node has
+            // not been computed).
+            let uncached_lower_bound = hashed_cursor_current
+                .as_ref()
+                .map_or(sub_trie_targets.prefix, |kv| std::cmp::max(kv.0, sub_trie_targets.prefix));
+
             // Determine the range of keys of the overall trie which need to be re-computed.
-            let Some((lower_bound, upper_bound)) = self.next_uncached_key_range(
+            let Some((calc_lower_bound, calc_upper_bound)) = self.next_uncached_key_range(
                 &mut targets,
-                &mut trie_cursor_state,
-                hashed_cursor_current.as_ref().map(|kv| kv.0),
+                trie_cursor_state,
+                &sub_trie_targets.prefix,
+                uncached_lower_bound,
             )?
             else {
                 // If `next_uncached_key_range` determines that there can be no more keys then
@@ -1129,9 +1158,9 @@ where
             self.calculate_key_range(
                 value_encoder,
                 &mut targets,
-                &mut hashed_cursor_current,
-                lower_bound,
-                upper_bound,
+                hashed_cursor_current,
+                calc_lower_bound,
+                calc_upper_bound,
             )?;
 
             // Once outside `calculate_key_range`, `hashed_cursor_current` will be at the first key
@@ -1145,6 +1174,7 @@ where
         }
 
         // Once there's no more leaves we can pop the remaining branches, if any.
+        trace!(target: TRACE_TARGET, "Exited loop, popping remaining branches");
         while !self.branch_stack.is_empty() {
             self.pop_branch(&mut targets)?;
         }
@@ -1158,17 +1188,21 @@ where
 
         // All targets match the root node, so always retain it. Determine the root node based on
         // the child stack, and push the proof of the root node onto the result stack.
-        let root_node = if let Some(node) = self.child_stack.pop() {
+        // TODO fix this
+        if let Some(node) = self.child_stack.pop() {
             self.rlp_encode_buf.clear();
-            node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?
-        } else {
-            ProofTrieNode {
+            let root_node = node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?;
+            self.retained_proofs.push(root_node);
+        } else if sub_trie_targets.prefix.is_empty() {
+            // Empty prefix covers the entire trie, and is therefore the only prefix which covers
+            // the root node itself. If the entire trie is targetted, and it has no data, then we
+            // retain the empty root proof.
+            self.retained_proofs.push(ProofTrieNode {
                 path: Nibbles::new(), // root path
                 node: TrieNode::EmptyRoot,
                 masks: TrieMasks::none(),
-            }
+            });
         };
-        self.retained_proofs.push(root_node);
 
         Ok(())
     }
@@ -1180,20 +1214,25 @@ where
         value_encoder: &VE,
         targets: &mut [Target],
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
-        trace!(target: TRACE_TARGET, "proof_inner: called");
-
         // If there are no targets then nothing could be returned, return early.
         if targets.is_empty() {
             trace!(target: TRACE_TARGET, "Empty targets, returning");
             return Ok(Vec::new())
         }
 
+        // Initialize the variables which track the state of the two cursors. Both indicated the
+        // cursors are unseeked.
+        let mut trie_cursor_state = TrieCursorState::unseeked();
+        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+
+        // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
+        // overall trie, and handle all proofs within that sub-trie.
         for sub_trie_targets in iter_sub_trie_targets(targets) {
             self.proof_subtrie(
                 value_encoder,
-                sub_trie_targets.lower_bound,
-                sub_trie_targets.upper_bound,
-                sub_trie_targets.targets.iter(),
+                &mut trie_cursor_state,
+                &mut hashed_cursor_current,
+                sub_trie_targets,
             )?;
         }
 
@@ -1324,6 +1363,8 @@ impl<I: Iterator<Item: Copy>> Iterator for WindowIter<I> {
 /// been taken (used as a cached branch) and the cursor having been exhausted.
 #[derive(Debug)]
 enum TrieCursorState {
+    /// The initial state of the cursor, indicating it's never been seeked.
+    Unseeked,
     /// Cursor is seeked to this path and the node has not been used yet.
     Available(Nibbles, BranchNodeCompact),
     /// Cursor is seeked to this path, but the node has been used.
@@ -1333,14 +1374,24 @@ enum TrieCursorState {
 }
 
 impl TrieCursorState {
+    /// Creates a [`Self::Unseeked`] based on an entry returned from the cursor itself.
+    const fn unseeked() -> Self {
+        Self::Unseeked
+    }
+
     /// Creates a [`Self`] based on an entry returned from the cursor itself.
-    fn new(entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
+    fn seeked(entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
         entry.map_or(Self::Exhausted, |(path, node)| Self::Available(path, node))
     }
 
     /// Returns the path the cursor is seeked to, or None if it's exhausted.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cursor is unseeked.
     const fn path(&self) -> Option<&Nibbles> {
         match self {
+            Self::Unseeked => panic!("cursor is unseeked"),
             Self::Available(path, _) | Self::Taken(path) => Some(path),
             Self::Exhausted => None,
         }
