@@ -32,6 +32,7 @@ use jsonrpsee::{
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{ConsensusError, FullConsensus};
+use reth_engine_primitives::ConsensusEngineEvent;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
 use reth_primitives_traits::{NodePrimitives, TxTy};
@@ -46,17 +47,18 @@ use reth_rpc_eth_api::{
         TraceExt,
     },
     node::RpcNodeCoreAdapter,
-    EthApiServer, EthApiTypes, FullEthApiServer, RpcBlock, RpcConvert, RpcConverter, RpcHeader,
-    RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
+    EthApiServer, EthApiTypes, FullEthApiServer, FullEthApiTypes, RpcBlock, RpcConvert,
+    RpcConverter, RpcHeader, RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
 use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
 pub use reth_rpc_server_types::RethRpcModule;
 use reth_storage_api::{
-    AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, ProviderBlock,
+    AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, NodePrimitivesProvider,
     StateProviderFactory,
 };
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner, TokioTaskExecutor};
+use reth_tokio_util::EventSender;
 use reth_transaction_pool::{noop::NoopTransactionPool, TransactionPool};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -327,6 +329,7 @@ where
         module_config: TransportRpcModuleConfig,
         engine: impl IntoEngineApiRpcModule,
         eth: EthApi,
+        engine_events: EventSender<ConsensusEngineEvent<N>>,
     ) -> (
         TransportRpcModules,
         AuthRpcModule,
@@ -335,16 +338,10 @@ where
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
-        let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
-
         let config = module_config.config.clone().unwrap_or_default();
 
-        let mut registry = RpcRegistryInner::new(
-            provider, pool, network, executor, consensus, config, evm_config, eth,
-        );
-
+        let mut registry = self.into_registry(config, eth, engine_events);
         let modules = registry.create_transport_rpc_modules(module_config);
-
         let auth_module = registry.create_auth_module(engine);
 
         (modules, auth_module, registry)
@@ -358,12 +355,23 @@ where
         self,
         config: RpcModuleConfig,
         eth: EthApi,
+        engine_events: EventSender<ConsensusEngineEvent<N>>,
     ) -> RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
     where
-        EthApi: EthApiTypes + 'static,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
         let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
-        RpcRegistryInner::new(provider, pool, network, executor, consensus, config, evm_config, eth)
+        RpcRegistryInner::new(
+            provider,
+            pool,
+            network,
+            executor,
+            consensus,
+            config,
+            evm_config,
+            eth,
+            engine_events,
+        )
     }
 
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
@@ -372,27 +380,17 @@ where
         self,
         module_config: TransportRpcModuleConfig,
         eth: EthApi,
+        engine_events: EventSender<ConsensusEngineEvent<N>>,
     ) -> TransportRpcModules<()>
     where
         EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
     {
         let mut modules = TransportRpcModules::default();
 
-        let Self { provider, pool, network, executor, consensus, evm_config, .. } = self;
-
         if !module_config.is_empty() {
             let TransportRpcModuleConfig { http, ws, ipc, config } = module_config.clone();
 
-            let mut registry = RpcRegistryInner::new(
-                provider,
-                pool,
-                network,
-                executor,
-                consensus,
-                config.unwrap_or_default(),
-                evm_config,
-                eth,
-            );
+            let mut registry = self.into_registry(config.unwrap_or_default(), eth, engine_events);
 
             modules.config = module_config;
             modules.http = registry.maybe_module(http.as_ref());
@@ -488,16 +486,8 @@ impl RpcModuleConfigBuilder {
 }
 
 /// A Helper type the holds instances of the configured modules.
-#[derive(Debug, Clone)]
-#[expect(dead_code)] // Consensus generic, might be useful in the future
-pub struct RpcRegistryInner<
-    Provider: BlockReader,
-    Pool,
-    Network,
-    EthApi: EthApiTypes,
-    EvmConfig,
-    Consensus,
-> {
+#[derive(Debug)]
+pub struct RpcRegistryInner<Provider, Pool, Network, EthApi: EthApiTypes, EvmConfig, Consensus> {
     provider: Provider,
     pool: Pool,
     network: Network,
@@ -512,6 +502,9 @@ pub struct RpcRegistryInner<
     modules: HashMap<RethRpcModule, Methods>,
     /// eth config settings
     eth_config: EthConfig,
+    /// Notification channel for engine API events
+    engine_events:
+        EventSender<ConsensusEngineEvent<<EthApi::RpcConvert as RpcConvert>::Primitives>>,
 }
 
 // === impl RpcRegistryInner ===
@@ -528,7 +521,7 @@ where
         + 'static,
     Pool: Send + Sync + Clone + 'static,
     Network: Clone + 'static,
-    EthApi: EthApiTypes + 'static,
+    EthApi: FullEthApiTypes + 'static,
     EvmConfig: ConfigureEvm<Primitives = N>,
 {
     /// Creates a new, empty instance.
@@ -542,6 +535,9 @@ where
         config: RpcModuleConfig,
         evm_config: EvmConfig,
         eth_api: EthApi,
+        engine_events: EventSender<
+            ConsensusEngineEvent<<EthApi::Provider as NodePrimitivesProvider>::Primitives>,
+        >,
     ) -> Self
     where
         EvmConfig: ConfigureEvm<Primitives = N>,
@@ -561,6 +557,7 @@ where
             blocking_pool_guard,
             eth_config: config.eth,
             evm_config,
+            engine_events,
         }
     }
 }
@@ -568,7 +565,6 @@ where
 impl<Provider, Pool, Network, EthApi, Evm, Consensus>
     RpcRegistryInner<Provider, Pool, Network, EthApi, Evm, Consensus>
 where
-    Provider: BlockReader,
     EthApi: EthApiTypes,
 {
     /// Returns a reference to the installed [`EthApi`].
@@ -712,8 +708,7 @@ where
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
     pub fn register_debug(&mut self) -> &mut Self
     where
-        EthApi: EthApiSpec + EthTransactions + TraceExt,
-        EvmConfig::Primitives: NodePrimitives<Block = ProviderBlock<EthApi::Provider>>,
+        EthApi: EthTransactions + TraceExt,
     {
         let debug_api = self.debug_api();
         self.modules.insert(RethRpcModule::Debug, debug_api.into_rpc().into());
@@ -820,8 +815,16 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime. See also [`Self::eth_api`]
-    pub fn debug_api(&self) -> DebugApi<EthApi> {
-        DebugApi::new(self.eth_api().clone(), self.blocking_pool_guard.clone())
+    pub fn debug_api(&self) -> DebugApi<EthApi>
+    where
+        EthApi: FullEthApiTypes,
+    {
+        DebugApi::new(
+            self.eth_api().clone(),
+            self.blocking_pool_guard.clone(),
+            self.tasks(),
+            self.engine_events.new_listener(),
+        )
     }
 
     /// Instantiates `NetApi`
@@ -939,11 +942,14 @@ where
                         )
                         .into_rpc()
                         .into(),
-                        RethRpcModule::Debug => {
-                            DebugApi::new(eth_api.clone(), self.blocking_pool_guard.clone())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Debug => DebugApi::new(
+                            eth_api.clone(),
+                            self.blocking_pool_guard.clone(),
+                            &*self.executor,
+                            self.engine_events.new_listener(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Eth => {
                             // merge all eth handlers
                             let mut module = eth_api.clone().into_rpc();
@@ -1008,6 +1014,33 @@ where
                     .clone()
             })
             .collect::<Vec<_>>()
+    }
+}
+
+impl<Provider, Pool, Network, EthApi, EvmConfig, Consensus> Clone
+    for RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>
+where
+    EthApi: EthApiTypes,
+    Provider: Clone,
+    Pool: Clone,
+    Network: Clone,
+    EvmConfig: Clone,
+    Consensus: Clone,
+{
+    fn clone(&self) -> Self {
+        Self {
+            provider: self.provider.clone(),
+            pool: self.pool.clone(),
+            network: self.network.clone(),
+            executor: self.executor.clone(),
+            evm_config: self.evm_config.clone(),
+            consensus: self.consensus.clone(),
+            eth: self.eth.clone(),
+            blocking_pool_guard: self.blocking_pool_guard.clone(),
+            modules: self.modules.clone(),
+            eth_config: self.eth_config.clone(),
+            engine_events: self.engine_events.clone(),
+        }
     }
 }
 

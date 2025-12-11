@@ -266,9 +266,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-evm"
-version = "0.24.2"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "01be36ba6f5e6e62563b369e03ca529eac46aea50677f84655084b4750816574"
+checksum = "70cd39002a40b8d528f4a3f8ecc7e59dc2204d9bfae249296d7d379f291f9cba"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -383,9 +383,9 @@ dependencies = [
 
 [[package]]
 name = "alloy-op-evm"
-version = "0.24.2"
+version = "0.25.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "231262d7e06000f3fb642d32d38ca75e09e78e04977c10be0a07a5ee2c869cfd"
+checksum = "6bec5d35135e72ab8096f9b7713840725dc0cd0f9e20ed283156808874da76f4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -3672,6 +3672,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "example-custom-rpc-middleware"
+version = "0.0.0"
+dependencies = [
+ "clap",
+ "jsonrpsee",
+ "reth-ethereum",
+ "tower",
+ "tracing",
+]
+
+[[package]]
 name = "example-db-access"
 version = "0.0.0"
 dependencies = [
@@ -6188,9 +6199,9 @@ checksum = "d6790f58c7ff633d8771f42965289203411a5e5c68388703c06e14f24770b41e"
 
 [[package]]
 name = "op-alloy"
-version = "0.22.4"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c3b13412d297c1f9341f678b763750b120a73ffe998fa54a94d6eda98449e7ca"
+checksum = "5f8cef53b364f406ed2be3a447b2d8f2f18b07a6ff1255c287debb4cda68095b"
 dependencies = [
  "op-alloy-consensus",
  "op-alloy-network",
@@ -6201,9 +6212,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-consensus"
-version = "0.22.4"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "726da827358a547be9f1e37c2a756b9e3729cb0350f43408164794b370cad8ae"
+checksum = "736381a95471d23e267263cfcee9e1d96d30b9754a94a2819148f83379de8a86"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6227,9 +6238,9 @@ checksum = "a79f352fc3893dcd670172e615afef993a41798a1d3fc0db88a3e60ef2e70ecc"
 
 [[package]]
 name = "op-alloy-network"
-version = "0.22.4"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f63f27e65be273ec8fcb0b6af0fd850b550979465ab93423705ceb3dfddbd2ab"
+checksum = "4034183dca6bff6632e7c24c92e75ff5f0eabb58144edb4d8241814851334d47"
 dependencies = [
  "alloy-consensus",
  "alloy-network",
@@ -6243,9 +6254,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-provider"
-version = "0.22.4"
+version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a71456699aa256dc20119736422ad9a44da8b9585036117afb936778122093b9"
+checksum = "9f1c952895ad45087d35d323e3fb73c0b5de7c6852494d81ebe997030366196a"
 dependencies = [
  "alloy-network",
  "alloy-primitives",
@@ -6258,9 +6269,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-jsonrpsee"
-version = "0.22.4"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8ef9114426b16172254555aad34a8ea96c01895e40da92f5d12ea680a1baeaa7"
+checksum = "c1c820ef9c802ebc732281a940bfb6ac2345af4d9fff041cbb64b4b546676686"
 dependencies = [
  "alloy-primitives",
  "jsonrpsee",
@@ -6268,9 +6279,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types"
-version = "0.22.4"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "562dd4462562c41f9fdc4d860858c40e14a25df7f983ae82047f15f08fce4d19"
+checksum = "ddd87c6b9e5b6eee8d6b76f41b04368dca0e9f38d83338e5b00e730c282098a4"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6288,9 +6299,9 @@ dependencies = [
 
 [[package]]
 name = "op-alloy-rpc-types-engine"
-version = "0.22.4"
+version = "0.23.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d8f24b8cb66e4b33e6c9e508bf46b8ecafc92eadd0b93fedd306c0accb477657"
+checksum = "77727699310a18cdeed32da3928c709e2704043b6584ed416397d5da65694efc"
 dependencies = [
  "alloy-consensus",
  "alloy-eips",
@@ -6304,6 +6315,7 @@ dependencies = [
  "ethereum_ssz_derive",
  "op-alloy-consensus",
  "serde",
+ "sha2",
  "snap",
  "thiserror 2.0.17",
 ]
@@ -10277,6 +10289,7 @@ dependencies = [
  "reth-rpc-server-types",
  "reth-storage-api",
  "reth-tasks",
+ "reth-tokio-util",
  "reth-tracing",
  "reth-transaction-pool",
  "serde",

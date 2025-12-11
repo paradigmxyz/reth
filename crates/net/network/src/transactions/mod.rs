@@ -1338,6 +1338,8 @@ where
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
         let mut transactions = transactions.0;
 
+        let start = Instant::now();
+
         // mark the transactions as received
         self.transaction_fetcher
             .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| tx.tx_hash()));
@@ -1459,6 +1461,8 @@ where
         if num_already_seen_by_peer > 0 {
             self.report_already_seen(peer_id);
         }
+
+        self.metrics.pool_import_prepare_duration.record(start.elapsed());
     }
 
     /// Processes a [`FetchEvent`].

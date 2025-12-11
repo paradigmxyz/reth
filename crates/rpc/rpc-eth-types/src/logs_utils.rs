@@ -11,6 +11,7 @@ use reth_errors::ProviderError;
 use reth_primitives_traits::{BlockBody, RecoveredBlock, SignedTransaction};
 use reth_storage_api::{BlockReader, ProviderBlock};
 use std::sync::Arc;
+use thiserror::Error;
 
 /// Returns all matching of a block's receipts when the transaction hashes are known.
 pub fn matching_block_logs_with_tx_hashes<'a, I, R>(
@@ -147,30 +148,40 @@ where
 
 /// Computes the block range based on the filter range and current block numbers.
 ///
-/// This returns `(min(best,from), min(best,to))`.
+/// Returns an error for invalid ranges rather than silently clamping values.
 pub fn get_filter_block_range(
     from_block: Option<u64>,
     to_block: Option<u64>,
     start_block: u64,
     info: ChainInfo,
-) -> (u64, u64) {
-    let mut from_block_number = start_block;
-    let mut to_block_number = info.best_number;
+) -> Result<(u64, u64), FilterBlockRangeError> {
+    let from_block_number = from_block.unwrap_or(start_block);
+    let to_block_number = to_block.unwrap_or(info.best_number);
 
-    // if a `from_block` argument is provided then the `from_block_number` is the converted value or
-    // the start block if the converted value is larger than the start block, since `from_block`
-    // can't be a future block: `min(head, from_block)`
-    if let Some(filter_from_block) = from_block {
-        from_block_number = start_block.min(filter_from_block)
+    // from > to is an invalid range
+    if from_block_number > to_block_number {
+        return Err(FilterBlockRangeError::InvalidBlockRange);
     }
 
-    // upper end of the range is the converted `to_block` argument, restricted by the best block:
-    // `min(best_number,to_block_number)`
-    if let Some(filter_to_block) = to_block {
-        to_block_number = info.best_number.min(filter_to_block);
+    // we cannot query blocks that don't exist yet
+    if to_block_number > info.best_number {
+        return Err(FilterBlockRangeError::BlockRangeExceedsHead);
     }
 
-    (from_block_number, to_block_number)
+    Ok((from_block_number, to_block_number))
+}
+
+/// Errors for filter block range validation.
+///
+/// See also <https://github.com/ethereum/go-ethereum/blob/master/eth/filters/filter.go#L224-L230>.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Error)]
+pub enum FilterBlockRangeError {
+    /// `from_block > to_block`
+    #[error("invalid block range params")]
+    InvalidBlockRange,
+    /// Block range extends beyond current head
+    #[error("block range extends beyond current head block")]
+    BlockRangeExceedsHead,
 }
 
 #[cfg(test)]
@@ -184,42 +195,71 @@ mod tests {
         let from = 14000000u64;
         let to = 14000100u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
-        let range = get_filter_block_range(Some(from), Some(to), info.best_number, info);
+        let range = get_filter_block_range(Some(from), Some(to), info.best_number, info).unwrap();
         assert_eq!(range, (from, to));
-    }
-
-    #[test]
-    fn test_log_range_higher() {
-        let from = 15000001u64;
-        let to = 15000002u64;
-        let info = ChainInfo { best_number: 15000000, ..Default::default() };
-        let range = get_filter_block_range(Some(from), Some(to), info.best_number, info);
-        assert_eq!(range, (info.best_number, info.best_number));
     }
 
     #[test]
     fn test_log_range_from() {
         let from = 14000000u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
-        let range = get_filter_block_range(Some(from), None, info.best_number, info);
+        let range = get_filter_block_range(Some(from), None, 0, info).unwrap();
         assert_eq!(range, (from, info.best_number));
     }
 
     #[test]
     fn test_log_range_to() {
         let to = 14000000u64;
+        let start_block = 0u64;
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
-        let range = get_filter_block_range(None, Some(to), info.best_number, info);
-        assert_eq!(range, (info.best_number, to));
+        let range = get_filter_block_range(None, Some(to), start_block, info).unwrap();
+        assert_eq!(range, (start_block, to));
+    }
+
+    #[test]
+    fn test_log_range_higher_error() {
+        // Range extends beyond head -> should error instead of clamping
+        let from = 15000001u64;
+        let to = 15000002u64;
+        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let err = get_filter_block_range(Some(from), Some(to), info.best_number, info).unwrap_err();
+        assert_eq!(err, FilterBlockRangeError::BlockRangeExceedsHead);
+    }
+
+    #[test]
+    fn test_log_range_to_below_start_error() {
+        // to_block < start_block, default from -> invalid range
+        let to = 14000000u64;
+        let info = ChainInfo { best_number: 15000000, ..Default::default() };
+        let err = get_filter_block_range(None, Some(to), info.best_number, info).unwrap_err();
+        assert_eq!(err, FilterBlockRangeError::InvalidBlockRange);
     }
 
     #[test]
     fn test_log_range_empty() {
         let info = ChainInfo { best_number: 15000000, ..Default::default() };
-        let range = get_filter_block_range(None, None, info.best_number, info);
+        let range = get_filter_block_range(None, None, info.best_number, info).unwrap();
 
         // no range given -> head
         assert_eq!(range, (info.best_number, info.best_number));
+    }
+
+    #[test]
+    fn test_invalid_block_range_error() {
+        let from = 100;
+        let to = 50;
+        let info = ChainInfo { best_number: 150, ..Default::default() };
+        let err = get_filter_block_range(Some(from), Some(to), 0, info).unwrap_err();
+        assert_eq!(err, FilterBlockRangeError::InvalidBlockRange);
+    }
+
+    #[test]
+    fn test_block_range_exceeds_head_error() {
+        let from = 100;
+        let to = 200;
+        let info = ChainInfo { best_number: 150, ..Default::default() };
+        let err = get_filter_block_range(Some(from), Some(to), 0, info).unwrap_err();
+        assert_eq!(err, FilterBlockRangeError::BlockRangeExceedsHead);
     }
 
     #[test]
@@ -242,7 +282,8 @@ mod tests {
             to_block.and_then(alloy_rpc_types_eth::BlockNumberOrTag::as_number),
             start_block,
             info,
-        );
+        )
+        .unwrap();
         assert_eq!(from_block_number, 16022082);
         assert_eq!(to_block_number, best_number);
     }
