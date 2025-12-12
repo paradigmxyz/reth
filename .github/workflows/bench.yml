@@ -19,13 +19,13 @@ jobs:
     runs-on: depot-ubuntu-latest
     strategy:
       matrix:
+        partition: [1, 2]
+        total_partitions: [2]
         include:
           - partition: 1
-            total_partitions: 2
-            crates: "-p reth-primitives -p reth-trie"
+            crates: "-p reth-primitives -p reth-trie-common -p reth-trie-sparse"
           - partition: 2
-            total_partitions: 2
-            crates: "-p reth-trie-common -p reth-trie-sparse"
+            crates: "-p reth-trie"
     name: codspeed (${{ matrix.partition }}/${{ matrix.total_partitions }})
     steps:
       - uses: actions/checkout@v6
