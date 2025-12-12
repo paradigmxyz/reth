@@ -2,7 +2,7 @@ use alloc::vec::Vec;
 use alloy_primitives::{Address, BlockNumber, Bytes, B256};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie_common::{
-    updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
+    updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,
 };
@@ -47,6 +47,15 @@ pub trait StorageRootProvider: Send + Sync {
     fn storage_root(&self, address: Address, hashed_storage: HashedStorage)
         -> ProviderResult<B256>;
 
+    /// Returns the storage root of the `HashedStorage` for target address on top of the current
+    /// state, using the provided storage trie updates.
+    fn storage_root_from_nodes(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+        storage_trie_updates: &StorageTrieUpdates,
+    ) -> ProviderResult<B256>;
+
     /// Returns the storage proof of the `HashedStorage` for target slot on top of the current
     /// state.
     fn storage_proof(
@@ -54,6 +63,16 @@ pub trait StorageRootProvider: Send + Sync {
         address: Address,
         slot: B256,
         hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageProof>;
+
+    /// Returns the storage proof of the `HashedStorage` for target slot on top of the current
+    /// state, using the provided storage trie updates.
+    fn storage_proof_from_nodes(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+        storage_trie_updates: &StorageTrieUpdates,
     ) -> ProviderResult<StorageProof>;
 
     /// Returns the storage multiproof for target slots.
