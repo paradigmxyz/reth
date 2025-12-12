@@ -213,17 +213,17 @@ where
     }
 
     /// Converts the changed accounts to a map of sender ids to sender info (internal identifier
-    /// used for accounts)
+    /// used for __tracked__ accounts)
     fn changed_senders(
         &self,
         accs: impl Iterator<Item = ChangedAccount>,
     ) -> FxHashMap<SenderId, SenderInfo> {
-        let mut identifiers = self.identifiers.write();
+        let identifiers = self.identifiers.read();
         accs.into_iter()
-            .map(|acc| {
+            .filter_map(|acc| {
                 let ChangedAccount { address, nonce, balance } = acc;
-                let sender_id = identifiers.sender_id_or_create(address);
-                (sender_id, SenderInfo { state_nonce: nonce, balance })
+                let sender_id = identifiers.sender_id(&address)?;
+                Some((sender_id, SenderInfo { state_nonce: nonce, balance }))
             })
             .collect()
     }
