@@ -21,6 +21,7 @@ use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
+use rayon::iter::{ParallelBridge, ParallelIterator};
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
@@ -40,6 +41,7 @@ use reth_trie_sparse::{
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
+    collections::BTreeMap,
     sync::{
         atomic::AtomicBool,
         mpsc::{self, channel},
@@ -315,21 +317,50 @@ where
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
         usize,
     ) {
+        let (transactions, convert) = transactions.into();
+        let transactions = transactions.into_iter();
         // Get the transaction count for prewarming task
         // Use upper bound if available (more accurate), otherwise use lower bound
         let (lower, upper) = transactions.size_hint();
         let transaction_count_hint = upper.unwrap_or(lower);
 
+        // Spawn a task that iterates through all transactions in parallel and sends them to the
+        // main task.
+        let (tx, rx) = mpsc::channel();
+        self.executor.spawn_blocking(move || {
+            transactions.enumerate().par_bridge().for_each_with(tx, |sender, (idx, tx)| {
+                let tx = convert(tx);
+                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
+                let _ = sender.send((idx, tx));
+            });
+        });
+
+        // Spawn a task that processes out-of-order transactions from the task above and sends them
+        // to prewarming and execution tasks.
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
         self.executor.spawn_blocking(move || {
-            for tx in transactions {
-                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
+            let mut next_for_execution = 0;
+            let mut queue = BTreeMap::new();
+            while let Ok((idx, tx)) = rx.recv() {
                 // only send Ok(_) variants to prewarming task
                 if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());
                 }
-                let _ = execute_tx.send(tx);
+
+                if next_for_execution == idx {
+                    let _ = execute_tx.send(tx);
+                    next_for_execution += 1;
+
+                    while let Some(entry) = queue.first_entry() &&
+                        *entry.key() == next_for_execution
+                    {
+                        let _ = execute_tx.send(entry.remove());
+                        next_for_execution += 1;
+                    }
+                } else {
+                    queue.insert(idx, tx);
+                }
             }
         });
 
@@ -1026,13 +1057,19 @@ mod tests {
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
-        let mut handle = payload_processor.spawn(
-            Default::default(),
-            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
-            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-            OverlayStateProviderFactory::new(provider_factory),
-            &TreeConfig::default(),
-        );
+        let mut handle =
+            payload_processor.spawn(
+                Default::default(),
+                (
+                    core::iter::empty::<
+                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
+                    >(),
+                    std::convert::identity,
+                ),
+                StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+                OverlayStateProviderFactory::new(provider_factory),
+                &TreeConfig::default(),
+            );
 
         let mut state_hook = handle.state_hook();
 

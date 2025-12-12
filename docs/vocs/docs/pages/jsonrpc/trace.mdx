@@ -176,9 +176,13 @@ The second parameter is an array of one or more trace types (`vmTrace`, `trace`,
 
 The third and optional parameter is a block number, block hash, or a block tag (`latest`, `finalized`, `safe`, `earliest`, `pending`).
 
-| Client | Method invocation                                              |
-| ------ | -------------------------------------------------------------- |
-| RPC    | `{"method": "trace_call", "params": [tx, trace[], block]}` |
+The fourth and optional parameter is a `stateOverrides` object that temporarily overrides account state used for the trace (balances, nonces, code, storage).
+
+The fifth and optional parameter is a `blockOverrides` object that temporarily overrides block fields used for the trace (for example `timestamp`, `baseFee`, `number`).
+
+| Client | Method invocation                                                                    |
+| ------ | ------------------------------------------------------------------------------------ |
+| RPC    | `{"method": "trace_call", "params": [tx, trace[], block, stateOverrides, blockOverrides]}` |
 
 ### Example
 

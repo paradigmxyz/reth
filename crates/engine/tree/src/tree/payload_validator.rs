@@ -11,6 +11,7 @@ use crate::tree::{
     StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
@@ -213,16 +214,31 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => Ok(Either::Left(
-                self.evm_config
+            BlockOrPayload::Payload(payload) => {
+                let (iter, convert) = self
+                    .evm_config
                     .tx_iterator_for_payload(payload)
                     .map_err(NewPayloadError::other)?
-                    .map(|res| res.map(Either::Left).map_err(NewPayloadError::other)),
-            )),
+                    .into();
+
+                let iter = Either::Left(iter.into_iter().map(Either::Left));
+                let convert = move |tx| {
+                    let Either::Left(tx) = tx else { unreachable!() };
+                    convert(tx).map(Either::Left).map_err(Either::Left)
+                };
+
+                // Box the closure to satisfy the `Fn` bound both here and in the branch below
+                Ok((iter, Box::new(convert) as Box<dyn Fn(_) -> _ + Send + Sync + 'static>))
+            }
             BlockOrPayload::Block(block) => {
-                Ok(Either::Right(block.body().clone_transactions().into_iter().map(|tx| {
-                    Ok(Either::Right(tx.try_into_recovered().map_err(NewPayloadError::other)?))
-                })))
+                let iter =
+                    Either::Right(block.body().clone_transactions().into_iter().map(Either::Right));
+                let convert = move |tx: Either<_, N::SignedTx>| {
+                    let Either::Right(tx) = tx else { unreachable!() };
+                    tx.try_into_recovered().map(Either::Right).map_err(Either::Right)
+                };
+
+                Ok((iter, Box::new(convert)))
             }
         }
     }
@@ -406,7 +422,8 @@ where
 
         // Execute the block and handle any execution errors
         let (output, senders) = match if self.config.state_provider_metrics() {
-            let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
+            let state_provider =
+                InstrumentedStateProvider::from_state_provider(&state_provider, "engine");
             let result = self.execute_block(&state_provider, env, &input, &mut handle);
             state_provider.record_total_latency();
             result
@@ -1229,5 +1246,11 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(_) => "payload",
             Self::Block(_) => "block",
         }
+    }
+
+    /// Returns the block access list if available.
+    pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
+        // TODO decode and return `BlockAccessList`
+        None
     }
 }

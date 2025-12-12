@@ -54,7 +54,7 @@ use tracing::*;
 mod block_buffer;
 mod cached_state;
 pub mod error;
-mod instrumented_state;
+pub mod instrumented_state;
 mod invalid_headers;
 mod metrics;
 mod payload_processor;
@@ -1901,6 +1901,16 @@ where
         false
     }
 
+    /// Returns true if the given hash is part of the last received sync target fork choice update.
+    ///
+    /// See [`ForkchoiceStateTracker::sync_target_state`]
+    fn is_any_sync_target(&self, block_hash: B256) -> bool {
+        if let Some(target) = self.state.forkchoice_state_tracker.sync_target_state() {
+            return target.contains(block_hash)
+        }
+        false
+    }
+
     /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
     /// block into the invalid header cache if the `check` hash has a known invalid ancestor.
     ///
@@ -2040,9 +2050,12 @@ where
             match self.insert_block(child) {
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
-                    if self.is_sync_target_head(child_num_hash.hash) &&
+                    if self.is_any_sync_target(child_num_hash.hash) &&
                         matches!(res, InsertPayloadOk::Inserted(BlockStatus::Valid))
                     {
+                        debug!(target: "engine::tree", child =?child_num_hash, "connected sync target block");
+                        // we just inserted a block that we know is part of the canonical chain, so
+                        // we can make it canonical
                         self.make_canonical(child_num_hash.hash)?;
                     }
                 }
@@ -2348,11 +2361,15 @@ where
         // try to append the block
         match self.insert_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
-                if self.is_sync_target_head(block_num_hash.hash) {
-                    trace!(target: "engine::tree", "appended downloaded sync target block");
+                // check if we just inserted a block that's part of sync targets,
+                // i.e. head, safe, or finalized
+                if let Some(sync_target) = self.state.forkchoice_state_tracker.sync_target_state() &&
+                    sync_target.contains(block_num_hash.hash)
+                {
+                    debug!(target: "engine::tree", ?sync_target, "appended downloaded sync target block");
 
-                    // we just inserted the current sync target block, we can try to make it
-                    // canonical
+                    // we just inserted a block that we know is part of the canonical chain, so we
+                    // can make it canonical
                     return Ok(Some(TreeEvent::TreeAction(TreeAction::MakeCanonical {
                         sync_target_head: block_num_hash.hash,
                     })))
