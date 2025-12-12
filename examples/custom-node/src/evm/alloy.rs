@@ -15,10 +15,6 @@ use reth_ethereum::evm::revm::{
 use revm::{context_interface::result::EVMError, inspector::NoOpInspector};
 use std::error::Error;
 
-/// EVM context contains data that EVM needs for execution of [`CustomTxEnv`].
-pub type CustomContext<DB> =
-    Context<BlockEnv, OpTransaction<PaymentTxEnv>, CfgEnv<OpSpecId>, DB, Journal<DB>, L1BlockInfo>;
-
 pub struct CustomEvm<DB: Database, I, P = OpPrecompiles> {
     inner: OpEvm<DB, I, P>,
 }
