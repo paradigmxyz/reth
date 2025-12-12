@@ -104,14 +104,17 @@ where
             .map(|(address, block_number)| {
                 ShardedKey::new(address, block_number.min(last_changeset_pruned_block))
             });
-        let outcomes = prune_history_indices::<Provider, tables::AccountsHistory, _>(
+        let (outcomes, indices_done) = prune_history_indices::<Provider, tables::AccountsHistory, _>(
             provider,
             highest_sharded_keys,
+            &limiter,
             |a, b| a.key == b.key,
         )?;
-        trace!(target: "pruner", ?outcomes, %done, "Pruned account history (indices)");
+        trace!(target: "pruner", ?outcomes, %done, %indices_done, "Pruned account history (indices)");
 
-        let progress = limiter.progress(done);
+        // Both changesets pruning and indices pruning must be done for overall completion
+        let overall_done = done && indices_done;
+        let progress = limiter.progress(overall_done);
 
         Ok(SegmentOutput {
             progress,

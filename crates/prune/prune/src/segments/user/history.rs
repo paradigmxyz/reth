@@ -1,3 +1,4 @@
+use crate::PruneLimiter;
 use alloy_primitives::BlockNumber;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
@@ -7,6 +8,7 @@ use reth_db_api::{
     BlockNumberList, DatabaseError, RawKey, RawTable, RawValue,
 };
 use reth_provider::DBProvider;
+use tracing::debug;
 
 enum PruneShardOutcome {
     Deleted,
@@ -23,12 +25,14 @@ pub(crate) struct PrunedIndices {
 
 /// Prune history indices according to the provided list of highest sharded keys.
 ///
-/// Returns total number of deleted, updated and unchanged entities.
+/// Returns total number of deleted, updated and unchanged entities, and whether the pruning is
+/// done.
 pub(crate) fn prune_history_indices<Provider, T, SK>(
     provider: &Provider,
     highest_sharded_keys: impl IntoIterator<Item = T::Key>,
+    limiter: &PruneLimiter,
     key_matches: impl Fn(&T::Key, &T::Key) -> bool,
-) -> Result<PrunedIndices, DatabaseError>
+) -> Result<(PrunedIndices, bool), DatabaseError>
 where
     Provider: DBProvider<Tx: DbTxMut>,
     T: Table<Value = BlockNumberList>,
@@ -37,7 +41,21 @@ where
     let mut outcomes = PrunedIndices::default();
     let mut cursor = provider.tx_ref().cursor_write::<RawTable<T>>()?;
 
-    for sharded_key in highest_sharded_keys {
+    let mut highest_sharded_keys = highest_sharded_keys.into_iter();
+
+    for sharded_key in &mut highest_sharded_keys {
+        // Check time limiter at the start of each outer iteration (for each sharded_key)
+        if limiter.is_time_limit_reached() {
+            debug!(
+                target: "pruner",
+                ?limiter,
+                time_limit = true,
+                table = %T::NAME,
+                "Pruning time limit reached in prune_history_indices (outer loop)"
+            );
+            return Ok((outcomes, false))
+        }
+
         // Seek to the shard that has the key >= the given sharded key
         // TODO: optimize
         let mut shard = cursor.seek(RawKey::new(sharded_key.clone()))?;
@@ -46,6 +64,19 @@ where
         let to_block = sharded_key.as_ref().highest_block_number;
 
         'shard: loop {
+            // Check time limiter at the start of each inner iteration (for each shard)
+            // Note: deleted_entries_limit applies to ChangeSet table entries, not History indices
+            if limiter.is_time_limit_reached() {
+                debug!(
+                    target: "pruner",
+                    ?limiter,
+                    time_limit = true,
+                    table = %T::NAME,
+                    "Pruning time limit reached in prune_history_indices (inner loop)"
+                );
+                return Ok((outcomes, false))
+            }
+
             let Some((key, block_nums)) =
                 shard.map(|(k, v)| Result::<_, DatabaseError>::Ok((k.key()?, v))).transpose()?
             else {
@@ -67,7 +98,9 @@ where
         }
     }
 
-    Ok(outcomes)
+    // Check if all keys were processed
+    let done = highest_sharded_keys.next().is_none();
+    Ok((outcomes, done))
 }
 
 /// Prunes one shard of a history table.
