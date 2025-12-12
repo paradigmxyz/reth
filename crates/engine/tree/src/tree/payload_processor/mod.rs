@@ -1053,19 +1053,16 @@ mod tests {
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
-        let mut handle =
-            payload_processor.spawn(
-                Default::default(),
-                (
-                    core::iter::empty::<
-                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                    >(),
-                    std::convert::identity,
-                ),
-                StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-                OverlayStateProviderFactory::new(provider_factory),
-                &TreeConfig::default(),
-            );
+        let mut handle = payload_processor.spawn(
+            Default::default(),
+            (
+                Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
+                std::convert::identity,
+            ),
+            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+            OverlayStateProviderFactory::new(provider_factory),
+            &TreeConfig::default(),
+        );
 
         let mut state_hook = handle.state_hook();
 
