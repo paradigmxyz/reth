@@ -54,7 +54,7 @@ use tracing::*;
 mod block_buffer;
 mod cached_state;
 pub mod error;
-mod instrumented_state;
+pub mod instrumented_state;
 mod invalid_headers;
 mod metrics;
 mod payload_processor;
