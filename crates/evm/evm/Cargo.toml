@@ -32,7 +32,7 @@ auto_impl.workspace = true
 derive_more.workspace = true
 futures-util.workspace = true
 metrics = { workspace = true, optional = true }
-rayon.workspace = true
+rayon = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
@@ -41,6 +41,7 @@ reth-ethereum-forks.workspace = true
 [features]
 default = ["std"]
 std = [
+    "dep:rayon",
     "reth-primitives-traits/std",
     "alloy-eips/std",
     "alloy-primitives/std",
