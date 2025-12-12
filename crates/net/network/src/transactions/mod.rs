@@ -1372,21 +1372,6 @@ where
         //    reallocations
         let mut new_txs = Vec::with_capacity(transactions.len());
         for tx in transactions {
-            // recover transaction
-            let tx = match tx.try_into_recovered() {
-                Ok(tx) => tx,
-                Err(badtx) => {
-                    trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        hash=%badtx.tx_hash(),
-                        client_version=%peer.client_version,
-                        "failed ecrecovery for transaction"
-                    );
-                    has_bad_transactions = true;
-                    continue
-                }
-            };
-
             match self.transactions_by_peers.entry(*tx.tx_hash()) {
                 Entry::Occupied(mut entry) => {
                     // transaction was already inserted
@@ -1403,6 +1388,21 @@ where
                         has_bad_transactions = true;
                     } else {
                         // this is a new transaction that should be imported into the pool
+
+                        // recover transaction
+                        let tx = match tx.try_into_recovered() {
+                            Ok(tx) => tx,
+                            Err(badtx) => {
+                                trace!(target: "net::tx",
+                                    peer_id=format!("{peer_id:#}"),
+                                    hash=%badtx.tx_hash(),
+                                    client_version=%peer.client_version,
+                                    "failed ecrecovery for transaction"
+                                );
+                                has_bad_transactions = true;
+                                continue
+                            }
+                        };
 
                         let pool_transaction = Pool::Transaction::from_pooled(tx);
                         new_txs.push(pool_transaction);
