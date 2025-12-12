@@ -32,7 +32,7 @@ use reth_node_builder::{
         EngineValidatorBuilder, EthApiBuilder, EthApiCtx, Identity, PayloadValidatorBuilder,
         RethRpcAddOns, RpcAddOns, RpcHandle,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter, PayloadBuilderConfig,
+    BuilderContext, DebugNode, Node, NodeAdapter,
 };
 use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
@@ -437,9 +437,7 @@ where
     type EVM = EthEvmConfig<Types::ChainSpec>;
 
     async fn build_evm(self, ctx: &BuilderContext<Node>) -> eyre::Result<Self::EVM> {
-        let evm_config = EthEvmConfig::new(ctx.chain_spec())
-            .with_extra_data(ctx.payload_builder_config().extra_data_bytes());
-        Ok(evm_config)
+        Ok(EthEvmConfig::new(ctx.chain_spec()))
     }
 }
 
