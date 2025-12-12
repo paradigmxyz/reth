@@ -25,6 +25,8 @@ struct DisplayFork {
     activated_at: ForkCondition,
     /// An optional EIP (e.g. `EIP-1559`).
     eip: Option<String>,
+    /// Optional metadata to display alongside the fork (e.g. blob parameters)
+    metadata: Option<String>,
 }
 
 impl core::fmt::Display for DisplayFork {
@@ -38,6 +40,9 @@ impl core::fmt::Display for DisplayFork {
         match self.activated_at {
             ForkCondition::Block(at) | ForkCondition::Timestamp(at) => {
                 write!(f, "{name_with_eip:32} @{at}")?;
+                if let Some(metadata) = &self.metadata {
+                    write!(f, "          {metadata}")?;
+                }
             }
             ForkCondition::TTD { total_difficulty, .. } => {
                 // All networks that have merged are finalized.
@@ -45,6 +50,9 @@ impl core::fmt::Display for DisplayFork {
                     f,
                     "{name_with_eip:32} @{total_difficulty} (network is known to be merged)",
                 )?;
+                if let Some(metadata) = &self.metadata {
+                    write!(f, "          {metadata}")?;
+                }
             }
             ForkCondition::Never => unreachable!(),
         }
@@ -146,13 +154,26 @@ impl DisplayHardforks {
     where
         I: IntoIterator<Item = (&'a dyn Hardfork, ForkCondition)>,
     {
+        // Delegate to with_meta by mapping the iterator to include None for metadata
+        Self::with_meta(hardforks.into_iter().map(|(fork, condition)| (fork, condition, None)))
+    }
+
+    /// Creates a new [`DisplayHardforks`] from an iterator of hardforks with optional metadata.
+    pub fn with_meta<'a, I>(hardforks: I) -> Self
+    where
+        I: IntoIterator<Item = (&'a dyn Hardfork, ForkCondition, Option<String>)>,
+    {
         let mut pre_merge = Vec::new();
         let mut with_merge = Vec::new();
         let mut post_merge = Vec::new();
 
-        for (fork, condition) in hardforks {
-            let mut display_fork =
-                DisplayFork { name: fork.name().to_string(), activated_at: condition, eip: None };
+        for (fork, condition, metadata) in hardforks {
+            let mut display_fork = DisplayFork {
+                name: fork.name().to_string(),
+                activated_at: condition,
+                eip: None,
+                metadata,
+            };
 
             match condition {
                 ForkCondition::Block(_) => {

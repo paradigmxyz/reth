@@ -1,0 +1,299 @@
+# Custom transactions
+
+In this chapter, we'll learn how to define custom crate-local transaction envelope types and configure our node to use it.
+We'll extend it with a custom variant, implement custom processing logic and configure our custom node to use it.
+
+All the while trying to minimize boilerplate, trivial, unnecessary or copy-pasted code.
+
+# Motivation
+
+Historically, custom node operators were forced to fork the blockchain client repository they were working with if they
+wanted to introduce complex custom changes beyond the scope of the vanilla node configuration. Forking represents a huge
+maintenance burden due to the complexities of keeping the code up-to-date with the custom changes intact.
+
+We introduced Reth SDK to address this widespread issue, where we operate in a continuous feed-back loop, continuously
+shaping it to fit the needs of node operators.
+
+Oftentimes we may want to preserve the full capabilities of an Ethereum blockchain but introduce a special transaction
+that has different processing. For example, one may introduce a transaction type that does not invoke any EVM processing,
+but still produces a new state, performing a computation at no gas cost.
+
+# Type definition using declarative macro
+
+We'll showcase the macro on the `custom-node` example in the `reth` repository.
+Please refer to it to see the complete implementation: https://github.com/paradigmxyz/reth/tree/main/examples/custom-node
+
+## Introduction
+
+In this example, we assume that we are building our node on top of an Optimism stack. But all the things we're doing are
+analogous to the way you would build on top off of an L1 node, for example. Just use Ethereum counterparts to the Optimism
+ones.
+
+## Dependencies
+
+We recommend copying out the dependencies list from the [manifest of the custom node example](https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/Cargo.toml).
+
+The transaction envelope macro resides in the `alloy_consensus` crate since version `1.0.10`. It's being consistently improved upon so it's recommended to use the latest version.
+Since we're building on top of Optimism we will also need `op-alloy` that contains Optimism specific extensions.
+
+Our goal is Reth compatibility, hence we need to import relevant Reth crates. Sometimes items from REVM are referenced
+by Reth as its transaction execution environment, so we also need to import it.
+
+There may be occasionally additional dependencies needed. Refer to the [custom node example](https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/Cargo.toml) for a complete list.
+
+## Declaration
+
+### Consensus
+
+When one thinks of a transaction, usually they mean as it is defined in the consensus layer. There are however more
+interpretations depending on context. We'll start with the consensus definition.
+
+This definition is how the blockchain stores it, hence why a lot of the declarative properties relate to RLP encoding.
+In the context of reth, the consensus definition is also adapted into the RPC API representation. Therefore, it is also
+being JSON encoded. And lastly, it is being stored in database, it uses `Compact` encoding, which is a custom reth
+database encoding. This one needs to be implemented manually, but can reuse a lot of existing functionality. More on
+that later on in this chapter.
+
+Here is our top level consensus transaction envelope declaration:
+
+```rust
+use alloy_consensus::{Signed, TransactionEnvelope};
+use op_alloy_consensus::OpTxEnvelope;
+
+/// Either [`OpTxEnvelope`] or [`TxPayment`].
+#[derive(Debug, Clone, TransactionEnvelope)]
+#[envelope(tx_type_name = TxTypeCustom)]
+pub enum CustomTransaction {
+    /// A regular Optimism transaction as defined by [`OpTxEnvelope`].
+    #[envelope(flatten)]
+    Op(OpTxEnvelope),
+    /// A [`TxPayment`] tagged with type 0x7E.
+    #[envelope(ty = 42)]
+    Payment(Signed<TxPayment>),
+}
+```
+
+Few things to note here, let's start from up top. We added:
+* `derive(TransactionEnvelope)` which generates a lot of derivable trait implementations for transaction envelope types.
+* `derive(Debug, Clone)` which are necessary for this macro to work.
+* The `envelope` attribute with parameter `tx_type_name` generates an enum with a given name, in our case `TxTypeCustom`. This enum contains a *flattened* list of transaction variants.
+* The enum `CustomTransaction` is declared hence it remains a crate-local type, allowing us to implement methods and foreign traits for it, which is very useful.
+* The enum has two variants:
+ * `Op` the base regular Optimism transaction envelope.
+ * `Payment` the custom extension we added.
+* We can add more custom extensions if we need to by extending this enum with another variant.
+* Both variants have `envelope` attribute telling the macro how to process them
+* The `flatten` parameter tells the macro to adapt all the variants of the wrapped type as the variants of this transaction.
+This affects the serialization of the transaction, making so that on the outside all the `OpTxEnvelope` encoded types can be deserialized into this one.
+It only works with already existing transaction envelope types.
+* The `ty` parameter sets the transaction numerical identifier for the serialization. It identifies the transaction
+variant during deserialization. It's important that this number fits into one byte and does not collide with
+identifier of any other transaction variant.
+
+The `TxPayment` is our custom transaction representation. In our example, it is meant only for money transfers, not for
+smart contract interaction. Therefore, it needs fewer parameters and is smaller to encode.
+
+```rust
+#[derive(
+    Clone,
+    Debug,
+    Default,
+    PartialEq,
+    Eq,
+    Hash,
+    serde::Serialize,
+    serde::Deserialize,
+    reth_codecs::Compact,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct TxPayment {
+    /// EIP-155: Simple replay attack protection
+    #[serde(with = "alloy_serde::quantity")]
+    pub chain_id: ChainId,
+    /// A scalar value equal to the number of transactions sent by the sender; formally Tn.
+    #[serde(with = "alloy_serde::quantity")]
+    pub nonce: u64,
+    /// A scalar value equal to the maximum
+    /// amount of gas that should be used in executing
+    /// this transaction. This is paid up-front, before any
+    /// computation is done and may not be increased
+    /// later; formally Tg.
+    #[serde(with = "alloy_serde::quantity", rename = "gas", alias = "gasLimit")]
+    pub gas_limit: u64,
+    /// A scalar value equal to the maximum
+    /// amount of gas that should be used in executing
+    /// this transaction. This is paid up-front, before any
+    /// computation is done and may not be increased
+    /// later; formally Tg.
+    ///
+    /// As ethereum circulation is around 120mil eth as of 2022 that is around
+    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+    /// 340282366920938463463374607431768211455
+    ///
+    /// This is also known as `GasFeeCap`
+    #[serde(with = "alloy_serde::quantity")]
+    pub max_fee_per_gas: u128,
+    /// Max Priority fee that transaction is paying
+    ///
+    /// As ethereum circulation is around 120mil eth as of 2022 that is around
+    /// 120000000000000000000000000 wei we are safe to use u128 as its max number is:
+    /// 340282366920938463463374607431768211455
+    ///
+    /// This is also known as `GasTipCap`
+    #[serde(with = "alloy_serde::quantity")]
+    pub max_priority_fee_per_gas: u128,
+    /// The 160-bit address of the message call’s recipient.
+    pub to: Address,
+    /// A scalar value equal to the number of Wei to
+    /// be transferred to the message call’s recipient or,
+    /// in the case of contract creation, as an endowment
+    /// to the newly created account; formally Tv.
+    pub value: U256,
+}
+```
+
+On top of our declaration, there are several traits derivations from the standard library. For our purposes, it is
+enough to know that these are expected by Reth.
+
+Due to it being serialized in JSON, it needs to be `serde` compatible. The struct is annotated with
+the`#[serde(rename_all = "camelCase")]` attribute that assumes JSON keys formatting in the serialized representation.
+
+A custom Reth derive macro is used here to generate a `Compact` implementation for us. As mentioned earlier, this
+encoding is used for database storage.
+
+## Pooled
+
+Another important representation is the mempool one. This declaration should be made to contain any transaction that
+users can submit into the node's mempool.
+
+Here is the declaration:
+
+```rust
+use alloy_consensus::{Signed, TransactionEnvelope};
+use op_alloy_consensus::OpPooledTransaction;
+
+#[derive(Clone, Debug, TransactionEnvelope)]
+#[envelope(tx_type_name = CustomPooledTxType)]
+pub enum CustomPooledTransaction {
+    /// A regular Optimism transaction as defined by [`OpPooledTransaction`].
+    #[envelope(flatten)]
+    Op(OpPooledTransaction),
+    /// A [`TxPayment`] tagged with type 0x7E.
+    #[envelope(ty = 42)]
+    Payment(Signed<TxPayment>),
+}
+```
+
+As you can see it is almost the same as the consensus one. The main difference is the use of `OpPooledTransaction`
+as the base. This one does not contain the deposit transactions. In Optimism, deposits don't go into the mempool,
+because they are not user-submitted, but rather received from the engine API that only the sequencer can use.
+
+## Manual trait implementations
+
+There are more traits to be implemented a lot of them are `reth` specific and due to the macro being defined in `alloy`,
+it cannot provide these implementations automatically.
+
+We'll dissect the several kinds of trait implementations you may encounter. To see the complete list refer to these
+source code sections:
+* Consensus envelope: https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/src/primitives/tx.rs#L29-L140
+* Pooled envelope: https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/src/pool.rs#L23-L89
+* Transaction: https://github.com/paradigmxyz/reth/blob/main/examples/custom-node/src/primitives/tx_custom.rs#L71-L288
+
+Most of these implementations simply match the envelope enum variant and then delegate the responsibility to each variant, for example:
+
+```rust
+impl InMemorySize for CustomTransaction {
+    fn size(&self) -> usize {
+        match self {
+            CustomTransaction::Op(tx) => InMemorySize::size(tx),
+            CustomTransaction::Payment(tx) => InMemorySize::size(tx),
+        }
+    }
+}
+```
+
+Some of these implementations are trivial, for example:
+
+```rust
+impl OpTransaction for CustomTransaction {
+    fn is_deposit(&self) -> bool {
+        match self {
+            CustomTransaction::Op(op) => op.is_deposit(),
+            CustomTransaction::Payment(_) => false,
+        }
+    }
+
+    fn as_deposit(&self) -> Option<&Sealed<TxDeposit>> {
+        match self {
+            CustomTransaction::Op(op) => op.as_deposit(),
+            CustomTransaction::Payment(_) => None,
+        }
+    }
+}
+```
+
+This one is simply saying that the custom transaction variant is not an optimism deposit.
+
+A few of these trait implementations are a marker trait with no body like so:
+
+```rust
+impl RlpBincode for CustomTransaction {}
+```
+
+Sometimes the fact that `CustomTransactionEnvelope` is a wrapper type means that it needs to reimplement some traits that
+it's `inner` field already implements, like so:
+
+```rust
+impl SignedTransaction for CustomTransaction {
+    fn tx_hash(&self) -> &B256 {
+        match self {
+            CustomTransaction::Op(tx) => SignedTransaction::tx_hash(tx),
+            CustomTransaction::Payment(tx) => tx.hash(),
+        }
+    }
+}
+```
+
+The `Compact` support is largely derived and abstracted away with the help of a few minimal trivial implementations. One
+slightly interesting case is `FromTxCompact`. The actual decoding is delegated to `TxPayment`, where it is macro generated.
+Then it is put together with the `signature`, that given as one of the function arguments, via `Signed::new_unhashed`
+which creates the `Signed<TxPayment>` instance with no signature validation.
+
+Since the signature validation is done before encoding it, it would be redundant and infallible, but still need a
+`Result` type or an `unwrap`.
+
+```rust
+impl FromTxCompact for CustomTransaction {
+    type TxType = TxTypeCustom;
+
+    fn from_tx_compact(buf: &[u8], tx_type: Self::TxType, signature: Signature) -> (Self, &[u8])
+    where
+        Self: Sized,
+    {
+        match tx_type {
+            TxTypeCustom::Op(tx_type) => {
+                let (tx, buf) = OpTxEnvelope::from_tx_compact(buf, tx_type, signature);
+                (Self::Op(tx), buf)
+            }
+            TxTypeCustom::Payment => {
+                let (tx, buf) = TxPayment::from_compact(buf, buf.len());
+                let tx = Signed::new_unhashed(tx, signature);
+                (Self::Payment(tx), buf)
+            }
+        }
+    }
+}
+```
+
+# Conclusion
+
+We have declared our own transaction representation that is ready to be used with Reth! We have also declared our own
+transaction envelope that contains either our custom representation or any other Optimism type. This means that it is
+fully compatible with Optimism while also supporting the payment transaction, capable of being filling the role of an
+execution client that belongs to an Op stack.
+
+# Where to go next
+
+Our work is not finished! What follows is to:
+* Configure the node to use the custom type
+* Implement components that work with transaction variants

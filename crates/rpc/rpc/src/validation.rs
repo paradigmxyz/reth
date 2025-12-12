@@ -5,10 +5,11 @@ use alloy_eips::{eip4844::kzg_to_versioned_hash, eip7685::RequestsOrHash};
 use alloy_rpc_types_beacon::relay::{
     BidTrace, BuilderBlockValidationRequest, BuilderBlockValidationRequestV2,
     BuilderBlockValidationRequestV3, BuilderBlockValidationRequestV4,
+    BuilderBlockValidationRequestV5,
 };
 use alloy_rpc_types_engine::{
-    BlobsBundleV1, CancunPayloadFields, ExecutionData, ExecutionPayload, ExecutionPayloadSidecar,
-    PraguePayloadFields,
+    BlobsBundleV1, BlobsBundleV2, CancunPayloadFields, ExecutionData, ExecutionPayload,
+    ExecutionPayloadSidecar, PraguePayloadFields,
 };
 use async_trait::async_trait;
 use core::fmt;
@@ -16,12 +17,17 @@ use jsonrpsee::core::RpcResult;
 use jsonrpsee_types::error::ErrorObject;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_consensus::{Consensus, FullConsensus};
+use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
 use reth_engine_primitives::PayloadValidator;
 use reth_errors::{BlockExecutionError, ConsensusError, ProviderError};
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_execution_types::BlockExecutionOutput;
-use reth_metrics::{metrics, metrics::Gauge, Metrics};
-use reth_node_api::NewPayloadError;
+use reth_metrics::{
+    metrics,
+    metrics::{gauge, Gauge},
+    Metrics,
+};
+use reth_node_api::{NewPayloadError, PayloadTypes};
 use reth_primitives_traits::{
     constants::GAS_LIMIT_BOUND_DIVISOR, BlockBody, GotExpected, NodePrimitives, RecoveredBlock,
     SealedBlock, SealedHeaderFor,
@@ -33,20 +39,22 @@ use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use revm_primitives::{Address, B256, U256};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::{collections::HashSet, sync::Arc};
 use tokio::sync::{oneshot, RwLock};
 use tracing::warn;
 
 /// The type that implements the `validation` rpc namespace trait
 #[derive(Clone, Debug, derive_more::Deref)]
-pub struct ValidationApi<Provider, E: ConfigureEvm> {
+pub struct ValidationApi<Provider, E: ConfigureEvm, T: PayloadTypes> {
     #[deref]
-    inner: Arc<ValidationApiInner<Provider, E>>,
+    inner: Arc<ValidationApiInner<Provider, E, T>>,
 }
 
-impl<Provider, E> ValidationApi<Provider, E>
+impl<Provider, E, T> ValidationApi<Provider, E, T>
 where
     E: ConfigureEvm,
+    T: PayloadTypes,
 {
     /// Create a new instance of the [`ValidationApi`]
     pub fn new(
@@ -56,10 +64,7 @@ where
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
         payload_validator: Arc<
-            dyn PayloadValidator<
-                Block = <E::Primitives as NodePrimitives>::Block,
-                ExecutionData = ExecutionData,
-            >,
+            dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>,
         >,
     ) -> Self {
         let ValidationApiConfig { disallow, validation_window } = config;
@@ -77,6 +82,11 @@ where
         });
 
         inner.metrics.disallow_size.set(inner.disallow.len() as f64);
+
+        let disallow_hash = hash_disallow_list(&inner.disallow);
+        let hash_gauge = gauge!("builder_validation_disallow_hash", "hash" => disallow_hash);
+        hash_gauge.set(1.0);
+
         Self { inner }
     }
 
@@ -101,13 +111,14 @@ where
     }
 }
 
-impl<Provider, E> ValidationApi<Provider, E>
+impl<Provider, E, T> ValidationApi<Provider, E, T>
 where
     Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + StateProviderFactory
         + 'static,
     E: ConfigureEvm + 'static,
+    T: PayloadTypes<ExecutionData = ExecutionData>,
 {
     /// Validates the given block and a [`BidTrace`] against it.
     pub async fn validate_message_against_block(
@@ -132,10 +143,10 @@ where
                 if self.disallow.contains(sender) {
                     return Err(ValidationApiError::Blacklist(*sender))
                 }
-                if let Some(to) = tx.to() {
-                    if self.disallow.contains(&to) {
-                        return Err(ValidationApiError::Blacklist(to))
-                    }
+                if let Some(to) = tx.to() &&
+                    self.disallow.contains(&to)
+                {
+                    return Err(ValidationApiError::Blacklist(to))
                 }
             }
         }
@@ -174,7 +185,7 @@ where
         let output = executor.execute_with_state_closure(&block, |state| {
             if !self.disallow.is_empty() {
                 // Check whether the submission interacted with any blacklisted account by scanning
-                // the `State`'s cache that records everything read form database during execution.
+                // the `State`'s cache that records everything read from database during execution.
                 for account in state.cache.accounts.keys() {
                     if self.disallow.contains(account) {
                         accessed_blacklisted = Some(*account);
@@ -229,7 +240,7 @@ where
                 expected: header.gas_limit(),
             }))
         } else if header.gas_used() != message.gas_used {
-            return Err(ValidationApiError::GasUsedMismatch(GotExpected {
+            Err(ValidationApiError::GasUsedMismatch(GotExpected {
                 got: message.gas_used,
                 expected: header.gas_used(),
             }))
@@ -297,7 +308,7 @@ where
             }
         }
 
-        if balance_after >= balance_before + message.value {
+        if balance_after >= balance_before.saturating_add(message.value) {
             return Ok(())
         }
 
@@ -323,10 +334,10 @@ where
             return Err(ValidationApiError::ProposerPayment)
         }
 
-        if let Some(block_base_fee) = block.header().base_fee_per_gas() {
-            if tx.effective_tip_per_gas(block_base_fee).unwrap_or_default() != 0 {
-                return Err(ValidationApiError::ProposerPayment)
-            }
+        if let Some(block_base_fee) = block.header().base_fee_per_gas() &&
+            tx.effective_tip_per_gas(block_base_fee).unwrap_or_default() != 0
+        {
+            return Err(ValidationApiError::ProposerPayment)
         }
 
         Ok(())
@@ -352,6 +363,24 @@ where
         let sidecar = blobs_bundle.pop_sidecar(blobs_bundle.blobs.len());
 
         sidecar.validate(&versioned_hashes, EnvKzgSettings::default().get())?;
+
+        Ok(versioned_hashes)
+    }
+    /// Validates the given [`BlobsBundleV1`] and returns versioned hashes for blobs.
+    pub fn validate_blobs_bundle_v2(
+        &self,
+        blobs_bundle: BlobsBundleV2,
+    ) -> Result<Vec<B256>, ValidationApiError> {
+        let versioned_hashes = blobs_bundle
+            .commitments
+            .iter()
+            .map(|c| kzg_to_versioned_hash(c.as_slice()))
+            .collect::<Vec<_>>();
+
+        blobs_bundle
+            .try_into_sidecar()
+            .map_err(|_| ValidationApiError::InvalidBlobsBundle)?
+            .validate(&versioned_hashes, EnvKzgSettings::default().get())?;
 
         Ok(versioned_hashes)
     }
@@ -404,10 +433,50 @@ where
         )
         .await
     }
+
+    /// Core logic for validating the builder submission v5
+    async fn validate_builder_submission_v5(
+        &self,
+        request: BuilderBlockValidationRequestV5,
+    ) -> Result<(), ValidationApiError> {
+        let block = self.payload_validator.ensure_well_formed_payload(ExecutionData {
+            payload: ExecutionPayload::V3(request.request.execution_payload),
+            sidecar: ExecutionPayloadSidecar::v4(
+                CancunPayloadFields {
+                    parent_beacon_block_root: request.parent_beacon_block_root,
+                    versioned_hashes: self
+                        .validate_blobs_bundle_v2(request.request.blobs_bundle)?,
+                },
+                PraguePayloadFields {
+                    requests: RequestsOrHash::Requests(
+                        request.request.execution_requests.to_requests(),
+                    ),
+                },
+            ),
+        })?;
+
+        // Check block size as per EIP-7934 (only applies when Osaka hardfork is active)
+        let chain_spec = self.provider.chain_spec();
+        if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) &&
+            block.rlp_length() > MAX_RLP_BLOCK_SIZE
+        {
+            return Err(ValidationApiError::Consensus(ConsensusError::BlockTooLarge {
+                rlp_length: block.rlp_length(),
+                max_rlp_length: MAX_RLP_BLOCK_SIZE,
+            }));
+        }
+
+        self.validate_message_against_block(
+            block,
+            request.request.message,
+            request.registered_gas_limit,
+        )
+        .await
+    }
 }
 
 #[async_trait]
-impl<Provider, E> BlockSubmissionValidationApiServer for ValidationApi<Provider, E>
+impl<Provider, E, T> BlockSubmissionValidationApiServer for ValidationApi<Provider, E, T>
 where
     Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
         + ChainSpecProvider<ChainSpec: EthereumHardforks>
@@ -415,6 +484,7 @@ where
         + Clone
         + 'static,
     E: ConfigureEvm + 'static,
+    T: PayloadTypes<ExecutionData = ExecutionData>,
 {
     async fn validate_builder_submission_v1(
         &self,
@@ -467,20 +537,34 @@ where
 
         rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
     }
+
+    /// Validates a block submitted to the relay
+    async fn validate_builder_submission_v5(
+        &self,
+        request: BuilderBlockValidationRequestV5,
+    ) -> RpcResult<()> {
+        let this = self.clone();
+        let (tx, rx) = oneshot::channel();
+
+        self.task_spawner.spawn_blocking(Box::pin(async move {
+            let result = Self::validate_builder_submission_v5(&this, request)
+                .await
+                .map_err(ErrorObject::from);
+            let _ = tx.send(result);
+        }));
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+    }
 }
 
-pub struct ValidationApiInner<Provider, E: ConfigureEvm> {
+pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// Consensus implementation.
     consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
     /// Execution payload validator.
-    payload_validator: Arc<
-        dyn PayloadValidator<
-            Block = <E::Primitives as NodePrimitives>::Block,
-            ExecutionData = ExecutionData,
-        >,
-    >,
+    payload_validator:
+        Arc<dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>>,
     /// Block executor factory.
     evm_config: E,
     /// Set of disallowed addresses
@@ -498,7 +582,23 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm> {
     metrics: ValidationMetrics,
 }
 
-impl<Provider, E: ConfigureEvm> fmt::Debug for ValidationApiInner<Provider, E> {
+/// Calculates a deterministic hash of the blocklist for change detection.
+///
+/// This function sorts addresses to ensure deterministic output regardless of
+/// insertion order, then computes a SHA256 hash of the concatenated addresses.
+fn hash_disallow_list(disallow: &HashSet<Address>) -> String {
+    let mut sorted: Vec<_> = disallow.iter().collect();
+    sorted.sort(); // sort for deterministic hashing
+
+    let mut hasher = Sha256::new();
+    for addr in sorted {
+        hasher.update(addr.as_slice());
+    }
+
+    format!("{:x}", hasher.finalize())
+}
+
+impl<Provider, E: ConfigureEvm, T: PayloadTypes> fmt::Debug for ValidationApiInner<Provider, E, T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidationApiInner").finish_non_exhaustive()
     }
@@ -596,4 +696,64 @@ impl From<ValidationApiError> for ErrorObject<'static> {
 pub(crate) struct ValidationMetrics {
     /// The number of entries configured in the builder validation disallow list.
     pub(crate) disallow_size: Gauge,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::hash_disallow_list;
+    use revm_primitives::Address;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_hash_disallow_list_deterministic() {
+        let mut addresses = HashSet::new();
+        addresses.insert(Address::from([1u8; 20]));
+        addresses.insert(Address::from([2u8; 20]));
+
+        let hash1 = hash_disallow_list(&addresses);
+        let hash2 = hash_disallow_list(&addresses);
+
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_disallow_list_different_content() {
+        let mut addresses1 = HashSet::new();
+        addresses1.insert(Address::from([1u8; 20]));
+
+        let mut addresses2 = HashSet::new();
+        addresses2.insert(Address::from([2u8; 20]));
+
+        let hash1 = hash_disallow_list(&addresses1);
+        let hash2 = hash_disallow_list(&addresses2);
+
+        assert_ne!(hash1, hash2);
+    }
+
+    #[test]
+    fn test_hash_disallow_list_order_independent() {
+        let mut addresses1 = HashSet::new();
+        addresses1.insert(Address::from([1u8; 20]));
+        addresses1.insert(Address::from([2u8; 20]));
+
+        let mut addresses2 = HashSet::new();
+        addresses2.insert(Address::from([2u8; 20])); // Different insertion order
+        addresses2.insert(Address::from([1u8; 20]));
+
+        let hash1 = hash_disallow_list(&addresses1);
+        let hash2 = hash_disallow_list(&addresses2);
+
+        assert_eq!(hash1, hash2);
+    }
+
+    #[test]
+    //ensures parity with rbuilder hashing https://github.com/flashbots/rbuilder/blob/962c8444cdd490a216beda22c7eec164db9fc3ac/crates/rbuilder/src/live_builder/block_list_provider.rs#L248
+    fn test_disallow_list_hash_rbuilder_parity() {
+        let json = r#"["0x05E0b5B40B7b66098C2161A5EE11C5740A3A7C45","0x01e2919679362dFBC9ee1644Ba9C6da6D6245BB1","0x03893a7c7463AE47D46bc7f091665f1893656003","0x04DBA1194ee10112fE6C3207C0687DEf0e78baCf"]"#;
+        let blocklist: Vec<Address> = serde_json::from_str(json).unwrap();
+        let blocklist: HashSet<Address> = blocklist.into_iter().collect();
+        let expected_hash = "ee14e9d115e182f61871a5a385ab2f32ecf434f3b17bdbacc71044810d89e608";
+        let hash = hash_disallow_list(&blocklist);
+        assert_eq!(expected_hash, hash);
+    }
 }

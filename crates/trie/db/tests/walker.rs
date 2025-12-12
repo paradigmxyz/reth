@@ -60,13 +60,13 @@ fn test_cursor<T>(mut trie: T, expected: &[Vec<u8>])
 where
     T: TrieCursor,
 {
-    let mut walker = TrieWalker::state_trie(&mut trie, Default::default());
+    let mut walker = TrieWalker::<_>::state_trie(&mut trie, Default::default());
     assert!(walker.key().unwrap().is_empty());
 
     // We're traversing the path in lexicographical order.
     for expected in expected {
         walker.advance().unwrap();
-        let got = walker.key().cloned();
+        let got = walker.key().copied();
         assert_eq!(got.unwrap(), Nibbles::from_nibbles_unchecked(expected.clone()));
     }
 
@@ -114,28 +114,28 @@ fn cursor_rootnode_with_changesets() {
     let mut trie = DatabaseStorageTrieCursor::new(cursor, hashed_address);
 
     // No changes
-    let mut cursor = TrieWalker::state_trie(&mut trie, Default::default());
-    assert_eq!(cursor.key().cloned(), Some(Nibbles::new())); // root
+    let mut cursor = TrieWalker::<_>::state_trie(&mut trie, Default::default());
+    assert_eq!(cursor.key().copied(), Some(Nibbles::new())); // root
     assert!(cursor.can_skip_current_node); // due to root_hash
     cursor.advance().unwrap(); // skips to the end of trie
-    assert_eq!(cursor.key().cloned(), None);
+    assert_eq!(cursor.key().copied(), None);
 
     // We insert something that's not part of the existing trie/prefix.
     let mut changed = PrefixSetMut::default();
     changed.insert(Nibbles::from_nibbles([0xF, 0x1]));
-    let mut cursor = TrieWalker::state_trie(&mut trie, changed.freeze());
+    let mut cursor = TrieWalker::<_>::state_trie(&mut trie, changed.freeze());
 
     // Root node
-    assert_eq!(cursor.key().cloned(), Some(Nibbles::new()));
+    assert_eq!(cursor.key().copied(), Some(Nibbles::new()));
     // Should not be able to skip state due to the changed values
     assert!(!cursor.can_skip_current_node);
     cursor.advance().unwrap();
-    assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles([0x2])));
+    assert_eq!(cursor.key().copied(), Some(Nibbles::from_nibbles([0x2])));
     cursor.advance().unwrap();
-    assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles([0x2, 0x1])));
+    assert_eq!(cursor.key().copied(), Some(Nibbles::from_nibbles([0x2, 0x1])));
     cursor.advance().unwrap();
-    assert_eq!(cursor.key().cloned(), Some(Nibbles::from_nibbles([0x4])));
+    assert_eq!(cursor.key().copied(), Some(Nibbles::from_nibbles([0x4])));
 
     cursor.advance().unwrap();
-    assert_eq!(cursor.key().cloned(), None); // the end of trie
+    assert_eq!(cursor.key().copied(), None); // the end of trie
 }

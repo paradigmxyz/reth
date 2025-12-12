@@ -41,8 +41,8 @@ pub fn init_db_for<P: AsRef<Path>, TS: TableSet>(
     args: DatabaseArguments,
 ) -> eyre::Result<DatabaseEnv> {
     let client_version = args.client_version().clone();
-    let db = create_db(path, args)?;
-    db.create_tables_for::<TS>()?;
+    let mut db = create_db(path, args)?;
+    db.create_and_track_tables_for::<TS>()?;
     db.record_client_version(client_version)?;
     Ok(db)
 }

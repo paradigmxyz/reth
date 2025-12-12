@@ -1,9 +1,9 @@
 use crate::BlockProvider;
-use alloy_consensus::BlockHeader;
 use alloy_provider::{Network, Provider, ProviderBuilder};
-use futures::StreamExt;
+use alloy_transport::TransportResult;
+use futures::{Stream, StreamExt};
 use reth_node_api::Block;
-use reth_tracing::tracing::warn;
+use reth_tracing::tracing::{debug, warn};
 use std::sync::Arc;
 use tokio::sync::mpsc::Sender;
 
@@ -25,16 +25,32 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
         convert: impl Fn(N::BlockResponse) -> PrimitiveBlock + Send + Sync + 'static,
     ) -> eyre::Result<Self> {
         Ok(Self {
-            provider: Arc::new(
-                ProviderBuilder::new()
-                    .disable_recommended_fillers()
-                    .network::<N>()
-                    .connect(rpc_url)
-                    .await?,
-            ),
+            provider: Arc::new(ProviderBuilder::default().connect(rpc_url).await?),
             url: rpc_url.to_string(),
             convert: Arc::new(convert),
         })
+    }
+
+    /// Obtains a full block stream.
+    ///
+    /// This first attempts to obtain an `eth_subscribe` subscription, if that fails because the
+    /// connection is not a websocket, this falls back to poll based subscription.
+    async fn full_block_stream(
+        &self,
+    ) -> TransportResult<impl Stream<Item = TransportResult<N::BlockResponse>>> {
+        // first try to obtain a regular subscription
+        match self.provider.subscribe_full_blocks().full().into_stream().await {
+            Ok(sub) => Ok(sub.left_stream()),
+            Err(err) => {
+                debug!(
+                    target: "consensus::debug-client",
+                    %err,
+                    url=%self.url,
+                    "Failed to establish block subscription",
+                );
+                Ok(self.provider.watch_full_blocks().await?.full().into_stream().right_stream())
+            }
+        }
     }
 }
 
@@ -45,22 +61,21 @@ where
     type Block = PrimitiveBlock;
 
     async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
-        let mut stream = match self.provider.subscribe_blocks().await {
-            Ok(sub) => sub.into_stream(),
-            Err(err) => {
-                warn!(
-                    target: "consensus::debug-client",
-                    %err,
-                    url=%self.url,
-                    "Failed to subscribe to blocks",
-                );
-                return;
-            }
+        let Ok(mut stream) = self.full_block_stream().await.inspect_err(|err| {
+            warn!(
+                target: "consensus::debug-client",
+                %err,
+                url=%self.url,
+                "Failed to subscribe to blocks",
+            );
+        }) else {
+            return
         };
-        while let Some(header) = stream.next().await {
-            match self.get_block(header.number()).await {
+
+        while let Some(res) = stream.next().await {
+            match res {
                 Ok(block) => {
-                    if tx.send(block).await.is_err() {
+                    if tx.send((self.convert)(block)).await.is_err() {
                         // Channel closed.
                         break;
                     }

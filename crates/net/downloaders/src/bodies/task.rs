@@ -190,7 +190,7 @@ mod tests {
         let factory = create_test_provider_factory();
         let (headers, mut bodies) = generate_bodies(0..=19);
 
-        insert_headers(factory.db_ref().db(), &headers);
+        insert_headers(&factory, &headers);
 
         let client = Arc::new(
             TestBodiesClient::default().with_bodies(bodies.clone()).with_should_delay(true),

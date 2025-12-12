@@ -96,7 +96,7 @@ where
     N: NodePrimitives,
 {
     fn new(directory: impl AsRef<Path>) -> WalResult<Self> {
-        let mut wal = Self {
+        let wal = Self {
             next_file_id: AtomicU32::new(0),
             storage: Storage::new(directory)?,
             block_cache: RwLock::new(BlockCache::default()),
@@ -112,7 +112,7 @@ where
 
     /// Fills the block cache with the notifications from the storage.
     #[instrument(skip(self))]
-    fn fill_block_cache(&mut self) -> WalResult<()> {
+    fn fill_block_cache(&self) -> WalResult<()> {
         let Some(files_range) = self.storage.files_range()? else { return Ok(()) };
         self.next_file_id.store(files_range.end() + 1, Ordering::Relaxed);
 

@@ -7,33 +7,46 @@ use reth_trie_common::{HashedAccountsSorted, HashedPostStateSorted, HashedStorag
 
 /// The hashed cursor factory for the post state.
 #[derive(Clone, Debug)]
-pub struct HashedPostStateCursorFactory<'a, CF> {
+pub struct HashedPostStateCursorFactory<CF, T> {
     cursor_factory: CF,
-    post_state: &'a HashedPostStateSorted,
+    post_state: T,
 }
 
-impl<'a, CF> HashedPostStateCursorFactory<'a, CF> {
+impl<CF, T> HashedPostStateCursorFactory<CF, T> {
     /// Create a new factory.
-    pub const fn new(cursor_factory: CF, post_state: &'a HashedPostStateSorted) -> Self {
+    pub const fn new(cursor_factory: CF, post_state: T) -> Self {
         Self { cursor_factory, post_state }
     }
 }
 
-impl<'a, CF: HashedCursorFactory> HashedCursorFactory for HashedPostStateCursorFactory<'a, CF> {
-    type AccountCursor = HashedPostStateAccountCursor<'a, CF::AccountCursor>;
-    type StorageCursor = HashedPostStateStorageCursor<'a, CF::StorageCursor>;
+impl<'overlay, CF, T> HashedCursorFactory for HashedPostStateCursorFactory<CF, &'overlay T>
+where
+    CF: HashedCursorFactory,
+    T: AsRef<HashedPostStateSorted>,
+{
+    type AccountCursor<'cursor>
+        = HashedPostStateAccountCursor<'overlay, CF::AccountCursor<'cursor>>
+    where
+        Self: 'cursor;
+    type StorageCursor<'cursor>
+        = HashedPostStateStorageCursor<'overlay, CF::StorageCursor<'cursor>>
+    where
+        Self: 'cursor;
 
-    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor, DatabaseError> {
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.hashed_account_cursor()?;
-        Ok(HashedPostStateAccountCursor::new(cursor, &self.post_state.accounts))
+        Ok(HashedPostStateAccountCursor::new(cursor, &self.post_state.as_ref().accounts))
     }
 
     fn hashed_storage_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageCursor, DatabaseError> {
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
-        Ok(HashedPostStateStorageCursor::new(cursor, self.post_state.storages.get(&hashed_address)))
+        Ok(HashedPostStateStorageCursor::new(
+            cursor,
+            self.post_state.as_ref().storages.get(&hashed_address),
+        ))
     }
 }
 

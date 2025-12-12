@@ -1,3 +1,25 @@
+//! Persistence state management for background database operations.
+//!
+//! This module manages the state of background tasks that persist cached data
+//! to the database. The persistence system works asynchronously to avoid blocking
+//! block execution while ensuring data durability.
+//!
+//! ## Background Persistence
+//!
+//! The execution engine maintains an in-memory cache of state changes that need
+//! to be persisted to disk. Rather than writing synchronously (which would slow
+//! down block processing), persistence happens in background tasks.
+//!
+//! ## Persistence Actions
+//!
+//! - **Saving Blocks**: Persist newly executed blocks and their state changes
+//! - **Removing Blocks**: Remove invalid blocks during chain reorganizations
+//!
+//! ## Coordination
+//!
+//! The [`PersistenceState`] tracks ongoing persistence operations and coordinates
+//! between the main execution thread and background persistence workers.
+
 use alloy_eips::BlockNumHash;
 use alloy_primitives::B256;
 use std::time::Instant;
@@ -45,6 +67,7 @@ impl PersistenceState {
 
     /// Returns the current persistence action. If there is no persistence task in progress, then
     /// this returns `None`.
+    #[cfg(test)]
     pub(crate) fn current_action(&self) -> Option<&CurrentPersistenceAction> {
         self.rx.as_ref().map(|rx| &rx.2)
     }

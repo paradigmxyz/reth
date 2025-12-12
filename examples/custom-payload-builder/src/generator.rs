@@ -1,6 +1,5 @@
 use crate::job::EmptyBlockPayloadJob;
 use alloy_eips::BlockNumberOrTag;
-use reth::tasks::TaskSpawner;
 use reth_basic_payload_builder::{
     BasicPayloadJobGeneratorConfig, HeaderForPayload, PayloadBuilder, PayloadConfig,
 };
@@ -8,6 +7,7 @@ use reth_ethereum::{
     node::api::{Block, PayloadBuilderAttributes},
     primitives::SealedHeader,
     provider::{BlockReaderIdExt, BlockSource, StateProviderFactory},
+    tasks::TaskSpawner,
 };
 use reth_payload_builder::{PayloadBuilderError, PayloadJobGenerator};
 use std::sync::Arc;

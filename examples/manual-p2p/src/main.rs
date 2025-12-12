@@ -19,8 +19,8 @@ use reth_ethereum::{
     network::{
         config::rng_secret_key,
         eth_wire::{
-            EthMessage, EthStream, HelloMessage, P2PStream, Status, UnauthedEthStream,
-            UnauthedP2PStream,
+            EthMessage, EthStream, HelloMessage, P2PStream, UnauthedEthStream, UnauthedP2PStream,
+            UnifiedStatus,
         },
         EthNetworkPrimitives,
     },
@@ -101,26 +101,30 @@ async fn handshake_p2p(
 }
 
 // Perform a ETH Wire handshake with a peer
-async fn handshake_eth(p2p_stream: AuthedP2PStream) -> eyre::Result<(AuthedEthStream, Status)> {
+async fn handshake_eth(
+    p2p_stream: AuthedP2PStream,
+) -> eyre::Result<(AuthedEthStream, UnifiedStatus)> {
     let fork_filter = MAINNET.fork_filter(Head {
         timestamp: MAINNET.fork(EthereumHardfork::Shanghai).as_timestamp().unwrap(),
         ..Default::default()
     });
 
-    let status = Status::builder()
+    let unified_status = UnifiedStatus::builder()
         .chain(Chain::mainnet())
         .genesis(MAINNET_GENESIS_HASH)
         .forkid(MAINNET.hardfork_fork_id(EthereumHardfork::Shanghai).unwrap())
         .build();
 
-    let status =
-        Status { version: p2p_stream.shared_capabilities().eth()?.version().try_into()?, ..status };
+    let status = UnifiedStatus {
+        version: p2p_stream.shared_capabilities().eth()?.version().try_into()?,
+        ..unified_status
+    };
     let eth_unauthed = UnauthedEthStream::new(p2p_stream);
     Ok(eth_unauthed.handshake(status, fork_filter).await?)
 }
 
 // Snoop by greedily capturing all broadcasts that the peer emits
-// note: this node cannot handle request so will be disconnected by peer when challenged
+// note: this node cannot handle request so it will be disconnected by peer when challenged
 async fn snoop(peer: NodeRecord, mut eth_stream: AuthedEthStream) {
     while let Some(Ok(update)) = eth_stream.next().await {
         match update {

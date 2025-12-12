@@ -9,8 +9,8 @@ use reth_evm::{
     execute::{BlockExecutionOutput, Executor},
     ConfigureEvm,
 };
-use reth_evm_ethereum::{execute::EthExecutorProvider, EthEvmConfig};
-use reth_node_api::FullNodePrimitives;
+use reth_evm_ethereum::EthEvmConfig;
+use reth_node_api::NodePrimitives;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
     providers::ProviderNodeTypes, BlockWriter as _, ExecutionOutcome, LatestStateProviderRef,
@@ -58,7 +58,7 @@ pub(crate) fn execute_block_and_commit_to_database<N>(
 ) -> eyre::Result<BlockExecutionOutput<Receipt>>
 where
     N: ProviderNodeTypes<
-        Primitives: FullNodePrimitives<
+        Primitives: NodePrimitives<
             Block = reth_ethereum_primitives::Block,
             BlockBody = reth_ethereum_primitives::BlockBody,
             Receipt = reth_ethereum_primitives::Receipt,
@@ -68,7 +68,7 @@ where
     let provider = provider_factory.provider()?;
 
     // Execute the block to produce a block execution output
-    let mut block_execution_output = EthExecutorProvider::ethereum(chain_spec)
+    let mut block_execution_output = EthEvmConfig::ethereum(chain_spec)
         .batch_executor(StateProviderDatabase::new(LatestStateProviderRef::new(&provider)))
         .execute(block)?;
     block_execution_output.state.reverts.sort();
@@ -81,7 +81,6 @@ where
     provider_rw.append_blocks_with_state(
         vec![block.clone()],
         &execution_outcome,
-        Default::default(),
         Default::default(),
     )?;
     provider_rw.commit()?;
@@ -170,7 +169,7 @@ pub(crate) fn blocks_and_execution_outputs<N>(
 >
 where
     N: ProviderNodeTypes<
-        Primitives: FullNodePrimitives<
+        Primitives: NodePrimitives<
             Block = reth_ethereum_primitives::Block,
             BlockBody = reth_ethereum_primitives::BlockBody,
             Receipt = reth_ethereum_primitives::Receipt,
@@ -194,7 +193,7 @@ pub(crate) fn blocks_and_execution_outcome<N>(
 ) -> eyre::Result<(Vec<RecoveredBlock<reth_ethereum_primitives::Block>>, ExecutionOutcome)>
 where
     N: ProviderNodeTypes,
-    N::Primitives: FullNodePrimitives<
+    N::Primitives: NodePrimitives<
         Block = reth_ethereum_primitives::Block,
         Receipt = reth_ethereum_primitives::Receipt,
     >,
@@ -215,7 +214,6 @@ where
     provider_rw.append_blocks_with_state(
         vec![block1.clone(), block2.clone()],
         &execution_outcome,
-        Default::default(),
         Default::default(),
     )?;
     provider_rw.commit()?;

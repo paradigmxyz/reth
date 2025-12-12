@@ -1,7 +1,7 @@
 use std::{collections::HashSet, fmt, str::FromStr};
 
 use serde::{Deserialize, Serialize, Serializer};
-use strum::{AsRefStr, EnumIter, IntoStaticStr, ParseError, VariantArray, VariantNames};
+use strum::{ParseError, VariantNames};
 
 /// Describes the modules that should be installed.
 ///
@@ -98,12 +98,17 @@ impl RpcModuleSelection {
         }
     }
 
+    /// Returns true if all modules are selected
+    pub const fn is_all(&self) -> bool {
+        matches!(self, Self::All)
+    }
+
     /// Returns an iterator over all configured [`RethRpcModule`]
     pub fn iter_selection(&self) -> Box<dyn Iterator<Item = RethRpcModule> + '_> {
         match self {
             Self::All => Box::new(RethRpcModule::modules().into_iter()),
-            Self::Standard => Box::new(Self::STANDARD_MODULES.iter().copied()),
-            Self::Selection(s) => Box::new(s.iter().copied()),
+            Self::Standard => Box::new(Self::STANDARD_MODULES.iter().cloned()),
+            Self::Selection(s) => Box::new(s.iter().cloned()),
         }
     }
 
@@ -149,6 +154,64 @@ impl RpcModuleSelection {
             Self::Selection(s) => s.contains(module),
         }
     }
+
+    /// Adds a module to the selection.
+    ///
+    /// If the selection is `All`, this is a no-op.
+    /// Otherwise, converts to a `Selection` and adds the module.
+    pub fn push(&mut self, module: RethRpcModule) {
+        if !self.is_all() {
+            let mut modules = self.to_selection();
+            modules.insert(module);
+            *self = Self::Selection(modules);
+        }
+    }
+
+    /// Returns a new selection with the given module added.
+    ///
+    /// If the selection is `All`, returns `All`.
+    /// Otherwise, converts to a `Selection` and adds the module.
+    pub fn append(self, module: RethRpcModule) -> Self {
+        if self.is_all() {
+            Self::All
+        } else {
+            let mut modules = self.into_selection();
+            modules.insert(module);
+            Self::Selection(modules)
+        }
+    }
+
+    /// Extends the selection with modules from an iterator.
+    ///
+    /// If the selection is `All`, this is a no-op.
+    /// Otherwise, converts to a `Selection` and adds the modules.
+    pub fn extend<I>(&mut self, iter: I)
+    where
+        I: IntoIterator<Item = RethRpcModule>,
+    {
+        if !self.is_all() {
+            let mut modules = self.to_selection();
+            modules.extend(iter);
+            *self = Self::Selection(modules);
+        }
+    }
+
+    /// Returns a new selection with modules from an iterator added.
+    ///
+    /// If the selection is `All`, returns `All`.
+    /// Otherwise, converts to a `Selection` and adds the modules.
+    pub fn extended<I>(self, iter: I) -> Self
+    where
+        I: IntoIterator<Item = RethRpcModule>,
+    {
+        if self.is_all() {
+            Self::All
+        } else {
+            let mut modules = self.into_selection();
+            modules.extend(iter);
+            Self::Selection(modules)
+        }
+    }
 }
 
 impl From<&HashSet<RethRpcModule>> for RpcModuleSelection {
@@ -165,7 +228,7 @@ impl From<HashSet<RethRpcModule>> for RpcModuleSelection {
 
 impl From<&[RethRpcModule]> for RpcModuleSelection {
     fn from(s: &[RethRpcModule]) -> Self {
-        Self::Selection(s.iter().copied().collect())
+        Self::Selection(s.iter().cloned().collect())
     }
 }
 
@@ -177,7 +240,7 @@ impl From<Vec<RethRpcModule>> for RpcModuleSelection {
 
 impl<const N: usize> From<[RethRpcModule; N]> for RpcModuleSelection {
     fn from(s: [RethRpcModule; N]) -> Self {
-        Self::Selection(s.iter().copied().collect())
+        Self::Selection(s.iter().cloned().collect())
     }
 }
 
@@ -186,7 +249,7 @@ impl<'a> FromIterator<&'a RethRpcModule> for RpcModuleSelection {
     where
         I: IntoIterator<Item = &'a RethRpcModule>,
     {
-        iter.into_iter().copied().collect()
+        iter.into_iter().cloned().collect()
     }
 }
 
@@ -230,20 +293,7 @@ impl fmt::Display for RpcModuleSelection {
 }
 
 /// Represents RPC modules that are supported by reth
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    Eq,
-    PartialEq,
-    Hash,
-    AsRefStr,
-    IntoStaticStr,
-    VariantNames,
-    VariantArray,
-    EnumIter,
-    Deserialize,
-)]
+#[derive(Debug, Clone, Eq, PartialEq, Hash, VariantNames, Deserialize)]
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "kebab-case")]
 pub enum RethRpcModule {
@@ -273,36 +323,90 @@ pub enum RethRpcModule {
     Miner,
     /// `mev_` module
     Mev,
+    /// Custom RPC module not part of the standard set
+    #[strum(default)]
+    #[serde(untagged)]
+    Other(String),
 }
 
 // === impl RethRpcModule ===
 
 impl RethRpcModule {
-    /// Returns the number of variants in the enum
+    /// All standard variants (excludes Other)
+    const STANDARD_VARIANTS: &'static [Self] = &[
+        Self::Admin,
+        Self::Debug,
+        Self::Eth,
+        Self::Net,
+        Self::Trace,
+        Self::Txpool,
+        Self::Web3,
+        Self::Rpc,
+        Self::Reth,
+        Self::Ots,
+        Self::Flashbots,
+        Self::Miner,
+        Self::Mev,
+    ];
+
+    /// Returns the number of standard variants (excludes Other)
     pub const fn variant_count() -> usize {
-        <Self as VariantArray>::VARIANTS.len()
+        Self::STANDARD_VARIANTS.len()
     }
 
-    /// Returns all variant names of the enum
+    /// Returns all variant names including Other (for parsing)
     pub const fn all_variant_names() -> &'static [&'static str] {
         <Self as VariantNames>::VARIANTS
     }
 
-    /// Returns all variants of the enum
-    pub const fn all_variants() -> &'static [Self] {
-        <Self as VariantArray>::VARIANTS
+    /// Returns standard variant names (excludes "other") for CLI display
+    pub fn standard_variant_names() -> impl Iterator<Item = &'static str> {
+        <Self as VariantNames>::VARIANTS.iter().copied().filter(|&name| name != "other")
     }
 
-    /// Returns all variants of the enum
-    pub fn modules() -> impl IntoIterator<Item = Self> {
-        use strum::IntoEnumIterator;
-        Self::iter()
+    /// Returns all standard variants (excludes Other)
+    pub const fn all_variants() -> &'static [Self] {
+        Self::STANDARD_VARIANTS
+    }
+
+    /// Returns iterator over standard modules only
+    pub fn modules() -> impl IntoIterator<Item = Self> + Clone {
+        Self::STANDARD_VARIANTS.iter().cloned()
     }
 
     /// Returns the string representation of the module.
-    #[inline]
-    pub fn as_str(&self) -> &'static str {
-        self.into()
+    pub fn as_str(&self) -> &str {
+        match self {
+            Self::Other(s) => s.as_str(),
+            _ => self.as_ref(), // Uses AsRefStr trait
+        }
+    }
+
+    /// Returns true if this is an `Other` variant.
+    pub const fn is_other(&self) -> bool {
+        matches!(self, Self::Other(_))
+    }
+}
+
+impl AsRef<str> for RethRpcModule {
+    fn as_ref(&self) -> &str {
+        match self {
+            Self::Other(s) => s.as_str(),
+            // For standard variants, use the derive-generated static strings
+            Self::Admin => "admin",
+            Self::Debug => "debug",
+            Self::Eth => "eth",
+            Self::Net => "net",
+            Self::Trace => "trace",
+            Self::Txpool => "txpool",
+            Self::Web3 => "web3",
+            Self::Rpc => "rpc",
+            Self::Reth => "reth",
+            Self::Ots => "ots",
+            Self::Flashbots => "flashbots",
+            Self::Miner => "miner",
+            Self::Mev => "mev",
+        }
     }
 }
 
@@ -324,7 +428,8 @@ impl FromStr for RethRpcModule {
             "flashbots" => Self::Flashbots,
             "miner" => Self::Miner,
             "mev" => Self::Mev,
-            _ => return Err(ParseError::VariantNotFound),
+            // Any unknown module becomes Other
+            other => Self::Other(other.to_string()),
         })
     }
 }
@@ -347,7 +452,81 @@ impl Serialize for RethRpcModule {
     where
         S: Serializer,
     {
-        s.serialize_str(self.as_ref())
+        s.serialize_str(self.as_str())
+    }
+}
+
+/// Trait for validating RPC module selections.
+///
+/// This allows customizing how RPC module names are validated when parsing
+/// CLI arguments or configuration.
+pub trait RpcModuleValidator: Clone + Send + Sync + 'static {
+    /// Parse and validate an RPC module selection string.
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String>;
+
+    /// Validates RPC module selection that was already parsed.
+    ///
+    /// This is used to validate modules that were parsed as `Other` variants
+    /// to ensure they meet the validation rules of the specific implementation.
+    fn validate_selection(modules: &RpcModuleSelection, arg_name: &str) -> Result<(), String> {
+        // Re-validate the modules using the parser's validator
+        // This is necessary because the clap value parser accepts any input
+        // and we need to validate according to the specific parser's rules
+        let RpcModuleSelection::Selection(module_set) = modules else {
+            // All or Standard variants are always valid
+            return Ok(());
+        };
+
+        for module in module_set {
+            let RethRpcModule::Other(name) = module else {
+                // Standard modules are always valid
+                continue;
+            };
+
+            // Try to parse and validate using the configured validator
+            // This will check for typos and other validation rules
+            Self::parse_selection(name)
+                .map_err(|e| format!("Invalid RPC module '{name}' in {arg_name}: {e}"))?;
+        }
+
+        Ok(())
+    }
+}
+
+/// Default validator that rejects unknown module names.
+///
+/// This validator only accepts known RPC module names.
+#[derive(Debug, Clone, Copy)]
+pub struct DefaultRpcModuleValidator;
+
+impl RpcModuleValidator for DefaultRpcModuleValidator {
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String> {
+        // First try standard parsing
+        let selection = RpcModuleSelection::from_str(s)
+            .map_err(|e| format!("Failed to parse RPC modules: {}", e))?;
+
+        // Validate each module in the selection
+        if let RpcModuleSelection::Selection(modules) = &selection {
+            for module in modules {
+                if let RethRpcModule::Other(name) = module {
+                    return Err(format!("Unknown RPC module: '{}'", name));
+                }
+            }
+        }
+
+        Ok(selection)
+    }
+}
+
+/// Lenient validator that accepts any module name without validation.
+///
+/// This validator accepts any module name, including unknown ones.
+#[derive(Debug, Clone, Copy)]
+pub struct LenientRpcModuleValidator;
+
+impl RpcModuleValidator for LenientRpcModuleValidator {
+    fn parse_selection(s: &str) -> Result<RpcModuleSelection, String> {
+        RpcModuleSelection::from_str(s).map_err(|e| format!("Failed to parse RPC modules: {}", e))
     }
 }
 
@@ -515,6 +694,52 @@ mod test {
     }
 
     #[test]
+    fn test_rpc_module_selection_append() {
+        // Test append on Standard selection
+        let selection = RpcModuleSelection::Standard;
+        let new_selection = selection.append(RethRpcModule::Admin);
+        assert!(new_selection.contains(&RethRpcModule::Eth));
+        assert!(new_selection.contains(&RethRpcModule::Net));
+        assert!(new_selection.contains(&RethRpcModule::Web3));
+        assert!(new_selection.contains(&RethRpcModule::Admin));
+
+        // Test append on empty Selection
+        let selection = RpcModuleSelection::Selection(HashSet::new());
+        let new_selection = selection.append(RethRpcModule::Eth);
+        assert!(new_selection.contains(&RethRpcModule::Eth));
+        assert_eq!(new_selection.len(), 1);
+
+        // Test append on All (should return All)
+        let selection = RpcModuleSelection::All;
+        let new_selection = selection.append(RethRpcModule::Eth);
+        assert_eq!(new_selection, RpcModuleSelection::All);
+    }
+
+    #[test]
+    fn test_rpc_module_selection_extend() {
+        // Test extend on Standard selection
+        let mut selection = RpcModuleSelection::Standard;
+        selection.extend(vec![RethRpcModule::Admin, RethRpcModule::Debug]);
+        assert!(selection.contains(&RethRpcModule::Eth));
+        assert!(selection.contains(&RethRpcModule::Net));
+        assert!(selection.contains(&RethRpcModule::Web3));
+        assert!(selection.contains(&RethRpcModule::Admin));
+        assert!(selection.contains(&RethRpcModule::Debug));
+
+        // Test extend on empty Selection
+        let mut selection = RpcModuleSelection::Selection(HashSet::new());
+        selection.extend(vec![RethRpcModule::Eth, RethRpcModule::Admin]);
+        assert!(selection.contains(&RethRpcModule::Eth));
+        assert!(selection.contains(&RethRpcModule::Admin));
+        assert_eq!(selection.len(), 2);
+
+        // Test extend on All (should be no-op)
+        let mut selection = RpcModuleSelection::All;
+        selection.extend(vec![RethRpcModule::Eth, RethRpcModule::Admin]);
+        assert_eq!(selection, RpcModuleSelection::All);
+    }
+
+    #[test]
     fn test_rpc_module_selection_from_str() {
         // Test empty string returns default selection
         let result = RpcModuleSelection::from_str("");
@@ -559,10 +784,12 @@ mod test {
         assert!(result.is_ok());
         assert_eq!(result.unwrap(), expected_selection);
 
-        // Test invalid selection should return error
+        // Test custom module selections now work (no longer return errors)
         let result = RpcModuleSelection::from_str("invalid,unknown");
-        assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), ParseError::VariantNotFound);
+        assert!(result.is_ok());
+        let selection = result.unwrap();
+        assert!(selection.contains(&RethRpcModule::Other("invalid".to_string())));
+        assert!(selection.contains(&RethRpcModule::Other("unknown".to_string())));
 
         // Test single valid selection: "eth"
         let result = RpcModuleSelection::from_str("eth");
@@ -570,9 +797,160 @@ mod test {
         let expected_selection = RpcModuleSelection::from([RethRpcModule::Eth]);
         assert_eq!(result.unwrap(), expected_selection);
 
-        // Test single invalid selection: "unknown"
+        // Test single custom module selection: "unknown" now becomes Other
         let result = RpcModuleSelection::from_str("unknown");
+        assert!(result.is_ok());
+        let expected_selection =
+            RpcModuleSelection::from([RethRpcModule::Other("unknown".to_string())]);
+        assert_eq!(result.unwrap(), expected_selection);
+    }
+
+    #[test]
+    fn test_rpc_module_other_variant() {
+        // Test parsing custom module
+        let custom_module = RethRpcModule::from_str("myCustomModule").unwrap();
+        assert_eq!(custom_module, RethRpcModule::Other("myCustomModule".to_string()));
+
+        // Test as_str for Other variant
+        assert_eq!(custom_module.as_str(), "myCustomModule");
+
+        // Test as_ref for Other variant
+        assert_eq!(custom_module.as_ref(), "myCustomModule");
+
+        // Test Display impl
+        assert_eq!(custom_module.to_string(), "myCustomModule");
+    }
+
+    #[test]
+    fn test_rpc_module_selection_with_mixed_modules() {
+        // Test selection with both standard and custom modules
+        let result = RpcModuleSelection::from_str("eth,admin,myCustomModule,anotherCustom");
+        assert!(result.is_ok());
+
+        let selection = result.unwrap();
+        assert!(selection.contains(&RethRpcModule::Eth));
+        assert!(selection.contains(&RethRpcModule::Admin));
+        assert!(selection.contains(&RethRpcModule::Other("myCustomModule".to_string())));
+        assert!(selection.contains(&RethRpcModule::Other("anotherCustom".to_string())));
+    }
+
+    #[test]
+    fn test_rpc_module_all_excludes_custom() {
+        // Test that All selection doesn't include custom modules
+        let all_selection = RpcModuleSelection::All;
+
+        // All should contain standard modules
+        assert!(all_selection.contains(&RethRpcModule::Eth));
+        assert!(all_selection.contains(&RethRpcModule::Admin));
+
+        // But All doesn't explicitly contain custom modules
+        // (though contains() returns true for all modules when selection is All)
+        assert_eq!(all_selection.len(), RethRpcModule::variant_count());
+    }
+
+    #[test]
+    fn test_rpc_module_equality_with_other() {
+        let other1 = RethRpcModule::Other("custom".to_string());
+        let other2 = RethRpcModule::Other("custom".to_string());
+        let other3 = RethRpcModule::Other("different".to_string());
+
+        assert_eq!(other1, other2);
+        assert_ne!(other1, other3);
+        assert_ne!(other1, RethRpcModule::Eth);
+    }
+
+    #[test]
+    fn test_rpc_module_is_other() {
+        // Standard modules should return false
+        assert!(!RethRpcModule::Eth.is_other());
+        assert!(!RethRpcModule::Admin.is_other());
+        assert!(!RethRpcModule::Debug.is_other());
+
+        // Other variants should return true
+        assert!(RethRpcModule::Other("custom".to_string()).is_other());
+        assert!(RethRpcModule::Other("mycustomrpc".to_string()).is_other());
+    }
+
+    #[test]
+    fn test_standard_variant_names_excludes_other() {
+        let standard_names: Vec<_> = RethRpcModule::standard_variant_names().collect();
+
+        // Verify "other" is not in the list
+        assert!(!standard_names.contains(&"other"));
+
+        // Should have exactly as many names as STANDARD_VARIANTS
+        assert_eq!(standard_names.len(), RethRpcModule::STANDARD_VARIANTS.len());
+
+        // Verify all standard variants have their names in the list
+        for variant in RethRpcModule::STANDARD_VARIANTS {
+            assert!(standard_names.contains(&variant.as_ref()));
+        }
+    }
+
+    #[test]
+    fn test_default_validator_accepts_standard_modules() {
+        // Should accept standard modules
+        let result = DefaultRpcModuleValidator::parse_selection("eth,admin,debug");
+        assert!(result.is_ok());
+
+        let selection = result.unwrap();
+        assert!(matches!(selection, RpcModuleSelection::Selection(_)));
+    }
+
+    #[test]
+    fn test_default_validator_rejects_unknown_modules() {
+        // Should reject unknown module names
+        let result = DefaultRpcModuleValidator::parse_selection("eth,mycustom");
         assert!(result.is_err());
-        assert_eq!(result.unwrap_err(), ParseError::VariantNotFound);
+        assert!(result.unwrap_err().contains("Unknown RPC module: 'mycustom'"));
+
+        let result = DefaultRpcModuleValidator::parse_selection("unknownmodule");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown RPC module: 'unknownmodule'"));
+
+        let result = DefaultRpcModuleValidator::parse_selection("eth,admin,xyz123");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown RPC module: 'xyz123'"));
+    }
+
+    #[test]
+    fn test_default_validator_all_selection() {
+        // Should accept "all" selection
+        let result = DefaultRpcModuleValidator::parse_selection("all");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), RpcModuleSelection::All);
+    }
+
+    #[test]
+    fn test_default_validator_none_selection() {
+        // Should accept "none" selection
+        let result = DefaultRpcModuleValidator::parse_selection("none");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), RpcModuleSelection::Selection(Default::default()));
+    }
+
+    #[test]
+    fn test_lenient_validator_accepts_unknown_modules() {
+        // Lenient validator should accept any module name without validation
+        let result = LenientRpcModuleValidator::parse_selection("eht,adimn,xyz123,customrpc");
+        assert!(result.is_ok());
+
+        let selection = result.unwrap();
+        if let RpcModuleSelection::Selection(modules) = selection {
+            assert!(modules.contains(&RethRpcModule::Other("eht".to_string())));
+            assert!(modules.contains(&RethRpcModule::Other("adimn".to_string())));
+            assert!(modules.contains(&RethRpcModule::Other("xyz123".to_string())));
+            assert!(modules.contains(&RethRpcModule::Other("customrpc".to_string())));
+        } else {
+            panic!("Expected Selection variant");
+        }
+    }
+
+    #[test]
+    fn test_default_validator_mixed_standard_and_custom() {
+        // Should reject mix of standard and custom modules
+        let result = DefaultRpcModuleValidator::parse_selection("eth,admin,mycustom,debug");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("Unknown RPC module: 'mycustom'"));
     }
 }

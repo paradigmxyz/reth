@@ -21,7 +21,7 @@ pub trait DatabaseTrieWitness<'a, TX> {
 }
 
 impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
-    for TrieWitness<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
+    for TrieWitness<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
         Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
@@ -44,6 +44,7 @@ impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
                 &state_sorted,
             ))
             .with_prefix_sets_mut(input.prefix_sets)
+            .always_include_root_node()
             .compute(target)
     }
 }

@@ -34,7 +34,7 @@ Why? This is a win for everyone. RPC providers meet more impressive SLAs, MEV se
 
 The biggest bottleneck in this pipeline is not the execution of the EVM interpreter itself, but rather in accessing state and managing I/O. As such, we think the largest optimizations to be made are closest to the DB layer.
 
-Ideally, we can achieve such fast runtime operation that we can avoid storing certain things (e.g.?) on the disk, and are able to generate them on the fly, instead - minimizing disk footprint.
+Ideally, we can achieve such fast runtime operation that we can avoid storing certain things (e.g., transaction receipts) on the disk, and are able to generate them on the fly, instead - minimizing disk footprint.
 
 ---
 
@@ -44,7 +44,7 @@ Ideally, we can achieve such fast runtime operation that we can avoid storing ce
 
 **Control over tradeoffs**
 
-Almost any given design choice or optimization to the client comes with its own tradeoffs. As such, our long-term goal is not to make opinionated decisions on behalf of everyone, as some users will be negatively impacted and turned away from what could be a great client.
+Almost any given design choice or optimization for the client comes with its own tradeoffs. As such, our long-term goal is not to make opinionated decisions on behalf of everyone, as some users will be negatively impacted and turned away from what could be a great client.
 
 **Profiles**
 

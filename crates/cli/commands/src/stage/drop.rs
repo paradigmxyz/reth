@@ -15,9 +15,7 @@ use reth_db_common::{
 };
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
-use reth_provider::{
-    writer::UnifiedStorageWriter, DatabaseProviderFactory, StaticFileProviderFactory,
-};
+use reth_provider::{DBProvider, DatabaseProviderFactory, StaticFileProviderFactory, TrieWriter};
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
 use reth_static_file_types::StaticFileSegment;
@@ -72,7 +70,6 @@ impl<C: ChainSpecParser> Command<C> {
             StageEnum::Headers => {
                 tx.clear::<tables::CanonicalHeaders>()?;
                 tx.clear::<tables::Headers<HeaderTy<N>>>()?;
-                tx.clear::<tables::HeaderTerminalDifficulties>()?;
                 tx.clear::<tables::HeaderNumbers>()?;
                 reset_stage_checkpoint(tx, StageId::Headers)?;
 
@@ -81,7 +78,6 @@ impl<C: ChainSpecParser> Command<C> {
             StageEnum::Bodies => {
                 tx.clear::<tables::BlockBodyIndices>()?;
                 tx.clear::<tables::Transactions<TxTy<N>>>()?;
-                reset_prune_checkpoint(tx, PruneSegment::Transactions)?;
 
                 tx.clear::<tables::TransactionBlocks>()?;
                 tx.clear::<tables::BlockOmmers<HeaderTy<N>>>()?;
@@ -140,6 +136,10 @@ impl<C: ChainSpecParser> Command<C> {
                     None,
                 )?;
             }
+            StageEnum::MerkleChangeSets => {
+                provider_rw.clear_trie_changesets()?;
+                reset_stage_checkpoint(tx, StageId::MerkleChangeSets)?;
+            }
             StageEnum::AccountHistory | StageEnum::StorageHistory => {
                 tx.clear::<tables::AccountsHistory>()?;
                 tx.clear::<tables::StoragesHistory>()?;
@@ -160,7 +160,7 @@ impl<C: ChainSpecParser> Command<C> {
 
         tx.put::<tables::StageCheckpoints>(StageId::Finish.to_string(), Default::default())?;
 
-        UnifiedStorageWriter::commit_unwind(provider_rw)?;
+        provider_rw.commit()?;
 
         Ok(())
     }

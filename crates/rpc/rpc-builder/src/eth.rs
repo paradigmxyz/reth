@@ -21,14 +21,14 @@ where
     /// Returns a new instance with the additional handlers for the `eth` namespace.
     ///
     /// This will spawn all necessary tasks for the additional handlers.
-    pub fn bootstrap<Tasks>(config: EthConfig, executor: Tasks, eth_api: EthApi) -> Self
-    where
-        Tasks: TaskSpawner + Clone + 'static,
-    {
-        let filter =
-            EthFilter::new(eth_api.clone(), config.filter_config(), Box::new(executor.clone()));
+    pub fn bootstrap(
+        config: EthConfig,
+        executor: Box<dyn TaskSpawner + 'static>,
+        eth_api: EthApi,
+    ) -> Self {
+        let filter = EthFilter::new(eth_api.clone(), config.filter_config(), executor.clone());
 
-        let pubsub = EthPubSub::with_spawner(eth_api.clone(), Box::new(executor));
+        let pubsub = EthPubSub::with_spawner(eth_api.clone(), executor);
 
         Self { api: eth_api, filter, pubsub }
     }

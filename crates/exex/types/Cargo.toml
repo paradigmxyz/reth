@@ -42,6 +42,7 @@ serde = [
     "rand/serde",
     "reth-primitives-traits/serde",
     "reth-ethereum-primitives/serde",
+    "reth-chain-state/serde",
 ]
 serde-bincode-compat = [
     "reth-execution-types/serde-bincode-compat",

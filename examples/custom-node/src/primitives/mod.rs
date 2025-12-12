@@ -22,6 +22,6 @@ impl NodePrimitives for CustomNodePrimitives {
     type Block = Block;
     type BlockHeader = CustomHeader;
     type BlockBody = BlockBody;
-    type SignedTx = ExtendedOpTxEnvelope<CustomTransactionEnvelope>;
+    type SignedTx = CustomTransaction;
     type Receipt = OpReceipt;
 }

@@ -44,7 +44,7 @@ impl UpgradeStatus {
 }
 
 /// The extension to define whether to enable or disable the flag.
-/// This flag currently is ignored, and will be supported later.
+/// This flag is currently ignored, and will be supported later.
 #[derive(Debug, Clone, PartialEq, Eq, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct UpgradeStatusExtension {

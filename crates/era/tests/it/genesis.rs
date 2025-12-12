@@ -3,13 +3,12 @@
 //! These tests verify proper decompression and decoding of genesis blocks
 //! from different networks.
 
-use alloy_consensus::{BlockBody, Header};
-use reth_era::execution_types::CompressedBody;
-use reth_ethereum_primitives::TransactionSigned;
-
 use crate::{
     Era1TestDownloader, ERA1_MAINNET_FILES_NAMES, ERA1_SEPOLIA_FILES_NAMES, MAINNET, SEPOLIA,
 };
+use alloy_consensus::{BlockBody, Header};
+use reth_era::{e2s_types::IndexEntry, execution_types::CompressedBody};
+use reth_ethereum_primitives::TransactionSigned;
 
 #[tokio::test(flavor = "multi_thread")]
 #[ignore = "download intensive"]
@@ -23,7 +22,7 @@ async fn test_mainnet_genesis_block_decompression() -> eyre::Result<()> {
 
     for &block_idx in &test_blocks {
         let block = &file.group.blocks[block_idx];
-        let block_number = file.group.block_index.starting_number + block_idx as u64;
+        let block_number = file.group.block_index.starting_number() + block_idx as u64;
 
         println!(
             "Testing block {}, compressed body size: {} bytes",
@@ -75,7 +74,7 @@ async fn test_sepolia_genesis_block_decompression() -> eyre::Result<()> {
 
     for &block_idx in &test_blocks {
         let block = &file.group.blocks[block_idx];
-        let block_number = file.group.block_index.starting_number + block_idx as u64;
+        let block_number = file.group.block_index.starting_number() + block_idx as u64;
 
         println!(
             "Testing block {}, compressed body size: {} bytes",

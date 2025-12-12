@@ -8,18 +8,16 @@ use std::sync::Arc;
 use alloy_genesis::Genesis;
 use alloy_primitives::{b256, hex};
 use futures_util::StreamExt;
-use reth::{
-    builder::{NodeBuilder, NodeHandle},
-    tasks::TaskManager,
-};
 use reth_ethereum::{
     chainspec::ChainSpec,
     node::{
+        builder::{NodeBuilder, NodeHandle},
         core::{args::RpcServerArgs, node_config::NodeConfig},
         EthereumNode,
     },
     provider::CanonStateSubscriptions,
     rpc::api::eth::helpers::EthTransactions,
+    tasks::TaskManager,
 };
 
 #[tokio::main]
@@ -35,7 +33,7 @@ async fn main() -> eyre::Result<()> {
     let NodeHandle { node, node_exit_future: _ } = NodeBuilder::new(node_config)
         .testing_node(tasks.executor())
         .node(EthereumNode::default())
-        .launch()
+        .launch_with_debug_capabilities()
         .await?;
 
     let mut notifications = node.provider.canonical_state_stream();

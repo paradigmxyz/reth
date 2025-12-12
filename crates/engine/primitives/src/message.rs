@@ -1,6 +1,5 @@
 use crate::{
-    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, EngineApiMessageVersion,
-    ExecutionPayload, ForkchoiceStatus,
+    error::BeaconForkChoiceUpdateError, BeaconOnNewPayloadError, ExecutionPayload, ForkchoiceStatus,
 };
 use alloy_rpc_types_engine::{
     ForkChoiceUpdateResult, ForkchoiceState, ForkchoiceUpdateError, ForkchoiceUpdated, PayloadId,
@@ -15,8 +14,12 @@ use core::{
 use futures::{future::Either, FutureExt, TryFutureExt};
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::PayloadTypes;
+use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
+
+/// Type alias for backwards compat
+#[deprecated(note = "Use ConsensusEngineHandle instead")]
+pub type BeaconConsensusEngineHandle<Payload> = ConsensusEngineHandle<Payload>;
 
 /// Represents the outcome of forkchoice update.
 ///
@@ -192,14 +195,14 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
 ///
 /// This type mirrors consensus related functions of the engine API.
 #[derive(Debug, Clone)]
-pub struct BeaconConsensusEngineHandle<Payload>
+pub struct ConsensusEngineHandle<Payload>
 where
     Payload: PayloadTypes,
 {
     to_engine: UnboundedSender<BeaconEngineMessage<Payload>>,
 }
 
-impl<Payload> BeaconConsensusEngineHandle<Payload>
+impl<Payload> ConsensusEngineHandle<Payload>
 where
     Payload: PayloadTypes,
 {

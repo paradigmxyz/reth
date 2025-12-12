@@ -51,7 +51,6 @@ reth-tracing.workspace = true
 alloy-consensus.workspace = true
 test-fuzz.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread"] }
-tokio-util = { workspace = true, features = ["io", "codec"] }
 rand.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
 rand_08.workspace = true

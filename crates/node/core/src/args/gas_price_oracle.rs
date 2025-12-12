@@ -3,7 +3,7 @@ use clap::Args;
 use reth_rpc_eth_types::GasPriceOracleConfig;
 use reth_rpc_server_types::constants::gas_oracle::{
     DEFAULT_GAS_PRICE_BLOCKS, DEFAULT_GAS_PRICE_PERCENTILE, DEFAULT_IGNORE_GAS_PRICE,
-    DEFAULT_MAX_GAS_PRICE, DEFAULT_MIN_SUGGESTED_PRIORITY_FEE,
+    DEFAULT_MAX_GAS_PRICE,
 };
 
 /// Parameters to configure Gas Price Oracle
@@ -25,22 +25,22 @@ pub struct GasPriceOracleArgs {
     /// The percentile of gas prices to use for the estimate
     #[arg(long = "gpo.percentile", default_value_t = DEFAULT_GAS_PRICE_PERCENTILE)]
     pub percentile: u32,
-
-    /// Minimum transaction priority fee to suggest. Used on OP chains when blocks are not full.
-    #[arg(long = "gpo.minsuggestedpriorityfee", default_value_t = DEFAULT_MIN_SUGGESTED_PRIORITY_FEE.to())]
-    pub min_suggested_priority_fee: u64,
+    
+    /// The default gas price to use if there are no blocks to use
+    #[arg(long = "gpo.default-suggested-fee")]
+    pub default_suggested_fee: Option<U256>,
 }
 
 impl GasPriceOracleArgs {
     /// Returns a [`GasPriceOracleConfig`] from the arguments.
     pub fn gas_price_oracle_config(&self) -> GasPriceOracleConfig {
-        let Self { blocks, ignore_price, max_price, percentile, min_suggested_priority_fee } = self;
+        let Self { blocks, ignore_price, max_price, percentile, default_suggested_fee } = self;
         GasPriceOracleConfig {
             max_price: Some(U256::from(*max_price)),
             ignore_price: Some(U256::from(*ignore_price)),
             percentile: *percentile,
             blocks: *blocks,
-            min_suggested_priority_fee: Some(U256::from(*min_suggested_priority_fee)),
+            default_suggested_fee: *default_suggested_fee,
             ..Default::default()
         }
     }
@@ -53,7 +53,7 @@ impl Default for GasPriceOracleArgs {
             ignore_price: DEFAULT_IGNORE_GAS_PRICE.to(),
             max_price: DEFAULT_MAX_GAS_PRICE.to(),
             percentile: DEFAULT_GAS_PRICE_PERCENTILE,
-            min_suggested_priority_fee: DEFAULT_MIN_SUGGESTED_PRIORITY_FEE.to(),
+            default_suggested_fee: None,
         }
     }
 }
@@ -79,7 +79,7 @@ mod tests {
                 ignore_price: DEFAULT_IGNORE_GAS_PRICE.to(),
                 max_price: DEFAULT_MAX_GAS_PRICE.to(),
                 percentile: DEFAULT_GAS_PRICE_PERCENTILE,
-                min_suggested_priority_fee: DEFAULT_MIN_SUGGESTED_PRIORITY_FEE.to(),
+                default_suggested_fee: None,
             }
         );
     }

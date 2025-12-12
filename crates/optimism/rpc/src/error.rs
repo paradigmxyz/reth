@@ -1,15 +1,17 @@
 //! RPC errors specific to OP.
 
+use alloy_json_rpc::ErrorPayload;
 use alloy_rpc_types_eth::{error::EthRpcErrorCode, BlockError};
 use alloy_transport::{RpcError, TransportErrorKind};
 use jsonrpsee_types::error::{INTERNAL_ERROR_CODE, INVALID_PARAMS_CODE};
 use op_revm::{OpHaltReason, OpTransactionError};
+use reth_evm::execute::ProviderError;
 use reth_optimism_evm::OpBlockExecutionError;
-use reth_rpc_eth_api::AsEthApiError;
+use reth_rpc_eth_api::{AsEthApiError, EthTxEnvError, TransactionConversionError};
 use reth_rpc_eth_types::{error::api::FromEvmHalt, EthApiError};
 use reth_rpc_server_types::result::{internal_rpc_err, rpc_err};
 use revm::context_interface::result::{EVMError, InvalidTransaction};
-use std::fmt::Display;
+use std::{convert::Infallible, fmt::Display};
 
 /// Optimism specific errors, that extend [`EthApiError`].
 #[derive(Debug, thiserror::Error)]
@@ -65,6 +67,9 @@ pub enum OpInvalidTransactionError {
     /// A deposit transaction halted post-regolith
     #[error("deposit transaction halted after regolith")]
     HaltedDepositPostRegolith,
+    /// The encoded transaction was missing during evm execution.
+    #[error("missing enveloped transaction bytes")]
+    MissingEnvelopedTx,
     /// Transaction conditional errors.
     #[error(transparent)]
     TxConditionalErr(#[from] TxConditionalErr),
@@ -74,7 +79,8 @@ impl From<OpInvalidTransactionError> for jsonrpsee_types::error::ErrorObject<'st
     fn from(err: OpInvalidTransactionError) -> Self {
         match err {
             OpInvalidTransactionError::DepositSystemTxPostRegolith |
-            OpInvalidTransactionError::HaltedDepositPostRegolith => {
+            OpInvalidTransactionError::HaltedDepositPostRegolith |
+            OpInvalidTransactionError::MissingEnvelopedTx => {
                 rpc_err(EthRpcErrorCode::TransactionRejected.code(), err.to_string(), None)
             }
             OpInvalidTransactionError::TxConditionalErr(_) => err.into(),
@@ -91,6 +97,7 @@ impl TryFrom<OpTransactionError> for OpInvalidTransactionError {
                 Ok(Self::DepositSystemTxPostRegolith)
             }
             OpTransactionError::HaltedDepositPostRegolith => Ok(Self::HaltedDepositPostRegolith),
+            OpTransactionError::MissingEnvelopedTx => Ok(Self::MissingEnvelopedTx),
             OpTransactionError::Base(err) => Err(err),
             OpTransactionError::BvmEth(_) => todo!(),
         }
@@ -141,24 +148,22 @@ pub enum SequencerClientError {
     /// Wrapper around an [`RpcError<TransportErrorKind>`].
     #[error(transparent)]
     HttpError(#[from] RpcError<TransportErrorKind>),
-    /// Thrown when serializing transaction to forward to sequencer
-    #[error("invalid sequencer transaction")]
-    InvalidSequencerTransaction,
 }
 
 impl From<SequencerClientError> for jsonrpsee_types::error::ErrorObject<'static> {
     fn from(err: SequencerClientError) -> Self {
-        jsonrpsee_types::error::ErrorObject::owned(
-            INTERNAL_ERROR_CODE,
-            err.to_string(),
-            None::<String>,
-        )
-    }
-}
-
-impl From<BlockError> for OpEthApiError {
-    fn from(error: BlockError) -> Self {
-        Self::Eth(error.into())
+        match err {
+            SequencerClientError::HttpError(RpcError::ErrorResp(ErrorPayload {
+                code,
+                message,
+                data,
+            })) => jsonrpsee_types::error::ErrorObject::owned(code as i32, message, data),
+            err => jsonrpsee_types::error::ErrorObject::owned(
+                INTERNAL_ERROR_CODE,
+                err.to_string(),
+                None::<String>,
+            ),
+        }
     }
 }
 
@@ -187,5 +192,35 @@ impl FromEvmHalt<OpHaltReason> for OpEthApiError {
             }
             OpHaltReason::Base(halt) => EthApiError::from_evm_halt(halt, gas_limit).into(),
         }
+    }
+}
+
+impl From<TransactionConversionError> for OpEthApiError {
+    fn from(value: TransactionConversionError) -> Self {
+        Self::Eth(EthApiError::from(value))
+    }
+}
+
+impl From<EthTxEnvError> for OpEthApiError {
+    fn from(value: EthTxEnvError) -> Self {
+        Self::Eth(EthApiError::from(value))
+    }
+}
+
+impl From<ProviderError> for OpEthApiError {
+    fn from(value: ProviderError) -> Self {
+        Self::Eth(EthApiError::from(value))
+    }
+}
+
+impl From<BlockError> for OpEthApiError {
+    fn from(value: BlockError) -> Self {
+        Self::Eth(EthApiError::from(value))
+    }
+}
+
+impl From<Infallible> for OpEthApiError {
+    fn from(value: Infallible) -> Self {
+        match value {}
     }
 }

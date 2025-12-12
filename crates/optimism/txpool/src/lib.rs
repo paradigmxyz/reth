@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod validator;
 pub use validator::{OpL1BlockInfo, OpTransactionValidator};
@@ -19,6 +19,7 @@ mod error;
 pub mod interop;
 pub mod maintain;
 pub use error::InvalidCrossTx;
+pub mod estimated_da_size;
 
 use reth_transaction_pool::{CoinbaseTipOrdering, Pool, TransactionValidationTaskExecutor};
 

@@ -53,8 +53,8 @@ pub enum NetworkError {
         error: io::Error,
     },
     /// IO error when creating the discovery service
-    #[error("failed to launch discovery service: {0}")]
-    Discovery(io::Error),
+    #[error("failed to launch discovery service on {0}: {1}")]
+    Discovery(SocketAddr, io::Error),
     /// An error occurred with discovery v5 node.
     #[error("discv5 error, {0}")]
     Discv5Error(#[from] reth_discv5::Error),
@@ -71,8 +71,8 @@ impl NetworkError {
         match err.kind() {
             ErrorKind::AddrInUse => Self::AddressAlreadyInUse { kind, error: err },
             _ => {
-                if let ServiceKind::Discovery(_) = kind {
-                    return Self::Discovery(err)
+                if let ServiceKind::Discovery(address) = kind {
+                    return Self::Discovery(address, err)
                 }
                 Self::Io(err)
             }

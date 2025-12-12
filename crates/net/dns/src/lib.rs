@@ -11,7 +11,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub use crate::resolver::{DnsResolver, MapResolver, Resolver};
 use crate::{

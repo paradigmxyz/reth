@@ -7,7 +7,7 @@ LABEL org.opencontainers.image.source=https://github.com/paradigmxyz/reth
 LABEL org.opencontainers.image.licenses="MIT OR Apache-2.0"
 
 # Install system dependencies
-RUN apt-get update && apt-get -y upgrade && apt-get install -y libclang-dev pkg-config
+RUN apt-get update && apt-get install -y libclang-dev pkg-config
 
 # Builds a cargo-chef plan
 FROM chef AS planner
@@ -33,7 +33,7 @@ ENV FEATURES=$FEATURES
 RUN cargo chef cook --profile $BUILD_PROFILE --features "$FEATURES" --recipe-path recipe.json
 
 # Build application
-COPY --exclude=.git --exclude=dist . .
+COPY --exclude=dist . .
 RUN cargo build --profile $BUILD_PROFILE --features "$FEATURES" --locked --bin reth
 
 # ARG is not resolved in COPY so we have to hack around it by copying the

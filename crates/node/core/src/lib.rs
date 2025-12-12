@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod args;
 pub mod cli;
@@ -31,6 +31,6 @@ pub mod rpc {
 
     /// Re-exported from `reth_rpc::eth`.
     pub mod compat {
-        pub use reth_rpc_types_compat::*;
+        pub use reth_rpc_convert::*;
     }
 }

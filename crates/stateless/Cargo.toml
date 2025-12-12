@@ -22,10 +22,9 @@ alloy-rpc-types-debug.workspace = true
 # reth
 reth-ethereum-consensus.workspace = true
 reth-primitives-traits.workspace = true
-reth-ethereum-primitives.workspace = true
+reth-ethereum-primitives = { workspace = true, features = ["serde", "serde-bincode-compat"] }
 reth-errors.workspace = true
 reth-evm.workspace = true
-reth-evm-ethereum.workspace = true
 reth-revm.workspace = true
 reth-trie-common.workspace = true
 reth-trie-sparse.workspace = true
@@ -35,3 +34,13 @@ reth-consensus.workspace = true
 # misc
 thiserror.workspace = true
 itertools.workspace = true
+serde.workspace = true
+serde_with.workspace = true
+
+k256 = { workspace = true, optional = true }
+secp256k1 = { workspace = true, optional = true }
+
+[features]
+default = ["k256"]
+k256 = ["dep:k256"]
+secp256k1 = ["dep:secp256k1"]

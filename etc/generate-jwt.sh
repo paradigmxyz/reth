@@ -1,6 +1,6 @@
 #!/bin/bash
 # Borrowed from EthStaker's prepare for the merge guide
-# See https://github.com/remyroy/ethstaker/blob/main/prepare-for-the-merge.md#configuring-a-jwt-token-file
+# See https://github.com/eth-educators/ethstaker-guides/blob/main/docs/prepare-for-the-merge.md#configuring-a-jwt-token-file
 
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
 mkdir -p "${SCRIPT_DIR}/jwttoken"

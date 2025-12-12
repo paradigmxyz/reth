@@ -14,7 +14,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -312,10 +312,9 @@ where
             return (None, buf)
         }
 
-        let (len, mut buf) = decode_varuint(buf);
+        let (len, buf) = decode_varuint(buf);
 
-        let (element, _) = T::from_compact(&buf[..len], len);
-        buf.advance(len);
+        let (element, buf) = T::from_compact(buf, len);
 
         (Some(element), buf)
     }

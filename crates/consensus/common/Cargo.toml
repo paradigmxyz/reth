@@ -23,7 +23,6 @@ alloy-eips.workspace = true
 [dev-dependencies]
 alloy-primitives = { workspace = true, features = ["rand"] }
 reth-ethereum-primitives.workspace = true
-alloy-consensus.workspace = true
 rand.workspace = true
 
 [features]

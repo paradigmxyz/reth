@@ -1,7 +1,7 @@
 # <h1 align="center"> discv4 </h1>
 
 This is a rust implementation of
-the [Discovery v4](https://github.com/ethereum/devp2p/blob/40ab248bf7e017e83cc9812a4e048446709623e8/discv4.md)
+the [Discovery v4](https://github.com/ethereum/devp2p/blob/0b3b679be294324eb893340461c7c51fb4c15864/discv4.md)
 peer discovery protocol.
 
 For comparison to Discovery v5,
@@ -14,7 +14,7 @@ This is inspired by the [discv5](https://github.com/sigp/discv5) crate and reuse
 The discovery service continuously attempts to connect to other nodes on the network until it has found enough peers.
 If UPnP (Universal Plug and Play) is supported by the router the service is running on, it will also accept connections
 from external nodes. In the discovery protocol, nodes exchange information about where the node can be reached to
-eventually establish ``RLPx`` sessions.
+eventually establish `RLPx` sessions.
 
 ## Trouble Shooting
 

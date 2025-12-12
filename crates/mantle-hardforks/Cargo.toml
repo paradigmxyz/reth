@@ -18,18 +18,30 @@ workspace = true
 # Core dependencies
 alloy-chains = { workspace = true }
 alloy-hardforks = { workspace = true }
-# alloy-primitives = { workspace = true }
+alloy-op-evm = { workspace = true }
+alloy-primitives = { workspace = true }
 
 # Reth dependencies
 # reth-chainspec = { workspace = true }
 # reth-ethereum-forks = { workspace = true }
 reth-optimism-forks = { workspace = true }
+reth-db = { workspace = true }
+reth-db-api = { workspace = true }
+reth-provider = { workspace = true }
+reth-trie = { workspace = true }
+reth-trie-db = { workspace = true }
+reth-primitives-traits = { workspace = true }
 
+op-revm = { workspace = true }
+revm = { workspace = true }
 auto_impl.workspace = true
-serde = { workspace = true, optional = true }
+serde = { workspace = true }
+eyre = { workspace = true }
+tracing = { workspace = true }
 
 [features]
+default = ["std", "serde"]
+std = []
 serde = [
-	"dep:serde",
 	"alloy-hardforks/serde"
 ]

@@ -56,7 +56,7 @@ impl ForkchoiceStateTracker {
         self.latest_status().is_some_and(|s| s.is_syncing())
     }
 
-    /// Returns whether the latest received FCU is syncing: [`ForkchoiceStatus::Invalid`]
+    /// Returns whether the latest received FCU is invalid: [`ForkchoiceStatus::Invalid`]
     pub fn is_latest_invalid(&self) -> bool {
         self.latest_status().is_some_and(|s| s.is_invalid())
     }

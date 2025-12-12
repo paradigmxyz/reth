@@ -1,11 +1,10 @@
 // Reth block related imports
-use reth_ethereum::{provider::BlockReaderIdExt, Block};
+use reth_ethereum::{provider::BlockReaderIdExt, rpc::eth::EthResult, Block};
 
 // Rpc related imports
 use jsonrpsee::proc_macros::rpc;
-use reth::rpc::server_types::eth::EthResult;
 
-/// trait interface for a custom rpc namespace: `MyRpc`
+/// trait interface for a custom rpc namespace: `myrpcExt`
 ///
 /// This defines an additional namespace where all methods are configured as trait functions.
 #[rpc(server, namespace = "myrpcExt")]
@@ -15,14 +14,14 @@ pub trait MyRpcExtApi {
     fn custom_method(&self) -> EthResult<Option<Block>>;
 }
 
-/// The type that implements `myRpc` rpc namespace trait
+/// The type that implements `myrpcExt` rpc namespace trait
 pub struct MyRpcExt<Provider> {
     pub provider: Provider,
 }
 
 impl<Provider> MyRpcExtApiServer for MyRpcExt<Provider>
 where
-    Provider: BlockReaderIdExt<Block = reth::primitives::Block> + 'static,
+    Provider: BlockReaderIdExt<Block = Block> + 'static,
 {
     /// Showcasing how to implement a custom rpc method
     /// using the provider.

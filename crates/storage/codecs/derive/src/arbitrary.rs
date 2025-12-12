@@ -23,11 +23,11 @@ pub fn maybe_generate_tests(
     let mut iter = args.into_iter().peekable();
 
     // we check if there's a crate argument which is used from inside the codecs crate directly
-    if let Some(arg) = iter.peek() {
-        if arg.to_string() == "crate" {
-            is_crate = true;
-            iter.next();
-        }
+    if let Some(arg) = iter.peek() &&
+        arg.to_string() == "crate"
+    {
+        is_crate = true;
+        iter.next();
     }
 
     for arg in iter {

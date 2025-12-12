@@ -1,10 +1,16 @@
-use std::path::{Path, PathBuf};
-
+use crate::formatter::LogFormat;
 use rolling_file::{RollingConditionBasic, RollingFileAppender};
+use std::{
+    fmt,
+    path::{Path, PathBuf},
+};
 use tracing_appender::non_blocking::WorkerGuard;
 use tracing_subscriber::{filter::Directive, EnvFilter, Layer, Registry};
-
-use crate::formatter::LogFormat;
+#[cfg(feature = "otlp")]
+use {
+    reth_tracing_otlp::{span_layer, OtlpProtocol},
+    url::Url,
+};
 
 /// A worker guard returned by the file layer.
 ///
@@ -15,30 +21,49 @@ pub type FileWorkerGuard = tracing_appender::non_blocking::WorkerGuard;
 ///  A boxed tracing [Layer].
 pub(crate) type BoxedLayer<S> = Box<dyn Layer<S> + Send + Sync>;
 
-const RETH_LOG_FILE_NAME: &str = "reth.log";
-
-/// Default [directives](Directive) for [`EnvFilter`] which disables high-frequency debug logs from
-/// `hyper`, `hickory-resolver`, `jsonrpsee-server`, and `discv5`.
-const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 5] = [
+/// Default [directives](Directive) for [`EnvFilter`] which:
+/// 1. Disable high-frequency debug logs from dependencies such as `hyper`, `hickory-resolver`,
+///    `hickory_proto`, `discv5`, `jsonrpsee-server`, and `hyper_util::client::legacy::pool`.
+/// 2. Set `opentelemetry_*` crates log level to `WARN`, as `DEBUG` is too noisy.
+const DEFAULT_ENV_FILTER_DIRECTIVES: [&str; 9] = [
     "hyper::proto::h1=off",
     "hickory_resolver=off",
     "hickory_proto=off",
     "discv5=off",
     "jsonrpsee-server=off",
+    "opentelemetry-otlp=warn",
+    "opentelemetry_sdk=warn",
+    "opentelemetry-http=warn",
+    "hyper_util::client::legacy::pool=off",
 ];
 
 /// Manages the collection of layers for a tracing subscriber.
 ///
 /// `Layers` acts as a container for different logging layers such as stdout, file, or journald.
 /// Each layer can be configured separately and then combined into a tracing subscriber.
-pub(crate) struct Layers {
+#[derive(Default)]
+pub struct Layers {
     inner: Vec<BoxedLayer<Registry>>,
+}
+
+impl fmt::Debug for Layers {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("Layers").field("layers_count", &self.inner.len()).finish()
+    }
 }
 
 impl Layers {
     /// Creates a new `Layers` instance.
-    pub(crate) fn new() -> Self {
-        Self { inner: vec![] }
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Adds a layer to the collection of layers.
+    pub fn add_layer<L>(&mut self, layer: L)
+    where
+        L: Layer<Registry> + Send + Sync,
+    {
+        self.inner.push(layer.boxed());
     }
 
     /// Consumes the `Layers` instance, returning the inner vector of layers.
@@ -55,8 +80,8 @@ impl Layers {
     /// An `eyre::Result<()>` indicating the success or failure of the operation.
     pub(crate) fn journald(&mut self, filter: &str) -> eyre::Result<()> {
         let journald_filter = build_env_filter(None, filter)?;
-        let layer = tracing_journald::layer()?.with_filter(journald_filter).boxed();
-        self.inner.push(layer);
+        let layer = tracing_journald::layer()?.with_filter(journald_filter);
+        self.add_layer(layer);
         Ok(())
     }
 
@@ -82,7 +107,7 @@ impl Layers {
     ) -> eyre::Result<()> {
         let filter = build_env_filter(Some(default_directive), filters)?;
         let layer = format.apply(filter, color, None);
-        self.inner.push(layer.boxed());
+        self.add_layer(layer);
         Ok(())
     }
 
@@ -104,8 +129,28 @@ impl Layers {
         let (writer, guard) = file_info.create_log_writer();
         let file_filter = build_env_filter(None, filter)?;
         let layer = format.apply(file_filter, None, Some(writer));
-        self.inner.push(layer);
+        self.add_layer(layer);
         Ok(guard)
+    }
+
+    /// Add OTLP spans layer to the layer collection
+    #[cfg(feature = "otlp")]
+    pub fn with_span_layer(
+        &mut self,
+        service_name: String,
+        endpoint_exporter: Url,
+        filter: EnvFilter,
+        otlp_protocol: OtlpProtocol,
+    ) -> eyre::Result<()> {
+        // Create the span provider
+
+        let span_layer = span_layer(service_name, &endpoint_exporter, otlp_protocol)
+            .map_err(|e| eyre::eyre!("Failed to build OTLP span exporter {}", e))?
+            .with_filter(filter);
+
+        self.add_layer(span_layer);
+
+        Ok(())
     }
 }
 
@@ -122,8 +167,13 @@ pub struct FileInfo {
 
 impl FileInfo {
     /// Creates a new `FileInfo` instance.
-    pub fn new(dir: PathBuf, max_size_bytes: u64, max_files: usize) -> Self {
-        Self { dir, file_name: RETH_LOG_FILE_NAME.to_string(), max_size_bytes, max_files }
+    pub const fn new(
+        dir: PathBuf,
+        file_name: String,
+        max_size_bytes: u64,
+        max_files: usize,
+    ) -> Self {
+        Self { dir, file_name, max_size_bytes, max_files }
     }
 
     /// Creates the log directory if it doesn't exist.

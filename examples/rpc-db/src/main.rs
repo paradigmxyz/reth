@@ -1,4 +1,4 @@
-//! Example illustrating how to run the ETH JSON RPC API as standalone over a DB file.
+//! Example illustrating how to run the ETH JSON RPC API as a standalone over a DB file.
 //!
 //! Run with
 //!
@@ -16,9 +16,9 @@
 
 use std::{path::Path, sync::Arc};
 
-use reth::beacon_consensus::EthBeaconConsensus;
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
+    consensus::EthBeaconConsensus,
     network::api::noop::NoopNetwork,
     node::{api::NodeTypesWithDBAdapter, EthEvmConfig, EthereumNode},
     pool::noop::NoopTransactionPool,
@@ -31,17 +31,17 @@ use reth_ethereum::{
         builder::{RethRpcModule, RpcModuleBuilder, RpcServerConfig, TransportRpcModuleConfig},
         EthApiBuilder,
     },
+    tasks::TokioTaskExecutor,
 };
 // Configuring the network parts, ideally also wouldn't need to think about this.
 use myrpc_ext::{MyRpcExt, MyRpcExtApiServer};
-use reth::tasks::TokioTaskExecutor;
 
 // Custom rpc extension
 pub mod myrpc_ext;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    // 1. Setup the DB
+    // 1. Set up the DB
     let db_path = std::env::var("RETH_DB_PATH")?;
     let db_path = Path::new(&db_path);
     let db = Arc::new(open_db_read_only(
@@ -55,7 +55,7 @@ async fn main() -> eyre::Result<()> {
         StaticFileProvider::read_only(db_path.join("static_files"), true)?,
     );
 
-    // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
+    // 2. Set up the blockchain provider using only the database provider and a noop for the tree to
     //    satisfy trait bounds. Tree is not used in this example since we are only operating on the
     //    disk and don't handle new blocks/live sync etc, which is done by the blockchain tree.
     let provider = BlockchainProvider::new(factory)?;
@@ -65,7 +65,7 @@ async fn main() -> eyre::Result<()> {
         // Rest is just noops that do nothing
         .with_noop_pool()
         .with_noop_network()
-        .with_executor(TokioTaskExecutor::default())
+        .with_executor(Box::new(TokioTaskExecutor::default()))
         .with_evm_config(EthEvmConfig::new(spec.clone()))
         .with_consensus(EthBeaconConsensus::new(spec.clone()));
 

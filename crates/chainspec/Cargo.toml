@@ -35,7 +35,6 @@ derive_more.workspace = true
 alloy-trie = { workspace = true, features = ["arbitrary"] }
 alloy-eips = { workspace = true, features = ["arbitrary"] }
 alloy-rlp = { workspace = true, features = ["arrayvec"] }
-alloy-genesis.workspace = true
 
 [features]
 default = ["std"]

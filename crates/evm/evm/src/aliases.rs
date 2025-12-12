@@ -11,6 +11,9 @@ pub type EvmFactoryFor<Evm> =
 /// Helper to access [`EvmFactory::Spec`] for a given [`ConfigureEvm`].
 pub type SpecFor<Evm> = <EvmFactoryFor<Evm> as EvmFactory>::Spec;
 
+/// Helper to access [`EvmFactory::BlockEnv`] for a given [`ConfigureEvm`].
+pub type BlockEnvFor<Evm> = <EvmFactoryFor<Evm> as EvmFactory>::BlockEnv;
+
 /// Helper to access [`EvmFactory::Evm`] for a given [`ConfigureEvm`].
 pub type EvmFor<Evm, DB, I = NoOpInspector> = <EvmFactoryFor<Evm> as EvmFactory>::Evm<DB, I>;
 
@@ -31,7 +34,7 @@ pub type ExecutionCtxFor<'a, Evm> =
     <<Evm as ConfigureEvm>::BlockExecutorFactory as BlockExecutorFactory>::ExecutionCtx<'a>;
 
 /// Type alias for [`EvmEnv`] for a given [`ConfigureEvm`].
-pub type EvmEnvFor<Evm> = EvmEnv<SpecFor<Evm>>;
+pub type EvmEnvFor<Evm> = EvmEnv<SpecFor<Evm>, BlockEnvFor<Evm>>;
 
 /// Helper trait to bound [`Inspector`] for a [`ConfigureEvm`].
 pub trait InspectorFor<Evm: ConfigureEvm, DB: Database>: Inspector<EvmContextFor<Evm, DB>> {}

@@ -2,7 +2,7 @@
 
 use reth_chainspec::EthereumHardforks;
 use reth_db_api::table::Value;
-use reth_node_types::{FullNodePrimitives, NodeTypes, NodeTypesWithDB};
+use reth_node_types::{NodePrimitives, NodeTypes, NodeTypesWithDB};
 
 mod database;
 pub use database::*;
@@ -17,6 +17,7 @@ mod state;
 pub use state::{
     historical::{HistoricalStateProvider, HistoricalStateProviderRef, LowestAvailableBlocks},
     latest::{LatestStateProvider, LatestStateProviderRef},
+    overlay::{OverlayStateProvider, OverlayStateProviderFactory},
 };
 
 mod consistent_view;
@@ -35,7 +36,7 @@ where
     Self: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<Self::Primitives>,
-        Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
     >,
 {
 }
@@ -44,7 +45,7 @@ impl<T> NodeTypesForProvider for T where
     T: NodeTypes<
         ChainSpec: EthereumHardforks,
         Storage: ChainStorage<T::Primitives>,
-        Primitives: FullNodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
+        Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
     >
 {
 }

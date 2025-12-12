@@ -106,8 +106,10 @@ pub enum DatabaseWriteOperation {
     CursorInsert,
     /// Append duplicate cursor.
     CursorAppendDup,
-    /// Put.
-    Put,
+    /// Put upsert.
+    PutUpsert,
+    /// Put append.
+    PutAppend,
 }
 
 /// Database log level.

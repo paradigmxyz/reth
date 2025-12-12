@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -36,7 +36,7 @@ mod nibbles;
 pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};
 
 mod storage;
-pub use storage::StorageTrieEntry;
+pub use storage::{StorageTrieEntry, TrieChangeSetsEntry};
 
 mod subnode;
 pub use subnode::StoredSubNode;
@@ -54,6 +54,11 @@ pub mod root;
 
 /// Buffer for trie updates.
 pub mod updates;
+
+pub mod added_removed_keys;
+
+/// Utilities used by other modules in this crate.
+mod utils;
 
 /// Bincode-compatible serde implementations for trie types.
 ///

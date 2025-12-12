@@ -38,9 +38,10 @@
 //! ```
 use crate::{
     stages::{
-        AccountHashingStage, BodyStage, ExecutionStage, FinishStage, HeaderStage,
-        IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage, PruneSenderRecoveryStage,
-        PruneStage, SenderRecoveryStage, StorageHashingStage, TransactionLookupStage,
+        AccountHashingStage, BodyStage, EraImportSource, EraStage, ExecutionStage, FinishStage,
+        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleChangeSets,
+        MerkleStage, PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage,
+        StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
@@ -53,7 +54,7 @@ use reth_primitives_traits::{Block, NodePrimitives};
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
-use std::{ops::Not, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::watch;
 
 /// A set containing all stages to run a fully syncing instance of reth.
@@ -74,6 +75,7 @@ use tokio::sync::watch;
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
 /// - [`MerkleStage`] (execute)
+/// - [`MerkleChangeSets`]
 /// - [`TransactionLookupStage`]
 /// - [`IndexStorageHistoryStage`]
 /// - [`IndexAccountHistoryStage`]
@@ -115,6 +117,7 @@ where
         evm_config: E,
         stages_config: StageConfig,
         prune_modes: PruneModes,
+        era_import_source: Option<EraImportSource>,
     ) -> Self {
         Self {
             online: OnlineStages::new(
@@ -123,6 +126,7 @@ where
                 header_downloader,
                 body_downloader,
                 stages_config.clone(),
+                era_import_source,
             ),
             evm_config,
             consensus,
@@ -197,6 +201,8 @@ where
     body_downloader: B,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
+    /// Optional source of ERA1 files. The `EraStage` does nothing unless this is specified.
+    era_import_source: Option<EraImportSource>,
 }
 
 impl<Provider, H, B> OnlineStages<Provider, H, B>
@@ -211,8 +217,9 @@ where
         header_downloader: H,
         body_downloader: B,
         stages_config: StageConfig,
+        era_import_source: Option<EraImportSource>,
     ) -> Self {
-        Self { provider, tip, header_downloader, body_downloader, stages_config }
+        Self { provider, tip, header_downloader, body_downloader, stages_config, era_import_source }
     }
 }
 
@@ -259,9 +266,18 @@ where
     B: BodyDownloader + 'static,
     HeaderStage<P, H>: Stage<Provider>,
     BodyStage<B>: Stage<Provider>,
+    EraStage<<B::Block as Block>::Header, <B::Block as Block>::Body, EraImportSource>:
+        Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        StageSetBuilder::default()
+        let mut builder = StageSetBuilder::default();
+
+        if self.era_import_source.is_some() {
+            builder = builder
+                .add_stage(EraStage::new(self.era_import_source, self.stages_config.etl.clone()));
+        }
+
+        builder
             .add_stage(HeaderStage::new(
                 self.provider,
                 self.header_downloader,
@@ -327,12 +343,12 @@ where
                 stages_config: self.stages_config.clone(),
                 prune_modes: self.prune_modes.clone(),
             })
-            // If any prune modes are set, add the prune stage.
-            .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
-                // Prune stage should be added after all hashing stages, because otherwise it will
-                // delete
-                PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
-            }))
+            // Prune stage should be added after all hashing stages, because otherwise it will
+            // delete
+            .add_stage(PruneStage::new(
+                self.prune_modes.clone(),
+                self.stages_config.prune.commit_threshold,
+            ))
     }
 }
 
@@ -378,6 +394,13 @@ where
 }
 
 /// A set containing all stages that hash account state.
+///
+/// This includes:
+/// - [`MerkleStage`] (unwind)
+/// - [`AccountHashingStage`]
+/// - [`StorageHashingStage`]
+/// - [`MerkleStage`] (execute)
+/// - [`MerkleChangeSets`]
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct HashingStages {
@@ -390,6 +413,7 @@ where
     MerkleStage: Stage<Provider>,
     AccountHashingStage: Stage<Provider>,
     StorageHashingStage: Stage<Provider>,
+    MerkleChangeSets: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
@@ -402,7 +426,11 @@ where
                 self.stages_config.storage_hashing,
                 self.stages_config.etl.clone(),
             ))
-            .add_stage(MerkleStage::new_execution(self.stages_config.merkle.clean_threshold))
+            .add_stage(MerkleStage::new_execution(
+                self.stages_config.merkle.rebuild_threshold,
+                self.stages_config.merkle.incremental_threshold,
+            ))
+            .add_stage(MerkleChangeSets::new())
     }
 }
 
@@ -432,12 +460,12 @@ where
             .add_stage(IndexStorageHistoryStage::new(
                 self.stages_config.index_storage_history,
                 self.stages_config.etl.clone(),
-                self.prune_modes.account_history,
+                self.prune_modes.storage_history,
             ))
             .add_stage(IndexAccountHistoryStage::new(
                 self.stages_config.index_account_history,
                 self.stages_config.etl.clone(),
-                self.prune_modes.storage_history,
+                self.prune_modes.account_history,
             ))
     }
 }

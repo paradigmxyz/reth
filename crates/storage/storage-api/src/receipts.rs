@@ -1,8 +1,8 @@
 use crate::BlockIdReader;
 use alloc::vec::Vec;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
-use alloy_primitives::{TxHash, TxNumber};
-use core::ops::RangeBounds;
+use alloy_primitives::{BlockNumber, TxHash, TxNumber};
+use core::ops::{RangeBounds, RangeInclusive};
 use reth_primitives_traits::Receipt;
 use reth_storage_errors::provider::ProviderResult;
 
@@ -38,6 +38,20 @@ pub trait ReceiptProvider: Send + Sync {
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Self::Receipt>>;
+
+    /// Get receipts by block range.
+    ///
+    /// Returns a vector where each element contains all receipts for a block in the range.
+    /// The outer vector index corresponds to blocks in the range (`block_range.start()` + index).
+    /// Empty blocks will have empty inner vectors.
+    ///
+    /// This is more efficient than calling `receipts_by_block` multiple times for contiguous ranges
+    /// because it can leverage the underlying `receipts_by_tx_range` for the entire transaction
+    /// span.
+    fn receipts_by_block_range(
+        &self,
+        block_range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<Vec<Self::Receipt>>>;
 }
 
 /// Trait extension for `ReceiptProvider`, for types that implement `BlockId` conversion.

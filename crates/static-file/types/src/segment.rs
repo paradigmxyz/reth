@@ -37,10 +37,6 @@ pub enum StaticFileSegment {
     #[strum(serialize = "receipts")]
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
-    #[strum(serialize = "blockmeta")]
-    /// Static File segment responsible for the `BlockBodyIndices`, `BlockOmmers`,
-    /// `BlockWithdrawals` tables.
-    BlockMeta,
 }
 
 impl StaticFileSegment {
@@ -50,15 +46,13 @@ impl StaticFileSegment {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
-            Self::BlockMeta => "blockmeta",
         }
     }
 
     /// Returns an iterator over all segments.
     pub fn iter() -> impl Iterator<Item = Self> {
-        // The order of segments is significant and must be maintained to ensure correctness. For
-        // example, Transactions require BlockBodyIndices from Blockmeta to be sound.
-        [Self::Headers, Self::BlockMeta, Self::Transactions, Self::Receipts].into_iter()
+        // The order of segments is significant and must be maintained to ensure correctness.
+        [Self::Headers, Self::Transactions, Self::Receipts].into_iter()
     }
 
     /// Returns the default configuration of the segment.
@@ -69,7 +63,7 @@ impl StaticFileSegment {
     /// Returns the number of columns for the segment
     pub const fn columns(&self) -> usize {
         match self {
-            Self::Headers | Self::BlockMeta => 3,
+            Self::Headers => 3,
             Self::Transactions | Self::Receipts => 1,
         }
     }
@@ -133,11 +127,6 @@ impl StaticFileSegment {
         matches!(self, Self::Headers)
     }
 
-    /// Returns `true` if the segment is `StaticFileSegment::BlockMeta`.
-    pub const fn is_block_meta(&self) -> bool {
-        matches!(self, Self::BlockMeta)
-    }
-
     /// Returns `true` if the segment is `StaticFileSegment::Receipts`.
     pub const fn is_receipts(&self) -> bool {
         matches!(self, Self::Receipts)
@@ -150,7 +139,7 @@ impl StaticFileSegment {
 
     /// Returns `true` if a segment row is linked to a block.
     pub const fn is_block_based(&self) -> bool {
-        matches!(self, Self::Headers | Self::BlockMeta)
+        matches!(self, Self::Headers)
     }
 }
 
@@ -228,12 +217,12 @@ impl SegmentHeader {
 
     /// Number of transactions.
     pub fn tx_len(&self) -> Option<u64> {
-        self.tx_range.as_ref().map(|r| (r.end() + 1) - r.start())
+        self.tx_range.as_ref().map(|r| r.len())
     }
 
     /// Number of blocks.
     pub fn block_len(&self) -> Option<u64> {
-        self.block_range.as_ref().map(|r| (r.end() + 1) - r.start())
+        self.block_range.as_ref().map(|r| r.len())
     }
 
     /// Increments block end range depending on segment
@@ -339,6 +328,12 @@ impl SegmentRangeInclusive {
     /// End of the inclusive range
     pub const fn end(&self) -> u64 {
         self.end
+    }
+
+    /// Returns the length of the inclusive range.
+    #[allow(clippy::len_without_is_empty)]
+    pub const fn len(&self) -> u64 {
+        self.end.saturating_sub(self.start).saturating_add(1)
     }
 }
 

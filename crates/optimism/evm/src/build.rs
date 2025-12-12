@@ -15,6 +15,7 @@ use reth_optimism_forks::OpHardforks;
 use reth_optimism_primitives::DepositReceipt;
 use reth_primitives_traits::{Receipt, SignedTransaction};
 use reth_mantle_forks::MantleHardforks;
+use revm::context::Block as _;
 
 /// Block builder for Optimism.
 #[derive(Debug)]
@@ -29,39 +30,32 @@ impl<ChainSpec> OpBlockAssembler<ChainSpec> {
     }
 }
 
-impl<ChainSpec> Clone for OpBlockAssembler<ChainSpec> {
-    fn clone(&self) -> Self {
-        Self { chain_spec: self.chain_spec.clone() }
-    }
-}
-
-impl<F, ChainSpec> BlockAssembler<F> for OpBlockAssembler<ChainSpec>
-where
-    ChainSpec: OpHardforks + MantleHardforks,
-    F: for<'a> BlockExecutorFactory<
-        ExecutionCtx<'a> = OpBlockExecutionCtx,
-        Transaction: SignedTransaction,
-        Receipt: Receipt + DepositReceipt,
-    >,
-{
-    type Block = alloy_consensus::Block<F::Transaction>;
-
-    fn assemble_block(
+impl<ChainSpec: OpHardforks + MantleHardforks> OpBlockAssembler<ChainSpec> {
+    /// Builds a block for `input` without any bounds on header `H`.
+    pub fn assemble_block<
+        F: for<'a> BlockExecutorFactory<
+            ExecutionCtx<'a>: Into<OpBlockExecutionCtx>,
+            Transaction: SignedTransaction,
+            Receipt: Receipt + DepositReceipt,
+        >,
+        H,
+    >(
         &self,
-        input: BlockAssemblerInput<'_, '_, F>,
-    ) -> Result<Self::Block, BlockExecutionError> {
+        input: BlockAssemblerInput<'_, '_, F, H>,
+    ) -> Result<Block<F::Transaction>, BlockExecutionError> {
         let BlockAssemblerInput {
             evm_env,
             execution_ctx: ctx,
             transactions,
-            output: BlockExecutionResult { receipts, gas_used, .. },
+            output: BlockExecutionResult { receipts, gas_used, blob_gas_used, requests: _ },
             bundle_state,
             state_root,
             state_provider,
             ..
         } = input;
+        let ctx = ctx.into();
 
-        let timestamp = evm_env.block_env.timestamp;
+        let timestamp = evm_env.block_env.timestamp().saturating_to();
 
         let transactions_root = proofs::calculate_transaction_root(&transactions);
         let receipts_root =
@@ -89,6 +83,12 @@ where
         let (excess_blob_gas, blob_gas_used) =
             if self.chain_spec.is_skadi_active_at_timestamp(timestamp) {
                 (Some(0), Some(0))
+            } else if self.chain_spec.is_jovian_active_at_timestamp(timestamp) {
+                // In jovian, we're using the blob gas used field to store the current da
+                // footprint's value.
+                (Some(0), Some(*blob_gas_used))
+            } else if self.chain_spec.is_ecotone_active_at_timestamp(timestamp) {
+                (Some(0), Some(0))
             } else {
                 (None, None)
             };
@@ -96,19 +96,19 @@ where
         let header = Header {
             parent_hash: ctx.parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: evm_env.block_env.beneficiary,
+            beneficiary: evm_env.block_env.beneficiary(),
             state_root,
             transactions_root,
             receipts_root,
             withdrawals_root,
             logs_bloom,
             timestamp,
-            mix_hash: evm_env.block_env.prevrandao.unwrap_or_default(),
+            mix_hash: evm_env.block_env.prevrandao().unwrap_or_default(),
             nonce: BEACON_NONCE.into(),
-            base_fee_per_gas: Some(evm_env.block_env.basefee),
-            number: evm_env.block_env.number,
-            gas_limit: evm_env.block_env.gas_limit,
-            difficulty: evm_env.block_env.difficulty,
+            base_fee_per_gas: Some(evm_env.block_env.basefee()),
+            number: evm_env.block_env.number().saturating_to(),
+            gas_limit: evm_env.block_env.gas_limit(),
+            difficulty: evm_env.block_env.difficulty(),
             gas_used: *gas_used,
             extra_data: ctx.extra_data,
             parent_beacon_block_root: ctx.parent_beacon_block_root,
@@ -128,5 +128,30 @@ where
                     .then(Default::default),
             },
         ))
+    }
+}
+
+impl<ChainSpec> Clone for OpBlockAssembler<ChainSpec> {
+    fn clone(&self) -> Self {
+        Self { chain_spec: self.chain_spec.clone() }
+    }
+}
+
+impl<F, ChainSpec> BlockAssembler<F> for OpBlockAssembler<ChainSpec>
+where
+    ChainSpec: OpHardforks,
+    F: for<'a> BlockExecutorFactory<
+        ExecutionCtx<'a> = OpBlockExecutionCtx,
+        Transaction: SignedTransaction,
+        Receipt: Receipt + DepositReceipt,
+    >,
+{
+    type Block = Block<F::Transaction>;
+
+    fn assemble_block(
+        &self,
+        input: BlockAssemblerInput<'_, '_, F>,
+    ) -> Result<Self::Block, BlockExecutionError> {
+        self.assemble_block(input)
     }
 }

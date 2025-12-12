@@ -29,16 +29,42 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![no_std]
 
 extern crate alloc;
 
-pub(crate) mod root;
+mod recover_block;
+/// Sparse trie implementation for stateless validation
+pub mod trie;
+
+#[doc(inline)]
+pub use recover_block::UncompressedPublicKey;
+#[doc(inline)]
+pub use trie::StatelessTrie;
+#[doc(inline)]
+pub use validation::stateless_validation_with_trie;
+
 /// Implementation of stateless validation
 pub mod validation;
 pub(crate) mod witness_db;
 
 #[doc(inline)]
 pub use alloy_rpc_types_debug::ExecutionWitness;
+
+use reth_ethereum_primitives::Block;
+
+/// `StatelessInput` is a convenience structure for serializing the input needed
+/// for the stateless validation function.
+#[serde_with::serde_as]
+#[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
+pub struct StatelessInput {
+    /// The block being executed in the stateless validation function
+    #[serde_as(
+        as = "reth_primitives_traits::serde_bincode_compat::Block<reth_ethereum_primitives::TransactionSigned, alloy_consensus::Header>"
+    )]
+    pub block: Block,
+    /// `ExecutionWitness` for the stateless validation function
+    pub witness: ExecutionWitness,
+}

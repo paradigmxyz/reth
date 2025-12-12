@@ -88,7 +88,7 @@ impl From<HeadersDirection> for bool {
 mod tests {
     use super::*;
     use alloy_consensus::{Header, EMPTY_OMMER_ROOT_HASH, EMPTY_ROOT_HASH};
-    use alloy_primitives::{address, b256, bloom, bytes, hex, Address, Bytes, B256, U256};
+    use alloy_primitives::{address, b256, bloom, bytes, hex, Bytes, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use std::str::FromStr;
 
@@ -121,8 +121,7 @@ mod tests {
     #[test]
     fn test_eip1559_block_header_hash() {
         let expected_hash =
-            B256::from_str("6a251c7c3c5dca7b42407a3752ff48f3bbca1fab7f9868371d9918daf1988d1f")
-                .unwrap();
+            b256!("0x6a251c7c3c5dca7b42407a3752ff48f3bbca1fab7f9868371d9918daf1988d1f");
         let header = Header {
             parent_hash: b256!("0xe0a94a7a3c9617401586b1a27025d2d9671332d22d540e0af72b069170380f2a"),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -181,8 +180,7 @@ mod tests {
 
         // make sure the hash matches
         let expected_hash =
-            B256::from_str("8c2f2af15b7b563b6ab1e09bed0e9caade7ed730aec98b70a993597a797579a9")
-                .unwrap();
+            b256!("0x8c2f2af15b7b563b6ab1e09bed0e9caade7ed730aec98b70a993597a797579a9");
         assert_eq!(header.hash_slow(), expected_hash);
     }
 
@@ -197,7 +195,7 @@ mod tests {
                 "18db39e19931515b30b16b3a92c292398039e31d6c267111529c3f2ba0a26c17",
             )
             .unwrap(),
-            beneficiary: Address::from_str("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").unwrap(),
+            beneficiary: address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"),
             state_root: B256::from_str(
                 "95efce3d6972874ca8b531b233b7a1d1ff0a56f08b20c8f1b89bef1b001194a5",
             )
@@ -217,18 +215,16 @@ mod tests {
             extra_data: Bytes::from_str("42").unwrap(),
             mix_hash: EMPTY_ROOT_HASH,
             base_fee_per_gas: Some(0x09),
-            withdrawals_root: Some(
-                B256::from_str("27f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973")
-                    .unwrap(),
-            ),
+            withdrawals_root: Some(b256!(
+                "0x27f166f1d7c789251299535cb176ba34116e44894476a7886fe5d73d9be5c973"
+            )),
             ..Default::default()
         };
         let header = <Header as Decodable>::decode(&mut data.as_slice()).unwrap();
         assert_eq!(header, expected);
 
         let expected_hash =
-            B256::from_str("85fdec94c534fa0a1534720f167b899d1fc268925c71c0cbf5aaa213483f5a69")
-                .unwrap();
+            b256!("0x85fdec94c534fa0a1534720f167b899d1fc268925c71c0cbf5aaa213483f5a69");
         assert_eq!(header.hash_slow(), expected_hash);
     }
 
@@ -244,7 +240,7 @@ mod tests {
             )
             .unwrap(),
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
-            beneficiary: Address::from_str("2adc25665018aa1fe0e6bc666dac8fc2697ff9ba").unwrap(),
+            beneficiary: address!("0x2adc25665018aa1fe0e6bc666dac8fc2697ff9ba"),
             state_root: B256::from_str(
                 "3c837fc158e3e93eafcaf2e658a02f5d8f99abc9f1c4c66cdea96c0ca26406ae",
             )

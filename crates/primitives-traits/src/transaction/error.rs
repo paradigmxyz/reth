@@ -61,6 +61,9 @@ pub enum InvalidTransactionError {
     /// Thrown if the sender of a transaction is a contract.
     #[error("transaction signer has bytecode set")]
     SignerAccountHasBytecode,
+    /// Thrown post Osaka if gas limit is too high.
+    #[error("gas limit too high")]
+    GasLimitTooHigh,
 }
 
 /// Represents error variants that can happen when trying to convert a transaction to pooled

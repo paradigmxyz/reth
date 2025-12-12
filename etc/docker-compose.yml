@@ -1,24 +1,26 @@
-name: 'reth'
+name: reth
 
 services:
   reth:
     restart: unless-stopped
     image: ghcr.io/paradigmxyz/reth
     ports:
-      - '9001:9001' # metrics
-      - '30303:30303' # eth/66 peering
-      - '8545:8545' # rpc
-      - '8551:8551' # engine
+      - "9001:9001" # metrics
+      - "30303:30303" # eth/66 peering
+      - "8545:8545" # rpc
+      - "8551:8551" # engine
     volumes:
       - mainnet_data:/root/.local/share/reth/mainnet
       - sepolia_data:/root/.local/share/reth/sepolia
       - holesky_data:/root/.local/share/reth/holesky
+      - hoodi_data:/root/.local/share/reth/hoodi
       - logs:/root/logs
       - ./jwttoken:/root/jwt/:ro
     # https://paradigmxyz.github.io/reth/run/troubleshooting.html#concurrent-database-access-error-using-containersdocker
     pid: host
     # For Sepolia, replace `--chain mainnet` with `--chain sepolia`
     # For Holesky, replace `--chain mainnet` with `--chain holesky`
+    # For Hoodi, replace `--chain mainnet` with `--chain hoodi`
     command: >
       node
       --chain mainnet
@@ -39,7 +41,7 @@ services:
       - 9090:9090
     volumes:
       - ./prometheus/:/etc/prometheus/
-      - prometheusdata:/prometheus
+      - prometheus_data:/prometheus
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -55,7 +57,7 @@ services:
     environment:
       PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
     volumes:
-      - grafanadata:/var/lib/grafana
+      - grafana_data:/var/lib/grafana
       - ./grafana/datasources:/etc/grafana/provisioning/datasources
       - ./grafana/dashboards:/etc/grafana/provisioning_temp/dashboards
     # 1. Copy dashboards from temp directory to prevent modifying original host files
@@ -73,9 +75,11 @@ volumes:
     driver: local
   holesky_data:
     driver: local
+  hoodi_data:
+    driver: local
   logs:
     driver: local
-  prometheusdata:
+  prometheus_data:
     driver: local
-  grafanadata:
+  grafana_data:
     driver: local

@@ -63,11 +63,11 @@ impl NodeRecord {
     /// See also [`std::net::Ipv6Addr::to_ipv4_mapped`]
     pub fn convert_ipv4_mapped(&mut self) -> bool {
         // convert IPv4 mapped IPv6 address
-        if let IpAddr::V6(v6) = self.address {
-            if let Some(v4) = v6.to_ipv4_mapped() {
-                self.address = v4.into();
-                return true
-            }
+        if let IpAddr::V6(v6) = self.address &&
+            let Some(v4) = v6.to_ipv4_mapped()
+        {
+            self.address = v4.into();
+            return true
         }
         false
     }
@@ -307,6 +307,18 @@ mod tests {
             let decoded = NodeRecord::decode(&mut alloy_rlp::encode(record).as_slice()).unwrap();
             assert_eq!(record, decoded);
         }
+    }
+
+    #[test]
+    fn test_node_record() {
+        let url = "enode://fc8a2ff614e848c0af4c99372a81b8655edb8e11b617cffd0aab1a0691bcca66ca533626a528ee567f05f70c8cb529bda2c0a864cc0aec638a367fd2bb8e49fb@127.0.0.1:35481?discport=0";
+        let node: NodeRecord = url.parse().unwrap();
+        assert_eq!(node, NodeRecord {
+            address: IpAddr::V4([127,0,0, 1].into()),
+            tcp_port: 35481,
+            udp_port: 0,
+            id: "0xfc8a2ff614e848c0af4c99372a81b8655edb8e11b617cffd0aab1a0691bcca66ca533626a528ee567f05f70c8cb529bda2c0a864cc0aec638a367fd2bb8e49fb".parse().unwrap(),
+        })
     }
 
     #[test]

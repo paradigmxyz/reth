@@ -39,7 +39,7 @@ pub struct Pruner<Provider, PF> {
     previous_tip_block_number: Option<BlockNumber>,
     /// Maximum total entries to prune (delete from database) per run.
     delete_limit: usize,
-    /// Maximum time for a one pruner run.
+    /// Maximum time for one pruner run.
     timeout: Option<Duration>,
     /// The finished height of all `ExEx`'s.
     finished_exex_height: watch::Receiver<FinishedExExHeight>,

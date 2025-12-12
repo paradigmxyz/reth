@@ -324,14 +324,21 @@ fn test_put_del() {
     cursor.put(b"key3", b"val3", WriteFlags::empty()).unwrap();
 
     assert_eq!(
-        cursor.get_current().unwrap().unwrap(),
-        (Cow::Borrowed(b"key3" as &[u8]), Cow::Borrowed(b"val3" as &[u8]))
+        cursor.set_key(b"key2").unwrap(),
+        Some((Cow::Borrowed(b"key2" as &[u8]), Cow::Borrowed(b"val2" as &[u8])))
+    );
+    assert_eq!(
+        cursor.get_current().unwrap(),
+        Some((Cow::Borrowed(b"key2" as &[u8]), Cow::Borrowed(b"val2" as &[u8])))
     );
 
     cursor.del(WriteFlags::empty()).unwrap();
-    assert_eq!(cursor.get_current::<Vec<u8>, Vec<u8>>().unwrap(), None);
     assert_eq!(
-        cursor.last().unwrap().unwrap(),
-        (Cow::Borrowed(b"key2" as &[u8]), Cow::Borrowed(b"val2" as &[u8]))
+        cursor.get_current().unwrap(),
+        Some((Cow::Borrowed(b"key3" as &[u8]), Cow::Borrowed(b"val3" as &[u8])))
+    );
+    assert_eq!(
+        cursor.last().unwrap(),
+        Some((Cow::Borrowed(b"key3" as &[u8]), Cow::Borrowed(b"val3" as &[u8])))
     );
 }

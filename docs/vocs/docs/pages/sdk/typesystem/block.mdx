@@ -1,0 +1,26 @@
+# Block Types
+
+The Reth type system provides a flexible abstraction for blocks through traits, allowing different implementations while maintaining type safety and consistency.
+
+## Type Relationships
+
+```mermaid
+graph TD
+    Block[Block Trait] --> Header[BlockHeader Trait]
+    Block --> Body[BlockBody Trait]
+    
+    SealedBlock -.-> Block
+    SealedBlock --> SealedHeader
+    RecoveredBlock --> SealedBlock
+
+    SealedHeader --> Header
+
+    Body --> Transaction[Transactions]
+    Body --> Withdrawals[Withdrawals]
+```
+
+## Next Steps
+
+- Learn about [Transaction Types](/sdk/typesystem/transaction-types)
+- Understand [Consensus](/sdk/node-components/consensus) validation
+- Explore [EVM](/sdk/node-components/evm) execution

@@ -26,7 +26,7 @@ impl Protocol {
     /// Returns the corresponding eth capability for the given version.
     pub const fn eth(version: EthVersion) -> Self {
         let cap = Capability::eth(version);
-        let messages = version.total_messages();
+        let messages = EthMessageID::message_count(version);
         Self::new(cap, messages)
     }
 
@@ -52,10 +52,7 @@ impl Protocol {
     }
 
     /// The number of values needed to represent all message IDs of capability.
-    pub fn messages(&self) -> u8 {
-        if self.cap.is_eth() {
-            return EthMessageID::max() + 1
-        }
+    pub const fn messages(&self) -> u8 {
         self.messages
     }
 }
@@ -73,4 +70,19 @@ pub(crate) struct ProtoVersion {
     pub(crate) messages: u8,
     /// Version of the protocol
     pub(crate) version: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_protocol_eth_message_count() {
+        // Test that Protocol::eth() returns correct message counts for each version
+        // This ensures that EthMessageID::message_count() produces the expected results
+        assert_eq!(Protocol::eth(EthVersion::Eth66).messages(), 17);
+        assert_eq!(Protocol::eth(EthVersion::Eth67).messages(), 17);
+        assert_eq!(Protocol::eth(EthVersion::Eth68).messages(), 17);
+        assert_eq!(Protocol::eth(EthVersion::Eth69).messages(), 18);
+    }
 }

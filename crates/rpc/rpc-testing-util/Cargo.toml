@@ -36,4 +36,3 @@ similar-asserts.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "rt"] }
 reth-rpc-eth-api.workspace = true
 jsonrpsee-http-client.workspace = true
-alloy-rpc-types-trace.workspace = true

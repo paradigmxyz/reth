@@ -12,7 +12,7 @@ pub type Result<T> = result::Result<T, SignError>;
 
 /// An Ethereum Signer used via RPC.
 #[async_trait::async_trait]
-pub trait EthSigner<T>: Send + Sync + DynClone {
+pub trait EthSigner<T, TxReq = TransactionRequest>: Send + Sync + DynClone {
     /// Returns the available accounts for this signer.
     fn accounts(&self) -> Vec<Address>;
 
@@ -25,18 +25,10 @@ pub trait EthSigner<T>: Send + Sync + DynClone {
     async fn sign(&self, address: Address, message: &[u8]) -> Result<Signature>;
 
     /// signs a transaction request using the given account in request
-    async fn sign_transaction(&self, request: TransactionRequest, address: &Address) -> Result<T>;
+    async fn sign_transaction(&self, request: TxReq, address: &Address) -> Result<T>;
 
     /// Encodes and signs the typed data according EIP-712. Payload must implement Eip712 trait.
     fn sign_typed_data(&self, address: Address, payload: &TypedData) -> Result<Signature>;
 }
 
 dyn_clone::clone_trait_object!(<T> EthSigner<T>);
-
-/// Adds 20 random dev signers for access via the API. Used in dev mode.
-#[auto_impl::auto_impl(&)]
-pub trait AddDevSigners {
-    /// Generates 20 random developer accounts.
-    /// Used in DEV mode.
-    fn with_dev_accounts(&self);
-}

@@ -114,11 +114,11 @@ pub(super) fn compare_trie_updates(
         .account_nodes
         .keys()
         .chain(regular.account_nodes.keys())
-        .cloned()
+        .copied()
         .collect::<BTreeSet<_>>()
     {
         let (task, regular) = (task.account_nodes.remove(&key), regular.account_nodes.remove(&key));
-        let database = account_trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
+        let database = account_trie_cursor.seek_exact(key)?.map(|x| x.1);
 
         if !branch_nodes_equal(task.as_ref(), regular.as_ref(), database.as_ref())? {
             diff.account_nodes.insert(key, EntryDiff { task, regular, database });
@@ -131,12 +131,12 @@ pub(super) fn compare_trie_updates(
         .removed_nodes
         .iter()
         .chain(regular.removed_nodes.iter())
-        .cloned()
+        .copied()
         .collect::<BTreeSet<_>>()
     {
         let (task_removed, regular_removed) =
             (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        let database_not_exists = account_trie_cursor.seek_exact(key.clone())?.is_none();
+        let database_not_exists = account_trie_cursor.seek_exact(key)?.is_none();
         // If the deletion is a no-op, meaning that the entry is not in the
         // database, do not add it to the diff.
         if task_removed != regular_removed && !database_not_exists {
@@ -206,11 +206,11 @@ fn compare_storage_trie_updates<C: TrieCursor>(
         .storage_nodes
         .keys()
         .chain(regular.storage_nodes.keys())
-        .cloned()
+        .copied()
         .collect::<BTreeSet<_>>()
     {
         let (task, regular) = (task.storage_nodes.remove(&key), regular.storage_nodes.remove(&key));
-        let database = storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1);
+        let database = storage_trie_cursor.seek_exact(key)?.map(|x| x.1);
         if !branch_nodes_equal(task.as_ref(), regular.as_ref(), database.as_ref())? {
             diff.storage_nodes.insert(key, EntryDiff { task, regular, database });
         }
@@ -218,22 +218,20 @@ fn compare_storage_trie_updates<C: TrieCursor>(
 
     // compare removed nodes
     let mut storage_trie_cursor = trie_cursor()?;
-    for key in task
-        .removed_nodes
-        .iter()
-        .chain(regular.removed_nodes.iter())
-        .cloned()
-        .collect::<BTreeSet<_>>()
+    for key in
+        task.removed_nodes.iter().chain(regular.removed_nodes.iter()).collect::<BTreeSet<_>>()
     {
         let (task_removed, regular_removed) =
-            (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        let database_not_exists =
-            storage_trie_cursor.seek_exact(key.clone())?.map(|x| x.1).is_none();
+            (task.removed_nodes.contains(key), regular.removed_nodes.contains(key));
+        if task_removed == regular_removed {
+            continue;
+        }
+        let database_not_exists = storage_trie_cursor.seek_exact(*key)?.map(|x| x.1).is_none();
         // If the deletion is a no-op, meaning that the entry is not in the
         // database, do not add it to the diff.
-        if task_removed != regular_removed && !database_not_exists {
+        if !database_not_exists {
             diff.removed_nodes.insert(
-                key,
+                *key,
                 EntryDiff {
                     task: task_removed,
                     regular: regular_removed,

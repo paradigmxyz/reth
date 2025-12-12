@@ -22,11 +22,16 @@ reth-stages-types.workspace = true
 reth-fs-util.workspace = true
 reth-node-types.workspace = true
 reth-static-file-types.workspace = true
+reth-execution-errors.workspace = true
+reth-mantle-forks = { workspace = true, features = ["std"] }
 
 # eth
 alloy-consensus.workspace = true
 alloy-genesis.workspace = true
 alloy-primitives.workspace = true
+
+# revm
+revm.workspace = true
 
 # misc
 eyre.workspace = true
@@ -43,7 +48,6 @@ tracing.workspace = true
 [dev-dependencies]
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
-alloy-consensus.workspace = true
 
 [lints]
 workspace = true

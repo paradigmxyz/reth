@@ -1,7 +1,10 @@
 //! Listeners for the transaction-pool
 
 use crate::{
-    pool::events::{FullTransactionEvent, NewTransactionEvent, TransactionEvent},
+    pool::{
+        events::{FullTransactionEvent, NewTransactionEvent, TransactionEvent},
+        QueuedReason,
+    },
     traits::{NewBlobSidecar, PropagateKind},
     PoolTransaction, ValidPoolTransaction,
 };
@@ -17,6 +20,7 @@ use tokio::sync::mpsc::{
     self as mpsc, error::TrySendError, Receiver, Sender, UnboundedReceiver, UnboundedSender,
 };
 use tracing::debug;
+
 /// The size of the event channel used to propagate transaction events.
 const TX_POOL_EVENT_CHANNEL_SIZE: usize = 1024;
 
@@ -29,6 +33,11 @@ pub struct TransactionEvents {
 }
 
 impl TransactionEvents {
+    /// Create a new instance of this stream.
+    pub const fn new(hash: TxHash, events: UnboundedReceiver<TransactionEvent>) -> Self {
+        Self { hash, events }
+    }
+
     /// The hash for this transaction
     pub const fn hash(&self) -> TxHash {
         self.hash
@@ -110,6 +119,12 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
         self.all_events_broadcaster.broadcast(pool_event);
     }
 
+    /// Returns true if no listeners are installed
+    #[inline]
+    pub(crate) fn is_empty(&self) -> bool {
+        self.all_events_broadcaster.is_empty() && self.broadcasters_by_hash.is_empty()
+    }
+
     /// Create a new subscription for the given transaction hash.
     pub(crate) fn subscribe(&mut self, tx_hash: TxHash) -> TransactionEvents {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
@@ -153,8 +168,12 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
     }
 
     /// Notify listeners about a transaction that was added to the queued pool.
-    pub(crate) fn queued(&mut self, tx: &TxHash) {
-        self.broadcast_event(tx, TransactionEvent::Queued, FullTransactionEvent::Queued(*tx));
+    pub(crate) fn queued(&mut self, tx: &TxHash, reason: Option<QueuedReason>) {
+        self.broadcast_event(
+            tx,
+            TransactionEvent::Queued,
+            FullTransactionEvent::Queued(*tx, reason),
+        );
     }
 
     /// Notify listeners about a transaction that was propagated.
@@ -165,6 +184,17 @@ impl<T: PoolTransaction> PoolEventBroadcast<T> {
             TransactionEvent::Propagated(Arc::clone(&peers)),
             FullTransactionEvent::Propagated(peers),
         );
+    }
+
+    /// Notify listeners about all discarded transactions.
+    #[inline]
+    pub(crate) fn discarded_many(&mut self, discarded: &[Arc<ValidPoolTransaction<T>>]) {
+        if self.is_empty() {
+            return
+        }
+        for tx in discarded {
+            self.discarded(tx.hash());
+        }
     }
 
     /// Notify listeners about a transaction that was discarded.
@@ -210,6 +240,12 @@ impl<T: PoolTransaction> AllPoolEventsBroadcaster<T> {
             Err(TrySendError::Closed(_)) => false,
         })
     }
+
+    /// Returns true if there are no listeners installed.
+    #[inline]
+    const fn is_empty(&self) -> bool {
+        self.senders.is_empty()
+    }
 }
 
 /// All Sender half(s) of the event channels for a specific transaction.
@@ -223,7 +259,7 @@ struct PoolEventBroadcaster {
 
 impl PoolEventBroadcaster {
     /// Returns `true` if there are no more listeners remaining.
-    fn is_empty(&self) -> bool {
+    const fn is_empty(&self) -> bool {
         self.senders.is_empty()
     }
 

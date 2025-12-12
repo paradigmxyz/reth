@@ -21,9 +21,10 @@ reth-consensus.workspace = true
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
-reth-downloaders.workspace = true
+reth-downloaders = { workspace = true, features = ["file-client"] }
 reth-ecies.workspace = true
 reth-eth-wire.workspace = true
+reth-era.workspace = true
 reth-era-downloader.workspace = true
 reth-era-utils.workspace = true
 reth-etl.workspace = true
@@ -43,13 +44,14 @@ reth-ethereum-primitives = { workspace = true, optional = true }
 reth-provider.workspace = true
 reth-prune.workspace = true
 reth-prune-types = { workspace = true, optional = true }
+reth-revm.workspace = true
 reth-stages.workspace = true
 reth-stages-types = { workspace = true, optional = true }
 reth-static-file-types = { workspace = true, features = ["clap"] }
 reth-static-file.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
-reth-trie-common = { workspace = true, optional = true }
+reth-trie-common.workspace = true
 reth-primitives-traits.workspace = true
 reth-discv4.workspace = true
 reth-discv5.workspace = true
@@ -66,11 +68,12 @@ futures.workspace = true
 tokio.workspace = true
 
 # misc
-ahash.workspace = true
+humantime.workspace = true
 human_bytes.workspace = true
 eyre.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 lz4.workspace = true
+zstd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tar.workspace = true
@@ -96,6 +99,8 @@ proptest-arbitrary-interop = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-ethereum-cli.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
+tempfile.workspace = true
 
 [features]
 default = []
@@ -117,7 +122,7 @@ arbitrary = [
     "reth-codecs/arbitrary",
     "reth-prune-types?/arbitrary",
     "reth-stages-types?/arbitrary",
-    "reth-trie-common?/arbitrary",
+    "reth-trie-common/arbitrary",
     "alloy-consensus/arbitrary",
     "reth-primitives-traits/arbitrary",
     "reth-ethereum-primitives/arbitrary",

@@ -200,7 +200,6 @@ impl Discovery {
     }
 
     /// Add a node to the discv4 table.
-    #[expect(clippy::result_large_err)]
     pub(crate) fn add_discv5_node(&self, enr: Enr<SecretKey>) -> Result<(), NetworkError> {
         if let Some(discv5) = &self.discv5 {
             discv5.add_node(enr).map_err(NetworkError::Discv5Error)?;
@@ -267,12 +266,11 @@ impl Discovery {
             while let Some(Poll::Ready(Some(update))) =
                 self.discv5_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
-                if let Some(discv5) = self.discv5.as_mut() {
-                    if let Some(DiscoveredPeer { node_record, fork_id }) =
+                if let Some(discv5) = self.discv5.as_mut() &&
+                    let Some(DiscoveredPeer { node_record, fork_id }) =
                         discv5.on_discv5_update(update)
-                    {
-                        self.on_node_record_update(node_record, fork_id);
-                    }
+                {
+                    self.on_node_record_update(node_record, fork_id);
                 }
             }
 

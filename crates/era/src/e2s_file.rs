@@ -36,7 +36,7 @@ impl<R: Read + Seek> E2StoreReader<R> {
         Entry::read(&mut self.reader)
     }
 
-    /// Iterate through all entries, including the version entry
+    /// Read all entries from the file, including the version entry
     pub fn entries(&mut self) -> Result<Vec<Entry>, E2sError> {
         // Reset reader to beginning
         self.reader.seek(SeekFrom::Start(0))?;
@@ -74,7 +74,8 @@ impl<W: Write> E2StoreWriter<W> {
     }
 
     /// Write the version entry as the first entry in the file.
-    /// This must be called before writing any other entries.
+    /// If not called explicitly, it will be written automatically before the first non-version
+    /// entry.
     pub fn write_version(&mut self) -> Result<(), E2sError> {
         if self.has_written_version {
             return Ok(());

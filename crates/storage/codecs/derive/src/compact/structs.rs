@@ -155,7 +155,7 @@ impl<'a> StructHandler<'a> {
                     let (#name, new_buf) = #ident_type::#from_compact_ident(buf, flags.#len() as usize);
                 });
             } else {
-                todo!()
+                unreachable!("flag-type fields are always compact in Compact derive")
             }
             self.lines.push(quote! {
                 buf = new_buf;

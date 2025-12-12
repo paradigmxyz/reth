@@ -1,10 +1,10 @@
 use alloc::vec::Vec;
 use alloy_consensus::{
-    EthereumTxEnvelope, Header, TxEip1559, TxEip2930, TxEip4844, TxEip4844Variant,
-    TxEip4844WithSidecar, TxEip7702, TxLegacy, TxType,
+    transaction::TxEip4844Sidecar, EthereumTxEnvelope, Header, TxEip1559, TxEip2930, TxEip4844,
+    TxEip4844Variant, TxEip4844WithSidecar, TxEip7702, TxLegacy, TxType,
 };
 use alloy_eips::eip4895::Withdrawals;
-use alloy_primitives::{Signature, TxHash, B256};
+use alloy_primitives::{LogData, Signature, TxHash, B256};
 use revm_primitives::Log;
 
 /// Trait for calculating a heuristic for the in-memory size of a struct.
@@ -50,16 +50,21 @@ macro_rules! impl_in_mem_size {
     };
 }
 
-impl_in_mem_size!(
-    Header,
-    TxLegacy,
-    TxEip2930,
-    TxEip1559,
-    TxEip7702,
-    TxEip4844,
-    TxEip4844Variant,
-    TxEip4844WithSidecar
-);
+impl_in_mem_size!(Header, TxLegacy, TxEip2930, TxEip1559, TxEip7702, TxEip4844);
+
+impl<T: TxEip4844Sidecar> InMemorySize for TxEip4844Variant<T> {
+    #[inline]
+    fn size(&self) -> usize {
+        Self::size(self)
+    }
+}
+
+impl<T: TxEip4844Sidecar> InMemorySize for TxEip4844WithSidecar<T> {
+    #[inline]
+    fn size(&self) -> usize {
+        Self::size(self)
+    }
+}
 
 #[cfg(feature = "op")]
 impl_in_mem_size_size_of!(op_alloy_consensus::OpTxType);
@@ -69,7 +74,19 @@ impl InMemorySize for alloy_consensus::Receipt {
         let Self { status, cumulative_gas_used, logs } = self;
         core::mem::size_of_val(status) +
             core::mem::size_of_val(cumulative_gas_used) +
-            logs.capacity() * core::mem::size_of::<Log>()
+            logs.iter().map(|log| log.size()).sum::<usize>()
+    }
+}
+
+impl InMemorySize for LogData {
+    fn size(&self) -> usize {
+        self.data.len() + core::mem::size_of_val(self.topics())
+    }
+}
+
+impl<T: InMemorySize> InMemorySize for Log<T> {
+    fn size(&self) -> usize {
+        core::mem::size_of_val(&self.address) + self.data.size()
     }
 }
 
@@ -90,9 +107,7 @@ impl<T: InMemorySize, H: InMemorySize> InMemorySize for alloy_consensus::BlockBo
     #[inline]
     fn size(&self) -> usize {
         self.transactions.iter().map(T::size).sum::<usize>() +
-            self.transactions.capacity() * core::mem::size_of::<T>() +
             self.ommers.iter().map(H::size).sum::<usize>() +
-            self.ommers.capacity() * core::mem::size_of::<Header>() +
             self.withdrawals
                 .as_ref()
                 .map_or(core::mem::size_of::<Option<Withdrawals>>(), Withdrawals::total_size)

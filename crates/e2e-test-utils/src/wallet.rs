@@ -43,7 +43,7 @@ impl Wallet {
             let builder =
                 builder.clone().derivation_path(format!("{derivation_path}{idx}")).unwrap();
             let wallet = builder.build().unwrap().with_chain_id(Some(self.chain_id));
-            wallets.push(wallet)
+            wallets.push(wallet);
         }
         wallets
     }

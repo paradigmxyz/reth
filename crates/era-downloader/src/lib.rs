@@ -12,7 +12,7 @@
 //! let url = Url::from_str("file:///")?;
 //!
 //! // Directory where the ERA1 files will be downloaded to
-//! let folder = PathBuf::new().into_boxed_path();
+//! let folder = PathBuf::new();
 //!
 //! let client = EraClient::new(Client::new(), url, folder);
 //!
@@ -41,3 +41,5 @@ mod stream;
 pub use client::{EraClient, HttpClient};
 pub use fs::read_dir;
 pub use stream::{EraMeta, EraStream, EraStreamConfig};
+
+pub(crate) const BLOCKS_PER_FILE: usize = 8192;

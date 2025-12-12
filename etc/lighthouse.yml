@@ -1,5 +1,5 @@
-version: "3.9"
 name: reth
+
 services:
   lighthouse:
     restart: unless-stopped
@@ -13,11 +13,17 @@ services:
       - "9000:9000/tcp" # p2p
       - "9000:9000/udp" # p2p
     volumes:
-      - lighthousedata:/root/.lighthouse
+      - lighthouse_data:/root/.lighthouse
       - ./jwttoken:/root/jwt:ro
     # For Sepolia:
     # - Replace `--network mainnet` with `--network sepolia`
-    # - Use different checkpoint sync URL: `--checkpoint-sync-url https://sepolia.checkpoint-sync.ethpandaops.io`
+    # - Use different checkpoint sync URL: `--checkpoint-sync-url https://checkpoint-sync.sepolia.ethpandaops.io`
+    # For Holesky:
+    # - Replace `--network mainnet` with `--network holesky`
+    # - Use different checkpoint sync URL: `--checkpoint-sync-url https://checkpoint-sync.holesky.ethpandaops.io`
+    # For Hoodi:
+    # - Replace `--network mainnet` with `--network hoodi`
+    # - Use different checkpoint sync URL: `--checkpoint-sync-url https://checkpoint-sync.hoodi.ethpandaops.io`
     command: >
       lighthouse bn
       --network mainnet
@@ -43,5 +49,5 @@ services:
       - --metrics-port=9091
 
 volumes:
-  lighthousedata:
+  lighthouse_data:
     driver: local

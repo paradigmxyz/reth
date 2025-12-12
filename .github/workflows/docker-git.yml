@@ -33,7 +33,7 @@ jobs:
           - name: 'Build and push the git-sha-tagged op-reth image'
             command: 'make IMAGE_NAME=$OP_IMAGE_NAME DOCKER_IMAGE_NAME=$OP_DOCKER_IMAGE_NAME GIT_SHA=$GIT_SHA PROFILE=maxperf op-docker-build-push-git-sha'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2

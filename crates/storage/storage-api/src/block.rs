@@ -1,12 +1,12 @@
 use crate::{
-    BlockBodyIndicesProvider, BlockNumReader, HeaderProvider, OmmersProvider, ReceiptProvider,
-    ReceiptProviderIdExt, TransactionVariant, TransactionsProvider, WithdrawalsProvider,
+    BlockBodyIndicesProvider, BlockNumReader, HeaderProvider, ReceiptProvider,
+    ReceiptProviderIdExt, TransactionVariant, TransactionsProvider,
 };
 use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{BlockNumber, TxNumber, B256};
 use core::ops::RangeInclusive;
-use reth_primitives_traits::{RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 
 /// A helper enum that represents the origin of the requested block.
@@ -53,8 +53,6 @@ pub trait BlockReader:
     + BlockBodyIndicesProvider
     + TransactionsProvider
     + ReceiptProvider
-    + WithdrawalsProvider
-    + OmmersProvider
     + Send
     + Sync
 {
@@ -82,21 +80,15 @@ pub trait BlockReader:
 
     /// Returns the pending block if available
     ///
-    /// Note: This returns a [`SealedBlock`] because it's expected that this is sealed by the
-    /// provider and the caller does not know the hash.
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>>;
-
-    /// Returns the pending block if available
-    ///
     /// Note: This returns a [`RecoveredBlock`] because it's expected that this is sealed by
     /// the provider and the caller does not know the hash.
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>>;
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>>;
 
     /// Returns the pending block and receipts if available.
     #[expect(clippy::type_complexity)]
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>>;
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>>;
 
     /// Returns the block with matching hash from the database.
     ///
@@ -152,6 +144,9 @@ pub trait BlockReader:
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>>;
+
+    /// Returns the block number that contains the given transaction.
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>>;
 }
 
 impl<T: BlockReader> BlockReader for Arc<T> {
@@ -167,15 +162,12 @@ impl<T: BlockReader> BlockReader for Arc<T> {
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
     }
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::pending_block(self)
-    }
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        T::pending_block_with_senders(self)
     }
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
         T::pending_block_and_receipts(self)
     }
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
@@ -212,6 +204,9 @@ impl<T: BlockReader> BlockReader for Arc<T> {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::recovered_block_range(self, range)
+    }
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        T::block_by_transaction_id(self, id)
     }
 }
 
@@ -228,15 +223,12 @@ impl<T: BlockReader> BlockReader for &T {
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
         T::block(self, id)
     }
-    fn pending_block(&self) -> ProviderResult<Option<SealedBlock<Self::Block>>> {
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
         T::pending_block(self)
-    }
-    fn pending_block_with_senders(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
-        T::pending_block_with_senders(self)
     }
     fn pending_block_and_receipts(
         &self,
-    ) -> ProviderResult<Option<(SealedBlock<Self::Block>, Vec<Self::Receipt>)>> {
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
         T::pending_block_and_receipts(self)
     }
     fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
@@ -273,6 +265,9 @@ impl<T: BlockReader> BlockReader for &T {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
         T::recovered_block_range(self, range)
+    }
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        T::block_by_transaction_id(self, id)
     }
 }
 
@@ -384,19 +379,6 @@ pub trait BlockReaderIdExt: BlockReader + ReceiptProviderIdExt {
     ///
     /// Returns `None` if header is not found.
     fn header_by_id(&self, id: BlockId) -> ProviderResult<Option<Self::Header>>;
-
-    /// Returns the ommers with the matching tag from the database.
-    fn ommers_by_number_or_tag(
-        &self,
-        id: BlockNumberOrTag,
-    ) -> ProviderResult<Option<Vec<Self::Header>>> {
-        self.convert_block_number(id)?.map_or_else(|| Ok(None), |num| self.ommers(num.into()))
-    }
-
-    /// Returns the ommers with the matching `BlockId` from the database.
-    ///
-    /// Returns `None` if block is not found.
-    fn ommers_by_id(&self, id: BlockId) -> ProviderResult<Option<Vec<Self::Header>>>;
 }
 
 /// Functionality to read the last known chain blocks from the database.

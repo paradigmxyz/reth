@@ -6,7 +6,7 @@ use crate::{
     traits::{PoolTransaction, TransactionOrigin},
     PriceBumpConfig,
 };
-use alloy_eips::{eip4844::BlobTransactionSidecar, eip7702::SignedAuthorization};
+use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_primitives::{Address, TxHash, B256, U256};
 use futures_util::future::Either;
 use reth_primitives_traits::{Recovered, SealedBlock};
@@ -66,6 +66,14 @@ impl<T: PoolTransaction> TransactionValidationOutcome<T> {
         }
     }
 
+    /// Returns the [`InvalidPoolTransactionError`] if this is an invalid variant.
+    pub const fn as_invalid(&self) -> Option<&InvalidPoolTransactionError> {
+        match self {
+            Self::Invalid(_, err) => Some(err),
+            _ => None,
+        }
+    }
+
     /// Returns true if the transaction is valid.
     pub const fn is_valid(&self) -> bool {
         matches!(self, Self::Valid { .. })
@@ -103,13 +111,13 @@ pub enum ValidTransaction<T> {
         /// The valid EIP-4844 transaction.
         transaction: T,
         /// The extracted sidecar of that transaction
-        sidecar: BlobTransactionSidecar,
+        sidecar: BlobTransactionSidecarVariant,
     },
 }
 
 impl<T> ValidTransaction<T> {
     /// Creates a new valid transaction with an optional sidecar.
-    pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecar>) -> Self {
+    pub fn new(transaction: T, sidecar: Option<BlobTransactionSidecarVariant>) -> Self {
         if let Some(sidecar) = sidecar {
             Self::ValidWithSidecar { transaction, sidecar }
         } else {
@@ -198,12 +206,23 @@ pub trait TransactionValidator: Debug + Send + Sync {
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
-        async {
-            futures_util::future::join_all(
-                transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
-            )
-            .await
-        }
+        futures_util::future::join_all(
+            transactions.into_iter().map(|(origin, tx)| self.validate_transaction(origin, tx)),
+        )
+    }
+
+    /// Validates a batch of transactions with that given origin.
+    ///
+    /// Must return all outcomes for the given transactions in the same order.
+    ///
+    /// See also [`Self::validate_transaction`].
+    fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+    ) -> impl Future<Output = Vec<TransactionValidationOutcome<Self::Transaction>>> + Send {
+        let futures = transactions.into_iter().map(|tx| self.validate_transaction(origin, tx));
+        futures_util::future::join_all(futures)
     }
 
     /// Invoked when the head block changes.
@@ -241,6 +260,17 @@ where
         match self {
             Self::Left(v) => v.validate_transactions(transactions).await,
             Self::Right(v) => v.validate_transactions(transactions).await,
+        }
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        match self {
+            Self::Left(v) => v.validate_transactions_with_origin(origin, transactions).await,
+            Self::Right(v) => v.validate_transactions_with_origin(origin, transactions).await,
         }
     }
 
@@ -305,12 +335,12 @@ impl<T: PoolTransaction> ValidPoolTransaction<T> {
     }
 
     /// Returns the internal identifier for the sender of this transaction
-    pub(crate) const fn sender_id(&self) -> SenderId {
+    pub const fn sender_id(&self) -> SenderId {
         self.transaction_id.sender
     }
 
     /// Returns the internal identifier for this transaction.
-    pub(crate) const fn id(&self) -> &TransactionId {
+    pub const fn id(&self) -> &TransactionId {
         &self.transaction_id
     }
 
@@ -485,7 +515,7 @@ impl<T: PoolTransaction> fmt::Debug for ValidPoolTransaction<T> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ValidPoolTransaction")
             .field("id", &self.transaction_id)
-            .field("pragate", &self.propagate)
+            .field("propagate", &self.propagate)
             .field("origin", &self.origin)
             .field("hash", self.transaction.hash())
             .field("tx", &self.transaction)

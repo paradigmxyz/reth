@@ -11,12 +11,12 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
       - name: Label PRs
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         with:
           script: |
             const label_pr = require('./.github/assets/label_pr.js')

@@ -1,16 +1,15 @@
-use crate::{interop::MaybeInteropTransaction, supervisor::SupervisorClient, InvalidCrossTx};
+use crate::{supervisor::SupervisorClient, InvalidCrossTx, OpPooledTx};
 use alloy_consensus::{BlockHeader, Transaction};
-use alloy_eips::Encodable2718;
 use op_revm::L1BlockInfo;
 use parking_lot::RwLock;
 use reth_chainspec::ChainSpecProvider;
+use reth_mantle_forks::MantleHardforks;
 use reth_optimism_evm::RethL1BlockInfo;
 use reth_optimism_forks::OpHardforks;
-use reth_mantle_forks::MantleHardforks;
 use reth_primitives_traits::{
     transaction::error::InvalidTransactionError, Block, BlockBody, GotExpected, SealedBlock,
 };
-use reth_storage_api::{BlockReaderIdExt, StateProvider, StateProviderFactory};
+use reth_storage_api::{AccountInfoReader, BlockReaderIdExt, StateProviderFactory};
 use reth_transaction_pool::{
     error::InvalidPoolTransactionError, EthPoolTransaction, EthTransactionValidator,
     TransactionOrigin, TransactionValidationOutcome, TransactionValidator,
@@ -30,8 +29,6 @@ pub struct OpL1BlockInfo {
     l1_block_info: RwLock<L1BlockInfo>,
     /// Current block timestamp.
     timestamp: AtomicU64,
-    /// Current block number.
-    number: AtomicU64,
 }
 
 impl OpL1BlockInfo {
@@ -45,7 +42,7 @@ impl OpL1BlockInfo {
 #[derive(Debug, Clone)]
 pub struct OpTransactionValidator<Client, Tx> {
     /// The type that performs the actual validation.
-    inner: EthTransactionValidator<Client, Tx>,
+    inner: Arc<EthTransactionValidator<Client, Tx>>,
     /// Additional block info required for validation.
     block_info: Arc<OpL1BlockInfo>,
     /// If true, ensure that the transaction's sender has enough balance to cover the L1 gas fee
@@ -92,8 +89,10 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
-    Client: ChainSpecProvider<ChainSpec: OpHardforks + MantleHardforks> + StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction + MaybeInteropTransaction,
+    Client: ChainSpecProvider<ChainSpec: OpHardforks + MantleHardforks>
+        + StateProviderFactory
+        + BlockReaderIdExt,
+    Tx: EthPoolTransaction + OpPooledTx,
 {
     /// Create a new [`OpTransactionValidator`].
     pub fn new(inner: EthTransactionValidator<Client, Tx>) -> Self {
@@ -105,7 +104,6 @@ where
             // so that we will accept txs into the pool before the first block
             if block.header().number() == 0 {
                 this.block_info.timestamp.store(block.header().timestamp(), Ordering::Relaxed);
-                this.block_info.number.store(block.header().number(), Ordering::Relaxed);
             } else {
                 this.update_l1_block_info(block.header(), block.body().transactions().first());
             }
@@ -120,7 +118,7 @@ where
         block_info: OpL1BlockInfo,
     ) -> Self {
         Self {
-            inner,
+            inner: Arc::new(inner),
             block_info: Arc::new(block_info),
             require_l1_data_gas_fee: true,
             supervisor_client: None,
@@ -143,10 +141,9 @@ where
         T: Transaction,
     {
         self.block_info.timestamp.store(header.timestamp(), Ordering::Relaxed);
-        self.block_info.number.store(header.number(), Ordering::Relaxed);
 
-        if let Some(Ok(cost_addition)) = tx.map(reth_optimism_evm::extract_l1_info_from_tx) {
-            *self.block_info.l1_block_info.write() = cost_addition;
+        if let Some(Ok(l1_block_info)) = tx.map(reth_optimism_evm::extract_l1_info_from_tx) {
+            *self.block_info.l1_block_info.write() = l1_block_info;
         }
 
         if self.chain_spec().is_interop_active_at_timestamp(header.timestamp()) {
@@ -183,13 +180,13 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn StateProvider>>,
+        state: &mut Option<Box<dyn AccountInfoReader>>,
     ) -> TransactionValidationOutcome<Tx> {
         if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
                 transaction,
                 InvalidTransactionError::TxTypeNotSupported.into(),
-            )
+            );
         }
 
         // Interop cross tx validation
@@ -201,7 +198,7 @@ where
                     }
                     err => InvalidPoolTransactionError::Other(Box::new(err)),
                 };
-                return TransactionValidationOutcome::Invalid(transaction, err)
+                return TransactionValidationOutcome::Invalid(transaction, err);
             }
             Some(Ok(_)) => {
                 // valid interop tx
@@ -217,21 +214,6 @@ where
         self.apply_op_checks(outcome)
     }
 
-    /// Validates all given transactions.
-    ///
-    /// Returns all outcomes for the given transactions in the same order.
-    ///
-    /// See also [`Self::validate_one`]
-    pub async fn validate_all(
-        &self,
-        transactions: Vec<(TransactionOrigin, Tx)>,
-    ) -> Vec<TransactionValidationOutcome<Tx>> {
-        futures_util::future::join_all(
-            transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)),
-        )
-        .await
-    }
-
     /// Performs the necessary opstack specific checks based on top of the regular eth outcome.
     fn apply_op_checks(
         &self,
@@ -239,7 +221,7 @@ where
     ) -> TransactionValidationOutcome<Tx> {
         if !self.requires_l1_data_gas_fee() {
             // no need to check L1 gas fee
-            return outcome
+            return outcome;
         }
         // ensure that the account has enough balance to cover the L1 gas cost
         if let TransactionValidationOutcome::Valid {
@@ -253,9 +235,7 @@ where
         {
             let mut l1_block_info = self.block_info.l1_block_info.read().clone();
 
-            let mut encoded = Vec::with_capacity(valid_tx.transaction().encoded_length());
-            let tx = valid_tx.transaction().clone_into_consensus();
-            tx.encode_2718(&mut encoded);
+            let encoded = valid_tx.transaction().encoded_2718();
 
             let cost_addition = match l1_block_info.l1_tx_data_fee(
                 self.chain_spec(),
@@ -278,7 +258,7 @@ where
                         GotExpected { got: balance, expected: cost }.into(),
                     )
                     .into(),
-                )
+                );
             }
 
             return TransactionValidationOutcome::Valid {
@@ -288,7 +268,7 @@ where
                 propagate,
                 bytecode_hash,
                 authorities,
-            }
+            };
         }
         outcome
     }
@@ -312,8 +292,10 @@ where
 
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
-    Client: ChainSpecProvider<ChainSpec: OpHardforks + MantleHardforks> + StateProviderFactory + BlockReaderIdExt,
-    Tx: EthPoolTransaction + MaybeInteropTransaction,
+    Client: ChainSpecProvider<ChainSpec: OpHardforks + MantleHardforks>
+        + StateProviderFactory
+        + BlockReaderIdExt,
+    Tx: EthPoolTransaction + OpPooledTx,
 {
     type Transaction = Tx;
 
@@ -329,7 +311,21 @@ where
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
     ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
-        self.validate_all(transactions).await
+        futures_util::future::join_all(
+            transactions.into_iter().map(|(origin, tx)| self.validate_one(origin, tx)),
+        )
+        .await
+    }
+
+    async fn validate_transactions_with_origin(
+        &self,
+        origin: TransactionOrigin,
+        transactions: impl IntoIterator<Item = Self::Transaction> + Send,
+    ) -> Vec<TransactionValidationOutcome<Self::Transaction>> {
+        futures_util::future::join_all(
+            transactions.into_iter().map(|tx| self.validate_one(origin, tx)),
+        )
+        .await
     }
 
     fn on_new_head_block<B>(&self, new_tip_block: &SealedBlock<B>)

@@ -44,33 +44,50 @@ impl StorageLock {
     #[cfg(any(test, not(feature = "disable-lock")))]
     fn try_acquire_file_lock(path: &Path) -> Result<Self, StorageLockError> {
         let file_path = path.join(LOCKFILE_NAME);
-        if let Some(process_lock) = ProcessUID::parse(&file_path)? {
-            if process_lock.pid != (process::id() as usize) && process_lock.is_active() {
-                reth_tracing::tracing::error!(
-                    target: "reth::db::lockfile",
-                    path = ?file_path,
-                    pid = process_lock.pid,
-                    start_time = process_lock.start_time,
-                    "Storage lock already taken."
-                );
-                return Err(StorageLockError::Taken(process_lock.pid))
-            }
+        if let Some(process_lock) = ProcessUID::parse(&file_path)? &&
+            process_lock.pid != (process::id() as usize) &&
+            process_lock.is_active()
+        {
+            reth_tracing::tracing::error!(
+                target: "reth::db::lockfile",
+                path = ?file_path,
+                pid = process_lock.pid,
+                start_time = process_lock.start_time,
+                "Storage lock already taken."
+            );
+            return Err(StorageLockError::Taken(process_lock.pid))
         }
 
         Ok(Self(Arc::new(StorageLockInner::new(file_path)?)))
     }
 }
 
-impl Drop for StorageLock {
+impl Drop for StorageLockInner {
     fn drop(&mut self) {
         // The lockfile is not created in disable-lock mode, so we don't need to delete it.
         #[cfg(any(test, not(feature = "disable-lock")))]
-        if Arc::strong_count(&self.0) == 1 && self.0.file_path.exists() {
-            // TODO: should only happen during tests that the file does not exist: tempdir is
-            // getting dropped first. However, tempdir shouldn't be dropped
-            // before any of the storage providers.
-            if let Err(err) = reth_fs_util::remove_file(&self.0.file_path) {
-                reth_tracing::tracing::error!(%err, "Failed to delete lock file");
+        {
+            let file_path = &self.file_path;
+            if file_path.exists() {
+                if let Ok(Some(process_uid)) = ProcessUID::parse(file_path) {
+                    // Only remove if the lock file belongs to our process
+                    if process_uid.pid == process::id() as usize {
+                        if let Err(err) = reth_fs_util::remove_file(file_path) {
+                            reth_tracing::tracing::error!(%err, "Failed to delete lock file");
+                        }
+                    } else {
+                        reth_tracing::tracing::warn!(
+                            "Lock file belongs to different process (PID: {}), not removing",
+                            process_uid.pid
+                        );
+                    }
+                } else {
+                    // If we can't parse the lock file, still try to remove it
+                    // as it might be corrupted or from a previous run
+                    if let Err(err) = reth_fs_util::remove_file(file_path) {
+                        reth_tracing::tracing::error!(%err, "Failed to delete lock file");
+                    }
+                }
             }
         }
     }
@@ -125,15 +142,15 @@ impl ProcessUID {
 
     /// Parses [`Self`] from a file.
     fn parse(path: &Path) -> Result<Option<Self>, StorageLockError> {
-        if path.exists() {
-            if let Ok(contents) = reth_fs_util::read_to_string(path) {
-                let mut lines = contents.lines();
-                if let (Some(Ok(pid)), Some(Ok(start_time))) = (
-                    lines.next().map(str::trim).map(str::parse),
-                    lines.next().map(str::trim).map(str::parse),
-                ) {
-                    return Ok(Some(Self { pid, start_time }));
-                }
+        if path.exists() &&
+            let Ok(contents) = reth_fs_util::read_to_string(path)
+        {
+            let mut lines = contents.lines();
+            if let (Some(Ok(pid)), Some(Ok(start_time))) = (
+                lines.next().map(str::trim).map(str::parse),
+                lines.next().map(str::trim).map(str::parse),
+            ) {
+                return Ok(Some(Self { pid, start_time }));
             }
         }
         Ok(None)

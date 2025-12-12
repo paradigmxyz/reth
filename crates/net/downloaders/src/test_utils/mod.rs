@@ -2,6 +2,7 @@
 
 #![allow(dead_code)]
 
+#[cfg(any(test, feature = "file-client"))]
 use crate::{bodies::test_utils::create_raw_bodies, file_codec::BlockFileCodec};
 use alloy_primitives::B256;
 use futures::SinkExt;
@@ -37,6 +38,7 @@ pub(crate) fn generate_bodies(
 
 /// Generate a set of bodies, write them to a temporary file, and return the file along with the
 /// bodies and corresponding block hashes
+#[cfg(any(test, feature = "file-client"))]
 pub(crate) async fn generate_bodies_file(
     range: RangeInclusive<u64>,
 ) -> (tokio::fs::File, Vec<SealedHeader>, HashMap<B256, BlockBody>) {

@@ -35,7 +35,7 @@ pub trait DatabaseHashedStorage<TX>: Sized {
 }
 
 impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
-    for StorageRoot<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
+    for StorageRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX, address: Address) -> Self {
         Self::new(

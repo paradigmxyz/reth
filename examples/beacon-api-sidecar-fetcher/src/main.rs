@@ -1,7 +1,7 @@
 //! Run with
 //!
 //! ```sh
-//! cargo run -p beacon-api-beacon-sidecar-fetcher --node --full
+//! cargo run -p example-beacon-api-sidecar-fetcher -- node --full
 //! ```
 //!
 //! This launches a regular reth instance and subscribes to payload attributes event stream.
@@ -22,10 +22,9 @@ use alloy_primitives::B256;
 use clap::Parser;
 use futures_util::{stream::FuturesUnordered, StreamExt};
 use mined_sidecar::MinedSidecarStream;
-use reth::builder::NodeHandle;
 use reth_ethereum::{
     cli::{chainspec::EthereumChainSpecParser, interface::Cli},
-    node::EthereumNode,
+    node::{builder::NodeHandle, EthereumNode},
     provider::CanonStateSubscriptions,
 };
 
@@ -38,7 +37,7 @@ fn main() {
             let NodeHandle { node, node_exit_future } =
                 builder.node(EthereumNode::default()).launch().await?;
 
-            let notifications: reth::providers::CanonStateNotificationStream =
+            let notifications: reth_ethereum::provider::CanonStateNotificationStream =
                 node.provider.canonical_state_stream();
 
             let pool = node.pool.clone();
@@ -86,10 +85,7 @@ pub struct BeaconSidecarConfig {
 impl Default for BeaconSidecarConfig {
     /// Default setup for lighthouse client
     fn default() -> Self {
-        Self {
-            cl_addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), // Equivalent to Ipv4Addr::LOCALHOST
-            cl_port: 5052,
-        }
+        Self { cl_addr: IpAddr::V4(Ipv4Addr::LOCALHOST), cl_port: 5052 }
     }
 }
 

@@ -8,8 +8,7 @@ license.workspace = true
 [dependencies]
 tokio = { workspace = true, features = ["full"] }
 futures.workspace = true
-reth-ethereum = { workspace = true, features = ["node", "network"] }
-reth.workspace = true
+reth-ethereum = { workspace = true, features = ["node", "network", "cli"] }
 tokio-stream.workspace = true
 eyre.workspace = true
 tracing.workspace = true

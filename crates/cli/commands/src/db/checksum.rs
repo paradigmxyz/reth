@@ -2,7 +2,7 @@ use crate::{
     common::CliNodeTypes,
     db::get::{maybe_json_value_parser, table_key},
 };
-use ahash::RandomState;
+use alloy_primitives::map::foldhash::fast::FixedState;
 use clap::Parser;
 use reth_chainspec::EthereumHardforks;
 use reth_db::DatabaseEnv;
@@ -102,7 +102,7 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
         };
 
         let start_time = Instant::now();
-        let mut hasher = RandomState::with_seeds(1, 2, 3, 4).build_hasher();
+        let mut hasher = FixedState::with_seed(u64::from_be_bytes(*b"RETHRETH")).build_hasher();
         let mut total = 0;
 
         let limit = self.limit.unwrap_or(usize::MAX);
@@ -111,7 +111,7 @@ impl<N: ProviderNodeTypes> TableViewer<(u64, Duration)> for ChecksumViewer<'_, N
         for (index, entry) in walker.enumerate() {
             let (k, v): (RawKey<T::Key>, RawValue<T::Value>) = entry?;
 
-            if index % 100_000 == 0 {
+            if index.is_multiple_of(100_000) {
                 info!("Hashed {index} entries.");
             }
 

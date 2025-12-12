@@ -1,11 +1,10 @@
-use std::{net::SocketAddr, path::PathBuf};
-
-use jsonrpsee::server::ServerBuilder;
+use jsonrpsee::server::ServerConfigBuilder;
 use reth_node_core::{args::RpcServerArgs, utils::get_or_create_jwt_secret_from_path};
 use reth_rpc::ValidationApiConfig;
 use reth_rpc_eth_types::{EthConfig, EthStateCacheConfig, GasPriceOracleConfig};
 use reth_rpc_layer::{JwtError, JwtSecret};
 use reth_rpc_server_types::RpcModuleSelection;
+use std::{net::SocketAddr, path::PathBuf};
 use tower::layer::util::Identity;
 use tracing::{debug, warn};
 
@@ -49,8 +48,8 @@ pub trait RethRpcServerConfig {
     /// settings in the [`TransportRpcModuleConfig`].
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig;
 
-    /// Returns the default server builder for http/ws
-    fn http_ws_server_builder(&self) -> ServerBuilder<Identity, Identity>;
+    /// Returns the default server config for http/ws
+    fn http_ws_server_builder(&self) -> ServerConfigBuilder;
 
     /// Returns the default ipc server builder
     fn ipc_server_builder(&self) -> IpcServerBuilder<Identity, Identity>;
@@ -104,6 +103,9 @@ impl RethRpcServerConfig for RpcServerArgs {
             .state_cache(self.state_cache_config())
             .gpo_config(self.gas_price_oracle_config())
             .proof_permits(self.rpc_proof_permits)
+            .pending_block_kind(self.rpc_pending_block)
+            .raw_tx_forwarder(self.rpc_forwarder.clone())
+            .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
@@ -161,8 +163,8 @@ impl RethRpcServerConfig for RpcServerArgs {
         config
     }
 
-    fn http_ws_server_builder(&self) -> ServerBuilder<Identity, Identity> {
-        ServerBuilder::new()
+    fn http_ws_server_builder(&self) -> ServerConfigBuilder {
+        ServerConfigBuilder::new()
             .max_connections(self.rpc_max_connections.get())
             .max_request_body_size(self.rpc_max_request_size_bytes())
             .max_response_body_size(self.rpc_max_response_size_bytes())
@@ -175,6 +177,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .max_request_body_size(self.rpc_max_request_size_bytes())
             .max_response_body_size(self.rpc_max_response_size_bytes())
             .max_connections(self.rpc_max_connections.get())
+            .set_ipc_socket_permissions(self.ipc_socket_permissions.clone())
     }
 
     fn rpc_server_config(&self) -> RpcServerConfig {
@@ -193,12 +196,16 @@ impl RethRpcServerConfig for RpcServerArgs {
                 .with_http_address(socket_address)
                 .with_http(self.http_ws_server_builder())
                 .with_http_cors(self.http_corsdomain.clone())
-                .with_ws_cors(self.ws_allowed_origins.clone());
+                .with_http_disable_compression(self.http_disable_compression);
         }
 
         if self.ws {
             let socket_address = SocketAddr::new(self.ws_addr, self.ws_port);
-            config = config.with_ws_address(socket_address).with_ws(self.http_ws_server_builder());
+            // Ensure WS CORS is applied regardless of HTTP being enabled
+            config = config
+                .with_ws_address(socket_address)
+                .with_ws(self.http_ws_server_builder())
+                .with_ws_cors(self.ws_allowed_origins.clone());
         }
 
         if self.is_ipc_enabled() {

@@ -1,9 +1,7 @@
-use crate::primitives::{CustomHeader, CustomTransactionEnvelope, ExtendedOpTxEnvelope};
+use crate::primitives::{CustomHeader, CustomTransaction};
 
 /// The Block type of this node
-pub type Block =
-    alloy_consensus::Block<ExtendedOpTxEnvelope<CustomTransactionEnvelope>, CustomHeader>;
+pub type Block = alloy_consensus::Block<CustomTransaction, CustomHeader>;
 
 /// The body type of this node
-pub type BlockBody =
-    alloy_consensus::BlockBody<ExtendedOpTxEnvelope<CustomTransactionEnvelope>, CustomHeader>;
+pub type BlockBody = alloy_consensus::BlockBody<CustomTransaction, CustomHeader>;

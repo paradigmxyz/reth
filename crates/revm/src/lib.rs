@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -29,9 +29,6 @@ pub mod test_utils;
 
 // Convenience re-exports.
 pub use revm::{self, database::State, *};
-
-/// Either type for flexible usage of different database types in the same context.
-pub mod either;
 
 /// Helper types for execution witness generation.
 #[cfg(feature = "witness")]

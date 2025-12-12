@@ -5,7 +5,7 @@
 //! The components in this crate are involved in:
 //! * Handling and reacting to incoming consensus events ([`EngineHandler`](engine::EngineHandler))
 //! * Advancing the chain ([`ChainOrchestrator`](chain::ChainOrchestrator))
-//! * Keeping track of the chain structure in-memory ([`TreeState`](tree::TreeState))
+//! * Keeping track of the chain structure in-memory ([`TreeState`](tree::state::TreeState))
 //! * Performing backfill sync and handling its progress ([`BackfillSync`](backfill::BackfillSync))
 //! * Downloading blocks ([`BlockDownloader`](download::BlockDownloader)), and
 //! * Persisting blocks and performing pruning
@@ -58,10 +58,10 @@
 //!
 //! ## Chain representation
 //!
-//! The chain is represented by the [`TreeState`](tree::TreeState) data structure, which keeps
-//! tracks of blocks by hash and number, as well as keeping track of parent-child relationships
-//! between blocks. The hash and number of the current head of the canonical chain is also tracked
-//! in the [`TreeState`](tree::TreeState).
+//! The chain is represented by the [`TreeState`](tree::state::TreeState) data structure, which
+//! keeps tracks of blocks by hash and number, as well as keeping track of parent-child
+//! relationships between blocks. The hash and number of the current head of the canonical chain is
+//! also tracked in the [`TreeState`](tree::state::TreeState).
 //!
 //! ## Persistence model
 //!
@@ -89,7 +89,7 @@
     html_favicon_url = "https://avatars0.githubusercontent.com/u/97369466?s=256",
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
 /// Support for backfill sync mode.

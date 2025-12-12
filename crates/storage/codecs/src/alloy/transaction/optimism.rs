@@ -41,7 +41,7 @@ pub(crate) struct TxDeposit {
     value: U256,
     gas_limit: u64,
     is_system_transaction: bool,
-    eth_value: Option<u128>,
+    eth_value: u128,
     eth_tx_value: Option<u128>,
     input: Bytes,
 }
@@ -55,7 +55,10 @@ impl Compact for AlloyTxDeposit {
             source_hash: self.source_hash,
             from: self.from,
             to: self.to,
-            mint: self.mint,
+            mint: match self.mint {
+                0 => None,
+                v => Some(v),
+            },
             value: self.value,
             gas_limit: self.gas_limit,
             is_system_transaction: self.is_system_transaction,
@@ -67,12 +70,13 @@ impl Compact for AlloyTxDeposit {
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (tx, _) = TxDeposit::from_compact(buf, len);
+        // Return the remaining slice from the inner from_compact to advance the cursor correctly.
+        let (tx, remaining) = TxDeposit::from_compact(buf, len);
         let alloy_tx = Self {
             source_hash: tx.source_hash,
             from: tx.from,
             to: tx.to,
-            mint: tx.mint,
+            mint: tx.mint.unwrap_or_default(),
             value: tx.value,
             gas_limit: tx.gas_limit,
             is_system_transaction: tx.is_system_transaction,
@@ -80,7 +84,7 @@ impl Compact for AlloyTxDeposit {
             eth_value: tx.eth_value,
             eth_tx_value: tx.eth_tx_value,
         };
-        (alloy_tx, buf)
+        (alloy_tx, remaining)
     }
 }
 

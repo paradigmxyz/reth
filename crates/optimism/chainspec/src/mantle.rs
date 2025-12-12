@@ -32,6 +32,8 @@ impl TryFrom<&OtherFields> for MantleChainInfo {
 pub(crate) struct MantleGenesisInfo {
     /// Mantle Skadi upgrade timestamp
     pub mantle_skadi_time: Option<u64>,
+    /// Mantle Limb upgrade timestamp
+    pub mantle_limb_time: Option<u64>,
 }
 
 impl MantleGenesisInfo {
@@ -59,6 +61,10 @@ impl TryFrom<&OtherFields> for MantleGenesisInfo {
             .get_deserialized("mantleSkadiTime")
             .transpose()?;
 
-        Ok(Self { mantle_skadi_time })
+        let mantle_limb_time = others
+            .get_deserialized("mantleLimbTime")
+            .transpose()?;
+
+        Ok(Self { mantle_skadi_time, mantle_limb_time })
     }
 }

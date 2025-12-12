@@ -203,7 +203,7 @@ where
     }
 }
 
-/// A P2PStream wraps over any `Stream` that yields bytes and makes it compatible with `p2p`
+/// A `P2PStream` wraps over any `Stream` that yields bytes and makes it compatible with `p2p`
 /// protocol messages.
 ///
 /// This stream supports multiple shared capabilities, that were negotiated during the handshake.

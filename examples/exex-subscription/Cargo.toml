@@ -20,4 +20,5 @@ clap = { workspace = true, features = ["derive"] }
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
 tokio.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tracing.workspace = true

@@ -6,34 +6,35 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(clippy::useless_let_if_seq)]
 
-pub mod validator;
-pub use validator::EthereumExecutionPayloadValidator;
-
-use alloy_consensus::{Transaction, Typed2718};
+use alloy_consensus::Transaction;
 use alloy_primitives::U256;
+use alloy_rlp::Encodable;
 use reth_basic_payload_builder::{
     is_better_payload, BuildArguments, BuildOutcome, MissingPayloadBehaviour, PayloadBuilder,
     PayloadConfig,
 };
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
-use reth_errors::{BlockExecutionError, BlockValidationError};
+use reth_consensus_common::validation::MAX_RLP_BLOCK_SIZE;
+use reth_errors::{BlockExecutionError, BlockValidationError, ConsensusError};
 use reth_ethereum_primitives::{EthPrimitives, TransactionSigned};
 use reth_evm::{
     execute::{BlockBuilder, BlockBuilderOutcome},
     ConfigureEvm, Evm, NextBlockEnvAttributes,
 };
 use reth_evm_ethereum::EthEvmConfig;
-use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes};
+use reth_payload_builder::{BlobSidecars, EthBuiltPayload, EthPayloadBuilderAttributes};
 use reth_payload_builder_primitives::PayloadBuilderError;
 use reth_payload_primitives::PayloadBuilderAttributes;
+use reth_primitives_traits::transaction::error::InvalidTransactionError;
 use reth_revm::{database::StateProviderDatabase, db::State};
 use reth_storage_api::StateProviderFactory;
 use reth_transaction_pool::{
-    error::InvalidPoolTransactionError, BestTransactions, BestTransactionsAttributes,
-    PoolTransaction, TransactionPool, ValidPoolTransaction,
+    error::{Eip4844PoolTransactionError, InvalidPoolTransactionError},
+    BestTransactions, BestTransactionsAttributes, PoolTransaction, TransactionPool,
+    ValidPoolTransaction,
 };
 use revm::context_interface::Block as _;
 use std::sync::Arc;
@@ -41,8 +42,9 @@ use tracing::{debug, trace, warn};
 
 mod config;
 pub use config::*;
-use reth_primitives_traits::transaction::error::InvalidTransactionError;
-use reth_transaction_pool::error::Eip4844PoolTransactionError;
+
+pub mod validator;
+pub use validator::EthereumExecutionPayloadValidator;
 
 type BestTransactionsIter<Pool> = Box<
     dyn BestTransactions<Item = Arc<ValidPoolTransaction<<Pool as TransactionPool>::Transaction>>>,
@@ -174,8 +176,8 @@ where
 
     debug!(target: "payload_builder", id=%attributes.id, parent_header = ?parent_header.hash(), parent_number = parent_header.number, "building new payload");
     let mut cumulative_gas_used = 0;
-    let block_gas_limit: u64 = builder.evm_mut().block().gas_limit;
-    let base_fee = builder.evm_mut().block().basefee;
+    let block_gas_limit: u64 = builder.evm_mut().block().gas_limit();
+    let base_fee = builder.evm_mut().block().basefee();
 
     let mut best_txs = best_txs(BestTransactionsAttributes::new(
         base_fee,
@@ -188,10 +190,18 @@ where
         PayloadBuilderError::Internal(err.into())
     })?;
 
+    // initialize empty blob sidecars at first. If cancun is active then this will be populated by
+    // blob sidecars if any.
+    let mut blob_sidecars = BlobSidecars::Empty;
+
     let mut block_blob_count = 0;
+    let mut block_transactions_rlp_length = 0;
+
     let blob_params = chain_spec.blob_params_at_timestamp(attributes.timestamp);
     let max_blob_count =
         blob_params.as_ref().map(|params| params.max_blob_count).unwrap_or_default();
+
+    let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
@@ -214,8 +224,25 @@ where
         // convert tx to a signed transaction
         let tx = pool_tx.to_consensus();
 
+        let estimated_block_size_with_tx = block_transactions_rlp_length +
+            tx.inner().length() +
+            attributes.withdrawals().length() +
+            1024; // 1Kb of overhead for the block header
+
+        if is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
+            best_txs.mark_invalid(
+                &pool_tx,
+                InvalidPoolTransactionError::OversizedData {
+                    size: estimated_block_size_with_tx,
+                    limit: MAX_RLP_BLOCK_SIZE,
+                },
+            );
+            continue;
+        }
+
         // There's only limited amount of blob space available per block, so we need to check if
         // the EIP-4844 can still fit in the block
+        let mut blob_tx_sidecar = None;
         if let Some(blob_tx) = tx.as_eip4844() {
             let tx_blob_count = blob_tx.tx().blob_versioned_hashes.len() as u64;
 
@@ -236,6 +263,34 @@ where
                 );
                 continue
             }
+
+            let blob_sidecar_result = 'sidecar: {
+                let Some(sidecar) =
+                    pool.get_blob(*tx.hash()).map_err(PayloadBuilderError::other)?
+                else {
+                    break 'sidecar Err(Eip4844PoolTransactionError::MissingEip4844BlobSidecar)
+                };
+
+                if is_osaka {
+                    if sidecar.is_eip7594() {
+                        Ok(sidecar)
+                    } else {
+                        Err(Eip4844PoolTransactionError::UnexpectedEip4844SidecarAfterOsaka)
+                    }
+                } else if sidecar.is_eip4844() {
+                    Ok(sidecar)
+                } else {
+                    Err(Eip4844PoolTransactionError::UnexpectedEip7594SidecarBeforeOsaka)
+                }
+            };
+
+            blob_tx_sidecar = match blob_sidecar_result {
+                Ok(sidecar) => Some(sidecar),
+                Err(error) => {
+                    best_txs.mark_invalid(&pool_tx, InvalidPoolTransactionError::Eip4844(error));
+                    continue
+                }
+            };
         }
 
         let gas_used = match builder.execute_transaction(tx.clone()) {
@@ -273,11 +328,18 @@ where
             }
         }
 
-        // update add to total fees
+        block_transactions_rlp_length += tx.inner().length();
+
+        // update and add to total fees
         let miner_fee =
             tx.effective_tip_per_gas(base_fee).expect("fee is always valid; execution succeeded");
         total_fees += U256::from(miner_fee) * U256::from(gas_used);
         cumulative_gas_used += gas_used;
+
+        // Add blob tx sidecar to the payload.
+        if let Some(sidecar) = blob_tx_sidecar {
+            blob_sidecars.push_sidecar_variant(sidecar.as_ref().clone());
+        }
     }
 
     // check if we have a better block
@@ -294,31 +356,19 @@ where
         .is_prague_active_at_timestamp(attributes.timestamp)
         .then_some(execution_result.requests);
 
-    // initialize empty blob sidecars at first. If cancun is active then this will
-    let mut blob_sidecars = Vec::new();
-
-    // only determine cancun fields when active
-    if chain_spec.is_cancun_active_at_timestamp(attributes.timestamp) {
-        // grab the blob sidecars from the executed txs
-        blob_sidecars = pool
-            .get_all_blobs_exact(
-                block
-                    .body()
-                    .transactions()
-                    .filter(|tx| tx.is_eip4844())
-                    .map(|tx| *tx.tx_hash())
-                    .collect(),
-            )
-            .map_err(PayloadBuilderError::other)?;
-    }
-
     let sealed_block = Arc::new(block.sealed_block().clone());
     debug!(target: "payload_builder", id=%attributes.id, sealed_block_header = ?sealed_block.sealed_header(), "sealed built block");
 
-    let mut payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests);
+    if is_osaka && sealed_block.rlp_length() > MAX_RLP_BLOCK_SIZE {
+        return Err(PayloadBuilderError::other(ConsensusError::BlockTooLarge {
+            rlp_length: sealed_block.rlp_length(),
+            max_rlp_length: MAX_RLP_BLOCK_SIZE,
+        }));
+    }
 
-    // extend the payload with the blob sidecars from the executed txs
-    payload.extend_sidecars(blob_sidecars.into_iter().map(Arc::unwrap_or_clone));
+    let payload = EthBuiltPayload::new(attributes.id, sealed_block, total_fees, requests)
+        // add blob sidecars from the executed txs
+        .with_sidecars(blob_sidecars);
 
     Ok(BuildOutcome::Better { payload, cached_reads })
 }

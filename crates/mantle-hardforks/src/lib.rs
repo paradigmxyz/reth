@@ -11,11 +11,19 @@
 )]
 #![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![no_std]
+#![cfg_attr(not(feature = "std"), no_std)]
 
+#[cfg(not(feature = "std"))]
 extern crate alloc;
 
+// Debug utilities (requires std)
+#[cfg(feature = "std")]
+pub mod debug;
+
+#[cfg(not(feature = "std"))]
 use alloc::{vec::Vec};
+#[cfg(feature = "std")]
+use std::vec::Vec;
 use alloy_chains::{Chain, NamedChain};
 use alloy_hardforks::{EthereumHardfork, hardfork};
 pub use alloy_hardforks::{EthereumHardforks, ForkCondition};
@@ -35,6 +43,9 @@ pub const MANTLE_MAINNET_SKADI_TIMESTAMP: u64 = 1_756_278_000; // Wed Aug 27 202
 /// Skadi upgrade timestamp for Mantle Sepolia testnet
 pub const MANTLE_SEPOLIA_SKADI_TIMESTAMP: u64 = 1_752_649_200; // Wed Jul 16 2025 15:00:00 GMT+0800
 
+/// Limb upgrade timestamp for Mantle Sepolia testnet
+pub const MANTLE_SEPOLIA_LIMB_TIMESTAMP: u64 = 1_764_745_200; // Wed Dec 03 2025 15:00:00 GMT+0800
+
 hardfork!(
     /// Mantle-specific hardforks that extend the OP Stack hardfork set.
     ///
@@ -49,6 +60,12 @@ hardfork!(
         /// while maintaining compatibility with the OP Stack ecosystem.
         #[default]
         Skadi,
+
+        /// Limb: Mantle's Osaka-equivalent upgrade
+        /// 
+        /// This hardfork introduces Mantle-specific features and optimizations
+        /// while maintaining compatibility with the OP Stack ecosystem.
+        Limb,
     }
 );
 
@@ -65,7 +82,8 @@ impl MantleHardfork {
             }),
             NamedChain::MantleSepolia => Some(match timestamp {
                 _i if timestamp < MANTLE_SEPOLIA_SKADI_TIMESTAMP => Self::Skadi,
-                _ => Self::Skadi,
+                _i if timestamp < MANTLE_SEPOLIA_LIMB_TIMESTAMP => Self::Limb,
+                _ => Self::Limb,
             }),
             _ => None,
         }
@@ -79,9 +97,10 @@ impl MantleHardfork {
     }
 
     /// Mantle Sepolia list of hardforks.
-    pub const fn mantle_sepolia() -> [(Self, ForkCondition); 1] {
+    pub const fn mantle_sepolia() -> [(Self, ForkCondition); 2] {
         [
             (Self::Skadi, ForkCondition::Timestamp(MANTLE_SEPOLIA_SKADI_TIMESTAMP)),
+            (Self::Limb, ForkCondition::Timestamp(MANTLE_SEPOLIA_LIMB_TIMESTAMP)),
         ]
     }
 
@@ -101,6 +120,31 @@ pub trait MantleHardforks: OpHardforks {
     /// Returns `true` if [`Skadi`](MantleHardfork::Skadi) is active at given block timestamp.
     fn is_skadi_active_at_timestamp(&self, timestamp: u64) -> bool {
         self.mantle_fork_activation(MantleHardfork::Skadi).active_at_timestamp(timestamp)
+    }
+
+    /// Returns `true` if [`Limb`](MantleHardfork::Limb) is active at given block timestamp.
+    fn is_limb_active_at_timestamp(&self, timestamp: u64) -> bool {
+        self.mantle_fork_activation(MantleHardfork::Limb).active_at_timestamp(timestamp)
+    }
+
+    /// Returns the revm spec ID for Mantle chains at the given timestamp.
+    /// 
+    /// This checks Mantle-specific hardforks (like Skadi) first, then falls back
+    /// to standard OP Stack hardfork detection.
+    /// 
+    /// # Note
+    /// 
+    /// This is only intended to be used after Bedrock, when hardforks are activated by timestamp.
+    fn revm_spec_at_timestamp(&self, timestamp: u64) -> op_revm::OpSpecId {
+        // Check Mantle Skadi first
+        if self.is_limb_active_at_timestamp(timestamp) {
+            op_revm::OpSpecId::OSAKA
+        } else if self.is_skadi_active_at_timestamp(timestamp) {
+            op_revm::OpSpecId::ISTHMUS
+        } else {
+            // Fall back to OP Stack hardforks
+            alloy_op_evm::spec_by_timestamp_after_bedrock(self, timestamp)
+        }
     }
 }
 
@@ -142,8 +186,20 @@ impl MantleChainHardforks {
 }
 
 impl EthereumHardforks for MantleChainHardforks {
-    fn ethereum_fork_activation(&self, _fork: EthereumHardfork) -> ForkCondition {
-        todo!()
+    fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
+        use EthereumHardfork::{Cancun, Prague, Shanghai};
+        use MantleHardfork::Skadi;
+
+        if self.forks.is_empty() {
+            return ForkCondition::Never;
+        }
+
+        let forks_len = self.forks.len();
+        // check index out of bounds
+        match fork {
+            Shanghai|Cancun|Prague if forks_len <= Skadi.idx() => ForkCondition::Never,
+            _ => self[fork],
+        }
     }
 }
 
@@ -185,119 +241,14 @@ impl Index<MantleHardfork> for MantleChainHardforks {
     type Output = ForkCondition;
 
     fn index(&self, hf: MantleHardfork) -> &Self::Output {
-        use MantleHardfork::Skadi;
+        use MantleHardfork::{Skadi, Limb};
 
         match hf {
             Skadi => &self.forks[Skadi.idx()].1,
+            Limb => &self.forks[Limb.idx()].1,
         }
     }
 }
-
-// /// Combined hardforks for Mantle networks that include both OP Stack and Mantle-specific hardforks.
-// pub struct MantleNetworkHardforks {
-//     /// OP Stack hardforks
-//     pub op_hardforks: ChainHardforks,
-//     /// Mantle-specific hardforks
-//     pub mantle_hardforks: MantleChainHardforks,
-// }
-
-// impl MantleNetworkHardforks {
-//     /// Creates a new [`MantleNetworkHardforks`] with Mantle mainnet configuration.
-//     pub fn mantle_mainnet() -> Self {
-//         Self {
-//             op_hardforks: ChainHardforks::new(vec![
-//                 // Standard Ethereum hardforks
-//                 (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
-//                 (
-//                     EthereumHardfork::Paris.boxed(),
-//                     ForkCondition::TTD {
-//                         activation_block_number: 0,
-//                         total_difficulty: alloy_primitives::U256::ZERO,
-//                         fork_block: Some(0),
-//                     },
-//                 ),
-//                 // OP Stack hardforks
-//                 (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
-//                 (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-//                 (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(0)),
-//                 (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(0)),
-//                 (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(0)),
-//                 (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(0)),
-//                 (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(0)),
-//                 (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(0)),
-//                 (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(0)),
-//                 (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP)),
-//                 (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP)),
-//             ]),
-//             mantle_hardforks: MantleChainHardforks::mantle_mainnet(),
-//         }
-//     }
-
-//     /// Creates a new [`MantleNetworkHardforks`] with Mantle Sepolia configuration.
-//     pub fn mantle_sepolia() -> Self {
-//         Self {
-//             op_hardforks: ChainHardforks::new(vec![
-//                 // Standard Ethereum hardforks
-//                 (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::MuirGlacier.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::ArrowGlacier.boxed(), ForkCondition::Block(0)),
-//                 (EthereumHardfork::GrayGlacier.boxed(), ForkCondition::Block(0)),
-//                 (
-//                     EthereumHardfork::Paris.boxed(),
-//                     ForkCondition::TTD {
-//                         activation_block_number: 0,
-//                         total_difficulty: alloy_primitives::U256::ZERO,
-//                         fork_block: Some(0),
-//                     },
-//                 ),
-//                 // OP Stack hardforks
-//                 (OpHardfork::Bedrock.boxed(), ForkCondition::Block(0)),
-//                 (OpHardfork::Regolith.boxed(), ForkCondition::Timestamp(0)),
-//                 (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(0)),
-//                 (OpHardfork::Canyon.boxed(), ForkCondition::Timestamp(0)),
-//                 (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(0)),
-//                 (OpHardfork::Ecotone.boxed(), ForkCondition::Timestamp(0)),
-//                 (OpHardfork::Fjord.boxed(), ForkCondition::Timestamp(0)),
-//                 (OpHardfork::Granite.boxed(), ForkCondition::Timestamp(0)),
-//                 (OpHardfork::Holocene.boxed(), ForkCondition::Timestamp(0)),
-//                 (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(MANTLE_SEPOLIA_SKADI_TIMESTAMP)),
-//                 (OpHardfork::Isthmus.boxed(), ForkCondition::Timestamp(MANTLE_SEPOLIA_SKADI_TIMESTAMP)),
-//             ]),
-//             mantle_hardforks: MantleChainHardforks::mantle_sepolia(),
-//         }
-//     }
-// }
-
-// /// Mantle mainnet hardforks configuration.
-// pub static MANTLE_MAINNET_HARDFORKS: LazyLock<MantleNetworkHardforks> = LazyLock::new(|| {
-//     MantleNetworkHardforks::mantle_mainnet()
-// });
-
-// /// Mantle Sepolia hardforks configuration.
-// pub static MANTLE_SEPOLIA_HARDFORKS: LazyLock<MantleNetworkHardforks> = LazyLock::new(|| {
-//     MantleNetworkHardforks::mantle_sepolia()
-// });
 
 #[cfg(test)]
 mod tests {
@@ -374,16 +325,29 @@ mod tests {
         );
     }
 
-    // #[test]
-    // fn test_mantle_network_hardforks() {
-    //     let mantle_mainnet = MantleNetworkHardforks::mantle_mainnet();
+    #[test]
+    fn test_reverse_lookup_limb_hardfork() {
+        let mantle_sepolia_chain = Chain::from_id(MANTLE_SEPOLIA_CHAIN_ID);
         
-    //     // Test OP hardforks are present
-    //     assert!(mantle_mainnet.op_hardforks.fork(EthereumHardfork::Prague).active_at_timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP));
-    //     assert!(mantle_mainnet.op_hardforks.fork(OpHardfork::Isthmus).active_at_timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP));
+        // Test Limb activation
+        assert_eq!(
+            MantleHardfork::from_chain_and_timestamp(mantle_sepolia_chain, MANTLE_SEPOLIA_LIMB_TIMESTAMP),
+            Some(MantleHardfork::Limb)
+        );
         
-    //     // Test Mantle hardforks are present
-    //     assert!(mantle_mainnet.mantle_hardforks.is_skadi_active_at_timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP));
-    //     assert!(!mantle_mainnet.mantle_hardforks.is_skadi_active_at_timestamp(MANTLE_MAINNET_SKADI_TIMESTAMP - 1));
-    // }
+        // Test before Limb but after Skadi
+        assert_eq!(
+            MantleHardfork::from_chain_and_timestamp(mantle_sepolia_chain, MANTLE_SEPOLIA_LIMB_TIMESTAMP - 1),
+            Some(MantleHardfork::Skadi)
+        );
+    }
+
+    #[test]
+    fn test_limb_fork_condition() {
+        let mantle_sepolia_forks = MantleChainHardforks::mantle_sepolia();
+        assert_eq!(
+            mantle_sepolia_forks[MantleHardfork::Limb],
+            ForkCondition::Timestamp(MANTLE_SEPOLIA_LIMB_TIMESTAMP)
+        );
+    }
 }

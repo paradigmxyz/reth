@@ -4,6 +4,7 @@ use std::collections::HashMap;
 
 #[derive(Debug, Default)]
 pub(crate) struct SyncMetrics {
+    /// Stage metrics by stage.
     pub(crate) stages: HashMap<StageId, StageMetrics>,
 }
 
@@ -26,4 +27,6 @@ pub(crate) struct StageMetrics {
     pub(crate) entities_processed: Gauge,
     /// The number of total entities of the last commit for a stage, if applicable.
     pub(crate) entities_total: Gauge,
+    /// The number of seconds spent executing the stage and committing the data.
+    pub(crate) total_elapsed: Gauge,
 }

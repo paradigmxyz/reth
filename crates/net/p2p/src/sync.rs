@@ -1,6 +1,7 @@
 //! Traits used when interacting with the sync status of the network.
 
 use alloy_eips::eip2124::Head;
+use reth_eth_wire_types::BlockRangeUpdate;
 
 /// A type that provides information about whether the node is currently syncing and the network is
 /// currently serving syncing related requests.
@@ -22,11 +23,14 @@ pub trait SyncStateProvider: Send + Sync {
 /// which point the node is considered fully synced.
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait NetworkSyncUpdater: std::fmt::Debug + Send + Sync + 'static {
-    /// Notifies about a [SyncState] update.
+    /// Notifies about a [`SyncState`] update.
     fn update_sync_state(&self, state: SyncState);
 
-    /// Updates the status of the p2p node
+    /// Updates the status of the p2p node.
     fn update_status(&self, head: Head);
+
+    /// Updates the advertised block range.
+    fn update_block_range(&self, update: BlockRangeUpdate);
 }
 
 /// The state the network is currently in when it comes to synchronization.
@@ -66,4 +70,5 @@ impl SyncStateProvider for NoopSyncStateUpdater {
 impl NetworkSyncUpdater for NoopSyncStateUpdater {
     fn update_sync_state(&self, _state: SyncState) {}
     fn update_status(&self, _: Head) {}
+    fn update_block_range(&self, _update: BlockRangeUpdate) {}
 }

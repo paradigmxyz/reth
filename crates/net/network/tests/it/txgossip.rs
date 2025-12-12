@@ -10,7 +10,9 @@ use reth_network::{
 };
 use reth_network_api::{events::PeerEvent, PeerKind, PeersInfo};
 use reth_provider::test_utils::{ExtendedAccount, MockEthProvider};
-use reth_transaction_pool::{test_utils::TransactionGenerator, PoolTransaction, TransactionPool};
+use reth_transaction_pool::{
+    test_utils::TransactionGenerator, AddedTransactionOutcome, PoolTransaction, TransactionPool,
+};
 use std::sync::Arc;
 use tokio::join;
 
@@ -42,7 +44,8 @@ async fn test_tx_gossip() {
     provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
 
     // insert pending tx in peer0's pool
-    let hash = peer0_pool.add_external_transaction(tx).await.unwrap();
+    let AddedTransactionOutcome { hash, .. } =
+        peer0_pool.add_external_transaction(tx).await.unwrap();
 
     let inserted = peer0_tx_listener.recv().await.unwrap();
     assert_eq!(inserted, hash);
@@ -81,10 +84,10 @@ async fn test_tx_propagation_policy_trusted_only() {
     provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
 
     // insert the tx in peer0's pool
-    let hash_0 = peer_0_handle.pool().unwrap().add_external_transaction(tx).await.unwrap();
+    let outcome_0 = peer_0_handle.pool().unwrap().add_external_transaction(tx).await.unwrap();
     let inserted = peer0_tx_listener.recv().await.unwrap();
 
-    assert_eq!(inserted, hash_0);
+    assert_eq!(inserted, outcome_0.hash);
 
     // ensure tx is not gossiped to peer1
     peer1_tx_listener.try_recv().expect_err("Empty");
@@ -108,16 +111,16 @@ async fn test_tx_propagation_policy_trusted_only() {
     provider.add_account(sender, ExtendedAccount::new(0, U256::from(100_000_000)));
 
     // insert pending tx in peer0's pool
-    let hash_1 = peer_0_handle.pool().unwrap().add_external_transaction(tx).await.unwrap();
+    let outcome_1 = peer_0_handle.pool().unwrap().add_external_transaction(tx).await.unwrap();
     let inserted = peer0_tx_listener.recv().await.unwrap();
-    assert_eq!(inserted, hash_1);
+    assert_eq!(inserted, outcome_1.hash);
 
     // ensure peer1 now receives the pending txs from peer0
     let mut buff = Vec::with_capacity(2);
     buff.push(peer1_tx_listener.recv().await.unwrap());
     buff.push(peer1_tx_listener.recv().await.unwrap());
 
-    assert!(buff.contains(&hash_1));
+    assert!(buff.contains(&outcome_1.hash));
 }
 
 #[tokio::test(flavor = "multi_thread")]
