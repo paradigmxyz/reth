@@ -53,6 +53,12 @@ pub mod tx_manager {
     ///
     /// Default is 100 KiB, i.e. 3 200 transaction hashes.
     pub const DEFAULT_MAX_COUNT_BAD_IMPORTS: u32 = 100 * 1024 / 32;
+
+    /// Default limit for number of recently mined transactions to keep track of.
+    ///
+    /// Used to prevent re-importing transactions that were recently included in blocks.
+    /// Default is 100 KiB, i.e. 3 200 transaction hashes.
+    pub const DEFAULT_MAX_COUNT_MINED_TRANSACTIONS: u32 = 100 * 1024 / 32;
 }
 
 /// Constants used by [`TransactionFetcher`](super::TransactionFetcher).

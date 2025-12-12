@@ -504,7 +504,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
     pub fn filter_unseen_and_pending_hashes(
         &mut self,
         new_announced_hashes: &mut ValidAnnouncementData,
-        is_tx_bad_import: impl Fn(&TxHash) -> bool,
+        should_skip: impl Fn(&TxHash) -> bool,
         peer_id: &PeerId,
         client_version: &str,
     ) {
@@ -546,7 +546,7 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
 
             // vacant entry
 
-            if is_tx_bad_import(hash) {
+            if should_skip(hash) {
                 return false
             }
 
