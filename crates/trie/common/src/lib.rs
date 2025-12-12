@@ -69,6 +69,7 @@ mod utils;
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
     pub use super::updates::serde_bincode_compat as updates;
+    pub use super::hashed_state::serde_bincode_compat as hashed_state;
 }
 
 /// Re-export
