@@ -6,7 +6,8 @@ use alloy_primitives::{
     map::{HashMap, HashSet},
     BlockNumber, B256,
 };
-use reth_chain_state::{EthPrimitives, ExecutedBlock};
+use reth_chain_state::ExecutedBlock;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::{AlloyBlockHeader, NodePrimitives, SealedHeader};
 use std::{
     collections::{btree_map, hash_map, BTreeMap, VecDeque},

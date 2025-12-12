@@ -2225,8 +2225,8 @@ where
 mod tests {
     use std::collections::BTreeMap;
 
-    use reth_chain_state::EthPrimitives;
     use reth_db::test_utils::create_test_static_files_dir;
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_static_file_types::{SegmentRangeInclusive, StaticFileSegment};
 
     use crate::StaticFileProviderBuilder;
