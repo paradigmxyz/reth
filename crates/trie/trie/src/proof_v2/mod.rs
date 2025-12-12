@@ -16,7 +16,7 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{BranchNode, Nibbles, ProofTrieNode, RlpNode, TrieMasks, TrieNode};
-use std::{cmp::Ordering, iter::Peekable};
+use std::cmp::Ordering;
 use tracing::{instrument, trace};
 
 mod value;
@@ -114,9 +114,6 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     }
 }
 
-/// Helper type for the [`Iterator`] used to pass targets in from the caller.
-type TargetsIter<I> = Peekable<WindowIter<I>>;
-
 impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
     TC: TrieCursor,
@@ -148,18 +145,19 @@ where
         !self.branch_stack.is_empty() as usize
     }
 
-    /// Returns true if the proof of a node at the given path should be retained.
-    /// A node is retained if its path is a prefix of any target.
-    /// This may move the
-    /// `targets` iterator forward if the given path comes after the current target.
+    /// Returns true if the proof of a node at the given path should be retained. A node is retained
+    /// if its path is a prefix of any target.
     ///
-    /// This method takes advantage of the [`WindowIter`] component of [`TargetsIter`] to only check
-    /// a single target at a time. The [`WindowIter`] allows us to look at a current target and the
-    /// next target simultaneously, forming an end-exclusive range.
+    /// This may move the `targets` iterator forward if the given path comes after the current
+    /// target.
+    ///
+    /// This method takes advantage of the [`std::slice::Iter`] component of [`TargetsCursor`] to
+    /// check the minimum number of targets. In general it looks at a current target and the next
+    /// target simultaneously, forming an end-exclusive range.
     ///
     /// ```text
     /// * Given targets: [ 0x012, 0x045, 0x678 ]
-    /// * targets.next() returns:
+    /// * targets.current() returns:
     ///     - (0x012, Some(0x045)): covers (0x012..0x045)
     ///     - (0x045, Some(0x678)): covers (0x045..0x678)
     ///     - (0x678, None): covers (0x678..)
@@ -172,27 +170,20 @@ where
     /// ```text
     /// * Given:
     ///     - path: 0x04
-    ///     - targets.peek() returns (0x012, Some(0x045))
+    ///     - targets.current() returns (0x012, Some(0x045))
     ///
     /// * 0x04 comes _after_ 0x045 in depth-first order, so (0x012..0x045) does not contain 0x04.
     ///
     /// * targets.next() is called.
     ///
-    /// * targets.peek() now returns (0x045, Some(0x678)). This does contain 0x04.
+    /// * targets.current() now returns (0x045, Some(0x678)). This does contain 0x04.
     ///
     /// * 0x04 is a prefix of 0x045, and so is retained.
     /// ```
-    ///
-    /// Because paths in the trie are visited in depth-first order, it's imperative that targets are
-    /// given in depth-first order as well. If the targets were generated off of B256s, which is
-    /// the common-case, then this is equivalent to lexicographical order.
-    fn should_retain<'a>(
-        &self,
-        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
-        path: &Nibbles,
-    ) -> bool {
-        // TODO check target lower bound
-        trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), "should_retain: called");
+    fn should_retain<'a>(&self, targets: &mut TargetsCursor<'a>, path: &Nibbles) -> bool {
+        let (mut lower, mut upper) = targets.current();
+
+        trace!(target: TRACE_TARGET, ?path, target = ?lower, "should_retain: called");
         debug_assert!(self.retained_proofs.last().is_none_or(
                 |ProofTrieNode { path: last_retained_path, .. }| {
                     depth_first::cmp(path, last_retained_path) == Ordering::Greater
@@ -202,21 +193,40 @@ where
             self.retained_proofs.last().map(|n| n.path),
         );
 
-        let &(mut lower, mut upper) = targets.peek().expect("targets is never exhausted");
-
         loop {
-            // If the node in question is a prefix of the target then we retain
+            // If the node in question is a prefix of the target then we do not iterate targets
+            // further.
+            //
+            // Even if the node is a prefix of the target's key, if the target has a `prefix` field
+            // it indicates that the node should only be retained if it has that prefix (ie if it
+            // has a minimum length).
+            //
+            // _However_ even if the node doesn't match the target due to the target's prefix, it
+            // may match previous targets whose keys match this node. So we search backwards for all
+            // targets which might match this node, and check the prefix on each.
+            //
+            // For example, given targets:
+            // - key: 0xabc0, prefix: 0xab
+            // - key: 0xabc1, prefix: 0xa
+            // - key: 0xabc2, prefix: 0xabc2
+            //
+            // When the branch node at 0xabc is visited it will be after targets has iterated
+            // forward to 0xabc2 (because all children will have been visited already). At this
+            // point the target for 0xabc2 will not match the branch due to its prefix, but previous
+            // targets which would, so we need to check those as well.
             if lower.key.starts_with(path) {
-                return true
+                return path.starts_with(&lower.prefix) ||
+                    targets
+                        .rev_iter()
+                        .take_while(|target| target.key.starts_with(path))
+                        .any(|target| path.starts_with(&target.prefix))
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
             // there is no upper bound, indicating unbounded).
             if upper.is_some_and(|upper| depth_first::cmp(path, &upper.key) != Ordering::Less) {
-                targets.next();
-                trace!(target: TRACE_TARGET, target = ?targets.peek(), "upper target <= path, next target");
-                let &(l, u) = targets.peek().expect("targets is never exhausted");
-                (lower, upper) = (l, u);
+                (lower, upper) = targets.next();
+                trace!(target: TRACE_TARGET, target = ?lower, "upper target <= path, next target");
             } else {
                 return false
             }
@@ -230,7 +240,7 @@ where
     /// therefore can be retained as a proof node if applicable.
     fn commit_child<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsCursor<'a>,
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
     ) -> Result<RlpNode, StateProofError> {
@@ -316,7 +326,7 @@ where
     /// to this method.
     fn commit_last_child<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsCursor<'a>,
     ) -> Result<(), StateProofError> {
         let Some(child) = self.child_stack.pop() else { return Ok(()) };
 
@@ -347,7 +357,7 @@ where
     /// - If the leaf's nibble is already set in the branch's `state_mask`.
     fn push_new_leaf<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsCursor<'a>,
         leaf_nibble: u8,
         leaf_short_key: Nibbles,
         leaf_val: VE::DeferredEncoder,
@@ -452,10 +462,7 @@ where
     /// # Panics
     ///
     /// This method panics if `branch_stack` is empty.
-    fn pop_branch<'a>(
-        &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
-    ) -> Result<(), StateProofError> {
+    fn pop_branch<'a>(&mut self, targets: &mut TargetsCursor<'a>) -> Result<(), StateProofError> {
         trace!(
             target: TRACE_TARGET,
             branch = ?self.branch_stack.last(),
@@ -536,7 +543,7 @@ where
     /// creating a new one depending on the path of the key.
     fn push_leaf<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsCursor<'a>,
         key: Nibbles,
         val: VE::DeferredEncoder,
     ) -> Result<(), StateProofError> {
@@ -623,7 +630,7 @@ where
     fn calculate_key_range<'a>(
         &mut self,
         value_encoder: &VE,
-        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsCursor<'a>,
         hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
@@ -684,7 +691,7 @@ where
     /// cached branch will be a child of that splitting branch.
     fn push_cached_branch<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsCursor<'a>,
         cached_path: Nibbles,
         cached_branch: &BranchNodeCompact,
     ) -> Result<(), StateProofError> {
@@ -866,7 +873,7 @@ where
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     fn next_uncached_key_range<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = &'a Target>>,
+        targets: &mut TargetsCursor<'a>,
         trie_cursor_state: &mut TrieCursorState,
         sub_trie_prefix: &Nibbles,
         uncalculated_lower_bound: Nibbles,
@@ -1097,23 +1104,8 @@ where
         hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
         sub_trie_targets: SubTrieTargets<'a>,
     ) -> Result<(), StateProofError> {
-        // In debug builds, verify that targets are sorted
-        #[cfg(debug_assertions)]
-        let targets = {
-            let mut prev: Option<Nibbles> = None;
-            sub_trie_targets.targets.iter().inspect(move |target| {
-                if let Some(prev) = prev {
-                    debug_assert!(prev <= target.key, "prev:{prev:?} target:{target:?}");
-                }
-                prev = Some(target.key);
-            })
-        };
-
-        #[cfg(not(debug_assertions))]
-        let targets = sub_trie_targets.targets.into_iter();
-
-        // Wrap targets into a `TargetsIter`.
-        let mut targets = WindowIter::new(targets).peekable();
+        // Wrap targets into a `TargetsCursor`.
+        let mut targets = TargetsCursor::new(sub_trie_targets.targets);
 
         // Ensure initial state is cleared. By the end of the method call these should be empty once
         // again.
@@ -1186,23 +1178,29 @@ where
         debug_assert!(self.branch_path.is_empty());
         debug_assert!(self.child_stack.len() < 2);
 
-        // All targets match the root node, so always retain it. Determine the root node based on
-        // the child stack, and push the proof of the root node onto the result stack.
-        // TODO fix this
-        if let Some(node) = self.child_stack.pop() {
-            self.rlp_encode_buf.clear();
-            let root_node = node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?;
-            self.retained_proofs.push(root_node);
-        } else if sub_trie_targets.prefix.is_empty() {
-            // Empty prefix covers the entire trie, and is therefore the only prefix which covers
-            // the root node itself. If the entire trie is targetted, and it has no data, then we
-            // retain the empty root proof.
-            self.retained_proofs.push(ProofTrieNode {
-                path: Nibbles::new(), // root path
-                node: TrieNode::EmptyRoot,
-                masks: TrieMasks::none(),
-            });
-        };
+        // We always pop the root node off of the `child_stack` in order to empty it, however we
+        // might not want to retain the node unless the `SubTrieTargets` indicates it.
+        match (sub_trie_targets.retain_root, self.child_stack.pop()) {
+            (false, _) => {
+                // Whether the root node is exists or not, we don't want it.
+            }
+            (true, None) => {
+                // If `child_stack` is empty it means there was no keys at all, retain an empty
+                // root node.
+                self.retained_proofs.push(ProofTrieNode {
+                    path: Nibbles::new(), // root path
+                    node: TrieNode::EmptyRoot,
+                    masks: TrieMasks::none(),
+                });
+            }
+            (true, Some(root_node)) => {
+                // Encode and retain the root node.
+                self.rlp_encode_buf.clear();
+                let root_node =
+                    root_node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?;
+                self.retained_proofs.push(root_node);
+            }
+        }
 
         Ok(())
     }
@@ -1322,40 +1320,46 @@ where
     }
 }
 
-/// `WindowIter` is a wrapper around an [`Iterator`] which allows viewing both previous and current
-/// items on every iteration. It is similar to `itertools::tuple_windows`, except that the final
-/// item returned will contain the previous item and `None` as the current.
-struct WindowIter<I: Iterator> {
-    iter: I,
-    prev: Option<I::Item>,
+/// Helper type wrapping a slice of [`Target`]s, primarily used to iterate through targets in
+/// [`ProofCalculator::should_retain`].
+///
+/// It is assumed that the underlying slice is never empty, and that the iterator is never
+/// exhausted.
+struct TargetsCursor<'a> {
+    targets: &'a [Target],
+    i: usize,
 }
 
-impl<I: Iterator> WindowIter<I> {
-    /// Wraps an iterator with a [`WindowIter`].
-    const fn new(iter: I) -> Self {
-        Self { iter, prev: None }
+impl<'a> TargetsCursor<'a> {
+    /// Wraps a slice of [`Target`]s with the `TargetsCursor`.
+    ///
+    /// # Panics
+    ///
+    /// Will panic in debug mode if called with an empty slice.
+    fn new(targets: &'a [Target]) -> Self {
+        debug_assert!(!targets.is_empty());
+        Self { targets, i: 0 }
     }
-}
 
-impl<I: Iterator<Item: Copy>> Iterator for WindowIter<I> {
-    /// The iterator returns the previous and current items, respectively. If the underlying
-    /// iterator is exhausted then `Some(prev, None)` is returned on the subsequent call to
-    /// `WindowIter::next`, and `None` from the call after that.
-    type Item = (I::Item, Option<I::Item>);
+    /// Returns the current and next [`Target`] that the cursor is pointed at.
+    fn current(&self) -> (&'a Target, Option<&'a Target>) {
+        (&self.targets[self.i], self.targets.get(self.i + 1))
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match (self.prev, self.iter.next()) {
-                (None, None) => return None,
-                (None, Some(v)) => {
-                    self.prev = Some(v);
-                }
-                (Some(v), next) => {
-                    self.prev = next;
-                    return Some((v, next))
-                }
-            }
-        }
+    /// Iterates the cursor forward.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if the cursor is exhausted.
+    fn next(&mut self) -> (&'a Target, Option<&'a Target>) {
+        self.i += 1;
+        debug_assert!(self.i < self.targets.len());
+        self.current()
+    }
+
+    /// Iterated backwards over the slice, starting from the [`Target`] previous to the current.
+    fn rev_iter(&self) -> impl Iterator<Item = &'a Target> {
+        self.targets[..self.i].iter().rev()
     }
 }
 

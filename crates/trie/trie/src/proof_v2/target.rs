@@ -9,9 +9,9 @@ use crate::proof_v2::increment_and_strip_trailing_zeros;
 #[derive(Debug, Copy, Clone)]
 pub struct Target {
     pub(crate) key: Nibbles,
-    /// The lower bound of the range of trie nodes which can be retained by this target. In other
-    /// words, the shortest trie node path which can be retained by this target.
-    pub(crate) lower_bound: Nibbles,
+    /// The shortest trie node path which can be retained by this target. `key.starts_with(prefix)`
+    /// is always true.
+    pub(crate) prefix: Nibbles,
 }
 
 impl Target {
@@ -19,7 +19,7 @@ impl Target {
     pub fn new(key: B256) -> Self {
         // SAFETY: key is a B256 and so is exactly 32-bytes.
         let key = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
-        Self { key, lower_bound: Nibbles::new() }
+        Self { key, prefix: Nibbles::new() }
     }
 
     /// Only match trie nodes whose path is at least this long.
@@ -29,15 +29,9 @@ impl Target {
     /// This method panics if `min_len` is greater than 64.
     pub fn with_min_len(mut self, min_len: u8) -> Self {
         debug_assert!(min_len <= 64);
-        self.lower_bound = self.key;
-        self.lower_bound.truncate(min_len as usize);
+        self.prefix = self.key;
+        self.prefix.truncate(min_len as usize);
         self
-    }
-
-    /// Returns the exclusive upper bound of the range of possible trie nodes which can be retained
-    /// by this target, or None for unbounded.
-    fn upper_bound(&self) -> Option<Nibbles> {
-        increment_and_strip_trailing_zeros(&self.lower_bound)
     }
 }
 
@@ -56,6 +50,10 @@ pub(crate) struct SubTrieTargets<'a> {
     /// The targets belonging to this sub-trie. These will be sorted by their `key` field,
     /// lexicographically.
     pub(crate) targets: &'a [Target],
+    /// Will be true if at least one target in the set has an empty `prefix`.
+    ///
+    /// If this is true then `prefix.is_empty()`, though not necessarily vice-versa.
+    pub(crate) retain_root: bool,
 }
 
 /// Given a set of [`Target`]s, returns an iterator over those same [`Target`]s chunked by the
@@ -63,38 +61,61 @@ pub(crate) struct SubTrieTargets<'a> {
 pub(crate) fn iter_sub_trie_targets<'a>(
     targets: &'a mut [Target],
 ) -> impl Iterator<Item = SubTrieTargets<'a>> {
-    // TODO this isn't quite right... if the lower_bound of a target is 0xabc, then the lower_bound
-    // of the sub-trie is actually 0xab, because we need to calculate the 0xab sub-trie in case 0xab
-    // is a branch, when could then hav a leaf/extension at 0xabc.
-
-    // First sort lexicographically by lower bound. We will use this for chunking targets into
+    // First sort lexicographically by prefix. We will use this for chunking targets into
     // contiguous sections in the next steps based on their bounds.
-    targets.sort_unstable_by_key(|target| target.lower_bound);
+    targets.sort_unstable_by_key(|target| target.prefix);
+
+    // A helper function for getting the largest prefix of the sub-trie which contains a particular
+    // target, based on its prefix.
+    //
+    // In general the target will only match within the sub-trie with the same prefix as the
+    // target's. However there is an exception:
+    //
+    // Given a trie with a node at 0xabc, there must be a branch at 0xab. A target with prefix 0xabc
+    // needs to match that node, but in order to know the node is at that path the branch at 0xab
+    // must be constructed. Therefore the sub-trie prefix is the target prefix with a nibble
+    // truncated.
+    //
+    // For a target with an empty prefix we still use an empty sub-trie prefix; this will still
+    // construct the branch at the root node (if there is one), the only behavioral difference
+    // between targets with prefix lengths zero and one will be that with prefix length zero the
+    // root node's proof will be retained.
+    let sub_trie_prefix = |prefix: Nibbles| {
+        let mut lower_bound = prefix;
+        lower_bound.truncate(prefix.len().saturating_sub(1));
+        lower_bound
+    };
+
+    // A helper function which returns the first path following a sub-trie in lexicographical order.
+    let sub_trie_upper_bound =
+        |sub_trie_prefix: &Nibbles| increment_and_strip_trailing_zeros(sub_trie_prefix);
 
     // We now chunk targets, such that each chunk contains all targets belonging to the same
     // sub-trie. We are taking advantage of the following properties:
     //
-    // - The first target in the chunk has the lowest lower bound (see previous sorting step).
+    // - The first target in the chunk has the shortest prefix (see previous sorting step).
     //
-    // - The first target in the chunk's upper bound will therefore be the highest upper bound, and
-    //   the upper bound of the whole chunk.
-    //      - For example, given a chunk with lower bounds [0x2, 0x2f, 0x2fa], the upper bounds will
-    //        be [0x3, 0x3, 0x2fb]. Note that no target could match a trie node with path equal to
-    //        or greater than 0x3.
+    // - The first target in the chunk's upper bound will therefore belong to the sub-trie with the
+    //   highest upper bound, and the upper bound of the whole chunk.
+    //      - For example, given a chunk with sub-trie prefixes [0x2, 0x2f, 0x2fa], the upper bounds
+    //        will be [0x3, 0x3, 0x2fb]. Note that no target could match a trie node with path equal
+    //        to or greater than 0x3.
     //
-    // - If a target's lower bound does not lie within the bounds of the current chunk, then that
-    //   target must be the first target of the next chunk, covering a separate sub-trie.
-    //      - Example: given lower bounds of [0x2, 0x2fa, 0x4c, 0x4ce, 0x4e], we would end up with
-    //        the following chunks:
+    // - If a target's sub-trie's prefix does not lie within the bounds of the current chunk, then
+    //   that target must be the first target of the next chunk, lying in a separate sub-trie.
+    //      - Example: given sub-trie prefixes of [0x2, 0x2fa, 0x4c, 0x4ce, 0x4e], we would end up
+    //        with the following chunks:
     //          - [0x2, 0x2a]  w/ upper bound 0x3
     //          - [0x4c 0x4ce] w/ upper bound 0x4d
     //          - [0x4e]       w/ upper bound 0x4f
-    let mut upper_bound = targets.first().and_then(|t| t.upper_bound());
+    let mut upper_bound =
+        targets.first().and_then(|t| sub_trie_upper_bound(&sub_trie_prefix(t.prefix)));
     let target_chunks = targets.chunk_by_mut(move |_, next| {
         if let Some(some_upper_bound) = upper_bound {
-            let same_chunk = next.lower_bound < some_upper_bound;
+            let sub_trie_prefix = sub_trie_prefix(next.prefix);
+            let same_chunk = sub_trie_prefix < some_upper_bound;
             if !same_chunk {
-                upper_bound = next.upper_bound();
+                upper_bound = sub_trie_upper_bound(&sub_trie_prefix);
             }
             same_chunk
         } else {
@@ -104,10 +125,11 @@ pub(crate) fn iter_sub_trie_targets<'a>(
 
     // Map the chunks to the return type. Within each chunk we want targets to be sorted by their
     // key, as that will be the order they are checked by the `ProofCalculator`.
-    target_chunks.map(|target_chunk| {
-        let lower_bound = target_chunk[0].lower_bound;
-        target_chunk.sort_unstable_by_key(|target| target.key);
-        SubTrieTargets { prefix: lower_bound, targets: target_chunk }
+    target_chunks.map(move |targets| {
+        let prefix = sub_trie_prefix(targets[0].prefix);
+        let retain_root = targets[0].prefix.is_empty();
+        targets.sort_unstable_by_key(|target| target.key);
+        SubTrieTargets { prefix, targets, retain_root }
     })
 }
 
@@ -131,7 +153,6 @@ mod tests {
             // Case 1: Empty targets
             (vec![], vec![]),
             // Case 2: Single target without min_len
-            // lower_bound is empty
             (
                 vec![Target::new(B256::repeat_byte(0x20))],
                 vec![(
@@ -140,7 +161,6 @@ mod tests {
                 )],
             ),
             // Case 3: Multiple targets in same sub-trie (no min_len)
-            // Both have empty lower_bound, so they're in the same sub-trie
             (
                 vec![Target::new(B256::repeat_byte(0x20)), Target::new(B256::repeat_byte(0x21))],
                 vec![(
@@ -152,13 +172,10 @@ mod tests {
                 )],
             ),
             // Case 4: Multiple targets in different sub-tries
-            // with_min_len(1) gives lower_bound with first 1 nibble
-            // First has lower_bound=0x2
-            // Second has lower_bound=0x4
             (
                 vec![
-                    Target::new(B256::repeat_byte(0x20)).with_min_len(1),
-                    Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                    Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+                    Target::new(B256::repeat_byte(0x40)).with_min_len(2),
                 ],
                 vec![
                     ("2", vec!["2020202020202020202020202020202020202020202020202020202020202020"]),
@@ -166,13 +183,11 @@ mod tests {
                 ],
             ),
             // Case 5: Three targets, two in same sub-trie, one separate
-            // 0x20 and 0x2f both have lower_bound=0x2
-            // 0x40 has lower_bound=0x4
             (
                 vec![
-                    Target::new(B256::repeat_byte(0x20)).with_min_len(1),
-                    Target::new(B256::repeat_byte(0x2f)).with_min_len(1),
-                    Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                    Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+                    Target::new(B256::repeat_byte(0x2f)).with_min_len(2),
+                    Target::new(B256::repeat_byte(0x40)).with_min_len(2),
                 ],
                 vec![
                     (
@@ -186,12 +201,10 @@ mod tests {
                 ],
             ),
             // Case 6: Targets with different min_len values in same sub-trie
-            // First has min_len=1 (lower=0x2), second has min_len=2 (lower=0x2f)
-            // Second's lower bound (0x2f) < first's upper bound (0x3), so same sub-trie
             (
                 vec![
-                    Target::new(B256::repeat_byte(0x20)).with_min_len(1),
-                    Target::new(B256::repeat_byte(0x2f)).with_min_len(2),
+                    Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+                    Target::new(B256::repeat_byte(0x2f)).with_min_len(3),
                 ],
                 vec![(
                     "2",
@@ -202,14 +215,13 @@ mod tests {
                 )],
             ),
             // Case 7: More complex chunking with multiple sub-tries
-            // As described in the function comments: [0x2, 0x2fa, 0x4c, 0x4ce, 0x4e]
             (
                 vec![
-                    Target::new(B256::repeat_byte(0x20)).with_min_len(1), // lower_bound: 0x2
-                    Target::new(B256::repeat_byte(0x2f)).with_min_len(3), // lower_bound: 0x2f2
-                    Target::new(B256::repeat_byte(0x4c)).with_min_len(2), // lower_bound: 0x4c
-                    Target::new(B256::repeat_byte(0x4c)).with_min_len(3), // lower_bound: 0x4c4
-                    Target::new(B256::repeat_byte(0x4e)).with_min_len(2), // lower_bound: 0x4e
+                    Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+                    Target::new(B256::repeat_byte(0x2f)).with_min_len(4),
+                    Target::new(B256::repeat_byte(0x4c)).with_min_len(3),
+                    Target::new(B256::repeat_byte(0x4c)).with_min_len(4),
+                    Target::new(B256::repeat_byte(0x4e)).with_min_len(3),
                 ],
                 vec![
                     (
@@ -231,6 +243,20 @@ mod tests {
                         vec!["4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e"],
                     ),
                 ],
+            ),
+            // Case 8: Min-len 1 should result in zero-length sub-trie prefix
+            (
+                vec![
+                    Target::new(B256::repeat_byte(0x20)).with_min_len(1),
+                    Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                ],
+                vec![(
+                    "",
+                    vec![
+                        "2020202020202020202020202020202020202020202020202020202020202020",
+                        "4040404040404040404040404040404040404040404040404040404040404040",
+                    ],
+                )],
             ),
         ];
 
