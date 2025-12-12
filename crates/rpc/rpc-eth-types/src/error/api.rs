@@ -1,7 +1,7 @@
 //! Helper traits to wrap generic l1 errors, in network specific error type configured in
 //! `reth_rpc_eth_api::EthApiTypes`.
 
-use crate::{EthApiError, EthApiEvmErr, RevertError};
+use crate::{simulate::EthSimulateError, EthApiError, EthApiEvmErr, RevertError};
 use alloy_primitives::Bytes;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmErrorFor, HaltReasonFor};
