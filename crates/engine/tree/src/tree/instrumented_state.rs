@@ -59,7 +59,7 @@ impl AtomicDuration {
 }
 
 /// A wrapper of a state provider and latency metrics.
-pub(crate) struct InstrumentedStateProvider<S> {
+pub struct InstrumentedStateProvider<S> {
     /// The state provider
     state_provider: S,
 
@@ -81,10 +81,10 @@ where
     S: StateProvider,
 {
     /// Creates a new [`InstrumentedStateProvider`] from a state provider
-    pub(crate) fn from_state_provider(state_provider: S) -> Self {
+    pub fn from_state_provider(state_provider: S, source: &'static str) -> Self {
         Self {
             state_provider,
-            metrics: StateProviderMetrics::default(),
+            metrics: StateProviderMetrics::new_with_labels(&[("source", source)]),
             total_storage_fetch_latency: AtomicDuration::zero(),
             total_code_fetch_latency: AtomicDuration::zero(),
             total_account_fetch_latency: AtomicDuration::zero(),

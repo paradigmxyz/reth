@@ -420,7 +420,8 @@ where
 
         // Execute the block and handle any execution errors
         let (output, senders) = match if self.config.state_provider_metrics() {
-            let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
+            let state_provider =
+                InstrumentedStateProvider::from_state_provider(&state_provider, "engine");
             let result = self.execute_block(&state_provider, env, &input, &mut handle);
             state_provider.record_total_latency();
             result
