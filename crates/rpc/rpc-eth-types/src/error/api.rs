@@ -1,7 +1,7 @@
 //! Helper traits to wrap generic l1 errors, in network specific error type configured in
 //! `reth_rpc_eth_api::EthApiTypes`.
 
-use crate::{EthApiError, RevertError};
+use crate::{EthApiError, EthApiEvmErr, RevertError};
 use alloy_primitives::Bytes;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmErrorFor, HaltReasonFor};
@@ -113,11 +113,11 @@ where
         + FromRevert
         + From<EthApiError>,
     Evm: ConfigureEvm,
-    EthApiError: From<EvmErrorFor<Evm, ProviderError>>,
+    EthApiError: From<EthApiEvmErr<EvmErrorFor<Evm, ProviderError>>>,
 {
     fn from_evm_err_at_index(err: EvmErrorFor<Evm, ProviderError>, tx_index: usize) -> Self {
-        let inner: EthApiError = err.into();
-        EthApiError::indexed_evm_error(tx_index, inner).into()
+        let indexed = EthApiEvmErr::new(err, tx_index);
+        EthApiError::from(indexed).into()
     }
 }
 
