@@ -1,4 +1,5 @@
 use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
+use reth_trie_common::iter::{IndexedParallelIterator, IntoParallelIterator};
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
@@ -21,7 +22,7 @@ pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
 /// A helper trait representing a pair of a "raw" transactions iterator and a closure that can be
 /// used to convert them to an executable transaction. This tuple is used in the engine to
 /// parallelize heavy work like decoding or recovery.
-pub trait ExecutableTxTuple: Into<(Self::Iter, Self::Convert)> + Send + 'static {
+pub trait ExecutableTxTuple: Into<(Self::IntoIter, Self::Convert)> + Send + 'static {
     /// Raw transaction that can be converted to an [`ExecutableTxTuple::Tx`]
     ///
     /// This can be any type that can be converted to an [`ExecutableTxTuple::Tx`]. For example,
@@ -33,7 +34,9 @@ pub trait ExecutableTxTuple: Into<(Self::Iter, Self::Convert)> + Send + 'static 
     type Error: core::error::Error + Send + Sync + 'static;
 
     /// Iterator over [`ExecutableTxTuple::Tx`]
-    type Iter: Iterator<Item = Self::RawTx> + Send + 'static;
+    type IntoIter: IntoParallelIterator<Item = Self::RawTx, Iter: IndexedParallelIterator>
+        + Send
+        + 'static;
     /// Closure that can be used to convert a [`ExecutableTxTuple::RawTx`] to a
     /// [`ExecutableTxTuple::Tx`]. This might involve heavy work like decoding or recovery
     /// and will be parallelized in the engine.
@@ -45,14 +48,14 @@ where
     RawTx: Send + Sync + 'static,
     Tx: Clone + Send + Sync + 'static,
     Err: core::error::Error + Send + Sync + 'static,
-    I: Iterator<Item = RawTx> + Send + 'static,
+    I: IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator> + Send + 'static,
     F: Fn(RawTx) -> Result<Tx, Err> + Send + Sync + 'static,
 {
     type RawTx = RawTx;
     type Tx = Tx;
     type Error = Err;
 
-    type Iter = I;
+    type IntoIter = I;
     type Convert = F;
 }
 

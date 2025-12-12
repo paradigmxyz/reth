@@ -15,6 +15,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
+use rayon::prelude::*;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
@@ -221,7 +222,7 @@ where
                     .map_err(NewPayloadError::other)?
                     .into();
 
-                let iter = Either::Left(iter.into_iter().map(Either::Left));
+                let iter = Either::Left(iter.into_par_iter().map(Either::Left));
                 let convert = move |tx| {
                     let Either::Left(tx) = tx else { unreachable!() };
                     convert(tx).map(Either::Left).map_err(Either::Left)
@@ -231,8 +232,9 @@ where
                 Ok((iter, Box::new(convert) as Box<dyn Fn(_) -> _ + Send + Sync + 'static>))
             }
             BlockOrPayload::Block(block) => {
-                let iter =
-                    Either::Right(block.body().clone_transactions().into_iter().map(Either::Right));
+                let iter = Either::Right(
+                    block.body().clone_transactions().into_par_iter().map(Either::Right),
+                );
                 let convert = move |tx: Either<_, N::SignedTx>| {
                     let Either::Right(tx) = tx else { unreachable!() };
                     tx.try_into_recovered().map(Either::Right).map_err(Either::Right)
