@@ -1110,7 +1110,7 @@ where
         }
     }
 
-    /// Calculates trie nodes and retains proofs for targetted nodes within a sub-trie. The
+    /// Calculates trie nodes and retains proofs for targeted nodes within a sub-trie. The
     /// sub-trie's bounds are denoted by the `lower_bound` and `upper_bound` arguments,
     /// `upper_bound` is exclusive, None indicates unbounded.
     #[instrument(
