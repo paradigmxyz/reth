@@ -202,35 +202,36 @@ where
             // If the node in question is a prefix of the target then we do not iterate targets
             // further.
             //
-            // Even if the node is a prefix of the target's key, if the target has a `prefix` field
-            // it indicates that the node should only be retained if it has that prefix (ie if it
-            // has a minimum length).
+            // Even if the node is a prefix of the target's key, if the target has a non-zero
+            // `min_len` it indicates that the node should only be retained if it is
+            // longer than that value.
             //
-            // _However_ even if the node doesn't match the target due to the target's prefix, it
+            // _However_ even if the node doesn't match the target due to the target's `min_len`, it
             // may match other targets whose keys match this node. So we search forwards and
-            // backwards for all targets which might match this node, and check the prefix on each.
+            // backwards for all targets which might match this node, and check against the
+            // `min_len` of each.
             //
             // For example, given a branch 0xabc, with children at 0, 1, and 2, and targets:
-            // - key: 0xabc0, prefix: 0xab
-            // - key: 0xabc1, prefix: 0xa
-            // - key: 0xabc2, prefix: 0xabc2 <-- current
-            // - key: 0xabc3, prefix: 0xabc
+            // - key: 0xabc0, min_len: 2
+            // - key: 0xabc1, min_len: 1
+            // - key: 0xabc2, min_len: 4 <-- current
+            // - key: 0xabc3, min_len: 3
             //
-            // When the branch node at 0xabc is visited it will be after targets has iterated
+            // When the branch node at 0xabc is visited it will be after the targets has iterated
             // forward to 0xabc2 (because all children will have been visited already). At this
-            // point the target for 0xabc2 will not match the branch due to its prefix, any of the
-            // other targets would, so we need to check those as well.
+            // point the target for 0xabc2 will not match the branch due to its prefix, but any of
+            // the other targets would, so we need to check those as well.
             if lower.key.starts_with(path) {
                 return !check_prefix ||
-                    (path.starts_with(&lower.prefix) ||
+                    (path.len() >= lower.min_len as usize ||
                         targets
                             .skip_iter()
                             .take_while(|target| target.key.starts_with(path))
-                            .any(|target| path.starts_with(&target.prefix)) ||
+                            .any(|target| path.len() >= target.min_len as usize) ||
                         targets
                             .rev_iter()
                             .take_while(|target| target.key.starts_with(path))
-                            .any(|target| path.starts_with(&target.prefix)))
+                            .any(|target| path.len() >= target.min_len as usize))
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
@@ -1631,8 +1632,8 @@ mod tests {
                 targets_vec.iter().any(|target| {
                     // Node path must be a prefix of the target's key
                     target.key.starts_with(node_path) &&
-                    // Node path must start with the target's prefix (minimum length requirement)
-                    node_path.starts_with(&target.prefix)
+                    // Node path must be at least `min_len` long
+                    node_path.len() >= target.min_len as usize
                 })
             };
 

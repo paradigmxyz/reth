@@ -8,9 +8,7 @@ use reth_trie_common::Nibbles;
 #[derive(Debug, Copy, Clone)]
 pub struct Target {
     pub(crate) key: Nibbles,
-    /// The shortest trie node path which can be retained by this target. `key.starts_with(prefix)`
-    /// is always true.
-    pub(crate) prefix: Nibbles,
+    pub(crate) min_len: u8,
 }
 
 impl Target {
@@ -18,7 +16,7 @@ impl Target {
     pub fn new(key: B256) -> Self {
         // SAFETY: key is a B256 and so is exactly 32-bytes.
         let key = unsafe { Nibbles::unpack_unchecked(key.as_slice()) };
-        Self { key, prefix: Nibbles::new() }
+        Self { key, min_len: 0 }
     }
 
     /// Only match trie nodes whose path is at least this long.
@@ -28,9 +26,30 @@ impl Target {
     /// This method panics if `min_len` is greater than 64.
     pub fn with_min_len(mut self, min_len: u8) -> Self {
         debug_assert!(min_len <= 64);
-        self.prefix = self.key;
-        self.prefix.truncate(min_len as usize);
+        self.min_len = min_len;
         self
+    }
+
+    // A helper function for getting the largest prefix of the sub-trie which contains a particular
+    // target, based on its prefix.
+    //
+    // In general the target will only match within the sub-trie with the same prefix as the
+    // target's. However there is an exception:
+    //
+    // Given a trie with a node at 0xabc, there must be a branch at 0xab. A target with prefix 0xabc
+    // needs to match that node, but in order to know the node is at that path the branch at 0xab
+    // must be constructed. Therefore the sub-trie prefix is the target prefix with a nibble
+    // truncated.
+    //
+    // For a target with an empty prefix we still use an empty sub-trie prefix; this will still
+    // construct the branch at the root node (if there is one), the only behavioral difference
+    // between targets with prefix lengths zero and one will be that with prefix length zero the
+    // root node's proof will be retained.
+    #[inline]
+    fn sub_trie_prefix(&self) -> Nibbles {
+        let mut sub_trie_prefix = self.key;
+        sub_trie_prefix.truncate(self.min_len.saturating_sub(1) as usize);
+        sub_trie_prefix
     }
 }
 
@@ -38,28 +57,6 @@ impl From<B256> for Target {
     fn from(key: B256) -> Self {
         Self::new(key)
     }
-}
-
-// A helper function for getting the largest prefix of the sub-trie which contains a particular
-// target, based on its prefix.
-//
-// In general the target will only match within the sub-trie with the same prefix as the
-// target's. However there is an exception:
-//
-// Given a trie with a node at 0xabc, there must be a branch at 0xab. A target with prefix 0xabc
-// needs to match that node, but in order to know the node is at that path the branch at 0xab
-// must be constructed. Therefore the sub-trie prefix is the target prefix with a nibble
-// truncated.
-//
-// For a target with an empty prefix we still use an empty sub-trie prefix; this will still
-// construct the branch at the root node (if there is one), the only behavioral difference
-// between targets with prefix lengths zero and one will be that with prefix length zero the
-// root node's proof will be retained.
-#[inline]
-fn sub_trie_prefix(target_prefix: Nibbles) -> Nibbles {
-    let mut sub_trie_prefix = target_prefix;
-    sub_trie_prefix.truncate(target_prefix.len().saturating_sub(1));
-    sub_trie_prefix
 }
 
 // A helper function which returns the first path following a sub-trie in lexicographical order.
@@ -77,7 +74,7 @@ pub(crate) struct SubTrieTargets<'a> {
     /// The targets belonging to this sub-trie. These will be sorted by their `key` field,
     /// lexicographically.
     pub(crate) targets: &'a [Target],
-    /// Will be true if at least one target in the set has an empty `prefix`.
+    /// Will be true if at least one target in the set has a zero `min_len`.
     ///
     /// If this is true then `prefix.is_empty()`, though not necessarily vice-versa.
     pub(crate) retain_root: bool,
@@ -96,22 +93,20 @@ impl<'a> SubTrieTargets<'a> {
 pub(crate) fn iter_sub_trie_targets<'a>(
     targets: &'a mut [Target],
 ) -> impl Iterator<Item = SubTrieTargets<'a>> {
-    // First sort by the sub-trie prefix of each target, falling back to the actual prefix in cases
-    // where the sub-trie prefixes are equal (to differentiate an empty target prefix from an empty
-    // sub-trie prefix).
+    // First sort by the sub-trie prefix of each target, falling back to the `min_len` in cases
+    // where the sub-trie prefixes are equal (to differentiate targets which match the root node and
+    // those which don't).
     targets.sort_unstable_by(|a, b| {
-        let sub_trie_prefix_a = sub_trie_prefix(a.prefix);
-        let sub_trie_prefix_b = sub_trie_prefix(b.prefix);
-        sub_trie_prefix_a.cmp(&sub_trie_prefix_b).then_with(|| a.prefix.cmp(&b.prefix))
+        a.sub_trie_prefix().cmp(&b.sub_trie_prefix()).then_with(|| a.min_len.cmp(&b.min_len))
     });
 
     // We now chunk targets, such that each chunk contains all targets belonging to the same
     // sub-trie. We are taking advantage of the following properties:
     //
-    // - The first target in the chunk has the shortest prefix (see previous sorting step).
+    // - The first target in the chunk has the shortest sub-trie prefix (see previous sorting step).
     //
-    // - The first target in the chunk's upper bound will therefore belong to the sub-trie with the
-    //   highest upper bound, and the upper bound of the whole chunk.
+    // - The upper bound of the first target in the chunk's sub-trie will therefore be the upper
+    //   bound of the whole chunk.
     //      - For example, given a chunk with sub-trie prefixes [0x2, 0x2f, 0x2fa], the upper bounds
     //        will be [0x3, 0x3, 0x2fb]. Note that no target could match a trie node with path equal
     //        to or greater than 0x3.
@@ -123,11 +118,10 @@ pub(crate) fn iter_sub_trie_targets<'a>(
     //          - [0x2, 0x2a]  w/ upper bound 0x3
     //          - [0x4c 0x4ce] w/ upper bound 0x4d
     //          - [0x4e]       w/ upper bound 0x4f
-    let mut upper_bound =
-        targets.first().and_then(|t| sub_trie_upper_bound(&sub_trie_prefix(t.prefix)));
+    let mut upper_bound = targets.first().and_then(|t| sub_trie_upper_bound(&t.sub_trie_prefix()));
     let target_chunks = targets.chunk_by_mut(move |_, next| {
         if let Some(some_upper_bound) = upper_bound {
-            let sub_trie_prefix = sub_trie_prefix(next.prefix);
+            let sub_trie_prefix = next.sub_trie_prefix();
             let same_chunk = sub_trie_prefix < some_upper_bound;
             if !same_chunk {
                 upper_bound = sub_trie_upper_bound(&sub_trie_prefix);
@@ -141,8 +135,8 @@ pub(crate) fn iter_sub_trie_targets<'a>(
     // Map the chunks to the return type. Within each chunk we want targets to be sorted by their
     // key, as that will be the order they are checked by the `ProofCalculator`.
     target_chunks.map(move |targets| {
-        let prefix = sub_trie_prefix(targets[0].prefix);
-        let retain_root = targets[0].prefix.is_empty();
+        let prefix = targets[0].sub_trie_prefix();
+        let retain_root = targets[0].min_len == 0;
         targets.sort_unstable_by_key(|target| target.key);
         SubTrieTargets { prefix, targets, retain_root }
     })
