@@ -226,7 +226,7 @@ impl OpReceiptFieldsBuilder {
         // }
 
         // self.da_footprint_gas_scalar = l1_block_info.da_footprint_gas_scalar;
-        // self.token_ratio = l1_block_info.token_ratio.map(|ratio| ratio.saturating_to());
+        self.token_ratio = l1_block_info.token_ratio.map(|ratio| ratio.saturating_to());
 
         self.da_footprint_gas_scalar = l1_block_info.da_footprint_gas_scalar;
 
