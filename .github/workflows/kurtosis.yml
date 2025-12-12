@@ -58,7 +58,7 @@ jobs:
   notify-on-error:
     needs: test
     if: failure()
-    runs-on: depot-ubuntu-latest
+    runs-on: ubuntu-latest
     steps:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2

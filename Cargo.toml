@@ -376,11 +376,11 @@ reth-era-utils = { path = "crates/era-utils" }
 reth-errors = { path = "crates/errors" }
 reth-eth-wire = { path = "crates/net/eth-wire" }
 reth-eth-wire-types = { path = "crates/net/eth-wire-types" }
+reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-cli = { path = "crates/ethereum/cli", default-features = false }
 reth-ethereum-consensus = { path = "crates/ethereum/consensus", default-features = false }
 reth-ethereum-engine-primitives = { path = "crates/ethereum/engine-primitives", default-features = false }
 reth-ethereum-forks = { path = "crates/ethereum/hardforks", default-features = false }
-reth-ethereum-payload-builder = { path = "crates/ethereum/payload" }
 reth-ethereum-primitives = { path = "crates/ethereum/primitives", default-features = false }
 reth-ethereum = { path = "crates/ethereum/reth" }
 reth-etl = { path = "crates/etl" }
@@ -487,7 +487,8 @@ revm-inspectors = "0.33.1"
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.4.1"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-evm = { version = "0.25.0", default-features = false }
+alloy-eip7928 = { version = "0.1.0" }
+alloy-evm = { version = "0.25.1", default-features = false }
 alloy-primitives = { version = "1.4.1", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
 alloy-sol-macro = "1.4.1"
