@@ -423,7 +423,7 @@ sender_recovery = { distance = 100_000 } # Prune all transaction senders before 
 # Transaction Lookup pruning configuration
 transaction_lookup = "full" # Prune all TxNumber => TxHash mappings
 
-# Receipts pruning configuration. This setting overrides `receipts_log_filter`.
+# Receipts pruning configuration. Defines the global pruning policy for all receipts.
 receipts = { before = 1920000 } # Prune all receipts from transactions before the block 1920000, i.e. keep receipts from the block 1920000
 
 # Account History pruning configuration
@@ -445,7 +445,8 @@ We can also prune receipts more granular, using the logs filtering:
 
 ```toml
 # Receipts pruning configuration by retaining only those receipts that contain logs emitted
-# by the specified addresses, discarding all others. This setting is overridden by `receipts`.
+# by the specified addresses, discarding all others. Can be used on its own or together with
+# `receipts` to additionally keep receipts for selected contracts on top of the global policy.
 [prune.segments.receipts_log_filter]
 # Prune all receipts, leaving only those which:
 # - Contain logs from address `0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48`, starting from the block 17000000

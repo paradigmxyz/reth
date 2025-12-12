@@ -56,8 +56,8 @@ pub struct PruneModes {
     /// Transaction Lookup pruning configuration.
     #[cfg_attr(any(test, feature = "serde"), serde(skip_serializing_if = "Option::is_none"))]
     pub transaction_lookup: Option<PruneMode>,
-    /// Receipts pruning configuration. This setting overrides `receipts_log_filter`
-    /// and offers improved performance.
+    /// Receipts pruning configuration. Defines the global pruning policy for all receipts
+    /// and is the primary control for how aggressively receipts are removed.
     #[cfg_attr(
         any(test, feature = "serde"),
         serde(
@@ -97,8 +97,10 @@ pub struct PruneModes {
     /// `StoragesTrieChangeSets`.
     #[cfg_attr(any(test, feature = "serde"), serde(default = "default_merkle_changesets_mode"))]
     pub merkle_changesets: PruneMode,
-    /// Receipts pruning configuration by retaining only those receipts that contain logs emitted
-    /// by the specified addresses, discarding others. This setting is overridden by `receipts`.
+    /// Receipts pruning configuration that retains only receipts containing logs emitted
+    /// by the specified addresses, discarding others. This can be used in addition to the
+    /// global receipts pruning policy defined by `receipts` to retain receipts for selected
+    /// contracts.
     ///
     /// The [`BlockNumber`](`crate::BlockNumber`) represents the starting block from which point
     /// onwards the receipts are preserved.
