@@ -280,7 +280,6 @@ fn calculate_state_root(
     // 2. Apply account‑level updates and (re)encode the account nodes
     // Update accounts with new values
     // TODO: upstream changes into reth so that `SparseStateTrie::update_account` handles this
-    let mut account_rlp_buf = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
 
     for (hashed_address, account) in
         state.accounts.into_iter().sorted_unstable_by_key(|(addr, _)| *addr)
@@ -298,9 +297,9 @@ fn calculate_state_root(
 
         // Decide whether to remove or update the account leaf
         if let Some(account) = account {
-            account_rlp_buf.clear();
-            account.into_trie_account(storage_root).encode(&mut account_rlp_buf);
-            trie.update_account_leaf(nibbles, account_rlp_buf.clone(), &provider_factory)?;
+            let mut buf = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
+            account.into_trie_account(storage_root).encode(&mut buf);
+            trie.update_account_leaf(nibbles, buf, &provider_factory)?;
         } else {
             trie.remove_account_leaf(&nibbles, &provider_factory)?;
         }
