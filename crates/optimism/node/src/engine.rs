@@ -18,7 +18,7 @@ use reth_node_api::{
 use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpExecutionPayloadValidator, OpPayloadTypes};
-use reth_optimism_primitives::{OpBlock, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
+use reth_optimism_primitives::{OpBlock, L2_TO_L1_MESSAGE_PASSER_ADDRESS};
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SignedTransaction};
 use reth_provider::StateProviderFactory;
 use reth_trie_common::{HashedPostState, KeyHasher};
@@ -76,7 +76,7 @@ pub struct OpEngineValidator<P, Tx, ChainSpec> {
 impl<P, Tx, ChainSpec> OpEngineValidator<P, Tx, ChainSpec> {
     /// Instantiates a new validator.
     pub fn new<KH: KeyHasher>(chain_spec: Arc<ChainSpec>, provider: P) -> Self {
-        let hashed_addr_l2tol1_msg_passer = KH::hash_key(ADDRESS_L2_TO_L1_MESSAGE_PASSER);
+        let hashed_addr_l2tol1_msg_passer = KH::hash_key(L2_TO_L1_MESSAGE_PASSER_ADDRESS);
         Self {
             inner: OpExecutionPayloadValidator::new(chain_spec),
             provider,
@@ -121,15 +121,6 @@ where
 {
     type Block = alloy_consensus::Block<Tx>;
 
-    fn ensure_well_formed_payload(
-        &self,
-        payload: OpExecutionData,
-    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block =
-            self.inner.ensure_well_formed_payload(payload).map_err(NewPayloadError::other)?;
-        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
-    }
-
     fn validate_block_post_execution_with_hashed_state(
         &self,
         state_updates: &HashedPostState,
@@ -158,6 +149,13 @@ where
         }
 
         Ok(())
+    }
+
+    fn convert_payload_to_block(
+        &self,
+        payload: OpExecutionData,
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        self.inner.ensure_well_formed_payload(payload).map_err(NewPayloadError::other)
     }
 }
 

@@ -33,7 +33,7 @@ use reth_transaction_pool::{
     blobstore::BlobSidecarConverter, noop::NoopTransactionPool, AddedTransactionOutcome,
     BatchTxProcessor, BatchTxRequest, TransactionPool,
 };
-use tokio::sync::{broadcast, mpsc, Mutex};
+use tokio::sync::{broadcast, mpsc, Mutex, Semaphore};
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -152,6 +152,7 @@ where
         proof_permits: usize,
         rpc_converter: Rpc,
         max_batch_size: usize,
+        max_blocking_io_requests: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: ForwardConfig,
         send_raw_transaction_sync_timeout: Duration,
@@ -171,6 +172,7 @@ where
             rpc_converter,
             (),
             max_batch_size,
+            max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
             send_raw_transaction_sync_timeout,
@@ -184,14 +186,14 @@ where
 impl<N, Rpc> EthApiTypes for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert<Error = EthApiError>,
 {
     type Error = EthApiError;
     type NetworkTypes = Rpc::Network;
     type RpcConvert = Rpc;
 
-    fn tx_resp_builder(&self) -> &Self::RpcConvert {
-        &self.tx_resp_builder
+    fn converter(&self) -> &Self::RpcConvert {
+        &self.converter
     }
 }
 
@@ -247,7 +249,7 @@ where
 impl<N, Rpc> SpawnBlocking for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert,
+    Rpc: RpcConvert<Error = EthApiError>,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -262,6 +264,11 @@ where
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
         self.inner.blocking_task_guard()
+    }
+
+    #[inline]
+    fn blocking_io_task_guard(&self) -> &std::sync::Arc<tokio::sync::Semaphore> {
+        self.inner.blocking_io_request_semaphore()
     }
 }
 
@@ -296,6 +303,9 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     /// Guard for getproof calls
     blocking_task_guard: BlockingTaskGuard,
 
+    /// Semaphore to limit concurrent blocking IO requests (`eth_call`, `eth_estimateGas`, etc.)
+    blocking_io_request_semaphore: Arc<Semaphore>,
+
     /// Transaction broadcast channel
     raw_tx_sender: broadcast::Sender<Bytes>,
 
@@ -303,7 +313,7 @@ pub struct EthApiInner<N: RpcNodeCore, Rpc: RpcConvert> {
     raw_tx_forwarder: Option<RpcClient>,
 
     /// Converter for RPC types.
-    tx_resp_builder: Rpc,
+    converter: Rpc,
 
     /// Builder for pending block environment.
     next_env_builder: Box<dyn PendingEnvBuilder<N::Evm>>,
@@ -343,9 +353,10 @@ where
         fee_history_cache: FeeHistoryCache<ProviderHeader<N::Provider>>,
         task_spawner: Box<dyn TaskSpawner + 'static>,
         proof_permits: usize,
-        tx_resp_builder: Rpc,
+        converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
         max_batch_size: usize,
+        max_blocking_io_requests: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: Option<RpcClient>,
         send_raw_transaction_sync_timeout: Duration,
@@ -384,9 +395,10 @@ where
             blocking_task_pool,
             fee_history_cache,
             blocking_task_guard: BlockingTaskGuard::new(proof_permits),
+            blocking_io_request_semaphore: Arc::new(Semaphore::new(max_blocking_io_requests)),
             raw_tx_sender,
             raw_tx_forwarder,
-            tx_resp_builder,
+            converter,
             next_env_builder: Box::new(next_env),
             tx_batch_sender,
             pending_block_kind,
@@ -410,8 +422,8 @@ where
 
     /// Returns a handle to the transaction response builder.
     #[inline]
-    pub const fn tx_resp_builder(&self) -> &Rpc {
-        &self.tx_resp_builder
+    pub const fn converter(&self) -> &Rpc {
+        &self.converter
     }
 
     /// Returns a handle to data in memory.
@@ -440,6 +452,8 @@ where
     }
 
     /// Returns a handle to the blocking thread pool.
+    ///
+    /// This is intended for tasks that are CPU bound.
     #[inline]
     pub const fn blocking_task_pool(&self) -> &BlockingTaskPool {
         &self.blocking_task_pool
@@ -575,6 +589,12 @@ where
     #[inline]
     pub const fn evm_memory_limit(&self) -> u64 {
         self.evm_memory_limit
+    }
+
+    /// Returns a reference to the blocking IO request semaphore.
+    #[inline]
+    pub const fn blocking_io_request_semaphore(&self) -> &Arc<Semaphore> {
+        &self.blocking_io_request_semaphore
     }
 }
 

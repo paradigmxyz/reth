@@ -439,16 +439,24 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
                 entries += jar_provider.rows();
 
-                let data_size = reth_fs_util::metadata(jar_provider.data_path())
+                let data_path = jar_provider.data_path().to_path_buf();
+                let index_path = jar_provider.index_path();
+                let offsets_path = jar_provider.offsets_path();
+                let config_path = jar_provider.config_path();
+
+                // can release jar early
+                drop(jar_provider);
+
+                let data_size = reth_fs_util::metadata(data_path)
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let index_size = reth_fs_util::metadata(jar_provider.index_path())
+                let index_size = reth_fs_util::metadata(index_path)
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let offsets_size = reth_fs_util::metadata(jar_provider.offsets_path())
+                let offsets_size = reth_fs_util::metadata(offsets_path)
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
-                let config_size = reth_fs_util::metadata(jar_provider.config_path())
+                let config_size = reth_fs_util::metadata(config_path)
                     .map(|metadata| metadata.len())
                     .unwrap_or_default();
 

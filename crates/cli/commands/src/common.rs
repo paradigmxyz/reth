@@ -1,5 +1,7 @@
 //! Contains common `reth` arguments
 
+pub use reth_primitives_traits::header::HeaderMut;
+
 use alloy_primitives::B256;
 use clap::Parser;
 use reth_chainspec::EthChainSpec;
@@ -227,17 +229,6 @@ type FullTypesAdapter<T> = FullNodeTypesAdapter<
     Arc<DatabaseEnv>,
     BlockchainProvider<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
 >;
-
-/// Trait for block headers that can be modified through CLI operations.
-pub trait CliHeader {
-    fn set_number(&mut self, number: u64);
-}
-
-impl CliHeader for alloy_consensus::Header {
-    fn set_number(&mut self, number: u64) {
-        self.number = number;
-    }
-}
 
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.

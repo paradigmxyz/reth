@@ -22,7 +22,8 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 
 use revm_database::{AccountStatus, BundleAccount};
 
-/// Representation of in-memory hashed state.
+/// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
+/// hash maps.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedPostState {
@@ -375,6 +376,21 @@ impl HashedPostState {
         HashedPostStateSorted { accounts, storages }
     }
 
+    /// Creates a sorted copy without consuming self.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
+    pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
+        let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
+        accounts.sort_unstable_by_key(|(address, _)| *address);
+
+        let storages = self
+            .storages
+            .iter()
+            .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
+            .collect();
+
+        HashedPostStateSorted { accounts, storages }
+    }
+
     /// Clears the account and storage maps of this `HashedPostState`.
     pub fn clear(&mut self) {
         self.accounts.clear();
@@ -467,6 +483,15 @@ impl HashedStorage {
 
         HashedStorageSorted { storage_slots, wiped: self.wiped }
     }
+
+    /// Creates a sorted copy without consuming self.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
+    pub fn clone_into_sorted(&self) -> HashedStorageSorted {
+        let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
+        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+
+        HashedStorageSorted { storage_slots, wiped: self.wiped }
+    }
 }
 
 /// Sorted hashed post state optimized for iterating during state trie calculation.
@@ -505,6 +530,46 @@ impl HashedPostStateSorted {
     /// Returns the total number of updates including all accounts and storage updates.
     pub fn total_len(&self) -> usize {
         self.accounts.len() + self.storages.values().map(|s| s.len()).sum::<usize>()
+    }
+
+    /// Construct [`TriePrefixSetsMut`] from hashed post state.
+    ///
+    /// The prefix sets contain the hashed account and storage keys that have been changed in the
+    /// post state.
+    pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
+        let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
+        let mut destroyed_accounts = HashSet::default();
+        for (hashed_address, account) in &self.accounts {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if account.is_none() {
+                destroyed_accounts.insert(*hashed_address);
+            }
+        }
+
+        let mut storage_prefix_sets =
+            B256Map::with_capacity_and_hasher(self.storages.len(), Default::default());
+        for (hashed_address, hashed_storage) in &self.storages {
+            // Ensure account trie covers storage overlays even if account map is empty.
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+
+            let prefix_set = if hashed_storage.wiped {
+                PrefixSetMut::all()
+            } else {
+                let mut prefix_set =
+                    PrefixSetMut::with_capacity(hashed_storage.storage_slots.len());
+                prefix_set.extend_keys(
+                    hashed_storage
+                        .storage_slots
+                        .iter()
+                        .map(|(hashed_slot, _)| Nibbles::unpack(hashed_slot)),
+                );
+                prefix_set
+            };
+
+            storage_prefix_sets.insert(*hashed_address, prefix_set);
+        }
+
+        TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
     }
 
     /// Extends this state with contents of another sorted state.
@@ -1390,5 +1455,78 @@ mod tests {
                 chunking_length, size
             );
         }
+    }
+
+    #[test]
+    fn test_clone_into_sorted_equivalence() {
+        let addr1 = B256::from([1; 32]);
+        let addr2 = B256::from([2; 32]);
+        let addr3 = B256::from([3; 32]);
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+        let slot3 = B256::from([3; 32]);
+
+        let state = HashedPostState {
+            accounts: B256Map::from_iter([
+                (addr1, Some(Account { nonce: 1, balance: U256::from(100), bytecode_hash: None })),
+                (addr2, None),
+                (addr3, Some(Account::default())),
+            ]),
+            storages: B256Map::from_iter([
+                (
+                    addr1,
+                    HashedStorage {
+                        wiped: false,
+                        storage: B256Map::from_iter([
+                            (slot1, U256::from(10)),
+                            (slot2, U256::from(20)),
+                        ]),
+                    },
+                ),
+                (
+                    addr2,
+                    HashedStorage {
+                        wiped: true,
+                        storage: B256Map::from_iter([(slot3, U256::ZERO)]),
+                    },
+                ),
+            ]),
+        };
+
+        // clone_into_sorted should produce the same result as clone().into_sorted()
+        let sorted_via_clone = state.clone().into_sorted();
+        let sorted_via_clone_into = state.clone_into_sorted();
+
+        assert_eq!(sorted_via_clone, sorted_via_clone_into);
+
+        // Verify the original state is not consumed
+        assert_eq!(state.accounts.len(), 3);
+        assert_eq!(state.storages.len(), 2);
+    }
+
+    #[test]
+    fn test_hashed_storage_clone_into_sorted_equivalence() {
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+        let slot3 = B256::from([3; 32]);
+
+        let storage = HashedStorage {
+            wiped: true,
+            storage: B256Map::from_iter([
+                (slot1, U256::from(100)),
+                (slot2, U256::ZERO),
+                (slot3, U256::from(300)),
+            ]),
+        };
+
+        // clone_into_sorted should produce the same result as clone().into_sorted()
+        let sorted_via_clone = storage.clone().into_sorted();
+        let sorted_via_clone_into = storage.clone_into_sorted();
+
+        assert_eq!(sorted_via_clone, sorted_via_clone_into);
+
+        // Verify the original storage is not consumed
+        assert_eq!(storage.storage.len(), 3);
+        assert!(storage.wiped);
     }
 }

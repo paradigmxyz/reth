@@ -495,7 +495,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     }
 
     /// Runs an operation to fetch hashes that are cached in [`TransactionFetcher`].
-    fn on_fetch_hashes_pending_fetch(&mut self) {
+    ///
+    /// Returns `true` if a request was sent.
+    fn on_fetch_hashes_pending_fetch(&mut self) -> bool {
         // try drain transaction hashes pending fetch
         let info = &self.pending_pool_imports_info;
         let max_pending_pool_imports = info.max_pending_pool_imports;
@@ -503,7 +505,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             |divisor| info.has_capacity(max_pending_pool_imports / divisor);
 
         self.transaction_fetcher
-            .on_fetch_pending_hashes(&self.peers, has_capacity_wrt_pending_pool_imports);
+            .on_fetch_pending_hashes(&self.peers, has_capacity_wrt_pending_pool_imports)
     }
 
     fn on_request_error(&self, peer_id: PeerId, req_err: RequestError) {
@@ -1336,6 +1338,8 @@ where
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
         let mut transactions = transactions.0;
 
+        let start = Instant::now();
+
         // mark the transactions as received
         self.transaction_fetcher
             .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| tx.tx_hash()));
@@ -1457,6 +1461,8 @@ where
         if num_already_seen_by_peer > 0 {
             self.report_already_seen(peer_id);
         }
+
+        self.metrics.pool_import_prepare_duration.record(start.elapsed());
     }
 
     /// Processes a [`FetchEvent`].
@@ -1625,8 +1631,9 @@ where
         // Sends at most one request.
         duration_metered_exec!(
             {
-                if this.has_capacity_for_fetching_pending_hashes() {
-                    this.on_fetch_hashes_pending_fetch();
+                if this.has_capacity_for_fetching_pending_hashes() &&
+                    this.on_fetch_hashes_pending_fetch()
+                {
                     maybe_more_tx_fetch_events = true;
                 }
             },

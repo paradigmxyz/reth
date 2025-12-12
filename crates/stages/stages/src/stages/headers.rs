@@ -14,7 +14,9 @@ use reth_network_p2p::headers::{
     downloader::{HeaderDownloader, HeaderSyncGap, SyncTarget},
     error::HeadersDownloaderError,
 };
-use reth_primitives_traits::{serde_bincode_compat, FullBlockHeader, NodePrimitives, SealedHeader};
+use reth_primitives_traits::{
+    serde_bincode_compat, FullBlockHeader, HeaderTy, NodePrimitives, SealedHeader,
+};
 use reth_provider::{
     providers::StaticFileWriter, BlockHashReader, DBProvider, HeaderSyncGapProvider,
     StaticFileProviderFactory,
@@ -333,8 +335,9 @@ where
                 (input.unwind_to + 1)..,
             )?;
         provider.tx_ref().unwind_table_by_num::<tables::CanonicalHeaders>(input.unwind_to)?;
-        let unfinalized_headers_unwound =
-            provider.tx_ref().unwind_table_by_num::<tables::Headers>(input.unwind_to)?;
+        let unfinalized_headers_unwound = provider.tx_ref().unwind_table_by_num::<tables::Headers<
+            HeaderTy<Provider::Primitives>,
+        >>(input.unwind_to)?;
 
         // determine how many headers to unwind from the static files based on the highest block and
         // the unwind_to block
