@@ -1,7 +1,6 @@
+use crate::proof_v2::increment_and_strip_trailing_zeros;
 use alloy_primitives::B256;
 use reth_trie_common::Nibbles;
-
-use crate::proof_v2::increment_and_strip_trailing_zeros;
 
 /// Target describes a proof target. For every proof target given, the
 /// [`crate::proof_v2::ProofCalculator`] will calculate and return all nodes whose path is a prefix
@@ -41,6 +40,34 @@ impl From<B256> for Target {
     }
 }
 
+// A helper function for getting the largest prefix of the sub-trie which contains a particular
+// target, based on its prefix.
+//
+// In general the target will only match within the sub-trie with the same prefix as the
+// target's. However there is an exception:
+//
+// Given a trie with a node at 0xabc, there must be a branch at 0xab. A target with prefix 0xabc
+// needs to match that node, but in order to know the node is at that path the branch at 0xab
+// must be constructed. Therefore the sub-trie prefix is the target prefix with a nibble
+// truncated.
+//
+// For a target with an empty prefix we still use an empty sub-trie prefix; this will still
+// construct the branch at the root node (if there is one), the only behavioral difference
+// between targets with prefix lengths zero and one will be that with prefix length zero the
+// root node's proof will be retained.
+#[inline]
+fn sub_trie_prefix(target_prefix: Nibbles) -> Nibbles {
+    let mut sub_trie_prefix = target_prefix;
+    sub_trie_prefix.truncate(target_prefix.len().saturating_sub(1));
+    sub_trie_prefix
+}
+
+// A helper function which returns the first path following a sub-trie in lexicographical order.
+#[inline]
+fn sub_trie_upper_bound(sub_trie_prefix: &Nibbles) -> Option<Nibbles> {
+    increment_and_strip_trailing_zeros(sub_trie_prefix)
+}
+
 /// Describes a set of targets which all apply to a single sub-trie, ie a section of the overall
 /// trie whose nodes all share a prefix.
 pub(crate) struct SubTrieTargets<'a> {
@@ -56,39 +83,27 @@ pub(crate) struct SubTrieTargets<'a> {
     pub(crate) retain_root: bool,
 }
 
+impl<'a> SubTrieTargets<'a> {
+    // A helper function which returns the first path following a sub-trie in lexicographical order.
+    #[inline]
+    pub(crate) fn upper_bound(&self) -> Option<Nibbles> {
+        sub_trie_upper_bound(&self.prefix)
+    }
+}
+
 /// Given a set of [`Target`]s, returns an iterator over those same [`Target`]s chunked by the
 /// sub-tries they apply to within the overall trie.
 pub(crate) fn iter_sub_trie_targets<'a>(
     targets: &'a mut [Target],
 ) -> impl Iterator<Item = SubTrieTargets<'a>> {
-    // First sort lexicographically by prefix. We will use this for chunking targets into
-    // contiguous sections in the next steps based on their bounds.
-    targets.sort_unstable_by_key(|target| target.prefix);
-
-    // A helper function for getting the largest prefix of the sub-trie which contains a particular
-    // target, based on its prefix.
-    //
-    // In general the target will only match within the sub-trie with the same prefix as the
-    // target's. However there is an exception:
-    //
-    // Given a trie with a node at 0xabc, there must be a branch at 0xab. A target with prefix 0xabc
-    // needs to match that node, but in order to know the node is at that path the branch at 0xab
-    // must be constructed. Therefore the sub-trie prefix is the target prefix with a nibble
-    // truncated.
-    //
-    // For a target with an empty prefix we still use an empty sub-trie prefix; this will still
-    // construct the branch at the root node (if there is one), the only behavioral difference
-    // between targets with prefix lengths zero and one will be that with prefix length zero the
-    // root node's proof will be retained.
-    let sub_trie_prefix = |prefix: Nibbles| {
-        let mut lower_bound = prefix;
-        lower_bound.truncate(prefix.len().saturating_sub(1));
-        lower_bound
-    };
-
-    // A helper function which returns the first path following a sub-trie in lexicographical order.
-    let sub_trie_upper_bound =
-        |sub_trie_prefix: &Nibbles| increment_and_strip_trailing_zeros(sub_trie_prefix);
+    // First sort by the sub-trie prefix of each target, falling back to the actual prefix in cases
+    // where the sub-trie prefixes are equal (to differentiate an empty target prefix from an empty
+    // sub-trie prefix).
+    targets.sort_unstable_by(|a, b| {
+        let sub_trie_prefix_a = sub_trie_prefix(a.prefix);
+        let sub_trie_prefix_b = sub_trie_prefix(b.prefix);
+        sub_trie_prefix_a.cmp(&sub_trie_prefix_b).then_with(|| a.prefix.cmp(&b.prefix))
+    });
 
     // We now chunk targets, such that each chunk contains all targets belonging to the same
     // sub-trie. We are taking advantage of the following properties:
@@ -258,16 +273,31 @@ mod tests {
                     ],
                 )],
             ),
+            // Case 9: Second target's sub-trie prefix is root
+            (
+                vec![
+                    Target::new(B256::repeat_byte(0x20)).with_min_len(2),
+                    Target::new(B256::repeat_byte(0x40)).with_min_len(1),
+                ],
+                vec![(
+                    "",
+                    vec![
+                        "2020202020202020202020202020202020202020202020202020202020202020",
+                        "4040404040404040404040404040404040404040404040404040404040404040",
+                    ],
+                )],
+            ),
         ];
 
         for (i, (mut input_targets, expected)) in test_cases.into_iter().enumerate() {
+            let test_case = i + 1;
             let sub_tries: Vec<_> = iter_sub_trie_targets(&mut input_targets).collect();
 
             assert_eq!(
                 sub_tries.len(),
                 expected.len(),
                 "Test case {} failed: expected {} sub-tries, got {}",
-                i,
+                test_case,
                 expected.len(),
                 sub_tries.len()
             );
@@ -280,13 +310,13 @@ mod tests {
                 assert_eq!(
                     sub_trie.prefix, exp_prefix,
                     "Test case {} sub-trie {}: prefix mismatch",
-                    i, j
+                    test_case, j
                 );
                 assert_eq!(
                     sub_trie.targets.len(),
                     exp_keys.len(),
                     "Test case {} sub-trie {}: expected {} targets, got {}",
-                    i,
+                    test_case,
                     j,
                     exp_keys.len(),
                     sub_trie.targets.len()
@@ -299,7 +329,7 @@ mod tests {
                     assert_eq!(
                         target.key, exp_key,
                         "Test case {} sub-trie {} target {}: key mismatch",
-                        i, j, k
+                        test_case, j, k
                     );
                 }
             }
