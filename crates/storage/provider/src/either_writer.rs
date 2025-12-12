@@ -36,6 +36,17 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
+// Helper type so constructors stay exported even when RocksDB feature is off.
+#[cfg(all(unix, feature = "rocksdb"))]
+type RocksTxArg<'a> = crate::providers::rocksdb::RocksTx<'a>;
+#[cfg(not(all(unix, feature = "rocksdb")))]
+type RocksTxArg<'a> = ();
+
+#[cfg(all(unix, feature = "rocksdb"))]
+type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
+#[cfg(not(all(unix, feature = "rocksdb")))]
+type RocksTxRefArg<'a> = ();
+
 /// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherWriter<'a, CURSOR, N> {
@@ -116,39 +127,43 @@ impl<'a> EitherWriter<'a, (), ()> {
     }
 
     /// Creates a new [`EitherWriter`] for storages history based on storage settings.
-    #[cfg(all(unix, feature = "rocksdb"))]
     pub fn new_storages_history<P>(
         provider: &P,
-        rocksdb_tx: RocksTx<'a>,
+        rocksdb_tx: RocksTxArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::StoragesHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTxMut,
     {
+        #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            Ok(EitherWriter::RocksDB(rocksdb_tx))
-        } else {
-            Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
+            return Ok(EitherWriter::RocksDB(rocksdb_tx));
         }
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let _ = rocksdb_tx;
+
+        Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
     }
 
     /// Creates a new [`EitherWriter`] for transaction hash numbers based on storage settings.
-    #[cfg(all(unix, feature = "rocksdb"))]
     pub fn new_transaction_hash_numbers<P>(
         provider: &P,
-        rocksdb_tx: RocksTx<'a>,
+        rocksdb_tx: RocksTxArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionHashNumbers>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTxMut,
     {
+        #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            Ok(EitherWriter::RocksDB(rocksdb_tx))
-        } else {
-            Ok(EitherWriter::Database(
-                provider.tx_ref().cursor_write::<tables::TransactionHashNumbers>()?,
-            ))
+            return Ok(EitherWriter::RocksDB(rocksdb_tx));
         }
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let _ = rocksdb_tx;
+
+        Ok(EitherWriter::Database(
+            provider.tx_ref().cursor_write::<tables::TransactionHashNumbers>()?,
+        ))
     }
 }
 
@@ -286,7 +301,7 @@ pub enum EitherReader<'a, CURSOR, N> {
     StaticFile(StaticFileProvider<N>, PhantomData<&'a ()>),
     /// Read from `RocksDB` transaction
     #[cfg(all(unix, feature = "rocksdb"))]
-    RocksDB(&'a RocksTx<'a>),
+    RocksDB(&'a crate::providers::rocksdb::RocksTx<'a>),
 }
 
 impl<'a> EitherReader<'a, (), ()> {
@@ -309,43 +324,47 @@ impl<'a> EitherReader<'a, (), ()> {
     }
 
     /// Creates a new [`EitherReader`] for storages history based on storage settings.
-    #[cfg(all(unix, feature = "rocksdb"))]
     pub fn new_storages_history<P>(
         provider: &P,
-        rocksdb_tx: &'a RocksTx<'a>,
+        rocksdb_tx: RocksTxRefArg<'a>,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::StoragesHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
     {
+        #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            Ok(EitherReader::RocksDB(rocksdb_tx))
-        } else {
-            Ok(EitherReader::Database(
-                provider.tx_ref().cursor_read::<tables::StoragesHistory>()?,
-                PhantomData,
-            ))
+            return Ok(EitherReader::RocksDB(rocksdb_tx));
         }
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let _ = rocksdb_tx;
+
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::StoragesHistory>()?,
+            PhantomData,
+        ))
     }
 
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
-    #[cfg(all(unix, feature = "rocksdb"))]
     pub fn new_transaction_hash_numbers<P>(
         provider: &P,
-        rocksdb_tx: &'a RocksTx<'a>,
+        rocksdb_tx: RocksTxRefArg<'a>,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionHashNumbers>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTx,
     {
+        #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            Ok(EitherReader::RocksDB(rocksdb_tx))
-        } else {
-            Ok(EitherReader::Database(
-                provider.tx_ref().cursor_read::<tables::TransactionHashNumbers>()?,
-                PhantomData,
-            ))
+            return Ok(EitherReader::RocksDB(rocksdb_tx));
         }
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let _ = rocksdb_tx;
+
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::TransactionHashNumbers>()?,
+            PhantomData,
+        ))
     }
 }
 
