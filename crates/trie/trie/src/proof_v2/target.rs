@@ -115,7 +115,7 @@ pub(crate) fn iter_sub_trie_targets<'a>(
     //   that target must be the first target of the next chunk, lying in a separate sub-trie.
     //      - Example: given sub-trie prefixes of [0x2, 0x2fa, 0x4c, 0x4ce, 0x4e], we would end up
     //        with the following chunks:
-    //          - [0x2, 0x2a]  w/ upper bound 0x3
+    //          - [0x2, 0x2fa] w/ upper bound 0x3
     //          - [0x4c 0x4ce] w/ upper bound 0x4d
     //          - [0x4e]       w/ upper bound 0x4f
     let mut upper_bound = targets.first().and_then(|t| sub_trie_upper_bound(&t.sub_trie_prefix()));
