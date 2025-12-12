@@ -1709,7 +1709,7 @@ mod tests {
         }
 
         /// Generate a strategy for proof targets that are 80% from the `HashedPostState` accounts
-        /// and 20% random keys. Each target has a random min_len of 0..16.
+        /// and 20% random keys. Each target has a random `min_len` of 0..16.
         fn proof_targets_strategy(account_keys: Vec<B256>) -> impl Strategy<Value = Vec<Target>> {
             let num_accounts = account_keys.len();
 
