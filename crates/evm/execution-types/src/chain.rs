@@ -488,14 +488,14 @@ pub(super) mod serde_bincode_compat {
     {
         blocks: RecoveredBlocks<'a, N::Block>,
         execution_outcome: serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
-        #[serde(default, skip_serializing, rename = "trie_updates_legacy")]
+        #[serde(default, rename = "trie_updates_legacy")]
         _trie_updates_legacy:
             Option<reth_trie_common::serde_bincode_compat::updates::TrieUpdates<'a>>,
         #[serde(default)]
         trie_updates:
             BTreeMap<BlockNumber, reth_trie_common::serde_bincode_compat::updates::TrieUpdates<'a>>,
-        //#[serde(default)]
-        //hashed_state: BTreeMap<BlockNumber, super::HashedPostState>,
+        #[serde(default)]
+        hashed_state: BTreeMap<BlockNumber, reth_trie_common::serde_bincode_compat::hashed_state::HashedPostState<'a>>,
     }
 
     #[derive(Debug)]
@@ -554,11 +554,11 @@ pub(super) mod serde_bincode_compat {
                     .iter()
                     .map(|(k, v)| (*k, v.as_ref().into()))
                     .collect(),
-                //hashed_state: value
-                //    .hashed_state
-                //    .iter()
-                //    .map(|(k, v)| (*k, v.as_ref().clone()))
-                //    .collect(),
+                hashed_state: value
+                   .hashed_state
+                   .iter()
+                   .map(|(k, v)| (*k, v.as_ref().into()))
+                   .collect(),
             }
         }
     }
@@ -578,12 +578,11 @@ pub(super) mod serde_bincode_compat {
                     .into_iter()
                     .map(|(k, v)| (k, Arc::new(v.into())))
                     .collect(),
-                hashed_state: Default::default(),
-                //hashed_state: value
-                //    .hashed_state
-                //    .into_iter()
-                //    .map(|(k, v)| (k, Arc::new(v)))
-                //    .collect(),
+                hashed_state: value
+                   .hashed_state
+                   .into_iter()
+                   .map(|(k, v)| (k, Arc::new(v.into())))
+                   .collect(),
             }
         }
     }
