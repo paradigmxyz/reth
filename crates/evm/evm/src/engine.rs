@@ -1,6 +1,4 @@
 use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
-
-#[cfg(feature = "std")]
 use rayon::prelude::*;
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
@@ -36,43 +34,30 @@ pub trait ExecutableTxTuple: Into<(Self::IntoIter, Self::Convert)> + Send + 'sta
     type Error: core::error::Error + Send + Sync + 'static;
 
     /// Iterator over [`ExecutableTxTuple::Tx`].
-    #[cfg(feature = "std")]
     type IntoIter: IntoParallelIterator<Item = Self::RawTx, Iter: IndexedParallelIterator>
         + Send
         + 'static;
-    /// Iterator over [`ExecutableTxTuple::Tx`].
-    #[cfg(not(feature = "std"))]
-    type IntoIter: IntoIterator<Item = Self::RawTx> + Send + 'static;
     /// Closure that can be used to convert a [`ExecutableTxTuple::RawTx`] to a
     /// [`ExecutableTxTuple::Tx`]. This might involve heavy work like decoding or recovery
     /// and will be parallelized in the engine.
     type Convert: Fn(Self::RawTx) -> Result<Self::Tx, Self::Error> + Send + Sync + 'static;
 }
 
-macro_rules! maybe_parallel_iter {
-    ($($i_bound:tt)*) => {
-        impl<RawTx, Tx, Err, I, F> ExecutableTxTuple for (I, F)
-        where
-            RawTx: Send + Sync + 'static,
-            Tx: Clone + Send + Sync + 'static,
-            Err: core::error::Error + Send + Sync + 'static,
-            I: $($i_bound)* + Send + 'static,
-            F: Fn(RawTx) -> Result<Tx, Err> + Send + Sync + 'static,
-        {
-            type RawTx = RawTx;
-            type Tx = Tx;
-            type Error = Err;
+impl<RawTx, Tx, Err, I, F> ExecutableTxTuple for (I, F)
+where
+    RawTx: Send + Sync + 'static,
+    Tx: Clone + Send + Sync + 'static,
+    Err: core::error::Error + Send + Sync + 'static,
+    I: IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator> + Send + 'static,
+    F: Fn(RawTx) -> Result<Tx, Err> + Send + Sync + 'static,
+{
+    type RawTx = RawTx;
+    type Tx = Tx;
+    type Error = Err;
 
-            type IntoIter = I;
-            type Convert = F;
-        }
-    };
+    type IntoIter = I;
+    type Convert = F;
 }
-
-#[cfg(feature = "std")]
-maybe_parallel_iter!(IntoParallelIterator<Item = RawTx, Iter: IndexedParallelIterator>);
-#[cfg(not(feature = "std"))]
-maybe_parallel_iter!(IntoIterator<Item = RawTx>);
 
 /// Iterator over executable transactions.
 pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
