@@ -1,5 +1,7 @@
 //! Multiproof task related functionality.
 
+use crate::tree::payload_processor::bal::bal_to_hashed_post_state;
+use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
     keccak256,
@@ -11,6 +13,7 @@ use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
+use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
 use reth_trie::{
     added_removed_keys::MultiAddedRemovedKeys, DecodedMultiProof, HashedPostState, HashedStorage,
@@ -93,6 +96,11 @@ pub(super) enum MultiProofMessage {
         /// The state update that was used to calculate the proof
         state: HashedPostState,
     },
+    /// Block Access List (EIP-7928; BAL) containing complete state changes for the block.
+    ///
+    /// When received, the task generates a single state update from the BAL and processes it.
+    /// No further messages are expected after receiving this variant.
+    BlockAccessList(Arc<BlockAccessList>),
     /// Signals state update stream end.
     ///
     /// This is triggered by block execution, indicating that no additional state updates are
@@ -885,7 +893,17 @@ impl MultiProofTask {
     )]
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
+        self.on_hashed_state_update(source, hashed_state_update)
+    }
 
+    /// Processes a hashed state update and dispatches multiproofs as needed.
+    ///
+    /// Returns the number of state updates dispatched (both `EmptyProof` and regular multiproofs).
+    fn on_hashed_state_update(
+        &mut self,
+        source: StateChangeSource,
+        hashed_state_update: HashedPostState,
+    ) -> u64 {
         // Update removed keys based on the state update.
         self.multi_added_removed_keys.update_with_state(&hashed_state_update);
 
@@ -982,12 +1000,16 @@ impl MultiProofTask {
     /// This preserves ordering without requeuing onto the channel.
     ///
     /// Returns `true` if done, `false` to continue.
-    fn process_multiproof_message(
+    fn process_multiproof_message<P>(
         &mut self,
         msg: MultiProofMessage,
         ctx: &mut MultiproofBatchCtx,
         batch_metrics: &mut MultiproofBatchMetrics,
-    ) -> bool {
+        provider: &P,
+    ) -> bool
+    where
+        P: AccountReader,
+    {
         match msg {
             // Prefetch proofs: batch consecutive prefetch requests up to target/message limits
             MultiProofMessage::PrefetchProofs(targets) => {
@@ -1146,6 +1168,58 @@ impl MultiProofTask {
 
                 false
             }
+            // Process Block Access List (BAL) - complete state changes provided upfront
+            MultiProofMessage::BlockAccessList(bal) => {
+                trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::BAL");
+
+                if ctx.first_update_time.is_none() {
+                    self.metrics
+                        .first_update_wait_time_histogram
+                        .record(ctx.start.elapsed().as_secs_f64());
+                    ctx.first_update_time = Some(Instant::now());
+                    debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation from BAL");
+                }
+
+                // Convert BAL to HashedPostState and process it
+                match bal_to_hashed_post_state(&bal, &provider) {
+                    Ok(hashed_state) => {
+                        debug!(
+                            target: "engine::tree::payload_processor::multiproof",
+                            accounts = hashed_state.accounts.len(),
+                            storages = hashed_state.storages.len(),
+                            "Processing BAL state update"
+                        );
+
+                        // Use Transaction(0) as source for BAL-derived state updates
+                        batch_metrics.state_update_proofs_requested += self.on_hashed_state_update(
+                            StateChangeSource::Transaction(0),
+                            hashed_state,
+                        );
+                    }
+                    Err(err) => {
+                        error!(target: "engine::tree::payload_processor::multiproof", ?err, "Failed to convert BAL to hashed state");
+                        return true;
+                    }
+                }
+
+                // Mark updates as finished since BAL provides complete state
+                ctx.updates_finished_time = Some(Instant::now());
+
+                // Check if we're done (might need to wait for proofs to complete)
+                if self.is_done(
+                    batch_metrics.proofs_processed,
+                    batch_metrics.state_update_proofs_requested,
+                    batch_metrics.prefetch_proofs_requested,
+                    ctx.updates_finished(),
+                ) {
+                    debug!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        "BAL processed and all proofs complete, ending calculation"
+                    );
+                    return true;
+                }
+                false
+            }
             // Signal that no more state updates will arrive
             MultiProofMessage::FinishedStateUpdates => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
@@ -1238,7 +1312,10 @@ impl MultiProofTask {
         target = "engine::tree::payload_processor::multiproof",
         skip_all
     )]
-    pub(crate) fn run(mut self) {
+    pub(crate) fn run<P>(mut self, provider: P)
+    where
+        P: AccountReader,
+    {
         let mut ctx = MultiproofBatchCtx::new(Instant::now());
         let mut batch_metrics = MultiproofBatchMetrics::default();
 
@@ -1248,7 +1325,7 @@ impl MultiProofTask {
             trace!(target: "engine::tree::payload_processor::multiproof", "entering main channel receiving loop");
 
             if let Some(msg) = ctx.pending_msg.take() {
-                if self.process_multiproof_message(msg, &mut ctx, &mut batch_metrics) {
+                if self.process_multiproof_message(msg, &mut ctx, &mut batch_metrics, &provider) {
                     break 'main;
                 }
                 continue;
@@ -1323,7 +1400,7 @@ impl MultiProofTask {
                         }
                     };
 
-                    if self.process_multiproof_message(msg, &mut ctx, &mut batch_metrics) {
+                    if self.process_multiproof_message(msg, &mut ctx, &mut batch_metrics, &provider) {
                         break 'main;
                     }
                 }
@@ -1539,7 +1616,8 @@ fn estimate_evm_state_targets(state: &EvmState) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::map::B256Set;
+    use alloy_eip7928::{AccountChanges, BalanceChange};
+    use alloy_primitives::{map::B256Set, Address};
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
@@ -1548,7 +1626,7 @@ mod tests {
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
-    use std::sync::OnceLock;
+    use std::sync::{Arc, OnceLock};
     use tokio::runtime::{Handle, Runtime};
 
     /// Get a handle to the test runtime, creating it if necessary
@@ -2508,6 +2586,7 @@ mod tests {
         use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
+        let test_provider = test_provider_factory.latest().unwrap();
         let mut task = create_test_state_root_task(test_provider_factory);
 
         // Queue: Prefetch1, StateUpdate, Prefetch2
@@ -2548,12 +2627,22 @@ mod tests {
         // First message: Prefetch1 batches; StateUpdate becomes pending.
         let first = task.rx.recv().unwrap();
         assert!(matches!(first, MultiProofMessage::PrefetchProofs(_)));
-        assert!(!task.process_multiproof_message(first, &mut ctx, &mut batch_metrics));
+        assert!(!task.process_multiproof_message(
+            first,
+            &mut ctx,
+            &mut batch_metrics,
+            &test_provider
+        ));
         let pending = ctx.pending_msg.take().expect("pending message captured");
         assert!(matches!(pending, MultiProofMessage::StateUpdate(_, _)));
 
         // Pending message should be handled before the next select loop.
-        assert!(!task.process_multiproof_message(pending, &mut ctx, &mut batch_metrics));
+        assert!(!task.process_multiproof_message(
+            pending,
+            &mut ctx,
+            &mut batch_metrics,
+            &test_provider
+        ));
 
         // Prefetch2 should now be in pending_msg (captured by StateUpdate's batching loop).
         match ctx.pending_msg.take() {
@@ -2702,5 +2791,45 @@ mod tests {
             }
             _ => panic!("Prefetch2 was lost!"),
         }
+    }
+
+    /// Verifies that BAL messages are processed correctly and generate state updates.
+    #[test]
+    fn test_bal_message_processing() {
+        let test_provider_factory = create_test_provider_factory();
+        let test_provider = test_provider_factory.latest().unwrap();
+        let mut task = create_test_state_root_task(test_provider_factory);
+
+        // Create a simple BAL with one account change
+        let account_address = Address::random();
+        let account_changes = AccountChanges {
+            address: account_address,
+            balance_changes: vec![BalanceChange::new(0, U256::from(1000))],
+            nonce_changes: vec![],
+            code_changes: vec![],
+            storage_changes: vec![],
+            storage_reads: vec![],
+        };
+
+        let bal = Arc::new(vec![account_changes]);
+
+        let mut ctx = MultiproofBatchCtx::new(Instant::now());
+        let mut batch_metrics = MultiproofBatchMetrics::default();
+
+        let should_finish = task.process_multiproof_message(
+            MultiProofMessage::BlockAccessList(bal),
+            &mut ctx,
+            &mut batch_metrics,
+            &test_provider,
+        );
+
+        // BAL should mark updates as finished
+        assert!(ctx.updates_finished_time.is_some());
+
+        // Should have dispatched state update proofs
+        assert!(batch_metrics.state_update_proofs_requested > 0);
+
+        // Should need to wait for the results of those proofs to arrive
+        assert!(!should_finish, "Should continue waiting for proofs");
     }
 }

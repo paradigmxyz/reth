@@ -400,6 +400,14 @@ where
         // use prewarming background task
         let txs = self.tx_iterator_for(&input)?;
 
+        // Extract the BAL, if valid and available
+        let block_access_list = ensure_ok!(input
+            .block_access_list()
+            .transpose()
+            // Eventually gets converted to a `InsertBlockErrorKind::Other`
+            .map_err(Box::<dyn std::error::Error + Send + Sync>::from))
+        .map(Arc::new);
+
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
             env.clone(),
@@ -408,6 +416,7 @@ where
             parent_hash,
             ctx.state(),
             strategy,
+            block_access_list,
         ));
 
         // Use cached state provider before executing, used in execution after prewarming threads
@@ -777,6 +786,7 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
         strategy: StateRootStrategy,
+        block_access_list: Option<Arc<BlockAccessList>>,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -806,12 +816,14 @@ where
                     .record(trie_input_start.elapsed().as_secs_f64());
 
                 let spawn_start = Instant::now();
+
                 let handle = self.payload_processor.spawn(
                     env,
                     txs,
                     provider_builder,
                     multiproof_provider_factory,
                     &self.config,
+                    block_access_list,
                 );
 
                 // record prewarming initialization duration

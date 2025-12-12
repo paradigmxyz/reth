@@ -13,6 +13,7 @@ use crate::tree::{
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
@@ -49,8 +50,9 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, warn, Span};
+use tracing::{debug, debug_span, error, instrument, warn, Span};
 
+pub mod bal;
 mod configured_sparse_trie;
 pub mod executor;
 pub mod multiproof;
@@ -212,6 +214,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
+        bal: Option<Arc<BlockAccessList>>,
     ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -252,19 +255,45 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let prewarm_handle = self.spawn_caching_with(
-            env,
-            prewarm_rx,
-            transaction_count_hint,
-            provider_builder,
-            to_multi_proof.clone(),
-        );
+        // Handle BAL-based optimization if available
+        let prewarm_handle = if let Some(bal) = bal {
+            // When BAL is present, skip spawning prewarm tasks entirely and send BAL to multiproof
+            debug!(target: "engine::tree::payload_processor", "BAL present, skipping prewarm tasks");
+
+            // Send BAL message immediately to MultiProofTask
+            if let Some(ref sender) = to_multi_proof &&
+                let Err(err) = sender.send(MultiProofMessage::BlockAccessList(bal))
+            {
+                // In this case state root validation will simply fail
+                error!(target: "engine::tree::payload_processor", ?err, "Failed to send BAL to MultiProofTask");
+            }
+
+            // Spawn minimal cache-only task without prewarming
+            self.spawn_caching_with(
+                env,
+                prewarm_rx,
+                transaction_count_hint,
+                provider_builder.clone(),
+                None, // Don't send proof targets when BAL is present
+            )
+        } else {
+            // Normal path: spawn with full prewarming
+            self.spawn_caching_with(
+                env,
+                prewarm_rx,
+                transaction_count_hint,
+                provider_builder.clone(),
+                to_multi_proof.clone(),
+            )
+        };
 
         // spawn multi-proof task
         let parent_span = span.clone();
         self.executor.spawn_blocking(move || {
             let _enter = parent_span.entered();
-            multi_proof_task.run();
+            // Build a state provider for the multiproof task
+            let provider = provider_builder.build().expect("failed to build provider");
+            multi_proof_task.run(provider);
         });
 
         // wire the sparse trie to the state root response receiver
@@ -1069,6 +1098,7 @@ mod tests {
                 StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
                 OverlayStateProviderFactory::new(provider_factory),
                 &TreeConfig::default(),
+                None, // No BAL for test
             );
 
         let mut state_hook = handle.state_hook();
