@@ -184,7 +184,7 @@ where
         &self,
         targets: &mut TargetsCursor<'a>,
         path: &Nibbles,
-        check_prefix: bool,
+        check_min_len: bool,
     ) -> bool {
         let (mut lower, mut upper) = targets.current();
 
@@ -222,7 +222,7 @@ where
             // point the target for 0xabc2 will not match the branch due to its prefix, but any of
             // the other targets would, so we need to check those as well.
             if lower.key.starts_with(path) {
-                return !check_prefix ||
+                return !check_min_len ||
                     (path.len() >= lower.min_len as usize ||
                         targets
                             .skip_iter()
