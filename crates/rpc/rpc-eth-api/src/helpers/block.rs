@@ -74,13 +74,9 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<usize>, Self::Error>> + Send {
         async move {
-            if block_id.is_pending() {
-                // Pending block can be fetched directly without need for caching
-                return Ok(self
-                    .provider()
-                    .pending_block()
-                    .map_err(Self::Error::from_eth_err)?
-                    .map(|block| block.body().transaction_count()));
+            // If no pending block from provider, build the pending block locally.
+            if let Some(pending) = self.local_pending_block().await? {
+                return Ok(Some(pending.block.body().transaction_count()));
             }
 
             let block_hash = match self
