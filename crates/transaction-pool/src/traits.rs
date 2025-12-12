@@ -143,6 +143,16 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         self.add_transactions(TransactionOrigin::External, transactions)
     }
 
+    /// Imports all _external_ transactions
+    ///
+    /// Consumer: Utility
+    fn add_external_pooled_transactions(
+        &self,
+        transactions: Vec<<Self::Transaction as PoolTransaction>::Pooled>,
+    ) -> impl Future<Output = Vec<PoolResult<AddedTransactionOutcome>>> + Send {
+      todo!()
+    }
+
     /// Adds an _unvalidated_ transaction into the pool and subscribe to state changes.
     ///
     /// This is the same as [`TransactionPool::add_transaction`] but returns an event stream for the
