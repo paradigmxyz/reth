@@ -678,6 +678,38 @@ pub trait TransactionPoolExt: TransactionPool {
     fn cleanup_blobs(&self);
 }
 
+/// Extension methods for [`TransactionPoolExt`].
+///
+/// This trait provides additional utility methods that can be implemented more efficiently
+/// by specific pool implementations.
+pub trait TransactionPoolExtExt: TransactionPoolExt {
+    /// Returns the _full_ transaction objects for all transactions in the pool that are allowed to
+    /// be propagated and match the given predicate.
+    ///
+    /// This is a cheaper variant of [`TransactionPool::pooled_transactions`] that allows filtering
+    /// transactions using a predicate without collecting all transactions first.
+    ///
+    /// The predicate is applied to each transaction, and only transactions for which the predicate
+    /// returns `true` are included in the result.
+    ///
+    /// Note: This returns a `Vec` but should guarantee that all transactions are unique.
+    ///
+    /// Caution: In case of blob transactions, this does not include the sidecar.
+    ///
+    /// Consumer: Maintenance tasks, P2P
+    fn filter_pooled_txs<F>(
+        &self,
+        mut predicate: F,
+    ) -> Vec<Arc<ValidPoolTransaction<Self::Transaction>>>
+    where
+        F: FnMut(&Arc<ValidPoolTransaction<Self::Transaction>>) -> bool,
+    {
+        // Default implementation: collect all and filter
+        // Specific implementations can override this for better performance
+        self.pooled_transactions().into_iter().filter(|tx| predicate(tx)).collect()
+    }
+}
+
 /// A Helper type that bundles all transactions in the pool.
 #[derive(Debug, Clone)]
 pub struct AllPoolTransactions<T: PoolTransaction> {
