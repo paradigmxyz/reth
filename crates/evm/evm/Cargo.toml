@@ -32,6 +32,7 @@ auto_impl.workspace = true
 derive_more.workspace = true
 futures-util.workspace = true
 metrics = { workspace = true, optional = true }
+rayon.workspace = true
 
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true

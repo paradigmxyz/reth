@@ -1,5 +1,5 @@
 use crate::{execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor};
-use reth_trie_common::iter::{IndexedParallelIterator, IntoParallelIterator};
+use rayon::prelude::*;
 
 /// [`ConfigureEvm`] extension providing methods for executing payloads.
 pub trait ConfigureEngineEvm<ExecutionData>: ConfigureEvm {
