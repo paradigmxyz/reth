@@ -142,7 +142,7 @@ pub struct Receipts70<T = Receipt>(pub crate::message::RequestPair<Receipts70Pay
 
 impl<T> alloy_rlp::Encodable for Receipts70<T>
 where
-    T: alloy_rlp::Encodable + alloy_rlp::Decodable,
+    T: alloy_rlp::Encodable,
 {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.0.encode_inline(out);
@@ -155,7 +155,7 @@ where
 
 impl<T> alloy_rlp::Decodable for Receipts70<T>
 where
-    T: alloy_rlp::Encodable + alloy_rlp::Decodable,
+    T: alloy_rlp::Decodable,
 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         crate::message::RequestPair::<Receipts70Payload<T>>::decode_inline(buf).map(Self)

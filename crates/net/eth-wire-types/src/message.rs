@@ -682,13 +682,13 @@ impl RequestPair<crate::receipts::GetReceipts70Payload> {
     }
 }
 
-impl<T> RequestPair<crate::receipts::Receipts70Payload<T>>
-where
-    T: Decodable + Encodable,
-{
+impl<T> RequestPair<crate::receipts::Receipts70Payload<T>> {
     /// Encodes the request id and payload in a flattened list:
     /// `[request-id, lastBlockIncomplete, [[receipts...], ...]]`.
-    pub fn encode_inline(&self, out: &mut dyn alloy_rlp::BufMut) {
+    pub fn encode_inline(&self, out: &mut dyn alloy_rlp::BufMut)
+    where
+        T: Encodable,
+    {
         let payload_length = self.request_id.length() +
             self.message.last_block_incomplete.length() +
             self.message.receipts.length();
@@ -700,7 +700,10 @@ where
     }
 
     /// Returns the length of the flattened encoding.
-    pub fn length_inline(&self) -> usize {
+    pub fn length_inline(&self) -> usize
+    where
+        T: Encodable,
+    {
         let mut length = 0;
         length += self.request_id.length();
         length += self.message.last_block_incomplete.length();
@@ -710,7 +713,10 @@ where
     }
 
     /// Decodes the flattened eth/70 Receipts payload.
-    pub fn decode_inline(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+    pub fn decode_inline(buf: &mut &[u8]) -> alloy_rlp::Result<Self>
+    where
+        T: Decodable,
+    {
         let header = Header::decode(buf)?;
         let initial_length = buf.len();
         let request_id = u64::decode(buf)?;

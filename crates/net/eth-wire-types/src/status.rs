@@ -395,7 +395,7 @@ pub enum StatusMessage {
     Legacy(Status),
     /// The new `eth/69` status with no `total_difficulty`.
     Eth69(StatusEth69),
-    /// The `eth/70` status, identical to `eth/69` encoding.
+    /// The `eth/70` status, identical to `eth/69` .
     Eth70(StatusEth70),
 }
 
