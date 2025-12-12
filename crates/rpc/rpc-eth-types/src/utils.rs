@@ -1,8 +1,11 @@
 //! Commonly used code snippets
 
+use crate::RpcInvalidTransactionError;
+
 use super::{EthApiError, EthResult};
 use alloy_consensus::TxReceipt;
 use reth_primitives_traits::{Recovered, SignedTransaction};
+use reth_transaction_pool::TxRecoveryHandle;
 use std::future::Future;
 
 /// Calculates the gas used and next log index for a transaction at the given index
@@ -32,7 +35,7 @@ pub fn calculate_gas_used_and_next_log_index(
 /// that the entire input buffer is consumed and no trailing bytes are allowed.
 ///
 /// See [`alloy_eips::eip2718::Decodable2718::decode_2718_exact`]
-pub fn recover_raw_transaction<T: SignedTransaction>(data: &[u8]) -> EthResult<Recovered<T>> {
+pub async fn recover_raw_transaction<T: SignedTransaction>(data: &[u8]) -> EthResult<Recovered<T>> {
     if data.is_empty() {
         return Err(EthApiError::EmptyRawTransactionData)
     }
@@ -40,8 +43,10 @@ pub fn recover_raw_transaction<T: SignedTransaction>(data: &[u8]) -> EthResult<R
     let transaction =
         T::decode_2718_exact(data).map_err(|_| EthApiError::FailedToDecodeSignedTransaction)?;
 
-    SignedTransaction::try_into_recovered(transaction)
-        .or(Err(EthApiError::InvalidTransactionSignature))
+    TxRecoveryHandle::new()
+        .try_into_recovered(transaction)
+        .await
+        .or(Err(RpcInvalidTransactionError::InvalidTransactionSignature.into()))
 }
 
 /// Performs a binary search within a given block range to find the desired block number.

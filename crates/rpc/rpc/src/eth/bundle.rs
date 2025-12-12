@@ -5,6 +5,7 @@ use alloy_eips::eip7840::BlobParams;
 use alloy_evm::env::BlockEnvironment;
 use alloy_primitives::{uint, Keccak256, U256};
 use alloy_rpc_types_mev::{EthCallBundle, EthCallBundleResponse, EthCallBundleTransactionResult};
+use futures::future::TryJoinAll;
 use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_evm::{ConfigureEvm, Evm};
@@ -79,8 +80,9 @@ where
 
         let transactions = txs
             .into_iter()
-            .map(|tx| recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx))
-            .collect::<Result<Vec<_>, _>>()?
+            .map(|tx| async move { recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx).await })
+            .collect::<TryJoinAll<_>>()
+            .await?
             .into_iter()
             .collect::<Vec<_>>();
 

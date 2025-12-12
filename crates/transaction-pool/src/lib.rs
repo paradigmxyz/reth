@@ -321,6 +321,8 @@ pub mod blobstore;
 mod config;
 pub mod identifier;
 mod ordering;
+mod recovery;
+pub use recovery::TxRecoveryHandle;
 mod traits;
 
 #[cfg(any(test, feature = "test-utils"))]

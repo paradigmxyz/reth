@@ -62,9 +62,9 @@ use reth_network_types::ReputationChangeKind;
 use reth_primitives_traits::SignedTransaction;
 use reth_tokio_util::EventStream;
 use reth_transaction_pool::{
-    error::{PoolError, PoolResult},
+    error::{InvalidPoolTransactionError, PoolError, PoolResult},
     AddedTransactionOutcome, GetPooledTransactionLimit, PoolTransaction, PropagateKind,
-    PropagatedTransactions, TransactionPool, ValidPoolTransaction,
+    PropagatedTransactions, TransactionPool, TxRecoveryHandle, ValidPoolTransaction,
 };
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
@@ -1372,21 +1372,6 @@ where
         //    reallocations
         let mut new_txs = Vec::with_capacity(transactions.len());
         for tx in transactions {
-            // recover transaction
-            let tx = match tx.try_into_recovered() {
-                Ok(tx) => tx,
-                Err(badtx) => {
-                    trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        hash=%badtx.tx_hash(),
-                        client_version=%peer.client_version,
-                        "failed ecrecovery for transaction"
-                    );
-                    has_bad_transactions = true;
-                    continue
-                }
-            };
-
             match self.transactions_by_peers.entry(*tx.tx_hash()) {
                 Entry::Occupied(mut entry) => {
                     // transaction was already inserted
@@ -1403,9 +1388,7 @@ where
                         has_bad_transactions = true;
                     } else {
                         // this is a new transaction that should be imported into the pool
-
-                        let pool_transaction = Pool::Transaction::from_pooled(tx);
-                        new_txs.push(pool_transaction);
+                        new_txs.push(tx);
 
                         entry.insert(HashSet::from([peer_id]));
                     }
@@ -1432,14 +1415,50 @@ where
             trace!(target: "net::tx::propagation", new_txs_len=?new_txs.len(), "Importing new transactions");
             let import = Box::pin(async move {
                 let added = new_txs.len();
-                let res = pool.add_external_transactions(new_txs).await;
+
+                let mut stream = new_txs
+                    .into_iter()
+                    .map(|tx| async move {
+                        let tx_hash = *tx.tx_hash();
+                        TxRecoveryHandle::new()
+                            .try_into_recovered(tx)
+                            .await
+                            .map(Pool::Transaction::from_pooled)
+                            .map_err(|_| {
+                                trace!(target: "net::tx",
+                                    peer_id=format!("{peer_id:#}"),
+                                    hash=%tx_hash,
+                                    "failed ecrecovery for transaction"
+                                );
+                                PoolError::new(
+                                    tx_hash,
+                                    InvalidPoolTransactionError::InvalidSignature,
+                                )
+                            })
+                    })
+                    .collect::<FuturesUnordered<_>>();
+
+                let mut recovered = Vec::new();
+                let mut results = Vec::new();
+                while let Some(res) = stream.next().await {
+                    match res {
+                        Ok(tx) => {
+                            recovered.push(tx);
+                        }
+                        Err(err) => {
+                            results.push(Err(err));
+                        }
+                    }
+                }
+
+                results.extend(pool.add_external_transactions(recovered).await);
 
                 // update metrics
                 metric_pending_pool_imports.decrement(added as f64);
                 // update self-monitoring info
                 tx_manager_info_pending_pool_imports.fetch_sub(added, Ordering::Relaxed);
 
-                res
+                results
             });
 
             self.pool_imports.push(import);

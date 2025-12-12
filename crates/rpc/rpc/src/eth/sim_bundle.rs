@@ -87,7 +87,7 @@ where
     /// `FlattenedBundleItem` with their associated metadata. This handles recursive bundle
     /// processing up to `MAX_NESTED_BUNDLE_DEPTH` and `MAX_BUNDLE_BODY_SIZE`, preserving
     /// inclusion, validity and privacy settings from parent bundles.
-    fn parse_and_flatten_bundle(
+    async fn parse_and_flatten_bundle(
         &self,
         request: &MevSendBundle,
     ) -> Result<Vec<FlattenedBundleItem<ProviderTx<Eth::Provider>>>, EthApiError> {
@@ -167,7 +167,7 @@ where
             while idx < body.len() {
                 match &body[idx] {
                     BundleItem::Tx { tx, can_revert } => {
-                        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
+                        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx).await?;
                         let tx = tx.map(
                             <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus,
                         );
@@ -228,7 +228,7 @@ where
 
         // Parse and validate bundle
         // Also, flatten the bundle here so that its easier to process
-        let flattened_bundle = self.parse_and_flatten_bundle(&request)?;
+        let flattened_bundle = self.parse_and_flatten_bundle(&request).await?;
 
         let block_id = parent_block.unwrap_or(BlockId::Number(BlockNumberOrTag::Latest));
         let (mut evm_env, current_block_id) = self.eth_api().evm_env_at(block_id).await?;

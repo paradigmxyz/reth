@@ -121,7 +121,7 @@ where
             return Err(TxConditionalErr::ConditionalCostExceeded.into());
         }
 
-        let recovered_tx = recover_raw_transaction(&bytes).map_err(|_| {
+        let recovered_tx = recover_raw_transaction(&bytes).await.map_err(|_| {
             OpEthApiError::Eth(reth_rpc_eth_types::EthApiError::FailedToDecodeSignedTransaction)
         })?;
 
