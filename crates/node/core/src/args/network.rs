@@ -33,6 +33,7 @@ use reth_network::{
             },
         },
         TransactionFetcherConfig, TransactionPropagationMode, TransactionsManagerConfig,
+        DEFAULT_RECOVERED_TX_CACHE_SIZE,
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
@@ -296,6 +297,7 @@ impl NetworkArgs {
                 self.max_capacity_cache_txns_pending_fetch,
             ),
             max_transactions_seen_by_peer_history: self.max_seen_tx_history,
+            recovered_tx_cache_size: DEFAULT_RECOVERED_TX_CACHE_SIZE,
             propagation_mode: self.propagation_mode,
             ingress_policy: self.tx_ingress_policy,
         }

@@ -1,6 +1,6 @@
 //! Transactions management for the p2p network.
 
-use alloy_consensus::transaction::TxHashRef;
+use alloy_consensus::transaction::{Recovered, TxHashRef};
 
 /// Aggregation on configurable parameters for [`TransactionsManager`].
 pub mod config;
@@ -15,6 +15,8 @@ pub use self::constants::{
     tx_fetcher::DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
     SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
 };
+/// Default maximum recovered transaction cache size.
+pub const DEFAULT_RECOVERED_TX_CACHE_SIZE: u32 = 32_768;
 use config::AnnouncementAcceptance;
 pub use config::{
     AnnouncementFilteringPolicy, TransactionFetcherConfig, TransactionIngressPolicy,
@@ -30,7 +32,7 @@ use crate::{
         DEFAULT_BUDGET_TRY_DRAIN_NETWORK_TRANSACTION_EVENTS,
         DEFAULT_BUDGET_TRY_DRAIN_PENDING_POOL_IMPORTS, DEFAULT_BUDGET_TRY_DRAIN_STREAM,
     },
-    cache::LruCache,
+    cache::{LruCache, LruMap},
     duration_metered_exec, metered_poll_nested_stream_with_budget,
     metrics::{
         AnnouncedTxTypesMetrics, TransactionsManagerMetrics, NETWORK_POOL_TRANSACTIONS_SCOPE,
@@ -311,6 +313,8 @@ pub struct TransactionsManager<Pool, N: NetworkPrimitives = EthNetworkPrimitives
     pending_pool_imports_info: PendingPoolImportsInfo,
     /// Bad imports.
     bad_imports: LruCache<TxHash>,
+    /// Cache recovered transactions to avoid repeated signature recovery for duplicates.
+    recovered_txs: LruMap<TxHash, Arc<Recovered<N::PooledTransaction>>>,
     /// All the connected peers.
     peers: HashMap<PeerId, PeerMetadata<N>>,
     /// Send half for the command channel.
@@ -405,6 +409,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 DEFAULT_MAX_COUNT_PENDING_POOL_IMPORTS,
             ),
             bad_imports: LruCache::new(DEFAULT_MAX_COUNT_BAD_IMPORTS),
+            recovered_txs: LruMap::new(transactions_manager_config.recovered_tx_cache_size),
             peers: Default::default(),
             command_tx,
             command_rx: UnboundedReceiverStream::new(command_rx),
@@ -1372,18 +1377,48 @@ where
         //    reallocations
         let mut new_txs = Vec::with_capacity(transactions.len());
         for tx in transactions {
-            // recover transaction
-            let tx = match tx.try_into_recovered() {
-                Ok(tx) => tx,
-                Err(badtx) => {
-                    trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        hash=%badtx.tx_hash(),
-                        client_version=%peer.client_version,
-                        "failed ecrecovery for transaction"
-                    );
-                    has_bad_transactions = true;
-                    continue
+            // recover transaction, prefer cached value if present when enabled
+            let tx_hash = *tx.tx_hash();
+            let tx = if self.config.recovered_tx_cache_size == 0 {
+                #[cfg(test)]
+                RECOVER_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
+                match tx.try_into_recovered() {
+                    Ok(tx) => Arc::new(tx),
+                    Err(badtx) => {
+                        trace!(target: "net::tx",
+                            peer_id=format!("{peer_id:#}"),
+                            hash=%badtx.tx_hash(),
+                            client_version=%peer.client_version,
+                            "failed ecrecovery for transaction"
+                        );
+                        has_bad_transactions = true;
+                        continue
+                    }
+                }
+            } else {
+                match self.recovered_txs.get(&tx_hash) {
+                    Some(cached) => cached.clone(),
+                    None => {
+                        #[cfg(test)]
+                        RECOVER_INVOCATIONS.fetch_add(1, Ordering::Relaxed);
+                        match tx.try_into_recovered() {
+                            Ok(tx) => {
+                                let tx = Arc::new(tx);
+                                _ = self.recovered_txs.insert(tx_hash, tx.clone());
+                                tx
+                            }
+                            Err(badtx) => {
+                                trace!(target: "net::tx",
+                                    peer_id=format!("{peer_id:#}"),
+                                    hash=%badtx.tx_hash(),
+                                    client_version=%peer.client_version,
+                                    "failed ecrecovery for transaction"
+                                );
+                                has_bad_transactions = true;
+                                continue
+                            }
+                        }
+                    }
                 }
             };
 
@@ -1404,7 +1439,7 @@ where
                     } else {
                         // this is a new transaction that should be imported into the pool
 
-                        let pool_transaction = Pool::Transaction::from_pooled(tx);
+                        let pool_transaction = Pool::Transaction::from_pooled((*tx).clone());
                         new_txs.push(pool_transaction);
 
                         entry.insert(HashSet::from([peer_id]));
@@ -2113,6 +2148,9 @@ struct TxManagerPollDurations {
 }
 
 #[cfg(test)]
+static RECOVER_INVOCATIONS: AtomicUsize = AtomicUsize::new(0);
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{
@@ -2128,6 +2166,7 @@ mod tests {
     use alloy_rlp::Decodable;
     use futures::FutureExt;
     use reth_chainspec::MIN_TRANSACTION_GAS;
+    use reth_eth_wire::{EthVersion, PooledTransactions};
     use reth_ethereum_primitives::{PooledTransactionVariant, Transaction, TransactionSigned};
     use reth_network_api::{NetworkInfo, PeerKind};
     use reth_network_p2p::{
@@ -2887,6 +2926,38 @@ mod tests {
         // propagate again
         let propagated = tx_manager.propagate_transactions(propagate, PropagationMode::Basic);
         assert!(propagated.0.is_empty());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_recovered_tx_cache_stores_recovered_once() {
+        reth_tracing::init_test_tracing();
+
+        // Build a tx manager and shrink the recovered cache to a tiny size.
+        let (mut tx_manager, _network) = new_tx_manager().await;
+        tx_manager.recovered_txs = LruMap::new(1);
+        RECOVER_INVOCATIONS.store(0, Ordering::Relaxed);
+
+        // Register a peer so the import path can proceed.
+        let peer_id = PeerId::random();
+        let (peer_meta, _rx) = new_mock_session(peer_id, EthVersion::Eth68);
+        tx_manager.peers.insert(peer_id, peer_meta);
+
+        // A simple valid transaction (same as other tests).
+        let input = hex!(
+            "02f871018302a90f808504890aef60826b6c94ddf4c5025d1a5742cf12f74eec246d4432c295e487e09c3bbcc12b2b80c080a0f21a4eacd0bf8fea9c5105c543be5a1d8c796516875710fafafdf16d16d8ee23a001280915021bb446d1973501a67f93d2b38894a514b976e7b46dc2fe54598d76"
+        );
+        let signed_tx = TransactionSigned::decode(&mut &input[..]).unwrap();
+        let pooled: PooledTransactionVariant = signed_tx.try_into().unwrap();
+
+        // Feed the same transaction twice; the cache should only keep one entry.
+        tx_manager.import_transactions(
+            peer_id,
+            PooledTransactions(vec![pooled.clone(), pooled]),
+            TransactionSource::Broadcast,
+        );
+
+        assert_eq!(tx_manager.recovered_txs.len(), 1);
+        assert_eq!(RECOVER_INVOCATIONS.load(Ordering::Relaxed), 1);
     }
 
     #[tokio::test]
