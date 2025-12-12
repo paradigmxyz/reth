@@ -129,7 +129,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     /// Creates a new [`EitherWriter`] for storages history based on storage settings.
     pub fn new_storages_history<P>(
         provider: &P,
-        rocksdb_tx: RocksTxArg<'a>,
+        _rocksdb_tx: RocksTxArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::StoragesHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
@@ -137,10 +137,8 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(rocksdb_tx));
+            return Ok(EitherWriter::RocksDB(_rocksdb_tx));
         }
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let _ = rocksdb_tx;
 
         Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
     }
@@ -148,7 +146,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     /// Creates a new [`EitherWriter`] for transaction hash numbers based on storage settings.
     pub fn new_transaction_hash_numbers<P>(
         provider: &P,
-        rocksdb_tx: RocksTxArg<'a>,
+        _rocksdb_tx: RocksTxArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionHashNumbers>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
@@ -156,10 +154,8 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(rocksdb_tx));
+            return Ok(EitherWriter::RocksDB(_rocksdb_tx));
         }
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let _ = rocksdb_tx;
 
         Ok(EitherWriter::Database(
             provider.tx_ref().cursor_write::<tables::TransactionHashNumbers>()?,
@@ -326,7 +322,7 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for storages history based on storage settings.
     pub fn new_storages_history<P>(
         provider: &P,
-        rocksdb_tx: RocksTxRefArg<'a>,
+        _rocksdb_tx: RocksTxRefArg<'a>,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::StoragesHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
@@ -334,10 +330,8 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherReader::RocksDB(rocksdb_tx));
+            return Ok(EitherReader::RocksDB(_rocksdb_tx));
         }
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let _ = rocksdb_tx;
 
         Ok(EitherReader::Database(
             provider.tx_ref().cursor_read::<tables::StoragesHistory>()?,
@@ -348,7 +342,7 @@ impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
     pub fn new_transaction_hash_numbers<P>(
         provider: &P,
-        rocksdb_tx: RocksTxRefArg<'a>,
+        _rocksdb_tx: RocksTxRefArg<'a>,
     ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionHashNumbers>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
@@ -356,10 +350,8 @@ impl<'a> EitherReader<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherReader::RocksDB(rocksdb_tx));
+            return Ok(EitherReader::RocksDB(_rocksdb_tx));
         }
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let _ = rocksdb_tx;
 
         Ok(EitherReader::Database(
             provider.tx_ref().cursor_read::<tables::TransactionHashNumbers>()?,
