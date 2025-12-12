@@ -23,7 +23,7 @@ pub(crate) enum TxnManagerMessage {
 /// - Opening, aborting, and committing transactions using [`TxnManager::send_message`] with the
 ///   corresponding [`TxnManagerMessage`]
 /// - Aborting long-lived read transactions (if the `read-tx-timeouts` feature is enabled and
-///   `TxnManager::with_max_read_transaction_duration` is called)
+///   `TxnManager::new_with_max_read_transaction_duration` is called)
 #[derive(Debug)]
 pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
