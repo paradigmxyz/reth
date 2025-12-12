@@ -105,7 +105,7 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
         hashed_storage: HashedStorage,
         _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
     ) -> ProviderResult<B256> {
-        // Fall back to regular calculation
+        // todo (fig): write overlay_root_from_nodes
         self.storage_root(address, hashed_storage)
     }
 
@@ -126,7 +126,7 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
         hashed_storage: HashedStorage,
         _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        // Fall back to regular calculation
+        // todo (fig): write overlay_proof_from_nodes
         self.storage_proof(address, slot, hashed_storage)
     }
 
