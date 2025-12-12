@@ -230,6 +230,20 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     /// Shrink the capacity of the sparse trie's value storage to the given size.
     /// This will reduce memory usage if the current capacity is higher than the given size.
     fn shrink_values_to(&mut self, size: usize);
+
+    /// Returns `true` if the given path has already been revealed.
+    fn is_path_revealed(&self, path: &Nibbles) -> bool;
+
+    /// Marks the given path as revealed.
+    ///
+    /// Returns `true` if the path was newly inserted, `false` if it was already revealed.
+    fn mark_path_revealed(&mut self, path: Nibbles) -> bool;
+
+    /// Returns a reference to the set of revealed paths.
+    fn revealed_paths(&self) -> &HashSet<Nibbles>;
+
+    /// Returns a mutable reference to the set of revealed paths.
+    fn revealed_paths_mut(&mut self) -> &mut HashSet<Nibbles>;
 }
 
 /// Tracks modifications to the sparse trie structure.
