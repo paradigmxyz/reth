@@ -59,13 +59,14 @@ metrics.workspace = true
 reth-metrics = { workspace = true, features = ["common"] }
 
 # misc
+crossbeam-channel.workspace = true
 dashmap.workspace = true
-schnellru.workspace = true
-rayon.workspace = true
-tracing.workspace = true
 derive_more.workspace = true
 parking_lot.workspace = true
-crossbeam-channel.workspace = true
+rayon.workspace = true
+schnellru.workspace = true
+thread-priority.workspace = true
+tracing.workspace = true
 
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }
