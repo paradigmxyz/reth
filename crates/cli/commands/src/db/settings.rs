@@ -92,6 +92,8 @@ impl Command {
             receipts_in_static_files: _,
             transaction_senders_in_static_files: _,
             storages_history_in_rocksdb: _,
+            transaction_hash_numbers_in_rocksdb: _,
+            account_history_in_rocksdb: _,
         } = settings.unwrap_or_else(StorageSettings::legacy);
 
         // Update the setting based on the key

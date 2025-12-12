@@ -24,7 +24,7 @@ jobs:
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     steps:
       - uses: actions/checkout@v6
       - name: Checkout hive tests
@@ -178,7 +178,7 @@ jobs:
       - prepare-reth
       - prepare-hive
     name: run ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
-    runs-on: ubuntu-latest
+    runs-on: depot-ubuntu-latest-16
     permissions:
       issues: write
     steps:
