@@ -369,7 +369,7 @@ where
             )
             .into())
         };
-        let state_provider = ensure_ok!(provider_builder.build());
+        let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
         // fetch parent block
@@ -412,11 +412,13 @@ where
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
-        let state_provider = CachedStateProvider::new_with_caches(
-            state_provider,
-            handle.caches(),
-            handle.cache_metrics(),
-        );
+        if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
+            state_provider = Box::new(CachedStateProvider::new_with_caches(
+                state_provider,
+                caches,
+                cache_metrics,
+            ));
+        };
 
         // Execute the block and handle any execution errors
         let (output, senders) = match if self.config.state_provider_metrics() {

@@ -20,6 +20,7 @@ pub struct DefaultEngineValues {
     persistence_threshold: u64,
     memory_block_buffer_target: u64,
     legacy_state_root_task_enabled: bool,
+    state_cache_disabled: bool,
     prewarming_disabled: bool,
     parallel_sparse_trie_disabled: bool,
     state_provider_metrics: bool,
@@ -63,6 +64,12 @@ impl DefaultEngineValues {
     /// Set whether to enable legacy state root task by default
     pub const fn with_legacy_state_root_task_enabled(mut self, v: bool) -> Self {
         self.legacy_state_root_task_enabled = v;
+        self
+    }
+
+    /// Set whether to disable state cache by default
+    pub const fn with_state_cache_disabled(mut self, v: bool) -> Self {
+        self.state_cache_disabled = v;
         self
     }
 
@@ -166,6 +173,7 @@ impl Default for DefaultEngineValues {
             persistence_threshold: DEFAULT_PERSISTENCE_THRESHOLD,
             memory_block_buffer_target: DEFAULT_MEMORY_BLOCK_BUFFER_TARGET,
             legacy_state_root_task_enabled: false,
+            state_cache_disabled: false,
             prewarming_disabled: false,
             parallel_sparse_trie_disabled: false,
             state_provider_metrics: false,
@@ -211,6 +219,10 @@ pub struct EngineArgs {
     #[arg(long = "engine.caching-and-prewarming", default_value = "true", hide = true)]
     #[deprecated]
     pub caching_and_prewarming_enabled: bool,
+
+    /// Disable state cache
+    #[arg(long = "engine.disable-state-cache", default_value_t = DefaultEngineValues::get_global().state_cache_disabled)]
+    pub state_cache_disabled: bool,
 
     /// Disable parallel prewarming
     #[arg(long = "engine.disable-prewarming", alias = "engine.disable-caching-and-prewarming", default_value_t = DefaultEngineValues::get_global().prewarming_disabled)]
@@ -305,6 +317,7 @@ impl Default for EngineArgs {
             persistence_threshold,
             memory_block_buffer_target,
             legacy_state_root_task_enabled,
+            state_cache_disabled,
             prewarming_disabled,
             parallel_sparse_trie_disabled,
             state_provider_metrics,
@@ -327,6 +340,7 @@ impl Default for EngineArgs {
             legacy_state_root_task_enabled,
             state_root_task_compare_updates,
             caching_and_prewarming_enabled: true,
+            state_cache_disabled,
             prewarming_disabled,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled,
@@ -354,6 +368,7 @@ impl EngineArgs {
             .with_persistence_threshold(self.persistence_threshold)
             .with_memory_block_buffer_target(self.memory_block_buffer_target)
             .with_legacy_state_root(self.legacy_state_root_task_enabled)
+            .without_state_cache(self.state_cache_disabled)
             .without_prewarming(self.prewarming_disabled)
             .with_disable_parallel_sparse_trie(self.parallel_sparse_trie_disabled)
             .with_state_provider_metrics(self.state_provider_metrics)
@@ -408,6 +423,7 @@ mod tests {
             memory_block_buffer_target: 50,
             legacy_state_root_task_enabled: true,
             caching_and_prewarming_enabled: true,
+            state_cache_disabled: true,
             prewarming_disabled: true,
             parallel_sparse_trie_enabled: true,
             parallel_sparse_trie_disabled: true,
@@ -434,6 +450,7 @@ mod tests {
             "--engine.memory-block-buffer-target",
             "50",
             "--engine.legacy-state-root",
+            "--engine.disable-state-cache",
             "--engine.disable-prewarming",
             "--engine.disable-parallel-sparse-trie",
             "--engine.state-provider-metrics",

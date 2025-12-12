@@ -91,6 +91,8 @@ pub struct TreeConfig {
     /// Whether to always compare trie updates from the state root task to the trie updates from
     /// the regular state root calculation.
     always_compare_trie_updates: bool,
+    /// Whether to disable state cache.
+    disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
     /// Whether to disable the parallel sparse trie state root algorithm.
@@ -145,6 +147,7 @@ impl Default for TreeConfig {
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             legacy_state_root: false,
             always_compare_trie_updates: false,
+            disable_state_cache: false,
             disable_prewarming: false,
             disable_parallel_sparse_trie: false,
             state_provider_metrics: false,
@@ -175,6 +178,7 @@ impl TreeConfig {
         max_execute_block_batch_size: usize,
         legacy_state_root: bool,
         always_compare_trie_updates: bool,
+        disable_state_cache: bool,
         disable_prewarming: bool,
         disable_parallel_sparse_trie: bool,
         state_provider_metrics: bool,
@@ -199,6 +203,7 @@ impl TreeConfig {
             max_execute_block_batch_size,
             legacy_state_root,
             always_compare_trie_updates,
+            disable_state_cache,
             disable_prewarming,
             disable_parallel_sparse_trie,
             state_provider_metrics,
@@ -273,7 +278,12 @@ impl TreeConfig {
         self.disable_parallel_sparse_trie
     }
 
-    /// Returns whether or not parallel prewarming should be used.
+    /// Returns whether or not state cache is disabled.
+    pub const fn disable_state_cache(&self) -> bool {
+        self.disable_state_cache
+    }
+
+    /// Returns whether or not parallel prewarming is disabled.
     pub const fn disable_prewarming(&self) -> bool {
         self.disable_prewarming
     }
@@ -362,6 +372,12 @@ impl TreeConfig {
     /// Setter for whether to use the legacy state root calculation method.
     pub const fn with_legacy_state_root(mut self, legacy_state_root: bool) -> Self {
         self.legacy_state_root = legacy_state_root;
+        self
+    }
+
+    /// Setter for whether to disable state cache.
+    pub const fn without_state_cache(mut self, disable_state_cache: bool) -> Self {
+        self.disable_state_cache = disable_state_cache;
         self
     }
 
