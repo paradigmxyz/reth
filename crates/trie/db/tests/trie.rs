@@ -23,9 +23,9 @@ use reth_trie::{
     triehash::KeccakHasher,
     updates::StorageTrieUpdates,
     BranchNodeCompact, HashBuilder, IntermediateStateRootState, Nibbles, StateRoot,
-    StateRootProgress, StorageRoot, TrieMask,
+    StateRootProgress, TrieMask,
 };
-use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
+use reth_trie_db::{storage_root_from_tx, storage_root_from_tx_hashed, DatabaseStateRoot};
 use std::{collections::BTreeMap, ops::Mul, str::FromStr, sync::Arc};
 
 fn insert_account(
@@ -64,7 +64,7 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
 
     // Generate the intermediate nodes on the receiving end of the channel
     let (_, _, trie_updates) =
-        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+        storage_root_from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
 
     // 1. Some state transition happens, update the hashed storage to the new value
     let modified_key = B256::from_str(modified).unwrap();
@@ -77,7 +77,7 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
         .unwrap();
 
     // 2. Calculate full merkle root
-    let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address);
+    let loader = storage_root_from_tx_hashed(tx.tx_ref(), hashed_address);
     let modified_root = loader.root().unwrap();
 
     // Update the intermediate roots table so that we can run the incremental verification
@@ -90,7 +90,7 @@ fn incremental_vs_full_root(inputs: &[&str], modified: &str) {
     // 3. Calculate the incremental root
     let mut storage_changes = PrefixSetMut::default();
     storage_changes.insert(Nibbles::unpack(modified_key));
-    let loader = StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address)
+    let loader = storage_root_from_tx_hashed(tx.tx_ref(), hashed_address)
         .with_prefix_set(storage_changes.freeze());
     let incremental_root = loader.root().unwrap();
 
@@ -130,7 +130,7 @@ fn arbitrary_storage_root() {
         tx.commit().unwrap();
 
         let tx =  factory.provider_rw().unwrap();
-        let got = StorageRoot::from_tx(tx.tx_ref(), address).root().unwrap();
+        let got = storage_root_from_tx(tx.tx_ref(), address).root().unwrap();
         let expected = storage_root(storage.into_iter());
         assert_eq!(expected, got);
     });
@@ -189,7 +189,7 @@ fn test_empty_storage_root() {
     tx.commit().unwrap();
 
     let tx = factory.provider_rw().unwrap();
-    let got = StorageRoot::from_tx(tx.tx_ref(), address).root().unwrap();
+    let got = storage_root_from_tx(tx.tx_ref(), address).root().unwrap();
     assert_eq!(got, EMPTY_ROOT_HASH);
 }
 
@@ -214,7 +214,7 @@ fn test_storage_root() {
     tx.commit().unwrap();
 
     let tx = factory.provider_rw().unwrap();
-    let got = StorageRoot::from_tx(tx.tx_ref(), address).root().unwrap();
+    let got = storage_root_from_tx(tx.tx_ref(), address).root().unwrap();
 
     assert_eq!(storage_root(storage.into_iter()), got);
 }
@@ -324,7 +324,7 @@ fn storage_root_regression() {
     tx.commit().unwrap();
     let tx = factory.provider_rw().unwrap();
 
-    let account3_storage_root = StorageRoot::from_tx(tx.tx_ref(), address3).root().unwrap();
+    let account3_storage_root = storage_root_from_tx(tx.tx_ref(), address3).root().unwrap();
     let expected_root = storage_root_prehashed(storage);
     assert_eq!(expected_root, account3_storage_root);
 }
@@ -386,7 +386,7 @@ fn account_and_storage_trie() {
         }
         hashed_storage_cursor.upsert(key3, &StorageEntry { key: hashed_slot, value }).unwrap();
     }
-    let account3_storage_root = StorageRoot::from_tx(tx.tx_ref(), address3).root().unwrap();
+    let account3_storage_root = storage_root_from_tx(tx.tx_ref(), address3).root().unwrap();
     hash_builder
         .add_leaf(Nibbles::unpack(key3), &encode_account(account3, Some(account3_storage_root)));
 
@@ -685,7 +685,7 @@ fn storage_trie_around_extension_node() {
     let (expected_root, expected_updates) = extension_node_storage_trie(&tx, hashed_address);
 
     let (got, _, updates) =
-        StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
+        storage_root_from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
     assert_eq!(expected_root, got);
     assert_eq!(expected_updates, updates);
     assert_trie_updates(updates.storage_nodes_ref());

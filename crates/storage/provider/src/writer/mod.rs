@@ -16,9 +16,11 @@ mod tests {
     use reth_storage_api::{DatabaseProviderFactory, HashedPostStateProvider, StateWriter};
     use reth_trie::{
         test_utils::{state_root, storage_root_prehashed},
-        HashedPostState, HashedStorage, StateRoot, StorageRoot, StorageRootProgress,
+        HashedPostState, HashedStorage, StateRoot, StorageRootProgress,
     };
-    use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
+    use reth_trie_db::{
+        storage_overlay_root, storage_root_from_tx_hashed, DatabaseStateRoot,
+    };
     use revm_database::{
         states::{
             bundle_state::BundleRetention, changes::PlainStorageRevert, PlainStorageChangeset,
@@ -1117,7 +1119,7 @@ mod tests {
 
         // calculate database storage root and write intermediate storage nodes.
         let StorageRootProgress::Complete(storage_root, _, storage_updates) =
-            StorageRoot::from_tx_hashed(tx, hashed_address)
+            storage_root_from_tx_hashed(tx, hashed_address)
                 .with_no_threshold()
                 .calculate(true)
                 .unwrap()
@@ -1148,7 +1150,7 @@ mod tests {
         provider_rw.write_hashed_state(&state.clone().into_sorted()).unwrap();
 
         // re-calculate database storage root
-        let storage_root = StorageRoot::overlay_root(tx, address, updated_storage.clone()).unwrap();
+        let storage_root = storage_overlay_root(tx, address, updated_storage.clone()).unwrap();
         assert_eq!(storage_root, storage_root_prehashed(updated_storage.storage));
     }
 }

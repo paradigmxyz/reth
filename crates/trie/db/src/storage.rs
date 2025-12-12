@@ -11,20 +11,58 @@ use reth_trie::{
 #[cfg(feature = "metrics")]
 use reth_trie::metrics::TrieRootMetrics;
 
-/// Extends [`StorageRoot`] with operations specific for working with a database transaction.
-pub trait DatabaseStorageRoot<'a, TX> {
-    /// Create a new storage root calculator from database transaction and raw address.
-    fn from_tx(tx: &'a TX, address: Address) -> Self;
+/// A type alias for [`StorageRoot`] configured with database cursor factories.
+pub type DatabaseStorageRoot<'a, TX> =
+    StorageRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>;
 
-    /// Create a new storage root calculator from database transaction and hashed address.
-    fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self;
+/// Create a new [`StorageRoot`] calculator from database transaction and raw address.
+pub fn storage_root_from_tx<'a, TX: DbTx>(
+    tx: &'a TX,
+    address: Address,
+) -> DatabaseStorageRoot<'a, TX> {
+    StorageRoot::new(
+        DatabaseTrieCursorFactory::new(tx),
+        DatabaseHashedCursorFactory::new(tx),
+        address,
+        Default::default(),
+        #[cfg(feature = "metrics")]
+        TrieRootMetrics::new(reth_trie::TrieType::Storage),
+    )
+}
 
-    /// Calculates the storage root for this [`HashedStorage`] and returns it.
-    fn overlay_root(
-        tx: &'a TX,
-        address: Address,
-        hashed_storage: HashedStorage,
-    ) -> Result<B256, StorageRootError>;
+/// Create a new [`StorageRoot`] calculator from database transaction and hashed address.
+pub fn storage_root_from_tx_hashed<'a, TX: DbTx>(
+    tx: &'a TX,
+    hashed_address: B256,
+) -> DatabaseStorageRoot<'a, TX> {
+    StorageRoot::new_hashed(
+        DatabaseTrieCursorFactory::new(tx),
+        DatabaseHashedCursorFactory::new(tx),
+        hashed_address,
+        Default::default(),
+        #[cfg(feature = "metrics")]
+        TrieRootMetrics::new(reth_trie::TrieType::Storage),
+    )
+}
+
+/// Calculates the storage root for the given [`HashedStorage`] and returns it.
+pub fn storage_overlay_root<TX: DbTx>(
+    tx: &TX,
+    address: Address,
+    hashed_storage: HashedStorage,
+) -> Result<B256, StorageRootError> {
+    let prefix_set = hashed_storage.construct_prefix_set().freeze();
+    let state_sorted =
+        HashedPostState::from_hashed_storage(keccak256(address), hashed_storage).into_sorted();
+    StorageRoot::new(
+        DatabaseTrieCursorFactory::new(tx),
+        HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+        address,
+        prefix_set,
+        #[cfg(feature = "metrics")]
+        TrieRootMetrics::new(reth_trie::TrieType::Storage),
+    )
+    .root()
 }
 
 /// Extends [`HashedStorage`] with operations specific for working with a database transaction.
@@ -32,51 +70,6 @@ pub trait DatabaseHashedStorage<TX>: Sized {
     /// Initializes [`HashedStorage`] from reverts. Iterates over storage reverts from the specified
     /// block up to the current tip and aggregates them into hashed storage in reverse.
     fn from_reverts(tx: &TX, address: Address, from: BlockNumber) -> Result<Self, DatabaseError>;
-}
-
-impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
-    for StorageRoot<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
-{
-    fn from_tx(tx: &'a TX, address: Address) -> Self {
-        Self::new(
-            DatabaseTrieCursorFactory::new(tx),
-            DatabaseHashedCursorFactory::new(tx),
-            address,
-            Default::default(),
-            #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(reth_trie::TrieType::Storage),
-        )
-    }
-
-    fn from_tx_hashed(tx: &'a TX, hashed_address: B256) -> Self {
-        Self::new_hashed(
-            DatabaseTrieCursorFactory::new(tx),
-            DatabaseHashedCursorFactory::new(tx),
-            hashed_address,
-            Default::default(),
-            #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(reth_trie::TrieType::Storage),
-        )
-    }
-
-    fn overlay_root(
-        tx: &'a TX,
-        address: Address,
-        hashed_storage: HashedStorage,
-    ) -> Result<B256, StorageRootError> {
-        let prefix_set = hashed_storage.construct_prefix_set().freeze();
-        let state_sorted =
-            HashedPostState::from_hashed_storage(keccak256(address), hashed_storage).into_sorted();
-        StorageRoot::new(
-            DatabaseTrieCursorFactory::new(tx),
-            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
-            address,
-            prefix_set,
-            #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(reth_trie::TrieType::Storage),
-        )
-        .root()
-    }
 }
 
 impl<TX: DbTx> DatabaseHashedStorage<TX> for HashedStorage {
