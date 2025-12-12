@@ -195,14 +195,6 @@ pub enum EthApiError {
         /// The underlying error object
         error: jsonrpsee_types::ErrorObject<'static>,
     },
-    /// Error that occurred during multi-transaction execution with transaction index context.
-    #[error("transaction execution failed (index {tx_index}): {error}")]
-    IndexedEvmError {
-        /// Transaction index where the error occurred
-        tx_index: usize,
-        /// The underlying error
-        error: Box<Self>,
-    },
     /// Any other error
     #[error("{0}")]
     Other(Box<dyn ToRpcError>),
@@ -221,11 +213,6 @@ impl EthApiError {
         error: jsonrpsee_types::ErrorObject<'static>,
     ) -> Self {
         Self::CallManyError { bundle_index, tx_index, error }
-    }
-
-    /// Creates a new [`EthApiError::IndexedEvmError`] variant.
-    pub fn indexed_evm_error(tx_index: usize, error: Self) -> Self {
-        Self::IndexedEvmError { tx_index, error: Box::new(error) }
     }
 
     /// Returns `true` if error is [`RpcInvalidTransactionError::GasTooHigh`]
@@ -343,17 +330,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                         error.message()
                     ),
                     error.data(),
-                )
-            }
-            EthApiError::IndexedEvmError { tx_index, error } => {
-                let inner_err: jsonrpsee_types::error::ErrorObject<'static> = (*error).into();
-                jsonrpsee_types::error::ErrorObject::owned(
-                    inner_err.code(),
-                    format!(
-                        "transaction execution failed (index {tx_index}): {}",
-                        inner_err.message()
-                    ),
-                    inner_err.data(),
                 )
             }
         }
@@ -556,6 +532,38 @@ impl From<RecoveryError> for EthApiError {
 impl From<Infallible> for EthApiError {
     fn from(_: Infallible) -> Self {
         unreachable!()
+    }
+}
+
+/// Wrapper for EVM errors with transaction index context.
+#[derive(Debug)]
+pub struct EthApiEvmErr<E> {
+    /// The underlying EVM error.
+    pub inner: E,
+    /// Transaction index where the error occurred.
+    pub index: usize,
+}
+
+impl<E> EthApiEvmErr<E> {
+    /// Creates a new indexed EVM error.
+    pub const fn new(inner: E, index: usize) -> Self {
+        Self { inner, index }
+    }
+}
+
+impl<E: core::fmt::Display> core::fmt::Display for EthApiEvmErr<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "transaction execution failed (index {}): {}", self.index, self.inner)
+    }
+}
+
+impl<T, TxError> From<EthApiEvmErr<EVMError<T, TxError>>> for EthApiError
+where
+    T: Into<Self> + core::fmt::Display,
+    TxError: reth_evm::InvalidTxError + core::fmt::Display,
+{
+    fn from(err: EthApiEvmErr<EVMError<T, TxError>>) -> Self {
+        Self::EvmCustom(err.to_string())
     }
 }
 
