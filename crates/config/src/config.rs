@@ -531,8 +531,12 @@ impl PruneConfig {
         self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
     }
 
-    /// Merges another `PruneConfig` into this one, taking values from the other config if and only
-    /// if the corresponding value in this config is not set.
+    /// Merges values from `other` into `self`.
+    /// - `Option<PruneMode>` fields: set from `other` only if `self` is `None`.
+    /// - `block_interval`: set from `other` only if `self.block_interval ==
+    ///   DEFAULT_BLOCK_INTERVAL`.
+    /// - `merkle_changesets`: always set from `other`.
+    /// - `receipts_log_filter`: set from `other` only if `self` is empty and `other` is non-empty.
     pub fn merge(&mut self, other: Self) {
         let Self {
             block_interval,
@@ -561,7 +565,7 @@ impl PruneConfig {
         self.segments.account_history = self.segments.account_history.or(account_history);
         self.segments.storage_history = self.segments.storage_history.or(storage_history);
         self.segments.bodies_history = self.segments.bodies_history.or(bodies_history);
-        // Merkle changesets is not optional, so we just replace it if provided
+        // Merkle changesets is not optional; always take the value from `other`
         self.segments.merkle_changesets = merkle_changesets;
 
         if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {

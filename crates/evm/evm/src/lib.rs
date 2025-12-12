@@ -28,7 +28,7 @@ use alloy_evm::{
     block::{BlockExecutorFactory, BlockExecutorFor},
     precompiles::PrecompilesMap,
 };
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, Bytes, B256};
 use core::{error::Error, fmt::Debug};
 use execute::{BasicBlockExecutor, BlockAssembler, BlockBuilder};
 use reth_execution_errors::BlockExecutionError;
@@ -501,6 +501,8 @@ pub struct NextBlockEnvAttributes {
     pub parent_beacon_block_root: Option<B256>,
     /// Withdrawals
     pub withdrawals: Option<Withdrawals>,
+    /// Optional extra data.
+    pub extra_data: Bytes,
 }
 
 /// Abstraction over transaction environment.

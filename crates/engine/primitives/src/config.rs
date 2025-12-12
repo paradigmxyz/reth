@@ -1,5 +1,7 @@
 //! Engine tree configuration.
 
+use alloy_eips::merge::EPOCH_SLOTS;
+
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 
@@ -40,7 +42,7 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Default maximum concurrency for prewarm task.
 pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 
-const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
+const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
 const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
@@ -97,7 +99,7 @@ pub struct TreeConfig {
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
-    /// Whether the host has enough parallelism to run state root task.
+    /// Whether the host has enough parallelism to run state root in parallel.
     has_enough_parallelism: bool,
     /// Whether multiproof task should chunk proof targets.
     multiproof_chunking_enabled: bool,
@@ -385,10 +387,15 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for has enough parallelism.
+    /// Setter for whether or not the host has enough parallelism to run state root in parallel.
     pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
         self.has_enough_parallelism = has_enough_parallelism;
         self
+    }
+
+    /// Whether or not the host has enough parallelism to run state root in parallel.
+    pub const fn has_enough_parallelism(&self) -> bool {
+        self.has_enough_parallelism
     }
 
     /// Setter for state provider metrics.

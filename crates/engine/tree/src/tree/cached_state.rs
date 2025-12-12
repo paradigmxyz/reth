@@ -146,17 +146,26 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         match self.caches.get_storage(&account, &storage_key) {
-            SlotStatus::NotCached => {
-                self.metrics.storage_cache_misses.increment(1);
+            (SlotStatus::NotCached, maybe_cache) => {
                 let final_res = self.state_provider.storage(account, storage_key)?;
-                self.caches.insert_storage(account, storage_key, final_res);
+                let account_cache = maybe_cache.unwrap_or_default();
+                account_cache.insert_storage(storage_key, final_res);
+                // we always need to insert the value to update the weights.
+                // Note: there exists a race when the storage cache did not exist yet and two
+                // consumers looking up the a storage value for this account for the first time,
+                // however we can assume that this will only happen for the very first (mostlikely
+                // the same) value, and don't expect that this will accidentally
+                // replace an account storage cache with additional values.
+                self.caches.insert_storage_cache(account, account_cache);
+
+                self.metrics.storage_cache_misses.increment(1);
                 Ok(final_res)
             }
-            SlotStatus::Empty => {
+            (SlotStatus::Empty, _) => {
                 self.metrics.storage_cache_hits.increment(1);
                 Ok(None)
             }
-            SlotStatus::Value(value) => {
+            (SlotStatus::Value(value), _) => {
                 self.metrics.storage_cache_hits.increment(1);
                 Ok(Some(value))
             }
@@ -311,18 +320,28 @@ pub(crate) struct ExecutionCache {
 impl ExecutionCache {
     /// Get storage value from hierarchical cache.
     ///
-    /// Returns a `SlotStatus` indicating whether:
-    /// - `NotCached`: The account's storage cache doesn't exist
-    /// - `Empty`: The slot exists in the account's cache but is empty
-    /// - `Value`: The slot exists and has a specific value
-    pub(crate) fn get_storage(&self, address: &Address, key: &StorageKey) -> SlotStatus {
+    /// Returns a tuple of:
+    /// - `SlotStatus` indicating whether:
+    ///   - `NotCached`: The account's storage cache doesn't exist
+    ///   - `Empty`: The slot exists in the account's cache but is empty
+    ///   - `Value`: The slot exists and has a specific value
+    /// - `Option<Arc<AccountStorageCache>>`: The account's storage cache if it exists
+    pub(crate) fn get_storage(
+        &self,
+        address: &Address,
+        key: &StorageKey,
+    ) -> (SlotStatus, Option<Arc<AccountStorageCache>>) {
         match self.storage_cache.get(address) {
-            None => SlotStatus::NotCached,
-            Some(account_cache) => account_cache.get_storage(key),
+            None => (SlotStatus::NotCached, None),
+            Some(account_cache) => {
+                let status = account_cache.get_storage(key);
+                (status, Some(account_cache))
+            }
         }
     }
 
     /// Insert storage value into hierarchical cache
+    #[cfg(test)]
     pub(crate) fn insert_storage(
         &self,
         address: Address,
@@ -349,6 +368,15 @@ impl ExecutionCache {
         // Insert to the cache so that moka picks up on the changed size, even though the actual
         // value (the Arc<AccountStorageCache>) is the same
         self.storage_cache.insert(address, account_cache);
+    }
+
+    /// Inserts the [`AccountStorageCache`].
+    pub(crate) fn insert_storage_cache(
+        &self,
+        address: Address,
+        storage_cache: Arc<AccountStorageCache>,
+    ) {
+        self.storage_cache.insert(address, storage_cache);
     }
 
     /// Invalidate storage for specific account
@@ -800,7 +828,7 @@ mod tests {
         caches.insert_storage(address, storage_key, Some(storage_value));
 
         // check that the storage returns the cached value
-        let slot_status = caches.get_storage(&address, &storage_key);
+        let (slot_status, _) = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::Value(storage_value));
     }
 
@@ -814,7 +842,7 @@ mod tests {
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
 
         // check that the storage is not cached
-        let slot_status = caches.get_storage(&address, &storage_key);
+        let (slot_status, _) = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::NotCached);
     }
 
@@ -830,7 +858,7 @@ mod tests {
         caches.insert_storage(address, storage_key, None);
 
         // check that the storage is empty
-        let slot_status = caches.get_storage(&address, &storage_key);
+        let (slot_status, _) = caches.get_storage(&address, &storage_key);
         assert_eq!(slot_status, SlotStatus::Empty);
     }
 
