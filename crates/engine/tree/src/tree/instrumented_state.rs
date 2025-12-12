@@ -136,6 +136,12 @@ impl<S> InstrumentedStateProvider<S> {
     }
 }
 
+impl<S> Drop for InstrumentedStateProvider<S> {
+    fn drop(&mut self) {
+        self.record_total_latency();
+    }
+}
+
 /// Metrics for the instrumented state provider
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.state_provider")]
