@@ -140,7 +140,7 @@ pub fn storage_trie_wiped_changeset_iter(
             // Due to the ordering closure passed to `merge_join_by` it's not possible for either
             // value to be an error here.
             debug_assert!(changed.is_ok(), "unreachable error condition: {changed:?}");
-            debug_assert_eq!(changed, _wiped);
+            debug_assert_eq!(*changed.as_ref().unwrap(), _wiped.unwrap());
             changed
         }
     }))
