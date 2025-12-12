@@ -151,11 +151,34 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
 impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_, N> {
     // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
+        let hashed_address = keccak256(address);
         let merged = self.merged_hashed_storage(address, storage);
+
+        if let Some(storage_updates) = self.trie_input().nodes.storage_tries.get(&hashed_address) {
+            return self.historical.storage_root_from_nodes(address, merged, storage_updates);
+        }
+
         self.historical.storage_root(address, merged)
     }
 
-    // TODO: Currently this does not reuse available in-memory trie nodes.
+    fn storage_root_from_nodes(
+        &self,
+        address: Address,
+        storage: HashedStorage,
+        storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+    ) -> ProviderResult<B256> {
+        let hashed_address = keccak256(address);
+        let merged = self.merged_hashed_storage(address, storage);
+
+        // Merge caller's updates with in-memory updates
+        let mut combined_updates = storage_trie_updates.clone();
+        if let Some(in_memory_updates) = self.trie_input().nodes.storage_tries.get(&hashed_address)
+        {
+            combined_updates.extend_ref(in_memory_updates);
+        }
+        self.historical.storage_root_from_nodes(address, merged, &combined_updates)
+    }
+
     fn storage_proof(
         &self,
         address: Address,
@@ -164,6 +187,24 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
     ) -> ProviderResult<reth_trie::StorageProof> {
         let merged = self.merged_hashed_storage(address, storage);
         self.historical.storage_proof(address, slot, merged)
+    }
+
+    fn storage_proof_from_nodes(
+        &self,
+        address: Address,
+        slot: B256,
+        storage: HashedStorage,
+        storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        let hashed_address = keccak256(address);
+        let merged = self.merged_hashed_storage(address, storage);
+
+        let mut combined_updates = storage_trie_updates.clone();
+        if let Some(in_memory_updates) = self.trie_input().nodes.storage_tries.get(&hashed_address)
+        {
+            combined_updates.extend_ref(in_memory_updates);
+        }
+        self.historical.storage_proof_from_nodes(address, slot, merged, &combined_updates)
     }
 
     // TODO: Currently this does not reuse available in-memory trie nodes.

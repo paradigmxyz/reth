@@ -801,12 +801,31 @@ where
         Ok(EMPTY_ROOT_HASH)
     }
 
+    fn storage_root_from_nodes(
+        &self,
+        _address: Address,
+        _hashed_storage: HashedStorage,
+        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+    ) -> ProviderResult<B256> {
+        Ok(EMPTY_ROOT_HASH)
+    }
+
     fn storage_proof(
         &self,
         _address: Address,
         slot: B256,
         _hashed_storage: HashedStorage,
-    ) -> ProviderResult<reth_trie::StorageProof> {
+    ) -> ProviderResult<StorageProof> {
+        Ok(StorageProof::new(slot))
+    }
+
+    fn storage_proof_from_nodes(
+        &self,
+        _address: Address,
+        slot: B256,
+        _hashed_storage: HashedStorage,
+        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+    ) -> ProviderResult<StorageProof> {
         Ok(StorageProof::new(slot))
     }
 

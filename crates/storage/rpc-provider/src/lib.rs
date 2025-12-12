@@ -1249,11 +1249,30 @@ where
         Err(ProviderError::UnsupportedProvider)
     }
 
+    fn storage_root_from_nodes(
+        &self,
+        _address: Address,
+        _hashed_storage: reth_trie::HashedStorage,
+        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+    ) -> Result<B256, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
     fn storage_proof(
         &self,
         _address: Address,
         _slot: B256,
         _hashed_storage: reth_trie::HashedStorage,
+    ) -> Result<reth_trie::StorageProof, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
+
+    fn storage_proof_from_nodes(
+        &self,
+        _address: Address,
+        _slot: B256,
+        _hashed_storage: reth_trie::HashedStorage,
+        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
     ) -> Result<reth_trie::StorageProof, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }

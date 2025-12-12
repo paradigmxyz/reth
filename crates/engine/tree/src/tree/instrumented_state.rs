@@ -9,8 +9,9 @@ use reth_provider::{
     StateProvider, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
-    updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    updates::{StorageTrieUpdates, TrieUpdates},
+    AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
+    StorageProof, TrieInput,
 };
 use std::{
     sync::atomic::{AtomicU64, Ordering},
@@ -262,6 +263,15 @@ impl<S: StorageRootProvider> StorageRootProvider for InstrumentedStateProvider<S
         self.state_provider.storage_root(address, hashed_storage)
     }
 
+    fn storage_root_from_nodes(
+        &self,
+        address: Address,
+        hashed_storage: HashedStorage,
+        storage_trie_updates: &StorageTrieUpdates,
+    ) -> ProviderResult<B256> {
+        self.state_provider.storage_root_from_nodes(address, hashed_storage, storage_trie_updates)
+    }
+
     fn storage_proof(
         &self,
         address: Address,
@@ -269,6 +279,21 @@ impl<S: StorageRootProvider> StorageRootProvider for InstrumentedStateProvider<S
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageProof> {
         self.state_provider.storage_proof(address, slot, hashed_storage)
+    }
+
+    fn storage_proof_from_nodes(
+        &self,
+        address: Address,
+        slot: B256,
+        hashed_storage: HashedStorage,
+        storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+    ) -> ProviderResult<StorageProof> {
+        self.state_provider.storage_proof_from_nodes(
+            address,
+            slot,
+            hashed_storage,
+            storage_trie_updates,
+        )
     }
 
     fn storage_multiproof(

@@ -102,11 +102,30 @@ impl StorageRootProvider for StateProviderTest {
         unimplemented!("storage root is not supported")
     }
 
+    fn storage_root_from_nodes(
+        &self,
+        _address: Address,
+        _hashed_storage: HashedStorage,
+        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+    ) -> ProviderResult<B256> {
+        unimplemented!("storage root is not supported")
+    }
+
     fn storage_proof(
         &self,
         _address: Address,
         _slot: B256,
         _hashed_storage: HashedStorage,
+    ) -> ProviderResult<StorageProof> {
+        unimplemented!("proof generation is not supported")
+    }
+
+    fn storage_proof_from_nodes(
+        &self,
+        _address: Address,
+        _slot: B256,
+        _hashed_storage: HashedStorage,
+        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
     ) -> ProviderResult<StorageProof> {
         unimplemented!("proof generation is not supported")
     }
