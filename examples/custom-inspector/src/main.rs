@@ -44,7 +44,7 @@ fn main() {
             // create a new subscription to pending transactions
             let mut pending_transactions = node.pool.new_pending_pool_transactions_listener();
 
-            // get an instance of the `trace_` API handler
+            // get an instance of the `eth_` API handler
             let eth_api = node.rpc_registry.eth_api().clone();
 
             println!("Spawning trace task!");
@@ -106,13 +106,13 @@ fn main() {
 /// Our custom cli args extension that adds one flag to reth default CLI.
 #[derive(Debug, Clone, Default, clap::Args)]
 struct RethCliTxpoolExt {
-    /// The addresses of the recipients that we want to trace.
+    /// The addresses of the recipients that we want to inspect.
     #[arg(long, value_delimiter = ',')]
     pub recipients: Vec<Address>,
 }
 
 impl RethCliTxpoolExt {
-    /// Check if the recipient is in the list of recipients to trace.
+    /// Check if the recipient is in the list of recipients to inspect.
     pub fn is_match(&self, recipient: &Address) -> bool {
         self.recipients.is_empty() || self.recipients.contains(recipient)
     }

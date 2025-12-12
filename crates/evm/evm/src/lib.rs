@@ -502,7 +502,7 @@ pub struct NextBlockEnvAttributes {
     /// Withdrawals
     pub withdrawals: Option<Withdrawals>,
     /// Optional extra data.
-    pub extra_data: Option<Bytes>,
+    pub extra_data: Bytes,
 }
 
 /// Abstraction over transaction environment.

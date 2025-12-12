@@ -11,6 +11,7 @@ env:
   CARGO_TERM_COLOR: always
   BASELINE: base
   SEED: reth
+  RUSTC_WRAPPER: "sccache"
 
 name: bench
 jobs:
@@ -22,6 +23,7 @@ jobs:
           submodules: true
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true

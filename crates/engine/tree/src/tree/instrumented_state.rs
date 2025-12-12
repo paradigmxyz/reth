@@ -22,7 +22,7 @@ const NANOS_PER_SEC: u32 = 1_000_000_000;
 
 /// An atomic version of [`Duration`], using an [`AtomicU64`] to store the total nanoseconds in the
 /// duration.
-#[derive(Default)]
+#[derive(Debug, Default)]
 pub(crate) struct AtomicDuration {
     /// The nanoseconds part of the duration
     ///
@@ -59,7 +59,8 @@ impl AtomicDuration {
 }
 
 /// A wrapper of a state provider and latency metrics.
-pub(crate) struct InstrumentedStateProvider<S> {
+#[derive(Debug)]
+pub struct InstrumentedStateProvider<S> {
     /// The state provider
     state_provider: S,
 
@@ -80,11 +81,12 @@ impl<S> InstrumentedStateProvider<S>
 where
     S: StateProvider,
 {
-    /// Creates a new [`InstrumentedStateProvider`] from a state provider
-    pub(crate) fn from_state_provider(state_provider: S) -> Self {
+    /// Creates a new [`InstrumentedStateProvider`] from a state provider with the provided label
+    /// for metrics.
+    pub fn from_state_provider(state_provider: S, source: &'static str) -> Self {
         Self {
             state_provider,
-            metrics: StateProviderMetrics::default(),
+            metrics: StateProviderMetrics::new_with_labels(&[("source", source)]),
             total_storage_fetch_latency: AtomicDuration::zero(),
             total_code_fetch_latency: AtomicDuration::zero(),
             total_account_fetch_latency: AtomicDuration::zero(),

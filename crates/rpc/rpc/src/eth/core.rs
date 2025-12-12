@@ -539,7 +539,7 @@ where
 
     /// Returns the transaction batch sender
     #[inline]
-    const fn tx_batch_sender(
+    pub const fn tx_batch_sender(
         &self,
     ) -> &mpsc::UnboundedSender<BatchTxRequest<<N::Pool as TransactionPool>::Transaction>> {
         &self.tx_batch_sender

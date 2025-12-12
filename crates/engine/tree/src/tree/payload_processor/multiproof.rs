@@ -354,7 +354,7 @@ impl MultiproofManager {
     fn dispatch(&self, input: PendingMultiproofTask) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
         if input.proof_targets_is_empty() {
-            debug!(
+            trace!(
                 sequence_number = input.proof_sequence_number(),
                 "No proof targets, sending empty multiproof back immediately"
             );
@@ -1045,7 +1045,7 @@ impl MultiProofTask {
                 let storage_targets =
                     merged_targets.values().map(|slots| slots.len()).sum::<usize>();
                 batch_metrics.prefetch_proofs_requested += self.on_prefetch_proof(merged_targets);
-                debug!(
+                trace!(
                     target: "engine::tree::payload_processor::multiproof",
                     account_targets,
                     storage_targets,
@@ -1135,7 +1135,7 @@ impl MultiProofTask {
                 let batch_len = merged_update.len();
                 batch_metrics.state_update_proofs_requested +=
                     self.on_state_update(batch_source, merged_update);
-                debug!(
+                trace!(
                     target: "engine::tree::payload_processor::multiproof",
                     ?batch_source,
                     len = batch_len,
@@ -1271,7 +1271,7 @@ impl MultiProofTask {
                             // Convert ProofResultMessage to SparseTrieUpdate
                             match proof_result.result {
                                 Ok(proof_result_data) => {
-                                    debug!(
+                                    trace!(
                                         target: "engine::tree::payload_processor::multiproof",
                                         sequence = proof_result.sequence_number,
                                         total_proofs = batch_metrics.proofs_processed,
