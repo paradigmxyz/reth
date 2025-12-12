@@ -1,6 +1,6 @@
 //! A Protocol defines a P2P subprotocol in an `RLPx` connection
 
-use crate::{Capability, EthMessageID, EthVersion};
+use crate::{Capability, EthMessageID, EthVersion, SnapMessageId};
 
 /// Type that represents a [Capability] and the number of messages it uses.
 ///
@@ -43,6 +43,13 @@ impl Protocol {
     /// Returns the [`EthVersion::Eth68`] capability.
     pub const fn eth_68() -> Self {
         Self::eth(EthVersion::Eth68)
+    }
+
+    /// Returns the snap capability (snap/1).
+    pub const fn snap() -> Self {
+        // SnapMessageId is a zero-based enum, so highest id + 1 = number of messages
+        let messages = SnapMessageId::TrieNodes as u8 + 1;
+        Self::new(Capability::new_static("snap", 1), messages)
     }
 
     /// Consumes the type and returns a tuple of the [Capability] and number of messages.
