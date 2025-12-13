@@ -16,7 +16,7 @@ reth-chain-state.workspace = true
 reth-chainspec = { workspace = true, optional = true }
 reth-consensus.workspace = true
 reth-db.workspace = true
-reth-engine-primitives.workspace = true
+reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-errors.workspace = true
 reth-execution-types.workspace = true
 reth-evm = { workspace = true, features = ["metrics"] }

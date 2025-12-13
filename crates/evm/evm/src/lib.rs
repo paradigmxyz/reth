@@ -44,8 +44,10 @@ pub mod execute;
 mod aliases;
 pub use aliases::*;
 
+#[cfg(feature = "std")]
 mod engine;
-pub use engine::{ConfigureEngineEvm, ExecutableTxIterator};
+#[cfg(feature = "std")]
+pub use engine::{ConfigureEngineEvm, ExecutableTxIterator, ExecutableTxTuple};
 
 #[cfg(feature = "metrics")]
 pub mod metrics;
