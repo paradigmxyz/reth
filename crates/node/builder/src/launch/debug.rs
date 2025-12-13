@@ -309,21 +309,11 @@ where
     inner: L,
     target: Target,
     local_payload_attributes_builder: Option<
-        Box<
-            dyn PayloadAttributesBuilder<
-                PayloadAttrTy<<N as FullNodeTypes>::Types>,
-                HeaderTy<<N as FullNodeTypes>::Types>,
-            >,
-        >,
+        Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>,
     >,
     map_attributes: Option<
         Box<
-            dyn Fn(
-                    PayloadAttrTy<<N as FullNodeTypes>::Types>,
-                ) -> PayloadAttrTy<<N as FullNodeTypes>::Types>
-                + Send
-                + Sync
-                + 'static,
+            dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync + 'static,
         >,
     >,
     dev_payload_attributes_builder_factory: Option<DevPayloadAttributesBuilderFactory<N>>,
@@ -340,8 +330,8 @@ where
     pub fn with_payload_attributes_builder(
         self,
         builder: impl PayloadAttributesBuilder<
-            PayloadAttrTy<<N as FullNodeTypes>::Types>,
-            HeaderTy<<N as FullNodeTypes>::Types>,
+            PayloadAttrTy<N::Types>,
+            HeaderTy<N::Types>,
         >,
     ) -> Self {
         Self {
@@ -358,8 +348,8 @@ where
     pub fn map_debug_payload_attributes(
         self,
         f: impl Fn(
-                PayloadAttrTy<<N as FullNodeTypes>::Types>,
-            ) -> PayloadAttrTy<<N as FullNodeTypes>::Types>
+                PayloadAttrTy<N::Types>,
+            ) -> PayloadAttrTy<N::Types>
             + Send
             + Sync
             + 'static,
