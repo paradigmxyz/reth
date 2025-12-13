@@ -117,7 +117,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             .map(|_| {
                 let tx = mock_tx(self.signer_build_account_info.nonce);
                 self.signer_build_account_info.nonce += 1;
-                self.signer_build_account_info.balance -= signer_balance_decrease;
+                self.signer_build_account_info.balance -= Self::single_tx_cost();
                 tx
             })
             .collect();
