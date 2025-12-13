@@ -2,7 +2,7 @@ use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
     HashedPostStateProvider, StateProvider, StateRootProvider,
 };
-use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider};
@@ -99,13 +99,10 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn storage_root_from_nodes(
-        &self,
-        address: Address,
-        hashed_storage: HashedStorage,
-        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
-    ) -> ProviderResult<B256> {
+    fn storage_root_from_nodes(&self, address: Address, input: TrieInput) -> ProviderResult<B256> {
         // todo (fig): write overlay_root_from_nodes
+        let hashed_address = keccak256(address);
+        let hashed_storage = input.state.storages.get(&hashed_address).cloned().unwrap_or_default();
         self.storage_root(address, hashed_storage)
     }
 
@@ -123,10 +120,11 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
         &self,
         address: Address,
         slot: B256,
-        hashed_storage: HashedStorage,
-        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+        input: TrieInput,
     ) -> ProviderResult<reth_trie::StorageProof> {
         // todo (fig): write overlay_proof_from_nodes
+        let hashed_address = keccak256(address);
+        let hashed_storage = input.state.storages.get(&hashed_address).cloned().unwrap_or_default();
         self.storage_proof(address, slot, hashed_storage)
     }
 

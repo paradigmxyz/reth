@@ -77,6 +77,14 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
         )
         .root()
     }
+
+    fn overlay_root_from_nodes(
+        tx: &'a TX,
+        address: Address,
+        hashed_storage: HashedStorage,
+        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+    ) -> ProviderResult<B256> {
+    }
 }
 
 impl<TX: DbTx> DatabaseHashedStorage<TX> for HashedStorage {

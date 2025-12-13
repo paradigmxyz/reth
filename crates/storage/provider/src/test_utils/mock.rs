@@ -804,8 +804,7 @@ where
     fn storage_root_from_nodes(
         &self,
         _address: Address,
-        _hashed_storage: HashedStorage,
-        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+        _input: TrieInput,
     ) -> ProviderResult<B256> {
         Ok(EMPTY_ROOT_HASH)
     }
@@ -823,8 +822,7 @@ where
         &self,
         _address: Address,
         slot: B256,
-        _hashed_storage: HashedStorage,
-        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+        _input: TrieInput,
     ) -> ProviderResult<StorageProof> {
         Ok(StorageProof::new(slot))
     }

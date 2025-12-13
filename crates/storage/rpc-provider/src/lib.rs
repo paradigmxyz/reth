@@ -1252,8 +1252,7 @@ where
     fn storage_root_from_nodes(
         &self,
         _address: Address,
-        _hashed_storage: reth_trie::HashedStorage,
-        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+        _input: TrieInput,
     ) -> Result<B256, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
@@ -1271,8 +1270,7 @@ where
         &self,
         _address: Address,
         _slot: B256,
-        _hashed_storage: reth_trie::HashedStorage,
-        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
+        _input: TrieInput,
     ) -> Result<reth_trie::StorageProof, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }

@@ -434,8 +434,7 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
     fn storage_root_from_nodes(
         &self,
         _address: Address,
-        _hashed_storage: HashedStorage,
-        _storage_trie_updates: &reth_trie_common::updates::StorageTrieUpdates,
+        _input: TrieInput,
     ) -> ProviderResult<B256> {
         Ok(B256::default())
     }
@@ -453,8 +452,7 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
         &self,
         _address: Address,
         slot: B256,
-        _hashed_storage: HashedStorage,
-        _storage_trie_updates: &reth_trie_common::updates::StorageTrieUpdates,
+        _input: TrieInput,
     ) -> ProviderResult<StorageProof> {
         Ok(StorageProof::new(slot))
     }
