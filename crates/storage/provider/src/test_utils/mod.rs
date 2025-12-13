@@ -1,11 +1,13 @@
 use crate::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
+    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     HashingWriter, ProviderFactory, TrieWriter,
 };
 use alloy_primitives::B256;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db::{
-    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
+    test_utils::{
+        create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir, TempDatabase,
+    },
     DatabaseEnv,
 };
 use reth_errors::ProviderResult;
@@ -54,11 +56,13 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
     chain_spec: Arc<N::ChainSpec>,
 ) -> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<TempDatabase<DatabaseEnv>>>> {
     let (static_dir, _) = create_test_static_files_dir();
+    let (rocksdb_dir, _) = create_test_rocksdb_dir();
     let db = create_test_rw_db();
     ProviderFactory::new(
         db,
         chain_spec,
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
+        RocksDBProvider::new(&rocksdb_dir).expect("failed to create test RocksDB provider"),
     )
     .expect("failed to create test provider factory")
 }

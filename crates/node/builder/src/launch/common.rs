@@ -65,7 +65,7 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
+    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
     StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
 };
@@ -485,9 +485,19 @@ where
                 .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
                 .build()?;
 
-        let factory =
-            ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
-                .with_prune_modes(self.prune_modes());
+        // Initialize RocksDB provider with metrics and statistics enabled
+        let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
+            .with_metrics()
+            .with_statistics()
+            .build()?;
+
+        let factory = ProviderFactory::new(
+            self.right().clone(),
+            self.chain_spec(),
+            static_file_provider,
+            rocksdb_provider,
+        )?
+        .with_prune_modes(self.prune_modes());
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.

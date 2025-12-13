@@ -110,6 +110,7 @@ pub async fn setup_engine_with_chain_import(
         // Create database path and static files path
         let db_path = datadir.join("db");
         let static_files_path = datadir.join("static_files");
+        let rocksdb_dir_path = datadir.join("rocksdb");
 
         // Initialize the database using init_db (same as CLI import command)
         // Use the same database arguments as the node will use
@@ -125,6 +126,7 @@ pub async fn setup_engine_with_chain_import(
             db.clone(),
             chain_spec.clone(),
             reth_provider::providers::StaticFileProvider::read_write(static_files_path.clone())?,
+            reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path).build().unwrap(),
         )?;
 
         // Initialize genesis if needed
@@ -311,6 +313,7 @@ mod tests {
         std::fs::create_dir_all(&datadir).unwrap();
         let db_path = datadir.join("db");
         let static_files_path = datadir.join("static_files");
+        let rocksdb_dir_path = datadir.join("rocksdb");
 
         // Import the chain
         {
@@ -323,6 +326,9 @@ mod tests {
                 db.clone(),
                 chain_spec.clone(),
                 reth_provider::providers::StaticFileProvider::read_write(static_files_path.clone())
+                    .unwrap(),
+                reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path.clone())
+                    .build()
                     .unwrap(),
             )
             .expect("failed to create provider factory");
@@ -384,6 +390,9 @@ mod tests {
                 db,
                 chain_spec.clone(),
                 reth_provider::providers::StaticFileProvider::read_only(static_files_path, false)
+                    .unwrap(),
+                reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path)
+                    .build()
                     .unwrap(),
             )
             .expect("failed to create provider factory");
@@ -472,11 +481,15 @@ mod tests {
         // Create static files path
         let static_files_path = datadir.join("static_files");
 
+        // Create rocksdb path
+        let rocksdb_dir_path = datadir.join("rocksdb");
+
         // Create a provider factory
         let provider_factory: ProviderFactory<MockNodeTypesWithDB> = ProviderFactory::new(
             db.clone(),
             chain_spec.clone(),
             reth_provider::providers::StaticFileProvider::read_write(static_files_path).unwrap(),
+            reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path).build().unwrap(),
         )
         .expect("failed to create provider factory");
 

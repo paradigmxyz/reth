@@ -711,7 +711,7 @@ mod tests {
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
-        ProviderFactory,
+        ProviderFactory, RocksDBProviderFactory,
     };
     use std::{collections::BTreeMap, sync::Arc};
 
@@ -756,6 +756,7 @@ mod tests {
     fn fail_init_inconsistent_db() {
         let factory = create_test_provider_factory_with_chain_spec(SEPOLIA.clone());
         let static_file_provider = factory.static_file_provider();
+        let rocksdb_provider = factory.rocksdb_provider();
         init_genesis(&factory).unwrap();
 
         // Try to init db with a different genesis block
@@ -764,6 +765,7 @@ mod tests {
                 factory.into_db(),
                 MAINNET.clone(),
                 static_file_provider,
+                rocksdb_provider,
             )
             .unwrap(),
         );

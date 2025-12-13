@@ -159,6 +159,14 @@ pub mod test_utils {
         (temp_dir, path)
     }
 
+    /// Create `rocksdb` path for testing
+    #[track_caller]
+    pub fn create_test_rocksdb_dir() -> (TempDir, PathBuf) {
+        let temp_dir = TempDir::with_prefix("reth-test-rocksdb-").expect(ERROR_TEMPDIR);
+        let path = temp_dir.path().to_path_buf();
+        (temp_dir, path)
+    }
+
     /// Get a temporary directory path to use for the database
     pub fn tempdir_path() -> PathBuf {
         let builder = tempfile::Builder::new().prefix("reth-test-").rand_bytes(8).tempdir();
