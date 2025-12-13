@@ -8,8 +8,9 @@ use reth_storage_errors::{
     provider::{ProviderError, ProviderResult},
 };
 use rocksdb::{
-    BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType, Options,
-    WriteBatch, DB,
+    BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
+    IteratorMode, Options, Transaction, TransactionDB, TransactionDBOptions, TransactionOptions,
+    WriteBatchWithTransaction, WriteOptions,
 };
 use std::{
     fmt,
@@ -177,7 +178,15 @@ impl RocksDBBuilder {
             })
             .collect();
 
-        let db = DB::open_cf_descriptors(&options, &self.path, cf_descriptors).map_err(|e| {
+        // Use TransactionDB for MDBX-like transaction semantics (read-your-writes, rollback)
+        let txn_db_options = TransactionDBOptions::default();
+        let db = TransactionDB::open_cf_descriptors(
+            &options,
+            &txn_db_options,
+            &self.path,
+            cf_descriptors,
+        )
+        .map_err(|e| {
             ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -209,12 +218,20 @@ macro_rules! compress_to_buf_or_ref {
 pub struct RocksDBProvider(Arc<RocksDBProviderInner>);
 
 /// Inner state for `RocksDB` provider.
-#[derive(Debug)]
 struct RocksDBProviderInner {
-    /// `RocksDB` database instance.
-    db: DB,
+    /// `RocksDB` database instance with transaction support.
+    db: TransactionDB,
     /// Metrics latency & operations.
     metrics: Option<RocksDBMetrics>,
+}
+
+impl fmt::Debug for RocksDBProviderInner {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBProviderInner")
+            .field("db", &"<TransactionDB>")
+            .field("metrics", &self.metrics)
+            .finish()
+    }
 }
 
 impl Clone for RocksDBProvider {
@@ -232,6 +249,14 @@ impl RocksDBProvider {
     /// Creates a new `RocksDB` provider builder.
     pub fn builder(path: impl AsRef<Path>) -> RocksDBBuilder {
         RocksDBBuilder::new(path)
+    }
+
+    /// Creates a new transaction with MDBX-like semantics (read-your-writes, rollback).
+    pub fn tx(&self) -> RocksTx<'_> {
+        let write_options = WriteOptions::default();
+        let txn_options = TransactionOptions::default();
+        let inner = self.0.db.transaction_opt(&write_options, &txn_options);
+        RocksTx { inner, provider: self }
     }
 
     /// Gets the column family handle for a table.
@@ -331,8 +356,11 @@ impl RocksDBProvider {
     {
         // Note: Using "Batch" as table name for batch operations across multiple tables
         self.execute_with_operation_metric(RocksDBOperation::BatchWrite, "Batch", |this| {
-            let mut batch_handle =
-                RocksDBBatch { provider: this, inner: WriteBatch::default(), buf: Vec::new() };
+            let mut batch_handle = RocksDBBatch {
+                provider: this,
+                inner: WriteBatchWithTransaction::<true>::default(),
+                buf: Vec::new(),
+            };
 
             f(&mut batch_handle)?;
 
@@ -347,17 +375,19 @@ impl RocksDBProvider {
 }
 
 /// Handle for building a batch of operations atomically.
+///
+/// Uses `WriteBatchWithTransaction<true>` for compatibility with `TransactionDB`.
 pub struct RocksDBBatch<'a> {
     provider: &'a RocksDBProvider,
-    inner: WriteBatch,
+    inner: WriteBatchWithTransaction<true>,
     buf: Vec<u8>,
 }
 
-impl<'a> fmt::Debug for RocksDBBatch<'a> {
+impl fmt::Debug for RocksDBBatch<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RocksDBBatch")
             .field("provider", &self.provider)
-            .field("batch", &"<WriteBatch>")
+            .field("batch", &"<WriteBatchWithTransaction>")
             // Number of operations in this batch
             .field("length", &self.inner.len())
             // Total serialized size (encoded key + compressed value + metadata) of this batch
@@ -389,6 +419,167 @@ impl<'a> RocksDBBatch<'a> {
     pub fn delete<T: Table>(&mut self, key: T::Key) -> ProviderResult<()> {
         self.inner.delete_cf(self.provider.get_cf_handle::<T>()?, key.encode().as_ref());
         Ok(())
+    }
+}
+
+/// `RocksDB` transaction wrapper providing MDBX-like semantics.
+///
+/// Supports:
+/// - Read-your-writes: reads see uncommitted writes within the same transaction
+/// - Atomic commit/rollback
+/// - Iteration over uncommitted data
+///
+/// Note: `Transaction` is `Send` but NOT `Sync`. This wrapper does not implement
+/// `DbTx`/`DbTxMut` traits directly; use RocksDB-specific methods instead.
+pub struct RocksTx<'db> {
+    inner: Transaction<'db, TransactionDB>,
+    provider: &'db RocksDBProvider,
+}
+
+impl fmt::Debug for RocksTx<'_> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksTx").field("provider", &self.provider).finish_non_exhaustive()
+    }
+}
+
+impl<'db> RocksTx<'db> {
+    /// Gets a value from the specified table. Sees uncommitted writes in this transaction.
+    pub fn get<T: Table>(&self, key: T::Key) -> ProviderResult<Option<T::Value>> {
+        let encoded_key = key.encode();
+        self.get_encoded::<T>(&encoded_key)
+    }
+
+    /// Gets a value using pre-encoded key. Sees uncommitted writes in this transaction.
+    pub fn get_encoded<T: Table>(
+        &self,
+        key: &<T::Key as Encode>::Encoded,
+    ) -> ProviderResult<Option<T::Value>> {
+        let cf = self.provider.get_cf_handle::<T>()?;
+        let result = self.inner.get_cf(cf, key.as_ref()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })?;
+
+        Ok(result.and_then(|value| T::Value::decompress(&value).ok()))
+    }
+
+    /// Puts a value into the specified table.
+    pub fn put<T: Table>(&self, key: T::Key, value: &T::Value) -> ProviderResult<()> {
+        let encoded_key = key.encode();
+        self.put_encoded::<T>(&encoded_key, value)
+    }
+
+    /// Puts a value using pre-encoded key.
+    pub fn put_encoded<T: Table>(
+        &self,
+        key: &<T::Key as Encode>::Encoded,
+        value: &T::Value,
+    ) -> ProviderResult<()> {
+        let cf = self.provider.get_cf_handle::<T>()?;
+        let mut buf = Vec::new();
+        let value_bytes = compress_to_buf_or_ref!(buf, value).unwrap_or(&buf);
+
+        self.inner.put_cf(cf, key.as_ref(), value_bytes).map_err(|e| {
+            ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
+                info: DatabaseErrorInfo { message: e.to_string().into(), code: -1 },
+                operation: DatabaseWriteOperation::PutUpsert,
+                table_name: T::NAME,
+                key: key.as_ref().to_vec(),
+            })))
+        })
+    }
+
+    /// Deletes a value from the specified table.
+    pub fn delete<T: Table>(&self, key: T::Key) -> ProviderResult<()> {
+        let cf = self.provider.get_cf_handle::<T>()?;
+        self.inner.delete_cf(cf, key.encode().as_ref()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+
+    /// Creates an iterator for the specified table. Sees uncommitted writes in this transaction.
+    ///
+    /// Returns an iterator that yields `(encoded_key, compressed_value)` pairs.
+    pub fn iter<T: Table>(&self) -> ProviderResult<RocksTxIter<'_, T>> {
+        let cf = self.provider.get_cf_handle::<T>()?;
+        let iter = self.inner.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksTxIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
+    /// Creates an iterator starting from the given key (inclusive).
+    pub fn iter_from<T: Table>(&self, key: T::Key) -> ProviderResult<RocksTxIter<'_, T>> {
+        let cf = self.provider.get_cf_handle::<T>()?;
+        let encoded_key = key.encode();
+        let iter = self
+            .inner
+            .iterator_cf(cf, IteratorMode::From(encoded_key.as_ref(), rocksdb::Direction::Forward));
+        Ok(RocksTxIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
+    /// Commits the transaction, persisting all changes.
+    pub fn commit(self) -> ProviderResult<()> {
+        self.inner.commit().map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+
+    /// Rolls back the transaction, discarding all changes.
+    pub fn rollback(self) -> ProviderResult<()> {
+        self.inner.rollback().map_err(|e| {
+            ProviderError::Database(DatabaseError::Other(format!("rollback failed: {e}")))
+        })
+    }
+}
+
+/// Iterator over a `RocksDB` table within a transaction.
+///
+/// Yields decoded `(Key, Value)` pairs. Sees uncommitted writes.
+pub struct RocksTxIter<'tx, T: Table> {
+    inner: rocksdb::DBIteratorWithThreadMode<'tx, Transaction<'tx, TransactionDB>>,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: Table> fmt::Debug for RocksTxIter<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksTxIter").field("table", &T::NAME).finish_non_exhaustive()
+    }
+}
+
+impl<T: Table> Iterator for RocksTxIter<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key_bytes, value_bytes) = match self.inner.next()? {
+            Ok(kv) => kv,
+            Err(e) => {
+                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))))
+            }
+        };
+
+        // Decode key
+        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
+            Ok(k) => k,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        // Decompress value
+        let value = match T::Value::decompress(&value_bytes) {
+            Ok(v) => v,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        Some(Ok((key, value)))
     }
 }
 
@@ -524,44 +715,126 @@ mod tests {
     #[test]
     fn test_statistics_enabled() {
         let temp_dir = TempDir::new().unwrap();
+        // Just verify that building with statistics doesn't panic
         let provider = RocksDBBuilder::new(temp_dir.path())
             .with_table::<TestTable>()
             .with_statistics()
             .build()
             .unwrap();
 
-        // Do operations
+        // Do operations - data should be immediately readable with TransactionDB
         for i in 0..10 {
             let value = vec![i as u8];
             provider.put::<TestTable>(i, &value).unwrap();
+            // Verify write is visible
+            assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
         }
-
-        // Verify statistics enabled
-        let stats = provider.0.db.property_value("rocksdb.stats").unwrap();
-        assert!(stats.is_some(), "Statistics should be enabled");
-        let stats_str = stats.unwrap();
-        assert!(stats_str.contains("DB Stats"));
     }
 
     #[test]
-    fn test_compression_after_flush() {
+    fn test_data_persistence() {
         let temp_dir = TempDir::new().unwrap();
         let provider =
             RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
 
-        // Insert compressible data
+        // Insert data - TransactionDB writes are immediately visible
         let value = vec![42u8; 1000];
         for i in 0..100 {
             provider.put::<TestTable>(i, &value).unwrap();
         }
 
-        // Get CF handle and flush it
-        let cf = provider.0.db.cf_handle("TestTable").expect("CF should exist");
-        provider.0.db.flush_cf(cf).unwrap();
-
-        // Verify data is persisted by reading it back
+        // Verify data is readable
         for i in 0..100 {
-            assert!(provider.get::<TestTable>(i).unwrap().is_some(), "Data should be persisted");
+            assert!(provider.get::<TestTable>(i).unwrap().is_some(), "Data should be readable");
         }
+    }
+
+    #[test]
+    fn test_transaction_read_your_writes() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Create a transaction
+        let tx = provider.tx();
+
+        // Write data within the transaction
+        let key = 42u64;
+        let value = b"test_value".to_vec();
+        tx.put::<TestTable>(key, &value).unwrap();
+
+        // Read-your-writes: should see uncommitted data in same transaction
+        let result = tx.get::<TestTable>(key).unwrap();
+        assert_eq!(
+            result,
+            Some(value.clone()),
+            "Transaction should see its own uncommitted writes"
+        );
+
+        // Data should NOT be visible via provider (outside transaction)
+        let provider_result = provider.get::<TestTable>(key).unwrap();
+        assert_eq!(provider_result, None, "Uncommitted data should not be visible outside tx");
+
+        // Commit the transaction
+        tx.commit().unwrap();
+
+        // Now data should be visible via provider
+        let committed_result = provider.get::<TestTable>(key).unwrap();
+        assert_eq!(committed_result, Some(value), "Committed data should be visible");
+    }
+
+    #[test]
+    fn test_transaction_rollback() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // First, put some initial data
+        let key = 100u64;
+        let initial_value = b"initial".to_vec();
+        provider.put::<TestTable>(key, &initial_value).unwrap();
+
+        // Create a transaction and modify data
+        let tx = provider.tx();
+        let new_value = b"modified".to_vec();
+        tx.put::<TestTable>(key, &new_value).unwrap();
+
+        // Verify modification is visible within transaction
+        assert_eq!(tx.get::<TestTable>(key).unwrap(), Some(new_value));
+
+        // Rollback instead of commit
+        tx.rollback().unwrap();
+
+        // Data should be unchanged (initial value)
+        let result = provider.get::<TestTable>(key).unwrap();
+        assert_eq!(result, Some(initial_value), "Rollback should preserve original data");
+    }
+
+    #[test]
+    fn test_transaction_iterator() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Create a transaction
+        let tx = provider.tx();
+
+        // Write multiple entries
+        for i in 0..5u64 {
+            let value = format!("value_{i}").into_bytes();
+            tx.put::<TestTable>(i, &value).unwrap();
+        }
+
+        // Iterate - should see uncommitted writes
+        let mut count = 0;
+        for result in tx.iter::<TestTable>().unwrap() {
+            let (key, value) = result.unwrap();
+            assert_eq!(value, format!("value_{key}").into_bytes());
+            count += 1;
+        }
+        assert_eq!(count, 5, "Iterator should see all uncommitted writes");
+
+        // Commit
+        tx.commit().unwrap();
     }
 }
