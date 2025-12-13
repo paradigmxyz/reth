@@ -212,13 +212,13 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Whether to enforce expiration timestamps in messages.
+    /// Whether to enable EIP-868
     pub const fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
         self.config.enable_eip868 = enable_eip868;
         self
     }
 
-    /// Whether to enable EIP-868
+    /// Whether to enforce expiration timestamps in messages.
     pub const fn enforce_expiration_timestamps(
         &mut self,
         enforce_expiration_timestamps: bool,
