@@ -741,7 +741,7 @@ vergen-git2 = "1.0.5"
 ipnet = "2.11"
 
 [patch.crates-io]
-alloy-consensus = { git = "https://github.com/lean-apple/alloy.git", branch = "tx-builder-split"}
+alloy-consensus = { git = "https://github.com/lean-apple/alloy.git", branch = "tx-builder-split" }
 alloy-contract = { git = "https://github.com/lean-apple/alloy.git", branch = "tx-builder-split" }
 alloy-eips = { git = "https://github.com/lean-apple/alloy.git", branch = "tx-builder-split" }
 alloy-genesis = { git = "https://github.com/lean-apple/alloy.git", branch = "tx-builder-split" }
