@@ -41,6 +41,8 @@ use reth_stages::{
     },
     ExecInput, ExecOutput, ExecutionStageThresholds, Stage, StageExt, UnwindInput, UnwindOutput,
 };
+/// Convenience alias for a stage paired with an optional unwind stage.
+type StagePair<DB> = (Box<dyn Stage<DB>>, Option<Box<dyn Stage<DB>>>);
 use std::{any::Any, net::SocketAddr, sync::Arc, time::Instant};
 use tokio::sync::watch;
 use tracing::*;
@@ -163,14 +165,15 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let etl_config = config.stages.etl.clone();
         let prune_modes = config.prune.segments.clone();
 
-        let mut stages_to_run: Vec<(Box<dyn Stage<_>>, Option<Box<dyn Stage<_>>>)> = match self
-            .stage
-        {
+        let mut stages_to_run: Vec<StagePair<_>> = match self.stage {
             StageEnum::Headers => {
                 let consensus = Arc::new(components.consensus().clone());
 
-                let network_secret_path =
-                    self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
+                let network_secret_path = self
+                    .network
+                    .p2p_secret_key
+                    .clone()
+                    .unwrap_or_else(|| data_dir.p2p_secret());
                 let p2p_secret_key = get_secret_key(&network_secret_path)?;
 
                 let default_peers_path = data_dir.known_peers();
@@ -221,8 +224,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 config.peers.trusted_nodes_only = self.network.trusted_only;
                 config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 
-                let network_secret_path =
-                    self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
+                let network_secret_path = self
+                    .network
+                    .p2p_secret_key
+                    .clone()
+                    .unwrap_or_else(|| data_dir.p2p_secret());
                 let p2p_secret_key = get_secret_key(&network_secret_path)?;
 
                 let default_peers_path = data_dir.known_peers();
