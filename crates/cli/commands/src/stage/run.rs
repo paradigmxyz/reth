@@ -169,11 +169,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             StageEnum::Headers => {
                 let consensus = Arc::new(components.consensus().clone());
 
-                let network_secret_path = self
-                    .network
-                    .p2p_secret_key
-                    .clone()
-                    .unwrap_or_else(|| data_dir.p2p_secret());
+                let network_secret_path =
+                    self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
                 let p2p_secret_key = get_secret_key(&network_secret_path)?;
 
                 let default_peers_path = data_dir.known_peers();
@@ -224,11 +221,8 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 config.peers.trusted_nodes_only = self.network.trusted_only;
                 config.peers.trusted_nodes.extend(self.network.trusted_peers.clone());
 
-                let network_secret_path = self
-                    .network
-                    .p2p_secret_key
-                    .clone()
-                    .unwrap_or_else(|| data_dir.p2p_secret());
+                let network_secret_path =
+                    self.network.p2p_secret_key.clone().unwrap_or_else(|| data_dir.p2p_secret());
                 let p2p_secret_key = get_secret_key(&network_secret_path)?;
 
                 let default_peers_path = data_dir.known_peers();
