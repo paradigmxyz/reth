@@ -57,7 +57,7 @@ use tracing::info;
 ///     }
 /// }
 /// ```
-pub trait DebugNode<N: FullNodeComponents>: Node<N> {
+pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
     /// RPC block type. Used by [`DebugConsensusClient`] to fetch blocks and submit them to the
     /// engine. This is intended to match the block format returned by the external RPC endpoint.
     type RpcBlock: Serialize + DeserializeOwned + 'static;
@@ -82,11 +82,82 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     fn local_payload_attributes_builder(
         chain_spec: &Self::ChainSpec,
     ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes, HeaderTy<Self>>;
+
+    /// Constructs a block provider for the debug consensus client.
+    ///
+    /// Default implementation wires either RPC or Etherscan provider based on debug config,
+    /// falling back to an error if none are configured.
+    fn block_provider<'a>(
+        ctx: DebugBlockProviderContext<'a, N>,
+    ) -> DebugBlockProviderFuture<'a, N> {
+        Box::pin(async move {
+            let config = ctx.config;
+            if let Some(url) = config.debug.rpc_consensus_url.clone() {
+                let block_provider = RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), {
+                    let convert_json = ctx.convert_json.clone();
+                    move |block_response| {
+                        let json = serde_json::to_value(block_response)
+                            .expect("Block serialization cannot fail");
+                        convert_json(json)
+                    }
+                })
+                .await?;
+                return Ok(DynBlockProviderHandle::new(block_provider))
+            }
+
+            if let Some(maybe_custom_etherscan_url) = config.debug.etherscan.clone() {
+                let chain = config.chain.chain();
+                let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
+                    chain.etherscan_urls().map(|urls| urls.0.to_string()).ok_or_else(|| {
+                        eyre::eyre!("failed to get etherscan url for chain: {chain}")
+                    })
+                })?;
+
+                let block_provider = EtherscanBlockProvider::new(
+                    etherscan_url,
+                    chain.etherscan_api_key().ok_or_else(|| {
+                        eyre::eyre!(
+                            "etherscan api key not found for rpc consensus client for chain: {chain}"
+                        )
+                    })?,
+                    chain.id(),
+                    Self::rpc_to_primitive_block,
+                );
+                return Ok(DynBlockProviderHandle::new(block_provider))
+            }
+
+            Err(eyre::eyre!("no debug consensus block provider configured"))
+        })
+    }
 }
 
 /// Converts a JSON value into the node's primitive block representation.
 pub type RpcConsensusJsonConvert<N> =
     Arc<dyn Fn(Value) -> BlockTy<<N as FullNodeTypes>::Types> + Send + Sync + 'static>;
+
+/// Context passed to construct a debug block provider.
+pub struct DebugBlockProviderContext<'a, N: FullNodeComponents> {
+    /// Node configuration for accessing debug settings.
+    pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
+    /// Converter used to map RPC responses into primitive blocks.
+    pub convert_json: RpcConsensusJsonConvert<N>,
+}
+
+impl<'a, N: FullNodeComponents> fmt::Debug for DebugBlockProviderContext<'a, N> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DebugBlockProviderContext").finish_non_exhaustive()
+    }
+}
+
+/// Future returning a dynamic block provider.
+pub(crate) type DebugBlockProviderFuture<'a, N> = Pin<
+    Box<
+        dyn Future<
+                Output = eyre::Result<DynBlockProviderHandle<BlockTy<<N as FullNodeTypes>::Types>>>,
+            > + Send
+            + 'a,
+    >,
+>;
 
 /// Context for building dev-mode payload attributes after the node has launched.
 #[derive(Clone, Debug)]
@@ -381,73 +452,28 @@ where
                 rpc_consensus_client.run().await
             });
         } else {
-            if let Some(url) = config.debug.rpc_consensus_url.clone() {
-                info!(target: "reth::cli", "Using RPC consensus client: {}", url);
+            let convert_json = rpc_consensus_convert_json.unwrap_or_else(|| {
+                Arc::new(|json: Value| {
+                    let rpc_block: <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock =
+                        serde_json::from_value(json).expect("Block deserialization cannot fail");
+                    <N as FullNodeTypes>::Types::rpc_to_primitive_block(rpc_block)
+                })
+            });
 
-                let convert_json = rpc_consensus_convert_json.unwrap_or_else(|| {
-                    Arc::new(|json: Value| {
-                        let rpc_block: <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock =
-                            serde_json::from_value(json)
-                                .expect("Block deserialization cannot fail");
-                        <N as FullNodeTypes>::Types::rpc_to_primitive_block(rpc_block)
-                    })
-                });
-
-                let block_provider = RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), {
-                    let convert_json = convert_json.clone();
-                    move |block_response| {
-                        let json = serde_json::to_value(block_response)
-                            .expect("Block serialization cannot fail");
-                        convert_json(json)
-                    }
+            let block_provider =
+                <N as FullNodeTypes>::Types::block_provider(DebugBlockProviderContext {
+                    config,
+                    convert_json,
                 })
                 .await?;
 
-                let block_provider = DynBlockProviderHandle::new(block_provider);
-
-                let rpc_consensus_client = DebugConsensusClient::new(
-                    handle.node.add_ons_handle.beacon_engine_handle.clone(),
-                    block_provider,
-                );
-
-                handle.node.task_executor.spawn_critical("rpc-ws consensus client", async move {
-                    rpc_consensus_client.run().await
-                });
-            }
-
-            if let Some(maybe_custom_etherscan_url) = config.debug.etherscan.clone() {
-                info!(target: "reth::cli", "Using etherscan as consensus client");
-
-                let chain = config.chain.chain();
-                let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
-                    // If URL isn't provided, use default Etherscan URL for the chain if it is known
-                    chain.etherscan_urls().map(|urls| urls.0.to_string()).ok_or_else(|| {
-                        eyre::eyre!("failed to get etherscan url for chain: {chain}")
-                    })
-                })?;
-
-                let block_provider = EtherscanBlockProvider::new(
-                    etherscan_url,
-                    chain.etherscan_api_key().ok_or_else(|| {
-                        eyre::eyre!(
-                            "etherscan api key not found for rpc consensus client for chain: {chain}"
-                        )
-                    })?,
-                    chain.id(),
-                    <N as FullNodeTypes>::Types::rpc_to_primitive_block,
-                );
-                let block_provider = DynBlockProviderHandle::new(block_provider);
-                let rpc_consensus_client = DebugConsensusClient::new(
-                    handle.node.add_ons_handle.beacon_engine_handle.clone(),
-                    block_provider,
-                );
-                handle
-                    .node
-                    .task_executor
-                    .spawn_critical("etherscan consensus client", async move {
-                        rpc_consensus_client.run().await
-                    });
-            }
+            let rpc_consensus_client = DebugConsensusClient::new(
+                handle.node.add_ons_handle.beacon_engine_handle.clone(),
+                block_provider,
+            );
+            handle.node.task_executor.spawn_critical("debug consensus client", async move {
+                rpc_consensus_client.run().await
+            });
         }
 
         if config.dev.dev {
