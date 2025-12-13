@@ -423,6 +423,15 @@ where
         }
     }
 
+    /// Provides an already constructed block provider for the debug consensus client.
+    pub fn with_debug_block_client(
+        self,
+        provider: impl BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + Send + Sync + 'static,
+    ) -> Self {
+        let handle = DynBlockProviderHandle::new(provider);
+        self.with_debug_block_provider_factory(Box::new(move |_, _| Ok(handle.clone())))
+    }
+
     async fn launch_node(self) -> eyre::Result<NodeHandle<N, AddOns>> {
         let Self {
             inner,
