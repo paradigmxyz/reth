@@ -87,6 +87,9 @@ impl<C: ChainSpecParser> Command<C> {
                             .unwrap_or_default();
                         writer.prune_transaction_senders(to_delete, 0)?;
                     }
+                    StaticFileSegment::AccountChangeSets => {
+                        writer.prune_account_changesets(highest_block)?;
+                    }
                 }
             }
         }

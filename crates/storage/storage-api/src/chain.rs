@@ -1,5 +1,5 @@
 use crate::DBProvider;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
