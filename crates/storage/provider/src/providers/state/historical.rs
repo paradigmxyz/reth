@@ -3,7 +3,7 @@ use crate::{
     ChangeSetReader, HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -339,11 +339,14 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn storage_root_from_nodes(&self, address: Address, input: TrieInput) -> ProviderResult<B256> {
-        // todo (fig): write overlay_root_from_nodes
-        let hashed_address = keccak256(address);
-        let hashed_storage = input.state.storages.get(&hashed_address).cloned().unwrap_or_default();
-        self.storage_root(address, hashed_storage)
+    fn storage_root_from_nodes(
+        &self,
+        address: Address,
+        mut input: TrieInput,
+    ) -> ProviderResult<B256> {
+        input.prepend(self.revert_state()?.into());
+        StorageRoot::overlay_root_from_nodes(self.tx(), address, input)
+            .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn storage_proof(
@@ -362,12 +365,11 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
         &self,
         address: Address,
         slot: B256,
-        input: TrieInput,
+        mut input: TrieInput,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        // todo (fig): write overlay_proof_from_nodes
-        let hashed_address = keccak256(address);
-        let hashed_storage = input.state.storages.get(&hashed_address).cloned().unwrap_or_default();
-        self.storage_proof(address, slot, hashed_storage)
+        input.prepend(self.revert_state()?.into());
+        StorageProof::overlay_storage_proof_from_nodes(self.tx(), address, slot, input)
+            .map_err(ProviderError::from)
     }
 
     fn storage_multiproof(

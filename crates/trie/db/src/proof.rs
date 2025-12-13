@@ -79,7 +79,7 @@ pub trait DatabaseStorageProof<'a, TX> {
     /// Create a new [`StorageProof`] from database transaction and account address.
     fn from_tx(tx: &'a TX, address: Address) -> Self;
 
-    /// Generates the storage proof for target slot based on [`TrieInput`].
+    /// Generates the storage proof for target slot based on [`HashedStorage`].
     fn overlay_storage_proof(
         tx: &'a TX,
         address: Address,
@@ -87,7 +87,15 @@ pub trait DatabaseStorageProof<'a, TX> {
         storage: HashedStorage,
     ) -> Result<reth_trie::StorageProof, StateProofError>;
 
-    /// Generates the storage multiproof for target slots based on [`TrieInput`].
+    /// Generates the storage proof for target slot based on [`TrieInput`] with cached nodes.
+    fn overlay_storage_proof_from_nodes(
+        tx: &'a TX,
+        address: Address,
+        slot: B256,
+        input: TrieInput,
+    ) -> Result<reth_trie::StorageProof, StateProofError>;
+
+    /// Generates the storage multiproof for target slots based on [`HashedStorage`].
     fn overlay_storage_multiproof(
         tx: &'a TX,
         address: Address,
@@ -121,6 +129,30 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
         );
         StorageProof::new(
             DatabaseTrieCursorFactory::new(tx),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            address,
+        )
+        .with_prefix_set_mut(prefix_set)
+        .storage_proof(slot)
+    }
+
+    fn overlay_storage_proof_from_nodes(
+        tx: &'a TX,
+        address: Address,
+        slot: B256,
+        input: TrieInput,
+    ) -> Result<reth_trie::StorageProof, StateProofError> {
+        let hashed_address = keccak256(address);
+        let hashed_storage = input.state.storages.get(&hashed_address).cloned().unwrap_or_default();
+        let prefix_set = hashed_storage.construct_prefix_set();
+        let state_sorted = HashedPostStateSorted::new(
+            Default::default(),
+            HashMap::from_iter([(hashed_address, hashed_storage.into_sorted())]),
+        );
+        let nodes_sorted = input.nodes.into_sorted();
+
+        StorageProof::new(
+            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,
         )

@@ -5,7 +5,8 @@ use reth_db_api::{
 };
 use reth_execution_errors::StorageRootError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
+    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
+    HashedPostState, HashedStorage, StorageRoot, TrieInput,
 };
 
 #[cfg(feature = "metrics")]
@@ -24,6 +25,14 @@ pub trait DatabaseStorageRoot<'a, TX> {
         tx: &'a TX,
         address: Address,
         hashed_storage: HashedStorage,
+    ) -> Result<B256, StorageRootError>;
+
+    /// Calculates the storage root for this [`HashedStorage`] using cached intermediate nodes
+    /// from [`TrieInput`].
+    fn overlay_root_from_nodes(
+        tx: &'a TX,
+        address: Address,
+        input: TrieInput,
     ) -> Result<B256, StorageRootError>;
 }
 
@@ -81,9 +90,24 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
     fn overlay_root_from_nodes(
         tx: &'a TX,
         address: Address,
-        hashed_storage: HashedStorage,
-        _storage_trie_updates: &reth_trie::updates::StorageTrieUpdates,
-    ) -> ProviderResult<B256> {
+        input: TrieInput,
+    ) -> Result<B256, StorageRootError> {
+        let hashed_address = keccak256(address);
+        let hashed_storage = input.state.storages.get(&hashed_address).cloned().unwrap_or_default();
+        let prefix_set = hashed_storage.construct_prefix_set().freeze();
+        let state_sorted =
+            HashedPostState::from_hashed_storage(hashed_address, hashed_storage).into_sorted();
+        let nodes_sorted = input.nodes.into_sorted();
+
+        StorageRoot::new(
+            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            address,
+            prefix_set,
+            #[cfg(feature = "metrics")]
+            TrieRootMetrics::new(reth_trie::TrieType::Storage),
+        )
+        .root()
     }
 }
 
