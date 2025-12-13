@@ -25,10 +25,10 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
-    message::{EthBroadcastMessage, MessageError, RequestPair},
+    message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{message::RequestPair, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::RequestError;
@@ -270,11 +270,83 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     on_request!(req, Receipts, GetReceipts)
                 }
             }
+            EthMessage::GetReceipts70(req70) => {
+                let RequestPair {
+                    request_id,
+                    message:
+                        reth_eth_wire::GetReceipts70Payload { first_block_receipt_index, block_hashes },
+                } = req70.0;
+
+                let (tx, response) = oneshot::channel();
+                let received = ReceivedRequest {
+                    request_id,
+                    rx: PeerResponse::Receipts70 { response },
+                    received: Instant::now(),
+                };
+                self.received_requests_from_remote.push(received);
+
+                let request =
+                    reth_eth_wire::GetReceipts70Payload { first_block_receipt_index, block_hashes };
+                self.try_emit_request(PeerMessage::EthRequest(PeerRequest::GetReceipts70 {
+                    request,
+                    response: tx,
+                }))
+                .into()
+            }
             EthMessage::Receipts(resp) => {
                 on_response!(resp, GetReceipts)
             }
             EthMessage::Receipts69(resp) => {
                 on_response!(resp, GetReceipts69)
+            }
+            EthMessage::Receipts70(resp) => {
+                // Handle eth/70 receipts responses. Support `GetReceipts`,
+                // `GetReceipts69`, and `GetReceipts70` by converting the payload as needed.
+                let RequestPair {
+                    request_id,
+                    message: reth_eth_wire::Receipts70Payload { last_block_incomplete, receipts },
+                } = resp.0;
+
+                if let Some(req) = self.inflight_requests.remove(&request_id) {
+                    match req.request {
+                        RequestState::Waiting(PeerRequest::GetReceipts69 { response, .. }) => {
+                            trace!(peer_id=?self.remote_peer_id, ?request_id, "received eth/70 Receipts for GetReceipts69");
+                            let message = reth_eth_wire::Receipts69(receipts);
+                            let _ = response.send(Ok(message));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(PeerRequest::GetReceipts70 { response, .. }) => {
+                            trace!(peer_id=?self.remote_peer_id, ?request_id, "received eth/70 Receipts for GetReceipts70");
+                            let message = reth_eth_wire::Receipts70Payload {
+                                last_block_incomplete,
+                                receipts,
+                            };
+                            let _ = response.send(Ok(message));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(PeerRequest::GetReceipts { response, .. }) => {
+                            trace!(peer_id=?self.remote_peer_id, ?request_id, "received eth/70 Receipts for GetReceipts");
+                            let receipts69 = reth_eth_wire::Receipts69(receipts);
+                            let message: reth_eth_wire::Receipts<N::Receipt> =
+                                receipts69.into_with_bloom();
+                            let _ = response.send(Ok(message));
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                        RequestState::Waiting(request) => {
+                            request.send_bad_response();
+                        }
+                        RequestState::TimedOut => {
+                            // request was already timed out internally
+                            self.update_request_timeout(req.timestamp, Instant::now());
+                        }
+                    }
+                } else {
+                    trace!(peer_id=?self.remote_peer_id, ?request_id, "received response to unknown request");
+                    // we received a response to a request we never sent
+                    self.on_bad_message();
+                }
+
+                OnIncomingMessageOutcome::Ok
             }
             EthMessage::BlockRangeUpdate(msg) => {
                 // Validate that earliest <= latest according to the spec
@@ -313,7 +385,29 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         let request_id = self.next_id();
 
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let msg = request.create_request_message(request_id);
+        let mut msg = request.create_request_message(request_id);
+
+        // For eth/70 peers we send `GetReceipts` using the new eth/70
+        // encoding with `firstBlockReceiptIndex = 0`, while keeping the
+        // user-facing `PeerRequest` API unchanged.
+        if self.conn.version() >= EthVersion::Eth70 {
+            msg = match msg {
+                EthMessage::GetReceipts(pair) => {
+                    let RequestPair { request_id, message } = pair;
+                    let reth_eth_wire::GetReceipts(block_hashes) = message;
+                    let get70 = reth_eth_wire::GetReceipts70(RequestPair {
+                        request_id,
+                        message: reth_eth_wire::GetReceipts70Payload {
+                            first_block_receipt_index: 0,
+                            block_hashes,
+                        },
+                    });
+                    EthMessage::GetReceipts70(get70)
+                }
+                other => other,
+            };
+        }
+
         self.queued_outgoing.push_back(msg.into());
         let req = InflightRequest {
             request: RequestState::Waiting(request),
@@ -368,6 +462,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
         match resp.try_into_message(id) {
             Ok(msg) => {
+                let msg: EthMessage<N> = msg;
                 self.queued_outgoing.push_back(msg.into());
             }
             Err(err) => {
@@ -746,9 +841,8 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 };
 
                 if should_send {
-                    this.queued_outgoing.push_back(
-                        EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
-                    );
+                    let msg = EthMessage::BlockRangeUpdate(this.local_range_info.to_message());
+                    this.queued_outgoing.push_back(msg.into());
                     this.last_sent_latest_block = Some(current_latest);
                 }
             }

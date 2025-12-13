@@ -13,7 +13,7 @@ use reth_codecs_derive::add_arbitrary_tests;
 /// unsupported fields are stripped out.
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub struct UnifiedStatus {
-    /// The eth protocol version (e.g. eth/66 to eth/69).
+    /// The eth protocol version (e.g. eth/66 to eth/70).
     pub version: EthVersion,
     /// The chain ID identifying the peer’s network.
     pub chain: Chain,
@@ -109,6 +109,11 @@ impl UnifiedStatus {
         }
     }
 
+    /// Consume this `UnifiedStatus` and produce the [`StatusEth70`] message used by `eth/70`.
+    pub fn into_eth70(self) -> StatusEth70 {
+        self.into_eth69()
+    }
+
     /// Convert this `UnifiedStatus` into the appropriate `StatusMessage` variant based on version.
     pub fn into_message(self) -> StatusMessage {
         if self.version >= EthVersion::Eth69 {
@@ -131,7 +136,7 @@ impl UnifiedStatus {
                 earliest_block: None,
                 latest_block: None,
             },
-            StatusMessage::Eth69(e) => Self {
+            StatusMessage::Eth69(e) | StatusMessage::Eth70(e) => Self {
                 version: e.version,
                 chain: e.chain,
                 genesis: e.genesis,
@@ -157,7 +162,7 @@ impl StatusBuilder {
         self.status
     }
 
-    /// Sets the eth protocol version (e.g., eth/66, eth/69).
+    /// Sets the eth protocol version (e.g., eth/66, eth/70).
     pub const fn version(mut self, version: EthVersion) -> Self {
         self.status.version = version;
         self
@@ -378,8 +383,11 @@ impl Debug for StatusEth69 {
     }
 }
 
-/// `StatusMessage` can store either the Legacy version (with TD) or the
-/// eth/69 version (omits TD).
+/// Share eth/69 status with eth/70
+pub type StatusEth70 = StatusEth69;
+
+/// `StatusMessage` can store either the Legacy version (with TD), or the eth/69+/eth/70 version
+/// (omits TD, includes block range).
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatusMessage {
@@ -387,6 +395,8 @@ pub enum StatusMessage {
     Legacy(Status),
     /// The new `eth/69` status with no `total_difficulty`.
     Eth69(StatusEth69),
+    /// The `eth/70` status, identical to `eth/69` .
+    Eth70(StatusEth70),
 }
 
 impl StatusMessage {
@@ -395,6 +405,7 @@ impl StatusMessage {
         match self {
             Self::Legacy(legacy_status) => legacy_status.genesis,
             Self::Eth69(status_69) => status_69.genesis,
+            Self::Eth70(status_70) => status_70.genesis,
         }
     }
 
@@ -403,6 +414,7 @@ impl StatusMessage {
         match self {
             Self::Legacy(legacy_status) => legacy_status.version,
             Self::Eth69(status_69) => status_69.version,
+            Self::Eth70(status_70) => status_70.version,
         }
     }
 
@@ -411,6 +423,7 @@ impl StatusMessage {
         match self {
             Self::Legacy(legacy_status) => &legacy_status.chain,
             Self::Eth69(status_69) => &status_69.chain,
+            Self::Eth70(status_70) => &status_70.chain,
         }
     }
 
@@ -419,6 +432,7 @@ impl StatusMessage {
         match self {
             Self::Legacy(legacy_status) => legacy_status.forkid,
             Self::Eth69(status_69) => status_69.forkid,
+            Self::Eth70(status_70) => status_70.forkid,
         }
     }
 
@@ -427,6 +441,7 @@ impl StatusMessage {
         match self {
             Self::Legacy(legacy_status) => legacy_status.blockhash,
             Self::Eth69(status_69) => status_69.blockhash,
+            Self::Eth70(status_70) => status_70.blockhash,
         }
     }
 }
@@ -435,14 +450,14 @@ impl Encodable for StatusMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             Self::Legacy(s) => s.encode(out),
-            Self::Eth69(s) => s.encode(out),
+            Self::Eth69(s) | Self::Eth70(s) => s.encode(out),
         }
     }
 
     fn length(&self) -> usize {
         match self {
             Self::Legacy(s) => s.length(),
-            Self::Eth69(s) => s.length(),
+            Self::Eth69(s) | Self::Eth70(s) => s.length(),
         }
     }
 }
@@ -452,6 +467,7 @@ impl Display for StatusMessage {
         match self {
             Self::Legacy(s) => Display::fmt(s, f),
             Self::Eth69(s69) => Display::fmt(s69, f),
+            Self::Eth70(s70) => Display::fmt(s70, f),
         }
     }
 }
@@ -539,6 +555,24 @@ mod tests {
             .total_difficulty(Some(U256::from(42u64)))
             .earliest_block(None)
             .latest_block(None)
+            .build();
+
+        let status_message = unified_status.into_message();
+        let roundtripped_unified_status = UnifiedStatus::from_message(status_message);
+        assert_eq!(unified_status, roundtripped_unified_status);
+    }
+
+    #[test]
+    fn roundtrip_eth70() {
+        let unified_status = UnifiedStatus::builder()
+            .version(EthVersion::Eth70)
+            .chain(Chain::mainnet())
+            .genesis(MAINNET_GENESIS_HASH)
+            .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
+            .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
+            .total_difficulty(None)
+            .earliest_block(Some(1))
+            .latest_block(Some(2))
             .build();
 
         let status_message = unified_status.into_message();

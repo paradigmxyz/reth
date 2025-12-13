@@ -413,3 +413,6 @@ additional "satellite" protocols (e.g. `snap`) using negotiated `SharedCapabilit
 - Starting with ETH69:
   - `BlockRangeUpdate (0x11)` announces the historical block range served.
   - Receipts omit bloom: encoded as `Receipts69` instead of `Receipts`.
+- Starting with ETH70 (EIP-7975):
+  - Status reuses the ETH69 format (no additional block range fields).
+  - Receipts continue to omit bloom; `GetReceipts`/`Receipts` add the eth/70 variants to support partial receipt ranges (`firstBlockReceiptIndex` and `lastBlockIncomplete`).
