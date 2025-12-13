@@ -6,15 +6,18 @@ use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_engine_primitives::{ConsensusEngineEvent, ForkchoiceStatus};
+use reth_ethereum_forks::{ForkCondition, Hardfork};
 use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
 use reth_prune_types::PrunerEvent;
 use reth_stages::{EntitiesCheckpoint, ExecOutput, PipelineEvent, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileProducerEvent;
 use std::{
+    collections::HashSet,
     fmt::{Display, Formatter},
     future::Future,
     pin::Pin,
+    sync::Arc,
     task::{Context, Poll},
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -23,6 +26,33 @@ use tracing::{debug, info, warn};
 
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
+
+/// Information about a hardfork for tracking activation.
+#[derive(Debug, Clone)]
+pub struct HardforkInfo {
+    /// The name of the hardfork.
+    pub name: &'static str,
+    /// The activation condition for this hardfork.
+    pub condition: ForkCondition,
+}
+
+impl HardforkInfo {
+    /// Creates a new [`HardforkInfo`] from a hardfork and its condition.
+    pub fn new(fork: &dyn Hardfork, condition: ForkCondition) -> Self {
+        Self { name: fork.name(), condition }
+    }
+
+    /// Returns true if this hardfork is active at the given block number and timestamp.
+    pub const fn is_active(&self, block_number: u64, timestamp: u64) -> bool {
+        match self.condition {
+            ForkCondition::Block(n) | ForkCondition::TTD { fork_block: Some(n), .. } => {
+                block_number >= n
+            }
+            ForkCondition::Timestamp(ts) => timestamp >= ts,
+            _ => false,
+        }
+    }
+}
 
 /// The current high-level state of the node, including the node's database environment, network
 /// connections, current processing stage, and the latest block information. It provides
@@ -43,12 +73,17 @@ struct NodeState {
     finalized_block_hash: Option<B256>,
     /// The time when we last logged a status message
     last_status_log_time: Option<u64>,
+    /// Information about hardforks for tracking activation.
+    hardforks: Arc<[HardforkInfo]>,
+    /// Set of hardfork names that have already been logged as activated.
+    activated_forks: HashSet<&'static str>,
 }
 
 impl NodeState {
-    const fn new(
+    fn new(
         peers_info: Option<Box<dyn PeersInfo>>,
         latest_block: Option<BlockNumber>,
+        hardforks: Arc<[HardforkInfo]>,
     ) -> Self {
         Self {
             peers_info,
@@ -58,11 +93,33 @@ impl NodeState {
             safe_block_hash: None,
             finalized_block_hash: None,
             last_status_log_time: None,
+            hardforks,
+            activated_forks: HashSet::new(),
         }
     }
 
     fn num_connected_peers(&self) -> usize {
         self.peers_info.as_ref().map(|info| info.num_connected_peers()).unwrap_or_default()
+    }
+
+    /// Checks if any hardfork has become active and logs it.
+    fn check_hardfork_activation(&mut self, block_number: u64, timestamp: u64) {
+        for fork_info in self.hardforks.iter() {
+            if self.activated_forks.contains(fork_info.name) {
+                continue;
+            }
+
+            if fork_info.is_active(block_number, timestamp) {
+                info!(
+                    target: "reth::cli",
+                    hardfork = %fork_info.name,
+                    block_number,
+                    timestamp,
+                    "Hardfork activated"
+                );
+                self.activated_forks.insert(fork_info.name);
+            }
+        }
     }
 
     fn build_current_stage(
@@ -254,6 +311,8 @@ impl NodeState {
                 );
             }
             ConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
+                self.check_hardfork_activation(head.number(), head.timestamp());
+
                 self.latest_block = Some(head.number());
                 info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
@@ -364,14 +423,18 @@ pub enum NodeEvent<N: NodePrimitives> {
 
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
+///
+/// If `hardforks` is provided, logs when hardforks are activated.
 pub async fn handle_events<E, N: NodePrimitives>(
     peers_info: Option<Box<dyn PeersInfo>>,
     latest_block_number: Option<BlockNumber>,
     events: E,
+    hardforks: Option<Arc<[HardforkInfo]>>,
 ) where
     E: Stream<Item = NodeEvent<N>> + Unpin,
 {
-    let state = NodeState::new(peers_info, latest_block_number);
+    let hardforks = hardforks.unwrap_or_else(|| Arc::from([]));
+    let state = NodeState::new(peers_info, latest_block_number, hardforks);
 
     let start = tokio::time::Instant::now() + Duration::from_secs(3);
     let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);
