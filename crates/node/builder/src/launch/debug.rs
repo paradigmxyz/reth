@@ -269,6 +269,17 @@ pub type DebugBlockProviderFactory<N, AddOns> = Box<
         + 'static,
 >;
 
+/// Dev payload builder configuration.
+enum DevBuilderConfig<N: FullNodeComponents> {
+    Factory(DevPayloadAttributesBuilderFactory<N>),
+    Builder(Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>),
+    DefaultWithMap(
+        Option<
+            Box<dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync + 'static>,
+        >,
+    ),
+}
+
 /// Node launcher with support for launching various debugging utilities.
 ///
 /// This launcher wraps an existing launcher and adds debugging capabilities when
@@ -311,12 +322,7 @@ where
 {
     inner: L,
     target: Target,
-    local_payload_attributes_builder:
-        Option<Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>>,
-    map_attributes: Option<
-        Box<dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync + 'static>,
-    >,
-    dev_payload_attributes_builder_factory: Option<DevPayloadAttributesBuilderFactory<N>>,
+    dev_builder_config: Option<DevBuilderConfig<N>>,
     rpc_consensus_convert_json: Option<RpcConsensusJsonConvert<N>>,
     debug_block_provider_factory: Option<DebugBlockProviderFactory<N, AddOns>>,
 }
@@ -334,9 +340,7 @@ where
         Self {
             inner: self.inner,
             target: self.target,
-            local_payload_attributes_builder: Some(Box::new(builder)),
-            map_attributes: None,
-            dev_payload_attributes_builder_factory: self.dev_payload_attributes_builder_factory,
+            dev_builder_config: Some(DevBuilderConfig::Builder(Box::new(builder))),
             rpc_consensus_convert_json: self.rpc_consensus_convert_json,
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
@@ -349,9 +353,7 @@ where
         Self {
             inner: self.inner,
             target: self.target,
-            local_payload_attributes_builder: None,
-            map_attributes: Some(Box::new(f)),
-            dev_payload_attributes_builder_factory: self.dev_payload_attributes_builder_factory,
+            dev_builder_config: Some(DevBuilderConfig::DefaultWithMap(Some(Box::new(f)))),
             rpc_consensus_convert_json: self.rpc_consensus_convert_json,
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
@@ -365,9 +367,7 @@ where
         Self {
             inner: self.inner,
             target: self.target,
-            local_payload_attributes_builder: self.local_payload_attributes_builder,
-            map_attributes: self.map_attributes,
-            dev_payload_attributes_builder_factory: self.dev_payload_attributes_builder_factory,
+            dev_builder_config: self.dev_builder_config,
             rpc_consensus_convert_json: Some(Arc::new(convert)),
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
@@ -381,9 +381,7 @@ where
         Self {
             inner: self.inner,
             target: self.target,
-            local_payload_attributes_builder: self.local_payload_attributes_builder,
-            map_attributes: self.map_attributes,
-            dev_payload_attributes_builder_factory: Some(factory),
+            dev_builder_config: Some(DevBuilderConfig::Factory(factory)),
             rpc_consensus_convert_json: self.rpc_consensus_convert_json,
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
@@ -397,9 +395,7 @@ where
         Self {
             inner: self.inner,
             target: self.target,
-            local_payload_attributes_builder: self.local_payload_attributes_builder,
-            map_attributes: self.map_attributes,
-            dev_payload_attributes_builder_factory: self.dev_payload_attributes_builder_factory,
+            dev_builder_config: self.dev_builder_config,
             rpc_consensus_convert_json: self.rpc_consensus_convert_json,
             debug_block_provider_factory: Some(factory),
         }
@@ -421,9 +417,7 @@ where
         let Self {
             inner,
             target,
-            local_payload_attributes_builder,
-            map_attributes,
-            dev_payload_attributes_builder_factory,
+            dev_builder_config,
             rpc_consensus_convert_json,
             debug_block_provider_factory,
         } = self;
@@ -474,22 +468,29 @@ where
                     PayloadAttrTy<<N as FullNodeTypes>::Types>,
                     HeaderTy<<N as FullNodeTypes>::Types>,
                 >,
-            > = if let Some(factory) = dev_payload_attributes_builder_factory {
-                let ctx = DevMiningContext {
-                    chain_spec: chain_spec.clone(),
-                    provider: &blockchain_db,
-                    pool: &pool,
-                    payload_builder_handle: &payload_builder_handle,
-                };
-                factory(ctx)
-            } else if let Some(builder) = local_payload_attributes_builder {
-                builder
-            } else {
-                let local =
-                    <N as FullNodeTypes>::Types::local_payload_attributes_builder(&chain_spec);
-                if let Some(f) = map_attributes {
-                    Box::new(move |parent| f(local.build(&parent)))
-                } else {
+            > = match dev_builder_config {
+                Some(DevBuilderConfig::Factory(f)) => {
+                    let ctx = DevMiningContext {
+                        chain_spec: chain_spec.clone(),
+                        provider: &blockchain_db,
+                        pool: &pool,
+                        payload_builder_handle: &payload_builder_handle,
+                    };
+                    f(ctx)
+                }
+                Some(DevBuilderConfig::Builder(b)) => b,
+                Some(DevBuilderConfig::DefaultWithMap(map)) => {
+                    let local =
+                        <N as FullNodeTypes>::Types::local_payload_attributes_builder(&chain_spec);
+                    if let Some(map) = map {
+                        Box::new(move |parent| map(local.build(&parent)))
+                    } else {
+                        Box::new(local)
+                    }
+                }
+                None => {
+                    let local =
+                        <N as FullNodeTypes>::Types::local_payload_attributes_builder(&chain_spec);
                     Box::new(local)
                 }
             };
@@ -541,9 +542,7 @@ where
         DebugNodeLauncherFuture {
             inner: self.inner,
             target,
-            local_payload_attributes_builder: None,
-            map_attributes: None,
-            dev_payload_attributes_builder_factory: None,
+            dev_builder_config: None,
             rpc_consensus_convert_json: None,
             debug_block_provider_factory: None,
         }
