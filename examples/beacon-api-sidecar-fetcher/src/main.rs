@@ -77,7 +77,7 @@ pub struct BeaconSidecarConfig {
     /// Beacon Node http server address
     #[arg(long = "cl.addr", default_value_t = IpAddr::V4(Ipv4Addr::LOCALHOST))]
     pub cl_addr: IpAddr,
-    /// Beacon Node http server port to listen on
+    /// Beacon Node http server port to connect to
     #[arg(long = "cl.port", default_value_t = 5052)]
     pub cl_port: u16,
 }
