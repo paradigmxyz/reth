@@ -164,11 +164,25 @@ pub(crate) struct Args {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub reth_args: Vec<String>,
 
-    /// Comma-separated list of features to enable during reth compilation
+    /// Comma-separated list of features to enable during reth compilation (applied to both)
     ///
     /// Example: `jemalloc,asm-keccak`
     #[arg(long, value_name = "FEATURES", default_value = "jemalloc,asm-keccak")]
     pub features: String,
+
+    /// Comma-separated list of features to enable for baseline reth compilation only
+    /// (overrides --features for baseline)
+    ///
+    /// Example: `jemalloc,asm-keccak`
+    #[arg(long, value_name = "FEATURES")]
+    pub baseline_features: Option<String>,
+
+    /// Comma-separated list of features to enable for feature reth compilation only
+    /// (overrides --features for feature)
+    ///
+    /// Example: `jemalloc,asm-keccak,keccak-cache`
+    #[arg(long, value_name = "FEATURES")]
+    pub feature_features: Option<String>,
 
     /// Disable automatic --debug.startup-sync-state-idle flag for specific runs.
     /// Can be "baseline", "feature", or "all".
@@ -264,6 +278,21 @@ impl Args {
     pub(crate) fn get_warmup_blocks(&self) -> u64 {
         self.warmup_blocks.unwrap_or(self.blocks)
     }
+
+    /// Get the features string for a specific ref type (baseline or feature)
+    pub(crate) fn get_features_for_ref(&self, ref_type: &str) -> String {
+        match ref_type {
+            "baseline" | "warmup" => self
+                .baseline_features
+                .clone()
+                .unwrap_or_else(|| self.features.clone()),
+            "feature" => self
+                .feature_features
+                .clone()
+                .unwrap_or_else(|| self.features.clone()),
+            _ => self.features.clone(),
+        }
+    }
 }
 
 /// Validate that the RPC endpoint chain ID matches the specified chain
@@ -328,7 +357,6 @@ pub(crate) async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
         git_manager.repo_root().to_string(),
         output_dir.clone(),
         git_manager.clone(),
-        args.features.clone(),
     )?;
     // Initialize node manager
     let mut node_manager = NodeManager::new(&args);
@@ -447,19 +475,21 @@ async fn run_compilation_phase(
     for (i, &git_ref) in refs.iter().enumerate() {
         let ref_type = ref_types[i];
         let commit = &ref_commits[git_ref];
+        let features = args.get_features_for_ref(ref_type);
 
         info!(
-            "Compiling {} binary for reference: {} (commit: {})",
+            "Compiling {} binary for reference: {} (commit: {}) with features: {}",
             ref_type,
             git_ref,
-            &commit[..8]
+            &commit[..8],
+            features
         );
 
         // Switch to target reference
         git_manager.switch_ref(git_ref)?;
 
         // Compile reth (with caching)
-        compilation_manager.compile_reth(commit, is_optimism)?;
+        compilation_manager.compile_reth(commit, &features, is_optimism)?;
 
         info!("Completed compilation for {} reference", ref_type);
     }
@@ -490,8 +520,13 @@ async fn run_warmup_phase(
     git_manager.switch_ref(warmup_ref)?;
 
     // Get the cached binary path for baseline (should already be compiled)
-    let binary_path =
-        compilation_manager.get_cached_binary_path_for_commit(baseline_commit, is_optimism);
+    // Warmup uses baseline features
+    let baseline_features = args.get_features_for_ref("baseline");
+    let binary_path = compilation_manager.get_cached_binary_path_for_commit(
+        baseline_commit,
+        &baseline_features,
+        is_optimism,
+    );
 
     // Verify the cached binary exists
     if !binary_path.exists() {
@@ -582,9 +617,12 @@ async fn run_benchmark_workflow(
         // Switch to target reference
         git_manager.switch_ref(git_ref)?;
 
+        // Get features for this ref type
+        let features = args.get_features_for_ref(ref_type);
+
         // Get the cached binary path for this git reference (should already be compiled)
         let binary_path =
-            compilation_manager.get_cached_binary_path_for_commit(commit, is_optimism);
+            compilation_manager.get_cached_binary_path_for_commit(commit, &features, is_optimism);
 
         // Verify the cached binary exists
         if !binary_path.exists() {

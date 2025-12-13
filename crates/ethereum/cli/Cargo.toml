@@ -30,6 +30,9 @@ clap.workspace = true
 eyre.workspace = true
 tracing.workspace = true
 
+# optional
+alloy-primitives = { workspace = true, optional = true }
+
 [dev-dependencies]
 # fs
 tempfile.workspace = true
@@ -44,6 +47,13 @@ dev = ["reth-cli-commands/arbitrary"]
 asm-keccak = [
     "reth-node-core/asm-keccak",
     "reth-node-ethereum/asm-keccak",
+]
+
+keccak-cache = [
+    "dep:alloy-primitives",
+    "alloy-primitives/keccak-cache",
+    "reth-node-metrics/keccak-cache",
+    "reth-node-ethereum/keccak-cache",
 ]
 
 jemalloc = [

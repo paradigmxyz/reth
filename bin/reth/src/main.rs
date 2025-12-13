@@ -42,4 +42,10 @@ fn main() {
         eprintln!("Error: {err:?}");
         std::process::exit(1);
     }
+
+    // Option 3: Manual - call whenever you want
+    let stats = alloy_primitives::utils::keccak_cache_stats();
+    eprintln!("{stats}");  // Display impl formats nicely
+    let traces = alloy_primitives::utils::keccak_cache_callsite_traces();
+    eprintln!("{traces:#?}");  // Display impl formats nicely
 }

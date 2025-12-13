@@ -13,7 +13,6 @@ pub(crate) struct CompilationManager {
     repo_root: String,
     output_dir: PathBuf,
     git_manager: GitManager,
-    features: String,
 }
 
 impl CompilationManager {
@@ -22,9 +21,8 @@ impl CompilationManager {
         repo_root: String,
         output_dir: PathBuf,
         git_manager: GitManager,
-        features: String,
     ) -> Result<Self> {
-        Ok(Self { repo_root, output_dir, git_manager, features })
+        Ok(Self { repo_root, output_dir, git_manager })
     }
 
     /// Detect if the RPC endpoint is an Optimism chain
@@ -50,25 +48,42 @@ impl CompilationManager {
         Ok(is_optimism)
     }
 
-    /// Get the path to the cached binary using explicit commit hash
+    /// Get the path to the cached binary using explicit commit hash and features
     pub(crate) fn get_cached_binary_path_for_commit(
         &self,
         commit: &str,
+        features: &str,
         is_optimism: bool,
     ) -> PathBuf {
-        let identifier = &commit[..8]; // Use first 8 chars of commit
+        let commit_id = &commit[..8]; // Use first 8 chars of commit
+        // Create a short hash of features to include in binary name
+        let features_hash = Self::hash_features(features);
 
         let binary_name = if is_optimism {
-            format!("op-reth_{}", identifier)
+            format!("op-reth_{}_{}", commit_id, features_hash)
         } else {
-            format!("reth_{}", identifier)
+            format!("reth_{}_{}", commit_id, features_hash)
         };
 
         self.output_dir.join("bin").join(binary_name)
     }
 
+    /// Create a short hash of features string for caching
+    fn hash_features(features: &str) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+        let mut hasher = DefaultHasher::new();
+        features.hash(&mut hasher);
+        format!("{:08x}", hasher.finish() as u32)
+    }
+
     /// Compile reth using cargo build and cache the binary
-    pub(crate) fn compile_reth(&self, commit: &str, is_optimism: bool) -> Result<()> {
+    pub(crate) fn compile_reth(
+        &self,
+        commit: &str,
+        features: &str,
+        is_optimism: bool,
+    ) -> Result<()> {
         // Validate that current git commit matches the expected commit
         let current_commit = self.git_manager.get_current_commit()?;
         if current_commit != commit {
@@ -79,7 +94,7 @@ impl CompilationManager {
             ));
         }
 
-        let cached_path = self.get_cached_binary_path_for_commit(commit, is_optimism);
+        let cached_path = self.get_cached_binary_path_for_commit(commit, features, is_optimism);
 
         // Check if cached binary already exists (since path contains commit hash, it's valid)
         if cached_path.exists() {
@@ -101,8 +116,8 @@ impl CompilationManager {
         cmd.arg("build").arg("--profile").arg("profiling");
 
         // Add features
-        cmd.arg("--features").arg(&self.features);
-        info!("Using features: {}", self.features);
+        cmd.arg("--features").arg(features);
+        info!("Using features: {}", features);
 
         // Add bin-specific arguments for optimism
         if is_optimism {

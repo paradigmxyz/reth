@@ -64,6 +64,7 @@ reth-ress-provider.workspace = true
 
 # alloy
 alloy-rpc-types = { workspace = true, features = ["engine"] }
+alloy-primitives = { workspace = true, features = ["keccak-cache"] }
 
 # tracing
 tracing.workspace = true
@@ -101,6 +102,11 @@ asm-keccak = [
     "reth-primitives/asm-keccak",
     "reth-ethereum-cli/asm-keccak",
     "reth-node-ethereum/asm-keccak",
+]
+
+keccak-cache = [
+    "reth-ethereum-cli/keccak-cache",
+    "reth-node-ethereum/keccak-cache",
 ]
 
 jemalloc = [
