@@ -269,6 +269,23 @@ pub type DebugBlockProviderFactory<N, AddOns> = Box<
         + 'static,
 >;
 
+fn spawn_consensus_client<N, AddOns>(
+    handle: &NodeHandle<N, AddOns>,
+    provider: DynBlockProviderHandle<BlockTy<<N as FullNodeTypes>::Types>>,
+) where
+    N: FullNodeComponents<Types: DebugNode<N>>,
+    AddOns: RethRpcAddOns<N>,
+{
+    let client = DebugConsensusClient::new(
+        handle.node.add_ons_handle.beacon_engine_handle.clone(),
+        provider,
+    );
+    handle
+        .node
+        .task_executor
+        .spawn_critical("debug consensus client", async move { client.run().await });
+}
+
 /// Dev payload builder configuration.
 enum DevBuilderConfig<N: FullNodeComponents> {
     Factory(DevPayloadAttributesBuilderFactory<N>),
@@ -427,13 +444,7 @@ where
         let config = &handle.node.config;
         if let Some(block_provider_factory) = debug_block_provider_factory {
             let provider = block_provider_factory(config, &handle)?;
-            let rpc_consensus_client = DebugConsensusClient::new(
-                handle.node.add_ons_handle.beacon_engine_handle.clone(),
-                provider,
-            );
-            handle.node.task_executor.spawn_critical("custom consensus client", async move {
-                rpc_consensus_client.run().await
-            });
+            spawn_consensus_client(&handle, provider);
         } else {
             let convert_json = rpc_consensus_convert_json
                 .unwrap_or_else(<N as FullNodeTypes>::Types::default_json_convert);
@@ -445,13 +456,7 @@ where
                 })
                 .await?;
 
-            let rpc_consensus_client = DebugConsensusClient::new(
-                handle.node.add_ons_handle.beacon_engine_handle.clone(),
-                block_provider,
-            );
-            handle.node.task_executor.spawn_critical("debug consensus client", async move {
-                rpc_consensus_client.run().await
-            });
+            spawn_consensus_client(&handle, block_provider);
         }
 
         if config.dev.dev {
