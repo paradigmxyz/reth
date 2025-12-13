@@ -117,62 +117,75 @@ pub type DevPayloadAttributesBuilderFactory<N> = Box<
 >;
 
 /// Object-safe wrapper for a [`BlockProvider`] with boxed futures.
-pub(crate) trait ErasedBlockProvider<B: Block>: Send + Sync {
-    fn subscribe_blocks(&self, tx: Sender<B>) -> Pin<Box<dyn Future<Output = ()> + Send>>;
-    fn get_block(&self, block_number: u64)
-        -> Pin<Box<dyn Future<Output = eyre::Result<B>> + Send>>;
+pub trait DynBlockProvider<B: Block>: Send + Sync {
+    /// Subscribes to new blocks and forwards them to the given channel.
+    fn subscribe_blocks(&self, tx: Sender<B>)
+        -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
+    /// Fetches a specific block by number.
+    fn get_block(
+        &self,
+        block_number: u64,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<B>> + Send + 'static>>;
 }
 
-impl<B, P> ErasedBlockProvider<B> for P
+/// Convenience handle for using a dynamic block provider where [`BlockProvider`] is expected.
+#[derive(Clone)]
+pub struct DynBlockProviderHandle<B: Block + 'static>(Arc<dyn DynBlockProvider<B>>);
+
+impl<B: Block + 'static> DynBlockProviderHandle<B> {
+    /// Wraps any [`BlockProvider`] as a dynamic provider handle.
+    pub fn new<P>(provider: P) -> Self
+    where
+        P: BlockProvider<Block = B> + Send + Sync + 'static,
+    {
+        Self(Arc::new(DynBlockProviderAdapter { inner: Arc::new(provider) }))
+    }
+}
+
+impl<B: Block + 'static> fmt::Debug for DynBlockProviderHandle<B> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("DynBlockProviderHandle").finish_non_exhaustive()
+    }
+}
+
+impl<B: Block + 'static> BlockProvider for DynBlockProviderHandle<B> {
+    type Block = B;
+
+    async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
+        DynBlockProvider::subscribe_blocks(self.0.as_ref(), tx).await
+    }
+
+    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
+        DynBlockProvider::get_block(self.0.as_ref(), block_number).await
+    }
+}
+
+struct DynBlockProviderAdapter<
+    B: Block + 'static,
+    P: BlockProvider<Block = B> + Send + Sync + 'static,
+> {
+    inner: Arc<P>,
+}
+
+impl<B, P> DynBlockProvider<B> for DynBlockProviderAdapter<B, P>
 where
     B: Block + 'static,
-    P: BlockProvider<Block = B> + Clone + Send + Sync + 'static,
+    P: BlockProvider<Block = B> + Send + Sync + 'static,
 {
-    fn subscribe_blocks(&self, tx: Sender<B>) -> Pin<Box<dyn Future<Output = ()> + Send>> {
-        let this = self.clone();
-        Box::pin(async move { this.subscribe_blocks(tx).await })
+    fn subscribe_blocks(
+        &self,
+        tx: Sender<B>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.subscribe_blocks(tx).await })
     }
 
     fn get_block(
         &self,
         block_number: u64,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<B>> + Send>> {
-        let this = self.clone();
-        Box::pin(async move { this.get_block(block_number).await })
-    }
-}
-
-/// Boxed block provider that satisfies the [`BlockProvider`] trait while being cloneable.
-#[derive(Clone)]
-pub struct BoxedBlockProvider<B: Block + 'static> {
-    inner: Arc<dyn ErasedBlockProvider<B>>,
-}
-
-impl<B: Block + 'static> BoxedBlockProvider<B> {
-    #[allow(dead_code)]
-    pub(crate) fn new<P>(provider: P) -> Self
-    where
-        P: BlockProvider<Block = B> + Clone + Send + Sync + 'static,
-    {
-        Self { inner: Arc::new(provider) }
-    }
-}
-
-impl<B: Block + 'static> BlockProvider for BoxedBlockProvider<B> {
-    type Block = B;
-
-    async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
-        self.inner.subscribe_blocks(tx).await
-    }
-
-    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
-        self.inner.get_block(block_number).await
-    }
-}
-
-impl<B: Block + 'static> fmt::Debug for BoxedBlockProvider<B> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("BoxedBlockProvider").finish_non_exhaustive()
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<B>> + Send + 'static>> {
+        let inner = self.inner.clone();
+        Box::pin(async move { inner.get_block(block_number).await })
     }
 }
 
@@ -181,7 +194,7 @@ pub type DebugBlockProviderFactory<N, AddOns> = Box<
     dyn Fn(
             &NodeConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
             &NodeHandle<N, AddOns>,
-        ) -> eyre::Result<BoxedBlockProvider<BlockTy<<N as FullNodeTypes>::Types>>>
+        ) -> eyre::Result<DynBlockProviderHandle<BlockTy<<N as FullNodeTypes>::Types>>>
         + Send
         + Sync
         + 'static,
@@ -390,9 +403,11 @@ where
                 })
                 .await?;
 
+                let block_provider = DynBlockProviderHandle::new(block_provider);
+
                 let rpc_consensus_client = DebugConsensusClient::new(
                     handle.node.add_ons_handle.beacon_engine_handle.clone(),
-                    Arc::new(block_provider),
+                    block_provider,
                 );
 
                 handle.node.task_executor.spawn_critical("rpc-ws consensus client", async move {
@@ -421,9 +436,10 @@ where
                     chain.id(),
                     <N as FullNodeTypes>::Types::rpc_to_primitive_block,
                 );
+                let block_provider = DynBlockProviderHandle::new(block_provider);
                 let rpc_consensus_client = DebugConsensusClient::new(
                     handle.node.add_ons_handle.beacon_engine_handle.clone(),
-                    Arc::new(block_provider),
+                    block_provider,
                 );
                 handle
                     .node
