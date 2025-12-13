@@ -136,17 +136,12 @@ pub type RpcConsensusJsonConvert<N> =
     Arc<dyn Fn(Value) -> BlockTy<<N as FullNodeTypes>::Types> + Send + Sync + 'static>;
 
 /// Context passed to construct a debug block provider.
+#[allow(missing_debug_implementations)]
 pub struct DebugBlockProviderContext<'a, N: FullNodeComponents> {
     /// Node configuration for accessing debug settings.
     pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
     /// Converter used to map RPC responses into primitive blocks.
     pub convert_json: RpcConsensusJsonConvert<N>,
-}
-
-impl<'a, N: FullNodeComponents> fmt::Debug for DebugBlockProviderContext<'a, N> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DebugBlockProviderContext").finish_non_exhaustive()
-    }
 }
 
 /// Future returning a dynamic block provider.
