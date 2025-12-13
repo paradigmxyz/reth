@@ -16,7 +16,6 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives_traits::Block;
 use serde_json::Value;
 use std::{
-    fmt,
     future::{Future, IntoFuture},
     pin::Pin,
     sync::Arc,
@@ -196,6 +195,7 @@ pub trait DynBlockProvider<B: Block>: Send + Sync {
 
 /// Convenience handle for using a dynamic block provider where [`BlockProvider`] is expected.
 #[derive(Clone)]
+#[allow(missing_debug_implementations)]
 pub struct DynBlockProviderHandle<B: Block + 'static>(Arc<dyn DynBlockProvider<B>>);
 
 impl<B: Block + 'static> DynBlockProviderHandle<B> {
@@ -205,12 +205,6 @@ impl<B: Block + 'static> DynBlockProviderHandle<B> {
         P: BlockProvider<Block = B> + Send + Sync + 'static,
     {
         Self(Arc::new(DynBlockProviderAdapter { inner: Arc::new(provider) }))
-    }
-}
-
-impl<B: Block + 'static> fmt::Debug for DynBlockProviderHandle<B> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("DynBlockProviderHandle").finish_non_exhaustive()
     }
 }
 
@@ -308,13 +302,10 @@ where
 {
     inner: L,
     target: Target,
-    local_payload_attributes_builder: Option<
-        Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>,
-    >,
+    local_payload_attributes_builder:
+        Option<Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>>,
     map_attributes: Option<
-        Box<
-            dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync + 'static,
-        >,
+        Box<dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync + 'static>,
     >,
     dev_payload_attributes_builder_factory: Option<DevPayloadAttributesBuilderFactory<N>>,
     rpc_consensus_convert_json: Option<RpcConsensusJsonConvert<N>>,
@@ -329,10 +320,7 @@ where
 {
     pub fn with_payload_attributes_builder(
         self,
-        builder: impl PayloadAttributesBuilder<
-            PayloadAttrTy<N::Types>,
-            HeaderTy<N::Types>,
-        >,
+        builder: impl PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>,
     ) -> Self {
         Self {
             inner: self.inner,
@@ -347,12 +335,7 @@ where
 
     pub fn map_debug_payload_attributes(
         self,
-        f: impl Fn(
-                PayloadAttrTy<N::Types>,
-            ) -> PayloadAttrTy<N::Types>
-            + Send
-            + Sync
-            + 'static,
+        f: impl Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync + 'static,
     ) -> Self {
         Self {
             inner: self.inner,
@@ -416,7 +399,10 @@ where
     /// Provides an already constructed block provider for the debug consensus client.
     pub fn with_debug_block_client(
         self,
-        provider: impl BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + Send + Sync + 'static,
+        provider: impl BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>>
+            + Send
+            + Sync
+            + 'static,
     ) -> Self {
         let handle = DynBlockProviderHandle::new(provider);
         self.with_debug_block_provider_factory(Box::new(move |_, _| Ok(handle.clone())))
