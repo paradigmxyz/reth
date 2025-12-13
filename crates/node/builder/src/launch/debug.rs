@@ -82,6 +82,15 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
         chain_spec: &Self::ChainSpec,
     ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes, HeaderTy<Self>>;
 
+    /// Default JSON-to-primitive block converter used by the debug consensus client.
+    fn default_json_convert() -> RpcConsensusJsonConvert<N> {
+        Arc::new(|json: Value| {
+            let rpc_block: Self::RpcBlock =
+                serde_json::from_value(json).expect("Block deserialization cannot fail");
+            Self::rpc_to_primitive_block(rpc_block)
+        })
+    }
+
     /// Constructs a block provider for the debug consensus client.
     ///
     /// Default implementation wires either RPC or Etherscan provider based on debug config,
@@ -432,13 +441,8 @@ where
                 rpc_consensus_client.run().await
             });
         } else {
-            let convert_json = rpc_consensus_convert_json.unwrap_or_else(|| {
-                Arc::new(|json: Value| {
-                    let rpc_block: <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock =
-                        serde_json::from_value(json).expect("Block deserialization cannot fail");
-                    <N as FullNodeTypes>::Types::rpc_to_primitive_block(rpc_block)
-                })
-            });
+            let convert_json = rpc_consensus_convert_json
+                .unwrap_or_else(<N as FullNodeTypes>::Types::default_json_convert);
 
             let block_provider =
                 <N as FullNodeTypes>::Types::block_provider(DebugBlockProviderContext {
