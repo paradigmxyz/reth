@@ -1,7 +1,7 @@
 //! Helper traits to wrap generic l1 errors, in network specific error type configured in
 //! `reth_rpc_eth_api::EthApiTypes`.
 
-use crate::{simulate::EthSimulateError, EthApiError, RevertError};
+use crate::{simulate::EthSimulateError, EthApiError, EthApiEvmErr, RevertError};
 use alloy_primitives::Bytes;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, EvmErrorFor, HaltReasonFor};
@@ -117,6 +117,9 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
         err.into()
     }
 
+    /// Converts from EVM error to this type with transaction index context.
+    fn from_evm_err_at_index(err: EvmErrorFor<Evm, ProviderError>, tx_index: usize) -> Self;
+
     /// Ensures the execution result is successful or returns an error,
     fn ensure_success(result: ExecutionResult<HaltReasonFor<Evm>>) -> Result<Bytes, Self> {
         match result {
@@ -131,9 +134,17 @@ pub trait FromEvmError<Evm: ConfigureEvm>:
 
 impl<T, Evm> FromEvmError<Evm> for T
 where
-    T: From<EvmErrorFor<Evm, ProviderError>> + FromEvmHalt<HaltReasonFor<Evm>> + FromRevert,
+    T: From<EvmErrorFor<Evm, ProviderError>>
+        + FromEvmHalt<HaltReasonFor<Evm>>
+        + FromRevert
+        + From<EthApiError>,
     Evm: ConfigureEvm,
+    EthApiError: From<EthApiEvmErr<EvmErrorFor<Evm, ProviderError>>>,
 {
+    fn from_evm_err_at_index(err: EvmErrorFor<Evm, ProviderError>, tx_index: usize) -> Self {
+        let indexed = EthApiEvmErr::new(err, tx_index);
+        EthApiError::from(indexed).into()
+    }
 }
 
 /// Helper trait to convert from revm errors.

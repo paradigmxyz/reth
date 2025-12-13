@@ -535,6 +535,38 @@ impl From<Infallible> for EthApiError {
     }
 }
 
+/// Wrapper for EVM errors with transaction index context.
+#[derive(Debug)]
+pub struct EthApiEvmErr<E> {
+    /// The underlying EVM error.
+    pub inner: E,
+    /// Transaction index where the error occurred.
+    pub index: usize,
+}
+
+impl<E> EthApiEvmErr<E> {
+    /// Creates a new indexed EVM error.
+    pub const fn new(inner: E, index: usize) -> Self {
+        Self { inner, index }
+    }
+}
+
+impl<E: core::fmt::Display> core::fmt::Display for EthApiEvmErr<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "transaction execution failed (index {}): {}", self.index, self.inner)
+    }
+}
+
+impl<T, TxError> From<EthApiEvmErr<EVMError<T, TxError>>> for EthApiError
+where
+    T: Into<Self> + core::fmt::Display,
+    TxError: reth_evm::InvalidTxError + core::fmt::Display,
+{
+    fn from(err: EthApiEvmErr<EVMError<T, TxError>>) -> Self {
+        Self::EvmCustom(err.to_string())
+    }
+}
+
 /// An error due to invalid transaction.
 ///
 /// The only reason this exists is to maintain compatibility with other clients de-facto standard
