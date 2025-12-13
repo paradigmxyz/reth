@@ -6,7 +6,7 @@ use crate::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Transaction as _};
 use alloy_eips::eip2718::WithEncoded;
-use alloy_network::TransactionBuilder;
+use alloy_network::{TransactionBuilder, NetworkTransactionBuilder};
 use alloy_rpc_types_eth::{
     simulate::{SimCallResult, SimulateError, SimulatedBlock},
     BlockTransactionsKind,

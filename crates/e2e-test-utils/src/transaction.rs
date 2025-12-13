@@ -3,7 +3,7 @@ use alloy_consensus::{
 };
 use alloy_eips::{eip7594::BlobTransactionSidecarVariant, eip7702::SignedAuthorization};
 use alloy_network::{
-    eip2718::Encodable2718, Ethereum, EthereumWallet, TransactionBuilder, TransactionBuilder4844,
+    Ethereum, EthereumWallet, NetworkTransactionBuilder, TransactionBuilder4844, eip2718::Encodable2718
 };
 use alloy_primitives::{hex, Address, Bytes, TxKind, B256, U256};
 use alloy_rpc_types_eth::{Authorization, TransactionInput, TransactionRequest};
@@ -115,7 +115,7 @@ impl TransactionTestContext {
     /// Signs an arbitrary [`TransactionRequest`] using the provided wallet
     pub async fn sign_tx(wallet: PrivateKeySigner, tx: TransactionRequest) -> TxEnvelope {
         let signer = EthereumWallet::from(wallet);
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx, &signer).await.unwrap()
+        <TransactionRequest as NetworkTransactionBuilder<Ethereum>>::build(tx, &signer).await.unwrap()
     }
 
     /// Creates a tx with blob sidecar and sign it, returning bytes
@@ -139,7 +139,7 @@ impl TransactionTestContext {
         ));
         let tx = tx(chain_id, 210000, Some(l1_block_info), None, nonce, Some(20e9 as u128));
         let signer = EthereumWallet::from(wallet);
-        <TransactionRequest as TransactionBuilder<Ethereum>>::build(tx, &signer)
+        <TransactionRequest as NetworkTransactionBuilder<Ethereum>>::build(tx, &signer)
             .await
             .unwrap()
             .encoded_2718()
