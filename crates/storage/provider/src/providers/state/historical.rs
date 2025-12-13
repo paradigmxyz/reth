@@ -339,6 +339,16 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
+    fn storage_root_from_nodes(
+        &self,
+        address: Address,
+        mut input: TrieInput,
+    ) -> ProviderResult<B256> {
+        input.prepend(self.revert_state()?.into());
+        StorageRoot::overlay_root_from_nodes(self.tx(), address, input)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
     fn storage_proof(
         &self,
         address: Address,
@@ -348,6 +358,17 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
         StorageProof::overlay_storage_proof(self.tx(), address, slot, revert_storage)
+            .map_err(ProviderError::from)
+    }
+
+    fn storage_proof_from_nodes(
+        &self,
+        address: Address,
+        slot: B256,
+        mut input: TrieInput,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        input.prepend(self.revert_state()?.into());
+        StorageProof::overlay_storage_proof_from_nodes(self.tx(), address, slot, input)
             .map_err(ProviderError::from)
     }
 

@@ -149,21 +149,43 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
 }
 
 impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_, N> {
-    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
-        let merged = self.merged_hashed_storage(address, storage);
-        self.historical.storage_root(address, merged)
+        self.storage_root_from_nodes(
+            address,
+            TrieInput::from_hashed_storage(keccak256(address), storage),
+        )
     }
 
-    // TODO: Currently this does not reuse available in-memory trie nodes.
+    fn storage_root_from_nodes(
+        &self,
+        address: Address,
+        mut input: TrieInput,
+    ) -> ProviderResult<B256> {
+        input.prepend_self(self.trie_input().clone());
+        self.historical.storage_root_from_nodes(address, input)
+    }
+
     fn storage_proof(
         &self,
         address: Address,
         slot: B256,
         storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        let merged = self.merged_hashed_storage(address, storage);
-        self.historical.storage_proof(address, slot, merged)
+        self.storage_proof_from_nodes(
+            address,
+            slot,
+            TrieInput::from_hashed_storage(keccak256(address), storage),
+        )
+    }
+
+    fn storage_proof_from_nodes(
+        &self,
+        address: Address,
+        slot: B256,
+        mut input: TrieInput,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        input.prepend_self(self.trie_input().clone());
+        self.historical.storage_proof_from_nodes(address, slot, input)
     }
 
     // TODO: Currently this does not reuse available in-memory trie nodes.

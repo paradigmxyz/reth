@@ -99,6 +99,11 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
+    fn storage_root_from_nodes(&self, address: Address, input: TrieInput) -> ProviderResult<B256> {
+        StorageRoot::overlay_root_from_nodes(self.tx(), address, input)
+            .map_err(|err| ProviderError::Database(err.into()))
+    }
+
     fn storage_proof(
         &self,
         address: Address,
@@ -106,6 +111,16 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
         hashed_storage: HashedStorage,
     ) -> ProviderResult<reth_trie::StorageProof> {
         StorageProof::overlay_storage_proof(self.tx(), address, slot, hashed_storage)
+            .map_err(ProviderError::from)
+    }
+
+    fn storage_proof_from_nodes(
+        &self,
+        address: Address,
+        slot: B256,
+        input: TrieInput,
+    ) -> ProviderResult<reth_trie::StorageProof> {
+        StorageProof::overlay_storage_proof_from_nodes(self.tx(), address, slot, input)
             .map_err(ProviderError::from)
     }
 
