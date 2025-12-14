@@ -445,7 +445,7 @@ where
         if let Some(block_provider_factory) = debug_block_provider_factory {
             let provider = block_provider_factory(config, &handle)?;
             spawn_consensus_client(&handle, provider);
-        } else {
+        } else if config.debug.rpc_consensus_url.is_some() || config.debug.etherscan.is_some() {
             let convert_json = rpc_consensus_convert_json
                 .unwrap_or_else(<N as FullNodeTypes>::Types::default_json_convert);
 
@@ -457,6 +457,8 @@ where
                 .await?;
 
             spawn_consensus_client(&handle, block_provider);
+        } else {
+            info!(target: "reth::cli", "Debug consensus client not configured; skipping");
         }
 
         if config.dev.dev {
