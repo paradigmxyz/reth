@@ -221,6 +221,27 @@ pub trait BlockBody:
             .zip(signers)
             .map(|(tx, signer)| Recovered::new_unchecked(tx, signer)))
     }
+
+    /// Returns an iterator over `Recovered<&Transaction>` for all transactions in the block body
+    /// _without ensuring that the signature has a low `s` value_.
+    ///
+    /// This method recovers signers and returns an iterator without cloning transactions,
+    /// making it more efficient than recovering with owned transactions when owned values are not
+    /// required.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if any transaction's signature is invalid.
+    fn recover_transactions_unchecked_ref(
+        &self,
+    ) -> Result<impl Iterator<Item = Recovered<&Self::Transaction>> + '_, RecoveryError> {
+        let signers = self.recover_signers_unchecked()?;
+        Ok(self
+            .transactions()
+            .iter()
+            .zip(signers)
+            .map(|(tx, signer)| Recovered::new_unchecked(tx, signer)))
+    }
 }
 
 impl<T, H> BlockBody for alloy_consensus::BlockBody<T, H>

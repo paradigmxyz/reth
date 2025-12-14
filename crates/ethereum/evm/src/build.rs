@@ -5,7 +5,6 @@ use alloy_consensus::{
 };
 use alloy_eips::merge::BEACON_NONCE;
 use alloy_evm::{block::BlockExecutorFactory, eth::EthBlockExecutionCtx};
-use alloy_primitives::Bytes;
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_evm::execute::{BlockAssembler, BlockAssemblerInput, BlockExecutionError};
 use reth_execution_types::BlockExecutionResult;
@@ -17,14 +16,12 @@ use revm::context::Block as _;
 pub struct EthBlockAssembler<ChainSpec = reth_chainspec::ChainSpec> {
     /// The chainspec.
     pub chain_spec: Arc<ChainSpec>,
-    /// Extra data to use for the blocks.
-    pub extra_data: Bytes,
 }
 
 impl<ChainSpec> EthBlockAssembler<ChainSpec> {
     /// Creates a new [`EthBlockAssembler`].
-    pub fn new(chain_spec: Arc<ChainSpec>) -> Self {
-        Self { chain_spec, extra_data: Default::default() }
+    pub const fn new(chain_spec: Arc<ChainSpec>) -> Self {
+        Self { chain_spec }
     }
 }
 
@@ -123,7 +120,7 @@ where
             gas_limit: evm_env.block_env.gas_limit(),
             difficulty: evm_env.block_env.difficulty(),
             gas_used: *gas_used,
-            extra_data: self.extra_data.clone(),
+            extra_data: ctx.extra_data,
             parent_beacon_block_root: ctx.parent_beacon_block_root,
             blob_gas_used: block_blob_gas_used,
             excess_blob_gas,

@@ -241,7 +241,7 @@ mod tests {
 
     use alloy_consensus::{BlockBody, Eip658Value, Header, Receipt, TxEip7702, TxReceipt};
     use alloy_eips::{eip4895::Withdrawals, eip7685::Requests};
-    use alloy_primitives::{Address, Bytes, Signature, U256};
+    use alloy_primitives::{Address, Bytes, Log, Signature, U256};
     use op_alloy_consensus::{
         encode_holocene_extra_data, encode_jovian_extra_data, OpTypedTransaction,
     };
@@ -369,7 +369,7 @@ mod tests {
 
         let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
 
-        let receipt = OpReceipt::Eip7702(Receipt {
+        let receipt = OpReceipt::Eip7702(Receipt::<Log> {
             status: Eip658Value::success(),
             cumulative_gas_used: GAS_USED,
             logs: vec![],
@@ -440,7 +440,7 @@ mod tests {
 
         let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
 
-        let receipt = OpReceipt::Eip7702(Receipt {
+        let receipt = OpReceipt::Eip7702(Receipt::<Log> {
             status: Eip658Value::success(),
             cumulative_gas_used: GAS_USED,
             logs: vec![],
@@ -455,7 +455,9 @@ mod tests {
             )),
             gas_used: GAS_USED,
             timestamp: u64::MAX,
-            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(
+                &receipt.with_bloom_ref(),
+            )),
             logs_bloom: receipt.bloom(),
             ..Default::default()
         };
@@ -515,7 +517,7 @@ mod tests {
 
         let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
 
-        let receipt = OpReceipt::Eip7702(Receipt {
+        let receipt = OpReceipt::Eip7702(Receipt::<Log> {
             status: Eip658Value::success(),
             cumulative_gas_used: 0,
             logs: vec![],
@@ -532,7 +534,9 @@ mod tests {
             )),
             gas_used: 0,
             timestamp: u64::MAX - 1,
-            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(
+                &receipt.with_bloom_ref(),
+            )),
             logs_bloom: receipt.bloom(),
             extra_data: encode_jovian_extra_data(
                 Default::default(),
@@ -555,7 +559,9 @@ mod tests {
             )),
             gas_used: 0,
             timestamp: u64::MAX,
-            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(
+                &receipt.with_bloom_ref(),
+            )),
             logs_bloom: receipt.bloom(),
             parent_hash: parent.hash(),
             ..Default::default()
@@ -582,7 +588,7 @@ mod tests {
 
         let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
 
-        let receipt = OpReceipt::Eip7702(Receipt {
+        let receipt = OpReceipt::Eip7702(Receipt::<Log> {
             status: Eip658Value::success(),
             cumulative_gas_used: 0,
             logs: vec![],
@@ -599,7 +605,9 @@ mod tests {
             )),
             gas_used: 0,
             timestamp: u64::MAX - 1,
-            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(
+                &receipt.with_bloom_ref(),
+            )),
             logs_bloom: receipt.bloom(),
             extra_data: encode_jovian_extra_data(
                 Default::default(),
@@ -622,7 +630,9 @@ mod tests {
             )),
             gas_used: 0,
             timestamp: u64::MAX,
-            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(
+                &receipt.with_bloom_ref(),
+            )),
             logs_bloom: receipt.bloom(),
             parent_hash: parent.hash(),
             ..Default::default()
@@ -658,7 +668,7 @@ mod tests {
 
         let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
 
-        let receipt = OpReceipt::Eip7702(Receipt {
+        let receipt = OpReceipt::Eip7702(Receipt::<Log> {
             status: Eip658Value::success(),
             cumulative_gas_used: 0,
             logs: vec![],
@@ -675,7 +685,9 @@ mod tests {
             )),
             gas_used: 0,
             timestamp: u64::MAX - 1,
-            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(
+                &receipt.with_bloom_ref(),
+            )),
             logs_bloom: receipt.bloom(),
             extra_data: encode_jovian_extra_data(
                 Default::default(),
@@ -699,7 +711,9 @@ mod tests {
             )),
             gas_used: 0,
             timestamp: u64::MAX,
-            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(
+                &receipt.with_bloom_ref(),
+            )),
             logs_bloom: receipt.bloom(),
             parent_hash: parent.hash(),
             ..Default::default()
@@ -728,7 +742,7 @@ mod tests {
 
         let beacon_consensus = OpBeaconConsensus::new(Arc::new(chain_spec));
 
-        let receipt = OpReceipt::Eip7702(Receipt {
+        let receipt = OpReceipt::Eip7702(Receipt::<Log> {
             status: Eip658Value::success(),
             cumulative_gas_used: 0,
             logs: vec![],
@@ -745,7 +759,9 @@ mod tests {
             )),
             gas_used: 0,
             timestamp: u64::MAX - 1,
-            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(
+                &receipt.with_bloom_ref(),
+            )),
             logs_bloom: receipt.bloom(),
             extra_data: encode_holocene_extra_data(Default::default(), BaseFeeParams::optimism())
                 .unwrap(),
@@ -765,7 +781,9 @@ mod tests {
             )),
             gas_used: 0,
             timestamp: u64::MAX,
-            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(&receipt)),
+            receipts_root: proofs::calculate_receipt_root(std::slice::from_ref(
+                &receipt.with_bloom_ref(),
+            )),
             logs_bloom: receipt.bloom(),
             parent_hash: parent.hash(),
             ..Default::default()

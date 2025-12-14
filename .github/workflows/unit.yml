@@ -12,6 +12,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   SEED: rustethereumethereumrust
+  RUSTC_WRAPPER: "sccache"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -20,7 +21,7 @@ concurrency:
 jobs:
   test:
     name: test / ${{ matrix.type }} (${{ matrix.partition }}/${{ matrix.total_partitions }})
-    runs-on: depot-ubuntu-latest-16
+    runs-on: depot-ubuntu-latest-4
     env:
       RUST_BACKTRACE: 1
     strategy:
@@ -47,6 +48,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -92,6 +94,7 @@ jobs:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
       - uses: taiki-e/install-action@nextest
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true
@@ -99,7 +102,7 @@ jobs:
 
   doc:
     name: doc tests
-    runs-on: depot-ubuntu-latest-16
+    runs-on: depot-ubuntu-latest
     env:
       RUST_BACKTRACE: 1
     timeout-minutes: 30
@@ -107,6 +110,7 @@ jobs:
       - uses: actions/checkout@v6
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true

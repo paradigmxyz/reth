@@ -7,25 +7,29 @@ use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
 use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
+use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{
-    state::EvmOverrides, Block as RpcBlock, BlockError, Bundle, StateContext,
-};
+use alloy_rpc_types_eth::{state::EvmOverrides, BlockError, Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
 use async_trait::async_trait;
+use futures::Stream;
 use jsonrpsee::core::RpcResult;
+use parking_lot::RwLock;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethError;
 use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor};
-use reth_primitives_traits::{Block as _, BlockBody, ReceiptWithBloom, RecoveredBlock};
+use reth_primitives_traits::{
+    Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
+};
 use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
     helpers::{EthTransactions, TraceExt},
-    EthApiTypes, FromEthApiError, RpcNodeCore,
+    FromEthApiError, RpcConvert, RpcNodeCore,
 };
 use reth_rpc_eth_types::EthApiError;
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
@@ -33,26 +37,52 @@ use reth_storage_api::{
     BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderBlock, ReceiptProviderIdExt,
     StateProofProvider, StateProviderFactory, StateRootProvider, TransactionVariant,
 };
-use reth_tasks::pool::BlockingTaskGuard;
+use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
-use std::sync::Arc;
+use serde::{Deserialize, Serialize};
+use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
+use tokio_stream::StreamExt;
 
 /// `debug` API implementation.
 ///
 /// This type provides the functionality for handling `debug` related requests.
-pub struct DebugApi<Eth> {
+pub struct DebugApi<Eth: RpcNodeCore> {
     inner: Arc<DebugApiInner<Eth>>,
 }
 
-// === impl DebugApi ===
-
-impl<Eth> DebugApi<Eth> {
+impl<Eth> DebugApi<Eth>
+where
+    Eth: RpcNodeCore,
+{
     /// Create a new instance of the [`DebugApi`]
-    pub fn new(eth_api: Eth, blocking_task_guard: BlockingTaskGuard) -> Self {
-        let inner = Arc::new(DebugApiInner { eth_api, blocking_task_guard });
+    pub fn new(
+        eth_api: Eth,
+        blocking_task_guard: BlockingTaskGuard,
+        executor: impl TaskSpawner,
+        mut stream: impl Stream<Item = ConsensusEngineEvent<Eth::Primitives>> + Send + Unpin + 'static,
+    ) -> Self {
+        let bad_block_store = BadBlockStore::default();
+        let inner = Arc::new(DebugApiInner {
+            eth_api,
+            blocking_task_guard,
+            bad_block_store: bad_block_store.clone(),
+        });
+
+        // Spawn a task caching bad blocks
+        executor.spawn(Box::pin(async move {
+            while let Some(event) = stream.next().await {
+                if let ConsensusEngineEvent::InvalidBlock(block) = event &&
+                    let Ok(recovered) =
+                        RecoveredBlock::try_recover_sealed(block.as_ref().clone())
+                {
+                    bad_block_store.insert(recovered);
+                }
+            }
+        }));
+
         Self { inner }
     }
 
@@ -60,9 +90,7 @@ impl<Eth> DebugApi<Eth> {
     pub fn eth_api(&self) -> &Eth {
         &self.inner.eth_api
     }
-}
 
-impl<Eth: RpcNodeCore> DebugApi<Eth> {
     /// Access the underlying provider.
     pub fn provider(&self) -> &Eth::Provider {
         self.inner.eth_api.provider()
@@ -73,7 +101,7 @@ impl<Eth: RpcNodeCore> DebugApi<Eth> {
 
 impl<Eth> DebugApi<Eth>
 where
-    Eth: EthApiTypes + TraceExt + 'static,
+    Eth: TraceExt,
 {
     /// Acquires a permit to execute a tracing call.
     async fn acquire_trace_permit(&self) -> Result<OwnedSemaphorePermit, AcquireError> {
@@ -610,7 +638,7 @@ where
 #[async_trait]
 impl<Eth> DebugApiServer<RpcTxReq<Eth::NetworkTypes>> for DebugApi<Eth>
 where
-    Eth: EthApiTypes + EthTransactions + TraceExt + 'static,
+    Eth: EthTransactions + TraceExt,
 {
     /// Handler for `debug_getRawHeader`
     async fn raw_header(&self, block_id: BlockId) -> RpcResult<Bytes> {
@@ -673,7 +701,7 @@ where
     /// Handler for `debug_getRawTransactions`
     /// Returns the bytes of the transaction for the given hash.
     async fn raw_transactions(&self, block_id: BlockId) -> RpcResult<Vec<Bytes>> {
-        let block = self
+        let block: RecoveredBlock<BlockTy<Eth::Primitives>> = self
             .provider()
             .block_with_senders_by_id(block_id, TransactionVariant::NoHash)
             .to_rpc_result()?
@@ -694,8 +722,36 @@ where
     }
 
     /// Handler for `debug_getBadBlocks`
-    async fn bad_blocks(&self) -> RpcResult<Vec<RpcBlock>> {
-        Ok(vec![])
+    async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>> {
+        let blocks = self.inner.bad_block_store.all();
+        let mut bad_blocks = Vec::with_capacity(blocks.len());
+
+        #[derive(Serialize, Deserialize)]
+        struct BadBlockSerde<T> {
+            block: T,
+            hash: B256,
+            rlp: Bytes,
+        }
+
+        for block in blocks {
+            let rlp = alloy_rlp::encode(block.sealed_block()).into();
+            let hash = block.hash();
+
+            let block = block
+                .clone_into_rpc_block(
+                    BlockTransactionsKind::Full,
+                    |tx, tx_info| self.eth_api().converter().fill(tx, tx_info),
+                    |header, size| self.eth_api().converter().convert_header(header, size),
+                )
+                .map_err(|err| Eth::Error::from(err).into())?;
+
+            let bad_block = serde_json::to_value(BadBlockSerde { block, hash, rlp })
+                .map_err(|err| EthApiError::other(internal_rpc_err(err.to_string())))?;
+
+            bad_blocks.push(bad_block);
+        }
+
+        Ok(bad_blocks)
     }
 
     /// Handler for `debug_traceChain`
@@ -1058,21 +1114,66 @@ where
     }
 }
 
-impl<Eth> std::fmt::Debug for DebugApi<Eth> {
+impl<Eth: RpcNodeCore> std::fmt::Debug for DebugApi<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("DebugApi").finish_non_exhaustive()
     }
 }
 
-impl<Eth> Clone for DebugApi<Eth> {
+impl<Eth: RpcNodeCore> Clone for DebugApi<Eth> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct DebugApiInner<Eth> {
+struct DebugApiInner<Eth: RpcNodeCore> {
     /// The implementation of `eth` API
     eth_api: Eth,
     // restrict the number of concurrent calls to blocking calls
     blocking_task_guard: BlockingTaskGuard,
+    /// Cache for bad blocks.
+    bad_block_store: BadBlockStore<BlockTy<Eth::Primitives>>,
+}
+
+/// A bounded, deduplicating store of recently observed bad blocks.
+#[derive(Clone, Debug)]
+struct BadBlockStore<B: BlockTrait> {
+    inner: Arc<RwLock<VecDeque<Arc<RecoveredBlock<B>>>>>,
+    limit: usize,
+}
+
+impl<B: BlockTrait> BadBlockStore<B> {
+    /// Creates a new store with the given capacity.
+    fn new(limit: usize) -> Self {
+        Self { inner: Arc::new(RwLock::new(VecDeque::with_capacity(limit))), limit }
+    }
+
+    /// Inserts a recovered block, keeping only the most recent `limit` entries and deduplicating
+    /// by block hash.
+    fn insert(&self, block: RecoveredBlock<B>) {
+        let hash = block.hash();
+        let mut guard = self.inner.write();
+
+        // skip if we already recorded this bad block , and keep original ordering
+        if guard.iter().any(|b| b.hash() == hash) {
+            return;
+        }
+        guard.push_back(Arc::new(block));
+
+        while guard.len() > self.limit {
+            guard.pop_front();
+        }
+    }
+
+    /// Returns all cached bad blocks ordered from newest to oldest.
+    fn all(&self) -> Vec<Arc<RecoveredBlock<B>>> {
+        let guard = self.inner.read();
+        guard.iter().rev().cloned().collect()
+    }
+}
+
+impl<B: BlockTrait> Default for BadBlockStore<B> {
+    fn default() -> Self {
+        Self::new(64)
+    }
 }

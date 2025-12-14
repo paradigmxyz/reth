@@ -172,6 +172,7 @@ where
                 gas_limit: builder_config.gas_limit(parent_header.gas_limit),
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
                 withdrawals: Some(attributes.withdrawals().clone()),
+                extra_data: builder_config.extra_data,
             },
         )
         .map_err(PayloadBuilderError::other)?;
