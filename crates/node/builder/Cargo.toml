@@ -78,6 +78,7 @@ aquamarine.workspace = true
 eyre.workspace = true
 jsonrpsee.workspace = true
 fdlimit.workspace = true
+libc = "0.2"
 rayon.workspace = true
 serde_json.workspace = true
 

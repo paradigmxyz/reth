@@ -87,8 +87,9 @@ impl EngineNodeLauncher {
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
         // setup the launch context
+        let fdlimit = config.fdlimit;
         let ctx = ctx
-            .with_configured_globals(engine_tree_config.reserved_cpu_cores())
+            .with_configured_globals(engine_tree_config.reserved_cpu_cores(), fdlimit)
             // load the toml config
             .with_loaded_toml_config(config)?
             // add resolved peers

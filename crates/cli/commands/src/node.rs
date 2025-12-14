@@ -66,6 +66,13 @@ pub struct NodeCommand<C: ChainSpecParser, Ext: clap::Args + fmt::Debug = NoArgs
     #[arg(long, conflicts_with = "instance", global = true)]
     pub with_unused_ports: bool,
 
+    /// Raise the open file descriptor resource limit.
+    ///
+    /// Default: 0 (system default). When set to 0, uses the system's default file descriptor
+    /// limit. When set to a positive value, attempts to raise the limit to that value.
+    #[arg(long, value_name = "LIMIT", default_value_t = 0, global = true)]
+    pub fdlimit: u64,
+
     /// All datadir related arguments
     #[command(flatten)]
     pub datadir: DatadirArgs,
@@ -158,6 +165,7 @@ where
             metrics,
             instance,
             with_unused_ports,
+            fdlimit,
             network,
             rpc,
             txpool,
@@ -179,6 +187,7 @@ where
             chain,
             metrics,
             instance,
+            fdlimit,
             network,
             rpc,
             txpool,
@@ -417,5 +426,25 @@ mod tests {
 
         // make sure the ipc path is not the default
         assert_ne!(cmd.rpc.ipcpath, String::from("/tmp/reth.ipc"));
+    }
+
+    #[test]
+    fn parse_fdlimit_default() {
+        let cmd: NodeCommand<EthereumChainSpecParser> = NodeCommand::parse_from(["reth"]);
+        assert_eq!(cmd.fdlimit, 0);
+    }
+
+    #[test]
+    fn parse_fdlimit_custom() {
+        let cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::parse_from(["reth", "--fdlimit", "10000"]);
+        assert_eq!(cmd.fdlimit, 10000);
+    }
+
+    #[test]
+    fn parse_fdlimit_zero() {
+        let cmd: NodeCommand<EthereumChainSpecParser> =
+            NodeCommand::parse_from(["reth", "--fdlimit", "0"]);
+        assert_eq!(cmd.fdlimit, 0);
     }
 }
