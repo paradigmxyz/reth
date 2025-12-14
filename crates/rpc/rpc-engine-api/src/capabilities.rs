@@ -60,11 +60,15 @@ impl Default for EngineCapabilities {
 /// Called during `engine_exchangeCapabilities` to warn operators about
 /// version mismatches between the consensus layer and execution layer.
 pub fn log_capability_mismatches(cl_capabilities: &[String], el_capabilities: &EngineCapabilities) {
-    let cl_set: HashSet<&str> = cl_capabilities.iter().map(|s| s.as_str()).collect();
-    let el_set: HashSet<&str> = el_capabilities.inner.iter().map(|s| s.as_str()).collect();
+    let el_set = el_capabilities.as_set();
+    let cl_set: HashSet<&str> = cl_capabilities.iter().map(String::as_str).collect();
 
     // CL has methods EL doesn't support
-    let mut el_missing: Vec<_> = cl_set.difference(&el_set).copied().collect();
+    let mut el_missing: Vec<_> = cl_capabilities
+        .iter()
+        .filter(|cap| !el_set.contains(cap.as_str()))
+        .map(String::as_str)
+        .collect();
     if !el_missing.is_empty() {
         el_missing.sort();
         warn!(
@@ -75,7 +79,8 @@ pub fn log_capability_mismatches(cl_capabilities: &[String], el_capabilities: &E
     }
 
     // EL has methods CL doesn't support
-    let mut cl_missing: Vec<_> = el_set.difference(&cl_set).copied().collect();
+    let mut cl_missing: Vec<_> =
+        el_set.iter().filter(|cap| !cl_set.contains(cap.as_str())).map(String::as_str).collect();
     if !cl_missing.is_empty() {
         cl_missing.sort();
         warn!(
