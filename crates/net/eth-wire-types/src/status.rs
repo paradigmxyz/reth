@@ -136,7 +136,7 @@ impl UnifiedStatus {
                 earliest_block: None,
                 latest_block: None,
             },
-            StatusMessage::Eth69(e) | StatusMessage::Eth70(e) => Self {
+            StatusMessage::Eth69(e) => Self {
                 version: e.version,
                 chain: e.chain,
                 genesis: e.genesis,
@@ -395,8 +395,6 @@ pub enum StatusMessage {
     Legacy(Status),
     /// The new `eth/69` status with no `total_difficulty`.
     Eth69(StatusEth69),
-    /// The `eth/70` status, identical to `eth/69` .
-    Eth70(StatusEth70),
 }
 
 impl StatusMessage {
@@ -405,7 +403,6 @@ impl StatusMessage {
         match self {
             Self::Legacy(legacy_status) => legacy_status.genesis,
             Self::Eth69(status_69) => status_69.genesis,
-            Self::Eth70(status_70) => status_70.genesis,
         }
     }
 
@@ -414,7 +411,6 @@ impl StatusMessage {
         match self {
             Self::Legacy(legacy_status) => legacy_status.version,
             Self::Eth69(status_69) => status_69.version,
-            Self::Eth70(status_70) => status_70.version,
         }
     }
 
@@ -423,7 +419,6 @@ impl StatusMessage {
         match self {
             Self::Legacy(legacy_status) => &legacy_status.chain,
             Self::Eth69(status_69) => &status_69.chain,
-            Self::Eth70(status_70) => &status_70.chain,
         }
     }
 
@@ -432,7 +427,6 @@ impl StatusMessage {
         match self {
             Self::Legacy(legacy_status) => legacy_status.forkid,
             Self::Eth69(status_69) => status_69.forkid,
-            Self::Eth70(status_70) => status_70.forkid,
         }
     }
 
@@ -441,7 +435,6 @@ impl StatusMessage {
         match self {
             Self::Legacy(legacy_status) => legacy_status.blockhash,
             Self::Eth69(status_69) => status_69.blockhash,
-            Self::Eth70(status_70) => status_70.blockhash,
         }
     }
 }
@@ -450,14 +443,14 @@ impl Encodable for StatusMessage {
     fn encode(&self, out: &mut dyn BufMut) {
         match self {
             Self::Legacy(s) => s.encode(out),
-            Self::Eth69(s) | Self::Eth70(s) => s.encode(out),
+            Self::Eth69(s) => s.encode(out),
         }
     }
 
     fn length(&self) -> usize {
         match self {
             Self::Legacy(s) => s.length(),
-            Self::Eth69(s) | Self::Eth70(s) => s.length(),
+            Self::Eth69(s) => s.length(),
         }
     }
 }
@@ -467,7 +460,6 @@ impl Display for StatusMessage {
         match self {
             Self::Legacy(s) => Display::fmt(s, f),
             Self::Eth69(s69) => Display::fmt(s69, f),
-            Self::Eth70(s70) => Display::fmt(s70, f),
         }
     }
 }

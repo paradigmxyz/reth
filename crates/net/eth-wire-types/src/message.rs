@@ -10,7 +10,7 @@ use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
     GetNodeData, GetPooledTransactions, GetReceipts, GetReceipts70, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, StatusEth69,
-    StatusEth70, Transactions,
+    Transactions,
 };
 use crate::{
     status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
@@ -66,9 +66,7 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         // For EIP-7642 (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md):
         // pre-merge (legacy) status messages include total difficulty, whereas eth/69 omits it.
         let message = match message_type {
-            EthMessageID::Status => EthMessage::Status(if version >= EthVersion::Eth70 {
-                StatusMessage::Eth70(StatusEth70::decode(buf)?)
-            } else if version >= EthVersion::Eth69 {
+            EthMessageID::Status => EthMessage::Status(if version >= EthVersion::Eth69 {
                 StatusMessage::Eth69(StatusEth69::decode(buf)?)
             } else {
                 StatusMessage::Legacy(Status::decode(buf)?)

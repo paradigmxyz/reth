@@ -205,7 +205,7 @@ where
                     return Err(err.into());
                 }
 
-                if let StatusMessage::Eth69(s) | StatusMessage::Eth70(s) = their_status_message {
+                if let StatusMessage::Eth69(s) = their_status_message {
                     if s.earliest > s.latest {
                         return Err(EthHandshakeError::EarliestBlockGreaterThanLatestBlock {
                             got: s.earliest,

@@ -538,8 +538,9 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 // negotiated version
                 let version = conn.version();
 
-                // Configure the interval at which the range information is updated (eth/69 only)
-                let range_update_interval = (conn.version() == EthVersion::Eth69).then(|| {
+                // Configure the interval at which the range information is updated, starting with
+                // ETH69
+                let range_update_interval = (conn.version() >= EthVersion::Eth69).then(|| {
                     let mut interval = tokio::time::interval(RANGE_UPDATE_INTERVAL);
                     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     interval

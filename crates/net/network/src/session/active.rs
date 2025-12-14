@@ -841,8 +841,9 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 };
 
                 if should_send {
-                    let msg = EthMessage::BlockRangeUpdate(this.local_range_info.to_message());
-                    this.queued_outgoing.push_back(msg.into());
+                    this.queued_outgoing.push_back(
+                        EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
+                    );
                     this.last_sent_latest_block = Some(current_latest);
                 }
             }
