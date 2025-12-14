@@ -32,6 +32,25 @@ pub struct GetReceipts70Payload {
     pub block_hashes: Vec<B256>,
 }
 
+impl alloy_rlp::Encodable for GetReceipts70Payload {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.first_block_receipt_index.encode(out);
+        self.block_hashes.encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.first_block_receipt_index.length() + self.block_hashes.length()
+    }
+}
+
+impl alloy_rlp::Decodable for GetReceipts70Payload {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let first_block_receipt_index = u64::decode(buf)?;
+        let block_hashes = Vec::<B256>::decode(buf)?;
+        Ok(Self { first_block_receipt_index, block_hashes })
+    }
+}
+
 /// Helper type for the full eth/70 request carrying the request id alongside
 /// the payload.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -41,17 +60,17 @@ pub struct GetReceipts70(pub crate::message::RequestPair<GetReceipts70Payload>);
 
 impl alloy_rlp::Encodable for GetReceipts70 {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.0.encode_inline(out);
+        self.0.encode(out);
     }
 
     fn length(&self) -> usize {
-        self.0.length_inline()
+        self.0.length()
     }
 }
 
 impl alloy_rlp::Decodable for GetReceipts70 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        crate::message::RequestPair::<GetReceipts70Payload>::decode_inline(buf).map(Self)
+        crate::message::RequestPair::<GetReceipts70Payload>::decode(buf).map(Self)
     }
 }
 
@@ -133,6 +152,31 @@ pub struct Receipts70Payload<T = Receipt> {
     pub receipts: Vec<Vec<T>>,
 }
 
+impl<T> alloy_rlp::Encodable for Receipts70Payload<T>
+where
+    T: alloy_rlp::Encodable,
+{
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.last_block_incomplete.encode(out);
+        self.receipts.encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.last_block_incomplete.length() + self.receipts.length()
+    }
+}
+
+impl<T> alloy_rlp::Decodable for Receipts70Payload<T>
+where
+    T: alloy_rlp::Decodable,
+{
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let last_block_incomplete = bool::decode(buf)?;
+        let receipts = Vec::<Vec<T>>::decode(buf)?;
+        Ok(Self { last_block_incomplete, receipts })
+    }
+}
+
 /// Helper type for the full eth/70 response carrying the request id alongside
 /// the payload.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -145,11 +189,11 @@ where
     T: alloy_rlp::Encodable,
 {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.0.encode_inline(out);
+        self.0.encode(out);
     }
 
     fn length(&self) -> usize {
-        self.0.length_inline()
+        self.0.length()
     }
 }
 
@@ -158,7 +202,7 @@ where
     T: alloy_rlp::Decodable,
 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        crate::message::RequestPair::<Receipts70Payload<T>>::decode_inline(buf).map(Self)
+        crate::message::RequestPair::<Receipts70Payload<T>>::decode(buf).map(Self)
     }
 }
 
