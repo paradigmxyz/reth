@@ -211,6 +211,8 @@ pub struct NetworkConfigBuilder<N: NetworkPrimitives = EthNetworkPrimitives> {
     hello_message: Option<HelloMessageWithProtocols>,
     /// The executor to use for spawning tasks.
     extra_protocols: RlpxSubProtocols,
+    /// Whether to announce snap capability.
+    snap_enabled: bool,
     /// Head used to start set for the fork filter and status.
     head: Option<Head>,
     /// Whether tx gossip is disabled
@@ -262,6 +264,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             executor: None,
             hello_message: None,
             extra_protocols: Default::default(),
+            snap_enabled: false,
             head: None,
             tx_gossip_disabled: false,
             block_import: None,
@@ -590,6 +593,12 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
         self
     }
 
+    /// Enable or disable announcing snap capability in the hello protocols.
+    pub const fn with_snap(mut self, enable: bool) -> Self {
+        self.snap_enabled = enable;
+        self
+    }
+
     /// Set the optional network id.
     pub const fn network_id(mut self, network_id: Option<u64>) -> Self {
         self.network_id = network_id;
@@ -630,6 +639,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
             handshake,
             required_block_hashes,
             network_id,
+            snap_enabled,
         } = self;
 
         let head = head.unwrap_or_else(|| Head {
@@ -653,6 +663,10 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
 
         let mut hello_message =
             hello_message.unwrap_or_else(|| HelloMessage::builder(peer_id).build());
+
+        if snap_enabled {
+            hello_message = hello_message.with_snap();
+        }
         hello_message.port = listener_addr.port();
 
         // set the status
