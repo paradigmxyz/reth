@@ -7,7 +7,7 @@ use alloy_eips::eip7928::{
     code_change::CodeChange as AlloyCodeChange, nonce_change::NonceChange as AlloyNonceChange,
     AccountChanges as AlloyAccountChanges, SlotChanges as AlloySlotChange,
 };
-use alloy_primitives::{Address, Bytes, StorageKey, B256, U256};
+use alloy_primitives::{Address, Bytes,U256};
 use reth_codecs_derive::add_arbitrary_tests;
 
 /// `AccountChanges` acts as bridge which simplifies Compact implementation for `AlloyAccountChanges`.
@@ -25,7 +25,7 @@ pub(crate) struct AccountChanges {
     /// List of slot changes for this account.
     pub storage_changes: Vec<SlotChanges>,
     /// List of storage reads for this account.
-    pub storage_reads: Vec<StorageKey>,
+    pub storage_reads: Vec<U256>,
     /// List of balance changes for this account.
     pub balance_changes: Vec<BalanceChange>,
     /// List of nonce changes for this account.
@@ -93,7 +93,7 @@ pub(crate) struct NonceChange {
 #[add_arbitrary_tests(crate, compact)]
 pub(crate) struct SlotChanges {
     /// The storage slot key being modified.
-    pub slot: B256,
+    pub slot: U256,
     /// A list of write operations to this slot, ordered by transaction index.
     pub changes: Vec<StorageChange>,
 }
@@ -111,7 +111,7 @@ pub(crate) struct StorageChange {
     /// Index of the bal that stores the performed write.
     pub block_access_index: u64,
     /// The new value written to the storage slot.
-    pub new_value: B256,
+    pub new_value: U256,
 }
 
 impl Compact for AlloyAccountChanges {
