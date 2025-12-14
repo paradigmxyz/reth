@@ -159,6 +159,19 @@ These crates define primitive types or algorithms.
 
 Crates related to the Optimism rollup live in [optimism](../../crates/optimism/).
 
+#### Ethereum-Specific Crates
+
+Ethereum mainnet-specific implementations and primitives live in `crates/ethereum/`.
+
+- **reth-ethereum-engine-primitives** (`crates/ethereum/engine-primitives`)  
+  Ethereum-specific types for engine API, consensus messages, and payload attributes.
+
+- **reth-ethereum-forks** (`crates/ethereum/hardforks`)  
+  Mainnet-specific hardfork definitions, activation schedules, and feature flags.
+
+- **reth-ethereum-payload-builder** (`crates/ethereum/payload`)  
+  Ethereum-tailored payload builder implementing mainnet block production rules.
+
 ### Misc
 
 Small utility crates.
