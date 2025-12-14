@@ -269,6 +269,13 @@ pub type DebugBlockProviderFactory<N, AddOns> = Box<
         + 'static,
 >;
 
+type PayloadAttrMapper<N> = Box<
+    dyn Fn(PayloadAttrTy<<N as FullNodeTypes>::Types>) -> PayloadAttrTy<<N as FullNodeTypes>::Types>
+        + Send
+        + Sync
+        + 'static,
+>;
+
 fn spawn_consensus_client<N, AddOns>(
     handle: &NodeHandle<N, AddOns>,
     provider: DynBlockProviderHandle<BlockTy<<N as FullNodeTypes>::Types>>,
@@ -290,11 +297,7 @@ fn spawn_consensus_client<N, AddOns>(
 enum DevBuilderConfig<N: FullNodeComponents> {
     Factory(DevPayloadAttributesBuilderFactory<N>),
     Builder(Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>),
-    DefaultWithMap(
-        Option<
-            Box<dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync + 'static>,
-        >,
-    ),
+    DefaultWithMap(Option<PayloadAttrMapper<N>>),
 }
 
 /// Node launcher with support for launching various debugging utilities.
@@ -331,7 +334,7 @@ impl<L> DebugNodeLauncher<L> {
 }
 
 /// Future for the [`DebugNodeLauncher`].
-#[expect(missing_debug_implementations, clippy::type_complexity)]
+#[allow(missing_debug_implementations)]
 pub struct DebugNodeLauncherFuture<L, Target, N, AddOns>
 where
     N: FullNodeComponents<Types: DebugNode<N>>,
@@ -421,10 +424,7 @@ where
     /// Provides an already constructed block provider for the debug consensus client.
     pub fn with_debug_block_client(
         self,
-        provider: impl BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>>
-            + Send
-            + Sync
-            + 'static,
+        provider: impl BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + 'static,
     ) -> Self {
         let handle = DynBlockProviderHandle::new(provider);
         self.with_debug_block_provider_factory(Box::new(move |_, _| Ok(handle.clone())))
