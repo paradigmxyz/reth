@@ -18,10 +18,7 @@ use reth_trie_sparse::{
     SparseTrieUpdates,
 };
 use smallvec::SmallVec;
-use std::{
-    cmp::{Ord, Ordering, PartialOrd},
-    sync::mpsc,
-};
+use std::cmp::{Ord, Ordering, PartialOrd};
 use tracing::{debug, instrument, trace};
 
 /// The maximum length of a path, in nibbles, which belongs to the upper subtrie of a
@@ -265,11 +262,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
                 })
                 .collect();
 
-            let (tx, rx) = mpsc::channel();
-
             // Zip the lower subtries and their corresponding node groups, and reveal lower subtrie
             // nodes in parallel
-            lower_subtries
+            let results: Vec<_> = lower_subtries
                 .into_par_iter()
                 .zip(node_groups.into_par_iter())
                 .map(|((subtrie_idx, mut subtrie), nodes)| {
@@ -286,16 +281,12 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     }
                     (subtrie_idx, subtrie, Ok(()))
                 })
-                .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
+                .collect();
 
-            drop(tx);
-
-            // Take back all lower subtries which were sent to the rayon pool, collecting the last
-            // seen error in the process and returning that. If we don't fully drain the channel
-            // then we lose lower sparse tries, putting the whole ParallelSparseTrie in an
-            // inconsistent state.
+            // Put subtries back which were processed in the rayon pool, collecting the last
+            // seen error in the process and returning that.
             let mut any_err = Ok(());
-            for (subtrie_idx, subtrie, res) in rx {
+            for (subtrie_idx, subtrie, res) in results {
                 self.lower_subtries[subtrie_idx] = LowerSparseSubtrie::Revealed(subtrie);
                 if res.is_err() {
                     any_err = res;
@@ -745,11 +736,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
         {
             use rayon::iter::{IntoParallelIterator, ParallelIterator};
 
-            let (tx, rx) = mpsc::channel();
-
             let branch_node_tree_masks = &self.branch_node_tree_masks;
             let branch_node_hash_masks = &self.branch_node_hash_masks;
-            changed_subtries
+            let updated_subtries: Vec<_> = changed_subtries
                 .into_par_iter()
                 .map(|mut changed_subtrie| {
                     #[cfg(feature = "metrics")]
@@ -764,10 +753,9 @@ impl SparseTrieInterface for ParallelSparseTrie {
                     self.metrics.subtrie_hash_update_latency.record(start.elapsed());
                     changed_subtrie
                 })
-                .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
+                .collect();
 
-            drop(tx);
-            self.insert_changed_subtries(rx);
+            self.insert_changed_subtries(updated_subtries);
         }
     }
 
