@@ -33,7 +33,8 @@ pub use memory_overlay::{MemoryOverlayStateProvider, MemoryOverlayStateProviderR
 /// Common test helpers
 pub mod test_utils;
 
+#[cfg(any(test, feature = "test-utils"))]
+use reth_trie_db as _;
+
 // todo: remove when generic data prim integration complete
 pub use reth_ethereum_primitives::EthPrimitives;
-
-use reth_trie_db as _;
