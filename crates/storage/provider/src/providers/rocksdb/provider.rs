@@ -151,8 +151,10 @@ impl RocksDBBuilder {
     }
 
     /// Sets the log level from `DatabaseArgs` configuration.
-    pub const fn with_database_log_level(mut self, log_level: LogLevel) -> Self {
-        self.log_level = convert_log_level(log_level);
+    pub const fn with_database_log_level(mut self, log_level: Option<LogLevel>) -> Self {
+        if let Some(level) = log_level {
+            self.log_level = convert_log_level(level);
+        }
         self
     }
 
