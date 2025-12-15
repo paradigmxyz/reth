@@ -131,6 +131,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             })
             .collect();
 
+        info!(
+            tasks = task_ranges.len(),
+            ranges = task_ranges.iter().flatten().count(),
+            blocks = task_ranges.iter().flatten().cloned().flatten().count(),
+            "Prepared task ranges"
+        );
+
         // Calculate total gas from headers for all chunks we'll execute
         let total_gas: u64 = task_ranges
             .par_iter()
