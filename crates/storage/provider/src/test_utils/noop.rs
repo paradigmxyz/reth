@@ -1,8 +1,8 @@
 //! Additional testing support for `NoopProvider`.
 
 use crate::{
-    providers::{StaticFileProvider, StaticFileProviderRWRefMut},
-    StaticFileProviderFactory,
+    providers::{RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut},
+    RocksDBProviderFactory, StaticFileProviderFactory,
 };
 use reth_errors::{ProviderError, ProviderResult};
 use reth_primitives_traits::NodePrimitives;
@@ -22,5 +22,11 @@ impl<C: Send + Sync, N: NodePrimitives> StaticFileProviderFactory for NoopProvid
         _segment: reth_static_file_types::StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
         Err(ProviderError::ReadOnlyStaticFileAccess)
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> RocksDBProviderFactory for NoopProvider<C, N> {
+    fn rocksdb_provider(&self) -> RocksDBProvider {
+        RocksDBProvider::builder(PathBuf::default()).build().unwrap()
     }
 }
