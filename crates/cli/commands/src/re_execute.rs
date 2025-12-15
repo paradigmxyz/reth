@@ -139,7 +139,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         );
 
         // Calculate total gas from headers for all chunks we'll execute
-        let total_gas: u64 = task_ranges
+        let total_gas = task_ranges
             .par_iter()
             .flatten()
             .map(|range| {
@@ -147,9 +147,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                     &provider_factory.static_file_provider(),
                     range.clone(),
                 )
-                .unwrap_or(0)
+                .map_err(Into::into)
             })
-            .sum();
+            .collect::<eyre::Result<Vec<_>>>()?
+            .into_iter()
+            .sum::<u64>();
 
         let db_at = {
             let provider_factory = provider_factory.clone();
