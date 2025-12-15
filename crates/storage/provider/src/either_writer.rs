@@ -161,6 +161,23 @@ impl<'a> EitherWriter<'a, (), ()> {
             provider.tx_ref().cursor_write::<tables::TransactionHashNumbers>()?,
         ))
     }
+
+    /// Creates a new [`EitherWriter`] for account history based on storage settings.
+    pub fn new_accounts_history<P>(
+        provider: &P,
+        _rocksdb_tx: RocksTxArg<'a>,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::AccountsHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTxMut,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            return Ok(EitherWriter::RocksDB(_rocksdb_tx));
+        }
+
+        Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::AccountsHistory>()?))
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
@@ -355,6 +372,26 @@ impl<'a> EitherReader<'a, (), ()> {
 
         Ok(EitherReader::Database(
             provider.tx_ref().cursor_read::<tables::TransactionHashNumbers>()?,
+            PhantomData,
+        ))
+    }
+
+    /// Creates a new [`EitherReader`] for account history based on storage settings.
+    pub fn new_accounts_history<P>(
+        provider: &P,
+        _rocksdb_tx: RocksTxRefArg<'a>,
+    ) -> ProviderResult<EitherReaderTy<'a, P, tables::AccountsHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTx,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+        }
+
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::AccountsHistory>()?,
             PhantomData,
         ))
     }
