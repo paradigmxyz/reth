@@ -1,0 +1,56 @@
+[package]
+name = "reth-scraper"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+description = "P2P network scraper that discovers Ethereum nodes and collects their metadata"
+default-run = "reth-scraper"
+
+[lints]
+workspace = true
+
+[dependencies]
+# reth
+reth-chainspec.workspace = true
+reth-discv4.workspace = true
+reth-ethereum = { workspace = true, features = ["network"] }
+reth-ecies.workspace = true
+reth-network-peers.workspace = true
+reth-tracing.workspace = true
+
+# alloy
+alloy-primitives.workspace = true
+
+# crypto
+secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }
+
+# async
+futures.workspace = true
+tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
+
+# cli
+clap = { workspace = true, features = ["derive", "env"] }
+eyre.workspace = true
+humantime.workspace = true
+tracing.workspace = true
+
+# metrics
+metrics.workspace = true
+metrics-exporter-prometheus = { workspace = true, features = ["http-listener"] }
+
+# serde
+serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+
+# storage
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio"] }
+
+# geoip
+maxminddb = "0.24"
+
+[[bin]]
+name = "reth-scraper"
+path = "src/main.rs"
