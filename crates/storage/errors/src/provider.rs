@@ -126,9 +126,6 @@ pub enum ProviderError {
     /// Static File Provider was initialized as read-only.
     #[error("cannot get a writer on a read-only environment.")]
     ReadOnlyStaticFileAccess,
-    /// `RocksDB` was opened in read-only mode.
-    #[error("cannot perform write operations on a read-only RocksDB instance.")]
-    ReadOnlyRocksDBAccess,
     /// Consistent view error.
     #[error("failed to initialize consistent view: {_0}")]
     ConsistentView(Box<ConsistentViewError>),
