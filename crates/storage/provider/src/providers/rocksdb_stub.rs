@@ -72,6 +72,11 @@ impl RocksDBProvider {
     {
         Err(UnsupportedProvider)
     }
+
+    /// Creates a new transaction (stub implementation).
+    pub const fn tx(&self) -> RocksTx {
+        RocksTx
+    }
 }
 
 /// A stub batch writer for `RocksDB` on non-Unix platforms.
@@ -134,13 +139,72 @@ impl RocksDBBuilder {
         self
     }
 
-    /// Opens the database in read-only mode (stub implementation).
-    pub const fn read_only(self) -> Self {
-        self
-    }
-
     /// Build the `RocksDB` provider (stub implementation).
     pub const fn build(self) -> ProviderResult<RocksDBProvider> {
         Ok(RocksDBProvider)
     }
+}
+
+/// A stub transaction for `RocksDB`.
+#[derive(Debug)]
+pub struct RocksTx;
+
+impl RocksTx {
+    /// Gets a value from the specified table (stub implementation).
+    pub fn get<T: Table>(&self, _key: T::Key) -> ProviderResult<Option<T::Value>> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Gets a value using pre-encoded key (stub implementation).
+    pub const fn get_encoded<T: Table>(
+        &self,
+        _key: &<T::Key as Encode>::Encoded,
+    ) -> ProviderResult<Option<T::Value>> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Puts a value into the specified table (stub implementation).
+    pub fn put<T: Table>(&self, _key: T::Key, _value: &T::Value) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Puts a value using pre-encoded key (stub implementation).
+    pub const fn put_encoded<T: Table>(
+        &self,
+        _key: &<T::Key as Encode>::Encoded,
+        _value: &T::Value,
+    ) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Deletes a value from the specified table (stub implementation).
+    pub fn delete<T: Table>(&self, _key: T::Key) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Creates an iterator for the specified table (stub implementation).
+    pub const fn iter<T: Table>(&self) -> ProviderResult<RocksTxIter<'_, T>> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Creates an iterator starting from the given key (stub implementation).
+    pub fn iter_from<T: Table>(&self, _key: T::Key) -> ProviderResult<RocksTxIter<'_, T>> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Commits the transaction (stub implementation).
+    pub const fn commit(self) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Rolls back the transaction (stub implementation).
+    pub const fn rollback(self) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+}
+
+/// A stub iterator for `RocksDB` transactions.
+#[derive(Debug)]
+pub struct RocksTxIter<'a, T> {
+    _marker: std::marker::PhantomData<(&'a (), T)>,
 }

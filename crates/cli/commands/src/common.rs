@@ -75,10 +75,12 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
+        let rocksdb_path = data_dir.rocksdb();
 
         if access.is_read_write() {
             reth_fs_util::create_dir_all(&db_path)?;
             reth_fs_util::create_dir_all(&sf_path)?;
+            reth_fs_util::create_dir_all(&rocksdb_path)?;
         }
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
@@ -98,22 +100,20 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         }
 
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
-        let (db, sfp, rocksdb_provider) = match access {
+        let (db, sfp) = match access {
             AccessRights::RW => (
                 Arc::new(init_db(db_path, self.db.database_args())?),
                 StaticFileProvider::read_write(sf_path)?,
-                RocksDBProvider::builder(data_dir.rocksdb())
-                    .with_database_log_level(self.db.log_level)
-                    .build()?,
             ),
             AccessRights::RO | AccessRights::RoInconsistent => (
                 Arc::new(open_db_read_only(&db_path, self.db.database_args())?),
                 StaticFileProvider::read_only(sf_path, false)?,
-                RocksDBProvider::builder(data_dir.rocksdb())
-                    .with_database_log_level(self.db.log_level)
-                    .build()?,
             ),
         };
+        // TransactionDB only support read-write mode
+        let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
+            .with_database_log_level(self.db.log_level)
+            .build()?;
 
         let provider_factory =
             self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
