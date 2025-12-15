@@ -58,6 +58,7 @@ impl RocksDBProvider {
     /// Checks invariants for the `TransactionHashNumbers` table.
     ///
     /// Returns a block number to unwind to if `RocksDB` is behind the checkpoint.
+    /// If `RocksDB` is ahead of the checkpoint, excess entries are pruned (healed).
     fn check_transaction_hash_numbers<Provider>(
         &self,
         provider: &Provider,
@@ -81,8 +82,9 @@ impl RocksDBProvider {
             Some((_hash, tx_number)) => {
                 // If checkpoint is 0 but we have data, that's inconsistent
                 if checkpoint == 0 && tx_number > 0 {
-                    // RocksDB has data but stage hasn't run - need to clear
-                    return Ok(Some(0));
+                    // RocksDB has data but stage hasn't run - need to clear all
+                    self.prune_transaction_hash_numbers_above(0)?;
+                    return Ok(None);
                 }
 
                 // Map tx_number to block_number using TransactionBlocks table
@@ -92,9 +94,10 @@ impl RocksDBProvider {
                 // Seek to the first entry where key >= tx_number
                 if let Some((_, rocks_block)) = cursor.seek(tx_number)? {
                     // rocks_block is the block containing this transaction
-                    // If checkpoint block > rocks_block, RocksDB is behind
                     if checkpoint > rocks_block {
-                        tracing::info!(
+                        // RocksDB is behind checkpoint - this indicates something went wrong
+                        // since MDBX checkpoint is committed last when appending.
+                        tracing::warn!(
                             target: "reth::providers::rocksdb",
                             rocks_max_tx = tx_number,
                             rocks_block,
@@ -102,6 +105,39 @@ impl RocksDBProvider {
                             "TransactionHashNumbers behind checkpoint, unwind needed"
                         );
                         return Ok(Some(rocks_block));
+                    } else if checkpoint < rocks_block {
+                        // RocksDB is ahead of checkpoint - this is the common case during
+                        // recovery from a crash during unwinding. MDBX checkpoint was
+                        // committed first, so we need to prune excess RocksDB data.
+                        //
+                        // Find the max tx_number for the checkpoint block by iterating
+                        // TransactionBlocks to find the entry where block_number == checkpoint
+                        let mut max_tx_for_checkpoint = 0u64;
+                        let mut cursor_walk =
+                            provider.tx_ref().cursor_read::<tables::TransactionBlocks>()?;
+                        let mut walker = cursor_walk.walk(Some(0))?;
+                        while let Some((tx_num, block_num)) = walker.next().transpose()? {
+                            if block_num == checkpoint {
+                                max_tx_for_checkpoint = tx_num;
+                                break;
+                            } else if block_num > checkpoint {
+                                // We've passed the checkpoint block, use the previous tx as max
+                                break;
+                            }
+                            max_tx_for_checkpoint = tx_num;
+                        }
+
+                        if max_tx_for_checkpoint > 0 {
+                            tracing::info!(
+                                target: "reth::providers::rocksdb",
+                                rocks_max_tx = tx_number,
+                                rocks_block,
+                                checkpoint,
+                                max_tx_for_checkpoint,
+                                "TransactionHashNumbers ahead of checkpoint, pruning excess data"
+                            );
+                            self.prune_transaction_hash_numbers_above(max_tx_for_checkpoint)?;
+                        }
                     }
                 }
 
@@ -119,9 +155,46 @@ impl RocksDBProvider {
         }
     }
 
+    /// Prunes `TransactionHashNumbers` entries where `tx_number` > `max_tx_number`.
+    ///
+    /// Since `TransactionHashNumbers` is keyed by `TxHash`, we must iterate all entries
+    /// and delete those whose value exceeds the threshold.
+    fn prune_transaction_hash_numbers_above(&self, max_tx_number: u64) -> ProviderResult<()> {
+        let mut to_delete = Vec::new();
+
+        // Iterate all entries and collect those to delete
+        for result in self.iter::<tables::TransactionHashNumbers>()? {
+            let (key, tx_number) = result?;
+
+            if tx_number > max_tx_number {
+                to_delete.push(key);
+            }
+        }
+
+        let deleted_count = to_delete.len();
+        if deleted_count > 0 {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                deleted_count,
+                max_tx_number,
+                "Pruning TransactionHashNumbers entries"
+            );
+
+            self.write_batch(|batch| {
+                for key in to_delete {
+                    batch.delete::<tables::TransactionHashNumbers>(key)?;
+                }
+                Ok(())
+            })?;
+        }
+
+        Ok(())
+    }
+
     /// Checks invariants for the `StoragesHistory` table.
     ///
     /// Returns a block number to unwind to if `RocksDB` is behind the checkpoint.
+    /// If `RocksDB` is ahead of the checkpoint, excess entries are pruned (healed).
     fn check_storages_history<Provider>(
         &self,
         provider: &Provider,
@@ -135,23 +208,41 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Get the last entry from RocksDB StoragesHistory
-        let rocks_last = self.last::<tables::StoragesHistory>()?;
+        // Check if RocksDB has any data
+        let rocks_first = self.first::<tables::StoragesHistory>()?;
 
-        match rocks_last {
-            Some((key, _block_list)) => {
-                let highest_block = key.sharded_key.highest_block_number;
-
-                // If the shard's highest block exceeds checkpoint, RocksDB is ahead
-                if highest_block != u64::MAX && highest_block > checkpoint {
-                    // Would need to prune - for now just report as inconsistent
-                    // In a full implementation, we'd prune entries > checkpoint
-                    tracing::warn!(
+        match rocks_first {
+            Some(_) => {
+                // If checkpoint is 0 but we have data, clear everything
+                if checkpoint == 0 {
+                    tracing::info!(
                         target: "reth::providers::rocksdb",
-                        rocks_highest = highest_block,
-                        checkpoint,
-                        "StoragesHistory ahead of checkpoint, pruning needed"
+                        "StoragesHistory has data but checkpoint is 0, clearing all"
                     );
+                    self.prune_storages_history_above(0)?;
+                    return Ok(None);
+                }
+
+                // Find the max highest_block_number (excluding u64::MAX sentinel) across all
+                // entries
+                let mut max_highest_block = 0u64;
+                for result in self.iter::<tables::StoragesHistory>()? {
+                    let (key, _) = result?;
+                    let highest = key.sharded_key.highest_block_number;
+                    if highest != u64::MAX && highest > max_highest_block {
+                        max_highest_block = highest;
+                    }
+                }
+
+                // If any entry has highest_block > checkpoint, prune excess
+                if max_highest_block > checkpoint {
+                    tracing::info!(
+                        target: "reth::providers::rocksdb",
+                        rocks_highest = max_highest_block,
+                        checkpoint,
+                        "StoragesHistory ahead of checkpoint, pruning excess data"
+                    );
+                    self.prune_storages_history_above(checkpoint)?;
                 }
 
                 Ok(None)
@@ -165,6 +256,48 @@ impl RocksDBProvider {
                 Ok(None)
             }
         }
+    }
+
+    /// Prunes `StoragesHistory` entries where `highest_block_number` > `max_block`.
+    ///
+    /// For `StoragesHistory`, the key contains `highest_block_number`, so we can iterate
+    /// and delete entries where `key.sharded_key.highest_block_number > max_block`.
+    fn prune_storages_history_above(&self, max_block: BlockNumber) -> ProviderResult<()> {
+        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
+
+        let mut to_delete: Vec<StorageShardedKey> = Vec::new();
+
+        // Iterate all entries and collect those to delete
+        for result in self.iter::<tables::StoragesHistory>()? {
+            let (key, _value) = result?;
+
+            let highest_block = key.sharded_key.highest_block_number;
+
+            // Delete entries where highest_block > max_block (excluding u64::MAX sentinel)
+            // Also delete if max_block is 0 (clearing all)
+            if max_block == 0 || (highest_block != u64::MAX && highest_block > max_block) {
+                to_delete.push(key);
+            }
+        }
+
+        let deleted_count = to_delete.len();
+        if deleted_count > 0 {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                deleted_count,
+                max_block,
+                "Pruning StoragesHistory entries"
+            );
+
+            self.write_batch(|batch| {
+                for key in to_delete {
+                    batch.delete::<tables::StoragesHistory>(key)?;
+                }
+                Ok(())
+            })?;
+        }
+
+        Ok(())
     }
 }
 
@@ -276,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_rocksdb_has_data_no_checkpoint_needs_clear() {
+    fn test_check_consistency_rocksdb_has_data_no_checkpoint_prunes_data() {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
@@ -287,6 +420,9 @@ mod tests {
         let tx_hash = B256::from([1u8; 32]);
         rocksdb.put::<tables::TransactionHashNumbers>(tx_hash, &100).unwrap();
 
+        // Verify data exists
+        assert!(rocksdb.last::<tables::TransactionHashNumbers>().unwrap().is_some());
+
         // Create a test provider factory for MDBX with NO checkpoint
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(
@@ -296,9 +432,15 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
 
         // RocksDB has data but checkpoint is 0
-        // This means RocksDB has stale data that should be cleared
+        // This means RocksDB has stale data that should be pruned (healed)
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, Some(0), "Should require unwind to block 0 to clear stale RocksDB data");
+        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+
+        // Verify data was pruned
+        assert!(
+            rocksdb.last::<tables::TransactionHashNumbers>().unwrap().is_none(),
+            "RocksDB should be empty after pruning"
+        );
     }
 
     #[test]
@@ -332,7 +474,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_storages_history_has_data_no_checkpoint() {
+    fn test_check_consistency_storages_history_has_data_no_checkpoint_prunes_data() {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::StoragesHistory>()
@@ -344,6 +486,9 @@ mod tests {
         let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
         rocksdb.put::<tables::StoragesHistory>(key, &block_list).unwrap();
 
+        // Verify data exists
+        assert!(rocksdb.last::<tables::StoragesHistory>().unwrap().is_some());
+
         // Create a test provider factory for MDBX with NO checkpoint
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(
@@ -353,12 +498,15 @@ mod tests {
         let provider = factory.database_provider_ro().unwrap();
 
         // RocksDB has data but checkpoint is 0
+        // This means RocksDB has stale data that should be pruned (healed)
         let result = rocksdb.check_consistency(&provider).unwrap();
-        // For StoragesHistory we don't return unwind when RocksDB has data and checkpoint is 0
-        // because we only check if checkpoint > 0 and RocksDB is empty
-        // The logic is: if checkpoint says we should have data but we don't, that's a problem
-        // But if we have data and checkpoint is 0, we log a warning but don't unwind
-        assert_eq!(result, None);
+        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+
+        // Verify data was pruned
+        assert!(
+            rocksdb.last::<tables::StoragesHistory>().unwrap().is_none(),
+            "RocksDB should be empty after pruning"
+        );
     }
 
     #[test]
@@ -407,6 +555,134 @@ mod tests {
             result,
             Some(10),
             "Should require unwind to block 10 where RocksDB's max tx belongs"
+        );
+    }
+
+    #[test]
+    fn test_check_consistency_rocksdb_ahead_of_checkpoint_prunes_excess() {
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::TransactionHashNumbers>()
+            .build()
+            .unwrap();
+
+        // Insert data into RocksDB - tx hashes for tx_numbers 50, 100, 150
+        let tx_hash_1 = B256::from([1u8; 32]);
+        let tx_hash_2 = B256::from([2u8; 32]);
+        let tx_hash_3 = B256::from([3u8; 32]);
+        rocksdb.put::<tables::TransactionHashNumbers>(tx_hash_1, &50).unwrap();
+        rocksdb.put::<tables::TransactionHashNumbers>(tx_hash_2, &100).unwrap();
+        rocksdb.put::<tables::TransactionHashNumbers>(tx_hash_3, &150).unwrap();
+
+        // Create a test provider factory for MDBX
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+        );
+
+        // Set up MDBX with:
+        // - TransactionBlocks: tx 50 is in block 10, tx 100 is in block 20, tx 150 is in block 30
+        // - Checkpoint at block 20 (meaning checkpoint should only have up to tx 100)
+        {
+            let provider = factory.database_provider_rw().unwrap();
+
+            // Insert TransactionBlocks entries
+            let mut cursor = provider.tx_ref().cursor_write::<tables::TransactionBlocks>().unwrap();
+            cursor.append(50, &10).unwrap(); // tx 50 is the last tx in block 10
+            cursor.append(100, &20).unwrap(); // tx 100 is the last tx in block 20
+            cursor.append(150, &30).unwrap(); // tx 150 is the last tx in block 30
+
+            // Set checkpoint to block 20
+            provider
+                .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(20))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // RocksDB has tx hashes up to tx 150 (block 30)
+        // But checkpoint says we only processed up to block 20 (tx 100)
+        // This means RocksDB is ahead and should prune entries > tx 100
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+
+        // Verify tx_hash_3 (tx 150) was pruned, but tx_hash_1 (tx 50) and tx_hash_2 (tx 100) remain
+        assert_eq!(
+            rocksdb.get::<tables::TransactionHashNumbers>(tx_hash_1).unwrap(),
+            Some(50),
+            "tx 50 should remain"
+        );
+        assert_eq!(
+            rocksdb.get::<tables::TransactionHashNumbers>(tx_hash_2).unwrap(),
+            Some(100),
+            "tx 100 should remain"
+        );
+        assert_eq!(
+            rocksdb.get::<tables::TransactionHashNumbers>(tx_hash_3).unwrap(),
+            None,
+            "tx 150 should be pruned"
+        );
+    }
+
+    #[test]
+    fn test_check_consistency_storages_history_ahead_of_checkpoint_prunes_excess() {
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+
+        // Insert data into RocksDB with different highest_block_numbers
+        let key_block_50 = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
+        let key_block_100 = StorageShardedKey::new(Address::ZERO, B256::from([1u8; 32]), 100);
+        let key_block_150 = StorageShardedKey::new(Address::ZERO, B256::from([2u8; 32]), 150);
+        let key_block_max = StorageShardedKey::new(Address::ZERO, B256::from([3u8; 32]), u64::MAX);
+
+        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
+        rocksdb.put::<tables::StoragesHistory>(key_block_50.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(key_block_100.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(key_block_150.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(key_block_max.clone(), &block_list).unwrap();
+
+        // Create a test provider factory for MDBX
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        // Set checkpoint to block 100
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // RocksDB has entries with highest_block = 150 which exceeds checkpoint (100)
+        // Should prune entries where highest_block > 100 (but not u64::MAX sentinel)
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+
+        // Verify key_block_150 was pruned, but others remain
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key_block_50).unwrap().is_some(),
+            "Entry with highest_block=50 should remain"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key_block_100).unwrap().is_some(),
+            "Entry with highest_block=100 should remain"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key_block_150).unwrap().is_none(),
+            "Entry with highest_block=150 should be pruned"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key_block_max).unwrap().is_some(),
+            "Entry with highest_block=u64::MAX (sentinel) should remain"
         );
     }
 }

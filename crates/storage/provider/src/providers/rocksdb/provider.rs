@@ -430,6 +430,15 @@ impl RocksDBProvider {
         })
     }
 
+    /// Creates an iterator over all entries in the specified table.
+    ///
+    /// Returns decoded `(Key, Value)` pairs in key order.
+    pub fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let iter = self.0.db.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
@@ -631,6 +640,50 @@ impl<'db> RocksTx<'db> {
         self.inner.rollback().map_err(|e| {
             ProviderError::Database(DatabaseError::Other(format!("rollback failed: {e}")))
         })
+    }
+}
+
+/// Iterator over a `RocksDB` table (non-transactional).
+///
+/// Yields decoded `(Key, Value)` pairs in key order.
+pub struct RocksDBIter<'db, T: Table> {
+    inner: rocksdb::DBIteratorWithThreadMode<'db, TransactionDB>,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: Table> fmt::Debug for RocksDBIter<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBIter").field("table", &T::NAME).finish_non_exhaustive()
+    }
+}
+
+impl<T: Table> Iterator for RocksDBIter<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key_bytes, value_bytes) = match self.inner.next()? {
+            Ok(kv) => kv,
+            Err(e) => {
+                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))))
+            }
+        };
+
+        // Decode key
+        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
+            Ok(k) => k,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        // Decompress value
+        let value = match T::Value::decompress(&value_bytes) {
+            Ok(v) => v,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        Some(Ok((key, value)))
     }
 }
 
