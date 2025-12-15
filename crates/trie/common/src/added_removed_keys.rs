@@ -1,8 +1,9 @@
 //! Tracking of keys having been added and removed from the tries.
 
 use crate::HashedPostState;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::{keccak256, map::B256Map, B256};
 use alloy_trie::proof::AddedRemovedKeys;
+use revm_state::EvmState;
 
 /// Tracks added and removed keys across account and storage tries.
 #[derive(Debug, Clone)]
@@ -81,6 +82,42 @@ impl MultiAddedRemovedKeys {
     pub fn touch_accounts(&mut self, addresses: impl Iterator<Item = B256>) {
         for address in addresses {
             self.storages.entry(address).or_insert_with(default_added_removed_keys);
+        }
+    }
+
+    /// Records removals from an EVM state update.
+    ///
+    /// Unlike [`Self::update_with_state`], this treats removals as monotonic -
+    /// once a key is marked removed, it stays removed. This is correct for
+    /// intra-block proof invalidation where branch proofs become stale on
+    /// deletion regardless of later recreation.
+    ///
+    /// Call this on each sub-update BEFORE merging with `extend()` to ensure
+    /// intermediate deletions are captured.
+    pub fn record_removals(&mut self, update: &EvmState) {
+        for (address, account) in update {
+            if !account.is_touched() {
+                continue;
+            }
+
+            let hashed_address = keccak256(*address);
+
+            // Selfdestruct wipes storage - mark account as removed
+            if account.is_selfdestructed() {
+                self.account.insert_removed(hashed_address);
+                continue;
+            }
+
+            // Track storage slots being deleted (set to zero)
+            for (slot, value) in &account.storage {
+                if value.is_changed() && value.present_value.is_zero() {
+                    self.storages
+                        .entry(hashed_address)
+                        .or_insert_with(default_added_removed_keys)
+                        .insert_removed(keccak256(B256::from(*slot)));
+                }
+            }
+            // NOTE: No remove_removed calls - removals are monotonic within a block
         }
     }
 }
@@ -182,6 +219,147 @@ mod tests {
 
         // Account should not be marked as removed still
         assert!(!multi_keys.get_accounts().is_removed(&addr));
+    }
+
+    #[test]
+    fn test_record_removals_is_monotonic() {
+        use alloy_primitives::Address;
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let mut multi_keys = MultiAddedRemovedKeys::new();
+        let address = Address::random();
+        let slot = U256::from(42);
+        let hashed_addr = keccak256(address);
+        let hashed_slot = keccak256(B256::from(slot));
+
+        // Update 1: Create slot with value 100
+        let mut update1 = EvmState::default();
+        update1.insert(
+            address,
+            Account {
+                info: AccountInfo::default(),
+                transaction_id: 0,
+                storage: std::iter::once((
+                    slot,
+                    EvmStorageSlot::new_changed(U256::ZERO, U256::from(100), 0),
+                ))
+                .collect(),
+                status: AccountStatus::Touched,
+            },
+        );
+        multi_keys.record_removals(&update1);
+
+        // Slot should NOT be marked as removed (value is 100, not 0)
+        assert!(
+            multi_keys.get_storage(&hashed_addr).is_none() ||
+                !multi_keys.get_storage(&hashed_addr).unwrap().is_removed(&hashed_slot)
+        );
+
+        // Update 2: Delete slot (set to 0)
+        let mut update2 = EvmState::default();
+        update2.insert(
+            address,
+            Account {
+                info: AccountInfo::default(),
+                transaction_id: 1,
+                storage: std::iter::once((
+                    slot,
+                    EvmStorageSlot::new_changed(U256::from(100), U256::ZERO, 1),
+                ))
+                .collect(),
+                status: AccountStatus::Touched,
+            },
+        );
+        multi_keys.record_removals(&update2);
+
+        // Slot should be marked as removed
+        assert!(multi_keys.get_storage(&hashed_addr).unwrap().is_removed(&hashed_slot));
+
+        // Update 3: Recreate slot with value 200
+        let mut update3 = EvmState::default();
+        update3.insert(
+            address,
+            Account {
+                info: AccountInfo::default(),
+                transaction_id: 2,
+                storage: std::iter::once((
+                    slot,
+                    EvmStorageSlot::new_changed(U256::ZERO, U256::from(200), 2),
+                ))
+                .collect(),
+                status: AccountStatus::Touched,
+            },
+        );
+        multi_keys.record_removals(&update3);
+
+        // KEY ASSERTION: Still removed after recreation!
+        // This is the critical difference from update_with_state.
+        // Removals are monotonic - once removed, stays removed for proof invalidation.
+        assert!(
+            multi_keys.get_storage(&hashed_addr).unwrap().is_removed(&hashed_slot),
+            "slot should remain marked as removed even after recreation"
+        );
+    }
+
+    #[test]
+    fn test_record_removals_selfdestruct() {
+        use alloy_primitives::Address;
+        use revm_state::{Account, AccountInfo, AccountStatus};
+
+        let mut multi_keys = MultiAddedRemovedKeys::new();
+        let address = Address::random();
+        let hashed_addr = keccak256(address);
+
+        // Selfdestruct the account (must also be Touched to be processed)
+        let mut update = EvmState::default();
+        update.insert(
+            address,
+            Account {
+                info: AccountInfo::default(),
+                transaction_id: 0,
+                storage: Default::default(),
+                status: AccountStatus::SelfDestructed | AccountStatus::Touched,
+            },
+        );
+        multi_keys.record_removals(&update);
+
+        // Account should be marked as removed
+        assert!(multi_keys.get_accounts().is_removed(&hashed_addr));
+    }
+
+    #[test]
+    fn test_record_removals_ignores_untouched() {
+        use alloy_primitives::Address;
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let mut multi_keys = MultiAddedRemovedKeys::new();
+        let address = Address::random();
+        let slot = U256::from(1);
+        let hashed_addr = keccak256(address);
+        let hashed_slot = keccak256(B256::from(slot));
+
+        // Create an untouched account with zero storage
+        let mut update = EvmState::default();
+        update.insert(
+            address,
+            Account {
+                info: AccountInfo::default(),
+                transaction_id: 0,
+                storage: std::iter::once((
+                    slot,
+                    EvmStorageSlot::new_changed(U256::from(100), U256::ZERO, 0),
+                ))
+                .collect(),
+                status: AccountStatus::default(), // NOT touched
+            },
+        );
+        multi_keys.record_removals(&update);
+
+        // Should NOT be marked as removed because account wasn't touched
+        assert!(
+            multi_keys.get_storage(&hashed_addr).is_none() ||
+                !multi_keys.get_storage(&hashed_addr).unwrap().is_removed(&hashed_slot)
+        );
     }
 
     #[test]

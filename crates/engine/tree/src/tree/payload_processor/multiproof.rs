@@ -886,8 +886,11 @@ impl MultiProofTask {
     fn on_state_update(&mut self, source: StateChangeSource, update: EvmState) -> u64 {
         let hashed_state_update = evm_state_to_hashed_post_state(update);
 
-        // Update removed keys based on the state update.
-        self.multi_added_removed_keys.update_with_state(&hashed_state_update);
+        // NOTE: Removal tracking is done at the batch site via record_removals(),
+        // which is called on each sub-update BEFORE extend() merges them.
+        // This ensures intermediate deletions (e.g., 100→0→100) are captured.
+        // We intentionally do NOT call update_with_state() here because it would
+        // clear removal flags via remove_removed() when seeing non-zero values.
 
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
@@ -1100,13 +1103,20 @@ impl MultiProofTask {
                 let num_batched = ctx.accumulated_state_updates.len();
                 self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
 
-                // Merge all accumulated updates into a single EvmState payload.
+                // Merge all accumulated updates into a single EvmState payload while
+                // recording removals BEFORE extend() can overwrite them.
                 // Use drain to preserve the buffer allocation.
                 let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
                 let (batch_source, mut merged_update) = accumulated_iter
                     .next()
                     .expect("state update batch always has at least one entry");
+
+                // Record removals from the first update
+                self.multi_added_removed_keys.record_removals(&merged_update);
+
                 for (_, next_update) in accumulated_iter {
+                    // Record removals BEFORE extend() overwrites them
+                    self.multi_added_removed_keys.record_removals(&next_update);
                     merged_update.extend(next_update);
                 }
 
