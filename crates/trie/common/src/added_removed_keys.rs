@@ -1,9 +1,8 @@
 //! Tracking of keys having been added and removed from the tries.
 
 use crate::HashedPostState;
-use alloy_primitives::{keccak256, map::B256Map, B256};
+use alloy_primitives::{map::B256Map, B256};
 use alloy_trie::proof::AddedRemovedKeys;
-use revm_state::EvmState;
 
 /// Tracks added and removed keys across account and storage tries.
 #[derive(Debug, Clone)]
@@ -85,40 +84,17 @@ impl MultiAddedRemovedKeys {
         }
     }
 
-    /// Records removals from an EVM state update.
-    ///
-    /// Unlike [`Self::update_with_state`], this treats removals as monotonic -
-    /// once a key is marked removed, it stays removed. This is correct for
-    /// intra-block proof invalidation where branch proofs become stale on
-    /// deletion regardless of later recreation.
-    ///
-    /// Call this on each sub-update BEFORE merging with `extend()` to ensure
-    /// intermediate deletions are captured.
-    pub fn record_removals(&mut self, update: &EvmState) {
-        for (address, account) in update {
-            if !account.is_touched() {
-                continue;
-            }
+    /// Marks an account as removed.
+    pub fn mark_account_removed(&mut self, account: B256) {
+        self.account.insert_removed(account);
+    }
 
-            let hashed_address = keccak256(*address);
-
-            // Selfdestruct wipes storage - mark account as removed
-            if account.is_selfdestructed() {
-                self.account.insert_removed(hashed_address);
-                continue;
-            }
-
-            // Track storage slots being deleted (set to zero)
-            for (slot, value) in &account.storage {
-                if value.is_changed() && value.present_value.is_zero() {
-                    self.storages
-                        .entry(hashed_address)
-                        .or_insert_with(default_added_removed_keys)
-                        .insert_removed(keccak256(B256::from(*slot)));
-                }
-            }
-            // NOTE: No remove_removed calls - removals are monotonic within a block
-        }
+    /// Marks a storage slot as removed for the given account.
+    pub fn mark_storage_removed(&mut self, hashed_address: B256, slot: B256) {
+        self.storages
+            .entry(hashed_address)
+            .or_insert_with(default_added_removed_keys)
+            .insert_removed(slot);
     }
 }
 
