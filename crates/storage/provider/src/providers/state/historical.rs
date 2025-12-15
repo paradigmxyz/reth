@@ -383,6 +383,17 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
         StorageProof::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
             .map_err(ProviderError::from)
     }
+
+    fn storage_multiproof_from_nodes(
+        &self,
+        address: Address,
+        slots: &[B256],
+        mut input: TrieInput,
+    ) -> ProviderResult<StorageMultiProof> {
+        input.prepend(self.revert_state()?.into());
+        StorageProof::overlay_storage_multiproof_from_nodes(self.tx(), address, slots, input)
+            .map_err(ProviderError::from)
+    }
 }
 
 impl<Provider: DBProvider + BlockNumReader> StateProofProvider

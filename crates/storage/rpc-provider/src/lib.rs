@@ -1283,6 +1283,15 @@ where
     ) -> Result<reth_trie::StorageMultiProof, ProviderError> {
         Err(ProviderError::UnsupportedProvider)
     }
+
+    fn storage_multiproof_from_nodes(
+        &self,
+        _address: Address,
+        _slots: &[B256],
+        _input: TrieInput,
+    ) -> Result<reth_trie::StorageMultiProof, ProviderError> {
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 impl<P, Node, N> reth_storage_api::StateProofProvider for RpcBlockchainStateProvider<P, Node, N>

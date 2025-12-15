@@ -136,6 +136,15 @@ impl StorageRootProvider for StateProviderTest {
     ) -> ProviderResult<StorageMultiProof> {
         unimplemented!("proof generation is not supported")
     }
+
+    fn storage_multiproof_from_nodes(
+        &self,
+        _address: Address,
+        _slots: &[B256],
+        _input: TrieInput,
+    ) -> ProviderResult<StorageMultiProof> {
+        unimplemented!("proof generation is not supported")
+    }
 }
 
 impl StateProofProvider for StateProviderTest {

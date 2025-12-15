@@ -465,6 +465,15 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
     ) -> ProviderResult<StorageMultiProof> {
         Ok(StorageMultiProof::empty())
     }
+
+    fn storage_multiproof_from_nodes(
+        &self,
+        _address: Address,
+        _slots: &[B256],
+        _input: TrieInput,
+    ) -> ProviderResult<StorageMultiProof> {
+        Ok(StorageMultiProof::empty())
+    }
 }
 
 impl<C: Send + Sync, N: NodePrimitives> StateProofProvider for NoopProvider<C, N> {

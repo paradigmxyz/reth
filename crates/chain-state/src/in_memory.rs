@@ -1126,6 +1126,15 @@ mod tests {
         ) -> ProviderResult<StorageMultiProof> {
             Ok(StorageMultiProof::empty())
         }
+
+        fn storage_multiproof_from_nodes(
+            &self,
+            _address: Address,
+            _slots: &[B256],
+            _input: TrieInput,
+        ) -> ProviderResult<StorageMultiProof> {
+            Ok(StorageMultiProof::empty())
+        }
     }
 
     impl StateProofProvider for MockStateProvider {

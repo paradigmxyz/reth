@@ -94,6 +94,15 @@ impl reth_storage_api::StorageRootProvider for StateProviderTraitObjWrapper {
     ) -> ProviderResult<reth_trie::StorageMultiProof> {
         self.0.storage_multiproof(address, slots, hashed_storage)
     }
+
+    fn storage_multiproof_from_nodes(
+        &self,
+        address: Address,
+        slots: &[B256],
+        input: reth_trie::TrieInput,
+    ) -> ProviderResult<reth_trie::StorageMultiProof> {
+        self.0.storage_multiproof_from_nodes(address, slots, input)
+    }
 }
 
 impl reth_storage_api::StateProofProvider for StateProviderTraitObjWrapper {

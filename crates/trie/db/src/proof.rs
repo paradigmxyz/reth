@@ -102,6 +102,14 @@ pub trait DatabaseStorageProof<'a, TX> {
         slots: &[B256],
         storage: HashedStorage,
     ) -> Result<StorageMultiProof, StateProofError>;
+
+    /// Generates the storage multiproof for target slots based on [`TrieInput`] with cached nodes.
+    fn overlay_storage_multiproof_from_nodes(
+        tx: &'a TX,
+        address: Address,
+        slots: &[B256],
+        input: TrieInput,
+    ) -> Result<StorageMultiProof, StateProofError>;
 }
 
 impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
@@ -175,6 +183,31 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
         );
         StorageProof::new(
             DatabaseTrieCursorFactory::new(tx),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+            address,
+        )
+        .with_prefix_set_mut(prefix_set)
+        .storage_multiproof(targets)
+    }
+
+    fn overlay_storage_multiproof_from_nodes(
+        tx: &'a TX,
+        address: Address,
+        slots: &[B256],
+        input: TrieInput,
+    ) -> Result<StorageMultiProof, StateProofError> {
+        let hashed_address = keccak256(address);
+        let hashed_storage = input.state.storages.get(&hashed_address).cloned().unwrap_or_default();
+        let targets = slots.iter().map(keccak256).collect();
+        let prefix_set = hashed_storage.construct_prefix_set();
+        let state_sorted = HashedPostStateSorted::new(
+            Default::default(),
+            HashMap::from_iter([(hashed_address, hashed_storage.into_sorted())]),
+        );
+        let nodes_sorted = input.nodes.into_sorted();
+
+        StorageProof::new(
+            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
             address,
         )

@@ -292,6 +292,15 @@ impl<S: StorageRootProvider> StorageRootProvider for InstrumentedStateProvider<S
     ) -> ProviderResult<StorageMultiProof> {
         self.state_provider.storage_multiproof(address, slots, hashed_storage)
     }
+
+    fn storage_multiproof_from_nodes(
+        &self,
+        address: Address,
+        slots: &[B256],
+        input: TrieInput,
+    ) -> ProviderResult<StorageMultiProof> {
+        self.state_provider.storage_multiproof_from_nodes(address, slots, input)
+    }
 }
 
 impl<S: BlockHashReader> BlockHashReader for InstrumentedStateProvider<S> {

@@ -76,6 +76,15 @@ pub trait StorageRootProvider: Send + Sync {
         slots: &[B256],
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof>;
+
+    /// Returns the storage multiproof for target slots, with the provided trie input which may
+    /// contain cached intermediate nodes.
+    fn storage_multiproof_from_nodes(
+        &self,
+        address: Address,
+        slots: &[B256],
+        input: TrieInput,
+    ) -> ProviderResult<StorageMultiProof>;
 }
 
 /// A type that can generate state proof on top of a given post state.
