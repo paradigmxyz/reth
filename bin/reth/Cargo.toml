@@ -64,7 +64,6 @@ reth-ress-provider.workspace = true
 
 # alloy
 alloy-rpc-types = { workspace = true, features = ["engine"] }
-alloy-primitives = { workspace = true, features = ["keccak-cache"] }
 
 # tracing
 tracing.workspace = true
