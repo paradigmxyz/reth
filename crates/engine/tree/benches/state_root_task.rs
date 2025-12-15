@@ -230,12 +230,12 @@ fn bench_state_root(c: &mut Criterion) {
                             let mut handle = payload_processor.spawn(
                                 Default::default(),
                                 (
-                                    core::iter::empty::<
+                                    Vec::<
                                         Result<
                                             Recovered<TransactionSigned>,
                                             core::convert::Infallible,
                                         >,
-                                    >(),
+                                    >::new(),
                                     std::convert::identity,
                                 ),
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
