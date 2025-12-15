@@ -897,7 +897,7 @@ where
         trie_cursor_state: &mut TrieCursorState,
         sub_trie_prefix: &Nibbles,
         sub_trie_upper_bound: Option<&Nibbles>,
-        uncalculated_lower_bound: Nibbles,
+        mut uncalculated_lower_bound: Option<Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
         // Pop any under-construction branches that are now complete.
         // All trie data prior to the current cached branch, if any, has been computed. Any branches
@@ -909,11 +909,6 @@ where
                 self.pop_branch(targets)?;
             }
         }
-
-        // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
-        // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor (this
-        // method). If this is None then there are no further nodes which could exist.
-        let mut uncalculated_lower_bound = Some(uncalculated_lower_bound);
 
         loop {
             // Pop the currently cached branch node.
@@ -1147,24 +1142,21 @@ where
                 TrieCursorState::seeked(self.trie_cursor.seek(sub_trie_targets.prefix)?);
         }
 
+        // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
+        // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor
+        // (`next_uncached_key_range`). If/when this becomes None then there are no further nodes
+        // which could exist.
+        let mut uncalculated_lower_bound = Some(sub_trie_targets.prefix);
+
         trace!(target: TRACE_TARGET, "Starting loop");
         loop {
-            // Calculate the uncalculated lower bound that `next_uncached_key_range` should use.
-            //
-            // The lower bound is the higher of the sub-trie's prefix (ie its first possible node)
-            // and the hashed cursor's current position (which is the next key which a trie node has
-            // not been computed).
-            let uncached_lower_bound = hashed_cursor_current
-                .as_ref()
-                .map_or(sub_trie_targets.prefix, |kv| std::cmp::max(kv.0, sub_trie_targets.prefix));
-
             // Determine the range of keys of the overall trie which need to be re-computed.
             let Some((calc_lower_bound, calc_upper_bound)) = self.next_uncached_key_range(
                 &mut targets,
                 trie_cursor_state,
                 &sub_trie_targets.prefix,
                 sub_trie_upper_bound.as_ref(),
-                uncached_lower_bound,
+                uncalculated_lower_bound,
             )?
             else {
                 // If `next_uncached_key_range` determines that there can be no more keys then
@@ -1193,6 +1185,10 @@ where
             {
                 break;
             }
+
+            // The upper bound of previous calculation becomes the lower bound of the uncalculated
+            // range, for which we'll once again check for cached data.
+            uncalculated_lower_bound = calc_upper_bound;
         }
 
         // Once there's no more leaves we can pop the remaining branches, if any.
@@ -1830,5 +1826,394 @@ mod tests {
             let result = increment_and_strip_trailing_zeros(&input);
             assert_eq!(result, expected, "Failed for input: {:?}", input);
         }
+    }
+
+    #[test]
+    fn test_failing_proptest_case_0() {
+        use alloy_primitives::{hex, map::B256Map};
+
+        reth_tracing::init_test_tracing();
+
+        // Helper function to create B256 from hex string
+        let b256 = |s: &str| B256::from_slice(&hex::decode(s).unwrap());
+
+        // Create the HashedPostState from test case input
+        let mut accounts = B256Map::default();
+
+        // Define all account data from test case input
+        let account_data = [
+            (
+                "9f3a475db85ff1f5b5e82d8614ee4afc670d27aefb9a43da0bd863a54acf1fe6",
+                8396790837504194281u64,
+                9224366602005816983u64,
+                "103c5b0538f4e37944321a30f5cb1f7005d2ee70998106f34f36d7adb838c789",
+            ),
+            (
+                "c736258fdfd23d73ec4c5e54b8c3b58e26726b361d438ef48670f028286b70ca",
+                9193115115482903760u64,
+                4515164289866465875u64,
+                "9f24ef3ab0b4893b0ec38d0e9b00f239da072ccf093b0b24f1ea1f99547abe55",
+            ),
+            (
+                "780a3476520090f97e847181aee17515c5ea30b7607775103df16d2b6611a87a",
+                8404772182417755681u64,
+                16639574952778823617u64,
+                "214b12bee666ce8c64c6bbbcfafa0c3e55b4b05a8724ec4182b9a6caa774c56d",
+            ),
+            (
+                "23ebfa849308a5d02c3048040217cd1f4b71fb01a9b54dafe541284ebec2bcce",
+                17978809803974566048u64,
+                11093542035392742776u64,
+                "5384dfda8f1935d98e463c00a96960ff24e4d4893ec21e5ece0d272df33ac7e9",
+            ),
+            (
+                "348e476c24fac841b11d358431b4526db09edc9f39906e0ac8809886a04f3c5a",
+                9422945522568453583u64,
+                9737072818780682487u64,
+                "79f8f25b2cbb7485c5c7b627917c0f562f012d3d7ddd486212c90fbea0cf686e",
+            ),
+            (
+                "830536ee6c8f780a1cd760457345b79fc09476018a59cf3e8fd427a793d99633",
+                16497625187081138489u64,
+                15143978245385012455u64,
+                "00ede4000cc2a16fca7e930761aaf30d1fddcc3803f0009d6a0742b4ee519342",
+            ),
+            (
+                "806c74b024b2fe81f077ea93d2936c489689f7fe024febc3a0fb71a8a9f22fbc",
+                8103477314050566918u64,
+                1383893458340561723u64,
+                "690ed176136174c4f0cc442e6dcbcf6e7b577e30fc052430b6060f97af1f8e85",
+            ),
+            (
+                "b903d962ffc520877f14e1e8328160e5b22f8086b0f7e9cba7a373a8376028a0",
+                12972727566246296372u64,
+                1130659127924527352u64,
+                "cadf1f09d8e6a0d945a58ccd2ff36e2ae99f8146f02be96873e84bef0462d64a",
+            ),
+            (
+                "d36a16afff0097e06b2c28bd795b889265e2ceff9a086173113fbeb6f7a9bc42",
+                15682404502571860137u64,
+                2025886798818635036u64,
+                "c2cee70663e9ff1b521e2e1602e88723da52ccdc7a69e370cde9595af435e654",
+            ),
+            (
+                "f3e8461cba0b84f5b81f8ca63d0456cb567e701ec1d6e77b1a03624c5018389b",
+                5663749586038550112u64,
+                7681243595728002238u64,
+                "072c547c3ab9744bcd2ed9dbd813bd62866a673f4ca5d46939b65e9507be0e70",
+            ),
+            (
+                "40b71840b6f43a493b32f4aa755e02d572012392fd582c81a513a169447e194c",
+                518207789203399614u64,
+                317311275468085815u64,
+                "85541d48471bf639c2574600a9b637338c49729ba9e741f157cc6ebaae139da0",
+            ),
+            (
+                "3f77cd91ceb7d335dd2527c29e79aaf94f14141438740051eb0163d86c35bcc9",
+                16227517944662106096u64,
+                12646193931088343779u64,
+                "54999911d82dd63d526429275115fa98f6a560bc2d8e00be24962e91e38d7182",
+            ),
+            (
+                "5cd903814ba84daa6956572411cd1bf4d48a8e230003d28cc3f942697bf8debb",
+                5096288383163945009u64,
+                17919982845103509853u64,
+                "6a53c812e713f1bfe6bf21954f291140c60ec3f2ef353ecdae5dc7b263a37282",
+            ),
+            (
+                "23f3602c95fd98d7fbe48a326ae1549030a2c7574099432cce5b458182f16bf2",
+                11136020130962086191u64,
+                12045219101880183180u64,
+                "ce53fb9b108a3ee90db8469e44948ba3263ca8d8a0d92a076c9516f9a3d30bd1",
+            ),
+            (
+                "be86489b3594a9da83e04a9ff81c8d68d528b8b9d31f3942d1c5856a4a8c5af7",
+                16293506537092575994u64,
+                536238712429663046u64,
+                "a2af0607ade21241386ecfb3780aa90514f43595941daeff8dd599c203cde30a",
+            ),
+            (
+                "97bcd85ee5d6033bdf86397e8b26f711912948a7298114be27ca5499ea99725f",
+                3086656672041156193u64,
+                8667446575959669532u64,
+                "0474377538684a991ffc9b41f970b48e65eda9e07c292e60861258ef87d45272",
+            ),
+            (
+                "40065932e6c70eb907e4f2a89ec772f5382ca90a49ef44c4ae21155b9decdcc0",
+                17152529399128063686u64,
+                3643450822628960860u64,
+                "d5f6198c64c797f455f5b44062bb136734f508f9cdd02d8d69d24100ac8d6252",
+            ),
+            (
+                "c136436c2db6b2ebd14985e2c883e73c6d8fd95ace54bfefae9eeca47b7da800",
+                727585093455815585u64,
+                521742371554431881u64,
+                "3dfad04a6eb46d175b63e96943c7d636c56d61063277e25557aace95820432da",
+            ),
+            (
+                "9ea50348595593788645394eb041ac4f75ee4d6a4840b9cf1ed304e895060791",
+                8654829249939415079u64,
+                15623358443672184321u64,
+                "61bb0d6ffcd5b32d0ee34a3b7dfb1c495888059be02b255dd1fa3be02fa1ddbd",
+            ),
+            (
+                "5abc714353ad6abda44a609f9b61f310f5b0a7df55ccf553dc2db3edda18ca17",
+                5732104102609402825u64,
+                15720007305337585794u64,
+                "8b55b7e9c6f54057322c5e0610b33b3137f1fcd46f7d4af1aca797c7b5fff033",
+            ),
+            (
+                "e270b59e6e56100f9e2813f263884ba5f74190a1770dd88cd9603266174e0a6b",
+                4728642361690813205u64,
+                6762867306120182099u64,
+                "5e9aa1ff854504b4bfea4a7f0175866eba04e88e14e57ac08dddc63d6917bf47",
+            ),
+            (
+                "78286294c6fb6823bb8b2b2ddb7a1e71ee64e05c9ba33b0eb8bb6654c64a8259",
+                6032052879332640150u64,
+                498315069638377858u64,
+                "799ef578ffb51a5ec42484e788d6ada4f13f0ff73e1b7b3e6d14d58caae9319a",
+            ),
+            (
+                "af1b85cf284b0cb59a4bfb0f699194bcd6ad4538f27057d9d93dc7a95c1ff32e",
+                1647153930670480138u64,
+                13109595411418593026u64,
+                "429dcdf4748c0047b0dd94f3ad12b5e62bbadf8302525cc5d2aad9c9c746696f",
+            ),
+            (
+                "0152b7a0626771a2518de84c01e52839e7821a655f9dcb9a174d8f52b64b7086",
+                3915492299782594412u64,
+                9550071871839879785u64,
+                "4d5e6ce993dfc9597585ae2b4bacd6d055fefc56ae825666c83e0770e4aa0527",
+            ),
+            (
+                "9ea9b8a4f6bce1dba63290b81f4d1b88dfeac3e244856904a5c9d4086a10271b",
+                8824593031424861220u64,
+                15831101445348312026u64,
+                "a07602b4dd5cba679562061b7c5c0344b2edd6eba36aa97ca57a6fe01ed80a48",
+            ),
+            (
+                "d7b26c2d8f85b74423a57a3da56c61829340f65967791bab849c90b5e1547e7a",
+                12723258987146468813u64,
+                10714399360315276559u64,
+                "3705e57b27d931188c0d2017ab62577355b0cdda4173203478a8562a0cdcae0c",
+            ),
+            (
+                "da354ceca117552482e628937931870a28e9d4416f47a58ee77176d0b760c75b",
+                1580954430670112951u64,
+                14920857341852745222u64,
+                "a13d6b0123daa2e662699ac55a2d0ed1d2e73a02ed00ee5a4dd34db8dea2a37e",
+            ),
+            (
+                "53140d0c8b90b4c3c49e0604879d0dc036e914c4c4f799f1ccae357fef2613e3",
+                12521658365236780592u64,
+                11630410585145916252u64,
+                "46f06ce1435a7a0fd3476bbcffe4aac88c33a7fcf50080270b715d25c93d96d7",
+            ),
+            (
+                "4b1c151815da6f18f27e98890eac1f7d43b80f3386c7c7d15ee0e43a7edfe0a6",
+                9575643484508382933u64,
+                3471795678079408573u64,
+                "a9e6a8fac46c5fc61ae07bddc223e9f105f567ad039d2312a03431d1f24d8b2c",
+            ),
+            (
+                "39436357a2bcd906e58fb88238be2ddb2e43c8a5590332e3aee1d1134a0d0ba4",
+                10171391804125392783u64,
+                2915644784933705108u64,
+                "1d5db03f07137da9d3af85096ed51a4ff64bb476a79bf4294850438867fe3833",
+            ),
+            (
+                "5fbe8d9d6a12b061a94a72436caec331ab1fd4e472c3bb4688215788c5e9bcd9",
+                5663512925993713993u64,
+                18170240962605758111u64,
+                "bd5d601cbcb47bd84d410bafec72f2270fceb1ed2ed11499a1e218a9f89a9f7f",
+            ),
+            (
+                "f2e29a909dd31b38e9b92b2b2d214e822ebddb26183cd077d4009773854ab099",
+                7512894577556564068u64,
+                15905517369556068583u64,
+                "a36e66ce11eca7900248c518e12c6c08d659d609f4cbd98468292de7adf780f2",
+            ),
+            (
+                "3eb82e6d6e964ca56b50cc54bdd55bb470c67a4932aba48d27d175d1be2542aa",
+                12645567232869276853u64,
+                8416544129280224452u64,
+                "d177f246a45cc76d39a8ee06b32d8c076c986106b9a8e0455a0b41d00fe3cbde",
+            ),
+            (
+                "c903731014f6a5b4b45174ef5f9d5a2895a19d1308292f25aa323fda88acc938",
+                5989992708726918818u64,
+                17462460601463602125u64,
+                "01241c61ad1c8adc27e5a1096ab6c643af0fbb6e2818ef77272b70e5c3624abc",
+            ),
+            (
+                "ef46410ab47113a78c27e100ed1b476f82a8789012bd95a047a4b23385596f53",
+                11884362385049322305u64,
+                619908411193297508u64,
+                "e9b4c929e26077ac1fd5a771ea5badc7e9ddb58a20a2a797389c63b3dd3df00d",
+            ),
+            (
+                "be336bc6722bb787d542f4ef8ecb6f46a449557ca7b69b8668b6fed19dfa73b7",
+                11490216175357680195u64,
+                13136528075688203375u64,
+                "31bfd807f92e6d5dc5c534e9ad0cb29d00c6f0ae7d7b5f1e65f8e683de0bce59",
+            ),
+            (
+                "39599e5828a8f102b8a6808103ae7df29b838fe739d8b73f72f8f0d282ca5a47",
+                6957481657451522177u64,
+                4196708540027060724u64,
+                "968a12d79704b313471ece148cb4e26b8b11620db2a9ee6da0f5dc200801f555",
+            ),
+            (
+                "acd99530bb14ca9a7fac3df8eebfd8cdd234b0f6f7c3893a20bc159a4fd54df5",
+                9792913946138032169u64,
+                9219321015500590384u64,
+                "db45a98128770a329c82c904ceee21d3917f6072b8bd260e46218f65656c964c",
+            ),
+            (
+                "453b80a0b11f237011c57630034ed46888ad96f4300a58aea24c0fe4a5472f68",
+                14407140330317286994u64,
+                5783848199433986576u64,
+                "b8cded0b4efd6bf2282a4f8b3c353f74821714f84df9a6ab25131edc7fdad00f",
+            ),
+            (
+                "23e464d1e9b413a4a6b378cee3a0405ec6ccbb4d418372d1b42d3fde558d48d1",
+                1190974500816796805u64,
+                1621159728666344828u64,
+                "d677f41d273754da3ab8080b605ae07a7193c9f35f6318b809e42a1fdf594be3",
+            ),
+            (
+                "d0e590648dec459aca50edf44251627bab5a36029a0c748b1ddf86b7b887425b",
+                4807164391931567365u64,
+                4256042233199858200u64,
+                "a8677de59ab856516a03663730af54c55a79169346c3d958b564e5ee35d8622b",
+            ),
+            (
+                "72387dbaaaf2c39175d8c067558b869ba7bdc6234bc63ee97a53fea1d988ff39",
+                5046042574093452325u64,
+                3088471405044806123u64,
+                "83c226621506b07073936aec3c87a8e2ef34dd42e504adc2bbab39ede49aa77f",
+            ),
+            (
+                "de6874ca2b9dd8b4347c25d32b882a2a7c127b127d6c5e00d073ab3853339d0e",
+                6112730660331874479u64,
+                10943246617310133253u64,
+                "a0c96a69e5ab3e3fe1a1a2fd0e5e68035ff3c7b2985e4e6b8407d4c377600c6f",
+            ),
+            (
+                "b0d8689e08b983e578d6a0c136b76952497087ee144369af653a0a1b231eeb28",
+                15612408165265483596u64,
+                13112504741499957010u64,
+                "4fc49edeff215f1d54dfd2e60a14a3de2abecbe845db2148c7aee32c65f3c91c",
+            ),
+            (
+                "29d7fb6b714cbdd1be95c4a268cef7f544329642ae05fab26dc251bbc773085e",
+                17509162400681223655u64,
+                5075629528173950353u64,
+                "781ecb560ef8cf0bcfa96b8d12075f4cf87ad52d69dfb2c72801206eded135bd",
+            ),
+            (
+                "85dbf7074c93a4e39b67cc504b35351ee16c1fab437a7fb9e5d9320be1d9c13c",
+                17692199403267011109u64,
+                7069378948726478427u64,
+                "a3ff0d8dee5aa0214460f5b03a70bd76ef00ac8c07f07c0b3d82c9c57e4c72a9",
+            ),
+            (
+                "7bd5a9f3126b4a681afac9a177c6ff7f3dd80d8d7fd5a821a705221c96975ded",
+                17807965607151214145u64,
+                5562549152802999850u64,
+                "dbc3861943b7372e49698b1c5b0e4255b7c93e9fa2c13d6a4405172ab0db9a5b",
+            ),
+            (
+                "496d13d45dbe7eb02fee23c914ac9fefdf86cf5c937c520719fc6a31b3fcf8d9",
+                13446203348342334214u64,
+                332407928246785326u64,
+                "d2d73f15fcdc12adce25b911aa4551dcf900e225761e254eb6392cbd414e389c",
+            ),
+            (
+                "b2f0a0127fc74a35dec5515b1c7eb8a3833ca99925049c47cd109ec94678e6c5",
+                9683373807753869342u64,
+                7570798132195583433u64,
+                "e704110433e5ab17858c5fbe4f1b6d692942d5f5981cac68372d06066bee97fe",
+            ),
+            (
+                "d5f65171b17d7720411905ef138e84b9d1f459e2b248521c449f1781aafd675e",
+                10088287051097617949u64,
+                185695341767856973u64,
+                "8d784c4171e242af4187f30510cd298106b7e68cd3088444a055cb1f3893ba28",
+            ),
+            (
+                "7dcbec5c20fbf1d69665d4b9cdc450fea2d0098e78084bce0a864fea4ba016b0",
+                13908816056510478374u64,
+                17793990636863600193u64,
+                "18e9026372d91e116faf813ce3ba9d7fadef2bb3b779be6efeba8a4ecd9e1f38",
+            ),
+            (
+                "d4f772f4bf1cfa4dad4b55962b50900da8657a4961dabbdf0664f3cd42d368f8",
+                16438076732493217366u64,
+                18419670900047275588u64,
+                "b9fd16b16b3a8fab4d9c47f452d9ce4aad530edeb06ee6830589078db2f79382",
+            ),
+            (
+                "2d009535f82b1813ce2ca7236ceae7864c1e4d3644a1acd02656919ef1aa55d0",
+                10206924399607440433u64,
+                3986996560633257271u64,
+                "db49e225bd427768599a7c06d7aee432121fa3179505f9ee8c717f51c7fa8c54",
+            ),
+            (
+                "b1d7a292df12e505e7433c7e850e9efc81a8931b65f3354a66402894b6d5ba76",
+                8215550459234533539u64,
+                10241096845089693964u64,
+                "5567813b312cb811909a01d14ee8f7ec4d239198ea2d37243123e1de2317e1af",
+            ),
+            (
+                "85120d6f43ea9258accf6a87e49cd5461d9b3735a4dc623f9fbcc669cbdd1ce6",
+                17566770568845511328u64,
+                8686605711223432099u64,
+                "e163f4fcd17acf5714ee48278732808601e861cd4c4c24326cd24431aab1d0ce",
+            ),
+            (
+                "48fe4c22080c6e702f7af0e97fb5354c1c14ff4616c6fc4ac8a4491d4b9b3473",
+                14371024664575587429u64,
+                15149464181957728462u64,
+                "061dec7af4b41bdd056306a8b13b71d574a49a4595884b1a77674f5150d4509d",
+            ),
+            (
+                "29d14b014fa3cabbb3b4808e751e81f571de6d0e727cae627318a5fd82fef517",
+                9612395342616083334u64,
+                3700617080099093094u64,
+                "f7b33a2d2784441f77f0cc1c87930e79bea3332a921269b500e81d823108561c",
+            ),
+        ];
+
+        // Insert all accounts
+        for (addr, nonce, balance, code_hash) in &account_data {
+            accounts.insert(
+                b256(addr),
+                Some(Account {
+                    nonce: *nonce,
+                    balance: U256::from(*balance),
+                    bytecode_hash: Some(b256(code_hash)),
+                }),
+            );
+        }
+
+        let post_state = HashedPostState { accounts, storages: Default::default() };
+
+        // Create test harness
+        let harness = ProofTestHarness::new(post_state);
+
+        // Create targets from test case input - these are Nibbles in hex form
+        let targets = vec![
+            Target::new(b256("0153000000000000000000000000000000000000000000000000000000000000"))
+                .with_min_len(2),
+            Target::new(b256("0000000000000000000000000000000000000000000000000000000000000000"))
+                .with_min_len(2),
+            Target::new(b256("2300000000000000000000000000000000000000000000000000000000000000"))
+                .with_min_len(2),
+        ];
+
+        // Test proof generation
+        harness.assert_proof(targets).expect("Proof generation failed");
     }
 }
