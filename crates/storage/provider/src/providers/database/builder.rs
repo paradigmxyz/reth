@@ -109,7 +109,7 @@ impl<N> ProviderFactoryBuilder<N> {
         self.db(Arc::new(open_db_read_only(db_dir, db_args)?))
             .chainspec(chainspec)
             .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
-            .rocksdb_provider(RocksDBProvider::builder(&rocksdb_dir).build()?)
+            .rocksdb_provider(RocksDBProvider::builder(&rocksdb_dir).with_default_tables().build()?)
             .build_provider_factory()
             .map_err(Into::into)
     }
