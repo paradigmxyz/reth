@@ -509,7 +509,7 @@ where
                 let transaction_id = TransactionId::new(sender_id, transaction.nonce());
 
                 // split the valid transaction and the blob sidecar if it has any
-                let (transaction, maybe_sidecar) = match transaction {
+                let (transaction, blob_sidecar) = match transaction {
                     ValidTransaction::Valid(tx) => (tx, None),
                     ValidTransaction::ValidWithSidecar { transaction, sidecar } => {
                         debug_assert!(
@@ -536,19 +536,16 @@ where
                 let hash = *added.hash();
                 let state = added.transaction_state();
 
-                // Collect metadata to process after releasing the pool lock
-                let meta = AddedTransactionMeta { added, blob_sidecar: maybe_sidecar };
+                let meta = AddedTransactionMeta { added, blob_sidecar };
 
                 (Ok(AddedTransactionOutcome { hash, state }), Some(meta))
             }
             TransactionValidationOutcome::Invalid(tx, err) => {
-                // For invalid transactions, notify immediately since they don't go through batching
                 let mut listener = self.event_listener.write();
                 listener.invalid(tx.hash());
                 (Err(PoolError::new(*tx.hash(), err)), None)
             }
             TransactionValidationOutcome::Error(tx_hash, err) => {
-                // For error transactions, notify immediately since they don't go through batching
                 let mut listener = self.event_listener.write();
                 listener.discarded(&tx_hash);
                 (Err(PoolError::other(tx_hash, err)), None)
@@ -608,7 +605,6 @@ where
             (results, added_metas, discarded)
         };
 
-        // Process added transactions without holding the pool lock
         for meta in added_metas {
             self.on_added_transaction(meta);
         }
@@ -653,7 +649,7 @@ where
             self.delete_blob(replaced);
         }
 
-        // Delete discarded blob sidecars if any
+        // Delete discarded blob sidecars if any, this doesnt do any IO.
         if let Some(discarded) = meta.added.discarded_transactions() {
             self.delete_discarded_blobs(discarded.iter());
         }
@@ -1229,7 +1225,7 @@ impl<V, T: TransactionOrdering, S> fmt::Debug for PoolInner<V, T, S> {
 /// Metadata for a transaction that was added to the pool.
 ///
 /// This holds all the data needed to complete post-insertion operations (notifications,
-/// blob storage) after the pool write lock has been released.
+/// blob storage).
 #[derive(Debug)]
 struct AddedTransactionMeta<T: PoolTransaction> {
     /// The transaction that was added to the pool
