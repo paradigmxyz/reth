@@ -21,6 +21,7 @@ reth-ethereum-primitives.workspace = true
 reth-primitives-traits.workspace = true
 reth-storage-api.workspace = true
 reth-trie.workspace = true
+reth-trie-db.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
@@ -52,7 +53,6 @@ rand = { workspace = true, optional = true }
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
-reth-trie-db.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
 rand.workspace = true
@@ -71,6 +71,7 @@ serde = [
     "reth-execution-types/serde",
     "reth-primitives-traits/serde",
     "reth-trie/serde",
+    "reth-trie-db/serde",
     "revm-database/serde",
     "revm-state?/serde",
     "reth-storage-api/serde",
