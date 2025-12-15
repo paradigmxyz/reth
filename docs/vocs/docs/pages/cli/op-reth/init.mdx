@@ -116,6 +116,21 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
+      --storage.tx-hash-numbers-in-rocksdb
+          Store `TransactionHashNumbers` table in `RocksDB` instead of MDBX.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+      --storage.storages-history-in-rocksdb
+          Store `StoragesHistory` table in `RocksDB` instead of MDBX.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+      --storage.account-history-in-rocksdb
+          Store `AccountsHistory` table in `RocksDB` instead of MDBX.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
