@@ -15,10 +15,13 @@ use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
-    TransactionVariant,
+    StaticFileProviderFactory, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
+use reth_stages::stages::calculate_gas_used_from_headers;
+use reth_trie::iter::{IntoParallelRefIterator, ParallelIterator};
 use std::{
+    ops::RangeInclusive,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -103,6 +106,44 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         };
         let blocks_per_task = blocks_to_execute / self.num_tasks;
         let segment_size = full_range / self.num_tasks;
+        let chunks_per_task = blocks_per_task / chunk_size;
+
+        // Pre-calculate chunk ranges for each task
+        let task_ranges: Vec<Vec<RangeInclusive<u64>>> = (0..self.num_tasks)
+            .map(|i| {
+                let segment_start = min_block + i * segment_size;
+                let segment_end =
+                    if i == self.num_tasks - 1 { max_block } else { segment_start + segment_size };
+
+                // Distance between chunk start positions
+                let task_stride = if chunks_per_task > 1 {
+                    (segment_end - segment_start - chunk_size) / (chunks_per_task - 1)
+                } else {
+                    0
+                };
+
+                (0..chunks_per_task)
+                    .map(|chunk_idx| {
+                        let chunk_start = segment_start + chunk_idx * task_stride;
+                        let chunk_end = (chunk_start + chunk_size).min(segment_end);
+                        chunk_start..=chunk_end
+                    })
+                    .collect()
+            })
+            .collect();
+
+        // Calculate total gas from headers for all chunks we'll execute
+        let total_gas: u64 = task_ranges
+            .par_iter()
+            .flatten()
+            .map(|range| {
+                calculate_gas_used_from_headers(
+                    &provider_factory.static_file_provider(),
+                    range.clone(),
+                )
+                .unwrap_or(0)
+            })
+            .sum();
 
         let db_at = {
             let provider_factory = provider_factory.clone();
@@ -120,11 +161,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
         let _guard = cancellation.drop_guard();
 
         let mut tasks = JoinSet::new();
-        for i in 0..self.num_tasks {
-            let segment_start = min_block + i * segment_size;
-            let segment_end =
-                if i == self.num_tasks - 1 { max_block } else { segment_start + segment_size };
-
+        for chunk_ranges in task_ranges {
             // Spawn thread executing blocks
             let provider_factory = provider_factory.clone();
             let evm_config = components.evm_config().clone();
@@ -134,22 +171,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let info_tx = info_tx.clone();
             let cancellation = cancellation.clone();
             tasks.spawn_blocking(move || {
-                // Number of contiguous block ranges (chunks) this task will execute
-                let chunks_per_task = blocks_per_task / chunk_size;
-                // Distance between chunk start positions, calculated to evenly distribute
-                // chunks across the segment. For N chunks in a segment, we have N-1 gaps,
-                // so stride = (segment_size - chunk_size) / (N - 1).
-                // Example: segment=1000, chunk_size=10, chunks=10 → stride=110
-                //          chunks start at: 0, 110, 220, 330, ...
-                let task_stride = if chunks_per_task > 1 {
-                    (segment_end - segment_start - chunk_size) / (chunks_per_task - 1)
-                } else {
-                    0
-                };
-
-                'chunks: for chunk_idx in 0..chunks_per_task {
-                    let chunk_start = segment_start + chunk_idx * task_stride;
-                    let chunk_end = (chunk_start + chunk_size).min(segment_end);
+                'chunks: for chunk_range in chunk_ranges {
+                    let chunk_start = *chunk_range.start();
+                    let chunk_end = *chunk_range.end();
 
                     let mut executor = evm_config.batch_executor(db_at(chunk_start - 1));
                     let mut executor_created = Instant::now();
