@@ -521,5 +521,3 @@ pr:
 	make update-book-cli && \
 	cargo docs --document-private-items && \
 	make test
-
-check-features:
