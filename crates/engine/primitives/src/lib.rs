@@ -22,7 +22,8 @@ use reth_trie_common::HashedPostState;
 use serde::{de::DeserializeOwned, Serialize};
 
 // Re-export [`ExecutionPayload`] moved to `reth_payload_primitives`
-pub use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator};
+#[cfg(feature = "std")]
+pub use reth_evm::{ConfigureEngineEvm, ExecutableTxIterator, ExecutableTxTuple};
 pub use reth_payload_primitives::ExecutionPayload;
 
 mod error;
