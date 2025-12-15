@@ -1,14 +1,14 @@
 //! XLayer-specific extensions for `EthFilter`
 
 use super::super::EthFilter;
-use alloy_rpc_types_eth::{Filter, Log};
+use alloy_rpc_types_eth::{Filter, FilterBlockOption, Log};
 use jsonrpsee::core::RpcResult;
 use reth_rpc_eth_api::{
     helpers::{internal_rpc_err, EthBlocks, LegacyRpc, LoadReceipt},
     EthApiTypes, FullEthApiTypes, RpcNodeCoreExt,
 };
 use reth_rpc_eth_types::LegacyRpcClient;
-use reth_storage_api::{BlockIdReader, BlockReader};
+use reth_storage_api::{BlockIdReader, BlockReader, HeaderProvider};
 use std::sync::Arc;
 use tracing::info;
 
@@ -63,7 +63,29 @@ where
         let legacy_client = self.inner.eth_api.legacy_rpc_client()?;
         let cutoff_block = legacy_client.cutoff_block();
 
-        // Parse block range from filter
+        // Handle `AtBlockHash` separately - query single block by hash
+        if let FilterBlockOption::AtBlockHash(block_hash) = filter.block_option {
+            match self.inner.eth_api.provider().header_by_hash_or_number(block_hash.into()) {
+                Ok(Some(_)) => {
+                    info!(target: "rpc::eth::legacy", method = "eth_getLogs", block_hash = %block_hash, "→ local");
+                    return None;
+                }
+                Ok(None) | Err(_) => {
+                    info!(target: "rpc::eth::legacy", method = "eth_getLogs", block_hash = %block_hash, "→ legacy");
+                    match reth_rpc_eth_api::helpers::exec_legacy(
+                        "eth_getLogs",
+                        legacy_client.get_logs(filter),
+                    )
+                    .await
+                    {
+                        Ok(logs) => return Some(Ok(logs)),
+                        Err(e) => return Some(Err(internal_rpc_err(e))),
+                    }
+                }
+            }
+        }
+
+        // Parse block range from filter (for Range variant)
         let (from_block, to_block) = match self.parse_block_range(&filter) {
             Ok(range) => range,
             Err(e) => return Some(Err(e)),
