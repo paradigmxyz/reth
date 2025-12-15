@@ -775,7 +775,7 @@ pub mod serde_bincode_compat {
     ///     trie_updates: TrieUpdates,
     /// }
     /// ```
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct TrieUpdates<'a> {
         account_nodes: Cow<'a, HashMap<Nibbles, BranchNodeCompact>>,
         removed_nodes: Cow<'a, HashSet<Nibbles>>,
@@ -839,7 +839,7 @@ pub mod serde_bincode_compat {
     ///     trie_updates: StorageTrieUpdates,
     /// }
     /// ```
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct StorageTrieUpdates<'a> {
         is_deleted: bool,
         storage_nodes: Cow<'a, HashMap<Nibbles, BranchNodeCompact>>,
@@ -904,7 +904,7 @@ pub mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     pub struct TrieUpdatesSorted<'a> {
-        account_nodes: Cow<'a, Vec<(Nibbles, Option<BranchNodeCompact>)>>,
+        account_nodes: Cow<'a, [(Nibbles, Option<BranchNodeCompact>)]>,
         storage_tries: B256Map<StorageTrieUpdatesSorted<'a>>,
     }
 
@@ -969,7 +969,7 @@ pub mod serde_bincode_compat {
     #[derive(Debug, Serialize, Deserialize)]
     pub struct StorageTrieUpdatesSorted<'a> {
         is_deleted: bool,
-        storage_nodes: Cow<'a, Vec<(Nibbles, Option<BranchNodeCompact>)>>,
+        storage_nodes: Cow<'a, [(Nibbles, Option<BranchNodeCompact>)]>,
     }
 
     impl<'a> From<&'a super::StorageTrieUpdatesSorted> for StorageTrieUpdatesSorted<'a> {
@@ -983,10 +983,7 @@ pub mod serde_bincode_compat {
 
     impl<'a> From<StorageTrieUpdatesSorted<'a>> for super::StorageTrieUpdatesSorted {
         fn from(value: StorageTrieUpdatesSorted<'a>) -> Self {
-            Self {
-                is_deleted: value.is_deleted,
-                storage_nodes: value.storage_nodes.into_owned(),
-            }
+            Self { is_deleted: value.is_deleted, storage_nodes: value.storage_nodes.into_owned() }
         }
     }
 
@@ -1015,7 +1012,9 @@ pub mod serde_bincode_compat {
     mod tests {
         use crate::{
             serde_bincode_compat,
-            updates::{StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
+            updates::{
+                StorageTrieUpdates, StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted,
+            },
             BranchNodeCompact, Nibbles,
         };
         use alloy_primitives::B256;
@@ -1109,15 +1108,16 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.trie_updates.account_nodes.push((
-                Nibbles::from_nibbles_unchecked([0x0f, 0x0f, 0x0f, 0x0f]),
-                None,
-            ));
+            data.trie_updates
+                .account_nodes
+                .push((Nibbles::from_nibbles_unchecked([0x0f, 0x0f, 0x0f, 0x0f]), None));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.trie_updates.storage_tries.insert(B256::default(), StorageTrieUpdatesSorted::default());
+            data.trie_updates
+                .storage_tries
+                .insert(B256::default(), StorageTrieUpdatesSorted::default());
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
@@ -1145,10 +1145,9 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.trie_updates.storage_nodes.push((
-                Nibbles::from_nibbles_unchecked([0x0a, 0x0a, 0x0a, 0x0a]),
-                None,
-            ));
+            data.trie_updates
+                .storage_nodes
+                .push((Nibbles::from_nibbles_unchecked([0x0a, 0x0a, 0x0a, 0x0a]), None));
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);

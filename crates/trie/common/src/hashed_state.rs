@@ -1297,7 +1297,7 @@ pub mod serde_bincode_compat {
     ///     hashed_state: HashedPostState,
     /// }
     /// ```
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct HashedPostState<'a> {
         accounts: Cow<'a, B256Map<Option<Account>>>,
         storages: B256Map<HashedStorage<'a>>,
@@ -1316,17 +1316,16 @@ pub mod serde_bincode_compat {
         fn from(value: HashedPostState<'a>) -> Self {
             Self {
                 accounts: value.accounts.into_owned(),
-                storages: value
-                    .storages
-                    .into_iter()
-                    .map(|(k, v)| (k, v.into()))
-                    .collect(),
+                storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
             }
         }
     }
 
     impl SerializeAs<super::HashedPostState> for HashedPostState<'_> {
-        fn serialize_as<S>(source: &super::HashedPostState, serializer: S) -> Result<S::Ok, S::Error>
+        fn serialize_as<S>(
+            source: &super::HashedPostState,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
         where
             S: Serializer,
         {
@@ -1358,7 +1357,7 @@ pub mod serde_bincode_compat {
     ///     hashed_storage: HashedStorage,
     /// }
     /// ```
-    #[derive(Debug, Clone, Serialize, Deserialize)]
+    #[derive(Debug, Serialize, Deserialize)]
     pub struct HashedStorage<'a> {
         wiped: bool,
         storage: Cow<'a, B256Map<U256>>,
@@ -1397,8 +1396,8 @@ pub mod serde_bincode_compat {
     #[cfg(test)]
     mod tests {
         use crate::{
-            serde_bincode_compat,
             hashed_state::{HashedPostState, HashedStorage},
+            serde_bincode_compat,
         };
         use alloy_primitives::{B256, U256};
         use reth_primitives_traits::Account;
@@ -1424,9 +1423,7 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
-            data.hashed_state
-                .storages
-                .insert(B256::random(), HashedStorage::default());
+            data.hashed_state.storages.insert(B256::random(), HashedStorage::default());
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);

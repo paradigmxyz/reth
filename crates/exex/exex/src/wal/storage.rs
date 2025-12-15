@@ -282,8 +282,7 @@ mod tests {
     #[ignore]
     fn generate_test_wal() -> eyre::Result<()> {
         use alloy_consensus::BlockHeader;
-        use alloy_primitives::{B256, U256};
-        use reth_trie_common::{updates::TrieUpdates, HashedPostState, HashedStorage};
+        use reth_trie_common::{updates::TrieUpdates, HashedPostState};
         use std::io::Write;
 
         let mut rng = generators::rng();

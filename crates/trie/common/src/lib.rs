@@ -68,8 +68,10 @@ mod utils;
 /// Read more: <https://github.com/paradigmxyz/reth/issues/11370>
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
-    pub use super::updates::serde_bincode_compat as updates;
-    pub use super::hashed_state::serde_bincode_compat as hashed_state;
+    pub use super::{
+        hashed_state::serde_bincode_compat as hashed_state,
+        updates::serde_bincode_compat as updates,
+    };
 }
 
 /// Re-export
