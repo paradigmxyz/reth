@@ -76,6 +76,8 @@ fn verify_and_compute_sender(
         return Err(StatelessValidationError::HomesteadSignatureNotNormalized);
     }
     let sig_hash = tx.signature_hash();
+    // Prevent unused function warning when both features are enabled.
+    // The k256 function is compiled but not called when secp256k1 has priority.
     #[cfg(all(feature = "k256", feature = "secp256k1"))]
     {
         let _ = verify_and_compute_sender_unchecked_k256;
