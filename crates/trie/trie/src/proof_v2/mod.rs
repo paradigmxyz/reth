@@ -860,7 +860,7 @@ where
         // Pop any under-construction branches that are now complete.
         // All trie data prior to the current cached branch, if any, has been computed. Any branches
         // which were under-construction previously, and which are not on the same path as this
-        // cached branch, can be assumed to be completed; they will not have any further keys added.
+        // cached branch, can be assumed to be completed; they will not have any further keys added
         // to them.
         if let Some(cached_path) = self.cached_branch_stack.last().map(|kv| kv.0) {
             while !cached_path.starts_with(&self.branch_path) {
