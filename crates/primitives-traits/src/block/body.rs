@@ -12,7 +12,23 @@ use alloy_consensus::{
 use alloy_eips::{eip2718::Encodable2718, eip4895::Withdrawals};
 use alloy_primitives::{Address, Bytes, B256};
 
-/// Helper trait that unifies all behaviour required by transaction to support full node operations.
+/// Helper trait that unifies all behaviour required by block body to support full node operations.
+///
+/// This trait combines [`BlockBody`] with additional constraints:
+/// - The associated `Transaction` type must implement [`FullSignedTx`]
+/// - The type must support bincode-compatible serialization via [`MaybeSerdeBincodeCompat`]
+///
+/// The syntax `BlockBody<Transaction: FullSignedTx>` uses Rust's associated type bounds to
+/// constrain the `Transaction` associated type of `BlockBody` to implement `FullSignedTx`.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// use reth_primitives_traits::{FullBlockBody, NodePrimitives};
+///
+/// // In NodePrimitives implementation:
+/// type BlockBody: FullBlockBody<Transaction = Self::SignedTx, OmmerHeader = Self::BlockHeader>;
+/// ```
 pub trait FullBlockBody: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
 
 impl<T> FullBlockBody for T where T: BlockBody<Transaction: FullSignedTx> + MaybeSerdeBincodeCompat {}
