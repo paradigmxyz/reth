@@ -95,17 +95,16 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
         };
 
-        let full_range = max_block - min_block;
-
+        let full_range_size = max_block - min_block;
         let (blocks_to_execute, chunk_size) = if let Some(total_blocks) = self.total_blocks {
-            let total_blocks = total_blocks.min(full_range);
+            let total_blocks = total_blocks.min(full_range_size);
             let chunk_size = self.chunk_size.min(total_blocks);
             (total_blocks, chunk_size)
         } else {
-            (full_range, full_range)
+            (full_range_size, full_range_size)
         };
         let blocks_per_task = blocks_to_execute / self.num_tasks;
-        let segment_size = full_range / self.num_tasks;
+        let segment_size = full_range_size / self.num_tasks;
         let chunks_per_task = blocks_per_task / chunk_size;
 
         // Pre-calculate chunk ranges for each task
