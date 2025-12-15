@@ -132,6 +132,14 @@ Static Files:
       --skip-invalid-blocks
           Continues with execution when an invalid block is encountered and collects these blocks
 
+      --total-blocks <TOTAL_BLOCKS>
+          Total number of blocks to execute, distributed evenly across the range. If not set, all blocks in the range are executed
+
+      --chunk-size <CHUNK_SIZE>
+          Size of contiguous block ranges to execute when using --total-blocks
+
+          [default: 10]
+
 Logging:
       --log.stdout.format <FORMAT>
           The format to use for logs written to stdout
