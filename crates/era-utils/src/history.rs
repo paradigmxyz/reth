@@ -9,7 +9,7 @@ use reth_db_api::{
     RawKey, RawTable, RawValue,
 };
 use reth_era::{
-    common::{decode::DecodeCompressed, file_ops::StreamReader},
+    common::{decode::DecodeCompressedRlp, file_ops::StreamReader},
     e2s::error::E2sError,
     era1::{
         file::{BlockTupleIterator, Era1Reader},
@@ -252,7 +252,7 @@ where
 
 /// Extracts block headers and bodies from `iter` and appends them using `writer` and `provider`.
 ///
-/// Adds on to `total_difficulty` and collects hash to height using `hash_collector`.
+/// Collects hash to height using `hash_collector`.
 ///
 /// Skips all blocks below the [`start_bound`] of `block_numbers` and stops when reaching past the
 /// [`end_bound`] or the end of the file.

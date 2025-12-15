@@ -7,7 +7,7 @@ use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_local::LocalMiner;
 use reth_node_api::{
-    BlockTy, FullNodeComponents, PayloadAttrTy, PayloadAttributesBuilder, PayloadTypes,
+    BlockTy, FullNodeComponents, HeaderTy, PayloadAttrTy, PayloadAttributesBuilder, PayloadTypes,
 };
 use std::{
     future::{Future, IntoFuture},
@@ -73,9 +73,7 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     /// be constructed during local mining.
     fn local_payload_attributes_builder(
         chain_spec: &Self::ChainSpec,
-    ) -> impl PayloadAttributesBuilder<
-        <<Self as reth_node_api::NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-    >;
+    ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes, HeaderTy<Self>>;
 }
 
 /// Node launcher with support for launching various debugging utilities.
@@ -120,7 +118,7 @@ where
     inner: L,
     target: Target,
     local_payload_attributes_builder:
-        Option<Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>>>>,
+        Option<Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>>,
     map_attributes:
         Option<Box<dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync>>,
 }
@@ -133,7 +131,7 @@ where
 {
     pub fn with_payload_attributes_builder(
         self,
-        builder: impl PayloadAttributesBuilder<PayloadAttrTy<N::Types>>,
+        builder: impl PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>,
     ) -> Self {
         Self {
             inner: self.inner,
@@ -229,7 +227,7 @@ where
             } else {
                 let local = N::Types::local_payload_attributes_builder(&chain_spec);
                 let builder = if let Some(f) = map_attributes {
-                    Either::Left(move |block_number| f(local.build(block_number)))
+                    Either::Left(move |parent| f(local.build(&parent)))
                 } else {
                     Either::Right(local)
                 };

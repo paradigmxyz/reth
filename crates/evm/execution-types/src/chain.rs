@@ -10,7 +10,7 @@ use reth_primitives_traits::{
     transaction::signed::SignedTransaction, Block, BlockBody, NodePrimitives, RecoveredBlock,
     SealedHeader,
 };
-use reth_trie_common::{updates::TrieUpdates, HashedPostState};
+use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostStateSorted};
 
 /// A chain of blocks and their final state.
 ///
@@ -35,9 +35,9 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// Additionally, it includes the individual state changes that led to the current state.
     execution_outcome: ExecutionOutcome<N::Receipt>,
     /// State trie updates for each block in the chain, keyed by block number.
-    trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdates>>,
+    trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
     /// Hashed post state for each block in the chain, keyed by block number.
-    hashed_state: BTreeMap<BlockNumber, Arc<HashedPostState>>,
+    hashed_state: BTreeMap<BlockNumber, Arc<HashedPostStateSorted>>,
 }
 
 impl<N: NodePrimitives> Default for Chain<N> {
@@ -60,8 +60,8 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn new(
         blocks: impl IntoIterator<Item = RecoveredBlock<N::Block>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdates>>,
-        hashed_state: BTreeMap<BlockNumber, Arc<HashedPostState>>,
+        trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
+        hashed_state: BTreeMap<BlockNumber, Arc<HashedPostStateSorted>>,
     ) -> Self {
         let blocks =
             blocks.into_iter().map(|b| (b.header().number(), b)).collect::<BTreeMap<_, _>>();
@@ -74,8 +74,8 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn from_block(
         block: RecoveredBlock<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_updates: Arc<TrieUpdates>,
-        hashed_state: Arc<HashedPostState>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        hashed_state: Arc<HashedPostStateSorted>,
     ) -> Self {
         let block_number = block.header().number();
         let trie_updates_map = BTreeMap::from([(block_number, trie_updates)]);
@@ -99,12 +99,12 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get all trie updates for this chain.
-    pub const fn trie_updates(&self) -> &BTreeMap<BlockNumber, Arc<TrieUpdates>> {
+    pub const fn trie_updates(&self) -> &BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>> {
         &self.trie_updates
     }
 
     /// Get trie updates for a specific block number.
-    pub fn trie_updates_at(&self, block_number: BlockNumber) -> Option<&Arc<TrieUpdates>> {
+    pub fn trie_updates_at(&self, block_number: BlockNumber) -> Option<&Arc<TrieUpdatesSorted>> {
         self.trie_updates.get(&block_number)
     }
 
@@ -114,12 +114,15 @@ impl<N: NodePrimitives> Chain<N> {
     }
 
     /// Get all hashed states for this chain.
-    pub const fn hashed_state(&self) -> &BTreeMap<BlockNumber, Arc<HashedPostState>> {
+    pub const fn hashed_state(&self) -> &BTreeMap<BlockNumber, Arc<HashedPostStateSorted>> {
         &self.hashed_state
     }
 
     /// Get hashed state for a specific block number.
-    pub fn hashed_state_at(&self, block_number: BlockNumber) -> Option<&Arc<HashedPostState>> {
+    pub fn hashed_state_at(
+        &self,
+        block_number: BlockNumber,
+    ) -> Option<&Arc<HashedPostStateSorted>> {
         self.hashed_state.get(&block_number)
     }
 
@@ -181,8 +184,8 @@ impl<N: NodePrimitives> Chain<N> {
     ) -> (
         ChainBlocks<'static, N::Block>,
         ExecutionOutcome<N::Receipt>,
-        BTreeMap<BlockNumber, Arc<TrieUpdates>>,
-        BTreeMap<BlockNumber, Arc<HashedPostState>>,
+        BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
+        BTreeMap<BlockNumber, Arc<HashedPostStateSorted>>,
     ) {
         (
             ChainBlocks { blocks: Cow::Owned(self.blocks) },
@@ -301,8 +304,8 @@ impl<N: NodePrimitives> Chain<N> {
         &mut self,
         block: RecoveredBlock<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_updates: Arc<TrieUpdates>,
-        hashed_state: Arc<HashedPostState>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        hashed_state: Arc<HashedPostStateSorted>,
     ) {
         let block_number = block.header().number();
         self.blocks.insert(block_number, block);
@@ -492,12 +495,14 @@ pub(super) mod serde_bincode_compat {
         _trie_updates_legacy:
             Option<reth_trie_common::serde_bincode_compat::updates::TrieUpdates<'a>>,
         #[serde(default)]
-        trie_updates:
-            BTreeMap<BlockNumber, reth_trie_common::serde_bincode_compat::updates::TrieUpdates<'a>>,
+        trie_updates: BTreeMap<
+            BlockNumber,
+            reth_trie_common::serde_bincode_compat::updates::TrieUpdatesSorted<'a>,
+        >,
         #[serde(default)]
         hashed_state: BTreeMap<
             BlockNumber,
-            reth_trie_common::serde_bincode_compat::hashed_state::HashedPostState<'a>,
+            reth_trie_common::serde_bincode_compat::hashed_state::HashedPostStateSorted<'a>,
         >,
     }
 

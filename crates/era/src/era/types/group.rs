@@ -3,9 +3,13 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
 
 use crate::{
+    common::file_ops::EraFileId,
     e2s::types::{Entry, IndexEntry, SLOT_INDEX},
     era::types::consensus::{CompressedBeaconState, CompressedSignedBeaconBlock},
 };
+
+/// Number of slots per historical root in ERA files
+pub const SLOTS_PER_HISTORICAL_ROOT: u64 = 8192;
 
 /// Era file content group
 ///
@@ -64,6 +68,28 @@ impl EraGroup {
     pub fn add_entry(&mut self, entry: Entry) {
         self.other_entries.push(entry);
     }
+
+    /// Get the starting slot and slot count.
+    pub const fn slot_range(&self) -> (u64, u32) {
+        if let Some(ref block_index) = self.slot_index {
+            // Non-genesis era: use block slot index
+            (block_index.starting_slot, block_index.slot_count() as u32)
+        } else {
+            // Genesis era: use state slot index, it should be slot 0
+            // Genesis has only the genesis state, no blocks
+            (self.state_slot_index.starting_slot, 0)
+        }
+    }
+
+    /// Get the starting slot number
+    pub const fn starting_slot(&self) -> u64 {
+        self.slot_range().0
+    }
+
+    /// Get the number of slots
+    pub const fn slot_count(&self) -> u32 {
+        self.slot_range().1
+    }
 }
 
 /// [`SlotIndex`] records store offsets to data at specific slots
@@ -119,6 +145,93 @@ impl IndexEntry for SlotIndex {
 
     fn offsets(&self) -> &[i64] {
         &self.offsets
+    }
+}
+
+/// Era file identifier
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EraId {
+    /// Network configuration name
+    pub network_name: String,
+
+    /// First slot number in file
+    pub start_slot: u64,
+
+    /// Number of slots in the file
+    pub slot_count: u32,
+
+    /// Optional hash identifier for this file
+    /// First 4 bytes of the last historical root in the last state in the era file
+    pub hash: Option<[u8; 4]>,
+}
+
+impl EraId {
+    /// Create a new [`EraId`]
+    pub fn new(network_name: impl Into<String>, start_slot: u64, slot_count: u32) -> Self {
+        Self { network_name: network_name.into(), start_slot, slot_count, hash: None }
+    }
+
+    /// Add a hash identifier to  [`EraId`]
+    pub const fn with_hash(mut self, hash: [u8; 4]) -> Self {
+        self.hash = Some(hash);
+        self
+    }
+
+    /// Calculate which era number the file starts at
+    pub const fn era_number(&self) -> u64 {
+        self.start_slot / SLOTS_PER_HISTORICAL_ROOT
+    }
+
+    // Helper function to calculate the number of eras per era1 file,
+    // If the user can decide how many blocks per era1 file there are, we need to calculate it.
+    // Most of the time it should be 1, but it can never be more than 2 eras per file
+    // as there is a maximum of 8192 blocks per era1 file.
+    const fn calculate_era_count(&self) -> u64 {
+        if self.slot_count == 0 {
+            return 0;
+        }
+
+        let first_era = self.era_number();
+
+        // Calculate the actual last slot number in the range
+        let last_slot = self.start_slot + self.slot_count as u64 - 1;
+        // Find which era the last block belongs to
+        let last_era = last_slot / SLOTS_PER_HISTORICAL_ROOT;
+        // Count how many eras we span
+        last_era - first_era + 1
+    }
+}
+
+impl EraFileId for EraId {
+    fn network_name(&self) -> &str {
+        &self.network_name
+    }
+
+    fn start_number(&self) -> u64 {
+        self.start_slot
+    }
+
+    fn count(&self) -> u32 {
+        self.slot_count
+    }
+    /// Convert to file name following the era file naming:
+    /// `<config-name>-<era-number>-<era-count>-<short-historical-root>.era`
+    /// <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md#file-name>
+    /// See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
+    fn to_file_name(&self) -> String {
+        let era_number = self.era_number();
+        let era_count = self.calculate_era_count();
+
+        if let Some(hash) = self.hash {
+            format!(
+                "{}-{:05}-{:05}-{:02x}{:02x}{:02x}{:02x}.era",
+                self.network_name, era_number, era_count, hash[0], hash[1], hash[2], hash[3]
+            )
+        } else {
+            // era spec format with placeholder hash when no hash available
+            // Format: `<config-name>-<era-number>-<era-count>-00000000.era`
+            format!("{}-{:05}-{:05}-00000000.era", self.network_name, era_number, era_count)
+        }
     }
 }
 

@@ -9,6 +9,7 @@ use alloy_eips::{eip2718::WithEncoded, Decodable2718};
 use alloy_evm::EvmEnv;
 use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_rpc_types_engine::PayloadError;
+use op_alloy_rpc_types_engine::flashblock::OpFlashblockPayloadBase;
 use op_revm::OpSpecId;
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_ethereum::{
@@ -23,8 +24,8 @@ use reth_op::{
     node::{OpEvmConfig, OpNextBlockEnvAttributes, OpRethReceiptBuilder},
     primitives::SignedTransaction,
 };
-use reth_optimism_flashblocks::ExecutionPayloadBaseV1;
 use reth_rpc_api::eth::helpers::pending_block::BuildPendingEnv;
+use revm_primitives::Bytes;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -126,13 +127,15 @@ impl ConfigureEngineEvm<CustomExecutionData> for CustomEvmConfig {
         &self,
         payload: &CustomExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
-        Ok(payload.inner.payload.transactions().clone().into_iter().map(|encoded| {
+        let transactions = payload.inner.payload.transactions().clone().into_iter();
+        let convert = |encoded: Bytes| {
             let tx = CustomTransaction::decode_2718_exact(encoded.as_ref())
                 .map_err(Into::into)
                 .map_err(PayloadError::Decode)?;
             let signer = tx.try_recover().map_err(NewPayloadError::other)?;
             Ok::<_, NewPayloadError>(WithEncoded::new(encoded, tx.with_signer(signer)))
-        }))
+        };
+        Ok((transactions, convert))
     }
 }
 
@@ -143,8 +146,8 @@ pub struct CustomNextBlockEnvAttributes {
     extension: u64,
 }
 
-impl From<ExecutionPayloadBaseV1> for CustomNextBlockEnvAttributes {
-    fn from(value: ExecutionPayloadBaseV1) -> Self {
+impl From<OpFlashblockPayloadBase> for CustomNextBlockEnvAttributes {
+    fn from(value: OpFlashblockPayloadBase) -> Self {
         Self { inner: value.into(), extension: 0 }
     }
 }

@@ -11,9 +11,9 @@ use reth_exex::{ExExManagerHandle, ExExNotification, ExExNotificationSource};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
-    BlockHashReader, BlockReader, DBProvider, ExecutionOutcome, HeaderProvider,
+    BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
     LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
-    StaticFileProviderFactory, StatsReader, TransactionVariant,
+    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::{
@@ -186,11 +186,15 @@ where
         unwind_to: Option<u64>,
     ) -> Result<(), StageError>
     where
-        Provider: StaticFileProviderFactory + DBProvider + BlockReader + HeaderProvider,
+        Provider: StaticFileProviderFactory
+            + DBProvider
+            + BlockReader
+            + HeaderProvider
+            + StorageSettingsCache,
     {
-        // If there's any receipts pruning configured, receipts are written directly to database and
-        // inconsistencies are expected.
-        if provider.prune_modes_ref().has_receipts_pruning() {
+        // On old nodes, if there's any receipts pruning configured, receipts are written directly
+        // to database and inconsistencies are expected.
+        if EitherWriter::receipts_destination(provider).is_database() {
             return Ok(())
         }
 
@@ -206,16 +210,23 @@ where
             .map(|num| num + 1)
             .unwrap_or(0);
 
+        // Get highest block number in static files for receipts
+        let static_file_block_num = static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::Receipts)
+            .unwrap_or(0);
+
         // Check if we had any unexpected shutdown after committing to static files, but
         // NOT committing to database.
-        match next_static_file_receipt_num.cmp(&next_receipt_num) {
+        match static_file_block_num.cmp(&checkpoint) {
             // It can be equal when it's a chain of empty blocks, but we still need to update the
             // last block in the range.
             Ordering::Greater | Ordering::Equal => {
                 let mut static_file_producer =
                     static_file_provider.latest_writer(StaticFileSegment::Receipts)?;
-                static_file_producer
-                    .prune_receipts(next_static_file_receipt_num - next_receipt_num, checkpoint)?;
+                static_file_producer.prune_receipts(
+                    next_static_file_receipt_num.saturating_sub(next_receipt_num),
+                    checkpoint,
+                )?;
                 // Since this is a database <-> static file inconsistency, we commit the change
                 // straight away.
                 static_file_producer.commit()?;
@@ -223,19 +234,14 @@ where
             Ordering::Less => {
                 // If we are already in the process of unwind, this might be fine because we will
                 // fix the inconsistency right away.
-                if let Some(unwind_to) = unwind_to {
-                    let next_receipt_num_after_unwind = provider
-                        .block_body_indices(unwind_to)?
-                        .map(|b| b.next_tx_num())
-                        .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?;
-
-                    if next_receipt_num_after_unwind > next_static_file_receipt_num {
-                        // This means we need a deeper unwind.
-                    } else {
-                        return Ok(())
-                    }
+                if let Some(unwind_to) = unwind_to &&
+                    unwind_to <= static_file_block_num
+                {
+                    return Ok(())
                 }
 
+                // Otherwise, this is a real inconsistency - database has more blocks than static
+                // files
                 return Err(missing_static_data_error(
                     next_static_file_receipt_num.saturating_sub(1),
                     &static_file_provider,
@@ -260,7 +266,8 @@ where
             Primitives: NodePrimitives<BlockHeader: reth_db_api::table::Value>,
         > + StatsReader
         + BlockHashReader
-        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>,
+        + StateWriter<Receipt = <E::Primitives as NodePrimitives>::Receipt>
+        + StorageSettingsCache,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -652,8 +659,9 @@ where
         *range.start()..*range.end() + 1,
         |cursor, number| cursor.get_one::<HeaderMask<N::BlockHeader>>(number.into()),
     )? {
-        let entry = entry?;
-        gas_total += entry.gas_used();
+        if let Some(entry) = entry? {
+            gas_total += entry.gas_used();
+        }
     }
 
     let duration = start.elapsed();
@@ -666,12 +674,12 @@ where
 mod tests {
     use super::*;
     use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, B256, U256};
+    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
     use reth_db_api::{
-        models::AccountBeforeTx,
+        models::{metadata::StorageSettings, AccountBeforeTx},
         transaction::{DbTx, DbTxMut},
     };
     use reth_ethereum_consensus::EthBeaconConsensus;
@@ -683,7 +691,10 @@ mod tests {
         DatabaseProviderFactory, ReceiptProvider, StaticFileProviderFactory,
     };
     use reth_prune::PruneModes;
+    use reth_prune_types::{PruneMode, ReceiptsLogPruneConfig};
     use reth_stages_api::StageUnitCheckpoint;
+    use reth_testing_utils::generators;
+    use std::collections::BTreeMap;
 
     fn stage() -> ExecutionStage<EthEvmConfig> {
         let evm_config =
@@ -900,10 +911,19 @@ mod tests {
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
         let modes = [None, Some(PruneModes::default())];
+        let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            Address::random(),
+            PruneMode::Distance(100000),
+        )]));
 
         // Tests node with database and node with static files
-        for mode in modes {
+        for mut mode in modes {
             let mut provider = factory.database_provider_rw().unwrap();
+
+            if let Some(mode) = &mut mode {
+                // Simulating a full node where we write receipts to database
+                mode.receipts_log_filter = random_filter.clone();
+            }
 
             let mut execution_stage = stage();
             provider.set_prune_modes(mode.clone().unwrap_or_default());
@@ -1028,9 +1048,18 @@ mod tests {
         // If there is a pruning configuration, then it's forced to use the database.
         // This way we test both cases.
         let modes = [None, Some(PruneModes::default())];
+        let random_filter = ReceiptsLogPruneConfig(BTreeMap::from([(
+            Address::random(),
+            PruneMode::Before(100000),
+        )]));
 
         // Tests node with database and node with static files
-        for mode in modes {
+        for mut mode in modes {
+            if let Some(mode) = &mut mode {
+                // Simulating a full node where we write receipts to database
+                mode.receipts_log_filter = random_filter.clone();
+            }
+
             // Test Execution
             let mut execution_stage = stage();
             provider.set_prune_modes(mode.clone().unwrap_or_default());
@@ -1221,5 +1250,67 @@ mod tests {
                 )
             ]
         );
+    }
+
+    #[test]
+    fn test_ensure_consistency_with_skipped_receipts() {
+        // Test that ensure_consistency allows the case where receipts are intentionally
+        // skipped. When receipts are skipped, blocks are still incremented in static files
+        // but no receipt data is written.
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_receipts_in_static_files(true),
+        );
+
+        // Setup with block 1
+        let provider_rw = factory.database_provider_rw().unwrap();
+        let mut rng = generators::rng();
+        let genesis = generators::random_block(&mut rng, 0, Default::default());
+        provider_rw.insert_block(genesis.try_recover().unwrap()).expect("failed to insert genesis");
+        let block = generators::random_block(
+            &mut rng,
+            1,
+            generators::BlockParams { tx_count: Some(2), ..Default::default() },
+        );
+        provider_rw.insert_block(block.try_recover().unwrap()).expect("failed to insert block");
+
+        let static_file_provider = provider_rw.static_file_provider();
+        static_file_provider.latest_writer(StaticFileSegment::Headers).unwrap().commit().unwrap();
+
+        // Simulate skipped receipts: increment block in receipts static file but don't write
+        // receipts
+        {
+            let mut receipts_writer =
+                static_file_provider.latest_writer(StaticFileSegment::Receipts).unwrap();
+            receipts_writer.increment_block(0).unwrap();
+            receipts_writer.increment_block(1).unwrap();
+            receipts_writer.commit().unwrap();
+        } // Explicitly drop receipts_writer here
+
+        provider_rw.commit().expect("failed to commit");
+
+        // Verify blocks are incremented but no receipts written
+        assert_eq!(
+            factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Receipts),
+            Some(1)
+        );
+        assert_eq!(
+            factory.static_file_provider().get_highest_static_file_tx(StaticFileSegment::Receipts),
+            None
+        );
+
+        // Create execution stage
+        let stage = stage();
+
+        // Run ensure_consistency - should NOT error
+        // Block numbers match (both at 1), but tx numbers don't (database has txs, static files
+        // don't) This is fine - receipts are being skipped
+        let provider = factory.provider().unwrap();
+        stage
+            .ensure_consistency(&provider, 1, None)
+            .expect("ensure_consistency should succeed when receipts are intentionally skipped");
     }
 }

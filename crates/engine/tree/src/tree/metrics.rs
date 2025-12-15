@@ -17,6 +17,7 @@ use reth_metrics::{
 use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
+use revm_primitives::Address;
 use std::time::Instant;
 use tracing::{debug_span, trace};
 
@@ -62,9 +63,9 @@ impl EngineApiMetrics {
     pub(crate) fn execute_metered<E, DB>(
         &self,
         executor: E,
-        transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
+        mut transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
-    ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
+    ) -> Result<(BlockExecutionOutput<E::Receipt>, Vec<Address>), BlockExecutionError>
     where
         DB: alloy_evm::Database,
         E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction: SignedTransaction>,
@@ -74,19 +75,46 @@ impl EngineApiMetrics {
         // be accessible.
         let wrapper = MeteredStateHook { metrics: self.executor.clone(), inner_hook: state_hook };
 
+        let mut senders = Vec::new();
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
         let f = || {
-            executor.apply_pre_execution_changes()?;
-            for tx in transactions {
+            let start = Instant::now();
+            debug_span!(target: "engine::tree", "pre execution")
+                .entered()
+                .in_scope(|| executor.apply_pre_execution_changes())?;
+            self.executor.pre_execution_histogram.record(start.elapsed());
+
+            let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+            loop {
+                let start = Instant::now();
+                let Some(tx) = transactions.next() else { break };
+                self.executor.transaction_wait_histogram.record(start.elapsed());
+
                 let tx = tx?;
+                senders.push(*tx.signer());
+
                 let span =
                     debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
-                let _enter = span.enter();
+                let enter = span.entered();
                 trace!(target: "engine::tree", "Executing transaction");
-                executor.execute_transaction(tx)?;
+                let start = Instant::now();
+                let gas_used = executor.execute_transaction(tx)?;
+                self.executor.transaction_execution_histogram.record(start.elapsed());
+
+                // record the tx gas used
+                enter.record("gas_used", gas_used);
             }
-            executor.finish().map(|(evm, result)| (evm.into_db(), result))
+            drop(exec_span);
+
+            let start = Instant::now();
+            let result = debug_span!(target: "engine::tree", "finish")
+                .entered()
+                .in_scope(|| executor.finish())
+                .map(|(evm, result)| (evm.into_db(), result));
+            self.executor.post_execution_histogram.record(start.elapsed());
+
+            result
         };
 
         // Use metered to execute and track timing/gas metrics
@@ -97,7 +125,9 @@ impl EngineApiMetrics {
         })?;
 
         // merge transitions into bundle state
-        db.borrow_mut().merge_transitions(BundleRetention::Reverts);
+        debug_span!(target: "engine::tree", "merge transitions")
+            .entered()
+            .in_scope(|| db.borrow_mut().merge_transitions(BundleRetention::Reverts));
         let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
 
         // Update the metrics for the number of accounts, storage slots and bytecodes updated
@@ -110,7 +140,7 @@ impl EngineApiMetrics {
         self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
         self.executor.bytecodes_updated_histogram.record(bytecodes as f64);
 
-        Ok(output)
+        Ok((output, senders))
     }
 }
 
@@ -248,6 +278,8 @@ pub(crate) struct NewPayloadStatusMetrics {
     pub(crate) new_payload_total_gas: Histogram,
     /// The gas per second of valid new payload messages received.
     pub(crate) new_payload_gas_per_second: Histogram,
+    /// The gas per second for the last new payload call.
+    pub(crate) new_payload_gas_per_second_last: Gauge,
     /// Latency for the new payload calls.
     pub(crate) new_payload_latency: Histogram,
     /// Latency for the last new payload call.
@@ -271,7 +303,9 @@ impl NewPayloadStatusMetrics {
                 PayloadStatusEnum::Valid => {
                     self.new_payload_valid.increment(1);
                     self.new_payload_total_gas.record(gas_used as f64);
-                    self.new_payload_gas_per_second.record(gas_used as f64 / elapsed.as_secs_f64());
+                    let gas_per_second = gas_used as f64 / elapsed.as_secs_f64();
+                    self.new_payload_gas_per_second.record(gas_per_second);
+                    self.new_payload_gas_per_second_last.set(gas_per_second);
                 }
                 PayloadStatusEnum::Syncing => self.new_payload_syncing.increment(1),
                 PayloadStatusEnum::Accepted => self.new_payload_accepted.increment(1),
@@ -297,6 +331,10 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) state_root_duration: Gauge,
     /// Histogram for state root duration ie the time spent blocked waiting for the state root
     pub(crate) state_root_histogram: Histogram,
+    /// Histogram of deferred trie computation duration.
+    pub(crate) deferred_trie_compute_duration: Histogram,
+    /// Histogram of time spent waiting for deferred trie data to become available.
+    pub(crate) deferred_trie_wait_duration: Histogram,
     /// Trie input computation duration
     pub(crate) trie_input_duration: Histogram,
     /// Payload conversion and validation latency

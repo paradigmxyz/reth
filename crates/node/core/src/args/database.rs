@@ -33,6 +33,18 @@ pub struct DatabaseArgs {
     /// The default value is 8TB.
     #[arg(long = "db.max-size", value_parser = parse_byte_size)]
     pub max_size: Option<usize>,
+    /// Database page size (e.g., 4KB, 8KB, 16KB).
+    ///
+    /// Specifies the page size used by the MDBX database.
+    ///
+    /// The page size determines the maximum database size.
+    /// MDBX supports up to 2^31 pages, so with the default 4KB page size, the maximum
+    /// database size is 8TB. To allow larger databases, increase this value to 8KB or higher.
+    ///
+    /// WARNING: This setting is only configurable at database creation; changing
+    /// it later requires re-syncing.
+    #[arg(long = "db.page-size", value_parser = parse_byte_size)]
+    pub page_size: Option<usize>,
     /// Database growth step (e.g., 4GB, 4KB)
     #[arg(long = "db.growth-step", value_parser = parse_byte_size)]
     pub growth_step: Option<usize>,
@@ -73,6 +85,7 @@ impl DatabaseArgs {
             .with_exclusive(self.exclusive)
             .with_max_read_transaction_duration(max_read_transaction_duration)
             .with_geometry_max_size(self.max_size)
+            .with_geometry_page_size(self.page_size)
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
             .with_sync_mode(self.sync_mode)
@@ -302,6 +315,41 @@ mod tests {
 
         let result =
             CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.max-size", "2PB"]);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_command_parser_with_valid_page_size_from_str() {
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "8KB"])
+            .unwrap();
+        assert_eq!(cmd.args.page_size, Some(KILOBYTE * 8));
+
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "1MB"])
+            .unwrap();
+        assert_eq!(cmd.args.page_size, Some(MEGABYTE));
+
+        // Test with spaces
+        let cmd =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "16 KB"])
+                .unwrap();
+        assert_eq!(cmd.args.page_size, Some(KILOBYTE * 16));
+
+        // Test with just a number (bytes)
+        let cmd = CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "4096"])
+            .unwrap();
+        assert_eq!(cmd.args.page_size, Some(KILOBYTE * 4));
+    }
+
+    #[test]
+    fn test_command_parser_with_invalid_page_size() {
+        // Invalid text
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "invalid"]);
+        assert!(result.is_err());
+
+        // Invalid unit
+        let result =
+            CommandParser::<DatabaseArgs>::try_parse_from(["reth", "--db.page-size", "7 ZB"]);
         assert!(result.is_err());
     }
 

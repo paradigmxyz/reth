@@ -181,6 +181,7 @@ mod tests {
     use reth_exex_types::ExExNotification;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{self, random_block};
+    use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostStateSorted};
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
     // wal with 1 block and tx (old 3-field format)
@@ -282,7 +283,6 @@ mod tests {
     #[ignore]
     fn generate_test_wal() -> eyre::Result<()> {
         use alloy_consensus::BlockHeader;
-        use reth_trie_common::{updates::TrieUpdates, HashedPostState};
         use std::io::Write;
 
         let mut rng = generators::rng();
@@ -292,8 +292,8 @@ mod tests {
         let block_number = block.header().number();
 
         // Create some non-empty trie updates and hashed state to ensure the 4-field format is used
-        let trie_updates = TrieUpdates::default();
-        let hashed_state = HashedPostState::default();
+        let trie_updates = TrieUpdatesSorted::default();
+        let hashed_state = HashedPostStateSorted::default();
 
         let notification: ExExNotification<reth_ethereum_primitives::EthPrimitives> =
             ExExNotification::ChainCommitted {

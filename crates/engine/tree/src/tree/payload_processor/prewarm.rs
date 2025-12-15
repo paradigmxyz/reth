@@ -29,7 +29,7 @@ use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, StateProviderFactory, StateReader};
+use reth_provider::{BlockReader, StateProviderBox, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
 use reth_trie::MultiProofTargets;
 use std::{
@@ -40,7 +40,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, trace, warn};
+use tracing::{debug, debug_span, instrument, trace, warn, Span};
 
 /// A wrapper for transactions that includes their index in the block.
 #[derive(Clone)]
@@ -87,6 +87,8 @@ where
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
     actions_rx: Receiver<PrewarmTaskEvent>,
+    /// Parent span for tracing
+    parent_span: Span,
 }
 
 impl<N, P, Evm> PrewarmCacheTask<N, P, Evm>
@@ -122,6 +124,7 @@ where
                 transaction_count_hint,
                 to_multi_proof,
                 actions_rx,
+                parent_span: Span::current(),
             },
             actions_tx,
         )
@@ -140,7 +143,7 @@ where
         let ctx = self.ctx.clone();
         let max_concurrency = self.max_concurrency;
         let transaction_count_hint = self.transaction_count_hint;
-        let span = tracing::Span::current();
+        let span = Span::current();
 
         self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
@@ -252,31 +255,35 @@ where
             self;
         let hash = env.hash;
 
-        debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-        // Perform all cache operations atomically under the lock
-        execution_cache.update_with_guard(|cached| {
-            // consumes the `SavedCache` held by the prewarming task, which releases its usage guard
-            let (caches, cache_metrics) = saved_cache.split();
-            let new_cache = SavedCache::new(hash, caches, cache_metrics);
+        if let Some(saved_cache) = saved_cache {
+            debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
+            // Perform all cache operations atomically under the lock
+            execution_cache.update_with_guard(|cached| {
+                // consumes the `SavedCache` held by the prewarming task, which releases its usage
+                // guard
+                let (caches, cache_metrics) = saved_cache.split();
+                let new_cache = SavedCache::new(hash, caches, cache_metrics);
 
-            // Insert state into cache while holding the lock
-            if new_cache.cache().insert_state(&state).is_err() {
-                // Clear the cache on error to prevent having a polluted cache
-                *cached = None;
-                debug!(target: "engine::caching", "cleared execution cache on update error");
-                return;
-            }
+                // Insert state into cache while holding the lock
+                if new_cache.cache().insert_state(&state).is_err() {
+                    // Clear the cache on error to prevent having a polluted cache
+                    *cached = None;
+                    debug!(target: "engine::caching", "cleared execution cache on update error");
+                    return;
+                }
 
-            new_cache.update_metrics();
+                new_cache.update_metrics();
 
-            // Replace the shared cache with the new one; the previous cache (if any) is dropped.
-            *cached = Some(new_cache);
-        });
+                // Replace the shared cache with the new one; the previous cache (if any) is
+                // dropped.
+                *cached = Some(new_cache);
+            });
 
-        let elapsed = start.elapsed();
-        debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
+            let elapsed = start.elapsed();
+            debug!(target: "engine::caching", parent_hash=?hash, elapsed=?elapsed, "Updated execution cache");
 
-        metrics.cache_saving_duration.set(elapsed.as_secs_f64());
+            metrics.cache_saving_duration.set(elapsed.as_secs_f64());
+        }
     }
 
     /// Executes the task.
@@ -284,9 +291,10 @@ where
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
     #[instrument(
+        parent = &self.parent_span,
         level = "debug",
         target = "engine::tree::payload_processor::prewarm",
-        name = "prewarm",
+        name = "prewarm and caching",
         skip_all
     )]
     pub(super) fn run(
@@ -352,7 +360,7 @@ where
 {
     pub(super) env: ExecutionEnv<Evm>,
     pub(super) evm_config: Evm,
-    pub(super) saved_cache: SavedCache,
+    pub(super) saved_cache: Option<SavedCache>,
     /// Provider to obtain the state
     pub(super) provider: StateProviderBuilder<N, P>,
     pub(super) metrics: PrewarmMetrics,
@@ -396,10 +404,13 @@ where
         };
 
         // Use the caches to create a new provider with caching
-        let caches = saved_cache.cache().clone();
-        let cache_metrics = saved_cache.metrics().clone();
-        let state_provider =
-            CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics);
+        let state_provider: StateProviderBox = if let Some(saved_cache) = saved_cache {
+            let caches = saved_cache.cache().clone();
+            let cache_metrics = saved_cache.metrics().clone();
+            Box::new(CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics))
+        } else {
+            state_provider
+        };
 
         let state_provider = StateProviderDatabase::new(state_provider);
 
@@ -431,8 +442,9 @@ where
     /// Accepts an [`mpsc::Receiver`] of transactions and a handle to prewarm task. Executes
     /// transactions and streams [`PrewarmTaskEvent::Outcome`] messages for each transaction.
     ///
-    /// Returns `None` if executing the transactions failed to a non Revert error.
-    /// Returns the touched+modified state of the transaction.
+    /// This function processes transactions sequentially from the receiver and emits outcome events
+    /// via the provided sender. Execution errors are logged and tracked but do not stop the batch
+    /// processing unless the task is explicitly cancelled.
     ///
     /// Note: There are no ordering guarantees; this does not reflect the state produced by
     /// sequential execution.
@@ -452,7 +464,7 @@ where
                 .entered();
             txs.recv()
         } {
-            let _enter =
+            let enter =
                 debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
                     .entered();
 
@@ -484,7 +496,11 @@ where
             };
             metrics.execution_duration.record(start.elapsed());
 
-            drop(_enter);
+            // record some basic information about the transactions
+            enter.record("gas_used", res.result.gas_used());
+            enter.record("is_success", res.result.is_success());
+
+            drop(enter);
 
             // If the task was cancelled, stop execution, send an empty result to notify the task,
             // and exit.

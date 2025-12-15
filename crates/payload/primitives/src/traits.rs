@@ -10,6 +10,7 @@ use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_engine::{PayloadAttributes as EthPayloadAttributes, PayloadId};
 use core::fmt;
 use either::Either;
+use reth_chain_state::ComputedTrieData;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_trie_common::{
@@ -42,25 +43,28 @@ pub struct BuiltPayloadExecutedBlock<N: NodePrimitives> {
 impl<N: NodePrimitives> BuiltPayloadExecutedBlock<N> {
     /// Converts this into an [`reth_chain_state::ExecutedBlock`].
     ///
-    /// If the hashed state or trie updates are in sorted form, they will be converted
-    /// back to their unsorted representations.
+    /// Ensures hashed state and trie updates are in their sorted representations
+    /// as required by `reth_chain_state::ExecutedBlock`.
     pub fn into_executed_payload(self) -> reth_chain_state::ExecutedBlock<N> {
         let hashed_state = match self.hashed_state {
-            Either::Left(unsorted) => unsorted,
-            Either::Right(sorted) => Arc::new(Arc::unwrap_or_clone(sorted).into()),
+            // Convert unsorted to sorted
+            Either::Left(unsorted) => Arc::new(Arc::unwrap_or_clone(unsorted).into_sorted()),
+            // Already sorted
+            Either::Right(sorted) => sorted,
         };
 
         let trie_updates = match self.trie_updates {
-            Either::Left(unsorted) => unsorted,
-            Either::Right(sorted) => Arc::new(Arc::unwrap_or_clone(sorted).into()),
+            // Convert unsorted to sorted
+            Either::Left(unsorted) => Arc::new(Arc::unwrap_or_clone(unsorted).into_sorted()),
+            // Already sorted
+            Either::Right(sorted) => sorted,
         };
 
-        reth_chain_state::ExecutedBlock {
-            recovered_block: self.recovered_block,
-            execution_output: self.execution_output,
-            hashed_state,
-            trie_updates,
-        }
+        reth_chain_state::ExecutedBlock::new(
+            self.recovered_block,
+            self.execution_output,
+            ComputedTrieData::without_trie_input(hashed_state, trie_updates),
+        )
     }
 }
 
@@ -193,40 +197,44 @@ impl PayloadAttributes for op_alloy_rpc_types_engine::OpPayloadAttributes {
 ///
 /// Enables different strategies for generating payload attributes based on
 /// contextual information. Useful for testing and specialized building.
-pub trait PayloadAttributesBuilder<Attributes>: Send + Sync + 'static {
+pub trait PayloadAttributesBuilder<Attributes, Header = alloy_consensus::Header>:
+    Send + Sync + 'static
+{
     /// Constructs new payload attributes for the given timestamp.
-    fn build(&self, timestamp: u64) -> Attributes;
+    fn build(&self, parent: &SealedHeader<Header>) -> Attributes;
 }
 
-impl<Attributes, F> PayloadAttributesBuilder<Attributes> for F
+impl<Attributes, Header, F> PayloadAttributesBuilder<Attributes, Header> for F
 where
-    F: Fn(u64) -> Attributes + Send + Sync + 'static,
+    Header: Clone,
+    F: Fn(SealedHeader<Header>) -> Attributes + Send + Sync + 'static,
 {
-    fn build(&self, timestamp: u64) -> Attributes {
-        self(timestamp)
+    fn build(&self, parent: &SealedHeader<Header>) -> Attributes {
+        self(parent.clone())
     }
 }
 
-impl<Attributes, L, R> PayloadAttributesBuilder<Attributes> for Either<L, R>
+impl<Attributes, Header, L, R> PayloadAttributesBuilder<Attributes, Header> for Either<L, R>
 where
-    L: PayloadAttributesBuilder<Attributes>,
-    R: PayloadAttributesBuilder<Attributes>,
+    L: PayloadAttributesBuilder<Attributes, Header>,
+    R: PayloadAttributesBuilder<Attributes, Header>,
 {
-    fn build(&self, timestamp: u64) -> Attributes {
+    fn build(&self, parent: &SealedHeader<Header>) -> Attributes {
         match self {
-            Self::Left(l) => l.build(timestamp),
-            Self::Right(r) => r.build(timestamp),
+            Self::Left(l) => l.build(parent),
+            Self::Right(r) => r.build(parent),
         }
     }
 }
 
-impl<Attributes> PayloadAttributesBuilder<Attributes>
-    for Box<dyn PayloadAttributesBuilder<Attributes>>
+impl<Attributes, Header> PayloadAttributesBuilder<Attributes, Header>
+    for Box<dyn PayloadAttributesBuilder<Attributes, Header>>
 where
+    Header: 'static,
     Attributes: 'static,
 {
-    fn build(&self, timestamp: u64) -> Attributes {
-        self.as_ref().build(timestamp)
+    fn build(&self, parent: &SealedHeader<Header>) -> Attributes {
+        self.as_ref().build(parent)
     }
 }
 

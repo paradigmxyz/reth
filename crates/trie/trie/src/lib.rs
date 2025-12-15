@@ -32,6 +32,9 @@ pub mod node_iter;
 /// Merkle proof generation.
 pub mod proof;
 
+/// Merkle proof generation v2 (leaf-only implementation).
+pub mod proof_v2;
+
 /// Trie witness generation.
 pub mod witness;
 
@@ -61,7 +64,7 @@ pub mod metrics;
 pub mod test_utils;
 
 /// Collection of mock types for testing.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub mod mock;
 
 /// Verification of existing stored trie nodes against state data.

@@ -23,7 +23,10 @@ use reth_node_core::{
     version::{version_metadata, CLIENT_CODE},
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
-use reth_rpc::eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer};
+use reth_rpc::{
+    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
+    AdminApi,
+};
 use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
 use reth_rpc_builder::{
     auth::{AuthRpcModule, AuthServerHandle},
@@ -382,6 +385,21 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes> RpcHandle<Node, EthApi> {
         &self,
     ) -> &EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>> {
         &self.engine_events
+    }
+
+    /// Returns the `EthApi` instance of the rpc server.
+    pub const fn eth_api(&self) -> &EthApi {
+        self.rpc_registry.registry.eth_api()
+    }
+
+    /// Returns an instance of the [`AdminApi`] for the rpc server.
+    pub fn admin_api(
+        &self,
+    ) -> AdminApi<Node::Network, <Node::Types as NodeTypes>::ChainSpec, Node::Pool>
+    where
+        <Node::Types as NodeTypes>::ChainSpec: EthereumHardforks,
+    {
+        self.rpc_registry.registry.admin_api()
     }
 }
 
@@ -973,7 +991,12 @@ where
         );
 
         let eth_config = config.rpc.eth_config().max_batch_size(config.txpool.max_batch_size());
-        let ctx = EthApiCtx { components: &node, config: eth_config, cache };
+        let ctx = EthApiCtx {
+            components: &node,
+            config: eth_config,
+            cache,
+            engine_handle: beacon_engine_handle.clone(),
+        };
         let eth_api = eth_api_builder.build_eth_api(ctx).await?;
 
         let auth_config = config.rpc.auth_server_config(jwt_secret)?;
@@ -987,7 +1010,7 @@ where
             .with_executor(Box::new(node.task_executor().clone()))
             .with_evm_config(node.evm_config().clone())
             .with_consensus(node.consensus().clone())
-            .build_with_auth_server(module_config, engine_api, eth_api);
+            .build_with_auth_server(module_config, engine_api, eth_api, engine_events.clone());
 
         // in dev mode we generate 20 random dev-signer accounts
         if config.dev.dev {
@@ -1137,6 +1160,8 @@ pub struct EthApiCtx<'a, N: FullNodeTypes> {
     pub config: EthConfig,
     /// Cache for eth state
     pub cache: EthStateCache<PrimitivesTy<N::Types>>,
+    /// Handle to the beacon consensus engine
+    pub engine_handle: ConsensusEngineHandle<<N::Types as NodeTypes>::Payload>,
 }
 
 impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumHardforks>>>
@@ -1154,6 +1179,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
             .proof_permits(self.config.proof_permits)
             .gas_oracle_config(self.config.gas_oracle)
             .max_batch_size(self.config.max_batch_size)
+            .max_blocking_io_requests(self.config.max_blocking_io_requests)
             .pending_block_kind(self.config.pending_block_kind)
             .raw_tx_forwarder(self.config.raw_tx_forwarder)
             .evm_memory_limit(self.config.rpc_evm_memory_limit)
@@ -1163,10 +1189,7 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
 /// A `EthApi` that knows how to build `eth` namespace API from [`FullNodeComponents`].
 pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     /// The Ethapi implementation this builder will build.
-    type EthApi: EthApiTypes
-        + FullEthApiServer<Provider = N::Provider, Pool = N::Pool>
-        + Unpin
-        + 'static;
+    type EthApi: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>;
 
     /// Builds the [`EthApiServer`](reth_rpc_api::eth::EthApiServer) from the given context.
     fn build_eth_api(

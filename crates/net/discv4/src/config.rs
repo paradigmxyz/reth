@@ -17,8 +17,6 @@ use std::{
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Discv4Config {
-    /// Whether to enable the incoming packet filter. Default: false.
-    pub enable_packet_filter: bool,
     /// Size of the channel buffer for outgoing messages.
     pub udp_egress_message_buffer: usize,
     /// Size of the channel buffer for incoming messages.
@@ -41,10 +39,6 @@ pub struct Discv4Config {
     /// Provides a way to ban peers and ips.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ban_list: BanList,
-    /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
-    /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
-    /// the filter will last indefinitely. Default is 1 hour.
-    pub ban_duration: Option<Duration>,
     /// Nodes to boot from.
     pub bootstrap_nodes: HashSet<NodeRecord>,
     /// Whether to randomly discover new peers.
@@ -101,14 +95,13 @@ impl Discv4Config {
     pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
         let resolver = self.external_ip_resolver?;
         let interval = self.resolve_external_ip_interval?;
-        Some(ResolveNatInterval::interval(resolver, interval))
+        Some(ResolveNatInterval::interval_at(resolver, tokio::time::Instant::now(), interval))
     }
 }
 
 impl Default for Discv4Config {
     fn default() -> Self {
         Self {
-            enable_packet_filter: false,
             // This should be high enough to cover an entire recursive FindNode lookup which is
             // includes sending FindNode to nodes it discovered in the rounds using the concurrency
             // factor ALPHA
@@ -126,7 +119,6 @@ impl Default for Discv4Config {
 
             lookup_interval: Duration::from_secs(20),
             ban_list: Default::default(),
-            ban_duration: Some(Duration::from_secs(60 * 60)), // 1 hour
             bootstrap_nodes: Default::default(),
             enable_dht_random_walk: true,
             enable_lookup: true,
@@ -148,12 +140,6 @@ pub struct Discv4ConfigBuilder {
 }
 
 impl Discv4ConfigBuilder {
-    /// Whether to enable the incoming packet filter.
-    pub const fn enable_packet_filter(&mut self) -> &mut Self {
-        self.config.enable_packet_filter = true;
-        self
-    }
-
     /// Sets the channel size for incoming messages
     pub const fn udp_ingress_message_buffer(
         &mut self,
@@ -276,14 +262,6 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
-    /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
-    /// the filter will last indefinitely. Default is 1 hour.
-    pub const fn ban_duration(&mut self, ban_duration: Option<Duration>) -> &mut Self {
-        self.config.ban_duration = ban_duration;
-        self
-    }
-
     /// Adds a boot node
     pub fn add_boot_node(&mut self, node: NodeRecord) -> &mut Self {
         self.config.bootstrap_nodes.insert(node);
@@ -331,9 +309,29 @@ mod tests {
             .enable_lookup(true)
             .enable_dht_random_walk(true)
             .add_boot_nodes(HashSet::new())
-            .ban_duration(None)
             .lookup_interval(Duration::from_secs(3))
             .enable_lookup(true)
             .build();
+    }
+
+    #[tokio::test]
+    async fn test_resolve_external_ip_interval_uses_interval_at() {
+        use reth_net_nat::NatResolver;
+        use std::net::{IpAddr, Ipv4Addr};
+
+        let ip_addr = IpAddr::V4(Ipv4Addr::new(192, 168, 1, 1));
+
+        // Create a config with external IP resolver
+        let mut builder = Discv4Config::builder();
+        builder.external_ip_resolver(Some(NatResolver::ExternalIp(ip_addr)));
+        builder.resolve_external_ip_interval(Some(Duration::from_secs(60 * 5)));
+        let config = builder.build();
+
+        // Get the ResolveNatInterval
+        let mut interval = config.resolve_external_ip_interval().expect("should have interval");
+
+        // Test that first tick returns immediately (interval_at behavior)
+        let ip = interval.tick().await;
+        assert_eq!(ip, Some(ip_addr));
     }
 }
