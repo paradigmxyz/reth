@@ -24,7 +24,7 @@ pub struct Discv4Config {
     /// The number of allowed consecutive failures for `FindNode` requests. Default: 5.
     pub max_find_node_failures: u8,
     /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
-    /// 10min.
+    /// 10 seconds.
     pub ping_interval: Duration,
     /// The duration of we consider a ping timed out.
     pub ping_expiration: Duration,
