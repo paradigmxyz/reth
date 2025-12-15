@@ -34,7 +34,7 @@ pub use consistent::ConsistentProvider;
 #[cfg(all(unix, feature = "rocksdb"))]
 pub(crate) mod rocksdb;
 #[cfg(all(unix, feature = "rocksdb"))]
-pub use rocksdb::{RocksDBBuilder, RocksDBProvider, RocksTx};
+pub use rocksdb::{RocksDBBuilder, RocksDBProvider, RocksDBWriteMode, RocksTx};
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy
 /// [`ProviderNodeTypes`].

@@ -4,7 +4,7 @@
 use std::{marker::PhantomData, ops::Range};
 
 #[cfg(all(unix, feature = "rocksdb"))]
-use crate::providers::rocksdb::RocksTx;
+use crate::providers::rocksdb::RocksDBWriteMode;
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
@@ -36,11 +36,12 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
-// Helper type so constructors stay exported even when RocksDB feature is off.
+// Helper types so constructors stay exported even when RocksDB feature is off.
+// RocksDBWriteMode encapsulates the choice between Transaction and Batch writes.
 #[cfg(all(unix, feature = "rocksdb"))]
-type RocksTxArg<'a> = crate::providers::rocksdb::RocksTx<'a>;
+type RocksWriteModeArg<'a> = crate::providers::rocksdb::RocksDBWriteMode<'a>;
 #[cfg(not(all(unix, feature = "rocksdb")))]
-type RocksTxArg<'a> = ();
+type RocksWriteModeArg<'a> = ();
 
 #[cfg(all(unix, feature = "rocksdb"))]
 type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
@@ -54,9 +55,12 @@ pub enum EitherWriter<'a, CURSOR, N> {
     Database(CURSOR),
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
-    /// Write to `RocksDB` transaction
+    /// Write to `RocksDB` (transaction or batch - internal detail).
+    ///
+    /// Uses [`RocksDBWriteMode`] to encapsulate the choice between full transaction
+    /// semantics and high-throughput batch writes.
     #[cfg(all(unix, feature = "rocksdb"))]
-    RocksDB(RocksTx<'a>),
+    RocksDB(RocksDBWriteMode<'a>),
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -127,9 +131,11 @@ impl<'a> EitherWriter<'a, (), ()> {
     }
 
     /// Creates a new [`EitherWriter`] for storages history based on storage settings.
+    ///
+    /// Accepts either Transaction or Batch mode via [`RocksDBWriteMode`].
     pub fn new_storages_history<P>(
         provider: &P,
-        _rocksdb_tx: RocksTxArg<'a>,
+        _rocksdb_mode: RocksWriteModeArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::StoragesHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
@@ -137,16 +143,37 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(_rocksdb_tx));
+            return Ok(EitherWriter::RocksDB(_rocksdb_mode));
         }
 
         Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
     }
 
+    /// Creates a new [`EitherWriter`] for accounts history based on storage settings.
+    ///
+    /// Accepts either Transaction or Batch mode via [`RocksDBWriteMode`].
+    pub fn new_accounts_history<P>(
+        provider: &P,
+        _rocksdb_mode: RocksWriteModeArg<'a>,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::AccountsHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTxMut,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            return Ok(EitherWriter::RocksDB(_rocksdb_mode));
+        }
+
+        Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::AccountsHistory>()?))
+    }
+
     /// Creates a new [`EitherWriter`] for transaction hash numbers based on storage settings.
+    ///
+    /// Accepts either Transaction or Batch mode via [`RocksDBWriteMode`].
     pub fn new_transaction_hash_numbers<P>(
         provider: &P,
-        _rocksdb_tx: RocksTxArg<'a>,
+        _rocksdb_mode: RocksWriteModeArg<'a>,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionHashNumbers>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
@@ -154,7 +181,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(_rocksdb_tx));
+            return Ok(EitherWriter::RocksDB(_rocksdb_mode));
         }
 
         Ok(EitherWriter::Database(
@@ -191,15 +218,21 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         }
     }
 
-    /// Commits the `RocksDB` transaction if this is a `RocksDB` writer.
+    /// Commits `RocksDB` writes if this is a `RocksDB` writer.
     ///
     /// For [`Self::Database`] and [`Self::StaticFile`], this is a no-op as they use
     /// different commit patterns (MDBX transaction commit, static file sync).
+    ///
+    /// # Commit Order
+    ///
+    /// Call this AFTER the outer MDBX transaction commits successfully. This ensures
+    /// that if `RocksDB` commit fails, the primary data (MDBX) is still intact and
+    /// the `RocksDB` data (which is derived) can be rebuilt.
     #[cfg(all(unix, feature = "rocksdb"))]
     pub fn commit(self) -> ProviderResult<()> {
         match self {
             Self::Database(_) | Self::StaticFile(_) => Ok(()),
-            Self::RocksDB(tx) => tx.commit(),
+            Self::RocksDB(mode) => mode.commit(),
         }
     }
 }
