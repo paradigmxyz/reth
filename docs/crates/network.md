@@ -382,36 +382,45 @@ fn get_or_init_fut(&mut self) -> HeadersRequestFuture {
 }
 ```
 
-In the `BodyStage` configured by the main binary, a `BodiesDownloader` is used:
+In the `BodyStage` configured by the main binary, a `BodiesDownloader` built via a `BodiesDownloaderBuilder` is used. At a high level, it looks like this:
 
-[File: crates/net/downloaders/src/bodies/bodies.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/downloaders/src/bodies/bodies.rs)
+[File: crates/net/downloaders/src/bodies/bodies.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/downloaders/src/bodies/bodies.rs)
 ```rust,ignore
-pub struct BodiesDownloader<Client, Consensus> {
+pub struct BodiesDownloader<B, C, Provider>
+where
+    B: Block,
+    C: BodiesClient<Body = B::Body>,
+    Provider: HeaderProvider<Header = B::Header>,
+{
     /// The bodies client
-    client: Arc<Client>,
+    client: Arc<C>,
     /// The consensus client
-    consensus: Arc<Consensus>,
-    /// The number of retries for each request.
-    retries: usize,
-    /// The batch size per one request
-    batch_size: usize,
-    /// The maximum number of requests to send concurrently.
-    concurrency: usize,
+    consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+    /// Database handle for reading headers.
+    provider: Provider,
+    /// The batch size of non-empty blocks per one request.
+    request_limit: u64,
+    /// The maximum number of block bodies returned at once from the stream.
+    stream_batch_size: usize,
+    /// The allowed range for number of concurrent requests.
+    concurrent_requests_range: RangeInclusive<usize>,
+    /// Maximum number of bytes of received bodies to buffer internally.
+    max_buffered_blocks_size_bytes: usize,
+    // ... in‑flight request queue and internal buffers ...
 }
 ```
 
-Here, similarly, a `FetchClient` is passed into the `client` field, and the `get_block_bodies` method it implements is used when constructing the stream created by the `BodiesDownloader` in the `execute` method of the `BodyStage`.
+Here, similarly, a `FetchClient` implementation is passed into the `client` field, and its `get_block_bodies`/`get_block_bodies_with_priority` methods are used internally when constructing the stream created by the `BodiesDownloader`.
 
-[File: crates/net/downloaders/src/bodies/bodies.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/downloaders/src/bodies/bodies.rs)
+Internally, the downloader issues requests via a `BodiesRequestFuture`:
+
+[File: crates/net/downloaders/src/bodies/request.rs](https://github.com/paradigmxyz/reth/blob/main/crates/net/downloaders/src/bodies/request.rs)
 ```rust,ignore
-async fn fetch_bodies(
-    &self,
-    headers: Vec<&SealedHeader>,
-) -> DownloadResult<Vec<BlockResponse>> {
-    // --snip--
-    let (peer_id, bodies) =
-        self.client.get_block_bodies(headers_with_txs_and_ommers).await?.split();
-    // --snip--
+fn submit_request(&mut self, req: Vec<B256>, priority: Priority) {
+    tracing::trace!(target: "downloaders::bodies", request_len = req.len(), "Requesting bodies");
+    let client = Arc::clone(&self.client);
+    self.last_request_len = Some(req.len());
+    self.fut = Some(client.get_block_bodies_with_priority(req, priority));
 }
 ```
 
