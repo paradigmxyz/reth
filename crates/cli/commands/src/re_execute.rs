@@ -15,10 +15,9 @@ use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{format_gas_throughput, BlockBody, GotExpected};
 use reth_provider::{
     BlockNumReader, BlockReader, ChainSpecProvider, DatabaseProviderFactory, ReceiptProvider,
-    StaticFileProviderFactory, TransactionVariant,
+    TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
-use reth_stages::stages::calculate_gas_used_from_headers;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -49,6 +48,15 @@ pub struct Command<C: ChainSpecParser> {
     /// Continues with execution when an invalid block is encountered and collects these blocks.
     #[arg(long)]
     skip_invalid_blocks: bool,
+
+    /// Total number of blocks to execute, distributed evenly across the range.
+    /// If not set, all blocks in the range are executed.
+    #[arg(long)]
+    total_blocks: Option<u64>,
+
+    /// Size of contiguous block ranges to execute when using --total-blocks.
+    #[arg(long, default_value = "10")]
+    chunk_size: u64,
 }
 
 impl<C: ChainSpecParser> Command<C> {
@@ -84,12 +92,17 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             }
         };
 
-        let total_blocks = max_block - min_block;
-        let total_gas = calculate_gas_used_from_headers(
-            &provider_factory.static_file_provider(),
-            min_block..=max_block,
-        )?;
-        let blocks_per_task = total_blocks / self.num_tasks;
+        let full_range = max_block - min_block;
+
+        let (blocks_to_execute, chunk_size) = if let Some(total_blocks) = self.total_blocks {
+            let total_blocks = total_blocks.min(full_range);
+            let chunk_size = self.chunk_size.min(total_blocks);
+            (total_blocks, chunk_size)
+        } else {
+            (full_range, full_range)
+        };
+        let blocks_per_task = blocks_to_execute / self.num_tasks;
+        let segment_size = full_range / self.num_tasks;
 
         let db_at = {
             let provider_factory = provider_factory.clone();
@@ -108,9 +121,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
 
         let mut tasks = JoinSet::new();
         for i in 0..self.num_tasks {
-            let start_block = min_block + i * blocks_per_task;
-            let end_block =
-                if i == self.num_tasks - 1 { max_block } else { start_block + blocks_per_task };
+            let segment_start = min_block + i * segment_size;
+            let segment_end =
+                if i == self.num_tasks - 1 { max_block } else { segment_start + segment_size };
 
             // Spawn thread executing blocks
             let provider_factory = provider_factory.clone();
@@ -121,94 +134,112 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
             let info_tx = info_tx.clone();
             let cancellation = cancellation.clone();
             tasks.spawn_blocking(move || {
-                let mut executor = evm_config.batch_executor(db_at(start_block - 1));
-                let mut executor_created = Instant::now();
-                let executor_lifetime = Duration::from_secs(120);
+                // Number of contiguous block ranges (chunks) this task will execute
+                let chunks_per_task = blocks_per_task / chunk_size;
+                // Distance between chunk start positions, calculated to evenly distribute
+                // chunks across the segment. For N chunks in a segment, we have N-1 gaps,
+                // so stride = (segment_size - chunk_size) / (N - 1).
+                // Example: segment=1000, chunk_size=10, chunks=10 → stride=110
+                //          chunks start at: 0, 110, 220, 330, ...
+                let task_stride = if chunks_per_task > 1 {
+                    (segment_end - segment_start - chunk_size) / (chunks_per_task - 1)
+                } else {
+                    0
+                };
 
-                'blocks: for block in start_block..end_block {
-                    if cancellation.is_cancelled() {
-                        // exit if the program is being terminated
-                        break
-                    }
+                'chunks: for chunk_idx in 0..chunks_per_task {
+                    let chunk_start = segment_start + chunk_idx * task_stride;
+                    let chunk_end = (chunk_start + chunk_size).min(segment_end);
 
-                    let block = provider_factory
-                        .recovered_block(block.into(), TransactionVariant::NoHash)?
-                        .unwrap();
+                    let mut executor = evm_config.batch_executor(db_at(chunk_start - 1));
+                    let mut executor_created = Instant::now();
+                    let executor_lifetime = Duration::from_secs(120);
 
-                    let result = match executor.execute_one(&block) {
-                        Ok(result) => result,
-                        Err(err) => {
-                            if skip_invalid_blocks {
-                                executor = evm_config.batch_executor(db_at(block.number()));
-                                let _ = info_tx.send((block, eyre::Report::new(err)));
-                                continue
-                            }
-                            return Err(err.into())
+                    'blocks: for block in chunk_start..chunk_end {
+                        if cancellation.is_cancelled() {
+                            // exit if the program is being terminated
+                            break 'chunks
                         }
-                    };
 
-                    if let Err(err) = consensus
-                        .validate_block_post_execution(&block, &result)
-                        .wrap_err_with(|| {
-                            format!("Failed to validate block {} {}", block.number(), block.hash())
-                        })
-                    {
-                        let correct_receipts =
-                            provider_factory.receipts_by_block(block.number().into())?.unwrap();
+                        let block = provider_factory
+                            .recovered_block(block.into(), TransactionVariant::NoHash)?
+                            .unwrap();
 
-                        for (i, (receipt, correct_receipt)) in
-                            result.receipts.iter().zip(correct_receipts.iter()).enumerate()
-                        {
-                            if receipt != correct_receipt {
-                                let tx_hash = block.body().transactions()[i].tx_hash();
-                                error!(
-                                    ?receipt,
-                                    ?correct_receipt,
-                                    index = i,
-                                    ?tx_hash,
-                                    "Invalid receipt"
-                                );
-                                let expected_gas_used = correct_receipt.cumulative_gas_used() -
-                                    if i == 0 {
-                                        0
-                                    } else {
-                                        correct_receipts[i - 1].cumulative_gas_used()
-                                    };
-                                let got_gas_used = receipt.cumulative_gas_used() -
-                                    if i == 0 {
-                                        0
-                                    } else {
-                                        result.receipts[i - 1].cumulative_gas_used()
-                                    };
-                                if got_gas_used != expected_gas_used {
-                                    let mismatch = GotExpected {
-                                        expected: expected_gas_used,
-                                        got: got_gas_used,
-                                    };
-
-                                    error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
-                                    if skip_invalid_blocks {
-                                        executor = evm_config.batch_executor(db_at(block.number()));
-                                        let _ = info_tx.send((block, err));
-                                        continue 'blocks;
-                                    }
-                                    return Err(err);
+                        let result = match executor.execute_one(&block) {
+                            Ok(result) => result,
+                            Err(err) => {
+                                if skip_invalid_blocks {
+                                    executor = evm_config.batch_executor(db_at(block.number()));
+                                    let _ = info_tx.send((block, eyre::Report::new(err)));
+                                    continue
                                 }
-                            } else {
-                                continue;
+                                return Err(err.into())
                             }
+                        };
+
+                        if let Err(err) = consensus
+                            .validate_block_post_execution(&block, &result)
+                            .wrap_err_with(|| {
+                                format!("Failed to validate block {} {}", block.number(), block.hash())
+                            })
+                        {
+                            let correct_receipts =
+                                provider_factory.receipts_by_block(block.number().into())?.unwrap();
+
+                            for (i, (receipt, correct_receipt)) in
+                                result.receipts.iter().zip(correct_receipts.iter()).enumerate()
+                            {
+                                if receipt != correct_receipt {
+                                    let tx_hash = block.body().transactions()[i].tx_hash();
+                                    error!(
+                                        ?receipt,
+                                        ?correct_receipt,
+                                        index = i,
+                                        ?tx_hash,
+                                        "Invalid receipt"
+                                    );
+                                    let expected_gas_used = correct_receipt.cumulative_gas_used() -
+                                        if i == 0 {
+                                            0
+                                        } else {
+                                            correct_receipts[i - 1].cumulative_gas_used()
+                                        };
+                                    let got_gas_used = receipt.cumulative_gas_used() -
+                                        if i == 0 {
+                                            0
+                                        } else {
+                                            result.receipts[i - 1].cumulative_gas_used()
+                                        };
+                                    if got_gas_used != expected_gas_used {
+                                        let mismatch = GotExpected {
+                                            expected: expected_gas_used,
+                                            got: got_gas_used,
+                                        };
+
+                                        error!(number=?block.number(), ?mismatch, "Gas usage mismatch");
+                                        if skip_invalid_blocks {
+                                            executor = evm_config.batch_executor(db_at(block.number()));
+                                            let _ = info_tx.send((block, err));
+                                            continue 'blocks;
+                                        }
+                                        return Err(err);
+                                    }
+                                } else {
+                                    continue;
+                                }
+                            }
+
+                            return Err(err);
                         }
+                        let _ = stats_tx.send(block.gas_used());
 
-                        return Err(err);
-                    }
-                    let _ = stats_tx.send(block.gas_used());
-
-                    // Reset DB once in a while to avoid OOM or read tx timeouts
-                    if executor.size_hint() > 1_000_000 ||
-                        executor_created.elapsed() > executor_lifetime
-                    {
-                        executor = evm_config.batch_executor(db_at(block.number()));
-                        executor_created = Instant::now();
+                        // Reset DB once in a while to avoid OOM or read tx timeouts
+                        if executor.size_hint() > 1_000_000 ||
+                            executor_created.elapsed() > executor_lifetime
+                        {
+                            executor = evm_config.batch_executor(db_at(block.number()));
+                            executor_created = Instant::now();
+                        }
                     }
                 }
 
