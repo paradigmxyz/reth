@@ -1,4 +1,4 @@
-use alloy_primitives::{bytes::BufMut, keccak256, B256};
+use alloy_primitives::{bytes::BufMut, utils::keccak256_cached, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
@@ -103,8 +103,8 @@ where
                 rayon::spawn(move || {
                     for (address, slot) in chunk {
                         let mut addr_key = Vec::with_capacity(64);
-                        addr_key.put_slice(keccak256(address).as_slice());
-                        addr_key.put_slice(keccak256(slot.key).as_slice());
+                        addr_key.put_slice(keccak256_cached(address).as_slice());
+                        addr_key.put_slice(keccak256_cached(slot.key).as_slice());
                         let _ = tx.send((addr_key, CompactU256::from(slot.value)));
                     }
                 });
@@ -368,7 +368,7 @@ mod tests {
 
                             for _ in 0..2 {
                                 let new_entry = StorageEntry {
-                                    key: keccak256([rng.random::<u8>()]),
+                                    key: keccak256_cached([rng.random::<u8>()]),
                                     value: U256::from(rng.random::<u8>() % 30 + 1),
                                 };
                                 self.insert_storage_entry(
@@ -391,7 +391,7 @@ mod tests {
                             tx,
                             (block_number, Address::random()).into(),
                             StorageEntry {
-                                key: keccak256("mining"),
+                                key: keccak256_cached("mining"),
                                 value: U256::from(rng.random::<u32>()),
                             },
                             progress.number == stage_progress,
@@ -455,9 +455,9 @@ mod tests {
                     let mut expected = 0;
 
                     while let Some((address, entry)) = storage_cursor.next()? {
-                        let key = keccak256(entry.key);
-                        let got =
-                            hashed_storage_cursor.seek_by_key_subkey(keccak256(address), key)?;
+                        let key = keccak256_cached(entry.key);
+                        let got = hashed_storage_cursor
+                            .seek_by_key_subkey(keccak256_cached(address), key)?;
                         assert_eq!(
                             got,
                             Some(StorageEntry { key, ..entry }),
@@ -493,8 +493,9 @@ mod tests {
             tx.put::<tables::PlainStorageState>(bn_address.address(), entry)?;
 
             if hash {
-                let hashed_address = keccak256(bn_address.address());
-                let hashed_entry = StorageEntry { key: keccak256(entry.key), value: entry.value };
+                let hashed_address = keccak256_cached(bn_address.address());
+                let hashed_entry =
+                    StorageEntry { key: keccak256_cached(entry.key), value: entry.value };
 
                 if let Some(e) = tx
                     .cursor_dup_write::<tables::HashedStorages>()?

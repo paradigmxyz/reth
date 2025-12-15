@@ -13,7 +13,7 @@ use alloy_eips::{
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
-use alloy_primitives::{keccak256, Address, Bytes, Signature, TxHash, TxKind, Uint, B256};
+use alloy_primitives::{utils::keccak256_cached, Address, Bytes, Signature, TxHash, TxKind, Uint, B256};
 use alloy_rlp::Header;
 use core::{
     hash::{Hash, Hasher},
@@ -138,7 +138,7 @@ impl SignerRecoverable for OpTransactionSigned {
             OpTypedTransaction::Eip1559(tx) => tx.encode_for_signing(buf),
             OpTypedTransaction::Eip7702(tx) => tx.encode_for_signing(buf),
         };
-        recover_signer_unchecked(&self.signature, keccak256(buf))
+        recover_signer_unchecked(&self.signature, keccak256_cached(buf))
     }
 }
 
@@ -156,7 +156,7 @@ impl IsTyped2718 for OpTransactionSigned {
 
 impl SignedTransaction for OpTransactionSigned {
     fn recalculate_hash(&self) -> B256 {
-        keccak256(self.encoded_2718())
+        keccak256_cached(self.encoded_2718())
     }
 }
 

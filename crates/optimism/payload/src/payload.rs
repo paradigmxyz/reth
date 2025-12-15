@@ -6,7 +6,7 @@ use alloy_consensus::{Block, BlockHeader};
 use alloy_eips::{
     eip1559::BaseFeeParams, eip2718::Decodable2718, eip4895::Withdrawals, eip7685::Requests,
 };
-use alloy_primitives::{keccak256, Address, Bytes, B256, B64, U256};
+use alloy_primitives::{keccak256_cached, Address, Bytes, B256, B64, U256};
 use alloy_rlp::Encodable;
 use alloy_rpc_types_engine::{
     BlobsBundleV1, ExecutionPayloadEnvelopeV2, ExecutionPayloadFieldV2, ExecutionPayloadV1,
@@ -376,7 +376,7 @@ pub fn payload_id_optimism(
             for tx in txs {
                 // we have to just hash the bytes here because otherwise we would need to decode
                 // the transactions here which really isn't ideal
-                let tx_hash = keccak256(tx);
+                let tx_hash = keccak256_cached(tx);
                 // maybe we can try just taking the hash and not decoding
                 hasher.update(tx_hash)
             }

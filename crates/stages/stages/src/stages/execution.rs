@@ -668,7 +668,7 @@ where
 mod tests {
     use super::*;
     use crate::{stages::MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD, test_utils::TestStageDB};
-    use alloy_primitives::{address, hex_literal::hex, keccak256, Address, B256, U256};
+    use alloy_primitives::{address, hex_literal::hex, keccak256_cached, Address, B256, U256};
     use alloy_rlp::Decodable;
     use assert_matches::assert_matches;
     use reth_chainspec::ChainSpecBuilder;
@@ -884,7 +884,7 @@ mod tests {
         let acc2 = address!("0xa94f5374fce5edbc8e2a8697c15331677e6ebf0b");
         let code = hex!("5a465a905090036002900360015500");
         let balance = U256::from(0x3635c9adc5dea00000u128);
-        let code_hash = keccak256(code);
+        let code_hash = keccak256_cached(code);
         db_tx
             .put::<tables::PlainAccountState>(
                 acc1,
@@ -1021,7 +1021,7 @@ mod tests {
         // variables
         let code = hex!("5a465a905090036002900360015500");
         let balance = U256::from(0x3635c9adc5dea00000u128);
-        let code_hash = keccak256(code);
+        let code_hash = keccak256_cached(code);
         // pre state
         let provider = factory.provider_rw().unwrap();
 
@@ -1135,7 +1135,7 @@ mod tests {
 
         let code = hex!("73095e7baea6a6c7c4c2dfeb977efac326af552d8731ff00");
         let balance = U256::from(0x0de0b6b3a7640000u64);
-        let code_hash = keccak256(code);
+        let code_hash = keccak256_cached(code);
 
         // pre state
         let caller_info = Account { nonce: 0, balance, bytecode_hash: None };

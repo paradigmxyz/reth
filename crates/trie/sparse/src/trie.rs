@@ -11,7 +11,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_primitives::{
-    hex, keccak256,
+    hex, utils::keccak256_cached,
     map::{Entry, HashMap, HashSet},
     B256,
 };
@@ -928,7 +928,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         if let Some(root_hash) = rlp_node.as_hash() {
             root_hash
         } else {
-            keccak256(rlp_node)
+            keccak256_cached(rlp_node)
         }
     }
 
@@ -2298,7 +2298,7 @@ mod find_leaf_tests {
 
         let leaf_node_child5 = LeafNode::new(revealed_leaf_suffix, revealed_value.clone());
         let leaf_node_child5_rlp_buf = alloy_rlp::encode(&leaf_node_child5);
-        let hash_of_child5 = keccak256(&leaf_node_child5_rlp_buf);
+        let hash_of_child5 = keccak256_cached(&leaf_node_child5_rlp_buf);
         let rlp_node_child5 = RlpNode::word_rlp(&hash_of_child5);
 
         // 2. Construct the root BranchNode using the RLP of its children

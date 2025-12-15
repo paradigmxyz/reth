@@ -9,7 +9,7 @@ use alloy_eips::{
     eip7685::EMPTY_REQUESTS_HASH,
 };
 use alloy_evm::block::BlockValidationError;
-use alloy_primitives::{b256, fixed_bytes, keccak256, Bytes, TxKind, B256, U256};
+use alloy_primitives::{b256, fixed_bytes, utils::keccak256_cached, Bytes, TxKind, B256, U256};
 use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition, MAINNET};
 use reth_ethereum_primitives::{Block, BlockBody, Transaction};
 use reth_evm::{
@@ -35,7 +35,7 @@ fn create_database_with_beacon_root_contract() -> CacheDB<EmptyDB> {
 
     let beacon_root_contract_account = AccountInfo {
         balance: U256::ZERO,
-        code_hash: keccak256(BEACON_ROOTS_CODE.clone()),
+        code_hash: keccak256_cached(BEACON_ROOTS_CODE.clone()),
         nonce: 1,
         code: Some(Bytecode::new_raw(BEACON_ROOTS_CODE.clone())),
     };
@@ -51,7 +51,7 @@ fn create_database_with_withdrawal_requests_contract() -> CacheDB<EmptyDB> {
     let withdrawal_requests_contract_account = AccountInfo {
         nonce: 1,
         balance: U256::ZERO,
-        code_hash: keccak256(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
+        code_hash: keccak256_cached(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone()),
         code: Some(Bytecode::new_raw(WITHDRAWAL_REQUEST_PREDEPLOY_CODE.clone())),
     };
 
@@ -331,12 +331,14 @@ fn eip_4788_high_base_fee() {
 fn create_database_with_block_hashes(latest_block: u64) -> CacheDB<EmptyDB> {
     let mut db = CacheDB::new(Default::default());
     for block_number in 0..=latest_block {
-        db.cache.block_hashes.insert(U256::from(block_number), keccak256(block_number.to_string()));
+        db.cache
+            .block_hashes
+            .insert(U256::from(block_number), keccak256_cached(block_number.to_string()));
     }
 
     let blockhashes_contract_account = AccountInfo {
         balance: U256::ZERO,
-        code_hash: keccak256(HISTORY_STORAGE_CODE.clone()),
+        code_hash: keccak256_cached(HISTORY_STORAGE_CODE.clone()),
         code: Some(Bytecode::new_raw(HISTORY_STORAGE_CODE.clone())),
         nonce: 1,
     };

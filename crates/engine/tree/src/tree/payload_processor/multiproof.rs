@@ -2,8 +2,8 @@
 
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
-    keccak256,
     map::{B256Set, HashSet},
+    utils::keccak256_cached,
     B256,
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -182,7 +182,7 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
 
     for (address, account) in update {
         if account.is_touched() {
-            let hashed_address = keccak256(address);
+            let hashed_address = keccak256_cached(address);
             trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
@@ -193,7 +193,7 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
                 .storage
                 .into_iter()
                 .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .map(|(slot, value)| (keccak256_cached(B256::from(slot)), value.present_value))
                 .peekable();
 
             if destroyed {

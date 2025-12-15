@@ -1,6 +1,8 @@
 use super::ExecutedBlock;
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    utils::keccak256_cached, Address, BlockNumber, Bytes, StorageKey, StorageValue, B256,
+};
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
@@ -63,7 +65,8 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
 
     fn merged_hashed_storage(&self, address: Address, storage: HashedStorage) -> HashedStorage {
         let state = &self.trie_input().state;
-        let mut hashed = state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+        let mut hashed =
+            state.storages.get(&keccak256_cached(address)).cloned().unwrap_or_default();
         hashed.extend(&storage);
         hashed
     }

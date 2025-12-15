@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{utils::keccak256_cached, Address, BlockNumber, TxHash, TxNumber, B256};
 use reth_chainspec::MAINNET;
 use reth_db::{
     test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
@@ -369,7 +369,7 @@ impl TestStageDB {
     {
         self.commit(|tx| {
             accounts.into_iter().try_for_each(|(address, (account, storage))| {
-                let hashed_address = keccak256(address);
+                let hashed_address = keccak256_cached(address);
 
                 // Insert into account tables.
                 tx.put::<tables::PlainAccountState>(address, account)?;
@@ -377,7 +377,7 @@ impl TestStageDB {
 
                 // Insert into storage tables.
                 storage.into_iter().filter(|e| !e.value.is_zero()).try_for_each(|entry| {
-                    let hashed_entry = StorageEntry { key: keccak256(entry.key), ..entry };
+                    let hashed_entry = StorageEntry { key: keccak256_cached(entry.key), ..entry };
 
                     let mut cursor = tx.cursor_dup_write::<tables::PlainStorageState>()?;
                     if cursor

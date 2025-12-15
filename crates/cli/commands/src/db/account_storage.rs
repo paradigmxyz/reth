@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address};
+use alloy_primitives::{utils::keccak256_cached, Address};
 use clap::Parser;
 use human_bytes::human_bytes;
 use reth_codecs::Compact;
@@ -60,7 +60,7 @@ impl Command {
         let hashed_size_estimate = if slot_count > 0 { plain_size + 12 } else { 0 };
         let total_estimate = plain_size + hashed_size_estimate;
 
-        let hashed_address = keccak256(address);
+        let hashed_address = keccak256_cached(address);
 
         println!("Account: {address}");
         println!("Hashed address: {hashed_address}");

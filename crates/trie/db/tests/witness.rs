@@ -2,7 +2,7 @@
 
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{
-    keccak256,
+    keccak256_cached,
     map::{HashMap, HashSet},
     Address, Bytes, B256, U256,
 };
@@ -23,7 +23,7 @@ fn includes_empty_node_preimage() {
     let provider = factory.provider_rw().unwrap();
 
     let address = Address::random();
-    let hashed_address = keccak256(address);
+    let hashed_address = keccak256_cached(address);
     let hashed_slot = B256::random();
 
     // witness includes empty state trie root node
@@ -60,7 +60,7 @@ fn includes_empty_node_preimage() {
         .unwrap();
     assert!(witness.contains_key(&state_root));
     for node in multiproof.account_subtree.values() {
-        assert_eq!(witness.get(&keccak256(node)), Some(node));
+        assert_eq!(witness.get(&keccak256_cached(node)), Some(node));
     }
     // witness includes empty state trie root node
     assert_eq!(witness.get(&EMPTY_ROOT_HASH), Some(&Bytes::from([EMPTY_STRING_CODE])));
@@ -72,9 +72,9 @@ fn includes_nodes_for_destroyed_storage_nodes() {
     let provider = factory.provider_rw().unwrap();
 
     let address = Address::random();
-    let hashed_address = keccak256(address);
+    let hashed_address = keccak256_cached(address);
     let slot = B256::random();
-    let hashed_slot = keccak256(slot);
+    let hashed_slot = keccak256_cached(slot);
 
     // Insert account and slot into database
     provider.insert_account_for_hashing([(address, Some(Account::default()))]).unwrap();
@@ -103,10 +103,10 @@ fn includes_nodes_for_destroyed_storage_nodes() {
             .unwrap();
     assert!(witness.contains_key(&state_root));
     for node in multiproof.account_subtree.values() {
-        assert_eq!(witness.get(&keccak256(node)), Some(node));
+        assert_eq!(witness.get(&keccak256_cached(node)), Some(node));
     }
     for node in multiproof.storages.iter().flat_map(|(_, storage)| storage.subtree.values()) {
-        assert_eq!(witness.get(&keccak256(node)), Some(node));
+        assert_eq!(witness.get(&keccak256_cached(node)), Some(node));
     }
 }
 
@@ -116,7 +116,7 @@ fn correctly_decodes_branch_node_values() {
     let provider = factory.provider_rw().unwrap();
 
     let address = Address::random();
-    let hashed_address = keccak256(address);
+    let hashed_address = keccak256_cached(address);
     let hashed_slot1 = B256::with_last_byte(1);
     let hashed_slot2 = B256::with_last_byte(2);
 
@@ -154,9 +154,9 @@ fn correctly_decodes_branch_node_values() {
         .unwrap();
     assert!(witness.contains_key(&state_root));
     for node in multiproof.account_subtree.values() {
-        assert_eq!(witness.get(&keccak256(node)), Some(node));
+        assert_eq!(witness.get(&keccak256_cached(node)), Some(node));
     }
     for node in multiproof.storages.iter().flat_map(|(_, storage)| storage.subtree.values()) {
-        assert_eq!(witness.get(&keccak256(node)), Some(node));
+        assert_eq!(witness.get(&keccak256_cached(node)), Some(node));
     }
 }

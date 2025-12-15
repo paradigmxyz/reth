@@ -9,7 +9,9 @@ use crate::{
 };
 use alloy_consensus::{transaction::TransactionMeta, Header};
 use alloy_eips::{eip2718::Encodable2718, BlockHashOrNumber};
-use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
+use alloy_primitives::{
+    b256, utils::keccak256_cached, Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
+};
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
@@ -2218,7 +2220,7 @@ where
 {
     let (tx_id, tx) = entry;
     tx.encode_2718(rlp_buf);
-    Ok((keccak256(rlp_buf), tx_id))
+    Ok((keccak256_cached(rlp_buf), tx_id))
 }
 
 #[cfg(test)]

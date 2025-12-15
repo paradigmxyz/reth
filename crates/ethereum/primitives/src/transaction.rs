@@ -13,7 +13,7 @@ use alloy_eips::{
     eip7702::SignedAuthorization,
 };
 use alloy_primitives::{
-    bytes::BufMut, keccak256, Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256,
+    bytes::BufMut, utils::keccak256_cached, Address, Bytes, ChainId, Signature, TxHash, TxKind, B256, U256,
 };
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::{Hash, Hasher};
@@ -320,7 +320,7 @@ pub struct TransactionSigned {
 
 impl TransactionSigned {
     fn recalculate_hash(&self) -> B256 {
-        keccak256(self.encoded_2718())
+        keccak256_cached(self.encoded_2718())
     }
 }
 
@@ -653,7 +653,7 @@ impl SignerRecoverable for TransactionSigned {
 
     fn recover_unchecked_with_buf(&self, buf: &mut Vec<u8>) -> Result<Address, RecoveryError> {
         self.encode_for_signing(buf);
-        let signature_hash = keccak256(buf);
+        let signature_hash = keccak256_cached(buf);
         recover_signer_unchecked(&self.signature, signature_hash)
     }
 }

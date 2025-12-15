@@ -50,7 +50,7 @@ mod tests {
     use crate::test_utils::{StorageKind, TestStageDB};
     use alloy_consensus::{SignableTransaction, TxLegacy};
     use alloy_primitives::{
-        address, hex_literal::hex, keccak256, BlockNumber, Signature, B256, U256,
+        address, hex_literal::hex, keccak256_cached, BlockNumber, Signature, B256, U256,
     };
     use alloy_rlp::Decodable;
     use reth_chainspec::ChainSpecBuilder;
@@ -122,7 +122,7 @@ mod tests {
         // insert pre state
         let provider_rw = test_db.factory.provider_rw().unwrap();
         let code = hex!("5a465a905090036002900360015500");
-        let code_hash = keccak256(hex!("5a465a905090036002900360015500"));
+        let code_hash = keccak256_cached(hex!("5a465a905090036002900360015500"));
         provider_rw
             .tx_ref()
             .put::<tables::PlainAccountState>(

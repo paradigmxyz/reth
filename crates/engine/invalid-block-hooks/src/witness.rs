@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{utils::keccak256_cached, Address, Bytes, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
@@ -124,12 +124,12 @@ fn collect_execution_data(
     // Collect codes
     db.cache.contracts.values().chain(bundle_state.contracts.values()).for_each(|code| {
         let code_bytes = code.original_bytes();
-        codes.insert(keccak256(&code_bytes), code_bytes);
+        codes.insert(keccak256_cached(&code_bytes), code_bytes);
     });
 
     // Collect preimages
     for (address, account) in db.cache.accounts {
-        let hashed_address = keccak256(address);
+        let hashed_address = keccak256_cached(address);
         hashed_state
             .accounts
             .insert(hashed_address, account.account.as_ref().map(|a| a.info.clone().into()));
@@ -143,7 +143,7 @@ fn collect_execution_data(
 
             for (slot, value) in account_data.storage {
                 let slot_bytes = B256::from(slot);
-                let hashed_slot = keccak256(slot_bytes);
+                let hashed_slot = keccak256_cached(slot_bytes);
                 storage.storage.insert(hashed_slot, value);
                 preimages.insert(hashed_slot, alloy_rlp::encode(slot_bytes).into());
             }

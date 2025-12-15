@@ -9,7 +9,7 @@ use alloy_eips::{
 };
 use alloy_primitives::{
     bytes::{Buf, BytesMut},
-    keccak256, Signature, TxHash, B256, U256,
+    keccak256_cached, Signature, TxHash, B256, U256,
 };
 use alloy_rlp::{Decodable, Error as RlpError, RlpDecodable};
 use derive_more::{AsRef, Deref};
@@ -96,7 +96,7 @@ impl OvmTransactionSigned {
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
     pub fn recalculate_hash(&self) -> B256 {
-        keccak256(self.encoded_2718())
+        keccak256_cached(self.encoded_2718())
     }
 
     /// Create a new signed transaction from a transaction and its signature.
@@ -146,7 +146,7 @@ impl OvmTransactionSigned {
         let s: U256 = Decodable::decode(data)?;
 
         let tx_length = header.payload_length + header.length();
-        let hash = keccak256(&original_encoding[..tx_length]);
+        let hash = keccak256_cached(&original_encoding[..tx_length]);
 
         // Handle both pre-bedrock and regular cases
         let (signature, chain_id) = if v == 0 && r.is_zero() && s.is_zero() {

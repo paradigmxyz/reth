@@ -445,7 +445,7 @@ mod tests {
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
     };
-    use alloy_primitives::{keccak256, U256};
+    use alloy_primitives::{keccak256_cached, U256};
     use assert_matches::assert_matches;
     use reth_db_api::cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO};
     use reth_primitives_traits::{SealedBlock, StorageEntry};
@@ -781,9 +781,9 @@ mod tests {
                             break
                         }
 
-                        tree.entry(keccak256(bn_address.address()))
+                        tree.entry(keccak256_cached(bn_address.address()))
                             .or_default()
-                            .insert(keccak256(entry.key), entry.value);
+                            .insert(keccak256_cached(entry.key), entry.value);
                     }
                     for (hashed_address, storage) in tree {
                         for (hashed_slot, value) in storage {
@@ -814,13 +814,13 @@ mod tests {
 
                         if let Some(acc) = account_before_tx.info {
                             tx.put::<tables::HashedAccounts>(
-                                keccak256(account_before_tx.address),
+                                keccak256_cached(account_before_tx.address),
                                 acc,
                             )
                             .unwrap();
                         } else {
                             tx.delete::<tables::HashedAccounts>(
-                                keccak256(account_before_tx.address),
+                                keccak256_cached(account_before_tx.address),
                                 None,
                             )
                             .unwrap();

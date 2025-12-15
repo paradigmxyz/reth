@@ -10,7 +10,7 @@ use crate::{
     HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_primitives::{
-    keccak256,
+    utils::keccak256_cached,
     map::{B256Map, B256Set, HashMap, HashSet},
     Address, B256,
 };
@@ -108,8 +108,8 @@ where
     ) -> Result<AccountProof, StateProofError> {
         Ok(self
             .multiproof(MultiProofTargets::from_iter([(
-                keccak256(address),
-                slots.iter().map(keccak256).collect(),
+                keccak256_cached(address),
+                slots.iter().map(keccak256_cached).collect(),
             )]))?
             .account_proof(address, slots)?)
     }
@@ -221,7 +221,7 @@ pub struct StorageProof<'a, T, H, K = AddedRemovedKeys> {
 impl<T, H> StorageProof<'static, T, H> {
     /// Create a new [`StorageProof`] instance.
     pub fn new(t: T, h: H, address: Address) -> Self {
-        Self::new_hashed(t, h, keccak256(address))
+        Self::new_hashed(t, h, keccak256_cached(address))
     }
 
     /// Create a new [`StorageProof`] instance with hashed address.
@@ -337,7 +337,7 @@ where
         self,
         slot: B256,
     ) -> Result<reth_trie_common::StorageProof, StateProofError> {
-        let targets = HashSet::from_iter([keccak256(slot)]);
+        let targets = HashSet::from_iter([keccak256_cached(slot)]);
         Ok(self.storage_multiproof(targets)?.storage_proof(slot)?)
     }
 

@@ -12,7 +12,7 @@ use alloc::{
     vec::Vec,
 };
 use alloy_consensus::{BlockHeader, Header};
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{utils::keccak256_cached, B256};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_consensus::{Consensus, HeaderValidator};
 use reth_errors::ConsensusError;
@@ -185,7 +185,7 @@ where
         .headers
         .iter()
         .map(|bytes| {
-            let hash = keccak256(bytes);
+            let hash = keccak256_cached(bytes);
             alloy_rlp::decode_exact::<Header>(bytes)
                 .map(|h| SealedHeader::new(h, hash))
                 .map_err(|_| StatelessValidationError::HeaderDeserializationFailed)

@@ -15,7 +15,7 @@ const L1_BLOCK_ECOTONE_SELECTOR: [u8; 4] = hex!("440a5e20");
 const L1_BLOCK_ISTHMUS_SELECTOR: [u8; 4] = hex!("098999be");
 
 /// The function selector of the "setL1BlockValuesJovian" function in the `L1Block` contract.
-/// This is the first 4 bytes of `keccak256("setL1BlockValuesJovian()")`.
+/// This is the first 4 bytes of `keccak256_cached("setL1BlockValuesJovian()")`.
 const L1_BLOCK_JOVIAN_SELECTOR: [u8; 4] = hex!("3db6be2b");
 
 /// Extracts the [`L1BlockInfo`] from the L2 block. The L1 info transaction is always the first
@@ -354,7 +354,7 @@ mod tests {
     use super::*;
     use alloy_consensus::{Block, BlockBody};
     use alloy_eips::eip2718::Decodable2718;
-    use alloy_primitives::keccak256;
+    use alloy_primitives::keccak256_cached;
     use reth_optimism_chainspec::OP_MAINNET;
     use reth_optimism_forks::OpHardforks;
     use reth_optimism_primitives::OpTransactionSigned;
@@ -383,7 +383,7 @@ mod tests {
 
     #[test]
     fn test_verify_set_jovian() {
-        let hash = &keccak256("setL1BlockValuesJovian()")[..4];
+        let hash = &keccak256_cached("setL1BlockValuesJovian()")[..4];
         assert_eq!(hash, L1_BLOCK_JOVIAN_SELECTOR)
     }
 

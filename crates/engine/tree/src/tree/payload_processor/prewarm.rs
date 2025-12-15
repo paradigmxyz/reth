@@ -23,7 +23,7 @@ use crate::tree::{
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eips::Typed2718;
 use alloy_evm::Database;
-use alloy_primitives::{keccak256, map::B256Set, B256};
+use alloy_primitives::{map::B256Set, utils::keccak256_cached, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
@@ -571,11 +571,11 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) 
                 continue
             }
 
-            storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
+            storage_set.insert(keccak256_cached(B256::new(key.to_be_bytes())));
         }
 
         storage_targets += storage_set.len();
-        targets.insert(keccak256(addr), storage_set);
+        targets.insert(keccak256_cached(addr), storage_set);
     }
 
     (targets, storage_targets)

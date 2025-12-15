@@ -361,7 +361,8 @@ pub trait EthApi<
     #[method(name = "sendRawTransactionSync")]
     async fn send_raw_transaction_sync(&self, bytes: Bytes) -> RpcResult<R>;
 
-    /// Returns an Ethereum specific signature with: sign(keccak256("\x19Ethereum Signed Message:\n"
+    /// Returns an Ethereum specific signature with: sign(keccak256_cached("\x19Ethereum Signed
+    /// Message:\n"
     /// + len(message) + message))).
     #[method(name = "sign")]
     async fn sign(&self, address: Address, message: Bytes) -> RpcResult<Bytes>;

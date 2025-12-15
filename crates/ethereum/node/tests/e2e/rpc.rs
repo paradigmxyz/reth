@@ -32,7 +32,7 @@ alloy_sol_types::sol! {
     contract GasWaster {
         constructor(uint256 iterations) {
             for (uint256 i = 0; i < iterations; i++) {
-                bytes32 slot = keccak256(abi.encode(block.number, i));
+                bytes32 slot = keccak256_cached(abi.encode(block.number, i));
                 assembly {
                     sstore(slot, slot)
                 }

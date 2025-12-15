@@ -130,7 +130,7 @@ mod test {
     use alloc::sync::Arc;
     use alloy_chains::Chain;
     use alloy_consensus::Header;
-    use alloy_primitives::{keccak256, B256, U256};
+    use alloy_primitives::{keccak256_cached, B256, U256};
     use core::str::FromStr;
     use reth_db_common::init::init_genesis;
     use reth_optimism_chainspec::OpChainSpecBuilder;
@@ -146,7 +146,7 @@ mod test {
 
     #[test]
     fn l2tol1_message_passer_no_withdrawals() {
-        let hashed_address = keccak256(L2_TO_L1_MESSAGE_PASSER_ADDRESS);
+        let hashed_address = keccak256_cached(L2_TO_L1_MESSAGE_PASSER_ADDRESS);
 
         // create account storage
         let init_storage = HashedStorage::from_iter(

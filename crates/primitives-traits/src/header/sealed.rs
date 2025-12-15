@@ -2,7 +2,7 @@ use crate::{sync::OnceLock, InMemorySize, NodePrimitives};
 pub use alloy_consensus::Header;
 use alloy_consensus::Sealed;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
-use alloy_primitives::{keccak256, BlockHash, Sealable};
+use alloy_primitives::{utils::keccak256_cached, BlockHash, Sealable};
 use alloy_rlp::{Decodable, Encodable};
 use bytes::BufMut;
 use core::mem;
@@ -173,7 +173,7 @@ impl Decodable for SealedHeader {
 
         // hash the consumed bytes, the rlp encoded header
         let consumed = started_len - b.len();
-        let hash = keccak256(&buf[..consumed]);
+        let hash = keccak256_cached(&buf[..consumed]);
 
         // update original buffer
         *buf = *b;

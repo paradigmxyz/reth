@@ -4,8 +4,8 @@ use crate::{Nibbles, TrieAccount};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
-    keccak256,
     map::{hash_map, B256Map, B256Set, HashMap},
+    utils::keccak256_cached,
     Address, Bytes, B256, U256,
 };
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
@@ -221,7 +221,7 @@ impl MultiProof {
         address: Address,
         slots: &[B256],
     ) -> Result<AccountProof, alloy_rlp::Error> {
-        let hashed_address = keccak256(address);
+        let hashed_address = keccak256_cached(address);
         let nibbles = Nibbles::unpack(hashed_address);
 
         // Retrieve the account proof.
@@ -350,7 +350,7 @@ impl DecodedMultiProof {
         address: Address,
         slots: &[B256],
     ) -> Result<DecodedAccountProof, alloy_rlp::Error> {
-        let hashed_address = keccak256(address);
+        let hashed_address = keccak256_cached(address);
         let nibbles = Nibbles::unpack(hashed_address);
 
         // Retrieve the account proof.
@@ -475,7 +475,7 @@ impl StorageMultiProof {
 
     /// Return storage proofs for the target storage slot (unhashed).
     pub fn storage_proof(&self, slot: B256) -> Result<StorageProof, alloy_rlp::Error> {
-        let nibbles = Nibbles::unpack(keccak256(slot));
+        let nibbles = Nibbles::unpack(keccak256_cached(slot));
 
         // Retrieve the storage proof.
         let proof = self
@@ -527,7 +527,7 @@ impl DecodedStorageMultiProof {
 
     /// Return storage proofs for the target storage slot (unhashed).
     pub fn storage_proof(&self, slot: B256) -> Result<DecodedStorageProof, alloy_rlp::Error> {
-        let nibbles = Nibbles::unpack(keccak256(slot));
+        let nibbles = Nibbles::unpack(keccak256_cached(slot));
 
         // Retrieve the storage proof.
         let proof = self
@@ -684,7 +684,7 @@ impl AccountProof {
                 self.info.unwrap_or_default().into_trie_account(self.storage_root),
             ))
         };
-        let nibbles = Nibbles::unpack(keccak256(self.address));
+        let nibbles = Nibbles::unpack(keccak256_cached(self.address));
         verify_proof(root, nibbles, expected, &self.proof)
     }
 }
@@ -742,7 +742,7 @@ pub struct StorageProof {
 impl StorageProof {
     /// Create new storage proof from the storage slot.
     pub fn new(key: B256) -> Self {
-        let nibbles = Nibbles::unpack(keccak256(key));
+        let nibbles = Nibbles::unpack(keccak256_cached(key));
         Self { key, nibbles, ..Default::default() }
     }
 
@@ -817,7 +817,7 @@ pub struct DecodedStorageProof {
 impl DecodedStorageProof {
     /// Create new storage proof from the storage slot.
     pub fn new(key: B256) -> Self {
-        let nibbles = Nibbles::unpack(keccak256(key));
+        let nibbles = Nibbles::unpack(keccak256_cached(key));
         Self { key, nibbles, ..Default::default() }
     }
 
@@ -842,7 +842,7 @@ impl DecodedStorageProof {
 /// for compatibility with `triehash` crate.
 #[cfg(any(test, feature = "test-utils"))]
 pub mod triehash {
-    use alloy_primitives::{keccak256, B256};
+    use alloy_primitives::{utils::keccak256_cached, B256};
     use alloy_rlp::RlpEncodable;
     use hash_db::Hasher;
     use plain_hasher::PlainHasher;
@@ -860,7 +860,7 @@ pub mod triehash {
         const LENGTH: usize = 32;
 
         fn hash(x: &[u8]) -> Self::Out {
-            keccak256(x)
+            keccak256_cached(x)
         }
     }
 }

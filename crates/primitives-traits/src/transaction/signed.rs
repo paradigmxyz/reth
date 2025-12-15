@@ -7,7 +7,7 @@ use alloy_consensus::{
     EthereumTxEnvelope, SignableTransaction,
 };
 use alloy_eips::eip2718::{Decodable2718, Encodable2718, IsTyped2718};
-use alloy_primitives::{keccak256, Address, Signature, B256};
+use alloy_primitives::{utils::keccak256_cached, Address, Signature, B256};
 use alloy_rlp::{Decodable, Encodable};
 use core::hash::Hash;
 
@@ -76,7 +76,7 @@ pub trait SignedTransaction:
     /// Calculate transaction hash, eip2728 transaction does not contain rlp header and start with
     /// tx type.
     fn recalculate_hash(&self) -> B256 {
-        keccak256(self.encoded_2718())
+        keccak256_cached(self.encoded_2718())
     }
 
     /// Tries to recover signer and return [`Recovered`] by cloning the type.

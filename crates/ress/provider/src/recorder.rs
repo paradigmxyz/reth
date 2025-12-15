@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, Address, B256, U256};
+use alloy_primitives::{utils::keccak256_cached, Address, B256, U256};
 use reth_revm::{
     state::{AccountInfo, Bytecode},
     Database,
@@ -29,15 +29,15 @@ impl<D: Database> Database for StateWitnessRecorderDatabase<D> {
 
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let maybe_account = self.database.basic(address)?;
-        let hashed_address = keccak256(address);
+        let hashed_address = keccak256_cached(address);
         self.state.accounts.insert(hashed_address, maybe_account.as_ref().map(|acc| acc.into()));
         Ok(maybe_account)
     }
 
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
         let value = self.database.storage(address, index)?;
-        let hashed_address = keccak256(address);
-        let hashed_slot = keccak256(B256::from(index));
+        let hashed_address = keccak256_cached(address);
+        let hashed_slot = keccak256_cached(B256::from(index));
         self.state
             .storages
             .entry(hashed_address)

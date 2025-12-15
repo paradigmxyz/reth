@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{utils::keccak256_cached, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
@@ -175,7 +175,7 @@ where
                 rayon::spawn(move || {
                     for (address, account) in chunk {
                         let address = address.key().unwrap();
-                        let _ = tx.send((RawKey::new(keccak256(address)), account));
+                        let _ = tx.send((RawKey::new(keccak256_cached(address)), account));
                     }
                 });
 
@@ -382,7 +382,7 @@ mod tests {
                     let mut hashed_acc_cursor = tx.cursor_read::<tables::HashedAccounts>()?;
 
                     while let Some((address, account)) = acc_cursor.next()? {
-                        let hashed_addr = keccak256(address);
+                        let hashed_addr = keccak256_cached(address);
                         if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {
                             assert_eq!(acc, account)
                         }
@@ -407,7 +407,7 @@ mod tests {
                             balance: balance - U256::from(1),
                             bytecode_hash: None,
                         };
-                        let hashed_addr = keccak256(address);
+                        let hashed_addr = keccak256_cached(address);
                         if let Some((_, acc)) = hashed_acc_cursor.seek_exact(hashed_addr)? {
                             assert_eq!(acc, old_acc)
                         }

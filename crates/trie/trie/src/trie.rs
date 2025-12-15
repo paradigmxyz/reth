@@ -13,7 +13,7 @@ use crate::{
     HashBuilder, Nibbles, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use alloy_consensus::EMPTY_ROOT_HASH;
-use alloy_primitives::{keccak256, Address, B256};
+use alloy_primitives::{utils::keccak256_cached, Address, B256};
 use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
@@ -486,7 +486,7 @@ impl<T, H> StorageRoot<T, H> {
         Self::new_hashed(
             trie_cursor_factory,
             hashed_cursor_factory,
-            keccak256(address),
+            keccak256_cached(address),
             prefix_set,
             #[cfg(feature = "metrics")]
             metrics,

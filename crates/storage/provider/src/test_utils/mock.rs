@@ -12,8 +12,8 @@ use alloy_consensus::{
 };
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{
-    keccak256, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey, StorageValue,
-    TxHash, TxNumber, B256, U256,
+    utils::keccak256_cached, map::HashMap, Address, BlockHash, BlockNumber, Bytes, StorageKey,
+    StorageValue, TxHash, TxNumber, B256, U256,
 };
 use parking_lot::Mutex;
 use reth_chain_state::{CanonStateNotifications, CanonStateSubscriptions};
@@ -217,7 +217,7 @@ impl ExtendedAccount {
 
     /// Set bytecode and bytecode hash on the extended account
     pub fn with_bytecode(mut self, bytecode: Bytes) -> Self {
-        let hash = keccak256(&bytecode);
+        let hash = keccak256_cached(&bytecode);
         self.account.bytecode_hash = Some(hash);
         self.bytecode = Some(Bytecode::new_raw(bytecode));
         self

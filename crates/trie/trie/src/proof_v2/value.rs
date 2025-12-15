@@ -131,7 +131,7 @@ where
                     nodes.first().expect("storage_proof always returns at least the root");
                 root_node.node.encode(buf);
 
-                let storage_root = alloy_primitives::keccak256(buf.as_slice());
+                let storage_root = alloy_primitives::utils::keccak256_cached(buf.as_slice());
 
                 // Clear the buffer so we can re-use it to encode the TrieAccount
                 buf.clear();

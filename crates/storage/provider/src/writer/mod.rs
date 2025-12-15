@@ -3,7 +3,7 @@ mod tests {
     use crate::{
         test_utils::create_test_provider_factory, AccountReader, StorageTrieWriter, TrieWriter,
     };
-    use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
+    use alloy_primitives::{keccak256_cached, map::HashMap, Address, B256, U256};
     use reth_db_api::{
         cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
         models::{AccountBeforeTx, BlockNumberAddress},
@@ -37,9 +37,9 @@ mod tests {
 
         let addresses = (0..10).map(|_| Address::random()).collect::<Vec<_>>();
         let destroyed_address = *addresses.first().unwrap();
-        let destroyed_address_hashed = keccak256(destroyed_address);
+        let destroyed_address_hashed = keccak256_cached(destroyed_address);
         let slot = B256::with_last_byte(1);
-        let hashed_slot = keccak256(slot);
+        let hashed_slot = keccak256_cached(slot);
         {
             let provider_rw = provider_factory.provider_rw().unwrap();
             let mut accounts_cursor =
@@ -48,7 +48,7 @@ mod tests {
                 provider_rw.tx_ref().cursor_write::<tables::HashedStorages>().unwrap();
 
             for address in addresses {
-                let hashed_address = keccak256(address);
+                let hashed_address = keccak256_cached(address);
                 accounts_cursor
                     .insert(hashed_address, &Account { nonce: 1, ..Default::default() })
                     .unwrap();
@@ -897,12 +897,12 @@ mod tests {
         // insert initial state to the database
         let tx = provider_rw.tx_ref();
         for (address, (account, storage)) in &prestate {
-            let hashed_address = keccak256(address);
+            let hashed_address = keccak256_cached(address);
             tx.put::<tables::HashedAccounts>(hashed_address, *account).unwrap();
             for (slot, value) in storage {
                 tx.put::<tables::HashedStorages>(
                     hashed_address,
-                    StorageEntry { key: keccak256(slot), value: *value },
+                    StorageEntry { key: keccak256_cached(slot), value: *value },
                 )
                 .unwrap();
             }
@@ -1095,7 +1095,7 @@ mod tests {
     #[test]
     fn hashed_state_storage_root() {
         let address = Address::random();
-        let hashed_address = keccak256(address);
+        let hashed_address = keccak256_cached(address);
         let provider_factory = create_test_provider_factory();
         let provider_rw = provider_factory.provider_rw().unwrap();
         let tx = provider_rw.tx_ref();

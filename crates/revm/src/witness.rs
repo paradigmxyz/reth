@@ -1,5 +1,5 @@
 use alloc::vec::Vec;
-use alloy_primitives::{keccak256, Bytes, B256};
+use alloy_primitives::{utils::keccak256_cached, Bytes, B256};
 use reth_trie::{HashedPostState, HashedStorage};
 use revm::database::State;
 
@@ -47,7 +47,7 @@ impl ExecutionWitnessRecord {
             .collect();
 
         for (address, account) in &statedb.cache.accounts {
-            let hashed_address = keccak256(address);
+            let hashed_address = keccak256_cached(address);
             self.hashed_state
                 .accounts
                 .insert(hashed_address, account.account.as_ref().map(|a| (&a.info).into()));
@@ -63,7 +63,7 @@ impl ExecutionWitnessRecord {
 
                 for (slot, value) in &account.storage {
                     let slot = B256::from(*slot);
-                    let hashed_slot = keccak256(slot);
+                    let hashed_slot = keccak256_cached(slot);
                     storage.storage.insert(hashed_slot, *value);
 
                     self.keys.push(slot.into());

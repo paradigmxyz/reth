@@ -10,7 +10,7 @@ use reth_trie_common::HashedPostState;
 use reth_trie_sparse::SparseTrieInterface;
 
 use alloy_primitives::{
-    keccak256,
+    utils::keccak256_cached,
     map::{B256Map, B256Set, Entry, HashMap},
     Bytes, B256,
 };
@@ -126,7 +126,7 @@ where
             let (root_hash, root_node) = if let Some(root_node) =
                 multiproof.account_subtree.into_inner().remove(&Nibbles::default())
             {
-                (keccak256(&root_node), root_node)
+                (keccak256_cached(&root_node), root_node)
             } else {
                 (EMPTY_ROOT_HASH, Bytes::from([EMPTY_STRING_CODE]))
             };
@@ -135,12 +135,16 @@ where
 
         // Record all nodes from multiproof in the witness
         for account_node in multiproof.account_subtree.values() {
-            if let Entry::Vacant(entry) = self.witness.entry(keccak256(account_node.as_ref())) {
+            if let Entry::Vacant(entry) =
+                self.witness.entry(keccak256_cached(account_node.as_ref()))
+            {
                 entry.insert(account_node.clone());
             }
         }
         for storage_node in multiproof.storages.values().flat_map(|s| s.subtree.values()) {
-            if let Entry::Vacant(entry) = self.witness.entry(keccak256(storage_node.as_ref())) {
+            if let Entry::Vacant(entry) =
+                self.witness.entry(keccak256_cached(storage_node.as_ref()))
+            {
                 entry.insert(storage_node.clone());
             }
         }
@@ -199,7 +203,7 @@ where
             }
 
             while let Ok(node) = rx.try_recv() {
-                self.witness.insert(keccak256(&node), node);
+                self.witness.insert(keccak256_cached(&node), node);
             }
         }
 

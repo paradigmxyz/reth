@@ -2,7 +2,7 @@
 
 use alloy_consensus::BlockHeader;
 use alloy_genesis::GenesisAccount;
-use alloy_primitives::{keccak256, map::HashMap, Address, B256, U256};
+use alloy_primitives::{map::HashMap, utils::keccak256_cached, Address, B256, U256};
 use reth_chainspec::EthChainSpec;
 use reth_codecs::Compact;
 use reth_config::config::EtlConfig;
@@ -563,13 +563,13 @@ where
         let (account, _) = GenesisAccount::from_compact(account.as_slice(), account.len());
 
         // Add to prefix sets
-        let hashed_address = keccak256(address);
+        let hashed_address = keccak256_cached(address);
         prefix_sets.account_prefix_set.insert(Nibbles::unpack(hashed_address));
 
         // Add storage keys to prefix sets if storage exists
         if let Some(ref storage) = account.storage {
             for key in storage.keys() {
-                let hashed_key = keccak256(key);
+                let hashed_key = keccak256_cached(key);
                 prefix_sets
                     .storage_prefix_sets
                     .entry(hashed_address)

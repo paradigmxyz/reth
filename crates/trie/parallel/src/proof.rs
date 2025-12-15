@@ -253,7 +253,7 @@ mod tests {
     use super::*;
     use crate::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use alloy_primitives::{
-        keccak256,
+        keccak256_cached,
         map::{B256Set, DefaultHashBuilder, HashMap},
         Address, U256,
     };
@@ -310,7 +310,7 @@ mod tests {
 
         let mut targets = MultiProofTargets::default();
         for (address, (_, storage)) in state.iter().take(10) {
-            let hashed_address = keccak256(*address);
+            let hashed_address = keccak256_cached(*address);
             let mut target_slots = B256Set::default();
 
             for (slot, _) in storage.iter().take(5) {

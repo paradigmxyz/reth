@@ -2,7 +2,7 @@
 
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{
-    address, b256, hex_literal::hex, keccak256, map::HashMap, Address, B256, U256,
+    address, b256, hex_literal::hex, keccak256_cached, map::HashMap, Address, B256, U256,
 };
 use alloy_rlp::Encodable;
 use proptest::{prelude::ProptestConfig, proptest};
@@ -34,7 +34,7 @@ fn insert_account(
     account: Account,
     storage: &BTreeMap<B256, U256>,
 ) {
-    let hashed_address = keccak256(address);
+    let hashed_address = keccak256_cached(address);
     tx.put::<tables::HashedAccounts>(hashed_address, account).unwrap();
     insert_storage(tx, hashed_address, storage);
 }
@@ -43,7 +43,7 @@ fn insert_storage(tx: &impl DbTxMut, hashed_address: B256, storage: &BTreeMap<B2
     for (k, v) in storage {
         tx.put::<tables::HashedStorages>(
             hashed_address,
-            StorageEntry { key: keccak256(k), value: *v },
+            StorageEntry { key: keccak256_cached(k), value: *v },
         )
         .unwrap();
     }
@@ -117,13 +117,13 @@ fn arbitrary_storage_root() {
     proptest!(ProptestConfig::with_cases(10), |(item in arb::<(Address, std::collections::BTreeMap<B256, U256>)>())| {
         let (address, storage) = item;
 
-        let hashed_address = keccak256(address);
+        let hashed_address = keccak256_cached(address);
         let factory = create_test_provider_factory();
         let tx = factory.provider_rw().unwrap();
         for (key, value) in &storage {
             tx.tx_ref().put::<tables::HashedStorages>(
                 hashed_address,
-                StorageEntry { key: keccak256(key), value: *value },
+                StorageEntry { key: keccak256_cached(key), value: *value },
             )
             .unwrap();
         }
@@ -160,7 +160,7 @@ fn test_empty_account() {
                 Account {
                     nonce: 155,
                     balance: U256::from(414241124u32),
-                    bytecode_hash: Some(keccak256("test")),
+                    bytecode_hash: Some(keccak256_cached("test")),
                 },
                 BTreeMap::from([
                     (B256::ZERO, U256::from(3)),
@@ -183,7 +183,7 @@ fn test_empty_storage_root() {
     let account = Account {
         nonce: 155,
         balance: U256::from(414241124u32),
-        bytecode_hash: Some(keccak256(code)),
+        bytecode_hash: Some(keccak256_cached(code)),
     };
     insert_account(tx.tx_ref(), address, account, &Default::default());
     tx.commit().unwrap();
@@ -207,7 +207,7 @@ fn test_storage_root() {
     let account = Account {
         nonce: 155,
         balance: U256::from(414241124u32),
-        bytecode_hash: Some(keccak256(code)),
+        bytecode_hash: Some(keccak256_cached(code)),
     };
 
     insert_account(tx.tx_ref(), address, account, &storage);
@@ -302,7 +302,7 @@ fn storage_root_regression() {
     let tx = factory.provider_rw().unwrap();
     // Some address whose hash starts with 0xB041
     let address3 = address!("0x16b07afd1c635f77172e842a000ead9a2a222459");
-    let key3 = keccak256(address3);
+    let key3 = keccak256_cached(address3);
     assert_eq!(key3[0], 0xB0);
     assert_eq!(key3[1], 0x41);
 
@@ -359,7 +359,7 @@ fn account_and_storage_trie() {
 
     // Some address whose hash starts with 0xB040
     let address2 = address!("0x7db3e81b72d2695e19764583f6d219dbee0f35ca");
-    let key2 = keccak256(address2);
+    let key2 = keccak256_cached(address2);
     assert_eq!(key2[0], 0xB0);
     assert_eq!(key2[1], 0x40);
     let account2 = Account { nonce: 0, balance: ether, ..Default::default() };
@@ -368,7 +368,7 @@ fn account_and_storage_trie() {
 
     // Some address whose hash starts with 0xB041
     let address3 = address!("0x16b07afd1c635f77172e842a000ead9a2a222459");
-    let key3 = keccak256(address3);
+    let key3 = keccak256_cached(address3);
     assert_eq!(key3[0], 0xB0);
     assert_eq!(key3[1], 0x41);
     let code_hash = b256!("0x5be74cad16203c4905c068b012a2e9fb6d19d036c410f16fd177f337541440dd");
@@ -451,7 +451,7 @@ fn account_and_storage_trie() {
     // Add an account
     // Some address whose hash starts with 0xB1
     let address4b = address!("0x4f61f2d5ebd991b85aa1677db97307caf5215c91");
-    let key4b = keccak256(address4b);
+    let key4b = keccak256_cached(address4b);
     assert_eq!(key4b.0[0], key4a.0[0]);
     let account4b = Account { nonce: 0, balance: U256::from(5).mul(ether), bytecode_hash: None };
     hashed_account_cursor.upsert(key4b, &account4b).unwrap();

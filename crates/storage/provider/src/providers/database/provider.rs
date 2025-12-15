@@ -27,7 +27,7 @@ use alloy_consensus::{
 };
 use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
-    keccak256,
+    utils::keccak256_cached,
     map::{hash_map, B256Map, HashMap, HashSet},
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
@@ -2489,7 +2489,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         // changes are applied in the correct order.
         let hashed_accounts = changesets
             .into_iter()
-            .map(|(_, e)| (keccak256(e.address), e.info))
+            .map(|(_, e)| (keccak256_cached(e.address), e.info))
             .collect::<Vec<_>>()
             .into_iter()
             .rev()
@@ -2525,8 +2525,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         changesets: impl IntoIterator<Item = (Address, Option<Account>)>,
     ) -> ProviderResult<BTreeMap<B256, Option<Account>>> {
         let mut hashed_accounts_cursor = self.tx.cursor_write::<tables::HashedAccounts>()?;
-        let hashed_accounts =
-            changesets.into_iter().map(|(ad, ac)| (keccak256(ad), ac)).collect::<BTreeMap<_, _>>();
+        let hashed_accounts = changesets
+            .into_iter()
+            .map(|(ad, ac)| (keccak256_cached(ad), ac))
+            .collect::<BTreeMap<_, _>>();
         for (hashed_address, account) in &hashed_accounts {
             if let Some(account) = account {
                 hashed_accounts_cursor.upsert(*hashed_address, account)?;
@@ -2545,7 +2547,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         let mut hashed_storages = changesets
             .into_iter()
             .map(|(BlockNumberAddress((_, address)), storage_entry)| {
-                (keccak256(address), keccak256(storage_entry.key), storage_entry.value)
+                (
+                    keccak256_cached(address),
+                    keccak256_cached(storage_entry.key),
+                    storage_entry.value,
+                )
             })
             .collect::<Vec<_>>();
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
@@ -2592,10 +2598,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         let hashed_storages =
             storages.into_iter().fold(BTreeMap::new(), |mut map, (address, storage)| {
                 let storage = storage.into_iter().fold(BTreeMap::new(), |mut map, entry| {
-                    map.insert(keccak256(entry.key), entry.value);
+                    map.insert(keccak256_cached(entry.key), entry.value);
                     map
                 });
-                map.insert(keccak256(address), storage);
+                map.insert(keccak256_cached(address), storage);
                 map
             });
 

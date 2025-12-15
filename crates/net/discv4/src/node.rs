@@ -1,4 +1,4 @@
-use alloy_primitives::keccak256;
+use alloy_primitives::utils::keccak256_cached;
 use reth_network_peers::{NodeRecord, PeerId};
 
 /// The key type for the table.
@@ -13,7 +13,7 @@ impl From<PeerId> for NodeKey {
 
 impl From<NodeKey> for discv5::Key<NodeKey> {
     fn from(value: NodeKey) -> Self {
-        let hash = keccak256(value.0.as_slice());
+        let hash = keccak256_cached(value.0.as_slice());
         Self::new_raw(value, hash.0.into())
     }
 }

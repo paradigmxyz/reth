@@ -1,6 +1,6 @@
 use crate::validation::StatelessValidationError;
 use alloc::{format, vec::Vec};
-use alloy_primitives::{keccak256, map::B256Map, Address, B256, U256};
+use alloy_primitives::{utils::keccak256_cached, map::B256Map, Address, B256, U256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types_debug::ExecutionWitness;
 use alloy_trie::{TrieAccount, EMPTY_ROOT_HASH};
@@ -67,7 +67,7 @@ impl StatelessSparseTrie {
     /// This method will error if the `ExecutionWitness` is not able to guarantee
     /// that the account is missing from the Trie _and_ the witness was complete.
     pub fn account(&self, address: Address) -> Result<Option<TrieAccount>, ProviderError> {
-        let hashed_address = keccak256(address);
+        let hashed_address = keccak256_cached(address);
 
         if let Some(bytes) = self.inner.get_account_value(&hashed_address) {
             let account = TrieAccount::decode(&mut bytes.as_slice())?;
@@ -88,8 +88,8 @@ impl StatelessSparseTrie {
     /// This method will error if the `ExecutionWitness` is not able to guarantee
     /// that the storage was missing from the Trie _and_ the witness was complete.
     pub fn storage(&self, address: Address, slot: U256) -> Result<U256, ProviderError> {
-        let hashed_address = keccak256(address);
-        let hashed_slot = keccak256(B256::from(slot));
+        let hashed_address = keccak256_cached(address);
+        let hashed_slot = keccak256_cached(B256::from(slot));
 
         if let Some(raw) = self.inner.get_storage_slot_value(&hashed_address, &hashed_slot) {
             return Ok(U256::decode(&mut raw.as_slice())?)
@@ -181,11 +181,11 @@ fn verify_execution_witness(
     let mut bytecode = B256Map::default();
 
     for rlp_encoded in &witness.state {
-        let hash = keccak256(rlp_encoded);
+        let hash = keccak256_cached(rlp_encoded);
         state_witness.insert(hash, rlp_encoded.clone());
     }
     for rlp_encoded in &witness.codes {
-        let hash = keccak256(rlp_encoded);
+        let hash = keccak256_cached(rlp_encoded);
         bytecode.insert(hash, Bytecode::new_raw(rlp_encoded.clone()));
     }
 

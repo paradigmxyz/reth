@@ -474,7 +474,7 @@ mod tests {
         hashed_cursor::mock::MockHashedCursorFactory,
         trie_cursor::mock::{MockTrieCursor, MockTrieCursorFactory},
     };
-    use alloy_primitives::{address, keccak256, map::B256Map, U256};
+    use alloy_primitives::{address, utils::keccak256_cached, map::B256Map, U256};
     use alloy_trie::TrieMask;
     use assert_matches::assert_matches;
     use reth_primitives_traits::Account;
@@ -537,20 +537,20 @@ mod tests {
         let mut storage_tries = B256Map::default();
 
         // Create test accounts
-        let addr1 = keccak256(address!("0000000000000000000000000000000000000001"));
+        let addr1 = keccak256_cached(address!("0000000000000000000000000000000000000001"));
         accounts.insert(
             addr1,
             Account {
                 nonce: 1,
                 balance: U256::from(1000),
-                bytecode_hash: Some(keccak256(b"code1")),
+                bytecode_hash: Some(keccak256_cached(b"code1")),
             },
         );
 
         // Add storage for the account
         let mut storage1 = BTreeMap::new();
-        storage1.insert(keccak256(B256::from(U256::from(1))), U256::from(100));
-        storage1.insert(keccak256(B256::from(U256::from(2))), U256::from(200));
+        storage1.insert(keccak256_cached(B256::from(U256::from(1))), U256::from(100));
+        storage1.insert(keccak256_cached(B256::from(U256::from(2))), U256::from(200));
         storage_tries.insert(addr1, storage1);
 
         let factory = MockHashedCursorFactory::new(accounts, storage_tries);
@@ -606,20 +606,21 @@ mod tests {
 
         // Create multiple test addresses
         for i in 1u8..=3 {
-            let addr = keccak256([i; 20]);
+            let addr = keccak256_cached([i; 20]);
             accounts.insert(
                 addr,
                 Account {
                     nonce: i as u64,
                     balance: U256::from(i as u64 * 1000),
-                    bytecode_hash: (i == 2).then(|| keccak256([i])),
+                    bytecode_hash: (i == 2).then(|| keccak256_cached([i])),
                 },
             );
 
             // Add some storage for each account
             let mut storage = BTreeMap::new();
             for j in 0..i {
-                storage.insert(keccak256(B256::from(U256::from(j))), U256::from(j as u64 * 10));
+                storage
+                    .insert(keccak256_cached(B256::from(U256::from(j))), U256::from(j as u64 * 10));
             }
             if !storage.is_empty() {
                 storage_tries.insert(addr, storage);

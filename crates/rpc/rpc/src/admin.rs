@@ -14,7 +14,7 @@ use reth_network_types::PeerKind;
 use reth_rpc_api::AdminApiServer;
 use reth_rpc_server_types::ToRpcResult;
 use reth_transaction_pool::TransactionPool;
-use revm_primitives::keccak256;
+use alloy_primitives::utils::keccak256_cached;
 
 /// `admin` API implementation.
 ///
@@ -76,7 +76,7 @@ where
 
         for peer in peers {
             infos.push(PeerInfo {
-                id: keccak256(peer.remote_id.as_slice()).to_string(),
+                id: keccak256_cached(peer.remote_id.as_slice()).to_string(),
                 name: peer.client_version.to_string(),
                 enode: peer.enode,
                 enr: peer.enr,

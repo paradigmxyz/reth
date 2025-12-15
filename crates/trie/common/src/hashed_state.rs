@@ -8,7 +8,7 @@ use crate::{
 };
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
-    keccak256,
+    utils::keccak256_cached,
     map::{hash_map, B256Map, HashMap, HashSet},
     Address, B256, U256,
 };
@@ -431,7 +431,7 @@ impl HashedStorage {
     ) -> Self {
         Self::from_iter(
             status.was_destroyed(),
-            storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
+            storage.into_iter().map(|(key, value)| (keccak256_cached(B256::from(*key)), *value)),
         )
     }
 
@@ -889,7 +889,7 @@ mod tests {
 
         // Validate the account info.
         assert_eq!(
-            *hashed_state.accounts.get(&keccak256(address)).unwrap(),
+            *hashed_state.accounts.get(&keccak256_cached(address)).unwrap(),
             Some(account_info.into())
         );
     }
@@ -908,16 +908,16 @@ mod tests {
         };
 
         // Create hashed accounts with addresses.
-        let account_1 = (keccak256(address_1), Some(account_info_1.into()));
-        let account_2 = (keccak256(address_2), None);
+        let account_1 = (keccak256_cached(address_1), Some(account_info_1.into()));
+        let account_2 = (keccak256_cached(address_2), None);
 
         // Add accounts to the hashed post state.
         let hashed_state = HashedPostState::default().with_accounts(vec![account_1, account_2]);
 
         // Validate the hashed post state.
         assert_eq!(hashed_state.accounts.len(), 2);
-        assert!(hashed_state.accounts.contains_key(&keccak256(address_1)));
-        assert!(hashed_state.accounts.contains_key(&keccak256(address_2)));
+        assert!(hashed_state.accounts.contains_key(&keccak256_cached(address_1)));
+        assert!(hashed_state.accounts.contains_key(&keccak256_cached(address_2)));
     }
 
     #[test]
@@ -926,16 +926,16 @@ mod tests {
         let address_1 = Address::random();
         let address_2 = Address::random();
 
-        let storage_1 = (keccak256(address_1), HashedStorage::new(false));
-        let storage_2 = (keccak256(address_2), HashedStorage::new(true));
+        let storage_1 = (keccak256_cached(address_1), HashedStorage::new(false));
+        let storage_2 = (keccak256_cached(address_2), HashedStorage::new(true));
 
         // Add storages to the hashed post state.
         let hashed_state = HashedPostState::default().with_storages(vec![storage_1, storage_2]);
 
         // Validate the hashed post state.
         assert_eq!(hashed_state.storages.len(), 2);
-        assert!(hashed_state.storages.contains_key(&keccak256(address_1)));
-        assert!(hashed_state.storages.contains_key(&keccak256(address_2)));
+        assert!(hashed_state.storages.contains_key(&keccak256_cached(address_1)));
+        assert!(hashed_state.storages.contains_key(&keccak256_cached(address_2)));
     }
 
     #[test]
@@ -946,7 +946,7 @@ mod tests {
 
         // Add an account and validate the state is no longer empty.
         let non_empty_state = HashedPostState::default()
-            .with_accounts(vec![(keccak256(Address::random()), Some(Account::default()))]);
+            .with_accounts(vec![(keccak256_cached(Address::random()), Some(Account::default()))]);
         assert!(!non_empty_state.is_empty());
     }
 

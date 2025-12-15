@@ -7,7 +7,7 @@ mod tests {
     use crate::root::storage_root_unhashed;
     use alloy_consensus::constants::KECCAK_EMPTY;
     use alloy_genesis::GenesisAccount;
-    use alloy_primitives::{keccak256, Bytes, B256, U256};
+    use alloy_primitives::{utils::keccak256_cached, Bytes, B256, U256};
     use std::collections::BTreeMap;
 
     use alloy_trie::EMPTY_ROOT_HASH;
@@ -56,14 +56,14 @@ mod tests {
         assert_eq!(trie_account.nonce, 10);
         assert_eq!(trie_account.balance, U256::from(1000));
         assert_eq!(trie_account.storage_root, expected_storage_root);
-        assert_eq!(trie_account.code_hash, keccak256([0x60, 0x61]));
+        assert_eq!(trie_account.code_hash, keccak256_cached([0x60, 0x61]));
 
         // Check that the Account converts to the same TrieAccount
         assert_eq!(
             Account {
                 nonce: 10,
                 balance: U256::from(1000),
-                bytecode_hash: Some(keccak256([0x60, 0x61]))
+                bytecode_hash: Some(keccak256_cached([0x60, 0x61]))
             }
             .into_trie_account(expected_storage_root),
             trie_account

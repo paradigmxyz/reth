@@ -1,4 +1,4 @@
-use alloy_primitives::{keccak256, B256};
+use alloy_primitives::{utils::keccak256_cached, B256};
 
 /// Trait for hashing keys in state.
 pub trait KeyHasher: Default + Clone + Send + Sync + 'static {
@@ -13,6 +13,6 @@ pub struct KeccakKeyHasher;
 impl KeyHasher for KeccakKeyHasher {
     #[inline]
     fn hash_key<T: AsRef<[u8]>>(bytes: T) -> B256 {
-        keccak256(bytes)
+        keccak256_cached(bytes)
     }
 }

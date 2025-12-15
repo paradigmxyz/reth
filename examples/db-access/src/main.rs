@@ -1,6 +1,6 @@
 #![warn(unused_crate_dependencies)]
 
-use alloy_primitives::{keccak256, Address, B256};
+use alloy_primitives::{keccak256_cached, Address, B256};
 use reth_ethereum::{
     chainspec::ChainSpecBuilder,
     node::EthereumNode,
@@ -181,7 +181,7 @@ fn receipts_provider_example<
     let contract_addr = Address::random();
     let indexed_from = Address::random();
     let indexed_to = Address::random();
-    let transfer_signature = keccak256("Transfer(address,address,uint256)");
+    let transfer_signature = keccak256_cached("Transfer(address,address,uint256)");
 
     // This matches ERC-20 Transfer events emitted by contract_addr where both indexed addresses are
     // fixed. If your event declares a third indexed parameter, continue with topic3(...).
