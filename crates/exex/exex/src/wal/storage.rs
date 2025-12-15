@@ -178,10 +178,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::Storage;
+    use alloy_primitives::{
+        map::{HashMap, HashSet},
+        B256, U256,
+    };
     use reth_exex_types::ExExNotification;
+    use reth_primitives_traits::Account;
     use reth_provider::Chain;
     use reth_testing_utils::generators::{self, random_block};
-    use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostStateSorted};
+    use reth_trie_common::{
+        updates::{StorageTrieUpdates, TrieUpdates},
+        BranchNodeCompact, HashedPostState, HashedStorage, Nibbles,
+    };
     use std::{collections::BTreeMap, fs::File, sync::Arc};
 
     // wal with 1 block and tx (old 3-field format)
@@ -292,16 +300,47 @@ mod tests {
         let block_number = block.header().number();
 
         // Create some non-empty trie updates and hashed state to ensure the 4-field format is used
-        let trie_updates = TrieUpdatesSorted::default();
-        let hashed_state = HashedPostStateSorted::default();
+        let hashed_address = B256::from([1; 32]);
+        let trie_updates = TrieUpdates {
+            account_nodes: HashMap::from_iter([
+                (Nibbles::from_nibbles_unchecked([0x01]), BranchNodeCompact::default()),
+                (Nibbles::from_nibbles_unchecked([0x02]), BranchNodeCompact::default()),
+            ]),
+            removed_nodes: HashSet::from_iter([Nibbles::from_nibbles_unchecked([0x03])]),
+            storage_tries: HashMap::from_iter([(
+                hashed_address,
+                StorageTrieUpdates {
+                    is_deleted: false,
+                    storage_nodes: HashMap::from_iter([(
+                        Nibbles::from_nibbles_unchecked([0x04]),
+                        BranchNodeCompact::default(),
+                    )]),
+                    removed_nodes: Default::default(),
+                },
+            )]),
+        };
+
+        let hashed_state = HashedPostState {
+            accounts: HashMap::from_iter([(
+                hashed_address,
+                Some(Account { nonce: 1, ..Default::default() }),
+            )]),
+            storages: HashMap::from_iter([(
+                hashed_address,
+                HashedStorage {
+                    wiped: false,
+                    storage: HashMap::from_iter([(B256::random(), U256::from(101))]),
+                },
+            )]),
+        };
 
         let notification: ExExNotification<reth_ethereum_primitives::EthPrimitives> =
             ExExNotification::ChainCommitted {
                 new: Arc::new(Chain::new(
                     vec![block],
                     Default::default(),
-                    BTreeMap::from([(block_number, Arc::new(trie_updates))]),
-                    BTreeMap::from([(block_number, Arc::new(hashed_state))]),
+                    BTreeMap::from([(block_number, Arc::new(trie_updates.into_sorted()))]),
+                    BTreeMap::from([(block_number, Arc::new(hashed_state.into_sorted()))]),
                 )),
             };
 
