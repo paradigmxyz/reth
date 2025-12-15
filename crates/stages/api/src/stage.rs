@@ -324,11 +324,13 @@ impl<Provider, S: Stage<Provider> + ?Sized> StageExt<Provider> for S {}
 #[cfg(test)]
 mod tests {
     use reth_chainspec::MAINNET;
-    use reth_db::test_utils::{create_test_rw_db, create_test_static_files_dir};
+    use reth_db::test_utils::{
+        create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir,
+    };
     use reth_db_api::{models::StoredBlockBodyIndices, tables, transaction::DbTxMut};
     use reth_provider::{
-        test_utils::MockNodeTypesWithDB, ProviderFactory, StaticFileProviderBuilder,
-        StaticFileProviderFactory, StaticFileSegment,
+        providers::RocksDBProvider, test_utils::MockNodeTypesWithDB, ProviderFactory,
+        StaticFileProviderBuilder, StaticFileProviderFactory, StaticFileSegment,
     };
     use reth_stages_types::StageCheckpoint;
     use reth_testing_utils::generators::{self, random_signed_tx};
@@ -346,6 +348,7 @@ mod tests {
                 .with_blocks_per_file(1)
                 .build()
                 .unwrap(),
+            RocksDBProvider::builder(create_test_rocksdb_dir().0.keep()).build().unwrap(),
         )
         .unwrap();
 

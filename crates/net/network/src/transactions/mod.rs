@@ -1338,6 +1338,8 @@ where
         let Some(peer) = self.peers.get_mut(&peer_id) else { return };
         let mut transactions = transactions.0;
 
+        let start = Instant::now();
+
         // mark the transactions as received
         self.transaction_fetcher
             .remove_hashes_from_transaction_fetcher(transactions.iter().map(|tx| tx.tx_hash()));
@@ -1370,21 +1372,6 @@ where
         //    reallocations
         let mut new_txs = Vec::with_capacity(transactions.len());
         for tx in transactions {
-            // recover transaction
-            let tx = match tx.try_into_recovered() {
-                Ok(tx) => tx,
-                Err(badtx) => {
-                    trace!(target: "net::tx",
-                        peer_id=format!("{peer_id:#}"),
-                        hash=%badtx.tx_hash(),
-                        client_version=%peer.client_version,
-                        "failed ecrecovery for transaction"
-                    );
-                    has_bad_transactions = true;
-                    continue
-                }
-            };
-
             match self.transactions_by_peers.entry(*tx.tx_hash()) {
                 Entry::Occupied(mut entry) => {
                     // transaction was already inserted
@@ -1401,6 +1388,21 @@ where
                         has_bad_transactions = true;
                     } else {
                         // this is a new transaction that should be imported into the pool
+
+                        // recover transaction
+                        let tx = match tx.try_into_recovered() {
+                            Ok(tx) => tx,
+                            Err(badtx) => {
+                                trace!(target: "net::tx",
+                                    peer_id=format!("{peer_id:#}"),
+                                    hash=%badtx.tx_hash(),
+                                    client_version=%peer.client_version,
+                                    "failed ecrecovery for transaction"
+                                );
+                                has_bad_transactions = true;
+                                continue
+                            }
+                        };
 
                         let pool_transaction = Pool::Transaction::from_pooled(tx);
                         new_txs.push(pool_transaction);
@@ -1459,6 +1461,8 @@ where
         if num_already_seen_by_peer > 0 {
             self.report_already_seen(peer_id);
         }
+
+        self.metrics.pool_import_prepare_duration.record(start.elapsed());
     }
 
     /// Processes a [`FetchEvent`].

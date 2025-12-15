@@ -21,6 +21,7 @@ use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
+use rayon::prelude::*;
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
@@ -40,6 +41,7 @@ use reth_trie_sparse::{
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
+    collections::BTreeMap,
     sync::{
         atomic::AtomicBool,
         mpsc::{self, channel},
@@ -104,6 +106,8 @@ where
     cross_block_cache_size: u64,
     /// Whether transactions should not be executed on prewarming task.
     disable_transaction_prewarming: bool,
+    /// Whether state cache should be disable
+    disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
     /// Whether precompile cache should be disabled.
@@ -147,6 +151,7 @@ where
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
             evm_config,
+            disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
@@ -312,21 +317,46 @@ where
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
         usize,
     ) {
-        // Get the transaction count for prewarming task
-        // Use upper bound if available (more accurate), otherwise use lower bound
-        let (lower, upper) = transactions.size_hint();
-        let transaction_count_hint = upper.unwrap_or(lower);
+        let (transactions, convert) = transactions.into();
+        let transactions = transactions.into_par_iter();
+        let transaction_count_hint = transactions.len();
 
+        let (ooo_tx, ooo_rx) = mpsc::channel();
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
+
+        // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
         self.executor.spawn_blocking(move || {
-            for tx in transactions {
+            transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
+                let tx = convert(tx);
                 let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
-                // only send Ok(_) variants to prewarming task
+                // Only send Ok(_) variants to prewarming task.
                 if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());
                 }
-                let _ = execute_tx.send(tx);
+                let _ = ooo_tx.send((idx, tx));
+            });
+        });
+
+        // Spawn a task that processes out-of-order transactions from the task above and sends them
+        // to the execution task in order.
+        self.executor.spawn_blocking(move || {
+            let mut next_for_execution = 0;
+            let mut queue = BTreeMap::new();
+            while let Ok((idx, tx)) = ooo_rx.recv() {
+                if next_for_execution == idx {
+                    let _ = execute_tx.send(tx);
+                    next_for_execution += 1;
+
+                    while let Some(entry) = queue.first_entry() &&
+                        *entry.key() == next_for_execution
+                    {
+                        let _ = execute_tx.send(entry.remove());
+                        next_for_execution += 1;
+                    }
+                } else {
+                    queue.insert(idx, tx);
+                }
             }
         });
 
@@ -351,9 +381,15 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let saved_cache = self.cache_for(env.parent_hash);
-        let cache = saved_cache.cache().clone();
-        let cache_metrics = saved_cache.metrics().clone();
+        let (saved_cache, cache, cache_metrics) = if self.disable_state_cache {
+            (None, None, None)
+        } else {
+            let saved_cache = self.cache_for(env.parent_hash);
+            let cache = saved_cache.cache().clone();
+            let cache_metrics = saved_cache.metrics().clone();
+            (Some(saved_cache), Some(cache), Some(cache_metrics))
+        };
+
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -565,12 +601,12 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     }
 
     /// Returns a clone of the caches used by prewarming
-    pub(super) fn caches(&self) -> StateExecutionCache {
+    pub(super) fn caches(&self) -> Option<StateExecutionCache> {
         self.prewarm_handle.cache.clone()
     }
 
     /// Returns a clone of the cache metrics used by prewarming
-    pub(super) fn cache_metrics(&self) -> CachedStateMetrics {
+    pub(super) fn cache_metrics(&self) -> Option<CachedStateMetrics> {
         self.prewarm_handle.cache_metrics.clone()
     }
 
@@ -600,9 +636,9 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle {
     /// The shared cache the task operates with.
-    cache: StateExecutionCache,
+    cache: Option<StateExecutionCache>,
     /// Metrics for the caches
-    cache_metrics: CachedStateMetrics,
+    cache_metrics: Option<CachedStateMetrics>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent>>,
 }
@@ -1019,7 +1055,10 @@ mod tests {
 
         let mut handle = payload_processor.spawn(
             Default::default(),
-            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
+            (
+                Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
+                std::convert::identity,
+            ),
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
             OverlayStateProviderFactory::new(provider_factory),
             &TreeConfig::default(),
