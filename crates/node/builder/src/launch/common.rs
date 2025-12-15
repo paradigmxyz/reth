@@ -65,7 +65,7 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
+    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
     StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
 };
@@ -172,7 +172,7 @@ impl LaunchContext {
     }
 
     /// Save prune config to the toml file if node is a full node or has custom pruning CLI
-    /// arguments.
+    /// arguments. Also migrates deprecated prune config values to new defaults.
     fn save_pruning_config<ChainSpec>(
         reth_config: &mut reth_config::Config,
         config: &NodeConfig<ChainSpec>,
@@ -181,15 +181,22 @@ impl LaunchContext {
     where
         ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
     {
+        let mut should_save = reth_config.prune.segments.migrate();
+
         if let Some(prune_config) = config.prune_config() {
             if reth_config.prune != prune_config {
                 reth_config.set_prune_config(prune_config);
-                info!(target: "reth::cli", "Saving prune config to toml file");
-                reth_config.save(config_path.as_ref())?;
+                should_save = true;
             }
         } else if !reth_config.prune.is_default() {
             warn!(target: "reth::cli", "Pruning configuration is present in the config file, but no CLI arguments are provided. Using config from file.");
         }
+
+        if should_save {
+            info!(target: "reth::cli", "Saving prune config to toml file");
+            reth_config.save(config_path.as_ref())?;
+        }
+
         Ok(())
     }
 
@@ -478,9 +485,19 @@ where
                 .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
                 .build()?;
 
-        let factory =
-            ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
-                .with_prune_modes(self.prune_modes());
+        // Initialize RocksDB provider with metrics and statistics enabled
+        let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
+            .with_metrics()
+            .with_statistics()
+            .build()?;
+
+        let factory = ProviderFactory::new(
+            self.right().clone(),
+            self.chain_spec(),
+            static_file_provider,
+            rocksdb_provider,
+        )?
+        .with_prune_modes(self.prune_modes());
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.

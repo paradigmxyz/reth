@@ -1,14 +1,15 @@
 use crate::{
     providers::{
-        ConsistentProvider, ProviderNodeTypes, StaticFileProvider, StaticFileProviderRWRefMut,
+        ConsistentProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
+        StaticFileProviderRWRefMut,
     },
     AccountReader, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader, BlockReaderIdExt,
     BlockSource, CanonChainTracker, CanonStateNotifications, CanonStateSubscriptions,
     ChainSpecProvider, ChainStateBlockReader, ChangeSetReader, DatabaseProviderFactory,
     HashedPostStateProvider, HeaderProvider, ProviderError, ProviderFactory, PruneCheckpointReader,
-    ReceiptProvider, ReceiptProviderIdExt, StageCheckpointReader, StateProviderBox,
-    StateProviderFactory, StateReader, StaticFileProviderFactory, TransactionVariant,
-    TransactionsProvider, TrieReader,
+    ReceiptProvider, ReceiptProviderIdExt, RocksDBProviderFactory, StageCheckpointReader,
+    StateProviderBox, StateProviderFactory, StateReader, StaticFileProviderFactory,
+    TransactionVariant, TransactionsProvider, TrieReader,
 };
 use alloy_consensus::transaction::TransactionMeta;
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumHash, BlockNumberOrTag};
@@ -173,6 +174,12 @@ impl<N: ProviderNodeTypes> StaticFileProviderFactory for BlockchainProvider<N> {
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
         self.database.get_static_file_writer(block, segment)
+    }
+}
+
+impl<N: ProviderNodeTypes> RocksDBProviderFactory for BlockchainProvider<N> {
+    fn rocksdb_provider(&self) -> RocksDBProvider {
+        self.database.rocksdb_provider()
     }
 }
 
@@ -1303,7 +1310,7 @@ mod tests {
 
         // Generate a random block to initialize the blockchain provider.
         let mut test_block_builder = TestBlockBuilder::eth();
-        let block_1 = test_block_builder.generate_random_block(0, B256::ZERO);
+        let block_1 = test_block_builder.generate_random_block(0, B256::ZERO).try_recover()?;
         let block_hash_1 = block_1.hash();
 
         // Insert and commit the block.
@@ -1319,7 +1326,7 @@ mod tests {
         let mut rx_2 = provider.subscribe_to_canonical_state();
 
         // Send and receive commit notifications.
-        let block_2 = test_block_builder.generate_random_block(1, block_hash_1);
+        let block_2 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
         let chain = Chain::new(vec![block_2], ExecutionOutcome::default(), None);
         let commit = CanonStateNotification::Commit { new: Arc::new(chain.clone()) };
         in_memory_state.notify_canon_state(commit.clone());
@@ -1328,8 +1335,8 @@ mod tests {
         assert_eq!(notification_2, Ok(commit.clone()));
 
         // Send and receive re-org notifications.
-        let block_3 = test_block_builder.generate_random_block(1, block_hash_1);
-        let block_4 = test_block_builder.generate_random_block(2, block_3.hash());
+        let block_3 = test_block_builder.generate_random_block(1, block_hash_1).try_recover()?;
+        let block_4 = test_block_builder.generate_random_block(2, block_3.hash()).try_recover()?;
         let new_chain = Chain::new(vec![block_3, block_4], ExecutionOutcome::default(), None);
         let re_org =
             CanonStateNotification::Reorg { old: Arc::new(chain), new: Arc::new(new_chain) };

@@ -27,6 +27,10 @@ pub struct DatadirArgs {
         verbatim_doc_comment
     )]
     pub static_files_path: Option<PathBuf>,
+
+    /// The absolute path to store `RocksDB` database in.
+    #[arg(long = "datadir.rocksdb", value_name = "PATH", verbatim_doc_comment)]
+    pub rocksdb_path: Option<PathBuf>,
 }
 
 impl DatadirArgs {

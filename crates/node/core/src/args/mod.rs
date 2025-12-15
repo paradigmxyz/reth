@@ -6,7 +6,7 @@ pub use network::{DiscoveryArgs, NetworkArgs};
 
 /// RpcServerArg struct for configuring the RPC
 mod rpc_server;
-pub use rpc_server::RpcServerArgs;
+pub use rpc_server::{DefaultRpcServerArgs, RpcServerArgs};
 
 /// `RpcStateCacheArgs` struct for configuring RPC state cache
 mod rpc_state_cache;
@@ -46,7 +46,7 @@ pub use gas_price_oracle::GasPriceOracleArgs;
 
 /// TxPoolArgs for configuring the transaction pool
 mod txpool;
-pub use txpool::TxPoolArgs;
+pub use txpool::{DefaultTxPoolValues, TxPoolArgs};
 
 /// DevArgs for configuring the dev testnet
 mod dev;
@@ -66,7 +66,7 @@ pub use benchmark_args::BenchmarkArgs;
 
 /// EngineArgs for configuring the engine
 mod engine;
-pub use engine::EngineArgs;
+pub use engine::{DefaultEngineValues, EngineArgs};
 
 /// `RessArgs` for configuring ress subprotocol.
 mod ress_args;

@@ -9,7 +9,7 @@ use reth_evm::ConfigureEvm;
 use reth_node_builder::NodeTypesWithDB;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
-    providers::{ProviderNodeTypes, StaticFileProvider},
+    providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{stages::ExecutionStage, Stage, StageCheckpoint, UnwindInput};
@@ -42,6 +42,7 @@ where
                 Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
+                RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
             )?,
             to,
             from,
