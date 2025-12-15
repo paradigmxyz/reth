@@ -682,6 +682,9 @@ where
             let listeners = self.transaction_listener.read();
             for listener in listeners.iter() {
                 if listener.kind.is_propagate_only() && !event.transaction.propagate {
+                    if listener.sender.is_closed() {
+                        needs_cleanup = true;
+                    }
                     // Skip non-propagate transactions for propagate-only listeners
                     continue
                 }
