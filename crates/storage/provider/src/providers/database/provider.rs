@@ -1086,16 +1086,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
                 // Case 1: Entire shard is at or above the unwinding point
                 if first >= rem_index {
-                    continue;
+                    continue
                 }
                 // Case 2: Boundary shard (spans across the unwinding point)
                 if rem_index <= sharded_key.sharded_key.highest_block_number {
                     partial_shard = list.iter().take_while(|i| *i < rem_index).collect();
-                    break;
+                    break
                 }
                 // Case 3: Entire shard is below the unwinding point
                 partial_shard = list.iter().collect();
-                break;
+                break
             }
 
             // Reinsert the partial shard if not empty
@@ -1241,7 +1241,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderSyncGapProvider
             }
             Ordering::Less => {
                 // There's either missing or corrupted files.
-                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()));
+                return Err(ProviderError::HeaderNotFound(next_static_file_block_num.into()))
             }
             Ordering::Equal => {}
         }
@@ -1352,15 +1352,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// If the header is found, but the transactions either do not exist, or are not indexed, this
     /// will return None.
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        if let Some(number) = self.convert_hash_or_number(id)?
-            && let Some(header) = self.header_by_number(number)?
+        if let Some(number) = self.convert_hash_or_number(id)? &&
+            let Some(header) = self.header_by_number(number)?
         {
             // If the body indices are not found, this means that the transactions either do not
             // exist in the database yet, or they do exit but are not indexed.
             // If they exist but are not indexed, we don't have enough
             // information to return the block anyways, so we return `None`.
             let Some(transactions) = self.transactions_by_block(number.into())? else {
-                return Ok(None);
+                return Ok(None)
             };
 
             let body = self
@@ -1370,7 +1370,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
                 .pop()
                 .ok_or(ProviderError::InvalidStorageOutput)?;
 
-            return Ok(Some(Self::Block::new(header, body)));
+            return Ok(Some(Self::Block::new(header, body)))
         }
 
         Ok(None)
@@ -1537,10 +1537,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        if let Some(transaction_id) = self.transaction_id(tx_hash)?
-            && let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)?
-            && let Some(block_number) = self.block_by_transaction_id(transaction_id)?
-            && let Some(sealed_header) = self.sealed_header(block_number)?
+        if let Some(transaction_id) = self.transaction_id(tx_hash)? &&
+            let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? &&
+            let Some(block_number) = self.block_by_transaction_id(transaction_id)? &&
+            let Some(sealed_header) = self.sealed_header(block_number)?
         {
             let (header, block_hash) = sealed_header.split();
             if let Some(block_body) = self.block_body_indices(block_number)? {
@@ -1571,15 +1571,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-        if let Some(block_number) = self.convert_hash_or_number(id)?
-            && let Some(body) = self.block_body_indices(block_number)?
+        if let Some(block_number) = self.convert_hash_or_number(id)? &&
+            let Some(body) = self.block_body_indices(block_number)?
         {
             let tx_range = body.tx_num_range();
             return if tx_range.is_empty() {
                 Ok(Some(Vec::new()))
             } else {
                 self.transactions_by_tx_range(tx_range).map(Some)
-            };
+            }
         }
         Ok(None)
     }
@@ -1654,15 +1654,15 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         &self,
         block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        if let Some(number) = self.convert_hash_or_number(block)?
-            && let Some(body) = self.block_body_indices(number)?
+        if let Some(number) = self.convert_hash_or_number(block)? &&
+            let Some(body) = self.block_body_indices(number)?
         {
             let tx_range = body.tx_num_range();
             return if tx_range.is_empty() {
                 Ok(Some(Vec::new()))
             } else {
                 self.receipts_by_tx_range(tx_range).map(Some)
-            };
+            }
         }
         Ok(None)
     }
@@ -1685,7 +1685,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         block_range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<Vec<Vec<Self::Receipt>>> {
         if block_range.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         // collect block body indices for each block in the range
@@ -1700,7 +1700,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         }
 
         if block_body_indices.is_empty() {
-            return Ok(Vec::new());
+            return Ok(Vec::new())
         }
 
         // find blocks with transactions to determine transaction range
@@ -1709,7 +1709,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
 
         if non_empty_blocks.is_empty() {
             // all blocks are empty
-            return Ok(vec![Vec::new(); block_body_indices.len()]);
+            return Ok(vec![Vec::new(); block_body_indices.len()])
         }
 
         // calculate the overall transaction range
@@ -1928,12 +1928,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // Database, OR if receipts_in_static_files is enabled but no receipts exist in static
         // files yet. Once receipts exist in static files, we must continue writing to maintain
         // continuity and have no gaps.
-        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database()
-            || self
-                .static_file_provider()
+        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
+            self.static_file_provider()
                 .get_highest_static_file_tx(StaticFileSegment::Receipts)
-                .is_none())
-            && PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
+                .is_none()) &&
+            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
 
         // Prepare set of addresses which logs should not be pruned.
         let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
@@ -1950,13 +1949,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             receipts_writer.increment_block(block_number)?;
 
             // Skip writing receipts if pruning configuration requires us to.
-            if prunable_receipts
-                && self
-                    .prune_modes
+            if prunable_receipts &&
+                self.prune_modes
                     .receipts
                     .is_some_and(|mode| mode.should_prune(block_number, tip))
             {
-                continue;
+                continue
             }
 
             // If there are new addresses to retain after this block number, track them
@@ -1968,11 +1966,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 let receipt_idx = first_tx_index + idx as u64;
                 // Skip writing receipt if log filter is active and it does not have any logs to
                 // retain
-                if prunable_receipts
-                    && has_contract_log_filter
-                    && !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
                 {
-                    continue;
+                    continue
                 }
 
                 receipts_writer.append_receipt(receipt_idx, receipt)?;
@@ -2100,8 +2098,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
             for entry in storage {
                 tracing::trace!(?address, ?entry.key, "Updating plain state storage");
-                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)?
-                    && db_entry.key == entry.key
+                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? &&
+                    db_entry.key == entry.key
                 {
                     storages_cursor.delete_current()?;
                 }
@@ -2139,8 +2137,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
                 if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)?
-                    && db_entry.key == entry.key
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                    db_entry.key == entry.key
                 {
                     hashed_storage_cursor.delete_current()?;
                 }
@@ -2179,7 +2177,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
-            return Ok(());
+            return Ok(())
         }
 
         // We are not removing block meta as it is used to get block changesets.
@@ -2272,7 +2270,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let range = block + 1..=self.last_block_number()?;
 
         if range.is_empty() {
-            return Ok(ExecutionOutcome::default());
+            return Ok(ExecutionOutcome::default())
         }
         let start_block_number = *range.start();
 
@@ -2391,7 +2389,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     /// Returns the number of entries modified.
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
-            return Ok(0);
+            return Ok(0)
         }
 
         // Track the number of inserted entries.
@@ -2995,8 +2993,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
                 StorageShardedKey::last(address, storage_key),
                 rem_index,
                 |storage_sharded_key| {
-                    storage_sharded_key.address == address
-                        && storage_sharded_key.sharded_key.key == storage_key
+                    storage_sharded_key.address == address &&
+                        storage_sharded_key.sharded_key.key == storage_key
                 },
             )?;
 
@@ -3343,7 +3341,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to append empty block range");
-            return Ok(());
+            return Ok(())
         }
 
         // Blocks are not empty, so no need to handle the case of `blocks.first()` being
