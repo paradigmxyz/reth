@@ -1338,11 +1338,20 @@ where
 
     /// Finishes termination by persisting all remaining blocks and signaling completion.
     ///
-    /// This blocks until all persistence is complete.
+    /// This blocks until all persistence is complete. Always signals completion,
+    /// even if an error occurs.
     fn finish_termination(
         &mut self,
         pending_termination: oneshot::Sender<()>,
     ) -> Result<(), AdvancePersistenceError> {
+        let result = self.persist_until_complete();
+        // Always signal completion, even on error
+        let _ = pending_termination.send(());
+        result
+    }
+
+    /// Persists all remaining blocks until none are left.
+    fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
         loop {
             // Wait for any in-progress persistence to complete (blocking)
             if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
@@ -1354,7 +1363,6 @@ where
 
             if blocks_to_persist.is_empty() {
                 debug!(target: "engine::tree", "persistence complete, signaling termination");
-                let _ = pending_termination.send(());
                 return Ok(())
             }
 
