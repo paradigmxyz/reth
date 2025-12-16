@@ -624,7 +624,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source, state.clone()));
+                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
             }
         }
     }
