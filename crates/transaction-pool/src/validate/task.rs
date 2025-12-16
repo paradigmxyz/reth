@@ -14,11 +14,13 @@ use reth_storage_api::{noop::NoopProvider, StateProviderFactory};
 use reth_tasks::TaskSpawner;
 use std::sync::Arc;
 use tokio::sync::{mpsc, oneshot};
+use tracing::{instrument, Instrument, Span};
 
 /// A validation job for a single transaction.
 ///
 /// Contains the transaction to validate, its origin, and a channel to send the result back.
-type ValidationJob<T> = (TransactionOrigin, T, oneshot::Sender<TransactionValidationOutcome<T>>);
+type ValidationJob<T> =
+    (TransactionOrigin, T, oneshot::Sender<TransactionValidationOutcome<T>>, Span);
 
 /// A service that performs transaction validation jobs.
 ///
@@ -70,13 +72,24 @@ impl<V: TransactionValidator> ValidationTask<V> {
                 break;
             }
 
+            let batch_span = if count == 1 {
+                buffer[0].3.clone()
+            } else {
+                let batch_span =
+                    tracing::info_span!("batch transaction validation", num_transactions = count);
+                for job in &buffer {
+                    batch_span.follows_from(&job.3);
+                }
+                batch_span
+            };
+
             // Split into transactions and response senders
             #[expect(clippy::iter_with_drain)]
             let (txs, senders): (Vec<_>, Vec<_>) =
-                buffer.drain(..).map(|(origin, tx, sender)| ((origin, tx), sender)).unzip();
+                buffer.drain(..).map(|(origin, tx, sender, _)| ((origin, tx), sender)).unzip();
 
             // Batch validate all transactions
-            let results = self.validator.validate_transactions(txs).await;
+            let results = self.validator.validate_transactions(txs).instrument(batch_span).await;
 
             // Send results back through oneshot channels
             for (result, sender) in results.into_iter().zip(senders) {
@@ -186,6 +199,7 @@ where
 {
     type Transaction = V::Transaction;
 
+    #[instrument(skip_all, fields(tx_hash = %transaction.hash()))]
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
@@ -194,7 +208,7 @@ where
         let hash = *transaction.hash();
         let (tx, rx) = oneshot::channel();
 
-        if self.to_validation_task.send((origin, transaction, tx)).is_err() {
+        if self.to_validation_task.send((origin, transaction, tx, Span::current())).is_err() {
             return TransactionValidationOutcome::Error(
                 hash,
                 Box::new(TransactionValidatorError::ValidationServiceUnreachable),
@@ -214,6 +228,7 @@ where
         result
     }
 
+    #[instrument(skip_all, fields(num_transactions = %transactions.len()))]
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
@@ -226,6 +241,7 @@ where
         // Create oneshot channels for all transactions
         let mut receivers = Vec::with_capacity(len);
         let mut hashes = Vec::with_capacity(len);
+        let span = Span::current();
 
         for (origin, transaction) in transactions {
             let hash = *transaction.hash();
@@ -234,7 +250,7 @@ where
             let (tx, rx) = oneshot::channel();
             receivers.push((hash, rx));
 
-            if self.to_validation_task.send((origin, transaction, tx)).is_err() {
+            if self.to_validation_task.send((origin, transaction, tx, span.clone())).is_err() {
                 // Channel closed - return errors for remaining
                 self.metrics.inflight_validation_jobs.decrement(len as f64);
                 return hashes
