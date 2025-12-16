@@ -318,7 +318,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn on_internal_peer_request(&mut self, request: PeerRequest<N>, deadline: Instant) {
         let request_id = self.next_id();
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let mut msg = request.create_request_message(request_id).map_versioned(self.conn.version());
+        let msg = request.create_request_message(request_id).map_versioned(self.conn.version());
 
         self.queued_outgoing.push_back(msg.into());
         let req = InflightRequest {
@@ -374,7 +374,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     fn handle_outgoing_response(&mut self, id: u64, resp: PeerResponseResult<N>) {
         match resp.try_into_message(id) {
             Ok(msg) => {
-                let msg: EthMessage<N> = msg;
                 self.queued_outgoing.push_back(msg.into());
             }
             Err(err) => {

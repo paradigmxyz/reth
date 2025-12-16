@@ -373,7 +373,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
     ///
     /// This handles up/downcasting where appropriate, for example for different receipt request
     /// types.
-    pub fn map_versioned(mut self, version: EthVersion) -> Self {
+    pub fn map_versioned(self, version: EthVersion) -> Self {
         // For eth/70 peers we send `GetReceipts` using the new eth/70
         // encoding with `firstBlockReceiptIndex = 0`, while keeping the
         // user-facing `PeerRequest` API unchanged.

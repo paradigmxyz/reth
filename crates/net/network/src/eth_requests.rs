@@ -218,6 +218,9 @@ where
         let _ = response.send(Ok(Receipts69(receipts)));
     }
 
+    /// Handles partial responses for [`GetReceipts70`] queries.
+    ///
+    /// This will adhere to the soft limit but allow filling the last vec partially.
     fn on_receipts70_request(
         &self,
         _peer_id: PeerId,
