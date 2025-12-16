@@ -4,7 +4,7 @@
 //! up to the intended build target.
 
 use crate::{
-    providers::{NodeTypesForProvider, StaticFileProvider},
+    providers::{NodeTypesForProvider, RocksDBProvider, StaticFileProvider},
     ProviderFactory,
 };
 use reth_db::{
@@ -104,11 +104,12 @@ impl<N> ProviderFactoryBuilder<N> {
     where
         N: NodeTypesForProvider,
     {
-        let ReadOnlyConfig { db_dir, db_args, static_files_dir, watch_static_files } =
+        let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir, watch_static_files } =
             config.into();
         self.db(Arc::new(open_db_read_only(db_dir, db_args)?))
             .chainspec(chainspec)
             .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
+            .rocksdb_provider(RocksDBProvider::builder(&rocksdb_dir).build()?)
             .build_provider_factory()
             .map_err(Into::into)
     }
@@ -120,7 +121,7 @@ impl<N> Default for ProviderFactoryBuilder<N> {
     }
 }
 
-/// Settings for how to open the database and static files.
+/// Settings for how to open the database, static files, and `RocksDB`.
 ///
 /// The default derivation from a path assumes the path is the datadir:
 /// [`ReadOnlyConfig::from_datadir`]
@@ -132,6 +133,8 @@ pub struct ReadOnlyConfig {
     pub db_args: DatabaseArguments,
     /// The path to the static file dir
     pub static_files_dir: PathBuf,
+    /// The path to the `RocksDB` directory
+    pub rocksdb_dir: PathBuf,
     /// Whether the static files should be watched for changes.
     pub watch_static_files: bool,
 }
@@ -144,6 +147,7 @@ impl ReadOnlyConfig {
     /// ```text
     ///  -`datadir`
     ///    |__db
+    ///    |__rocksdb
     ///    |__static_files
     /// ```
     ///
@@ -151,7 +155,13 @@ impl ReadOnlyConfig {
     /// [`StaticFileProvider::read_only`]
     pub fn from_datadir(datadir: impl AsRef<Path>) -> Self {
         let datadir = datadir.as_ref();
-        Self::from_dirs(datadir.join("db"), datadir.join("static_files"))
+        Self {
+            db_dir: datadir.join("db"),
+            db_args: Default::default(),
+            static_files_dir: datadir.join("static_files"),
+            rocksdb_dir: datadir.join("rocksdb"),
+            watch_static_files: true,
+        }
     }
 
     /// Disables long-lived read transaction safety guarantees.
@@ -169,7 +179,8 @@ impl ReadOnlyConfig {
     ///
     /// ```text
     ///    - db
-    ///    -static_files
+    ///    - rocksdb
+    ///    - static_files
     /// ```
     ///
     /// By default this watches the static file directory for changes, see also
@@ -180,13 +191,10 @@ impl ReadOnlyConfig {
     /// If the path does not exist
     pub fn from_db_dir(db_dir: impl AsRef<Path>) -> Self {
         let db_dir = db_dir.as_ref();
-        let static_files_dir = std::fs::canonicalize(db_dir)
-            .unwrap()
-            .parent()
-            .unwrap()
-            .to_path_buf()
-            .join("static_files");
-        Self::from_dirs(db_dir, static_files_dir)
+        let datadir = std::fs::canonicalize(db_dir).unwrap().parent().unwrap().to_path_buf();
+        let static_files_dir = datadir.join("static_files");
+        let rocksdb_dir = datadir.join("rocksdb");
+        Self::from_dirs(db_dir, static_files_dir, rocksdb_dir)
     }
 
     /// Creates the config for the given paths.
@@ -194,11 +202,16 @@ impl ReadOnlyConfig {
     ///
     /// By default this watches the static file directory for changes, see also
     /// [`StaticFileProvider::read_only`]
-    pub fn from_dirs(db_dir: impl AsRef<Path>, static_files_dir: impl AsRef<Path>) -> Self {
+    pub fn from_dirs(
+        db_dir: impl AsRef<Path>,
+        static_files_dir: impl AsRef<Path>,
+        rocksdb_dir: impl AsRef<Path>,
+    ) -> Self {
         Self {
-            static_files_dir: static_files_dir.as_ref().into(),
             db_dir: db_dir.as_ref().into(),
             db_args: Default::default(),
+            static_files_dir: static_files_dir.as_ref().into(),
+            rocksdb_dir: rocksdb_dir.as_ref().into(),
             watch_static_files: true,
         }
     }
@@ -317,7 +330,37 @@ impl<N, Val1, Val2, Val3> TypesAnd3<N, Val1, Val2, Val3> {
     }
 }
 
-impl<N, DB> TypesAnd3<N, DB, Arc<N::ChainSpec>, StaticFileProvider<N::Primitives>>
+impl<N, DB, C> TypesAnd3<N, DB, Arc<C>, StaticFileProvider<N::Primitives>>
+where
+    N: NodeTypes,
+{
+    /// Configures the `RocksDB` provider.
+    pub fn rocksdb_provider(
+        self,
+        rocksdb_provider: RocksDBProvider,
+    ) -> TypesAnd4<N, DB, Arc<C>, StaticFileProvider<N::Primitives>, RocksDBProvider> {
+        TypesAnd4::new(self.val_1, self.val_2, self.val_3, rocksdb_provider)
+    }
+}
+
+/// This is staging type that contains the configured types and _four_ values.
+#[derive(Debug)]
+pub struct TypesAnd4<N, Val1, Val2, Val3, Val4> {
+    _types: PhantomData<N>,
+    val_1: Val1,
+    val_2: Val2,
+    val_3: Val3,
+    val_4: Val4,
+}
+
+impl<N, Val1, Val2, Val3, Val4> TypesAnd4<N, Val1, Val2, Val3, Val4> {
+    /// Creates a new instance with the given types and four values.
+    pub fn new(val_1: Val1, val_2: Val2, val_3: Val3, val_4: Val4) -> Self {
+        Self { _types: Default::default(), val_1, val_2, val_3, val_4 }
+    }
+}
+
+impl<N, DB> TypesAnd4<N, DB, Arc<N::ChainSpec>, StaticFileProvider<N::Primitives>, RocksDBProvider>
 where
     N: NodeTypesForProvider,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
@@ -326,7 +369,7 @@ where
     pub fn build_provider_factory(
         self,
     ) -> ProviderResult<ProviderFactory<NodeTypesWithDBAdapter<N, DB>>> {
-        let Self { _types, val_1, val_2, val_3 } = self;
-        ProviderFactory::new(val_1, val_2, val_3)
+        let Self { _types, val_1, val_2, val_3, val_4 } = self;
+        ProviderFactory::new(val_1, val_2, val_3, val_4)
     }
 }

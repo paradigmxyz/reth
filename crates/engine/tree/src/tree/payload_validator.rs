@@ -11,9 +11,11 @@ use crate::tree::{
     StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
 use alloy_primitives::B256;
+use rayon::prelude::*;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock};
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
@@ -213,16 +215,32 @@ where
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
         match input {
-            BlockOrPayload::Payload(payload) => Ok(Either::Left(
-                self.evm_config
+            BlockOrPayload::Payload(payload) => {
+                let (iter, convert) = self
+                    .evm_config
                     .tx_iterator_for_payload(payload)
                     .map_err(NewPayloadError::other)?
-                    .map(|res| res.map(Either::Left).map_err(NewPayloadError::other)),
-            )),
+                    .into();
+
+                let iter = Either::Left(iter.into_par_iter().map(Either::Left));
+                let convert = move |tx| {
+                    let Either::Left(tx) = tx else { unreachable!() };
+                    convert(tx).map(Either::Left).map_err(Either::Left)
+                };
+
+                // Box the closure to satisfy the `Fn` bound both here and in the branch below
+                Ok((iter, Box::new(convert) as Box<dyn Fn(_) -> _ + Send + Sync + 'static>))
+            }
             BlockOrPayload::Block(block) => {
-                Ok(Either::Right(block.body().clone_transactions().into_iter().map(|tx| {
-                    Ok(Either::Right(tx.try_into_recovered().map_err(NewPayloadError::other)?))
-                })))
+                let iter = Either::Right(
+                    block.body().clone_transactions().into_par_iter().map(Either::Right),
+                );
+                let convert = move |tx: Either<_, N::SignedTx>| {
+                    let Either::Right(tx) = tx else { unreachable!() };
+                    tx.try_into_recovered().map(Either::Right).map_err(Either::Right)
+                };
+
+                Ok((iter, Box::new(convert)))
             }
         }
     }
@@ -353,7 +371,7 @@ where
             )
             .into())
         };
-        let state_provider = ensure_ok!(provider_builder.build());
+        let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
         // fetch parent block
@@ -396,18 +414,19 @@ where
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
-        let state_provider = CachedStateProvider::new_with_caches(
-            state_provider,
-            handle.caches(),
-            handle.cache_metrics(),
-        );
+        if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
+            state_provider = Box::new(CachedStateProvider::new_with_caches(
+                state_provider,
+                caches,
+                cache_metrics,
+            ));
+        };
 
         // Execute the block and handle any execution errors
         let (output, senders) = match if self.config.state_provider_metrics() {
-            let state_provider = InstrumentedStateProvider::from_state_provider(&state_provider);
-            let result = self.execute_block(&state_provider, env, &input, &mut handle);
-            state_provider.record_total_latency();
-            result
+            let state_provider =
+                InstrumentedStateProvider::from_state_provider(&state_provider, "engine");
+            self.execute_block(&state_provider, env, &input, &mut handle)
         } else {
             self.execute_block(&state_provider, env, &input, &mut handle)
         } {
@@ -857,7 +876,7 @@ where
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
     /// too expensive because it requires walking all paths in every proof.
     const fn plan_state_root_computation(&self) -> StateRootStrategy {
-        if self.config.state_root_fallback() || !self.config.has_enough_parallelism() {
+        if self.config.state_root_fallback() {
             StateRootStrategy::Synchronous
         } else if self.config.use_state_root_task() {
             StateRootStrategy::StateRootTask
@@ -1227,5 +1246,11 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
             Self::Payload(_) => "payload",
             Self::Block(_) => "block",
         }
+    }
+
+    /// Returns the block access list if available.
+    pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
+        // TODO decode and return `BlockAccessList`
+        None
     }
 }

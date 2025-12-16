@@ -22,7 +22,7 @@ use reth_transaction_pool::error::{
 use revm::context_interface::result::{
     EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
 };
-use revm_inspectors::tracing::MuxError;
+use revm_inspectors::tracing::{DebugInspectorError, MuxError};
 use std::convert::Infallible;
 use tokio::sync::oneshot::error::RecvError;
 
@@ -403,6 +403,25 @@ impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
                 Self::InternalJsTracerError(err.to_string())
             }
             err => Self::InvalidParams(err.to_string()),
+        }
+    }
+}
+
+impl<Err> From<DebugInspectorError<Err>> for EthApiError
+where
+    Err: core::error::Error + Send + Sync + 'static,
+{
+    fn from(error: DebugInspectorError<Err>) -> Self {
+        match error {
+            DebugInspectorError::InvalidTracerConfig => Self::InvalidTracerConfig,
+            DebugInspectorError::UnsupportedTracer => Self::Unsupported("unsupported tracer"),
+            DebugInspectorError::JsTracerNotEnabled => {
+                Self::Unsupported("JS Tracer is not enabled")
+            }
+            DebugInspectorError::MuxInspector(err) => err.into(),
+            DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
+            #[cfg(feature = "js-tracer")]
+            DebugInspectorError::JsInspector(err) => err.into(),
         }
     }
 }

@@ -25,7 +25,12 @@ pub(crate) enum ProofTrieBranchChild<RF> {
         child: RlpNode,
     },
     /// A branch node whose children have already been flattened into [`RlpNode`]s.
-    Branch(BranchNode),
+    Branch {
+        /// The node itself, for use during RLP encoding.
+        node: BranchNode,
+        /// Bitmasks carried over from cached `BranchNodeCompact` values, if any.
+        masks: TrieMasks,
+    },
     /// A node whose type is not known, as it has already been converted to an [`RlpNode`].
     RlpNode(RlpNode),
 }
@@ -64,7 +69,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
                 ExtensionNodeRef::new(&short_key, child.as_slice()).encode(buf);
                 Ok((RlpNode::from_rlp(buf), None))
             }
-            Self::Branch(branch_node) => {
+            Self::Branch { node: branch_node, .. } => {
                 branch_node.encode(buf);
                 Ok((RlpNode::from_rlp(buf), Some(branch_node.stack)))
             }
@@ -98,8 +103,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             Self::Extension { short_key, child } => {
                 (TrieNode::Extension(ExtensionNode { key: short_key, child }), TrieMasks::none())
             }
-            // TODO store trie masks on branch
-            Self::Branch(branch_node) => (TrieNode::Branch(branch_node), TrieMasks::none()),
+            Self::Branch { node, masks } => (TrieNode::Branch(node), masks),
             Self::RlpNode(_) => panic!("Cannot call `into_proof_trie_node` on RlpNode"),
         };
 
@@ -111,7 +115,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
     pub(crate) fn short_key(&self) -> &Nibbles {
         match self {
             Self::Leaf { short_key, .. } | Self::Extension { short_key, .. } => short_key,
-            Self::Branch(_) | Self::RlpNode(_) => {
+            Self::Branch { .. } | Self::RlpNode(_) => {
                 static EMPTY_NIBBLES: Nibbles = Nibbles::new();
                 &EMPTY_NIBBLES
             }
@@ -136,7 +140,7 @@ impl<RF: DeferredValueEncoder> ProofTrieBranchChild<RF> {
             Self::Leaf { short_key, .. } | Self::Extension { short_key, .. } => {
                 *short_key = trim_nibbles_prefix(short_key, len);
             }
-            Self::Branch(_) | Self::RlpNode(_) => {
+            Self::Branch { .. } | Self::RlpNode(_) => {
                 panic!("Cannot call `trim_short_key_prefix` on Branch or RlpNode")
             }
         }
@@ -153,14 +157,8 @@ pub(crate) struct ProofTrieBranch {
     /// A mask tracking which child nibbles are set on the branch so far. There will be a single
     /// child on the stack for each set bit.
     pub(crate) state_mask: TrieMask,
-    /// A subset of `state_mask`. Each bit is set if the `state_mask` bit is set and:
-    /// - The child is a branch which is stored in the DB.
-    /// - The child is an extension whose child branch is stored in the DB.
-    #[expect(unused)]
-    pub(crate) tree_mask: TrieMask,
-    /// A subset of `state_mask`. Each bit is set if the hash for the child is cached in the DB.
-    #[expect(unused)]
-    pub(crate) hash_mask: TrieMask,
+    /// Bitmasks which are subsets of `state_mask`.
+    pub(crate) masks: TrieMasks,
 }
 
 /// Trims the first `len` nibbles from the head of the given `Nibbles`.

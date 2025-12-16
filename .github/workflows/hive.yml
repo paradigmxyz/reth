@@ -24,8 +24,7 @@ jobs:
   prepare-hive:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on:
-      group: Reth
+    runs-on: depot-ubuntu-latest-16
     steps:
       - uses: actions/checkout@v6
       - name: Checkout hive tests
@@ -45,7 +44,7 @@ jobs:
 
       - name: Restore hive assets cache
         id: cache-hive
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ./hive_assets
           key: hive-assets-${{ steps.hive-commit.outputs.hash }}-${{ hashFiles('.github/assets/hive/build_simulators.sh') }}
@@ -68,7 +67,7 @@ jobs:
           chmod +x hive
 
       - name: Upload hive assets
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: hive_assets
           path: ./hive_assets
@@ -179,8 +178,7 @@ jobs:
       - prepare-reth
       - prepare-hive
     name: run ${{ matrix.scenario.sim }}${{ matrix.scenario.limit && format(' - {0}', matrix.scenario.limit) }}
-    runs-on:
-      group: Reth
+    runs-on: depot-ubuntu-latest-16
     permissions:
       issues: write
     steps:
@@ -189,13 +187,13 @@ jobs:
           fetch-depth: 0
 
       - name: Download hive assets
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: hive_assets
           path: /tmp
 
       - name: Download reth image
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
         with:
           name: artifacts
           path: /tmp
@@ -247,8 +245,7 @@ jobs:
   notify-on-error:
     needs: test
     if: failure()
-    runs-on:
-      group: Reth
+    runs-on: ubuntu-latest
     steps:
       - name: Slack Webhook Action
         uses: rtCamp/action-slack-notify@v2
