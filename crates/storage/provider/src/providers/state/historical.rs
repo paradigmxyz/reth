@@ -1,6 +1,4 @@
 #[cfg(all(unix, feature = "rocksdb"))]
-use crate::EitherReader;
-#[cfg(all(unix, feature = "rocksdb"))]
 use crate::RocksDBProviderFactory;
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
@@ -304,45 +302,50 @@ where
         + StorageSettingsCache
         + NodePrimitivesProvider,
 {
-    /// `RocksDB`-specific implementation for computing `HistoryInfo` from shards.
+    /// `RocksDB` specific implementation for computing `HistoryInfo` from a single shard plus
+    /// knowledge of whether a previous shard exists.
     ///
-    /// This replicates the logic from `history_info`: for a target `block_number`, we want
-    /// the smallest changeset block number that is >= `block_number`. This changeset contains
-    /// the state before the change at that block, which is what historical state queries need.
-    fn history_info_from_shards(
+    /// This mirrors `history_info` logic without reading/flattening all shards:
+    /// - Use the first shard whose `highest_block_number >= target`.
+    /// - If the target is before the first entry of that shard, we need to know if a previous shard
+    ///   exists to decide between `NotYetWritten` and `InChangeset(first)`.
+    fn history_info_from_shard(
         &self,
-        shards: impl IntoIterator<Item = BlockNumberList>,
+        has_previous_shard: bool,
+        shard: Option<BlockNumberList>,
         lowest_available_block_number: Option<BlockNumber>,
     ) -> HistoryInfo {
-        // Collect all block numbers from all shards (already sorted ascending within each shard)
-        let all_block_numbers: Vec<u64> = shards.into_iter().flat_map(|list| list.0).collect();
-
-        if all_block_numbers.is_empty() {
-            return if lowest_available_block_number.is_some() {
+        let Some(list) = shard else {
+            return if has_previous_shard {
+                HistoryInfo::InPlainState
+            } else if lowest_available_block_number.is_some() {
                 HistoryInfo::MaybeInPlainState
             } else {
                 HistoryInfo::NotYetWritten
-            };
-        }
+            }
+        };
 
-        let first = all_block_numbers[0];
+        let mut iter = list.0.iter();
+        let Some(first) = iter.next() else {
+            // Should not happen, but be defensive.
+            return HistoryInfo::InPlainState
+        };
 
-        // If target block is strictly before the first recorded change
         if self.block_number < first {
-            return if lowest_available_block_number.is_some() {
-                // Pruned history: there may have been earlier changes we can't see
+            // Target is before the first recorded change in this shard.
+            return if has_previous_shard || lowest_available_block_number.is_some() {
                 HistoryInfo::InChangeset(first)
             } else {
-                // No writes before our block - account/storage didn't exist yet
                 HistoryInfo::NotYetWritten
             };
         }
 
-        // Find the smallest block number >= self.block_number (the changeset we need)
-        if let Some(&bn) = all_block_numbers.iter().find(|&&b| b >= self.block_number) {
+        // Find the smallest block number >= target within this shard.
+        if let Some(bn) = list.0.iter().find(|&b| b >= self.block_number) {
             HistoryInfo::InChangeset(bn)
         } else {
-            // No change at or after our block - value is in plain state
+            // No change at or after our block in this shard, and no later shard exists (by
+            // construction), so the value is in plain state.
             HistoryInfo::InPlainState
         }
     }
@@ -351,18 +354,12 @@ where
     fn account_history_lookup_rocksdb(&self, address: Address) -> ProviderResult<HistoryInfo> {
         let rocks_provider = self.provider.rocksdb_provider();
         let rocks_tx = rocks_provider.tx();
-        let mut reader = EitherReader::new_accounts_history(self.provider, &rocks_tx)?;
-        let shards = reader.read_account_history_shards(address)?;
+        let (has_prev, shard) =
+            rocks_tx.seek_account_history_shard(address, self.block_number)?;
 
-        if shards.is_empty() {
-            if self.lowest_available_blocks.account_history_block_number.is_some() {
-                return Ok(HistoryInfo::MaybeInPlainState)
-            }
-            return Ok(HistoryInfo::NotYetWritten)
-        }
-
-        Ok(self.history_info_from_shards(
-            shards.into_iter().map(|(_, list)| list),
+        Ok(self.history_info_from_shard(
+            has_prev,
+            shard.map(|(_, list)| list),
             self.lowest_available_blocks.account_history_block_number,
         ))
     }
@@ -375,18 +372,12 @@ where
     ) -> ProviderResult<HistoryInfo> {
         let rocks_provider = self.provider.rocksdb_provider();
         let rocks_tx = rocks_provider.tx();
-        let mut reader = EitherReader::new_storages_history(self.provider, &rocks_tx)?;
-        let shards = reader.read_storage_history_shards(address, storage_key)?;
+        let (has_prev, shard) =
+            rocks_tx.seek_storage_history_shard(address, storage_key, self.block_number)?;
 
-        if shards.is_empty() {
-            if self.lowest_available_blocks.storage_history_block_number.is_some() {
-                return Ok(HistoryInfo::MaybeInPlainState)
-            }
-            return Ok(HistoryInfo::NotYetWritten)
-        }
-
-        Ok(self.history_info_from_shards(
-            shards.into_iter().map(|(_, list)| list),
+        Ok(self.history_info_from_shard(
+            has_prev,
+            shard.map(|(_, list)| list),
             self.lowest_available_blocks.storage_history_block_number,
         ))
     }

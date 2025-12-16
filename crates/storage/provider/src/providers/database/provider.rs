@@ -1066,7 +1066,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         storage_changesets.dedup_by_key(|(address, key, _)| (*address, *key));
 
         let rocks_tx = self.rocksdb_provider.tx();
-        let mut reader = EitherReader::new_storages_history(self, &rocks_tx)?;
+        let mut reader =
+            EitherReader::new_storages_history(self, &rocks_tx)?;
 
         let rocks_batch = self.rocksdb_provider.batch();
         let mut writer = EitherWriter::new_storages_history(self, rocks_batch)?;
@@ -1501,14 +1502,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     type Transaction = TxTy<N>;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        #[cfg(all(unix, feature = "rocksdb"))]
         let rocks_tx = self.rocksdb_provider.tx();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocks_tx_ref = &rocks_tx;
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocks_tx_ref = ();
-
-        let mut reader = EitherReader::new_transaction_hash_numbers(self, rocks_tx_ref)?;
+        let mut reader = EitherReader::new_transaction_hash_numbers(self, &rocks_tx)?;
         reader.get_transaction_hash_number(tx_hash)
     }
 

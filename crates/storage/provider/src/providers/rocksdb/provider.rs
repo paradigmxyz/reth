@@ -1,7 +1,9 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
+use alloy_primitives::{Address, B256, BlockNumber};
 use reth_db_api::{
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::{Compress, Decompress, Encode, Table},
-    DatabaseError,
+    BlockNumberList, DatabaseError,
 };
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
@@ -555,6 +557,55 @@ impl<'db> RocksTx<'db> {
             .inner
             .iterator_cf(cf, IteratorMode::From(encoded_key.as_ref(), rocksdb::Direction::Forward));
         Ok(RocksTxIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
+    /// Finds the first account history shard whose `highest_block_number >= target`.
+    ///
+    /// Returns `(has_previous_shard, matching_shard)` where `matching_shard` is `(key, list)` or
+    /// `None` if no shard covers/extends beyond `target`.
+    pub fn seek_account_history_shard(
+        &self,
+        address: Address,
+        target: BlockNumber,
+    ) -> ProviderResult<(bool, Option<(ShardedKey<Address>, BlockNumberList)>)> {
+        let start = ShardedKey::new(address, 0);
+        let mut iter = self.iter_from::<reth_db_api::tables::AccountsHistory>(start)?;
+        let mut has_prev = false;
+        while let Some((key, value)) = iter.next().transpose()? {
+            if key.key != address {
+                break;
+            }
+            if key.highest_block_number >= target {
+                return Ok((has_prev, Some((key, value))))
+            }
+            has_prev = true;
+        }
+        Ok((has_prev, None))
+    }
+
+    /// Finds the first storage history shard whose `highest_block_number >= target`.
+    ///
+    /// Returns `(has_previous_shard, matching_shard)` where `matching_shard` is `(key, list)` or
+    /// `None` if no shard covers/extends beyond `target`.
+    pub fn seek_storage_history_shard(
+        &self,
+        address: Address,
+        storage_key: B256,
+        target: BlockNumber,
+    ) -> ProviderResult<(bool, Option<(StorageShardedKey, BlockNumberList)>)> {
+        let start = StorageShardedKey::new(address, storage_key, 0);
+        let mut iter = self.iter_from::<reth_db_api::tables::StoragesHistory>(start)?;
+        let mut has_prev = false;
+        while let Some((key, value)) = iter.next().transpose()? {
+            if key.address != address || key.sharded_key.key != storage_key {
+                break;
+            }
+            if key.sharded_key.highest_block_number >= target {
+                return Ok((has_prev, Some((key, value))))
+            }
+            has_prev = true;
+        }
+        Ok((has_prev, None))
     }
 
     /// Commits the transaction, persisting all changes.
