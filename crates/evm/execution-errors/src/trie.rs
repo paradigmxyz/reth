@@ -96,7 +96,7 @@ impl SparseStateTrieError {
     }
 }
 
-/// Error encountered in `SparseStateTrie`.
+/// [`SparseStateTrieError`] kind.
 #[derive(Error, Debug)]
 pub enum SparseStateTrieErrorKind {
     /// Encountered invalid root node.
