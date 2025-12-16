@@ -315,8 +315,7 @@ where
         lowest_available_block_number: Option<BlockNumber>,
     ) -> HistoryInfo {
         // Collect all block numbers from all shards (already sorted ascending within each shard)
-        let all_block_numbers: Vec<u64> =
-            shards.into_iter().flat_map(|list| list.iter().collect::<Vec<_>>()).collect();
+        let all_block_numbers: Vec<u64> = shards.into_iter().flat_map(|list| list.0).collect();
 
         if all_block_numbers.is_empty() {
             return if lowest_available_block_number.is_some() {
