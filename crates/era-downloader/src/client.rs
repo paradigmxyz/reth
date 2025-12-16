@@ -268,7 +268,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 }
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(false),
-            Err(e) => Err(e)?,
+            Err(e) => Err(e.into()),
         }
     }
 
