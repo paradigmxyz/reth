@@ -1991,7 +1991,7 @@ mod forkchoice_updated_tests {
             }
         }
 
-        // Ensure we persisted right ot the tip
+        // Ensure we persisted right to the tip
         assert_eq!(last_persisted_number, canonical_tip);
     }
 }
