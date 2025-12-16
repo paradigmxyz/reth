@@ -66,10 +66,10 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
         // For EIP-7642 (https://github.com/ethereum/EIPs/blob/master/EIPS/eip-7642.md):
         // pre-merge (legacy) status messages include total difficulty, whereas eth/69 omits it.
         let message = match message_type {
-            EthMessageID::Status => EthMessage::Status(if version >= EthVersion::Eth69 {
-                StatusMessage::Eth69(StatusEth69::decode(buf)?)
-            } else {
+            EthMessageID::Status => EthMessage::Status(if version < EthVersion::Eth69 {
                 StatusMessage::Legacy(Status::decode(buf)?)
+            } else {
+                StatusMessage::Eth69(StatusEth69::decode(buf)?)
             }),
             EthMessageID::NewBlockHashes => {
                 EthMessage::NewBlockHashes(NewBlockHashes::decode(buf)?)
@@ -113,22 +113,27 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
             }
             EthMessageID::GetReceipts => {
                 if version >= EthVersion::Eth70 {
-                    EthMessage::GetReceipts70(crate::receipts::GetReceipts70::decode(buf)?)
+                    EthMessage::GetReceipts70(RequestPair::decode(buf)?)
                 } else {
                     EthMessage::GetReceipts(RequestPair::decode(buf)?)
                 }
             }
             EthMessageID::Receipts => {
-                if version < EthVersion::Eth69 {
-                    EthMessage::Receipts(RequestPair::decode(buf)?)
-                } else if version < EthVersion::Eth70 {
-                    // with eth69, receipts no longer include the bloom
-                    EthMessage::Receipts69(RequestPair::decode(buf)?)
-                } else {
-                    // eth/70 continues to omit bloom filters and adds the
-                    // `lastBlockIncomplete` flag, encoded as
-                    // `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
-                    EthMessage::Receipts70(crate::receipts::Receipts70::<N::Receipt>::decode(buf)?)
+                match version {
+                    v if v >= EthVersion::Eth70 => {
+                        // eth/70 continues to omit bloom filters and adds the
+                        // `lastBlockIncomplete` flag, encoded as
+                        // `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
+                        EthMessage::Receipts70(RequestPair::decode(buf)?)
+                    }
+                    EthVersion::Eth69 => {
+                        // with eth69, receipts no longer include the bloom
+                        EthMessage::Receipts69(RequestPair::decode(buf)?)
+                    }
+                    _ => {
+                        // before eth69 we need to decode the bloom  as well
+                        EthMessage::Receipts(RequestPair::decode(buf)?)
+                    }
                 }
             }
             EthMessageID::BlockRangeUpdate => {
@@ -217,7 +222,7 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 /// The `eth/69` announces the historical block range served by the node. Removes total difficulty
 /// information. And removes the Bloom field from receipts transferred over the protocol.
 ///
-/// The `eth/70` (EIP-7975) keeps the eth/69 status format and introduces partial receipts
+/// The `eth/70` (EIP-7975) keeps the eth/69 status format and introduces partial receipts.
 /// requests/responses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
@@ -278,7 +283,7 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Note: Unlike earlier protocol versions, the eth/70 encoding for
     /// `GetReceipts` in EIP-7975 inlines the request id. The type still wraps
     /// a [`RequestPair`], but with a custom inline encoding.
-    GetReceipts70(GetReceipts70),
+    GetReceipts70(RequestPair<GetReceipts70>),
     /// Represents a Receipts request-response pair.
     #[cfg_attr(
         feature = "serde",
@@ -300,7 +305,7 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Note: The eth/70 encoding for `Receipts` in EIP-7975 inlines the
     /// request id. The type still wraps a [`RequestPair`], but with a custom
     /// inline encoding.
-    Receipts70(Receipts70<N::Receipt>),
+    Receipts70(RequestPair<Receipts70<N::Receipt>>),
     /// Represents a `BlockRangeUpdate` message broadcast to the network.
     #[cfg_attr(
         feature = "serde",
@@ -362,6 +367,34 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                 Self::BlockBodies(_) |
                 Self::NodeData(_)
         )
+    }
+
+    /// Converts the message types where applicable.
+    ///
+    /// This handles up/downcasting where appropriate, for example for different receipt request
+    /// types.
+    pub fn map_versioned(mut self, version: EthVersion) -> Self {
+        // For eth/70 peers we send `GetReceipts` using the new eth/70
+        // encoding with `firstBlockReceiptIndex = 0`, while keeping the
+        // user-facing `PeerRequest` API unchanged.
+        if version >= EthVersion::Eth70 {
+            return match self {
+                EthMessage::GetReceipts(pair) => {
+                    let RequestPair { request_id, message } = pair;
+                    let req = RequestPair {
+                        request_id,
+                        message: GetReceipts70 {
+                            first_block_receipt_index: 0,
+                            block_hashes: message.0,
+                        },
+                    };
+                    EthMessage::GetReceipts70(req)
+                }
+                other => other,
+            }
+        }
+
+        self
     }
 }
 

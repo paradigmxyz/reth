@@ -3,8 +3,8 @@
 use reth_eth_wire_types::{
     message::RequestPair, BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage,
     EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetPooledTransactions, GetReceipts, GetReceipts70, GetReceipts70Payload, NetworkPrimitives,
-    NodeData, PooledTransactions, Receipts, Receipts69, Receipts70Payload, UnifiedStatus,
+    GetPooledTransactions, GetReceipts, GetReceipts70, NetworkPrimitives, NodeData,
+    PooledTransactions, Receipts, Receipts69, Receipts70, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -243,9 +243,9 @@ pub enum PeerRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The response should be sent through the channel.
     GetReceipts70 {
         /// The request for receipts.
-        request: GetReceipts70Payload,
+        request: GetReceipts70,
         /// The channel to send the response for receipts.
-        response: oneshot::Sender<RequestResult<Receipts70Payload<N::Receipt>>>,
+        response: oneshot::Sender<RequestResult<Receipts70<N::Receipt>>>,
     },
 }
 
@@ -292,10 +292,7 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
                 EthMessage::GetReceipts(RequestPair { request_id, message: request.clone() })
             }
             Self::GetReceipts70 { request, .. } => {
-                EthMessage::GetReceipts70(GetReceipts70(RequestPair {
-                    request_id,
-                    message: request.clone(),
-                }))
+                EthMessage::GetReceipts70(RequestPair { request_id, message: request.clone() })
             }
         }
     }

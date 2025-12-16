@@ -10,8 +10,8 @@ use alloy_rlp::Encodable;
 use futures::StreamExt;
 use reth_eth_wire::{
     BlockBodies, BlockHeaders, EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, GetNodeData,
-    GetReceipts, GetReceipts70Payload, HeadersDirection, NetworkPrimitives, NodeData, Receipts,
-    Receipts69, Receipts70Payload,
+    GetReceipts, GetReceipts70, HeadersDirection, NetworkPrimitives, NodeData, Receipts,
+    Receipts69, Receipts70,
 };
 use reth_network_api::test_utils::PeersHandle;
 use reth_network_p2p::error::RequestResult;
@@ -221,12 +221,12 @@ where
     fn on_receipts70_request(
         &self,
         _peer_id: PeerId,
-        request: GetReceipts70Payload,
-        response: oneshot::Sender<RequestResult<Receipts70Payload<C::Receipt>>>,
+        request: GetReceipts70,
+        response: oneshot::Sender<RequestResult<Receipts70<C::Receipt>>>,
     ) {
         self.metrics.eth_receipts_requests_received_total.increment(1);
 
-        let GetReceipts70Payload { first_block_receipt_index, block_hashes } = request;
+        let GetReceipts70 { first_block_receipt_index, block_hashes } = request;
 
         let mut receipts = Vec::new();
         let mut total_bytes = 0usize;
@@ -275,7 +275,7 @@ where
             break;
         }
 
-        let _ = response.send(Ok(Receipts70Payload { last_block_incomplete, receipts }));
+        let _ = response.send(Ok(Receipts70 { last_block_incomplete, receipts }));
     }
 
     #[inline]
@@ -430,8 +430,8 @@ pub enum IncomingEthRequest<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The ID of the peer to request receipts from.
         peer_id: PeerId,
         /// The specific receipts requested including the `firstBlockReceiptIndex`.
-        request: GetReceipts70Payload,
+        request: GetReceipts70,
         /// The channel sender for the response containing Receipts70.
-        response: oneshot::Sender<RequestResult<Receipts70Payload<N::Receipt>>>,
+        response: oneshot::Sender<RequestResult<Receipts70<N::Receipt>>>,
     },
 }
