@@ -1,7 +1,10 @@
 //! Execution cache implementation for block processing.
+
+mod weighted_cache;
+
 use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::Gauge;
-use mini_moka::sync::CacheBuilder;
+use papaya::HashMap as PapayaMap;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
@@ -15,11 +18,17 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
 use revm_primitives::map::DefaultHashBuilder;
-use std::{sync::Arc, time::Duration};
+use std::{
+    fmt,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+};
 use tracing::{debug_span, instrument, trace};
+use weighted_cache::WeightedCache;
 
-pub(crate) type Cache<K, V> =
-    mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
+pub(crate) type Cache<K, V> = WeightedCache<K, V, alloy_primitives::map::DefaultHashBuilder>;
 
 /// A wrapper of a state provider and a shared cache.
 pub(crate) struct CachedStateProvider<S> {
@@ -117,7 +126,7 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         if let Some(res) = self.caches.account_cache.get(address) {
             self.metrics.account_cache_hits.increment(1);
-            return Ok(res)
+            return Ok(res);
         }
 
         self.metrics.account_cache_misses.increment(1);
@@ -359,14 +368,15 @@ impl ExecutionCache {
     where
         I: IntoIterator<Item = (StorageKey, Option<StorageValue>)>,
     {
-        let account_cache = self.storage_cache.get(&address).unwrap_or_default();
+        let (account_cache, _) = self
+            .storage_cache
+            .get_or_insert_with(address, || Arc::new(AccountStorageCache::default()));
 
         for (key, value) in storage_entries {
             account_cache.insert_storage(key, value);
         }
 
-        // Insert to the cache so that moka picks up on the changed size, even though the actual
-        // value (the Arc<AccountStorageCache>) is the same
+        // Re-insert to update weight tracking (the Arc value is the same, but weight may change)
         self.storage_cache.insert(address, account_cache);
     }
 
@@ -381,12 +391,21 @@ impl ExecutionCache {
 
     /// Invalidate storage for specific account
     pub(crate) fn invalidate_account_storage(&self, address: &Address) {
-        self.storage_cache.invalidate(address);
+        self.storage_cache.remove(address);
     }
 
     /// Returns the total number of storage slots cached across all accounts
     pub(crate) fn total_storage_slots(&self) -> usize {
-        self.storage_cache.iter().map(|addr| addr.len()).sum()
+        self.storage_cache.iter().into_iter().map(|(_, cache)| cache.len()).sum()
+    }
+
+    /// Evicts entries from all caches until they are at or below their capacity limits.
+    ///
+    /// This should be called manually (e.g., when saving the cache) to enforce weight limits.
+    pub(crate) fn evict_to_capacity(&self) {
+        self.code_cache.evict_to_capacity();
+        self.storage_cache.evict_to_capacity();
+        self.account_cache.evict_to_capacity();
     }
 
     /// Inserts the post-execution state changes into the cache.
@@ -435,8 +454,8 @@ impl ExecutionCache {
 
             // If the account was destroyed, invalidate from the account / storage caches
             if account.was_destroyed() {
-                // Invalidate the account cache entry if destroyed
-                self.account_cache.invalidate(addr);
+                // Remove the account cache entry if destroyed
+                self.account_cache.remove(addr);
 
                 self.invalidate_account_storage(addr);
                 continue
@@ -470,16 +489,38 @@ impl ExecutionCache {
 }
 
 /// A builder for [`ExecutionCache`].
-#[derive(Debug)]
-pub(crate) struct ExecutionCacheBuilder {
-    /// Code cache entries
-    code_cache_entries: u64,
+#[derive(Debug, Default)]
+pub(crate) struct ExecutionCacheBuilder;
 
-    /// Storage cache entries
-    storage_cache_entries: u64,
+/// Weigher function for storage cache entries.
+fn storage_weigher(_key: &Address, value: &Arc<AccountStorageCache>) -> u32 {
+    // values based on results from measure_storage_cache_overhead test
+    let base_weight = 39_000;
+    let slots_weight = value.len() * 218;
+    (base_weight + slots_weight) as u32
+}
 
-    /// Account cache entries
-    account_cache_entries: u64,
+/// Weigher function for account cache entries.
+fn account_weigher(_key: &Address, value: &Option<Account>) -> u32 {
+    // Account has a fixed size (none, balance, code_hash)
+    20 + std::mem::size_of_val(value) as u32
+}
+
+/// Weigher function for code cache entries.
+fn code_weigher(_key: &B256, value: &Option<Bytecode>) -> u32 {
+    let code_size = match value {
+        Some(bytecode) => {
+            // base weight + actual (padded) bytecode size + size of the jump table
+            (std::mem::size_of_val(value) +
+                bytecode.bytecode().len() +
+                bytecode
+                    .legacy_jump_table()
+                    .map(|table| table.as_slice().len())
+                    .unwrap_or_default()) as u32
+        }
+        None => std::mem::size_of_val(value) as u32,
+    };
+    32 + code_size
 }
 
 impl ExecutionCacheBuilder {
@@ -489,70 +530,11 @@ impl ExecutionCacheBuilder {
         let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
         let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
 
-        const EXPIRY_TIME: Duration = Duration::from_secs(7200); // 2 hours
-        const TIME_TO_IDLE: Duration = Duration::from_secs(3600); // 1 hour
-
-        let storage_cache = CacheBuilder::new(self.storage_cache_entries)
-            .weigher(|_key: &Address, value: &Arc<AccountStorageCache>| -> u32 {
-                // values based on results from measure_storage_cache_overhead test
-                let base_weight = 39_000;
-                let slots_weight = value.len() * 218;
-                (base_weight + slots_weight) as u32
-            })
-            .max_capacity(storage_cache_size)
-            .time_to_live(EXPIRY_TIME)
-            .time_to_idle(TIME_TO_IDLE)
-            .build_with_hasher(DefaultHashBuilder::default());
-
-        let account_cache = CacheBuilder::new(self.account_cache_entries)
-            .weigher(|_key: &Address, value: &Option<Account>| -> u32 {
-                // Account has a fixed size (none, balance,code_hash)
-                20 + size_of_val(value) as u32
-            })
-            .max_capacity(account_cache_size)
-            .time_to_live(EXPIRY_TIME)
-            .time_to_idle(TIME_TO_IDLE)
-            .build_with_hasher(DefaultHashBuilder::default());
-
-        let code_cache = CacheBuilder::new(self.code_cache_entries)
-            .weigher(|_key: &B256, value: &Option<Bytecode>| -> u32 {
-                let code_size = match value {
-                    Some(bytecode) => {
-                        // base weight + actual (padded) bytecode size + size of the jump table
-                        (size_of_val(value) +
-                            bytecode.bytecode().len() +
-                            bytecode
-                                .legacy_jump_table()
-                                .map(|table| table.as_slice().len())
-                                .unwrap_or_default()) as u32
-                    }
-                    None => size_of_val(value) as u32,
-                };
-                32 + code_size
-            })
-            .max_capacity(code_cache_size)
-            .time_to_live(EXPIRY_TIME)
-            .time_to_idle(TIME_TO_IDLE)
-            .build_with_hasher(DefaultHashBuilder::default());
+        let storage_cache = WeightedCache::new(storage_cache_size, storage_weigher);
+        let account_cache = WeightedCache::new(account_cache_size, account_weigher);
+        let code_cache = WeightedCache::new(code_cache_size, code_weigher);
 
         ExecutionCache { code_cache, storage_cache, account_cache }
-    }
-}
-
-impl Default for ExecutionCacheBuilder {
-    fn default() -> Self {
-        // With weigher and max_capacity in place, these numbers represent
-        // the maximum number of entries that can be stored, not the actual
-        // memory usage which is controlled by max_capacity.
-        //
-        // Code cache: up to 10M entries but limited to 0.5GB
-        // Storage cache: up to 10M accounts but limited to 8GB
-        // Account cache: up to 10M accounts but limited to 0.5GB
-        Self {
-            code_cache_entries: 10_000_000,
-            storage_cache_entries: 10_000_000,
-            account_cache_entries: 10_000_000,
-        }
     }
 }
 
@@ -620,21 +602,42 @@ impl SavedCache {
     }
 }
 
+/// Inner data for AccountStorageCache, wrapped in Arc for cheap cloning.
+struct AccountStorageCacheInner {
+    /// Map of storage keys to their cached values.
+    slots: PapayaMap<StorageKey, Option<StorageValue>, DefaultHashBuilder>,
+    /// Number of slots in the cache (tracked separately for O(1) len()).
+    slot_count: AtomicUsize,
+}
+
 /// Cache for an individual account's storage slots.
 ///
 /// This represents the second level of the hierarchical storage cache.
 /// Each account gets its own `AccountStorageCache` to store accessed storage slots.
-#[derive(Debug, Clone)]
+///
+/// This type is cheaply cloneable (just an Arc clone).
+#[derive(Clone)]
 pub(crate) struct AccountStorageCache {
-    /// Map of storage keys to their cached values.
-    slots: Cache<StorageKey, Option<StorageValue>>,
+    inner: Arc<AccountStorageCacheInner>,
+}
+
+impl fmt::Debug for AccountStorageCache {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("AccountStorageCache")
+            .field("slot_count", &self.inner.slot_count.load(Ordering::Relaxed))
+            .finish_non_exhaustive()
+    }
 }
 
 impl AccountStorageCache {
     /// Create a new [`AccountStorageCache`]
-    pub(crate) fn new(max_slots: u64) -> Self {
+    #[allow(unused)]
+    pub(crate) fn new(_max_slots: u64) -> Self {
         Self {
-            slots: CacheBuilder::new(max_slots).build_with_hasher(DefaultHashBuilder::default()),
+            inner: Arc::new(AccountStorageCacheInner {
+                slots: PapayaMap::with_hasher(DefaultHashBuilder::default()),
+                slot_count: AtomicUsize::new(0),
+            }),
         }
     }
 
@@ -643,30 +646,37 @@ impl AccountStorageCache {
     /// - `Empty`: The slot is empty
     /// - `Value`: The slot has a specific value
     pub(crate) fn get_storage(&self, key: &StorageKey) -> SlotStatus {
-        match self.slots.get(key) {
+        let guard = self.inner.slots.pin();
+        match guard.get(key) {
             None => SlotStatus::NotCached,
             Some(None) => SlotStatus::Empty,
-            Some(Some(value)) => SlotStatus::Value(value),
+            Some(Some(value)) => SlotStatus::Value(*value),
         }
     }
 
-    /// Insert a storage value
+    /// Insert a storage value. Uses a single map operation.
     pub(crate) fn insert_storage(&self, key: StorageKey, value: Option<StorageValue>) {
-        self.slots.insert(key, value);
+        let guard = self.inner.slots.pin();
+        // insert() returns None if new, Some(&old) if replaced
+        if guard.insert(key, value).is_none() {
+            self.inner.slot_count.fetch_add(1, Ordering::Relaxed);
+        }
     }
 
     /// Returns the number of slots in the cache
     pub(crate) fn len(&self) -> usize {
-        self.slots.entry_count() as usize
+        self.inner.slot_count.load(Ordering::Relaxed)
     }
 }
 
 impl Default for AccountStorageCache {
     fn default() -> Self {
-        // With weigher and max_capacity in place, this number represents
-        // the maximum number of entries that can be stored, not the actual
-        // memory usage which is controlled by storage cache's max_capacity.
-        Self::new(1_000_000)
+        Self {
+            inner: Arc::new(AccountStorageCacheInner {
+                slots: PapayaMap::with_hasher(DefaultHashBuilder::default()),
+                slot_count: AtomicUsize::new(0),
+            }),
+        }
     }
 }
 

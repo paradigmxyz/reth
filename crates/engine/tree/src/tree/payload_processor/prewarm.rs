@@ -272,6 +272,9 @@ where
                     return;
                 }
 
+                // Evict entries to enforce weight limits
+                new_cache.cache().evict_to_capacity();
+
                 new_cache.update_metrics();
 
                 // Replace the shared cache with the new one; the previous cache (if any) is
