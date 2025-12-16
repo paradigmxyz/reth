@@ -6,7 +6,7 @@ use crate::{
     error::{
         Eip4844PoolTransactionError, Eip7702PoolTransactionError, InvalidPoolTransactionError,
     },
-    metrics::TxPoolValidationMetrics,
+    metrics::{TxPoolValidationMetrics, TxPoolValidatorMetrics},
     traits::TransactionOrigin,
     validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
     Address, BlobTransactionSidecarVariant, EthBlobTransactionSidecar, EthPoolTransaction,
@@ -1203,7 +1203,11 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
 
         let to_validation_task = Arc::new(Mutex::new(tx));
 
-        TransactionValidationTaskExecutor { validator: Arc::new(validator), to_validation_task }
+        TransactionValidationTaskExecutor {
+            validator: Arc::new(validator),
+            to_validation_task,
+            metrics: TxPoolValidatorMetrics::default(),
+        }
     }
 }
 
