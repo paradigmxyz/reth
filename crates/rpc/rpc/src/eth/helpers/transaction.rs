@@ -19,6 +19,7 @@ use reth_transaction_pool::{
     error::Eip4844PoolTransactionError, AddedTransactionOutcome, EthBlobTransactionSidecar,
     EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
 };
+use tracing::instrument;
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
 where
@@ -36,6 +37,7 @@ where
         self.inner.send_raw_transaction_sync_timeout()
     }
 
+    #[instrument(skip_all)]
     async fn send_transaction(
         &self,
         tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,

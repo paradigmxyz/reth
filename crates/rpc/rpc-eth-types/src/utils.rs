@@ -4,6 +4,7 @@ use super::{EthApiError, EthResult};
 use alloy_consensus::TxReceipt;
 use reth_primitives_traits::{Recovered, SignedTransaction};
 use std::future::Future;
+use tracing::instrument;
 
 /// Calculates the gas used and next log index for a transaction at the given index
 pub fn calculate_gas_used_and_next_log_index(
@@ -32,6 +33,7 @@ pub fn calculate_gas_used_and_next_log_index(
 /// that the entire input buffer is consumed and no trailing bytes are allowed.
 ///
 /// See [`alloy_eips::eip2718::Decodable2718::decode_2718_exact`]
+#[instrument(skip_all)]
 pub fn recover_raw_transaction<T: SignedTransaction>(data: &[u8]) -> EthResult<Recovered<T>> {
     if data.is_empty() {
         return Err(EthApiError::EmptyRawTransactionData)

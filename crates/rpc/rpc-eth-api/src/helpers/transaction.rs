@@ -34,6 +34,7 @@ use reth_transaction_pool::{
     AddedTransactionOutcome, PoolPooledTx, PoolTransaction, TransactionOrigin, TransactionPool,
 };
 use std::{sync::Arc, time::Duration};
+use tracing::instrument;
 
 /// Transaction related functions for the [`EthApiServer`](crate::EthApiServer) trait in
 /// the `eth_` namespace.
@@ -74,6 +75,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
     /// Decodes and recovers the transaction and submits it to the pool.
     ///
     /// Returns the hash of the transaction.
+    #[instrument(skip_all)]
     fn send_raw_transaction(
         &self,
         tx: Bytes,
@@ -83,7 +85,8 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 .tracing_task_pool()
                 .spawn({
                     let tx = tx.clone();
-                    move || recover_raw_transaction(&tx)
+                    let span = tracing::Span::current();
+                    move || span.in_scope(|| recover_raw_transaction(&tx))
                 })
                 .await
                 .map_err(|_| EthApiError::InternalBlockingTaskError)??;

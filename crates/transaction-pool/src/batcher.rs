@@ -13,6 +13,7 @@ use std::{
     task::{ready, Context, Poll},
 };
 use tokio::sync::{mpsc, oneshot};
+use tracing::{Instrument, Span};
 
 /// A single batch transaction request
 /// All transactions processed through the batcher are considered local
@@ -23,6 +24,8 @@ pub struct BatchTxRequest<T: PoolTransaction> {
     pool_tx: T,
     /// Channel to send result back to caller
     response_tx: oneshot::Sender<Result<AddedTransactionOutcome, PoolError>>,
+    /// Span for tracing
+    span: Span,
 }
 
 impl<T> BatchTxRequest<T>
@@ -30,11 +33,11 @@ where
     T: PoolTransaction,
 {
     /// Create a new batch transaction request
-    pub const fn new(
+    pub fn new(
         pool_tx: T,
         response_tx: oneshot::Sender<Result<AddedTransactionOutcome, PoolError>>,
     ) -> Self {
-        Self { pool_tx, response_tx }
+        Self { pool_tx, response_tx, span: Span::current() }
     }
 }
 
@@ -66,8 +69,9 @@ where
     }
 
     async fn process_request(pool: &Pool, req: BatchTxRequest<Pool::Transaction>) {
-        let BatchTxRequest { pool_tx, response_tx } = req;
-        let pool_result = pool.add_transaction(TransactionOrigin::Local, pool_tx).await;
+        let BatchTxRequest { pool_tx, response_tx, span } = req;
+        let pool_result =
+            pool.add_transaction(TransactionOrigin::Local, pool_tx).instrument(span).await;
         let _ = response_tx.send(pool_result);
     }
 

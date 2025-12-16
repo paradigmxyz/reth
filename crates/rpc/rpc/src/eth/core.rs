@@ -34,6 +34,7 @@ use reth_transaction_pool::{
     BatchTxProcessor, BatchTxRequest, TransactionPool,
 };
 use tokio::sync::{broadcast, mpsc, Mutex, Semaphore};
+use tracing::instrument;
 
 const DEFAULT_BROADCAST_CAPACITY: usize = 2000;
 
@@ -547,6 +548,7 @@ where
 
     /// Adds an _unvalidated_ transaction into the pool via the transaction batch sender.
     #[inline]
+    #[instrument(skip_all)]
     pub async fn add_pool_transaction(
         &self,
         transaction: <N::Pool as TransactionPool>::Transaction,
