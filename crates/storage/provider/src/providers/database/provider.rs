@@ -969,6 +969,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ///
     /// Since RocksDB `WriteBatch` follows "last write wins" for the same key, we must deduplicate
     /// changesets to ensure we unwind to the *earliest* block number.
+    ///
+    /// Example: Unwinding blocks 101 and 100 for `AddressA`.
+    /// - If processed in order (101, 100), the batch contains `[Put(A, State@101), Put(A, State@100)]`.
+    ///   Result: `State@100` (Correct).
+    /// - If processed out of order (100, 101), the batch contains `[Put(A, State@100), Put(A, State@101)]`.
+    ///   Result: `State@101` (Incorrect - 101 should be unwound).
+    ///
     /// Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
     #[cfg(all(unix, feature = "rocksdb"))]
     fn unwind_account_history_indices_rocksdb<'a>(
@@ -1035,6 +1042,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ///
     /// Since RocksDB `WriteBatch` follows "last write wins" for the same key, we must deduplicate
     /// changesets to ensure we unwind to the *earliest* block number.
+    ///
+    /// Example: Unwinding blocks 101 and 100 for `AddressA`.
+    /// - If processed in order (101, 100), the batch contains `[Put(A, State@101), Put(A, State@100)]`.
+    ///   Result: `State@100` (Correct).
+    /// - If processed out of order (100, 101), the batch contains `[Put(A, State@100), Put(A, State@101)]`.
+    ///   Result: `State@101` (Incorrect - 101 should be unwound).
+    ///
     /// Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
     #[cfg(all(unix, feature = "rocksdb"))]
     fn unwind_storage_history_indices_rocksdb(
