@@ -21,18 +21,20 @@ pub struct GetReceipts(
 ///
 /// When used with eth/70, the request id is carried by the surrounding
 /// [`crate::message::RequestPair`], and the on-wire shape is the flattened list
-/// `[request-id, firstBlockReceiptIndex, [blockhash₁, ...]]`.
+/// `firstBlockReceiptIndex, [blockhash₁, ...]`.
+///
+/// See also [eip-7975](https://eips.ethereum.org/EIPS/eip-7975)
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct GetReceipts70Payload {
+pub struct GetReceipts70 {
     /// Index into the receipts of the first requested block hash.
     pub first_block_receipt_index: u64,
     /// The block hashes to request receipts for.
     pub block_hashes: Vec<B256>,
 }
 
-impl alloy_rlp::Encodable for GetReceipts70Payload {
+impl alloy_rlp::Encodable for GetReceipts70 {
     fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
         self.first_block_receipt_index.encode(out);
         self.block_hashes.encode(out);
@@ -43,34 +45,11 @@ impl alloy_rlp::Encodable for GetReceipts70Payload {
     }
 }
 
-impl alloy_rlp::Decodable for GetReceipts70Payload {
+impl alloy_rlp::Decodable for GetReceipts70 {
     fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
         let first_block_receipt_index = u64::decode(buf)?;
         let block_hashes = Vec::<B256>::decode(buf)?;
         Ok(Self { first_block_receipt_index, block_hashes })
-    }
-}
-
-/// Helper type for the full eth/70 request carrying the request id alongside
-/// the payload.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct GetReceipts70(pub crate::message::RequestPair<GetReceipts70Payload>);
-
-impl alloy_rlp::Encodable for GetReceipts70 {
-    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.0.encode(out);
-    }
-
-    fn length(&self) -> usize {
-        self.0.length()
-    }
-}
-
-impl alloy_rlp::Decodable for GetReceipts70 {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        crate::message::RequestPair::<GetReceipts70Payload>::decode(buf).map(Self)
     }
 }
 
@@ -145,14 +124,14 @@ impl<T: TxReceipt> From<Receipts69<T>> for Receipts<T> {
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct Receipts70Payload<T = Receipt> {
+pub struct Receipts70<T = Receipt> {
     /// Whether the receipts list for the last block is incomplete.
     pub last_block_incomplete: bool,
     /// Receipts grouped by block.
     pub receipts: Vec<Vec<T>>,
 }
 
-impl<T> alloy_rlp::Encodable for Receipts70Payload<T>
+impl<T> alloy_rlp::Encodable for Receipts70<T>
 where
     T: alloy_rlp::Encodable,
 {
@@ -166,7 +145,7 @@ where
     }
 }
 
-impl<T> alloy_rlp::Decodable for Receipts70Payload<T>
+impl<T> alloy_rlp::Decodable for Receipts70<T>
 where
     T: alloy_rlp::Decodable,
 {
@@ -177,36 +156,7 @@ where
     }
 }
 
-/// Helper type for the full eth/70 response carrying the request id alongside
-/// the payload.
-#[derive(Clone, Debug, PartialEq, Eq)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
-#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
-pub struct Receipts70<T = Receipt>(pub crate::message::RequestPair<Receipts70Payload<T>>);
-
-impl<T> alloy_rlp::Encodable for Receipts70<T>
-where
-    T: alloy_rlp::Encodable,
-{
-    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
-        self.0.encode(out);
-    }
-
-    fn length(&self) -> usize {
-        self.0.length()
-    }
-}
-
-impl<T> alloy_rlp::Decodable for Receipts70<T>
-where
-    T: alloy_rlp::Decodable,
-{
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        crate::message::RequestPair::<Receipts70Payload<T>>::decode(buf).map(Self)
-    }
-}
-
-impl<T: TxReceipt> Receipts70Payload<T> {
+impl<T: TxReceipt> Receipts70<T> {
     /// Encodes all receipts with the bloom filter.
     ///
     /// Just like eth/69, eth/70 does not transmit bloom filters over the wire.
@@ -225,7 +175,7 @@ impl<T: TxReceipt> Receipts70Payload<T> {
 
 impl<T: TxReceipt> From<Receipts70<T>> for Receipts<T> {
     fn from(receipts: Receipts70<T>) -> Self {
-        receipts.0.message.into_with_bloom()
+        receipts.into_with_bloom()
     }
 }
 
@@ -382,16 +332,16 @@ mod tests {
 
     #[test]
     fn encode_get_receipts70_inline_shape() {
-        let req = GetReceipts70(RequestPair {
+        let req = RequestPair {
             request_id: 1111,
-            message: GetReceipts70Payload {
+            message: GetReceipts70 {
                 first_block_receipt_index: 0,
                 block_hashes: vec![
                     hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
                     hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
                 ],
             },
-        });
+        };
 
         let mut out = vec![];
         req.encode(&mut out);
@@ -411,19 +361,17 @@ mod tests {
         assert_eq!(payload_start - buf.len(), header.payload_length);
 
         let mut buf = out.as_slice();
-        let decoded = GetReceipts70::decode(&mut buf).unwrap();
+        let decoded = RequestPair::<GetReceipts70>::decode(&mut buf).unwrap();
         assert!(buf.is_empty(), "buffer not fully consumed on decode");
         assert_eq!(decoded, req);
     }
 
     #[test]
     fn encode_receipts70_inline_shape() {
-        let payload: Receipts70Payload<Receipt> = Receipts70Payload {
-            last_block_incomplete: true,
-            receipts: vec![vec![Receipt::default()]],
-        };
+        let payload: Receipts70<Receipt> =
+            Receipts70 { last_block_incomplete: true, receipts: vec![vec![Receipt::default()]] };
 
-        let resp = Receipts70(RequestPair { request_id: 7, message: payload });
+        let resp = RequestPair { request_id: 7, message: payload };
 
         let mut out = vec![];
         resp.encode(&mut out);
@@ -443,7 +391,7 @@ mod tests {
         assert_eq!(receipts[0].len(), 1);
 
         let mut buf = out.as_slice();
-        let decoded = Receipts70::decode(&mut buf).unwrap();
+        let decoded = RequestPair::<Receipts70>::decode(&mut buf).unwrap();
         assert!(buf.is_empty(), "buffer not fully consumed on decode");
         assert_eq!(decoded, resp);
     }

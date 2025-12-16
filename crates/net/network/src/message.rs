@@ -3,7 +3,7 @@
 //! An `RLPx` stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
-use crate::types::Receipts69;
+use crate::types::{Receipts69, Receipts70};
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
@@ -11,7 +11,7 @@ use reth_eth_wire::{
     message::RequestPair, BlockBodies, BlockHeaders, BlockRangeUpdate, EthMessage,
     EthNetworkPrimitives, GetBlockBodies, GetBlockHeaders, NetworkPrimitives, NewBlock,
     NewBlockHashes, NewBlockPayload, NewPooledTransactionHashes, NodeData, PooledTransactions,
-    Receipts, Receipts70, Receipts70Payload, SharedTransactions, Transactions,
+    Receipts, SharedTransactions, Transactions,
 };
 use reth_eth_wire_types::RawCapabilityMessage;
 use reth_network_api::PeerRequest;
@@ -119,7 +119,7 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a response to a request for receipts using eth/70.
     Receipts70 {
         /// The receiver channel for the response to a receipts request.
-        response: oneshot::Receiver<RequestResult<Receipts70Payload<N::Receipt>>>,
+        response: oneshot::Receiver<RequestResult<Receipts70<N::Receipt>>>,
     },
 }
 
@@ -181,7 +181,7 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Represents a result containing receipts or an error for eth/69.
     Receipts69(RequestResult<Vec<Vec<N::Receipt>>>),
     /// Represents a result containing receipts or an error for eth/70.
-    Receipts70(RequestResult<Receipts70Payload<N::Receipt>>),
+    Receipts70(RequestResult<Receipts70<N::Receipt>>),
 }
 
 // === impl PeerResponseResult ===
@@ -222,7 +222,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts70(resp) => match resp {
                 Ok(res) => {
                     let request = RequestPair { request_id: id, message: res };
-                    Ok(EthMessage::Receipts70(Receipts70(request)))
+                    Ok(EthMessage::Receipts70(request))
                 }
                 Err(err) => Err(err),
             },

@@ -109,11 +109,6 @@ impl UnifiedStatus {
         }
     }
 
-    /// Consume this `UnifiedStatus` and produce the [`StatusEth70`] message used by `eth/70`.
-    pub fn into_eth70(self) -> StatusEth70 {
-        self.into_eth69()
-    }
-
     /// Convert this `UnifiedStatus` into the appropriate `StatusMessage` variant based on version.
     pub fn into_message(self) -> StatusMessage {
         if self.version >= EthVersion::Eth69 {
@@ -382,9 +377,6 @@ impl Debug for StatusEth69 {
         }
     }
 }
-
-/// Share eth/69 status with eth/70
-pub type StatusEth70 = StatusEth69;
 
 /// `StatusMessage` can store either the Legacy version (with TD), or the eth/69+/eth/70 version
 /// (omits TD, includes block range).

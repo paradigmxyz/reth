@@ -12,7 +12,7 @@
 extern crate alloc;
 
 mod status;
-pub use status::{Status, StatusBuilder, StatusEth69, StatusEth70, StatusMessage, UnifiedStatus};
+pub use status::{Status, StatusBuilder, StatusEth69, StatusMessage, UnifiedStatus};
 
 pub mod version;
 pub use version::{EthVersion, ProtocolVersion};
