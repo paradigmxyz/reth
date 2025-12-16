@@ -1502,9 +1502,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
         #[cfg(all(unix, feature = "rocksdb"))]
-        let rocks_provider = self.rocksdb_provider.clone();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocks_tx = rocks_provider.tx();
+        let rocks_tx = self.rocksdb_provider.tx();
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocks_tx_ref = &rocks_tx;
         #[cfg(not(all(unix, feature = "rocksdb")))]
