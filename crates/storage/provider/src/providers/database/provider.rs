@@ -817,7 +817,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             // delete old shard so new one can be inserted.
             cursor.delete_current()?;
             let list = list.iter().collect::<Vec<_>>();
-            return Ok(list);
+            return Ok(list)
         }
         Ok(Vec::new())
     }
@@ -1009,16 +1009,16 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
 
                 // Case 1: Entire shard is at or above the unwinding point
                 if first >= rem_index {
-                    continue;
+                    continue
                 }
                 // Case 2: Boundary shard (spans across the unwinding point)
                 if rem_index <= sharded_key.highest_block_number {
                     partial_shard = list.iter().take_while(|i| *i < rem_index).collect();
-                    break;
+                    break
                 }
                 // Case 3: Entire shard is below the unwinding point
                 partial_shard = list.iter().collect();
-                break;
+                break
             }
 
             // Reinsert the partial shard if not empty
