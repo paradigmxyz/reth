@@ -1,7 +1,7 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
 use reth_db_api::{
     table::{Compress, Decompress, Encode, Table},
-    DatabaseError,
+    tables, DatabaseError,
 };
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
@@ -141,6 +141,18 @@ impl RocksDBBuilder {
     pub fn with_table<T: Table>(mut self) -> Self {
         self.column_families.push(T::NAME.to_string());
         self
+    }
+
+    /// Registers the default tables used by reth for `RocksDB` storage.
+    ///
+    /// This registers:
+    /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
+    /// - [`tables::AccountsHistory`] - Account history index
+    /// - [`tables::StoragesHistory`] - Storage history index
+    pub fn with_default_tables(self) -> Self {
+        self.with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
     }
 
     /// Enables metrics.
@@ -630,9 +642,37 @@ const fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{TxHash, B256};
-    use reth_db_api::{table::Table, tables};
+    use alloy_primitives::{Address, TxHash, B256};
+    use reth_db_api::{
+        models::{sharded_key::ShardedKey, storage_sharded_key::StorageShardedKey, IntegerList},
+        table::Table,
+        tables,
+    };
     use tempfile::TempDir;
+
+    #[test]
+    fn test_with_default_tables_registers_required_column_families() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Build with default tables
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        // Should be able to write/read TransactionHashNumbers
+        let tx_hash = TxHash::from(B256::from([1u8; 32]));
+        provider.put::<tables::TransactionHashNumbers>(tx_hash, &100).unwrap();
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(tx_hash).unwrap(), Some(100));
+
+        // Should be able to write/read AccountsHistory
+        let key = ShardedKey::new(Address::ZERO, 100);
+        let value = IntegerList::default();
+        provider.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::AccountsHistory>(key).unwrap().is_some());
+
+        // Should be able to write/read StoragesHistory
+        let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 100);
+        provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
+    }
 
     #[derive(Debug)]
     struct TestTable;
