@@ -723,7 +723,7 @@ mod rocksdb_tests {
 
         // Read via RocksTx
         let tx = provider.tx();
-        let result = tx.get::<tables::StoragesHistory>(key.clone()).unwrap();
+        let result = tx.get::<tables::StoragesHistory>(key).unwrap();
         assert_eq!(result, Some(value));
 
         // Test missing key
@@ -746,7 +746,7 @@ mod rocksdb_tests {
 
         // Read via RocksTx
         let tx = provider.tx();
-        let result = tx.get::<tables::AccountsHistory>(key.clone()).unwrap();
+        let result = tx.get::<tables::AccountsHistory>(key).unwrap();
         assert_eq!(result, Some(value));
 
         // Test missing key
