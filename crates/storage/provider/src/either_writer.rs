@@ -585,8 +585,7 @@ where
             Self::Database(cursor, _) => {
                 let start = StorageShardedKey::new(address, storage_key, 0);
                 let mut out = Vec::new();
-                let mut walker = cursor.walk(Some(start))?;
-                while let Some(entry) = walker.next() {
+                for entry in cursor.walk(Some(start))? {
                     let (key, value) = entry.map_err(ProviderError::from)?;
                     if key.address != address || key.sharded_key.key != storage_key {
                         break;
@@ -642,8 +641,7 @@ where
             Self::Database(cursor, _) => {
                 let start = ShardedKey::new(address, 0);
                 let mut out = Vec::new();
-                let mut walker = cursor.walk(Some(start))?;
-                while let Some(entry) = walker.next() {
+                for entry in cursor.walk(Some(start))? {
                     let (key, value) = entry.map_err(ProviderError::from)?;
                     if key.key != address {
                         break;
