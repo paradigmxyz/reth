@@ -145,6 +145,7 @@ where
         let transaction_count_hint = self.transaction_count_hint;
         let span = Span::current();
 
+        // TODO: thread name
         self.executor.spawn_blocking(move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
@@ -179,7 +180,10 @@ where
                     break;
                 }
 
+                // TODO: this index is incorrect, these indexes are not actual order indexes, so we need to get on `pending` channel `(idx, tx)`
                 let indexed_tx = IndexedTransaction { index: tx_index, tx };
+                // TODO: this check is hit by every Tempo transaction, we should expose a `is_system_tx` on tx itself
+                // TODO: maybe even more remove it altogether? idk how useful
                 let is_system_tx = indexed_tx.tx.tx().ty() > MAX_STANDARD_TX_TYPE;
 
                 // System transactions (type > 4) in the first position set critical metadata
@@ -265,6 +269,10 @@ where
                 let new_cache = SavedCache::new(hash, caches, cache_metrics);
 
                 // Insert state into cache while holding the lock
+                //
+                // TODO: this is very slow because we do cache invalidations on every cache update,
+                // instead we should do it once after payload validation before receiving the next
+                // payload
                 if new_cache.cache().insert_state(&state).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
@@ -322,6 +330,8 @@ where
                     trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
                     final_block_output = Some(block_output);
 
+                    // We can't just exit here because there may be prewarm tasks that are still
+                    // updating the cache
                     if finished_execution {
                         // all tasks are done, we can exit, which will save caches and exit
                         break
@@ -358,6 +368,7 @@ where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
 {
+    // TOOD: maybe Arc these two fields
     pub(super) env: ExecutionEnv<Evm>,
     pub(super) evm_config: Evm,
     pub(super) saved_cache: Option<SavedCache>,
@@ -511,10 +522,16 @@ where
 
             // Only send outcome for transactions after the first txn
             // as the main execution will be just as fast
+            //
+            // TODO: share current transaction index between execution and prewarming to skip txs
+            // that we already executed
             if index > 0 {
                 let _enter =
                     debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm outcome", index, tx_hash=%tx.tx().tx_hash())
                         .entered();
+                // TODO: `multiproof_targets_from_state` calculates keccaks for address and storage
+                // slots, maybe we should pre-calculate them in the beginning of newPayload to it's
+                // cached by keccak impl?
                 let (targets, storage_targets) = multiproof_targets_from_state(res.state);
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });

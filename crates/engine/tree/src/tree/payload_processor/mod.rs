@@ -249,6 +249,7 @@ where
         let multi_proof_task = MultiProofTask::new(
             proof_handle.clone(),
             to_sparse_trie,
+            // TOOD: benchmark on Tempo with disabled chunking
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
         );
 
@@ -278,6 +279,7 @@ where
             )
         } else {
             // Normal path: spawn with full prewarming
+            // TODO: rename the method to mention prewarming
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
@@ -293,6 +295,7 @@ where
             let _enter = parent_span.entered();
             // Build a state provider for the multiproof task
             let provider = provider_builder.build().expect("failed to build provider");
+            // TODO: look through MultiProofTask::run and whether we're doing it the best way
             multi_proof_task.run(provider);
         });
 
@@ -371,6 +374,7 @@ where
         // to the execution task in order.
         self.executor.spawn_blocking(move || {
             let mut next_for_execution = 0;
+            // TODO: maybe reuse allocation, check profiles
             let mut queue = BTreeMap::new();
             while let Ok((idx, tx)) = ooo_rx.recv() {
                 if next_for_execution == idx {
@@ -410,6 +414,7 @@ where
             transactions = mpsc::channel().1;
         }
 
+        // TODO: maybe refactor so it's not some some some
         let (saved_cache, cache, cache_metrics) = if self.disable_state_cache {
             (None, None, None)
         } else {
@@ -443,6 +448,7 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
+            // TODO: add name for this thread
             self.executor.spawn_blocking(move || {
                 prewarm_task.run(transactions, to_prewarm_task);
             });
@@ -750,6 +756,8 @@ impl ExecutionCache {
 
         cache
             .as_ref()
+            // TODO: add comment on why we're doing is_available: because cache updates can happen
+            // in background by other threads
             .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())
             .cloned()
     }

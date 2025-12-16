@@ -150,6 +150,8 @@ impl ProofWorkerHandle {
             let work_rx_clone = storage_work_rx.clone();
             let storage_available_workers_clone = storage_available_workers.clone();
 
+            // TODO: add name to this executor so we can differentiate proof task worker threads in
+            // Samply easier
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();

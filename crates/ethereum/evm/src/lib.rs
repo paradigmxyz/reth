@@ -292,6 +292,7 @@ where
         &self,
         payload: &ExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
+        // Cloning transactions is cheap here because `Bytes` is cheap to clone
         let txs = payload.payload.transactions().clone();
         let convert = |tx: Bytes| {
             let tx =

@@ -494,6 +494,10 @@ impl ExecutionCacheBuilder {
 
         let storage_cache = CacheBuilder::new(self.storage_cache_entries)
             .weigher(|_key: &Address, value: &Arc<AccountStorageCache>| -> u32 {
+                // TODO: this can't be done by just doing `value.len()` because it's slow, and we
+                // can't keep a usize counter in `AccountStorageCache` because cache can be evicted
+                // in background my moka itself
+                //
                 // values based on results from measure_storage_cache_overhead test
                 let base_weight = 39_000;
                 let slots_weight = value.len() * 218;

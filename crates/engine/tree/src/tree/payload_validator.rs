@@ -361,6 +361,8 @@ where
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "state provider").entered();
+        // input to this method
+        // TODO: deduplicate with another `state_provider_builder` and get `provider_builder` as
         let Some(provider_builder) =
             ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
         else {
@@ -375,6 +377,8 @@ where
         drop(_enter);
 
         // fetch parent block
+        // TODO: add comments that it goes to memory most of the time UNLESS parent block is beyond
+        // in-memory buffer
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
@@ -399,6 +403,7 @@ where
             "Decided which state root algorithm to run"
         );
 
+        // TODO: wrong comment vvv
         // use prewarming background task
         let txs = self.tx_iterator_for(&input)?;
 
@@ -553,6 +558,7 @@ where
         }
 
         // terminate prewarming task with good state output
+        // TODO: Arc the output state here, so that we don't clone it in caching
         handle.terminate_caching(Some(&output.state));
 
         Ok(self.spawn_deferred_trie_task(
@@ -627,6 +633,7 @@ where
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let mut executor = self.evm_config.create_executor(evm, ctx);
 
+        // TODO: measure how long does this take and maybe initialize once and re-use
         if !self.config.precompile_cache_disabled() {
             // Only cache pure precompiles to avoid issues with stateful precompiles
             executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
@@ -800,6 +807,7 @@ where
             StateRootStrategy::StateRootTask => {
                 // Compute trie input
                 let trie_input_start = Instant::now();
+                // TOOD: spawn prewarming and tx decoding and recovery before this
                 let (trie_input, block_hash) = self.compute_trie_input(parent_hash, state)?;
 
                 // Create OverlayStateProviderFactory with sorted trie data for multiproofs

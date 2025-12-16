@@ -1459,6 +1459,7 @@ impl MultiProofTask {
 ///
 /// Contains processing state that persists across loop iterations.
 struct MultiproofBatchCtx {
+    // TODO: mention `process_multiproof_message` and `try_recv` batching in the comment
     /// Buffers a non-matching message type encountered during batching.
     /// Processed first in next iteration to preserve ordering while allowing same-type
     /// messages to batch.

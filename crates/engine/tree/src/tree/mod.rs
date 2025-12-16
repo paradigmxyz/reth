@@ -116,6 +116,8 @@ where
     P: BlockReader + StateProviderFactory + StateReader + Clone,
 {
     /// Creates a new state provider from this builder.
+    /// TODO: maybe clone mdbx transaction because it allows to do so (need to use MDBX API for
+    /// that)
     pub fn build(&self) -> ProviderResult<StateProviderBox> {
         let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
         if let Some(overlay) = self.overlay.clone() {
@@ -2465,6 +2467,7 @@ where
         let block_num_hash = block_id.block;
         debug!(target: "engine::tree", block=?block_num_hash, parent = ?block_id.parent, "Inserting new block into tree");
 
+        // TODO: do in parallel because it can go to database
         match self.sealed_header_by_hash(block_num_hash.hash) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
@@ -2508,6 +2511,7 @@ where
         }
 
         // determine whether we are on a fork chain
+        // TODO: get rid of this as we only use it for the event, can make it simpler
         let is_fork = match self.is_fork(block_id) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
@@ -2808,6 +2812,8 @@ where
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone,
     {
+        // TODO: fix issues with going to historical instead of latest (problematic with persistence
+        // racing with validation)
         if let Some((historical, blocks)) = self.state.tree_state.blocks_by_hash(hash) {
             debug!(target: "engine::tree", %hash, %historical, "found canonical state for block in memory, creating provider builder");
             // the block leads back to the canonical chain
