@@ -44,9 +44,9 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
 // Helper types so constructors stay exported even when RocksDB feature is off.
 // Historical data tables use a write-only RocksDB batch (no read-your-writes needed).
 #[cfg(all(unix, feature = "rocksdb"))]
-type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
+type RocksBatchArg<'a> = &'a mut crate::providers::rocksdb::RocksDBBatch;
 #[cfg(not(all(unix, feature = "rocksdb")))]
-type RocksBatchArg<'a> = ();
+type RocksBatchArg<'a> = &'a mut ();
 
 #[cfg(all(unix, feature = "rocksdb"))]
 type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
@@ -61,8 +61,9 @@ pub enum EitherWriter<'a, CURSOR, N> {
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
     /// Write to `RocksDB` using a write-only batch (historical tables).
+    /// The batch is borrowed from `DatabaseProvider` and committed at provider commit time.
     #[cfg(all(unix, feature = "rocksdb"))]
-    RocksDB(RocksDBBatch<'a>),
+    RocksDB(&'a mut RocksDBBatch),
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -211,18 +212,6 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
             Self::StaticFile(writer) => writer.ensure_at_block(block_number),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
-        }
-    }
-
-    /// Consumes the writer and returns the underlying `RocksDB` batch if present.
-    ///
-    /// Returns `Some(batch)` for [`Self::RocksDB`], `None` for other variants.
-    /// The caller is responsible for committing the batch.
-    #[cfg(all(unix, feature = "rocksdb"))]
-    pub fn into_rocksdb_batch(self) -> Option<RocksDBBatch<'a>> {
-        match self {
-            Self::RocksDB(batch) => Some(batch),
-            _ => None,
         }
     }
 }

@@ -21,6 +21,13 @@ use std::{
     time::Instant,
 };
 
+/// Result of seeking an account history shard.
+///
+/// Returns `(has_previous_shard, matching_shard)` where `matching_shard` is the shard
+/// whose `highest_block_number >= target`, or `None` if no such shard exists.
+pub(crate) type AccountHistoryShardSeekResult =
+    ProviderResult<(bool, Option<(ShardedKey<Address>, BlockNumberList)>)>;
+
 /// Default cache size for `RocksDB` block cache (128 MB).
 const DEFAULT_CACHE_SIZE: usize = 128 << 20;
 
@@ -224,14 +231,23 @@ macro_rules! compress_to_buf_or_ref {
 
 /// `RocksDB` provider for auxiliary storage layer beside main database MDBX.
 #[derive(Debug)]
-pub struct RocksDBProvider(Arc<RocksDBProviderInner>);
+pub struct RocksDBProvider(pub(crate) Arc<RocksDBProviderInner>);
 
 /// Inner state for `RocksDB` provider.
-struct RocksDBProviderInner {
+pub(crate) struct RocksDBProviderInner {
     /// `RocksDB` database instance with transaction support.
-    db: TransactionDB,
+    pub(crate) db: TransactionDB,
     /// Metrics latency & operations.
-    metrics: Option<RocksDBMetrics>,
+    pub(crate) metrics: Option<RocksDBMetrics>,
+}
+
+impl RocksDBProviderInner {
+    /// Gets the column family handle for a table.
+    pub(crate) fn get_cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
+        self.db
+            .cf_handle(T::NAME)
+            .ok_or_else(|| DatabaseError::Other(format!("Column family '{}' not found", T::NAME)))
+    }
 }
 
 impl fmt::Debug for RocksDBProviderInner {
@@ -271,13 +287,10 @@ impl RocksDBProvider {
     /// Creates a new batch for atomic writes.
     ///
     /// Use [`Self::write_batch`] for closure-based atomic writes.
-    /// Use this method when the batch needs to be held by [`crate::EitherWriter`].
-    pub fn batch(&self) -> RocksDBBatch<'_> {
-        RocksDBBatch {
-            provider: self,
-            inner: WriteBatchWithTransaction::<true>::default(),
-            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
-        }
+    /// Use this method when the batch needs to be held by [`crate::EitherWriter`]
+    /// or stored in `DatabaseProvider`.
+    pub fn batch(&self) -> RocksDBBatch {
+        RocksDBBatch::new(self.0.clone())
     }
 
     /// Gets the column family handle for a table.
@@ -373,7 +386,7 @@ impl RocksDBProvider {
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
-        F: FnOnce(&mut RocksDBBatch<'_>) -> ProviderResult<()>,
+        F: FnOnce(&mut RocksDBBatch) -> ProviderResult<()>,
     {
         self.execute_with_operation_metric(RocksDBOperation::BatchWrite, "Batch", |this| {
             let mut batch_handle = this.batch();
@@ -392,17 +405,19 @@ impl RocksDBProvider {
 ///
 /// Note: `WriteBatch` operations are applied in order. If the same key is updated multiple times,
 /// the last update wins. Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
+///
+/// This type owns an `Arc<RocksDBProviderInner>` to allow storing it in `DatabaseProvider`
+/// without lifetime issues.
 #[must_use = "batch must be committed"]
-pub struct RocksDBBatch<'a> {
-    provider: &'a RocksDBProvider,
+pub struct RocksDBBatch {
+    provider: Arc<RocksDBProviderInner>,
     inner: WriteBatchWithTransaction<true>,
     buf: Vec<u8>,
 }
 
-impl fmt::Debug for RocksDBBatch<'_> {
+impl fmt::Debug for RocksDBBatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RocksDBBatch")
-            .field("provider", &self.provider)
             .field("batch", &"<WriteBatchWithTransaction>")
             // Number of operations in this batch
             .field("length", &self.inner.len())
@@ -413,7 +428,16 @@ impl fmt::Debug for RocksDBBatch<'_> {
     }
 }
 
-impl<'a> RocksDBBatch<'a> {
+impl RocksDBBatch {
+    /// Creates a new batch for the given provider.
+    pub(crate) fn new(provider: Arc<RocksDBProviderInner>) -> Self {
+        Self {
+            provider,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+        }
+    }
+
     /// Puts a value into the batch.
     pub fn put<T: Table>(&mut self, key: T::Key, value: &T::Value) -> ProviderResult<()> {
         let encoded_key = key.encode();
@@ -441,7 +465,7 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// This consumes the batch and writes all operations atomically to `RocksDB`.
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.0.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
+        self.provider.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -567,7 +591,7 @@ impl<'db> RocksTx<'db> {
         &self,
         address: Address,
         target: BlockNumber,
-    ) -> ProviderResult<(bool, Option<(ShardedKey<Address>, BlockNumberList)>)> {
+    ) -> AccountHistoryShardSeekResult {
         let start = ShardedKey::new(address, 0);
         let mut iter = self.iter_from::<reth_db_api::tables::AccountsHistory>(start)?;
         let mut has_prev = false;

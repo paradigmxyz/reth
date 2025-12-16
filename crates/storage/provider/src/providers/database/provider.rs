@@ -167,6 +167,10 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// Single `RocksDB` batch for this provider's lifetime.
+    /// All `RocksDB` writes accumulate here and commit together at provider commit time.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pending_rocks_batch: std::sync::Mutex<crate::providers::rocksdb::RocksDBBatch>,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
 }
@@ -273,7 +277,8 @@ impl<TX: Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> C
 
 impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-write transaction.
-    pub const fn new_rw(
+    #[allow(clippy::missing_const_for_fn)] // Cannot be const when rocksdb feature is enabled
+    pub fn new_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
@@ -289,6 +294,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             prune_modes,
             storage,
             storage_settings,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            pending_rocks_batch: std::sync::Mutex::new(rocksdb_provider.batch()),
             rocksdb_provider,
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
@@ -528,7 +535,8 @@ where
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
-    pub const fn new(
+    #[allow(clippy::missing_const_for_fn)] // Cannot be const when rocksdb feature is enabled
+    pub fn new(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
@@ -544,6 +552,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             prune_modes,
             storage,
             storage_settings,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            pending_rocks_batch: std::sync::Mutex::new(rocksdb_provider.batch()),
             rocksdb_provider,
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
@@ -567,6 +577,17 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Returns a reference to the chain specification.
     pub fn chain_spec(&self) -> &N::ChainSpec {
         &self.chain_spec
+    }
+}
+
+impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
+    /// Returns mutable access to the `RocksDB` batch for this provider.
+    ///
+    /// All writes accumulate in this batch and are committed together at provider commit time.
+    /// The returned guard releases the lock when dropped.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn rocks_batch(&self) -> std::sync::MutexGuard<'_, crate::providers::rocksdb::RocksDBBatch> {
+        self.pending_rocks_batch.lock().expect("rocks batch mutex poisoned")
     }
 }
 
@@ -865,6 +886,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ///
     /// Only modifies the last shard (with `highest_block_number == u64::MAX`) for each key,
     /// preserving all earlier shards. This matches the MDBX `append_history_index` behavior.
+    ///
+    /// Writes accumulate in the provider's shared batch and commit at provider commit time.
     #[cfg(all(unix, feature = "rocksdb"))]
     fn append_account_history_index_rocksdb(
         &self,
@@ -873,8 +896,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let rocks_tx = self.rocksdb_provider.tx();
         let mut reader = EitherReader::new_accounts_history(self, &rocks_tx)?;
 
-        let rocks_batch = self.rocksdb_provider.batch();
-        let mut writer = EitherWriter::new_accounts_history(self, rocks_batch)?;
+        let mut rocks_batch = self.rocks_batch();
+        let mut writer = EitherWriter::new_accounts_history(self, &mut rocks_batch)?;
 
         for (address, indices) in account_transitions {
             // Only fetch and modify the last shard (highest_block_number == u64::MAX)
@@ -906,9 +929,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             }
         }
 
-        if let Some(batch) = writer.into_rocksdb_batch() {
-            batch.commit()?;
-        }
+        // Batch commits at provider commit time
         Ok(())
     }
 
@@ -916,6 +937,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ///
     /// Only modifies the last shard (with `highest_block_number == u64::MAX`) for each key,
     /// preserving all earlier shards. This matches the MDBX `append_history_index` behavior.
+    ///
+    /// Writes accumulate in the provider's shared batch and commit at provider commit time.
     #[cfg(all(unix, feature = "rocksdb"))]
     fn append_storage_history_index_rocksdb(
         &self,
@@ -924,8 +947,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let rocks_tx = self.rocksdb_provider.tx();
         let mut reader = EitherReader::new_storages_history(self, &rocks_tx)?;
 
-        let rocks_batch = self.rocksdb_provider.batch();
-        let mut writer = EitherWriter::new_storages_history(self, rocks_batch)?;
+        let mut rocks_batch = self.rocks_batch();
+        let mut writer = EitherWriter::new_storages_history(self, &mut rocks_batch)?;
 
         for ((address, storage_key), indices) in storage_transitions {
             // Only fetch and modify the last shard (highest_block_number == u64::MAX)
@@ -957,9 +980,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             }
         }
 
-        if let Some(batch) = writer.into_rocksdb_batch() {
-            batch.commit()?;
-        }
+        // Batch commits at provider commit time
         Ok(())
     }
 
@@ -977,6 +998,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ///   State@101)]`. Result: `State@101` (Incorrect - 101 should be unwound).
     ///
     /// Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
+    ///
+    /// Writes accumulate in the provider's shared batch and commit at provider commit time.
     #[cfg(all(unix, feature = "rocksdb"))]
     fn unwind_account_history_indices_rocksdb<'a>(
         &self,
@@ -992,8 +1015,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let rocks_tx = self.rocksdb_provider.tx();
         let mut reader = EitherReader::new_accounts_history(self, &rocks_tx)?;
 
-        let rocks_batch = self.rocksdb_provider.batch();
-        let mut writer = EitherWriter::new_accounts_history(self, rocks_batch)?;
+        let mut rocks_batch = self.rocks_batch();
+        let mut writer = EitherWriter::new_accounts_history(self, &mut rocks_batch)?;
 
         for &(address, rem_index) in &last_indices {
             // Read all shards for this address (sorted by highest_block_number ascending)
@@ -1030,9 +1053,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             }
         }
 
-        if let Some(batch) = writer.into_rocksdb_batch() {
-            batch.commit()?;
-        }
+        // Batch commits at provider commit time
         Ok(last_indices.len())
     }
 
@@ -1050,6 +1071,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ///   State@101)]`. Result: `State@101` (Incorrect - 101 should be unwound).
     ///
     /// Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
+    ///
+    /// Writes accumulate in the provider's shared batch and commit at provider commit time.
     #[cfg(all(unix, feature = "rocksdb"))]
     fn unwind_storage_history_indices_rocksdb(
         &self,
@@ -1068,8 +1091,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let rocks_tx = self.rocksdb_provider.tx();
         let mut reader = EitherReader::new_storages_history(self, &rocks_tx)?;
 
-        let rocks_batch = self.rocksdb_provider.batch();
-        let mut writer = EitherWriter::new_storages_history(self, rocks_batch)?;
+        let mut rocks_batch = self.rocks_batch();
+        let mut writer = EitherWriter::new_storages_history(self, &mut rocks_batch)?;
 
         for &(address, storage_key, rem_index) in &storage_changesets {
             // Read all shards for this address/storage_key (sorted by highest_block_number
@@ -1107,9 +1130,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
             }
         }
 
-        if let Some(batch) = writer.into_rocksdb_batch() {
-            batch.commit()?;
-        }
+        // Batch commits at provider commit time
         Ok(storage_changesets.len())
     }
 }
@@ -3163,19 +3184,20 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
             #[cfg(all(unix, feature = "rocksdb"))]
-            let rocks_batch = self.rocksdb_provider.batch();
+            let mut rocks_batch = self.rocks_batch();
             #[cfg(not(all(unix, feature = "rocksdb")))]
-            let rocks_batch = ();
+            let mut unit = ();
 
-            let mut writer = EitherWriter::new_transaction_hash_numbers(self, rocks_batch)?;
+            #[cfg(all(unix, feature = "rocksdb"))]
+            let mut writer = EitherWriter::new_transaction_hash_numbers(self, &mut rocks_batch)?;
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            let mut writer = EitherWriter::new_transaction_hash_numbers(self, &mut unit)?;
+
             for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
                 let hash = transaction.tx_hash();
                 writer.put_transaction_hash_number(*hash, tx_num)?;
             }
-            #[cfg(all(unix, feature = "rocksdb"))]
-            if let Some(batch) = writer.into_rocksdb_batch() {
-                batch.commit()?;
-            }
+            // Batch commits at provider commit time
             durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
         }
 
@@ -3284,18 +3306,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         if unwind_tx_from <= unwind_tx_to {
             #[cfg(all(unix, feature = "rocksdb"))]
-            let rocks_batch = self.rocksdb_provider.batch();
+            let mut rocks_batch = self.rocks_batch();
             #[cfg(not(all(unix, feature = "rocksdb")))]
-            let rocks_batch = ();
+            let mut unit = ();
 
-            let mut writer = EitherWriter::new_transaction_hash_numbers(self, rocks_batch)?;
+            #[cfg(all(unix, feature = "rocksdb"))]
+            let mut writer = EitherWriter::new_transaction_hash_numbers(self, &mut rocks_batch)?;
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            let mut writer = EitherWriter::new_transaction_hash_numbers(self, &mut unit)?;
+
             for (hash, _) in self.transaction_hashes_by_range(unwind_tx_from..(unwind_tx_to + 1))? {
                 writer.delete_transaction_hash_number(hash)?;
             }
-            #[cfg(all(unix, feature = "rocksdb"))]
-            if let Some(batch) = writer.into_rocksdb_batch() {
-                batch.commit()?;
-            }
+            // Batch commits at provider commit time
         }
 
         EitherWriter::new_senders(self, last_block_number)?.prune_senders(unwind_tx_from, block)?;
@@ -3481,15 +3504,39 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
     /// Commit database transaction and static files.
     fn commit(self) -> ProviderResult<bool> {
+        // Commit ordering ensures consistency between storage layers on crash recovery.
+        //
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just
-        // truncate the static files according to the
-        // checkpoints on the next start-up.
+        // truncate the static files according to the checkpoints on the next start-up.
+        //
+        // Forward: static_files → rocks → mdbx
+        // Unwind:  mdbx → rocks → static_files
         if self.static_file_provider.has_unwind_queued() {
+            // Unwind: mdbx → rocks → static_files
             self.tx.commit()?;
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batch = self.pending_rocks_batch.into_inner().expect("rocks batch poisoned");
+                if !batch.is_empty() {
+                    batch.commit()?;
+                }
+            }
+
             self.static_file_provider.commit()?;
         } else {
+            // Forward: static_files → rocks → mdbx
             self.static_file_provider.commit()?;
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batch = self.pending_rocks_batch.into_inner().expect("rocks batch poisoned");
+                if !batch.is_empty() {
+                    batch.commit()?;
+                }
+            }
+
             self.tx.commit()?;
         }
 
