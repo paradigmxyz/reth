@@ -1,5 +1,5 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
-use alloy_primitives::{Address, B256, BlockNumber};
+use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::{Compress, Decompress, Encode, Table},

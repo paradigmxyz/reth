@@ -354,8 +354,7 @@ where
     fn account_history_lookup_rocksdb(&self, address: Address) -> ProviderResult<HistoryInfo> {
         let rocks_provider = self.provider.rocksdb_provider();
         let rocks_tx = rocks_provider.tx();
-        let (has_prev, shard) =
-            rocks_tx.seek_account_history_shard(address, self.block_number)?;
+        let (has_prev, shard) = rocks_tx.seek_account_history_shard(address, self.block_number)?;
 
         Ok(self.history_info_from_shard(
             has_prev,
