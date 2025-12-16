@@ -42,7 +42,7 @@ jobs:
           echo "Binaries SHA256 on ${{ matrix.machine }}: $(cat checksum.sha256)"
 
       - name: Upload the hash
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: checksum-${{ matrix.machine }}
           path: |
