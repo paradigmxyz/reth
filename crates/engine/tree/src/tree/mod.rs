@@ -1345,7 +1345,6 @@ where
         pending_termination: oneshot::Sender<()>,
     ) -> Result<(), AdvancePersistenceError> {
         let result = self.persist_until_complete();
-        // Always signal completion, even on error
         let _ = pending_termination.send(());
         result
     }
