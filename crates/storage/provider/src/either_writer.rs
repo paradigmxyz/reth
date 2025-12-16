@@ -208,24 +208,6 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
             Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
-
-    /// Commits `RocksDB` writes if this is a `RocksDB` writer.
-    ///
-    /// For [`Self::Database`] and [`Self::StaticFile`], this is a no-op as they use
-    /// different commit patterns (MDBX transaction commit, static file sync).
-    ///
-    /// # Commit Order
-    ///
-    /// Call this AFTER the outer MDBX transaction commits successfully. This ensures
-    /// that if `RocksDB` commit fails, the primary data (MDBX) is still intact and
-    /// the `RocksDB` data (which is derived) can be rebuilt.
-    #[cfg(all(unix, feature = "rocksdb"))]
-    pub fn commit(self) -> ProviderResult<()> {
-        match self {
-            Self::Database(_) | Self::StaticFile(_) => Ok(()),
-            Self::RocksDB(mode) => mode.commit(),
-        }
-    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
