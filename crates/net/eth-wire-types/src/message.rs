@@ -379,7 +379,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
         // user-facing `PeerRequest` API unchanged.
         if version >= EthVersion::Eth70 {
             return match self {
-                EthMessage::GetReceipts(pair) => {
+                Self::GetReceipts(pair) => {
                     let RequestPair { request_id, message } = pair;
                     let req = RequestPair {
                         request_id,
@@ -388,7 +388,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
                             block_hashes: message.0,
                         },
                     };
-                    EthMessage::GetReceipts70(req)
+                    Self::GetReceipts70(req)
                 }
                 other => other,
             }
