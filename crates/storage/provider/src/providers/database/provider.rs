@@ -966,6 +966,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// RocksDB-specific implementation of unwind account history indices.
     ///
     /// Replicates the `unwind_history_shards` logic but using `EitherReader`/`EitherWriter`.
+    ///
+    /// Unlike MDBX (where cursor writes are immediately visible), `RocksDB` reads from a snapshot
+    /// and writes to a batch. If the same address appears multiple times in changesets,
+    /// the last batch write wins. We must deduplicate by address and keep only the minimum
+    /// block number to ensure correct unwinding.
     #[cfg(all(unix, feature = "rocksdb"))]
     fn unwind_account_history_indices_rocksdb<'a>(
         &self,
@@ -973,7 +978,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ) -> ProviderResult<usize> {
         let mut last_indices =
             changesets.map(|(index, account)| (account.address, *index)).collect::<Vec<_>>();
-        last_indices.sort_by_key(|(a, _)| *a);
+        // Sort by (address, block_number) so the smallest block number comes first for each address
+        last_indices.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
+        // Deduplicate by address, keeping only the first (smallest block number) entry
+        last_indices.dedup_by_key(|(a, _)| *a);
 
         let rocks_tx = self.rocksdb_provider.tx();
         let mut reader = EitherReader::new_accounts_history(self, &rocks_tx)?;
@@ -1025,6 +1033,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// RocksDB-specific implementation of unwind storage history indices.
     ///
     /// Replicates the `unwind_history_shards` logic but using `EitherReader`/`EitherWriter`.
+    ///
+    /// Unlike MDBX (where cursor writes are immediately visible), `RocksDB` reads from a snapshot
+    /// and writes to a batch. If the same `(address, storage_key)` appears multiple times in
+    /// changesets, the last batch write wins. We must deduplicate and keep only the minimum
+    /// block number to ensure correct unwinding.
     #[cfg(all(unix, feature = "rocksdb"))]
     fn unwind_storage_history_indices_rocksdb(
         &self,
@@ -1033,7 +1046,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let mut storage_changesets = changesets
             .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
             .collect::<Vec<_>>();
-        storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
+        // Sort by (address, storage_key, block_number) so smallest block number comes first
+        storage_changesets.sort_unstable_by(|a, b| {
+            a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then_with(|| a.2.cmp(&b.2))
+        });
+        // Deduplicate by (address, storage_key), keeping only the first (smallest block number)
+        storage_changesets.dedup_by_key(|(address, key, _)| (*address, *key));
 
         let rocks_tx = self.rocksdb_provider.tx();
         let mut reader = EitherReader::new_storages_history(self, &rocks_tx)?;
