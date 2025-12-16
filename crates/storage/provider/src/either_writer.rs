@@ -1,5 +1,5 @@
 //! Generic reader and writer abstractions for interacting with database tables, static files, or
-//! RocksDB.
+//! `RocksDB`.
 
 use std::{marker::PhantomData, ops::Range};
 
@@ -9,7 +9,7 @@ use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
 use reth_db::{
     cursor::DbCursorRO,
     static_file::TransactionSenderMask,
@@ -211,6 +211,18 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
             Self::StaticFile(writer) => writer.ensure_at_block(block_number),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
+        }
+    }
+
+    /// Consumes the writer and returns the underlying `RocksDB` batch if present.
+    ///
+    /// Returns `Some(batch)` for [`Self::RocksDB`], `None` for other variants.
+    /// The caller is responsible for committing the batch.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pub fn into_rocksdb_batch(self) -> Option<RocksDBBatch<'a>> {
+        match self {
+            Self::RocksDB(batch) => Some(batch),
+            _ => None,
         }
     }
 }
@@ -559,6 +571,46 @@ where
             Self::RocksDB(tx) => tx.get::<tables::StoragesHistory>(key),
         }
     }
+
+    /// Reads all history shards for a given address and storage key.
+    ///
+    /// Returns all `(StorageShardedKey, BlockNumberList)` pairs for the address/key combination,
+    /// ordered by `highest_block_number`. Used for prefix iteration over sharded storage history.
+    pub fn read_storage_history_shards(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+    ) -> ProviderResult<Vec<(StorageShardedKey, BlockNumberList)>> {
+        match self {
+            Self::Database(cursor, _) => {
+                let start = StorageShardedKey::new(address, storage_key, 0);
+                let mut out = Vec::new();
+                let mut walker = cursor.walk(Some(start))?;
+                while let Some(entry) = walker.next() {
+                    let (key, value) = entry.map_err(ProviderError::from)?;
+                    if key.address != address || key.sharded_key.key != storage_key {
+                        break;
+                    }
+                    out.push((key, value));
+                }
+                Ok(out)
+            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => {
+                let start = StorageShardedKey::new(address, storage_key, 0);
+                let mut out = Vec::new();
+                for entry in tx.iter_from::<tables::StoragesHistory>(start)? {
+                    let (key, value) = entry?;
+                    if key.address != address || key.sharded_key.key != storage_key {
+                        break;
+                    }
+                    out.push((key, value));
+                }
+                Ok(out)
+            }
+        }
+    }
 }
 
 impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
@@ -575,6 +627,45 @@ where
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::AccountsHistory>(key),
+        }
+    }
+
+    /// Reads all history shards for a given address.
+    ///
+    /// Returns all `(ShardedKey, BlockNumberList)` pairs for the address, ordered by
+    /// `highest_block_number`. Used for prefix iteration over sharded history data.
+    pub fn read_account_history_shards(
+        &mut self,
+        address: Address,
+    ) -> ProviderResult<Vec<(ShardedKey<Address>, BlockNumberList)>> {
+        match self {
+            Self::Database(cursor, _) => {
+                let start = ShardedKey::new(address, 0);
+                let mut out = Vec::new();
+                let mut walker = cursor.walk(Some(start))?;
+                while let Some(entry) = walker.next() {
+                    let (key, value) = entry.map_err(ProviderError::from)?;
+                    if key.key != address {
+                        break;
+                    }
+                    out.push((key, value));
+                }
+                Ok(out)
+            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => {
+                let start = ShardedKey::new(address, 0);
+                let mut out = Vec::new();
+                for entry in tx.iter_from::<tables::AccountsHistory>(start)? {
+                    let (key, value) = entry?;
+                    if key.key != address {
+                        break;
+                    }
+                    out.push((key, value));
+                }
+                Ok(out)
+            }
         }
     }
 }
