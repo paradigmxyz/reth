@@ -21,7 +21,7 @@ use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::prelude::*;
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
@@ -318,36 +318,32 @@ where
         usize,
     ) {
         let (transactions, convert) = transactions.into();
-        let transactions = transactions.into_iter();
-        // Get the transaction count for prewarming task
-        // Use upper bound if available (more accurate), otherwise use lower bound
-        let (lower, upper) = transactions.size_hint();
-        let transaction_count_hint = upper.unwrap_or(lower);
+        let transactions = transactions.into_par_iter();
+        let transaction_count_hint = transactions.len();
 
-        // Spawn a task that iterates through all transactions in parallel and sends them to the
-        // main task.
-        let (tx, rx) = mpsc::channel();
+        let (ooo_tx, ooo_rx) = mpsc::channel();
+        let (prewarm_tx, prewarm_rx) = mpsc::channel();
+        let (execute_tx, execute_rx) = mpsc::channel();
+
+        // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
         self.executor.spawn_blocking(move || {
-            transactions.enumerate().par_bridge().for_each_with(tx, |sender, (idx, tx)| {
+            transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
                 let tx = convert(tx);
                 let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
-                let _ = sender.send((idx, tx));
+                // Only send Ok(_) variants to prewarming task.
+                if let Ok(tx) = &tx {
+                    let _ = prewarm_tx.send(tx.clone());
+                }
+                let _ = ooo_tx.send((idx, tx));
             });
         });
 
         // Spawn a task that processes out-of-order transactions from the task above and sends them
-        // to prewarming and execution tasks.
-        let (prewarm_tx, prewarm_rx) = mpsc::channel();
-        let (execute_tx, execute_rx) = mpsc::channel();
+        // to the execution task in order.
         self.executor.spawn_blocking(move || {
             let mut next_for_execution = 0;
             let mut queue = BTreeMap::new();
-            while let Ok((idx, tx)) = rx.recv() {
-                // only send Ok(_) variants to prewarming task
-                if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
-                }
-
+            while let Ok((idx, tx)) = ooo_rx.recv() {
                 if next_for_execution == idx {
                     let _ = execute_tx.send(tx);
                     next_for_execution += 1;
@@ -1059,19 +1055,16 @@ mod tests {
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
-        let mut handle =
-            payload_processor.spawn(
-                Default::default(),
-                (
-                    core::iter::empty::<
-                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                    >(),
-                    std::convert::identity,
-                ),
-                StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-                OverlayStateProviderFactory::new(provider_factory),
-                &TreeConfig::default(),
-            );
+        let mut handle = payload_processor.spawn(
+            Default::default(),
+            (
+                Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
+                std::convert::identity,
+            ),
+            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+            OverlayStateProviderFactory::new(provider_factory),
+            &TreeConfig::default(),
+        );
 
         let mut state_hook = handle.state_hook();
 

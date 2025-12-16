@@ -2,4 +2,4 @@
 
 mod metrics;
 mod provider;
-pub use provider::{RocksDBBuilder, RocksDBProvider, RocksTx};
+pub use provider::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksTx};
