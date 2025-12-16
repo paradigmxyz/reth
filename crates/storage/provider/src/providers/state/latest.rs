@@ -100,8 +100,12 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
     }
 
     fn storage_root_from_nodes(&self, address: Address, input: TrieInput) -> ProviderResult<B256> {
-        StorageRoot::overlay_root_from_nodes(self.tx(), address, input)
-            .map_err(|err| ProviderError::Database(err.into()))
+        StorageRoot::overlay_root_from_nodes(
+            self.tx(),
+            address,
+            TrieInputSorted::from_unsorted(input),
+        )
+        .map_err(|err| ProviderError::Database(err.into()))
     }
 
     fn storage_proof(
@@ -120,8 +124,13 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
         slot: B256,
         input: TrieInput,
     ) -> ProviderResult<reth_trie::StorageProof> {
-        StorageProof::overlay_storage_proof_from_nodes(self.tx(), address, slot, input)
-            .map_err(ProviderError::from)
+        StorageProof::overlay_storage_proof_from_nodes(
+            self.tx(),
+            address,
+            slot,
+            TrieInputSorted::from_unsorted(input),
+        )
+        .map_err(ProviderError::from)
     }
 
     fn storage_multiproof(
@@ -140,8 +149,13 @@ impl<Provider: DBProvider + Sync> StorageRootProvider for LatestStateProviderRef
         slots: &[B256],
         input: TrieInput,
     ) -> ProviderResult<StorageMultiProof> {
-        StorageProof::overlay_storage_multiproof_from_nodes(self.tx(), address, slots, input)
-            .map_err(ProviderError::from)
+        StorageProof::overlay_storage_multiproof_from_nodes(
+            self.tx(),
+            address,
+            slots,
+            TrieInputSorted::from_unsorted(input),
+        )
+        .map_err(ProviderError::from)
     }
 }
 

@@ -10,6 +10,7 @@ use reth_provider::{test_utils::create_test_provider_factory, StateWriter, TrieW
 use reth_storage_api::{noop::NoopProvider, BlockHashReader};
 use reth_trie::{
     updates::TrieUpdates, HashedPostState, HashedStorage, StateRoot, StorageRoot, TrieInput,
+    TrieInputSorted,
 };
 use reth_trie_db::{DatabaseStateRoot, DatabaseStorageRoot};
 use std::collections::HashMap;
@@ -154,14 +155,14 @@ fn bench_storage_root_with_cache(c: &mut Criterion) {
         }
         let changed_storage = HashedStorage { wiped: false, storage: changed_storage_map };
 
-        // Build TrieInput with cached nodes
+        // Build TrieInputSorted with cached nodes
         let cached_trie_input = {
             let mut trie_updates = TrieUpdates::default();
             trie_updates.insert_storage_updates(hashed_address, cached_storage_updates);
 
             let mut input = TrieInput::from_hashed_storage(hashed_address, changed_storage.clone());
             input.nodes = trie_updates;
-            input
+            TrieInputSorted::from_unsorted(input)
         };
 
         group.bench_function(BenchmarkId::new("with_cached_nodes", name), |b| {
