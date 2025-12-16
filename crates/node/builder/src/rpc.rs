@@ -41,7 +41,9 @@ use std::{
     fmt::{self, Debug},
     future::Future,
     ops::{Deref, DerefMut},
+    sync::Arc,
 };
+use tokio::sync::{oneshot, Mutex};
 
 /// Contains the handles to the spawned RPC servers.
 ///
@@ -319,6 +321,51 @@ where
     }
 }
 
+/// Handle to trigger graceful engine shutdown.
+///
+/// This handle can be used to request a graceful shutdown of the engine,
+/// which will persist all remaining in-memory blocks before terminating.
+#[derive(Clone, Debug)]
+pub struct EngineShutdown {
+    /// Channel to send shutdown signal.
+    tx: Arc<Mutex<Option<oneshot::Sender<EngineShutdownRequest>>>>,
+}
+
+impl EngineShutdown {
+    /// Creates a new [`EngineShutdown`] handle and returns the receiver.
+    pub fn new() -> (Self, oneshot::Receiver<EngineShutdownRequest>) {
+        let (tx, rx) = oneshot::channel();
+        (Self { tx: Arc::new(Mutex::new(Some(tx))) }, rx)
+    }
+
+    /// Requests a graceful engine shutdown.
+    ///
+    /// All remaining in-memory blocks will be persisted before the engine terminates.
+    ///
+    /// Returns a future that resolves when the shutdown is complete, or `None`
+    /// if shutdown was already requested.
+    pub async fn shutdown(&self) -> Option<oneshot::Receiver<()>> {
+        let mut guard = self.tx.lock().await;
+        let tx = guard.take()?;
+        let (done_tx, done_rx) = oneshot::channel();
+        let _ = tx.send(EngineShutdownRequest { done_tx });
+        Some(done_rx)
+    }
+}
+
+impl Default for EngineShutdown {
+    fn default() -> Self {
+        Self { tx: Arc::new(Mutex::new(None)) }
+    }
+}
+
+/// Request to shutdown the engine.
+#[derive(Debug)]
+pub struct EngineShutdownRequest {
+    /// Channel to signal shutdown completion.
+    pub done_tx: oneshot::Sender<()>,
+}
+
 /// Handle to the launched RPC servers.
 pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     /// Handles to launched servers.
@@ -332,6 +379,8 @@ pub struct RpcHandle<Node: FullNodeComponents, EthApi: EthApiTypes> {
     pub engine_events: EventSender<ConsensusEngineEvent<<Node::Types as NodeTypes>::Primitives>>,
     /// Handle to the beacon consensus engine.
     pub beacon_engine_handle: ConsensusEngineHandle<<Node::Types as NodeTypes>::Payload>,
+    /// Handle to trigger engine shutdown.
+    pub engine_shutdown: EngineShutdown,
 }
 
 impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandle<Node, EthApi> {
@@ -341,6 +390,7 @@ impl<Node: FullNodeComponents, EthApi: EthApiTypes> Clone for RpcHandle<Node, Et
             rpc_registry: self.rpc_registry.clone(),
             engine_events: self.engine_events.clone(),
             beacon_engine_handle: self.beacon_engine_handle.clone(),
+            engine_shutdown: self.engine_shutdown.clone(),
         }
     }
 }
@@ -361,6 +411,7 @@ where
         f.debug_struct("RpcHandle")
             .field("rpc_server_handles", &self.rpc_server_handles)
             .field("rpc_registry", &self.rpc_registry)
+            .field("engine_shutdown", &self.engine_shutdown)
             .finish()
     }
 }
@@ -956,6 +1007,7 @@ where
             rpc_registry: registry,
             engine_events,
             beacon_engine_handle: engine_handle,
+            engine_shutdown: EngineShutdown::default(),
         })
     }
 

@@ -277,6 +277,8 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
+    /// Termination signal sender, set when shutdown is requested.
+    pending_termination: Option<oneshot::Sender<()>>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -301,6 +303,7 @@ where
             .field("metrics", &self.metrics)
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
+            .field("pending_termination", &self.pending_termination)
             .finish()
     }
 }
@@ -357,6 +360,7 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
+            pending_termination: None,
         }
     }
 
@@ -423,6 +427,14 @@ where
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
         loop {
+            // If termination is requested, finish persistence and exit
+            if let Some(tx) = self.pending_termination.take() {
+                if let Err(err) = self.finish_termination(tx) {
+                    error!(target: "engine::tree", %err, "Termination failed");
+                }
+                return
+            }
+
             match self.try_recv_engine_message() {
                 Ok(Some(msg)) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
@@ -1302,22 +1314,7 @@ where
             // Check if persistence has complete
             match rx.try_recv() {
                 Ok(last_persisted_hash_num) => {
-                    self.metrics.engine.persistence_duration.record(start_time.elapsed());
-                    let Some(BlockNumHash {
-                        hash: last_persisted_block_hash,
-                        number: last_persisted_block_number,
-                    }) = last_persisted_hash_num
-                    else {
-                        // if this happened, then we persisted no blocks because we sent an
-                        // empty vec of blocks
-                        warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
-                        return Ok(())
-                    };
-
-                    debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
-                    self.persistence_state
-                        .finish(last_persisted_block_hash, last_persisted_block_number);
-                    self.on_new_persisted_block()?;
+                    self.on_persistence_complete(last_persisted_hash_num, start_time)?;
                 }
                 Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
                 Err(TryRecvError::Empty) => {
@@ -1330,11 +1327,65 @@ where
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
             } else if self.should_persist() {
-                let blocks_to_persist = self.get_canonical_blocks_to_persist()?;
+                let blocks_to_persist =
+                    self.get_canonical_blocks_to_persist(PersistTarget::Threshold)?;
                 self.persist_blocks(blocks_to_persist);
             }
         }
 
+        Ok(())
+    }
+
+    /// Finishes termination by persisting all remaining blocks and signaling completion.
+    ///
+    /// This blocks until all persistence is complete.
+    fn finish_termination(
+        &mut self,
+        pending_termination: oneshot::Sender<()>,
+    ) -> Result<(), AdvancePersistenceError> {
+
+        loop {
+            // Wait for any in-progress persistence to complete (blocking)
+            if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
+                let result = rx.blocking_recv().map_err(|_| TryRecvError::Closed)?;
+                self.on_persistence_complete(result, start_time)?;
+            }
+
+            let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
+
+            if blocks_to_persist.is_empty() {
+                debug!(target: "engine::tree", "persistence complete, signaling termination");
+                let _ = pending_termination.send(());
+                return Ok(())
+            }
+
+            debug!(target: "engine::tree", count = blocks_to_persist.len(), "persisting remaining blocks before shutdown");
+            self.persist_blocks(blocks_to_persist);
+        }
+    }
+
+    /// Handles a completed persistence task.
+    fn on_persistence_complete(
+        &mut self,
+        last_persisted_hash_num: Option<BlockNumHash>,
+        start_time: Instant,
+    ) -> Result<(), AdvancePersistenceError> {
+        self.metrics.engine.persistence_duration.record(start_time.elapsed());
+
+        let Some(BlockNumHash {
+            hash: last_persisted_block_hash,
+            number: last_persisted_block_number,
+        }) = last_persisted_hash_num
+        else {
+            // if this happened, then we persisted no blocks because we sent an
+            // empty vec of blocks
+            warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
+            return Ok(())
+        };
+
+        debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
+        self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
+        self.on_new_persisted_block()?;
         Ok(())
     }
 
@@ -1352,10 +1403,9 @@ where
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl)?;
                 }
-                FromOrchestrator::Terminate {
-
-                } => {
-                    todo!("trigger remaining persistence")
+                FromOrchestrator::Terminate { tx } => {
+                    debug!(target: "engine::tree", "received terminate request");
+                    self.pending_termination = Some(tx);
                 }
             },
             FromEngine::Request(request) => {
@@ -1706,10 +1756,10 @@ where
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range
-    /// `(last_persisted_number .. canonical_head - threshold]`. The expected
-    /// order is oldest -> newest.
+    /// `(last_persisted_number .. target]`. The expected order is oldest -> newest.
     fn get_canonical_blocks_to_persist(
         &self,
+        target: PersistTarget,
     ) -> Result<Vec<ExecutedBlock<N>>, AdvancePersistenceError> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
@@ -1720,9 +1770,12 @@ where
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
-        // Persist only up to block buffer target
-        let target_number =
-            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+        let target_number = match target {
+            PersistTarget::Head => canonical_head_number,
+            PersistTarget::Threshold => {
+                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
+            }
+        };
 
         debug!(
             target: "engine::tree",
@@ -2864,4 +2917,13 @@ pub enum InsertPayloadOk {
     AlreadySeen(BlockStatus),
     /// The payload was valid and inserted into the tree.
     Inserted(BlockStatus),
+}
+
+/// Target for block persistence.
+#[derive(Debug, Clone, Copy)]
+enum PersistTarget {
+    /// Persist up to `canonical_head - memory_block_buffer_target`.
+    Threshold,
+    /// Persist all blocks up to and including the canonical head.
+    Head,
 }
