@@ -69,17 +69,15 @@ impl<V: TransactionValidator> ValidationTask<V> {
 
         loop {
             // Lock the receiver and batch receive transactions
-            let count = {
-                let mut jobs = self.validation_jobs.lock().await;
-                jobs.recv_many(&mut buffer, Self::BATCH_SIZE).await
-            };
-
-            self.metrics.inflight_validation_jobs.decrement(count as f64);
+            let count =
+                self.validation_jobs.lock().await.recv_many(&mut buffer, Self::BATCH_SIZE).await;
 
             if count == 0 {
                 // Channel closed, exit
                 break;
             }
+
+            self.metrics.inflight_validation_jobs.decrement(count as f64);
 
             // Split into transactions and response senders
             #[expect(clippy::iter_with_drain)]
@@ -213,16 +211,12 @@ where
         }
 
         // Wait for the result
-        let result = match rx.await {
-            Ok(res) => res,
-            Err(_) => TransactionValidationOutcome::Error(
+        rx.await.unwrap_or_else(|_| {
+            TransactionValidationOutcome::Error(
                 hash,
                 Box::new(TransactionValidatorError::ValidationServiceUnreachable),
-            ),
-        };
-
-        self.metrics.inflight_validation_jobs.decrement(1);
-        result
+            )
+        })
     }
 
     async fn validate_transactions(
@@ -247,8 +241,6 @@ where
 
             self.metrics.inflight_validation_jobs.increment(1);
             if self.to_validation_task.send((origin, transaction, tx)).is_err() {
-                // Channel closed - return errors for remaining
-                self.metrics.inflight_validation_jobs.decrement(len as f64);
                 return hashes
                     .into_iter()
                     .map(|h| {
@@ -274,7 +266,6 @@ where
             results.push(result);
         }
 
-        self.metrics.inflight_validation_jobs.decrement(len as f64);
         results
     }
 
