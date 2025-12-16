@@ -9,14 +9,19 @@ use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxNumber};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
 use reth_db::{
     cursor::DbCursorRO,
     static_file::TransactionSenderMask,
     table::Value,
     transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut},
 };
-use reth_db_api::{cursor::DbCursorRW, tables};
+use reth_db_api::{
+    cursor::DbCursorRW,
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    tables,
+    tables::BlockNumberList,
+};
 use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::ReceiptTy;
@@ -294,6 +299,108 @@ where
     }
 }
 
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::TransactionHashNumbers> + DbCursorRO<tables::TransactionHashNumbers>,
+{
+    /// Puts a transaction hash number mapping.
+    pub fn put_transaction_hash_number(
+        &mut self,
+        hash: TxHash,
+        tx_num: TxNumber,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(hash, &tx_num)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::TransactionHashNumbers>(hash, &tx_num),
+        }
+    }
+
+    /// Deletes a transaction hash number mapping.
+    pub fn delete_transaction_hash_number(&mut self, hash: TxHash) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(hash)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.delete::<tables::TransactionHashNumbers>(hash),
+        }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
+{
+    /// Puts a storage history entry.
+    pub fn put_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
+        }
+    }
+
+    /// Deletes a storage history entry.
+    pub fn delete_storage_history(&mut self, key: StorageShardedKey) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(key)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
+        }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
+{
+    /// Puts an account history entry.
+    pub fn put_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
+        }
+    }
+
+    /// Deletes an account history entry.
+    pub fn delete_account_history(&mut self, key: ShardedKey<Address>) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(key)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
+        }
+    }
+}
+
 /// Represents a source for reading data, either from database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherReader<'a, CURSOR, N> {
@@ -418,6 +525,60 @@ where
     }
 }
 
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::TransactionHashNumbers>,
+{
+    /// Gets a transaction number by its hash.
+    pub fn get_transaction_hash_number(
+        &mut self,
+        hash: TxHash,
+    ) -> ProviderResult<Option<TxNumber>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.get::<tables::TransactionHashNumbers>(hash),
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::StoragesHistory>,
+{
+    /// Gets a storage history entry.
+    pub fn get_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.get::<tables::StoragesHistory>(key),
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::AccountsHistory>,
+{
+    /// Gets an account history entry.
+    pub fn get_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.get::<tables::AccountsHistory>(key),
+        }
+    }
+}
+
 /// Destination for writing data.
 #[derive(Debug, EnumIs)]
 pub enum EitherWriterDestination {
@@ -497,5 +658,162 @@ mod tests {
                 "{reader}"
             );
         }
+    }
+}
+
+#[cfg(all(test, unix, feature = "rocksdb"))]
+mod rocksdb_tests {
+    use crate::providers::rocksdb::{RocksDBBuilder, RocksDBProvider};
+    use alloy_primitives::{Address, B256};
+    use reth_db_api::{
+        models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
+        tables,
+    };
+    use tempfile::TempDir;
+
+    fn create_rocksdb_provider() -> (TempDir, RocksDBProvider) {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+        (temp_dir, provider)
+    }
+
+    #[test]
+    fn test_rocksdb_batch_transaction_hash_numbers() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let hash1 = B256::from([1u8; 32]);
+        let hash2 = B256::from([2u8; 32]);
+        let tx_num1 = 100u64;
+        let tx_num2 = 200u64;
+
+        // Write via RocksDBBatch (same as EitherWriter::RocksDB would use internally)
+        let mut batch = provider.batch();
+        batch.put::<tables::TransactionHashNumbers>(hash1, &tx_num1).unwrap();
+        batch.put::<tables::TransactionHashNumbers>(hash2, &tx_num2).unwrap();
+        batch.commit().unwrap();
+
+        // Read via RocksTx (same as EitherReader::RocksDB would use internally)
+        let tx = provider.tx();
+        assert_eq!(tx.get::<tables::TransactionHashNumbers>(hash1).unwrap(), Some(tx_num1));
+        assert_eq!(tx.get::<tables::TransactionHashNumbers>(hash2).unwrap(), Some(tx_num2));
+
+        // Test missing key
+        let missing_hash = B256::from([99u8; 32]);
+        assert_eq!(tx.get::<tables::TransactionHashNumbers>(missing_hash).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_storage_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let storage_key = B256::from([1u8; 32]);
+        let key = StorageShardedKey::new(address, storage_key, 1000);
+        let value = IntegerList::new([1, 5, 10, 50]).unwrap();
+
+        // Write via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
+        batch.commit().unwrap();
+
+        // Read via RocksTx
+        let tx = provider.tx();
+        let result = tx.get::<tables::StoragesHistory>(key).unwrap();
+        assert_eq!(result, Some(value));
+
+        // Test missing key
+        let missing_key = StorageShardedKey::new(Address::random(), B256::ZERO, 0);
+        assert_eq!(tx.get::<tables::StoragesHistory>(missing_key).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_account_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let key = ShardedKey::new(address, 1000);
+        let value = IntegerList::new([1, 10, 100, 500]).unwrap();
+
+        // Write via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
+        batch.commit().unwrap();
+
+        // Read via RocksTx
+        let tx = provider.tx();
+        let result = tx.get::<tables::AccountsHistory>(key).unwrap();
+        assert_eq!(result, Some(value));
+
+        // Test missing key
+        let missing_key = ShardedKey::new(Address::random(), 0);
+        assert_eq!(tx.get::<tables::AccountsHistory>(missing_key).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_delete_transaction_hash_number() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let hash = B256::from([1u8; 32]);
+        let tx_num = 100u64;
+
+        // First write
+        provider.put::<tables::TransactionHashNumbers>(hash, &tx_num).unwrap();
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(tx_num));
+
+        // Delete via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.delete::<tables::TransactionHashNumbers>(hash).unwrap();
+        batch.commit().unwrap();
+
+        // Verify deletion
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(hash).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_delete_storage_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let storage_key = B256::from([1u8; 32]);
+        let key = StorageShardedKey::new(address, storage_key, 1000);
+        let value = IntegerList::new([1, 5, 10]).unwrap();
+
+        // First write
+        provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::StoragesHistory>(key.clone()).unwrap().is_some());
+
+        // Delete via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.delete::<tables::StoragesHistory>(key.clone()).unwrap();
+        batch.commit().unwrap();
+
+        // Verify deletion
+        assert_eq!(provider.get::<tables::StoragesHistory>(key).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_delete_account_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let key = ShardedKey::new(address, 1000);
+        let value = IntegerList::new([1, 10, 100]).unwrap();
+
+        // First write
+        provider.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::AccountsHistory>(key.clone()).unwrap().is_some());
+
+        // Delete via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.delete::<tables::AccountsHistory>(key.clone()).unwrap();
+        batch.commit().unwrap();
+
+        // Verify deletion
+        assert_eq!(provider.get::<tables::AccountsHistory>(key).unwrap(), None);
     }
 }
