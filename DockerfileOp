@@ -14,10 +14,10 @@ RUN cargo chef prepare --recipe-path recipe.json
 FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 
-ARG BUILD_PROFILE=release
+ARG BUILD_PROFILE=maxperf
 ENV BUILD_PROFILE=$BUILD_PROFILE
 
-ARG RUSTFLAGS=""
+ARG RUSTFLAGS="jemalloc,asm-keccak"
 ENV RUSTFLAGS="$RUSTFLAGS"
 
 ARG FEATURES=""

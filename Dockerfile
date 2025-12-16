@@ -18,7 +18,7 @@ FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 
 # Build profile, release by default
-ARG BUILD_PROFILE=release
+ARG BUILD_PROFILE=maxperf
 ENV BUILD_PROFILE=$BUILD_PROFILE
 
 # Extra Cargo flags
@@ -26,7 +26,7 @@ ARG RUSTFLAGS=""
 ENV RUSTFLAGS="$RUSTFLAGS"
 
 # Extra Cargo features
-ARG FEATURES=""
+ARG FEATURES="jemalloc,asm-keccak"
 ENV FEATURES=$FEATURES
 
 # Builds dependencies
