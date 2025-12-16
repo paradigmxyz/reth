@@ -1,5 +1,5 @@
-//! Generic reader and writer abstractions for interacting with either database tables or static
-//! files.
+//! Generic reader and writer abstractions for interacting with database tables, static files, or
+//! RocksDB.
 
 use std::{marker::PhantomData, ops::Range};
 
