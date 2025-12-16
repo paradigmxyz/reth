@@ -424,21 +424,17 @@ where
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
-            state_provider = Box::new(CachedStateProvider::new_with_caches(
-                state_provider,
-                caches,
-                cache_metrics,
-            ));
+            state_provider =
+                Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
         };
 
+        if self.config.state_provider_metrics() {
+            state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
+        }
+
         // Execute the block and handle any execution errors
-        let (output, senders) = match if self.config.state_provider_metrics() {
-            let state_provider =
-                InstrumentedStateProvider::from_state_provider(&state_provider, "engine");
-            self.execute_block(&state_provider, env, &input, &mut handle)
-        } else {
-            self.execute_block(&state_provider, env, &input, &mut handle)
-        } {
+        let (output, senders) = match self.execute_block(&state_provider, env, &input, &mut handle)
+        {
             Ok(output) => output,
             Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
@@ -617,7 +613,7 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(&state_provider))
+            .with_database(StateProviderDatabase::new(state_provider))
             .with_bundle_update()
             .without_state_clear()
             .build();

@@ -42,7 +42,7 @@ where
 {
     /// Creates a new [`CachedStateProvider`] from an [`ExecutionCache`], state provider, and
     /// [`CachedStateMetrics`].
-    pub(crate) const fn new_with_caches(
+    pub(crate) const fn new(
         state_provider: S,
         caches: ExecutionCache,
         metrics: CachedStateMetrics,
@@ -819,7 +819,7 @@ mod tests {
 
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
         let state_provider =
-            CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
+            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
         // check that the storage is empty
         let res = state_provider.storage(address, storage_key);
@@ -842,7 +842,7 @@ mod tests {
 
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
         let state_provider =
-            CachedStateProvider::new_with_caches(provider, caches, CachedStateMetrics::zeroed());
+            CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
         // check that the storage returns the expected value
         let res = state_provider.storage(address, storage_key);
