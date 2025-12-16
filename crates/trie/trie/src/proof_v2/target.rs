@@ -31,20 +31,23 @@ impl Target {
     }
 
     // A helper function for getting the largest prefix of the sub-trie which contains a particular
-    // target, based on its prefix.
+    // target, based on its `min_len`.
     //
-    // In general the target will only match within the sub-trie with the same prefix as the
+    // A target will only match nodes which share the target's prefix, where the target's prefix is
+    // the first `min_len` nibbles of its key. E.g. a target with `key` 0xabcd and `min_len` 2 will
+    // only match nodes with prefix 0xab.
+    //
+    // In general the target will only match within the sub-trie whose prefix is identical to the
     // target's. However there is an exception:
     //
     // Given a trie with a node at 0xabc, there must be a branch at 0xab. A target with prefix 0xabc
-    // needs to match that node, but in order to know the node is at that path the branch at 0xab
-    // must be constructed. Therefore the sub-trie prefix is the target prefix with a nibble
-    // truncated.
+    // needs to match that node, but the branch at 0xab must be constructed order to know the node
+    // is at that path. Therefore the sub-trie prefix is the target prefix with a nibble truncated.
     //
-    // For a target with an empty prefix we still use an empty sub-trie prefix; this will still
-    // construct the branch at the root node (if there is one), the only behavioral difference
-    // between targets with prefix lengths zero and one will be that with prefix length zero the
-    // root node's proof will be retained.
+    // For a target with an empty prefix (`min_len` of 0) we still use an empty sub-trie prefix;
+    // this will still construct the branch at the root node (if there is one). Targets with
+    // `min_len` of both 0 and 1 will therefore construct the root node, but only those with
+    // `min_len` of 0 will retain it.
     #[inline]
     fn sub_trie_prefix(&self) -> Nibbles {
         let mut sub_trie_prefix = self.key;
@@ -157,7 +160,7 @@ mod tests {
         };
 
         // Test cases: (input_targets, expected_output)
-        // Expected output format: Vec<(lower_bound_hex, upper_bound_hex_opt, Vec<key_hex>)>
+        // Expected output format: Vec<(exp_prefix_hex, Vec<key_hex>)>
         let test_cases = vec![
             // Case 1: Empty targets
             (vec![], vec![]),
