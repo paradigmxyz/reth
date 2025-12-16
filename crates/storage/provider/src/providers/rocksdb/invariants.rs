@@ -310,7 +310,6 @@ impl RocksDBProvider {
         let mut to_delete: Vec<StorageShardedKey> = Vec::new();
 
         // Iterate all entries and collect those to delete
-        // Note: This is not ideal for large tables. See doc comment for limitations.
         for result in self.iter::<tables::StoragesHistory>()? {
             let (key, _value) = result?;
 
