@@ -17,7 +17,7 @@ COPY --from=planner /app/recipe.json recipe.json
 ARG BUILD_PROFILE=maxperf
 ENV BUILD_PROFILE=$BUILD_PROFILE
 
-ARG RUSTFLAGS="jemalloc,asm-keccak"
+ARG RUSTFLAGS=""
 ENV RUSTFLAGS="$RUSTFLAGS"
 
 ARG FEATURES=""
