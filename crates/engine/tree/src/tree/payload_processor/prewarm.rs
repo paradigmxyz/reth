@@ -407,7 +407,11 @@ where
         let state_provider: StateProviderBox = if let Some(saved_cache) = saved_cache {
             let caches = saved_cache.cache().clone();
             let cache_metrics = saved_cache.metrics().clone();
-            Box::new(CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics))
+            Box::new(
+                CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics)
+                    // ensure we pre-warm the cache
+                    .prewarm(),
+            )
         } else {
             state_provider
         };
