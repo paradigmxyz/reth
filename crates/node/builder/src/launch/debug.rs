@@ -162,6 +162,11 @@ pub(crate) type DebugBlockProviderFuture<'a, N> = Pin<
     >,
 >;
 
+/// Returns true if debug consensus block provider is configured via RPC or Etherscan flags.
+fn debug_block_provider_configured<ChainSpec>(config: &NodeConfig<ChainSpec>) -> bool {
+    config.debug.rpc_consensus_url.is_some() || config.debug.etherscan.is_some()
+}
+
 /// Context for building dev-mode payload attributes after the node has launched.
 #[derive(Clone, Debug)]
 pub struct DevMiningContext<'a, N: FullNodeComponents> {
@@ -297,7 +302,7 @@ fn spawn_consensus_client<N, AddOns>(
 enum DevBuilderConfig<N: FullNodeComponents> {
     Factory(DevPayloadAttributesBuilderFactory<N>),
     Builder(Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>),
-    DefaultWithMap(Option<PayloadAttrMapper<N>>),
+    DefaultWithMap(PayloadAttrMapper<N>),
 }
 
 /// Node launcher with support for launching various debugging utilities.
@@ -373,7 +378,7 @@ where
         Self {
             inner: self.inner,
             target: self.target,
-            dev_builder_config: Some(DevBuilderConfig::DefaultWithMap(Some(Box::new(f)))),
+            dev_builder_config: Some(DevBuilderConfig::DefaultWithMap(Box::new(f))),
             rpc_consensus_convert_json: self.rpc_consensus_convert_json,
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
@@ -445,7 +450,7 @@ where
         if let Some(block_provider_factory) = debug_block_provider_factory {
             let provider = block_provider_factory(config, &handle)?;
             spawn_consensus_client(&handle, provider);
-        } else if config.debug.rpc_consensus_url.is_some() || config.debug.etherscan.is_some() {
+        } else if debug_block_provider_configured(config) {
             let convert_json = rpc_consensus_convert_json
                 .unwrap_or_else(<N as FullNodeTypes>::Types::default_json_convert);
 
@@ -489,11 +494,7 @@ where
                 Some(DevBuilderConfig::DefaultWithMap(map)) => {
                     let local =
                         <N as FullNodeTypes>::Types::local_payload_attributes_builder(&chain_spec);
-                    if let Some(map) = map {
-                        Box::new(move |parent| map(local.build(&parent)))
-                    } else {
-                        Box::new(local)
-                    }
+                    Box::new(move |parent| map(local.build(&parent)))
                 }
                 None => {
                     let local =
