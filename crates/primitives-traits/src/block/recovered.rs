@@ -218,7 +218,7 @@ impl<B: Block> RecoveredBlock<B> {
 
     /// A safer variant of [`Self::new_sealed`] that checks if the number of senders is equal to
     /// the number of transactions in the block and recovers the senders from the transactions, if
-    /// not using [`SignedTransaction::recover_signer_unchecked`](crate::transaction::signed::SignedTransaction)
+    /// not using [`SignedTransaction::recover_signer`](crate::transaction::signed::SignedTransaction)
     /// to recover the senders.
     ///
     /// Returns an error if any of the transactions fail to recover the sender.
