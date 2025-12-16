@@ -82,10 +82,19 @@ where
             return
         }
 
+        let batch_span = tracing::info_span!("batch pool import", batch_size = batch.len());
+
+        for req in &batch {
+            batch_span.follows_from(&req.span);
+        }
+
         let (pool_transactions, response_tx): (Vec<_>, Vec<_>) =
             batch.into_iter().map(|req| (req.pool_tx, req.response_tx)).unzip();
 
-        let pool_results = pool.add_transactions(TransactionOrigin::Local, pool_transactions).await;
+        let pool_results = pool
+            .add_transactions(TransactionOrigin::Local, pool_transactions)
+            .instrument(batch_span)
+            .await;
 
         for (response_tx, pool_result) in response_tx.into_iter().zip(pool_results) {
             let _ = response_tx.send(pool_result);
