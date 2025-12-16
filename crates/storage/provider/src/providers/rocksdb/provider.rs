@@ -444,7 +444,7 @@ impl<'a> RocksDBBatch<'a> {
         })
     }
 
-    /// Returns the number of operations in this batch.
+    /// Returns the number of write operations (puts + deletes) queued in this batch.
     pub fn len(&self) -> usize {
         self.inner.len()
     }
