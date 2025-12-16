@@ -9,14 +9,17 @@ use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxNumber};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
 use reth_db::{
     cursor::DbCursorRO,
     static_file::TransactionSenderMask,
     table::Value,
     transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut},
 };
-use reth_db_api::{cursor::DbCursorRW, tables};
+use reth_db_api::{
+    cursor::DbCursorRW, models::storage_sharded_key::StorageShardedKey, tables,
+    tables::BlockNumberList,
+};
 use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::ReceiptTy;
@@ -239,6 +242,74 @@ where
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
 where
+    CURSOR: DbCursorRW<tables::TransactionHashNumbers> + DbCursorRO<tables::TransactionHashNumbers>,
+{
+    /// Upserts a transaction hash -> tx number mapping.
+    pub fn put_transaction_hash_number(
+        &mut self,
+        hash: TxHash,
+        tx_num: TxNumber,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(hash, &tx_num)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.put::<tables::TransactionHashNumbers>(hash, &tx_num),
+        }
+    }
+
+    /// Deletes a transaction hash mapping.
+    pub fn delete_transaction_hash_number(&mut self, hash: TxHash) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(hash)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.delete::<tables::TransactionHashNumbers>(hash),
+        }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
+{
+    /// Upserts a storage history shard entry.
+    pub fn put_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.put::<tables::StoragesHistory>(key, value),
+        }
+    }
+
+    /// Deletes a storage history shard entry.
+    pub fn delete_storage_history(&mut self, key: StorageShardedKey) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(key)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.delete::<tables::StoragesHistory>(key),
+        }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
     CURSOR: DbCursorRW<tables::TransactionSenders>,
 {
     /// Append a transaction sender to the destination
@@ -425,6 +496,42 @@ where
                 .collect::<ProviderResult<HashMap<_, _>>>(),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
+        }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherReader<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::TransactionHashNumbers>,
+{
+    /// Fetches the transaction number for a given transaction hash.
+    pub fn get_transaction_hash_number(
+        &mut self,
+        hash: TxHash,
+    ) -> ProviderResult<Option<TxNumber>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.get::<tables::TransactionHashNumbers>(hash),
+        }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherReader<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::StoragesHistory>,
+{
+    /// Fetches the storage history for a given storage key.
+    pub fn get_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.get::<tables::StoragesHistory>(key),
         }
     }
 }
