@@ -485,8 +485,9 @@ where
                 .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
                 .build()?;
 
-        // Initialize RocksDB provider with metrics and statistics enabled
+        // Initialize RocksDB provider with metrics, statistics, and default tables
         let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
+            .with_default_tables()
             .with_metrics()
             .with_statistics()
             .build()?;
