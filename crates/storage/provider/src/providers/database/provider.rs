@@ -860,6 +860,228 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
         Ok(())
     }
+
+    /// RocksDB-specific implementation of account history index append.
+    ///
+    /// Only modifies the last shard (with `highest_block_number == u64::MAX`) for each key,
+    /// preserving all earlier shards. This matches the MDBX `append_history_index` behavior.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn append_account_history_index_rocksdb(
+        &self,
+        account_transitions: impl IntoIterator<Item = (Address, impl IntoIterator<Item = u64>)>,
+    ) -> ProviderResult<()> {
+        let rocks_tx = self.rocksdb_provider.tx();
+        let mut reader = EitherReader::new_accounts_history(self, &rocks_tx)?;
+
+        let rocks_batch = self.rocksdb_provider.batch();
+        let mut writer = EitherWriter::new_accounts_history(self, rocks_batch)?;
+
+        for (address, indices) in account_transitions {
+            // Only fetch and modify the last shard (highest_block_number == u64::MAX)
+            let last_key = ShardedKey::last(address);
+            let mut last_shard: Vec<u64> =
+                if let Some(list) = reader.get_account_history(last_key.clone())? {
+                    // Delete only the last shard - earlier shards remain untouched
+                    writer.delete_account_history(last_key)?;
+                    list.iter().collect()
+                } else {
+                    Vec::new()
+                };
+
+            // Append new indices (assumed sorted and > last_shard.last())
+            last_shard.extend(indices);
+
+            // Re-chunk and write shards
+            let mut chunks = last_shard.chunks(sharded_key::NUM_OF_INDICES_IN_SHARD).peekable();
+            while let Some(list) = chunks.next() {
+                let highest_block_number = if chunks.peek().is_some() {
+                    *list.last().expect("`chunks` does not return empty list")
+                } else {
+                    u64::MAX
+                };
+                writer.put_account_history(
+                    ShardedKey::new(address, highest_block_number),
+                    &BlockNumberList::new_pre_sorted(list.iter().copied()),
+                )?;
+            }
+        }
+
+        if let Some(batch) = writer.into_rocksdb_batch() {
+            batch.commit()?;
+        }
+        Ok(())
+    }
+
+    /// RocksDB-specific implementation of storage history index append.
+    ///
+    /// Only modifies the last shard (with `highest_block_number == u64::MAX`) for each key,
+    /// preserving all earlier shards. This matches the MDBX `append_history_index` behavior.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn append_storage_history_index_rocksdb(
+        &self,
+        storage_transitions: impl IntoIterator<Item = ((Address, B256), impl IntoIterator<Item = u64>)>,
+    ) -> ProviderResult<()> {
+        let rocks_tx = self.rocksdb_provider.tx();
+        let mut reader = EitherReader::new_storages_history(self, &rocks_tx)?;
+
+        let rocks_batch = self.rocksdb_provider.batch();
+        let mut writer = EitherWriter::new_storages_history(self, rocks_batch)?;
+
+        for ((address, storage_key), indices) in storage_transitions {
+            // Only fetch and modify the last shard (highest_block_number == u64::MAX)
+            let last_key = StorageShardedKey::last(address, storage_key);
+            let mut last_shard: Vec<u64> =
+                if let Some(list) = reader.get_storage_history(last_key.clone())? {
+                    // Delete only the last shard - earlier shards remain untouched
+                    writer.delete_storage_history(last_key)?;
+                    list.iter().collect()
+                } else {
+                    Vec::new()
+                };
+
+            // Append new indices (assumed sorted and > last_shard.last())
+            last_shard.extend(indices);
+
+            // Re-chunk and write shards
+            let mut chunks = last_shard.chunks(sharded_key::NUM_OF_INDICES_IN_SHARD).peekable();
+            while let Some(list) = chunks.next() {
+                let highest_block_number = if chunks.peek().is_some() {
+                    *list.last().expect("`chunks` does not return empty list")
+                } else {
+                    u64::MAX
+                };
+                writer.put_storage_history(
+                    StorageShardedKey::new(address, storage_key, highest_block_number),
+                    &BlockNumberList::new_pre_sorted(list.iter().copied()),
+                )?;
+            }
+        }
+
+        if let Some(batch) = writer.into_rocksdb_batch() {
+            batch.commit()?;
+        }
+        Ok(())
+    }
+
+    /// RocksDB-specific implementation of unwind account history indices.
+    ///
+    /// Replicates the `unwind_history_shards` logic but using `EitherReader`/`EitherWriter`.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn unwind_account_history_indices_rocksdb<'a>(
+        &self,
+        changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
+    ) -> ProviderResult<usize> {
+        let mut last_indices =
+            changesets.map(|(index, account)| (account.address, *index)).collect::<Vec<_>>();
+        last_indices.sort_by_key(|(a, _)| *a);
+
+        let rocks_tx = self.rocksdb_provider.tx();
+        let mut reader = EitherReader::new_accounts_history(self, &rocks_tx)?;
+
+        let rocks_batch = self.rocksdb_provider.batch();
+        let mut writer = EitherWriter::new_accounts_history(self, rocks_batch)?;
+
+        for &(address, rem_index) in &last_indices {
+            // Read all shards for this address (sorted by highest_block_number ascending)
+            let shards = reader.read_account_history_shards(address)?;
+
+            // Process shards from last to first (backwards)
+            let mut partial_shard = Vec::new();
+            for (sharded_key, list) in shards.into_iter().rev() {
+                // Delete this shard
+                writer.delete_account_history(sharded_key.clone())?;
+
+                let first = list.iter().next().expect("List can't be empty");
+
+                // Case 1: Entire shard is at or above the unwinding point
+                if first >= rem_index {
+                    continue;
+                }
+                // Case 2: Boundary shard (spans across the unwinding point)
+                if rem_index <= sharded_key.highest_block_number {
+                    partial_shard = list.iter().take_while(|i| *i < rem_index).collect();
+                    break;
+                }
+                // Case 3: Entire shard is below the unwinding point
+                partial_shard = list.iter().collect();
+                break;
+            }
+
+            // Reinsert the partial shard if not empty
+            if !partial_shard.is_empty() {
+                writer.put_account_history(
+                    ShardedKey::last(address),
+                    &BlockNumberList::new_pre_sorted(partial_shard),
+                )?;
+            }
+        }
+
+        if let Some(batch) = writer.into_rocksdb_batch() {
+            batch.commit()?;
+        }
+        Ok(last_indices.len())
+    }
+
+    /// RocksDB-specific implementation of unwind storage history indices.
+    ///
+    /// Replicates the `unwind_history_shards` logic but using `EitherReader`/`EitherWriter`.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn unwind_storage_history_indices_rocksdb(
+        &self,
+        changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
+    ) -> ProviderResult<usize> {
+        let mut storage_changesets = changesets
+            .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
+            .collect::<Vec<_>>();
+        storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
+
+        let rocks_tx = self.rocksdb_provider.tx();
+        let mut reader = EitherReader::new_storages_history(self, &rocks_tx)?;
+
+        let rocks_batch = self.rocksdb_provider.batch();
+        let mut writer = EitherWriter::new_storages_history(self, rocks_batch)?;
+
+        for &(address, storage_key, rem_index) in &storage_changesets {
+            // Read all shards for this address/storage_key (sorted by highest_block_number
+            // ascending)
+            let shards = reader.read_storage_history_shards(address, storage_key)?;
+
+            // Process shards from last to first (backwards)
+            let mut partial_shard = Vec::new();
+            for (sharded_key, list) in shards.into_iter().rev() {
+                // Delete this shard
+                writer.delete_storage_history(sharded_key.clone())?;
+
+                let first = list.iter().next().expect("List can't be empty");
+
+                // Case 1: Entire shard is at or above the unwinding point
+                if first >= rem_index {
+                    continue;
+                }
+                // Case 2: Boundary shard (spans across the unwinding point)
+                if rem_index <= sharded_key.sharded_key.highest_block_number {
+                    partial_shard = list.iter().take_while(|i| *i < rem_index).collect();
+                    break;
+                }
+                // Case 3: Entire shard is below the unwinding point
+                partial_shard = list.iter().collect();
+                break;
+            }
+
+            // Reinsert the partial shard if not empty
+            if !partial_shard.is_empty() {
+                writer.put_storage_history(
+                    StorageShardedKey::last(address, storage_key),
+                    &BlockNumberList::new_pre_sorted(partial_shard),
+                )?;
+            }
+        }
+
+        if let Some(batch) = writer.into_rocksdb_batch() {
+            batch.commit()?;
+        }
+        Ok(storage_changesets.len())
+    }
 }
 
 impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
@@ -1249,7 +1471,17 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     type Transaction = TxTy<N>;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocks_provider = self.rocksdb_provider.clone();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocks_tx = rocks_provider.tx();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocks_tx_ref = &rocks_tx;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let rocks_tx_ref = ();
+
+        let mut reader = EitherReader::new_transaction_hash_numbers(self, rocks_tx_ref)?;
+        reader.get_transaction_hash_number(tx_hash)
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
@@ -2647,6 +2879,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
     ) -> ProviderResult<usize> {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if self.cached_storage_settings().account_history_in_rocksdb {
+            return self.unwind_account_history_indices_rocksdb(changesets);
+        }
+
         let mut last_indices = changesets
             .into_iter()
             .map(|(index, account)| (account.address, *index))
@@ -2693,6 +2930,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         &self,
         account_transitions: impl IntoIterator<Item = (Address, impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()> {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if self.cached_storage_settings().account_history_in_rocksdb {
+            return self.append_account_history_index_rocksdb(account_transitions);
+        }
+
         self.append_history_index::<_, tables::AccountsHistory>(
             account_transitions,
             ShardedKey::new,
@@ -2703,6 +2945,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         &self,
         changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<usize> {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if self.cached_storage_settings().storages_history_in_rocksdb {
+            return self.unwind_storage_history_indices_rocksdb(changesets);
+        }
+
         let mut storage_changesets = changesets
             .into_iter()
             .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
@@ -2751,6 +2998,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         &self,
         storage_transitions: impl IntoIterator<Item = ((Address, B256), impl IntoIterator<Item = u64>)>,
     ) -> ProviderResult<()> {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if self.cached_storage_settings().storages_history_in_rocksdb {
+            return self.append_storage_history_index_rocksdb(storage_transitions);
+        }
+
         self.append_history_index::<_, tables::StoragesHistory>(
             storage_transitions,
             |(address, storage_key), highest_block_number| {
@@ -2881,9 +3133,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         }
 
         if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            let rocks_batch = self.rocksdb_provider.batch();
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            let rocks_batch = ();
+
+            let mut writer = EitherWriter::new_transaction_hash_numbers(self, rocks_batch)?;
             for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
                 let hash = transaction.tx_hash();
-                self.tx.put::<tables::TransactionHashNumbers>(*hash, tx_num)?;
+                writer.put_transaction_hash_number(*hash, tx_num)?;
+            }
+            #[cfg(all(unix, feature = "rocksdb"))]
+            if let Some(batch) = writer.into_rocksdb_batch() {
+                batch.commit()?;
             }
             durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
         }
@@ -2992,8 +3254,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             .last_tx_num();
 
         if unwind_tx_from <= unwind_tx_to {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            let rocks_batch = self.rocksdb_provider.batch();
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            let rocks_batch = ();
+
+            let mut writer = EitherWriter::new_transaction_hash_numbers(self, rocks_batch)?;
             for (hash, _) in self.transaction_hashes_by_range(unwind_tx_from..(unwind_tx_to + 1))? {
-                self.tx.delete::<tables::TransactionHashNumbers>(hash, None)?;
+                writer.delete_transaction_hash_number(hash)?;
+            }
+            #[cfg(all(unix, feature = "rocksdb"))]
+            if let Some(batch) = writer.into_rocksdb_batch() {
+                batch.commit()?;
             }
         }
 
@@ -4840,5 +5112,56 @@ mod tests {
                 }
             }
         }
+
+        // end of test_prunable_receipts_logic
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    #[test]
+    fn transaction_id_reads_from_rocksdb() {
+        use crate::{
+            providers::{rocksdb::RocksDBProvider, StaticFileProvider},
+            test_utils::MockNodeTypesWithDB,
+            ProviderFactory, StorageSettings, StorageSettingsCache,
+        };
+        use alloy_primitives::B256;
+        use reth_chainspec::MAINNET;
+        use reth_db::test_utils::{
+            create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir,
+        };
+
+        let db = create_test_rw_db();
+        let (static_dir, _) = create_test_static_files_dir();
+        let (_rocks_dir, rocks_path) = create_test_rocksdb_dir();
+
+        let rocksdb_provider = RocksDBProvider::builder(&rocks_path)
+            .with_table::<tables::TransactionHashNumbers>()
+            .build()
+            .unwrap();
+
+        let factory: ProviderFactory<MockNodeTypesWithDB> = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir.keep()).unwrap(),
+            rocksdb_provider,
+        )
+        .unwrap();
+
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+        );
+
+        let provider = factory.provider_rw().unwrap();
+
+        // Write mapping directly to RocksDB
+        let rocks = provider.rocksdb_provider();
+        let mut batch = rocks.batch();
+        let hash = B256::from([1u8; 32]);
+        let tx_num = 42u64;
+        batch.put::<tables::TransactionHashNumbers>(hash, &tx_num).unwrap();
+        batch.commit().unwrap();
+
+        // transaction_id should read it via RocksDB-backed EitherReader
+        assert_eq!(provider.transaction_id(hash).unwrap(), Some(tx_num));
     }
 }
