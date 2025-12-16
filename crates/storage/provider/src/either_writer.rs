@@ -187,6 +187,20 @@ impl<'a> EitherWriter<'a, (), ()> {
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
+    /// Commits the writer.
+    ///
+    /// - For [`Self::Database`]: No-op, as MDBX commits happen at the provider level.
+    /// - For [`Self::StaticFile`]: No-op, as static files have their own commit mechanism.
+    /// - For [`Self::RocksDB`]: Commits the underlying batch.
+    pub fn commit(self) -> ProviderResult<()> {
+        match self {
+            Self::Database(_) => Ok(()),
+            Self::StaticFile(_) => Ok(()),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.commit(),
+        }
+    }
+
     /// Increment the block number.
     ///
     /// Relevant only for [`Self::StaticFile`]. It is a no-op for [`Self::Database`].
@@ -663,12 +677,18 @@ mod tests {
 
 #[cfg(all(test, unix, feature = "rocksdb"))]
 mod rocksdb_tests {
-    use crate::providers::rocksdb::{RocksDBBuilder, RocksDBProvider};
+    use super::*;
+    use crate::{
+        providers::rocksdb::{RocksDBBuilder, RocksDBProvider},
+        test_utils::create_test_provider_factory,
+        RocksDBProviderFactory,
+    };
     use alloy_primitives::{Address, B256};
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
         tables,
     };
+    use reth_storage_api::{DatabaseProviderFactory, StorageSettings};
     use tempfile::TempDir;
 
     fn create_rocksdb_provider() -> (TempDir, RocksDBProvider) {
@@ -680,6 +700,77 @@ mod rocksdb_tests {
             .build()
             .unwrap();
         (temp_dir, provider)
+    }
+
+    /// Test that `EitherWriter::new_transaction_hash_numbers` creates a `RocksDB` writer
+    /// when the storage setting is enabled, and that put operations followed by commit
+    /// persist the data to `RocksDB`.
+    #[test]
+    fn test_either_writer_transaction_hash_numbers_with_rocksdb() {
+        let factory = create_test_provider_factory();
+
+        // Enable RocksDB for transaction hash numbers
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+        );
+
+        let hash1 = B256::from([1u8; 32]);
+        let hash2 = B256::from([2u8; 32]);
+        let tx_num1 = 100u64;
+        let tx_num2 = 200u64;
+
+        // Get the RocksDB batch from the provider
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+
+        // Create EitherWriter with RocksDB
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+
+        // Verify we got a RocksDB writer
+        assert!(matches!(writer, EitherWriter::RocksDB(_)));
+
+        // Write transaction hash numbers
+        writer.put_transaction_hash_number(hash1, tx_num1).unwrap();
+        writer.put_transaction_hash_number(hash2, tx_num2).unwrap();
+
+        // Commit the writer (for RocksDB, this commits the batch)
+        writer.commit().unwrap();
+
+        // Verify data was written to RocksDB
+        let rocksdb = factory.rocksdb_provider();
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash1).unwrap(), Some(tx_num1));
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash2).unwrap(), Some(tx_num2));
+    }
+
+    /// Test that `EitherWriter::delete_transaction_hash_number` works with `RocksDB`.
+    #[test]
+    fn test_either_writer_delete_transaction_hash_number_with_rocksdb() {
+        let factory = create_test_provider_factory();
+
+        // Enable RocksDB for transaction hash numbers
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+        );
+
+        let hash = B256::from([1u8; 32]);
+        let tx_num = 100u64;
+
+        // First, write a value directly to RocksDB
+        let rocksdb = factory.rocksdb_provider();
+        rocksdb.put::<tables::TransactionHashNumbers>(hash, &tx_num).unwrap();
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(tx_num));
+
+        // Now delete using EitherWriter
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+        writer.delete_transaction_hash_number(hash).unwrap();
+        writer.commit().unwrap();
+
+        // Verify deletion
+        let rocksdb = factory.rocksdb_provider();
+        assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap(), None);
     }
 
     #[test]

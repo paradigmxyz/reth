@@ -1,5 +1,5 @@
 use crate::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
+    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider},
     HashingWriter, ProviderFactory, TrieWriter,
 };
 use alloy_primitives::B256;
@@ -62,7 +62,10 @@ pub fn create_test_provider_factory_with_node_types<N: NodeTypesForProvider>(
         db,
         chain_spec,
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
-        RocksDBProvider::new(&rocksdb_dir).expect("failed to create test RocksDB provider"),
+        RocksDBBuilder::new(&rocksdb_dir)
+            .with_default_tables()
+            .build()
+            .expect("failed to create test RocksDB provider"),
     )
     .expect("failed to create test provider factory")
 }
