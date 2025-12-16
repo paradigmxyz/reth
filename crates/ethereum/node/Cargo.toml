@@ -88,6 +88,9 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "revm/asm-keccak",
 ]
+keccak-cache-global = [
+    "alloy-primitives/keccak-cache-global",
+]
 js-tracer = [
     "reth-node-builder/js-tracer",
     "reth-rpc/js-tracer",
