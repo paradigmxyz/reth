@@ -34,7 +34,7 @@ use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmStat
 use reth_trie::MultiProofTargets;
 use std::{
     sync::{
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicUsize, Ordering},
         mpsc::{self, channel, Receiver, Sender},
         Arc,
     },
@@ -135,8 +135,14 @@ where
     /// For Optimism chains, special handling is applied to the first transaction if it's a
     /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
     /// subsequent transactions in the block.
-    fn spawn_all<Tx>(&self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent>)
-    where
+    ///
+    /// The `pending` receiver yields tuples of `(original_index, tx)` where `original_index`
+    /// is the transaction's position in the block, used to coordinate with the main execution path.
+    fn spawn_all<Tx>(
+        &self,
+        pending: mpsc::Receiver<(usize, Tx)>,
+        actions_tx: Sender<PrewarmTaskEvent>,
+    ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         let executor = self.executor.clone();
@@ -168,8 +174,8 @@ where
             }
 
             // Distribute transactions to workers
-            let mut tx_index = 0usize;
-            while let Ok(tx) = pending.recv() {
+            let mut tx_count = 0usize;
+            while let Ok((original_index, tx)) = pending.recv() {
                 // Stop distributing if termination was requested
                 if ctx.terminate_execution.load(Ordering::Relaxed) {
                     trace!(
@@ -179,7 +185,8 @@ where
                     break;
                 }
 
-                let indexed_tx = IndexedTransaction { index: tx_index, tx };
+                // Use the original transaction index from the block, not the receive order
+                let indexed_tx = IndexedTransaction { index: original_index, tx };
                 let is_system_tx = indexed_tx.tx.tx().ty() > MAX_STANDARD_TX_TYPE;
 
                 // System transactions (type > 4) in the first position set critical metadata
@@ -187,7 +194,7 @@ where
                 // Broadcast the first system transaction to all workers to ensure they have
                 // the critical state. This is particularly important for L2s like Optimism
                 // where the first deposit transaction (type 126) contains essential block metadata.
-                if tx_index == 0 && is_system_tx {
+                if original_index == 0 && is_system_tx {
                     for handle in &handles {
                         // Ignore send errors: workers listen to terminate_execution and may
                         // exit early when signaled. Sending to a disconnected worker is
@@ -197,7 +204,7 @@ where
                     }
                 } else {
                     // Round-robin distribution for all other transactions
-                    let worker_idx = tx_index % workers_needed;
+                    let worker_idx = original_index % workers_needed;
                     // Ignore send errors: workers listen to terminate_execution and may
                     // exit early when signaled. Sending to a disconnected worker is
                     // possible and harmless and should happen at most once due to
@@ -205,7 +212,7 @@ where
                     let _ = handles[worker_idx].send(indexed_tx);
                 }
 
-                tx_index += 1;
+                tx_count += 1;
             }
 
             // drop handle and wait for all tasks to finish and drop theirs
@@ -214,7 +221,7 @@ where
             while done_rx.recv().is_ok() {}
 
             let _ = actions_tx
-                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_index });
+                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_count });
         });
     }
 
@@ -290,6 +297,9 @@ where
     ///
     /// This will execute the transactions until all transactions have been processed or the task
     /// was cancelled.
+    ///
+    /// The `pending` receiver yields tuples of `(original_index, tx)` where `original_index`
+    /// is the transaction's position in the block.
     #[instrument(
         parent = &self.parent_span,
         level = "debug",
@@ -297,11 +307,13 @@ where
         name = "prewarm and caching",
         skip_all
     )]
-    pub(super) fn run(
+    pub(super) fn run<Tx>(
         self,
-        pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent>,
-    ) {
+    ) where
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
+    {
         // spawn execution tasks.
         self.spawn_all(pending, actions_tx);
 
@@ -368,6 +380,9 @@ where
     pub(super) terminate_execution: Arc<AtomicBool>,
     pub(super) precompile_cache_disabled: bool,
     pub(super) precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+    /// Shared counter tracking the current transaction index being executed by the main execution
+    /// path. Prewarming tasks use this to skip transactions that have already been executed.
+    pub(super) executed_tx_index: Arc<AtomicUsize>,
 }
 
 impl<N, P, Evm> PrewarmContext<N, P, Evm>
@@ -379,7 +394,9 @@ where
     /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating
     /// execution.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn evm_for_ctx(self) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>)> {
+    fn evm_for_ctx(
+        self,
+    ) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>, Arc<AtomicUsize>)> {
         let Self {
             env,
             evm_config,
@@ -389,6 +406,7 @@ where
             terminate_execution,
             precompile_cache_disabled,
             mut precompile_cache_map,
+            executed_tx_index,
         } = self;
 
         let state_provider = match provider.build() {
@@ -436,7 +454,7 @@ where
             });
         }
 
-        Some((evm, metrics, terminate_execution))
+        Some((evm, metrics, terminate_execution, executed_tx_index))
     }
 
     /// Accepts an [`mpsc::Receiver`] of transactions and a handle to prewarm task. Executes
@@ -457,13 +475,29 @@ where
     ) where
         Tx: ExecutableTxFor<Evm>,
     {
-        let Some((mut evm, metrics, terminate_execution)) = self.evm_for_ctx() else { return };
+        let Some((mut evm, metrics, terminate_execution, executed_tx_index)) = self.evm_for_ctx()
+        else {
+            return;
+        };
 
         while let Ok(IndexedTransaction { index, tx }) = {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", "recv tx")
                 .entered();
             txs.recv()
         } {
+            // Skip transactions that have already been executed by the main execution path
+            let current_executed = executed_tx_index.load(Ordering::Relaxed);
+            if index < current_executed {
+                trace!(
+                    target: "engine::tree::payload_processor::prewarm",
+                    index,
+                    current_executed,
+                    tx_hash=%tx.tx().tx_hash(),
+                    "Skipping already executed transaction"
+                );
+                continue;
+            }
+
             let enter =
                 debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm tx", index, tx_hash=%tx.tx().tx_hash())
                     .entered();
