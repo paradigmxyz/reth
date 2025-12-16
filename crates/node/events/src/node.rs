@@ -219,9 +219,7 @@ impl NodeState {
                 // changes.
                 if (self.safe_block_hash != Some(safe_block_hash) &&
                     self.finalized_block_hash != Some(finalized_block_hash)) ||
-                    (self.head_block_hash != Some(head_block_hash) &&
-                        self.safe_block_hash == Some(safe_block_hash) &&
-                        self.finalized_block_hash == Some(finalized_block_hash))
+                    self.head_block_hash != Some(head_block_hash)
                 {
                     let msg = match status {
                         ForkchoiceStatus::Valid => "Forkchoice updated",
