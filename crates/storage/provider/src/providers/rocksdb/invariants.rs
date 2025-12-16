@@ -5,10 +5,15 @@
 //! inconsistencies between `RocksDB` data and MDBX checkpoints.
 
 use super::RocksDBProvider;
+use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::BlockNumber;
-use reth_db_api::tables;
+use rayon::prelude::*;
+use reth_db::cursor::DbCursorRO;
+use reth_db_api::{tables, transaction::DbTx};
 use reth_stages_types::StageId;
-use reth_storage_api::{DBProvider, StageCheckpointReader, StorageSettingsCache};
+use reth_storage_api::{
+    DBProvider, StageCheckpointReader, StorageSettingsCache, TransactionsProvider,
+};
 use reth_storage_errors::provider::ProviderResult;
 
 impl RocksDBProvider {
@@ -29,12 +34,21 @@ impl RocksDBProvider {
     /// - The maximum block number in shards should not exceed the `IndexStorageHistory` stage
     ///   checkpoint.
     /// - Similar healing/unwind logic applies.
+    ///
+    /// # Requirements
+    ///
+    /// For pruning `TransactionHashNumbers`, the provider must be able to supply transaction
+    /// data (typically from static files) so that transaction hashes can be computed. This
+    /// implies that static files should be ahead of or in sync with `RocksDB`.
     pub fn check_consistency<Provider>(
         &self,
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader + StorageSettingsCache,
+        Provider: DBProvider
+            + StageCheckpointReader
+            + StorageSettingsCache
+            + TransactionsProvider<Transaction: Encodable2718>,
     {
         let mut unwind_target: Option<BlockNumber> = None;
 
@@ -64,26 +78,32 @@ impl RocksDBProvider {
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader,
+        Provider:
+            DBProvider + StageCheckpointReader + TransactionsProvider<Transaction: Encodable2718>,
     {
-        use reth_db::cursor::DbCursorRO;
-        use reth_db_api::transaction::DbTx;
-
         // Get the TransactionLookup stage checkpoint
         let checkpoint = provider
             .get_stage_checkpoint(StageId::TransactionLookup)?
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Get the last entry from RocksDB TransactionHashNumbers
-        let rocks_last = self.last::<tables::TransactionHashNumbers>()?;
+        // Find the max tx_number in RocksDB by iterating all entries.
+        // Note: We can't use `last()` because that returns the entry with the largest
+        // hash key, not the entry with the largest tx_number value.
+        let max_tx = self
+            .iter::<tables::TransactionHashNumbers>()?
+            .map(|r| r.map(|(_, tx_num)| tx_num))
+            .collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .max();
 
-        match rocks_last {
-            Some((_hash, tx_number)) => {
+        match max_tx {
+            Some(tx_number) => {
                 // If checkpoint is 0 but we have data, that's inconsistent
                 if checkpoint == 0 && tx_number > 0 {
-                    // RocksDB has data but stage hasn't run - need to clear all
-                    self.prune_transaction_hash_numbers_above(0)?;
+                    // RocksDB has data but stage hasn't run - need to clear all.
+                    // Prune all transactions in range [0, tx_number].
+                    self.prune_transaction_hash_numbers_in_range(provider, 0..=tx_number)?;
                     return Ok(None);
                 }
 
@@ -127,7 +147,7 @@ impl RocksDBProvider {
                             max_tx_for_checkpoint = tx_num;
                         }
 
-                        if max_tx_for_checkpoint > 0 {
+                        if max_tx_for_checkpoint < tx_number {
                             tracing::info!(
                                 target: "reth::providers::rocksdb",
                                 rocks_max_tx = tx_number,
@@ -136,7 +156,11 @@ impl RocksDBProvider {
                                 max_tx_for_checkpoint,
                                 "TransactionHashNumbers ahead of checkpoint, pruning excess data"
                             );
-                            self.prune_transaction_hash_numbers_above(max_tx_for_checkpoint)?;
+                            // Prune transactions in range (max_tx_for_checkpoint, tx_number]
+                            self.prune_transaction_hash_numbers_in_range(
+                                provider,
+                                (max_tx_for_checkpoint + 1)..=tx_number,
+                            )?;
                         }
                     }
                 }
@@ -155,34 +179,50 @@ impl RocksDBProvider {
         }
     }
 
-    /// Prunes `TransactionHashNumbers` entries where `tx_number` > `max_tx_number`.
+    /// Prunes `TransactionHashNumbers` entries for transactions in the given range.
     ///
-    /// Since `TransactionHashNumbers` is keyed by `TxHash`, we must iterate all entries
-    /// and delete those whose value exceeds the threshold.
-    fn prune_transaction_hash_numbers_above(&self, max_tx_number: u64) -> ProviderResult<()> {
-        let mut to_delete = Vec::new();
-
-        // Iterate all entries and collect those to delete
-        for result in self.iter::<tables::TransactionHashNumbers>()? {
-            let (key, tx_number) = result?;
-
-            if tx_number > max_tx_number {
-                to_delete.push(key);
-            }
+    /// This fetches transactions from the provider, computes their hashes in parallel,
+    /// and deletes the corresponding entries from `RocksDB` by key. This approach is more
+    /// scalable than iterating all rows because it only processes the transactions that
+    /// need to be pruned.
+    ///
+    /// # Requirements
+    ///
+    /// The provider must be able to supply transaction data (typically from static files)
+    /// so that transaction hashes can be computed. This implies that static files should
+    /// be ahead of or in sync with `RocksDB`.
+    pub fn prune_transaction_hash_numbers_in_range<Provider>(
+        &self,
+        provider: &Provider,
+        tx_range: std::ops::RangeInclusive<u64>,
+    ) -> ProviderResult<()>
+    where
+        Provider: TransactionsProvider<Transaction: Encodable2718>,
+    {
+        if tx_range.is_empty() {
+            return Ok(());
         }
 
-        let deleted_count = to_delete.len();
+        // Fetch transactions in the range and compute their hashes in parallel
+        let hashes: Vec<_> = provider
+            .transactions_by_tx_range(tx_range.clone())?
+            .into_par_iter()
+            .map(|tx| tx.trie_hash())
+            .collect();
+
+        let deleted_count = hashes.len();
         if deleted_count > 0 {
             tracing::info!(
                 target: "reth::providers::rocksdb",
                 deleted_count,
-                max_tx_number,
-                "Pruning TransactionHashNumbers entries"
+                tx_range_start = *tx_range.start(),
+                tx_range_end = *tx_range.end(),
+                "Pruning TransactionHashNumbers entries by tx range"
             );
 
             self.write_batch(|batch| {
-                for key in to_delete {
-                    batch.delete::<tables::TransactionHashNumbers>(key)?;
+                for hash in hashes {
+                    batch.delete::<tables::TransactionHashNumbers>(hash)?;
                 }
                 Ok(())
             })?;
@@ -305,8 +345,8 @@ impl RocksDBProvider {
 mod tests {
     use super::*;
     use crate::{
-        providers::rocksdb::RocksDBBuilder, test_utils::create_test_provider_factory,
-        DatabaseProviderFactory, StageCheckpointWriter,
+        providers::rocksdb::RocksDBBuilder, test_utils::create_test_provider_factory, BlockWriter,
+        DatabaseProviderFactory, StageCheckpointWriter, TransactionsProvider,
     };
     use alloy_primitives::{Address, B256};
     use reth_db::cursor::DbCursorRW;
@@ -316,6 +356,7 @@ mod tests {
         transaction::DbTxMut,
     };
     use reth_stages_types::StageCheckpoint;
+    use reth_testing_utils::generators::{self, BlockRangeParams};
     use tempfile::TempDir;
 
     #[test]
@@ -416,18 +457,37 @@ mod tests {
             .build()
             .unwrap();
 
-        // Insert data into RocksDB
-        let tx_hash = B256::from([1u8; 32]);
-        rocksdb.put::<tables::TransactionHashNumbers>(tx_hash, &100).unwrap();
-
-        // Verify data exists
-        assert!(rocksdb.last::<tables::TransactionHashNumbers>().unwrap().is_some());
-
         // Create a test provider factory for MDBX with NO checkpoint
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(
             StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
         );
+
+        // Generate blocks with real transactions and insert them
+        let mut rng = generators::rng();
+        let blocks = generators::random_block_range(
+            &mut rng,
+            0..=2,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+
+        let mut tx_count = 0u64;
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            for block in &blocks {
+                provider.insert_block(block.clone().try_recover().expect("recover block")).unwrap();
+                for tx in &block.body().transactions {
+                    let hash = tx.trie_hash();
+                    rocksdb.put::<tables::TransactionHashNumbers>(hash, &tx_count).unwrap();
+                    tx_count += 1;
+                }
+            }
+            // No checkpoint set (checkpoint = 0)
+            provider.commit().unwrap();
+        }
+
+        // Verify data exists
+        assert!(rocksdb.last::<tables::TransactionHashNumbers>().unwrap().is_some());
 
         let provider = factory.database_provider_ro().unwrap();
 
@@ -566,63 +626,69 @@ mod tests {
             .build()
             .unwrap();
 
-        // Insert data into RocksDB - tx hashes for tx_numbers 50, 100, 150
-        let tx_hash_1 = B256::from([1u8; 32]);
-        let tx_hash_2 = B256::from([2u8; 32]);
-        let tx_hash_3 = B256::from([3u8; 32]);
-        rocksdb.put::<tables::TransactionHashNumbers>(tx_hash_1, &50).unwrap();
-        rocksdb.put::<tables::TransactionHashNumbers>(tx_hash_2, &100).unwrap();
-        rocksdb.put::<tables::TransactionHashNumbers>(tx_hash_3, &150).unwrap();
-
         // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(
             StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
         );
 
-        // Set up MDBX with:
-        // - TransactionBlocks: tx 50 is in block 10, tx 100 is in block 20, tx 150 is in block 30
-        // - Checkpoint at block 20 (meaning checkpoint should only have up to tx 100)
+        // Generate blocks with real transactions:
+        // Blocks 0-5, each with 2 transactions = 12 total transactions (0-11)
+        let mut rng = generators::rng();
+        let blocks = generators::random_block_range(
+            &mut rng,
+            0..=5,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+
+        // Track which hashes belong to which blocks
+        let mut tx_hashes = Vec::new();
+        let mut tx_count = 0u64;
         {
             let provider = factory.database_provider_rw().unwrap();
+            for block in &blocks {
+                provider.insert_block(block.clone().try_recover().expect("recover block")).unwrap();
+                for tx in &block.body().transactions {
+                    let hash = tx.trie_hash();
+                    tx_hashes.push(hash);
+                    rocksdb.put::<tables::TransactionHashNumbers>(hash, &tx_count).unwrap();
+                    tx_count += 1;
+                }
+            }
 
-            // Insert TransactionBlocks entries
-            let mut cursor = provider.tx_ref().cursor_write::<tables::TransactionBlocks>().unwrap();
-            cursor.append(50, &10).unwrap(); // tx 50 is the last tx in block 10
-            cursor.append(100, &20).unwrap(); // tx 100 is the last tx in block 20
-            cursor.append(150, &30).unwrap(); // tx 150 is the last tx in block 30
-
-            // Set checkpoint to block 20
+            // Set checkpoint to block 2 (meaning we should only have tx hashes for blocks 0-2)
+            // Blocks 0, 1, 2 have 6 transactions total
             provider
-                .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(20))
+                .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(2))
                 .unwrap();
             provider.commit().unwrap();
         }
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB has tx hashes up to tx 150 (block 30)
-        // But checkpoint says we only processed up to block 20 (tx 100)
-        // This means RocksDB is ahead and should prune entries > tx 100
+        // RocksDB has tx hashes for all blocks (0-5)
+        // But checkpoint says we only processed up to block 2
+        // This means RocksDB is ahead and should prune entries for blocks 3-5
         let result = rocksdb.check_consistency(&provider).unwrap();
         assert_eq!(result, None, "Should heal by pruning, no unwind needed");
 
-        // Verify tx_hash_3 (tx 150) was pruned, but tx_hash_1 (tx 50) and tx_hash_2 (tx 100) remain
-        assert_eq!(
-            rocksdb.get::<tables::TransactionHashNumbers>(tx_hash_1).unwrap(),
-            Some(50),
-            "tx 50 should remain"
-        );
-        assert_eq!(
-            rocksdb.get::<tables::TransactionHashNumbers>(tx_hash_2).unwrap(),
-            Some(100),
-            "tx 100 should remain"
-        );
-        assert_eq!(
-            rocksdb.get::<tables::TransactionHashNumbers>(tx_hash_3).unwrap(),
-            None,
-            "tx 150 should be pruned"
-        );
+        // Verify: hashes for blocks 0-2 (tx 0-5) should remain, blocks 3-5 (tx 6-11) should be
+        // pruned First 6 hashes should remain
+        for (i, hash) in tx_hashes.iter().take(6).enumerate() {
+            assert!(
+                rocksdb.get::<tables::TransactionHashNumbers>(*hash).unwrap().is_some(),
+                "tx {} should remain",
+                i
+            );
+        }
+        // Last 6 hashes should be pruned
+        for (i, hash) in tx_hashes.iter().skip(6).enumerate() {
+            assert!(
+                rocksdb.get::<tables::TransactionHashNumbers>(*hash).unwrap().is_none(),
+                "tx {} should be pruned",
+                i + 6
+            );
+        }
     }
 
     #[test]
@@ -683,6 +749,120 @@ mod tests {
         assert!(
             rocksdb.get::<tables::StoragesHistory>(key_block_max).unwrap().is_some(),
             "Entry with highest_block=u64::MAX (sentinel) should remain"
+        );
+    }
+
+    /// Test that pruning works by fetching transactions and computing their hashes,
+    /// rather than iterating all rows. This test uses random blocks with unique
+    /// transactions so we can verify the correct entries are pruned.
+    #[test]
+    fn test_prune_transaction_hash_numbers_by_range() {
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::TransactionHashNumbers>()
+            .build()
+            .unwrap();
+
+        // Create a test provider factory for MDBX
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+        );
+
+        // Generate random blocks with unique transactions
+        // Block 0 (genesis) has no transactions
+        // Blocks 1-5 each have 2 transactions = 10 transactions total
+        let mut rng = generators::rng();
+        let blocks = generators::random_block_range(
+            &mut rng,
+            0..=5,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+
+        // Insert blocks into the database
+        let mut tx_count = 0u64;
+        let mut tx_hashes = Vec::new();
+        {
+            let provider = factory.database_provider_rw().unwrap();
+
+            for block in &blocks {
+                provider.insert_block(block.clone().try_recover().expect("recover block")).unwrap();
+
+                // Store transaction hash -> tx_number mappings in RocksDB
+                for tx in &block.body().transactions {
+                    let hash = tx.trie_hash();
+                    tx_hashes.push(hash);
+                    rocksdb.put::<tables::TransactionHashNumbers>(hash, &tx_count).unwrap();
+                    tx_count += 1;
+                }
+            }
+
+            // Set checkpoint to block 2 (meaning we should only have tx hashes for blocks 0-2)
+            // Blocks 0, 1, 2 have 6 transactions (2 each), so tx 0-5 should remain
+            provider
+                .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(2))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        // At this point:
+        // - RocksDB has tx hashes for blocks 0-5 (10 total: 2 per block)
+        // - Checkpoint says we only processed up to block 2
+        // - We need to prune tx hashes for blocks 3, 4, 5 (tx 6-9)
+
+        // Verify RocksDB has the expected number of entries before pruning
+        let rocksdb_count_before: usize =
+            rocksdb.iter::<tables::TransactionHashNumbers>().unwrap().count();
+        assert_eq!(
+            rocksdb_count_before, tx_count as usize,
+            "RocksDB should have all {} transaction hashes before pruning",
+            tx_count
+        );
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // Verify we can fetch transactions by tx range
+        let all_txs = provider.transactions_by_tx_range(0..tx_count).unwrap();
+        assert_eq!(all_txs.len(), tx_count as usize, "Should be able to fetch all transactions");
+
+        // Verify the hashes match between what we stored and what we compute from fetched txs
+        for (i, tx) in all_txs.iter().enumerate() {
+            let computed_hash = tx.trie_hash();
+            assert_eq!(
+                computed_hash, tx_hashes[i],
+                "Hash mismatch for tx {}: stored {:?} vs computed {:?}",
+                i, tx_hashes[i], computed_hash
+            );
+        }
+
+        // Blocks 0, 1, 2 have 2 tx each = 6 tx total (indices 0-5)
+        // We want to keep tx 0-5, prune tx 6-9
+        let max_tx_to_keep = 5u64;
+        let tx_to_prune_start = max_tx_to_keep + 1;
+
+        // Prune transactions 6-9 (blocks 3-5)
+        rocksdb
+            .prune_transaction_hash_numbers_in_range(&provider, tx_to_prune_start..=(tx_count - 1))
+            .expect("prune should succeed");
+
+        // Verify: transactions 0-5 should remain, 6-9 should be pruned
+        let mut remaining_count = 0;
+        for result in rocksdb.iter::<tables::TransactionHashNumbers>().unwrap() {
+            let (_hash, tx_num) = result.unwrap();
+            assert!(
+                tx_num <= max_tx_to_keep,
+                "Transaction {} should have been pruned (> {})",
+                tx_num,
+                max_tx_to_keep
+            );
+            remaining_count += 1;
+        }
+        assert_eq!(
+            remaining_count,
+            (max_tx_to_keep + 1) as usize,
+            "Should have {} transactions (0-{})",
+            max_tx_to_keep + 1,
+            max_tx_to_keep
         );
     }
 }
