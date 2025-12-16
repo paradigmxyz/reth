@@ -163,7 +163,7 @@ pub(crate) type DebugBlockProviderFuture<'a, N> = Pin<
 >;
 
 /// Returns true if debug consensus block provider is configured via RPC or Etherscan flags.
-fn debug_block_provider_configured<ChainSpec>(config: &NodeConfig<ChainSpec>) -> bool {
+const fn debug_block_provider_configured<ChainSpec>(config: &NodeConfig<ChainSpec>) -> bool {
     config.debug.rpc_consensus_url.is_some() || config.debug.etherscan.is_some()
 }
 
