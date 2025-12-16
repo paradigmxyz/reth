@@ -225,4 +225,8 @@ pub enum FromOrchestrator {
     BackfillSyncFinished(ControlFlow),
     /// Invoked when backfill sync started
     BackfillSyncStarted,
+    /// Gracefully terminate the engine service.
+    Terminate {
+        // TODO: add oneshot channel/settings to optionally trigger persistence
+    },
 }

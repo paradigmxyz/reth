@@ -1352,6 +1352,11 @@ where
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl)?;
                 }
+                FromOrchestrator::Terminate {
+
+                } => {
+                    todo!("trigger remaining persistence")
+                }
             },
             FromEngine::Request(request) => {
                 match request {

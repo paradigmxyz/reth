@@ -295,6 +295,7 @@ impl EngineNodeLauncher {
             // advance the chain and await payloads built locally to add into the engine api tree handler to prevent re-execution if that block is received as payload from the CL
             loop {
                 tokio::select! {
+                    // TODO: channel for manual shutdown command -> forwar to engine_service.orchestrator_mut().handler_mut() ::Terminate
                     payload = built_payloads.select_next_some() => {
                         if let Some(executed_block) = payload.executed_block() {
                             debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
@@ -366,6 +367,7 @@ impl EngineNodeLauncher {
                 rpc_registry,
                 engine_events,
                 beacon_engine_handle,
+                // TODO: add like a Arc<Mutex<Option<>> struct EngineShutdown that sends a oneshot to
             },
         };
         // Notify on node started
