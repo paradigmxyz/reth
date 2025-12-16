@@ -489,10 +489,10 @@ alloy-dyn-abi = "1.4.1"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
 alloy-eip7928 = { version = "0.1.0" }
 alloy-evm = { version = "0.25.1", default-features = false }
-alloy-primitives = { version = "1.4.1", default-features = false, features = ["map-foldhash"] }
+alloy-primitives = { version = "1.5.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
-alloy-sol-macro = "1.4.1"
-alloy-sol-types = { version = "1.4.1", default-features = false }
+alloy-sol-macro = "1.5.0"
+alloy-sol-types = { version = "1.5.0", default-features = false }
 alloy-trie = { version = "0.9.1", default-features = false }
 
 alloy-hardforks = "0.4.5"
