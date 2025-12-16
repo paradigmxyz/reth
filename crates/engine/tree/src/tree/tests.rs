@@ -4,7 +4,7 @@ use crate::{
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
         persistence_state::CurrentPersistenceAction,
-        TreeConfig,
+        PersistTarget, TreeConfig,
     },
 };
 
@@ -883,7 +883,8 @@ async fn test_get_canonical_blocks_to_persist() {
         .with_persistence_threshold(persistence_threshold)
         .with_memory_block_buffer_target(memory_block_buffer_target);
 
-    let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist().unwrap();
+    let blocks_to_persist =
+        test_harness.tree.get_canonical_blocks_to_persist(PersistTarget::Threshold).unwrap();
 
     let expected_blocks_to_persist_length: usize =
         (canonical_head_number - memory_block_buffer_target - last_persisted_block_number)
@@ -902,7 +903,8 @@ async fn test_get_canonical_blocks_to_persist() {
 
     assert!(test_harness.tree.state.tree_state.sealed_header_by_hash(&fork_block_hash).is_some());
 
-    let blocks_to_persist = test_harness.tree.get_canonical_blocks_to_persist().unwrap();
+    let blocks_to_persist =
+        test_harness.tree.get_canonical_blocks_to_persist(PersistTarget::Threshold).unwrap();
     assert_eq!(blocks_to_persist.len(), expected_blocks_to_persist_length);
 
     // check that the fork block is not included in the blocks to persist
@@ -1942,5 +1944,54 @@ mod forkchoice_updated_tests {
             .handle_canonical_head(state, &None, EngineApiMessageVersion::default())
             .unwrap();
         assert!(result.is_some(), "OpStack should handle canonical head");
+    }
+
+    /// Test that engine termination persists all blocks and signals completion.
+    #[test]
+    fn test_engine_termination_with_everything_persisted() {
+        let chain_spec = MAINNET.clone();
+        let mut test_block_builder = TestBlockBuilder::eth().with_chain_spec((*chain_spec).clone());
+
+        // Create 10 blocks to persist
+        let blocks: Vec<_> = test_block_builder.get_executed_blocks(1..11).collect();
+        let canonical_tip = blocks.last().unwrap().recovered_block().number;
+        let test_harness = TestHarness::new(chain_spec).with_blocks(blocks);
+
+        // Create termination channel
+        let (terminate_tx, mut terminate_rx) = oneshot::channel();
+
+        let to_tree_tx = test_harness.to_tree_tx.clone();
+        let action_rx = test_harness.action_rx;
+
+        // Spawn tree in background thread
+        std::thread::Builder::new()
+            .name("Engine Task".to_string())
+            .spawn(|| test_harness.tree.run())
+            .unwrap();
+
+        // Send terminate request
+        to_tree_tx
+            .send(FromEngine::Event(FromOrchestrator::Terminate { tx: terminate_tx }))
+            .unwrap();
+
+        // Handle persistence actions until termination completes
+        let mut last_persisted_number = 0;
+        loop {
+            if terminate_rx.try_recv().is_ok() {
+                break;
+            }
+
+            if let Ok(PersistenceAction::SaveBlocks(saved_blocks, sender)) =
+                action_rx.recv_timeout(std::time::Duration::from_millis(100))
+            {
+                if let Some(last) = saved_blocks.last() {
+                    last_persisted_number = last.recovered_block().number;
+                }
+                sender.send(saved_blocks.last().map(|b| b.recovered_block().num_hash())).unwrap();
+            }
+        }
+
+        // Ensure we persisted right ot the tip
+        assert_eq!(last_persisted_number, canonical_tip);
     }
 }
