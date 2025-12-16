@@ -387,6 +387,9 @@ impl RocksDBProvider {
 /// Unlike [`RocksTx`], this does NOT support read-your-writes. Use for write-only flows
 /// where you don't need to read back uncommitted data within the same operation
 /// (e.g., history index writes).
+///
+/// Note: `WriteBatch` operations are applied in order. If the same key is updated multiple times,
+/// the last update wins. Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
 #[must_use = "batch must be committed"]
 pub struct RocksDBBatch<'a> {
     provider: &'a RocksDBProvider,
