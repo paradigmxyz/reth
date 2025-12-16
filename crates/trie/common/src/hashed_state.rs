@@ -861,7 +861,7 @@ mod tests {
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
-            storage_id: None,
+            account_id: None,
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -906,7 +906,7 @@ mod tests {
             nonce: 1,
             code_hash: B256::random(),
             code: None,
-            storage_id: None,
+            account_id: None,
         };
 
         // Create hashed accounts with addresses.

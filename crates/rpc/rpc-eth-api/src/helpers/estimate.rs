@@ -27,7 +27,7 @@ use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GA
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Transaction},
-    database::bal::BalDatabaseError,
+    database::bal::EvmDatabaseError,
 };
 use tracing::trace;
 
@@ -319,7 +319,7 @@ pub trait EstimateCall: Call {
         max_gas_limit: u64,
     ) -> Result<U256, Self::Error>
     where
-        DB: Database<Error = BalDatabaseError<ProviderError>>,
+        DB: Database<Error = EvmDatabaseError<ProviderError>>,
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();

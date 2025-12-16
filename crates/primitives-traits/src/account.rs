@@ -238,7 +238,7 @@ impl From<Account> for AccountInfo {
             nonce: reth_acc.nonce,
             code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
             code: None,
-            storage_id: None,
+            account_id: None,
         }
     }
 }
@@ -305,11 +305,14 @@ mod tests {
         assert_eq!(len, 17);
 
         let mut buf = vec![];
-        let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(LegacyAnalyzedBytecode::new(
-            Bytes::from(&hex!("ff00")),
-            2,
-            JumpTable::from_slice(&[0], 2),
-        )));
+        let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(
+            LegacyAnalyzedBytecode::new(
+                Bytes::from(&hex!("ff00")),
+                2,
+                JumpTable::from_slice(&[0], 2),
+            )
+            .into(),
+        ));
         let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
 

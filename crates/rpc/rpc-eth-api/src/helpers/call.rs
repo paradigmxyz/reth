@@ -37,7 +37,7 @@ use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
-    database::bal::BalDatabaseError,
+    database::bal::EvmDatabaseError,
     Database, DatabaseCommit,
 };
 use revm_inspectors::{access_list::AccessListInspector, transfer::TransferInspector};
@@ -514,7 +514,7 @@ pub trait Call:
         tx_env: TxEnvFor<Self::Evm>,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
-        DB: Database<Error = BalDatabaseError<ProviderError>> + fmt::Debug,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);
         let res = evm.transact(tx_env).map_err(Self::Error::from_evm_err)?;
@@ -532,7 +532,7 @@ pub trait Call:
         inspector: I,
     ) -> Result<ResultAndState<HaltReasonFor<Self::Evm>>, Self::Error>
     where
-        DB: Database<Error = BalDatabaseError<ProviderError>> + fmt::Debug,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + fmt::Debug,
         I: InspectorFor<Self::Evm, DB>,
     {
         let mut evm = self.evm_config().evm_with_env_and_inspector(db, evm_env, inspector);
@@ -709,7 +709,7 @@ pub trait Call:
         target_tx_hash: B256,
     ) -> Result<usize, Self::Error>
     where
-        DB: Database<Error = BalDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
+        DB: Database<Error = EvmDatabaseError<ProviderError>> + DatabaseCommit + core::fmt::Debug,
         I: IntoIterator<Item = Recovered<&'a ProviderTx<Self::Provider>>>,
     {
         let mut evm = self.evm_config().evm_with_env(db, evm_env);

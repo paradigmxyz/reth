@@ -571,7 +571,7 @@ mod tests {
                         nonce: 10,
                         code_hash: B256::random(),
                         code: Default::default(),
-                        storage_id: None,
+                        account_id: None,
                     },
                     storage,
                     status: AccountStatus::default(),

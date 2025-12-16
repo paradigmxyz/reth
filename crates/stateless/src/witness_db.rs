@@ -76,7 +76,7 @@ where
                 nonce: account.nonce,
                 code_hash: account.code_hash,
                 code: None,
-                storage_id: None,
+                account_id: None,
             })
         })
     }

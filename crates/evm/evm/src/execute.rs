@@ -745,7 +745,7 @@ mod tests {
             nonce,
             code_hash: KECCAK_EMPTY,
             code: None,
-            storage_id: None,
+            account_id: None,
         };
         state.insert_account(addr, account_info);
         state
@@ -787,7 +787,7 @@ mod tests {
             nonce: 1,
             code_hash: KECCAK_EMPTY,
             code: None,
-            storage_id: None,
+            account_id: None,
         };
         state.insert_account(addr2, account2);
 
@@ -814,7 +814,7 @@ mod tests {
             nonce: 1,
             code_hash: KECCAK_EMPTY,
             code: None,
-            storage_id: None,
+            account_id: None,
         };
         state.insert_account(addr2, account2);
 
