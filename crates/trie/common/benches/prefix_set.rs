@@ -76,12 +76,6 @@ pub fn prefix_set_lookups(c: &mut Criterion) {
             test_data.clone(),
             size,
         );
-        prefix_set_bench::<VecBinarySearchPrefixSet>(
-            &mut group,
-            "`Vec` with binary search lookup",
-            test_data.clone(),
-            size,
-        );
     }
 }
 
