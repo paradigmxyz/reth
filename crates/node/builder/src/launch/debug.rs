@@ -1,6 +1,7 @@
 use super::LaunchNode;
 use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
 use alloy_provider::network::AnyNetwork;
+use async_trait::async_trait;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{
@@ -20,7 +21,6 @@ use std::{
     pin::Pin,
     sync::Arc,
 };
-use async_trait::async_trait;
 use tokio::sync::mpsc::Sender;
 use tracing::info;
 
