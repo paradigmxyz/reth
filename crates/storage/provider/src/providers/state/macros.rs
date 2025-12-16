@@ -26,6 +26,11 @@ pub(crate) use delegate_impls_to_as_ref;
 /// [`AccountReader`](crate::AccountReader)
 /// [`BlockHashReader`](crate::BlockHashReader)
 /// [`StateProvider`](crate::StateProvider)
+/// [`BytecodeReader`](crate::BytecodeReader)
+/// [`StateRootProvider`](crate::StateRootProvider)
+/// [`StorageRootProvider`](crate::StorageRootProvider)
+/// [`StateProofProvider`](crate::StateProofProvider)
+/// [`HashedPostStateProvider`](crate::HashedPostStateProvider)
 macro_rules! delegate_provider_impls {
     ($target:ty $(where [$($generics:tt)*])?) => {
         $crate::providers::state::macros::delegate_impls_to_as_ref!(
