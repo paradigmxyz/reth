@@ -16,6 +16,7 @@ use tokio::{
     sync::{mpsc, oneshot},
 };
 use tokio_stream::wrappers::ReceiverStream;
+use tracing::{instrument, Instrument};
 
 /// Represents a future outputting unit type and is sendable.
 type ValidationFuture = Pin<Box<dyn Future<Output = ()> + Send>>;
@@ -198,6 +199,7 @@ where
 {
     type Transaction = <V as TransactionValidator>::Transaction;
 
+    #[instrument(skip_all, fields(tx_hash = %transaction.hash()))]
     async fn validate_transaction(
         &self,
         origin: TransactionOrigin,
@@ -209,10 +211,13 @@ where
             let res = {
                 let to_validation_task = self.to_validation_task.clone();
                 let validator = self.validator.clone();
-                let fut = Box::pin(async move {
-                    let res = validator.validate_transaction(origin, transaction).await;
-                    let _ = tx.send(res);
-                });
+                let fut = Box::pin(
+                    async move {
+                        let res = validator.validate_transaction(origin, transaction).await;
+                        let _ = tx.send(res);
+                    }
+                    .in_current_span(),
+                );
                 let to_validation_task = to_validation_task.lock().await;
                 to_validation_task.send(fut).await
             };
@@ -233,6 +238,7 @@ where
         }
     }
 
+    #[instrument(skip_all, fields(num_transactions = %transactions.len()))]
     async fn validate_transactions(
         &self,
         transactions: Vec<(TransactionOrigin, Self::Transaction)>,
@@ -243,10 +249,13 @@ where
             let res = {
                 let to_validation_task = self.to_validation_task.clone();
                 let validator = self.validator.clone();
-                let fut = Box::pin(async move {
-                    let res = validator.validate_transactions(transactions).await;
-                    let _ = tx.send(res);
-                });
+                let fut = Box::pin(
+                    async move {
+                        let res = validator.validate_transactions(transactions).await;
+                        let _ = tx.send(res);
+                    }
+                    .in_current_span(),
+                );
                 let to_validation_task = to_validation_task.lock().await;
                 to_validation_task.send(fut).await
             };
