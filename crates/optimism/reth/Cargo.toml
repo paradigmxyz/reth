@@ -75,7 +75,7 @@ arbitrary = [
     "reth-codecs?/arbitrary",
 ]
 keccak-cache-global = [
-	"reth-optimism-node?/keccak-cache-global"
+    "reth-optimism-node?/keccak-cache-global",
 ]
 test-utils = [
     "reth-chainspec/test-utils",
