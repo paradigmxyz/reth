@@ -3,7 +3,7 @@
 //! An `RLPx` stream is multiplexed via the prepended message-id of a framed message.
 //! Capabilities are exchanged via the `RLPx` `Hello` message as pairs of `(id, version)`, <https://github.com/ethereum/devp2p/blob/master/rlpx.md#capability-messaging>
 
-use crate::types::Receipts69;
+use crate::types::{Receipts69, Receipts70};
 use alloy_consensus::{BlockHeader, ReceiptWithBloom};
 use alloy_primitives::{Bytes, B256};
 use futures::FutureExt;
@@ -116,6 +116,11 @@ pub enum PeerResponse<N: NetworkPrimitives = EthNetworkPrimitives> {
         /// The receiver channel for the response to a receipts request.
         response: oneshot::Receiver<RequestResult<Receipts69<N::Receipt>>>,
     },
+    /// Represents a response to a request for receipts using eth/70.
+    Receipts70 {
+        /// The receiver channel for the response to a receipts request.
+        response: oneshot::Receiver<RequestResult<Receipts70<N::Receipt>>>,
+    },
 }
 
 // === impl PeerResponse ===
@@ -151,6 +156,10 @@ impl<N: NetworkPrimitives> PeerResponse<N> {
             Self::Receipts69 { response } => {
                 poll_request!(response, Receipts69, cx)
             }
+            Self::Receipts70 { response } => match ready!(response.poll_unpin(cx)) {
+                Ok(res) => PeerResponseResult::Receipts70(res),
+                Err(err) => PeerResponseResult::Receipts70(Err(err.into())),
+            },
         };
         Poll::Ready(res)
     }
@@ -171,6 +180,8 @@ pub enum PeerResponseResult<N: NetworkPrimitives = EthNetworkPrimitives> {
     Receipts(RequestResult<Vec<Vec<ReceiptWithBloom<N::Receipt>>>>),
     /// Represents a result containing receipts or an error for eth/69.
     Receipts69(RequestResult<Vec<Vec<N::Receipt>>>),
+    /// Represents a result containing receipts or an error for eth/70.
+    Receipts70(RequestResult<Receipts70<N::Receipt>>),
 }
 
 // === impl PeerResponseResult ===
@@ -208,6 +219,13 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::Receipts69(resp) => {
                 to_message!(resp, Receipts69, id)
             }
+            Self::Receipts70(resp) => match resp {
+                Ok(res) => {
+                    let request = RequestPair { request_id: id, message: res };
+                    Ok(EthMessage::Receipts70(request))
+                }
+                Err(err) => Err(err),
+            },
         }
     }
 
@@ -220,6 +238,7 @@ impl<N: NetworkPrimitives> PeerResponseResult<N> {
             Self::NodeData(res) => res.as_ref().err(),
             Self::Receipts(res) => res.as_ref().err(),
             Self::Receipts69(res) => res.as_ref().err(),
+            Self::Receipts70(res) => res.as_ref().err(),
         }
     }
 
