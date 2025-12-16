@@ -7,11 +7,12 @@ use reth_node_api::{
 use reth_primitives_traits::{Block, SealedBlock};
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
+use async_trait::async_trait;
 use tokio::sync::mpsc;
 
 /// Supplies consensus client with new blocks sent in `tx` and a callback to find specific blocks
 /// by number to fetch past finalized and safe blocks.
-#[async_trait::async_trait]
+#[async_trait]
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockProvider: Send + Sync + 'static {
     /// The block type.

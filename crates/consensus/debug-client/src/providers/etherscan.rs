@@ -2,6 +2,7 @@ use crate::BlockProvider;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_json_rpc::{Response, ResponsePayload};
+use async_trait::async_trait;
 use reqwest::Client;
 use reth_tracing::tracing::{debug, warn};
 use serde::{de::DeserializeOwned, Serialize};
@@ -88,7 +89,7 @@ where
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl<RpcBlock, PrimitiveBlock> BlockProvider for EtherscanBlockProvider<RpcBlock, PrimitiveBlock>
 where
     RpcBlock: Serialize + DeserializeOwned + 'static,

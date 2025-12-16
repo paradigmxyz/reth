@@ -1,6 +1,7 @@
 use crate::BlockProvider;
 use alloy_provider::{ConnectionConfig, Network, Provider, ProviderBuilder, WebSocketConfig};
 use alloy_transport::TransportResult;
+use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use reth_node_api::Block;
 use reth_tracing::tracing::{debug, warn};
@@ -66,7 +67,7 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl<N: Network, PrimitiveBlock> BlockProvider for RpcBlockProvider<N, PrimitiveBlock>
 where
     PrimitiveBlock: Block + 'static,

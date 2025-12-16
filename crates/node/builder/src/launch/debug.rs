@@ -20,6 +20,7 @@ use std::{
     pin::Pin,
     sync::Arc,
 };
+use async_trait::async_trait;
 use tokio::sync::mpsc::Sender;
 use tracing::info;
 
@@ -210,7 +211,7 @@ impl<B: Block + 'static> DynBlockProviderHandle<B> {
     }
 }
 
-#[async_trait::async_trait]
+#[async_trait]
 impl<B: Block + 'static> BlockProvider for DynBlockProviderHandle<B> {
     type Block = B;
 
