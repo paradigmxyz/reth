@@ -7,11 +7,11 @@ use reth_node_api::{
 use reth_primitives_traits::{Block, SealedBlock};
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
-use std::future::Future;
 use tokio::sync::mpsc;
 
 /// Supplies consensus client with new blocks sent in `tx` and a callback to find specific blocks
 /// by number to fetch past finalized and safe blocks.
+#[async_trait::async_trait]
 #[auto_impl::auto_impl(&, Arc, Box)]
 pub trait BlockProvider: Send + Sync + 'static {
     /// The block type.
@@ -21,39 +21,34 @@ pub trait BlockProvider: Send + Sync + 'static {
     ///
     /// Note: This is expected to be spawned in a separate task, and as such it should ignore
     /// errors.
-    fn subscribe_blocks(&self, tx: mpsc::Sender<Self::Block>) -> impl Future<Output = ()> + Send;
+    async fn subscribe_blocks(&self, tx: mpsc::Sender<Self::Block>);
 
     /// Get a past block by number.
-    fn get_block(
-        &self,
-        block_number: u64,
-    ) -> impl Future<Output = eyre::Result<Self::Block>> + Send;
+    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block>;
 
     /// Get previous block hash using previous block hash buffer. If it isn't available (buffer
     /// started more recently than `offset`), fetch it using `get_block`.
-    fn get_or_fetch_previous_block(
+    async fn get_or_fetch_previous_block(
         &self,
         previous_block_hashes: &AllocRingBuffer<B256>,
         current_block_number: u64,
         offset: usize,
-    ) -> impl Future<Output = eyre::Result<B256>> + Send {
-        async move {
-            let stored_hash = previous_block_hashes
-                .len()
-                .checked_sub(offset)
-                .and_then(|index| previous_block_hashes.get(index));
-            if let Some(hash) = stored_hash {
-                return Ok(*hash);
-            }
-
-            // Return zero hash if the chain isn't long enough to have the block at the offset.
-            let previous_block_number = match current_block_number.checked_sub(offset as u64) {
-                Some(number) => number,
-                None => return Ok(B256::default()),
-            };
-            let block = self.get_block(previous_block_number).await?;
-            Ok(block.header().hash_slow())
+    ) -> eyre::Result<B256> {
+        let stored_hash = previous_block_hashes
+            .len()
+            .checked_sub(offset)
+            .and_then(|index| previous_block_hashes.get(index));
+        if let Some(hash) = stored_hash {
+            return Ok(*hash);
         }
+
+        // Return zero hash if the chain isn't long enough to have the block at the offset.
+        let previous_block_number = match current_block_number.checked_sub(offset as u64) {
+            Some(number) => number,
+            None => return Ok(B256::default()),
+        };
+        let block = self.get_block(previous_block_number).await?;
+        Ok(block.header().hash_slow())
     }
 }
 

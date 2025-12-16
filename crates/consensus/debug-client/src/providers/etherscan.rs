@@ -88,6 +88,7 @@ where
     }
 }
 
+#[async_trait::async_trait]
 impl<RpcBlock, PrimitiveBlock> BlockProvider for EtherscanBlockProvider<RpcBlock, PrimitiveBlock>
 where
     RpcBlock: Serialize + DeserializeOwned + 'static,

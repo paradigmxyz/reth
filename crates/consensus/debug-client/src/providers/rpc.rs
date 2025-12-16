@@ -66,6 +66,7 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
     }
 }
 
+#[async_trait::async_trait]
 impl<N: Network, PrimitiveBlock> BlockProvider for RpcBlockProvider<N, PrimitiveBlock>
 where
     PrimitiveBlock: Block + 'static,

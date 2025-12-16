@@ -195,22 +195,10 @@ pub type DevPayloadAttributesBuilderFactory<N> = Box<
         + 'static,
 >;
 
-/// Object-safe wrapper for a [`BlockProvider`] with boxed futures.
-pub trait DynBlockProvider<B: Block>: Send + Sync {
-    /// Subscribes to new blocks and forwards them to the given channel.
-    fn subscribe_blocks(&self, tx: Sender<B>)
-        -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>;
-    /// Fetches a specific block by number.
-    fn get_block(
-        &self,
-        block_number: u64,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<B>> + Send + 'static>>;
-}
-
 /// Convenience handle for using a dynamic block provider where [`BlockProvider`] is expected.
 #[derive(Clone)]
 #[allow(missing_debug_implementations)]
-pub struct DynBlockProviderHandle<B: Block + 'static>(Arc<dyn DynBlockProvider<B>>);
+pub struct DynBlockProviderHandle<B: Block + 'static>(Arc<dyn BlockProvider<Block = B>>);
 
 impl<B: Block + 'static> DynBlockProviderHandle<B> {
     /// Wraps any [`BlockProvider`] as a dynamic provider handle.
@@ -218,48 +206,20 @@ impl<B: Block + 'static> DynBlockProviderHandle<B> {
     where
         P: BlockProvider<Block = B> + Send + Sync + 'static,
     {
-        Self(Arc::new(DynBlockProviderAdapter { inner: Arc::new(provider) }))
+        Self(Arc::new(provider))
     }
 }
 
+#[async_trait::async_trait]
 impl<B: Block + 'static> BlockProvider for DynBlockProviderHandle<B> {
     type Block = B;
 
     async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
-        DynBlockProvider::subscribe_blocks(self.0.as_ref(), tx).await
+        self.0.subscribe_blocks(tx).await
     }
 
     async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
-        DynBlockProvider::get_block(self.0.as_ref(), block_number).await
-    }
-}
-
-struct DynBlockProviderAdapter<
-    B: Block + 'static,
-    P: BlockProvider<Block = B> + Send + Sync + 'static,
-> {
-    inner: Arc<P>,
-}
-
-impl<B, P> DynBlockProvider<B> for DynBlockProviderAdapter<B, P>
-where
-    B: Block + 'static,
-    P: BlockProvider<Block = B> + Send + Sync + 'static,
-{
-    fn subscribe_blocks(
-        &self,
-        tx: Sender<B>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.subscribe_blocks(tx).await })
-    }
-
-    fn get_block(
-        &self,
-        block_number: u64,
-    ) -> Pin<Box<dyn Future<Output = eyre::Result<B>> + Send + 'static>> {
-        let inner = self.inner.clone();
-        Box::pin(async move { inner.get_block(block_number).await })
+        self.0.get_block(block_number).await
     }
 }
 
