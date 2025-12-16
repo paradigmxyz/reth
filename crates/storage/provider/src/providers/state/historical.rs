@@ -178,8 +178,8 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
 
     /// Retrieve revert hashed state for this history provider.
     fn revert_state(&self) -> ProviderResult<HashedPostStateSorted> {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
-            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
+        if !self.lowest_available_blocks.is_account_history_available(self.block_number)
+            || !self.lowest_available_blocks.is_storage_history_available(self.block_number)
         {
             return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
@@ -245,9 +245,9 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
             // short-circuit) and when it passes we save a full seek into the changeset/plain state
             // table.
-            if rank == 0 &&
-                block_number != Some(self.block_number) &&
-                !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
+            if rank == 0
+                && block_number != Some(self.block_number)
+                && !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
             {
                 if let (Some(_), Some(block_number)) = (lowest_available_block_number, block_number)
                 {
