@@ -963,18 +963,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         Ok(())
     }
 
-    /// RocksDB-specific implementation of unwind account history indices.
+    /// `RocksDB` specific implementation of unwind account history indices.
     ///
     /// Replicates the `unwind_history_shards` logic but using `EitherReader`/`EitherWriter`.
     ///
-    /// Since RocksDB `WriteBatch` follows "last write wins" for the same key, we must deduplicate
+    /// Since `RocksDB` `WriteBatch` follows "last write wins" for the same key, we must deduplicate
     /// changesets to ensure we unwind to the *earliest* block number.
     ///
     /// Example: Unwinding blocks 101 and 100 for `AddressA`.
-    /// - If processed in order (101, 100), the batch contains `[Put(A, State@101), Put(A, State@100)]`.
-    ///   Result: `State@100` (Correct).
-    /// - If processed out of order (100, 101), the batch contains `[Put(A, State@100), Put(A, State@101)]`.
-    ///   Result: `State@101` (Incorrect - 101 should be unwound).
+    /// - If processed in order (101, 100), the batch contains `[Put(A, State@101), Put(A,
+    ///   State@100)]`. Result: `State@100` (Correct).
+    /// - If processed out of order (100, 101), the batch contains `[Put(A, State@100), Put(A,
+    ///   State@101)]`. Result: `State@101` (Incorrect - 101 should be unwound).
     ///
     /// Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
     #[cfg(all(unix, feature = "rocksdb"))]
@@ -1036,18 +1036,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         Ok(last_indices.len())
     }
 
-    /// RocksDB-specific implementation of unwind storage history indices.
+    /// `RocksDB` specific implementation of unwind storage history indices.
     ///
     /// Replicates the `unwind_history_shards` logic but using `EitherReader`/`EitherWriter`.
     ///
-    /// Since RocksDB `WriteBatch` follows "last write wins" for the same key, we must deduplicate
+    /// Since `RocksDB` `WriteBatch` follows "last write wins" for the same key, we must deduplicate
     /// changesets to ensure we unwind to the *earliest* block number.
     ///
     /// Example: Unwinding blocks 101 and 100 for `AddressA`.
-    /// - If processed in order (101, 100), the batch contains `[Put(A, State@101), Put(A, State@100)]`.
-    ///   Result: `State@100` (Correct).
-    /// - If processed out of order (100, 101), the batch contains `[Put(A, State@100), Put(A, State@101)]`.
-    ///   Result: `State@101` (Incorrect - 101 should be unwound).
+    /// - If processed in order (101, 100), the batch contains `[Put(A, State@101), Put(A,
+    ///   State@100)]`. Result: `State@100` (Correct).
+    /// - If processed out of order (100, 101), the batch contains `[Put(A, State@100), Put(A,
+    ///   State@101)]`. Result: `State@101` (Incorrect - 101 should be unwound).
     ///
     /// Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
     #[cfg(all(unix, feature = "rocksdb"))]
@@ -1560,7 +1560,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
                     timestamp: header.timestamp(),
                 };
 
-                return Ok(Some((transaction, meta)));
+                return Ok(Some((transaction, meta)))
             }
         }
 
