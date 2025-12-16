@@ -337,7 +337,7 @@ impl NetworkArgs {
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key)
-            .external_ip_resolver(self.nat)
+            .external_ip_resolver(self.nat.clone())
             .sessions_config(
                 SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
             )
@@ -399,7 +399,7 @@ impl NetworkArgs {
     }
 
     /// Configures the [`NatResolver`]
-    pub const fn with_nat_resolver(mut self, nat: NatResolver) -> Self {
+    pub fn with_nat_resolver(mut self, nat: NatResolver) -> Self {
         self.nat = nat;
         self
     }

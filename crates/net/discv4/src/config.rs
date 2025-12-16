@@ -93,7 +93,7 @@ impl Discv4Config {
     /// Returns the corresponding [`ResolveNatInterval`], if a [`NatResolver`] and an interval was
     /// configured
     pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
-        let resolver = self.external_ip_resolver?;
+        let resolver = self.external_ip_resolver.clone()?;
         let interval = self.resolve_external_ip_interval?;
         Some(ResolveNatInterval::interval_at(resolver, tokio::time::Instant::now(), interval))
     }
@@ -275,10 +275,7 @@ impl Discv4ConfigBuilder {
     }
 
     /// Configures if and how the external IP of the node should be resolved.
-    pub const fn external_ip_resolver(
-        &mut self,
-        external_ip_resolver: Option<NatResolver>,
-    ) -> &mut Self {
+    pub fn external_ip_resolver(&mut self, external_ip_resolver: Option<NatResolver>) -> &mut Self {
         self.config.external_ip_resolver = external_ip_resolver;
         self
     }

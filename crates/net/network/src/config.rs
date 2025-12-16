@@ -433,7 +433,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     pub fn external_ip_resolver(mut self, resolver: NatResolver) -> Self {
         self.discovery_v4_builder
             .get_or_insert_with(Discv4Config::builder)
-            .external_ip_resolver(Some(resolver));
+            .external_ip_resolver(Some(resolver.clone()));
         self.nat = Some(resolver);
         self
     }
@@ -484,7 +484,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     }
 
     // Disable nat
-    pub const fn disable_nat(mut self) -> Self {
+    pub fn disable_nat(mut self) -> Self {
         self.nat = None;
         self
     }
@@ -579,7 +579,7 @@ impl<N: NetworkPrimitives> NetworkConfigBuilder<N> {
     }
 
     /// Sets the NAT resolver for external IP.
-    pub const fn add_nat(mut self, nat: Option<NatResolver>) -> Self {
+    pub fn add_nat(mut self, nat: Option<NatResolver>) -> Self {
         self.nat = nat;
         self
     }
