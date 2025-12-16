@@ -10885,7 +10885,6 @@ dependencies = [
  "tempfile",
  "thiserror 2.0.17",
  "tokio",
- "tokio-stream",
  "tracing",
 ]
 

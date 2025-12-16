@@ -36,7 +36,6 @@ futures-util.workspace = true
 parking_lot.workspace = true
 pin-project.workspace = true
 tokio = { workspace = true, features = ["sync"] }
-tokio-stream.workspace = true
 
 # metrics
 reth-metrics.workspace = true

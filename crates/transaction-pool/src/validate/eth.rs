@@ -8,10 +8,12 @@ use crate::{
     },
     metrics::TxPoolValidationMetrics,
     traits::TransactionOrigin,
-    validate::{ValidTransaction, ValidationTask, MAX_INIT_CODE_BYTE_SIZE},
+    validate::{
+        task::TransactionValidationTaskExecutorBuilder, ValidTransaction, MAX_INIT_CODE_BYTE_SIZE,
+    },
     Address, BlobTransactionSidecarVariant, EthBlobTransactionSidecar, EthPoolTransaction,
-    LocalTransactionConfig, TransactionValidationOutcome, TransactionValidationTaskExecutor,
-    TransactionValidator,
+    LocalTransactionConfig, PoolTransaction, TransactionValidationOutcome,
+    TransactionValidationTaskExecutor, TransactionValidator,
 };
 
 use alloy_consensus::{
@@ -41,7 +43,6 @@ use std::{
     },
     time::{Instant, SystemTime},
 };
-use tokio::sync::Mutex;
 
 /// A [`TransactionValidator`] implementation that validates ethereum transaction.
 ///
@@ -1164,6 +1165,19 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
         }
     }
 
+    /// Creates a [`TransactionValidationTaskExecutorBuilder`].
+    pub fn into_tasks_builder<Tx, S>(
+        self,
+        blob_store: S,
+    ) -> TransactionValidationTaskExecutorBuilder<EthTransactionValidator<Client, Tx>>
+    where
+        S: BlobStore,
+    {
+        let additional_tasks = self.additional_tasks;
+        let validator = self.build(blob_store);
+        TransactionValidationTaskExecutorBuilder::new(validator, additional_tasks)
+    }
+
     /// Builds a [`EthTransactionValidator`] and spawns validation tasks via the
     /// [`TransactionValidationTaskExecutor`]
     ///
@@ -1178,32 +1192,10 @@ impl<Client> EthTransactionValidatorBuilder<Client> {
     where
         T: TaskSpawner,
         S: BlobStore,
+        Tx: PoolTransaction,
+        EthTransactionValidator<Client, Tx>: TransactionValidator<Transaction = Tx> + 'static,
     {
-        let additional_tasks = self.additional_tasks;
-        let validator = self.build(blob_store);
-
-        let (tx, task) = ValidationTask::new();
-
-        // Spawn validation tasks, they are blocking because they perform db lookups
-        for _ in 0..additional_tasks {
-            let task = task.clone();
-            tasks.spawn_blocking(Box::pin(async move {
-                task.run().await;
-            }));
-        }
-
-        // we spawn them on critical tasks because validation, especially for EIP-4844 can be quite
-        // heavy
-        tasks.spawn_critical_blocking(
-            "transaction-validation-service",
-            Box::pin(async move {
-                task.run().await;
-            }),
-        );
-
-        let to_validation_task = Arc::new(Mutex::new(tx));
-
-        TransactionValidationTaskExecutor { validator: Arc::new(validator), to_validation_task }
+        self.into_tasks_builder(blob_store).build_and_spawn(tasks)
     }
 }
 
