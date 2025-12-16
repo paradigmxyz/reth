@@ -782,10 +782,11 @@ mod tests {
         let tests = vec![0, 10];
 
         for retries in tests {
+            let retries_str = retries.to_string();
             let args = CommandParser::<NetworkArgs>::parse_from([
                 "reth",
                 "--dns-retries",
-                retries.to_string().as_str(),
+                retries_str.as_str(),
             ])
             .args;
 
