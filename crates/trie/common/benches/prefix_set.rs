@@ -201,43 +201,6 @@ mod implementations {
             false
         }
     }
-
-    #[derive(Default)]
-    pub struct VecBinarySearchPrefixSet {
-        keys: Vec<Nibbles>,
-        sorted: bool,
-    }
-
-    impl PrefixSetMutAbstraction for VecBinarySearchPrefixSet {
-        type Frozen = Self;
-
-        fn insert(&mut self, key: Nibbles) {
-            self.sorted = false;
-            self.keys.push(key);
-        }
-
-        fn freeze(self) -> Self::Frozen {
-            self
-        }
-    }
-
-    impl PrefixSetAbstraction for VecBinarySearchPrefixSet {
-        fn contains(&mut self, prefix: Nibbles) -> bool {
-            if !self.sorted {
-                self.keys.sort();
-                self.sorted = true;
-            }
-
-            match self.keys.binary_search(&prefix) {
-                Ok(_) => true,
-                Err(idx) => match self.keys.get(idx) {
-                    Some(key) => key.starts_with(&prefix),
-                    None => false, // prefix > last key
-                },
-            }
-        }
-    }
-
     #[derive(Default)]
     pub struct VecCursorPrefixSet {
         keys: Vec<Nibbles>,
