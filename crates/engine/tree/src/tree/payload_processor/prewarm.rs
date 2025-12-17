@@ -256,7 +256,7 @@ where
         let hash = env.hash;
 
         if let Some(saved_cache) = saved_cache {
-            debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
+            debug!(target: "engine::caching", block_hash=?hash, "Updating execution cache");
             // Perform all cache operations atomically under the lock
             execution_cache.update_with_guard(|cached| {
                 // consumes the `SavedCache` held by the prewarming task, which releases its usage
