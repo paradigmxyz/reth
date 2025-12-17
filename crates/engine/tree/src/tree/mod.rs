@@ -2465,9 +2465,11 @@ where
             Ok(Some(_)) => {}
         }
 
-        // determine whether we are on a fork chain by checking if the parent is the canonical
-        // head. This is a simple check that is sufficient for the event emission below.
-        let is_fork = block_id.parent != self.state.tree_state.canonical_block_hash();
+        // determine whether we are on a fork chain by comparing the block number with the
+        // canonical head. This is a simple check that is sufficient for the event emission below.
+        // A block is considered a fork if its number is less than or equal to the canonical head,
+        // as this indicates there's already a canonical block at that height.
+        let is_fork = block_id.block.number <= self.state.tree_state.current_canonical_head.number;
 
         let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
 
