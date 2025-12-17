@@ -422,6 +422,19 @@ pub struct TxPoolArgs {
     /// Default: false (re-inject transactions to preserve standard Ethereum behavior)
     #[arg(long = "txpool.discard-reorged-transactions")]
     pub discard_reorged_transactions: bool,
+
+    /// Enable FIFO ordering for transactions.
+    ///
+    /// When enabled, transactions are processed in the order they were received
+    /// rather than being prioritized by gas price. This is useful for:
+    /// - Private networks where gas price competition is not desired
+    /// - Testing scenarios requiring deterministic transaction ordering
+    /// - Applications requiring fairness guarantees
+    ///
+    /// Not recommended for public Ethereum networks where MEV considerations
+    /// and transaction fee markets are important.
+    #[arg(long = "txpool.fifo-ordering", default_value_t = false)]
+    pub fifo_ordering: bool,
 }
 
 impl TxPoolArgs {
@@ -508,6 +521,7 @@ impl Default for TxPoolArgs {
             disable_transactions_backup,
             max_batch_size,
             discard_reorged_transactions: false,
+            fifo_ordering: false,
         }
     }
 }
@@ -552,6 +566,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
             max_queued_lifetime: self.max_queued_lifetime,
             max_inflight_delegated_slot_limit: default_config.max_inflight_delegated_slot_limit,
+            fifo_ordering: self.fifo_ordering,
         }
     }
 
@@ -638,6 +653,7 @@ mod tests {
             disable_transactions_backup: false,
             max_batch_size: 10,
             discard_reorged_transactions: false,
+            fifo_ordering: false,
         };
 
         let parsed_args = CommandParser::<TxPoolArgs>::parse_from([
