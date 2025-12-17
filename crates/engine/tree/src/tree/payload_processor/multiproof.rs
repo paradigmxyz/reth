@@ -170,11 +170,6 @@ impl ProofSequencer {
         while let Some(pending) = self.pending_proofs.remove(&current_sequence) {
             consecutive_proofs.push(pending);
             current_sequence += 1;
-
-            // if we don't have the next number, stop collecting
-            if !self.pending_proofs.contains_key(&current_sequence) {
-                break;
-            }
         }
 
         self.next_to_deliver += consecutive_proofs.len() as u64;
@@ -1458,6 +1453,9 @@ impl MultiProofTask {
 /// Context for multiproof message batching loop.
 ///
 /// Contains processing state that persists across loop iterations.
+///
+/// Used by `process_multiproof_message` to batch consecutive same-type messages received via
+/// `try_recv` for efficient processing.
 struct MultiproofBatchCtx {
     /// Buffers a non-matching message type encountered during batching.
     /// Processed first in next iteration to preserve ordering while allowing same-type

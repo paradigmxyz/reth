@@ -936,6 +936,7 @@ impl<T: TransactionOrdering> TxPool<T> {
     /// This will move/discard the given transaction according to the `PoolUpdate`
     fn process_updates(&mut self, updates: Vec<PoolUpdate>) -> UpdateOutcome<T::Transaction> {
         let mut outcome = UpdateOutcome::default();
+        let mut removed = 0;
         for PoolUpdate { id, current, destination } in updates {
             match destination {
                 Destination::Discard => {
@@ -943,7 +944,7 @@ impl<T: TransactionOrdering> TxPool<T> {
                     if let Some(tx) = self.prune_transaction_by_id(&id) {
                         outcome.discarded.push(tx);
                     }
-                    self.metrics.removed_transactions.increment(1);
+                    removed += 1;
                 }
                 Destination::Pool(move_to) => {
                     debug_assert_ne!(&move_to, &current, "destination must be different");
@@ -956,6 +957,10 @@ impl<T: TransactionOrdering> TxPool<T> {
                     }
                 }
             }
+        }
+
+        if removed > 0 {
+            self.metrics.removed_transactions.increment(removed);
         }
 
         outcome
