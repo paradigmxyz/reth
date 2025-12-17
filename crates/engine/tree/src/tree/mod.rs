@@ -1344,6 +1344,7 @@ where
         &mut self,
         pending_termination: oneshot::Sender<()>,
     ) -> Result<(), AdvancePersistenceError> {
+        trace!(target: "engine::tree", "finishing termination, persisting remaining blocks");
         let result = self.persist_until_complete();
         let _ = pending_termination.send(());
         result
