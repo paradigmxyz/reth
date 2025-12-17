@@ -191,7 +191,7 @@ impl RocksDBProvider {
     /// The provider must be able to supply transaction data (typically from static files)
     /// so that transaction hashes can be computed. This implies that static files should
     /// be ahead of or in sync with `RocksDB`.
-    pub fn prune_transaction_hash_numbers_in_range<Provider>(
+    fn prune_transaction_hash_numbers_in_range<Provider>(
         &self,
         provider: &Provider,
         tx_range: std::ops::RangeInclusive<u64>,
@@ -210,22 +210,20 @@ impl RocksDBProvider {
             .map(|tx| tx.trie_hash())
             .collect();
 
-        let deleted_count = hashes.len();
-        if deleted_count > 0 {
+        if !hashes.is_empty() {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                deleted_count,
+                deleted_count = hashes.len(),
                 tx_range_start = *tx_range.start(),
                 tx_range_end = *tx_range.end(),
                 "Pruning TransactionHashNumbers entries by tx range"
             );
 
-            self.write_batch(|batch| {
-                for hash in hashes {
-                    batch.delete::<tables::TransactionHashNumbers>(hash)?;
-                }
-                Ok(())
-            })?;
+            let mut batch = self.batch();
+            for hash in hashes {
+                batch.delete::<tables::TransactionHashNumbers>(hash)?;
+            }
+            batch.commit()?;
         }
 
         Ok(())
@@ -308,35 +306,28 @@ impl RocksDBProvider {
         use reth_db_api::models::storage_sharded_key::StorageShardedKey;
 
         let mut to_delete: Vec<StorageShardedKey> = Vec::new();
-
-        // Iterate all entries and collect those to delete
         for result in self.iter::<tables::StoragesHistory>()? {
-            let (key, _value) = result?;
-
+            let (key, _) = result?;
             let highest_block = key.sharded_key.highest_block_number;
-
-            // Delete entries where highest_block > max_block (excluding u64::MAX sentinel)
-            // Also delete if max_block is 0 (clearing all)
             if max_block == 0 || (highest_block != u64::MAX && highest_block > max_block) {
                 to_delete.push(key);
             }
         }
 
-        let deleted_count = to_delete.len();
-        if deleted_count > 0 {
+        let deleted = to_delete.len();
+        if deleted > 0 {
             tracing::info!(
                 target: "reth::providers::rocksdb",
-                deleted_count,
+                deleted_count = deleted,
                 max_block,
                 "Pruning StoragesHistory entries"
             );
 
-            self.write_batch(|batch| {
-                for key in to_delete {
-                    batch.delete::<tables::StoragesHistory>(key)?;
-                }
-                Ok(())
-            })?;
+            let mut batch = self.batch();
+            for key in to_delete {
+                batch.delete::<tables::StoragesHistory>(key)?;
+            }
+            batch.commit()?;
         }
 
         Ok(())

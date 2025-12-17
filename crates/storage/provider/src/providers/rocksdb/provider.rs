@@ -524,6 +524,11 @@ impl<'a> RocksDBBatch<'a> {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
+    /// Returns a reference to the underlying `RocksDB` provider.
+    pub fn provider(&self) -> &RocksDBProvider {
+        self.provider
+    }
 }
 
 /// `RocksDB` transaction wrapper providing MDBX-like semantics.
