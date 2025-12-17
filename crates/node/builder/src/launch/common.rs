@@ -483,6 +483,7 @@ where
             StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
                 .with_metrics()
                 .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
+                .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
         // Initialize RocksDB provider with metrics, statistics, and default tables
@@ -498,8 +499,7 @@ where
             static_file_provider,
             rocksdb_provider,
         )?
-        .with_prune_modes(self.prune_modes())
-        .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default());
+        .with_prune_modes(self.prune_modes());
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.

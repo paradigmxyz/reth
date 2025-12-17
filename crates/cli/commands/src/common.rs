@@ -23,7 +23,7 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider},
+    providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider, StaticFileProviderBuilder},
     ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
@@ -100,14 +100,23 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         }
 
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
+        let genesis_block_number = self.chain.genesis().number.unwrap();
         let (db, sfp) = match access {
             AccessRights::RW => (
                 Arc::new(init_db(db_path, self.db.database_args())?),
-                StaticFileProvider::read_write(sf_path)?,
+                StaticFileProviderBuilder::read_write(sf_path)?
+                    .with_genesis_block_number(genesis_block_number)
+                    .build()?,
             ),
             AccessRights::RO | AccessRights::RoInconsistent => (
                 Arc::new(open_db_read_only(&db_path, self.db.database_args())?),
-                StaticFileProvider::read_only(sf_path, false)?,
+                {
+                    let provider = StaticFileProviderBuilder::read_only(sf_path)?
+                        .with_genesis_block_number(genesis_block_number)
+                        .build()?;
+                    provider.watch_directory();
+                    provider
+                },
             ),
         };
         // TransactionDB only support read-write mode
@@ -149,8 +158,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             static_file_provider,
             rocksdb_provider,
         )?
-        .with_prune_modes(prune_modes.clone())
-        .with_genesis_block_number(self.chain.genesis().number.unwrap());
+        .with_prune_modes(prune_modes.clone());
 
         // Check for consistency between database and static files.
         if !access.is_read_only_inconsistent() &&

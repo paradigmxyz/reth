@@ -137,23 +137,6 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     pub fn into_db(self) -> N::DB {
         self.db
     }
-
-    /// Sets the genesis block number for the `ProviderFactory`.
-    ///
-    /// This configures the genesis block number in the underlying `static_file_provider`,
-    /// which is used to determine the starting point for block indexing and querying operations.
-    ///
-    /// # Arguments
-    ///
-    /// * `genesis_block_number` - The block number of the genesis block.
-    ///
-    /// # Returns
-    ///
-    /// Returns `Self` to allow method chaining.
-    pub fn with_genesis_block_number(mut self, genesis_block_number: u64) -> Self {
-        self.static_file_provider.set_genesis_block_number(genesis_block_number);
-        self
-    }
 }
 
 impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {

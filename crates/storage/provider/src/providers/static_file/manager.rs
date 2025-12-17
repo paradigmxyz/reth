@@ -151,6 +151,23 @@ impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
         self
     }
 
+    /// Sets the genesis block number for the [`StaticFileProvider`].
+    ///
+    /// This configures the genesis block number, which is used to determine the starting point
+    /// for block indexing and querying operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `genesis_block_number` - The block number of the genesis block.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Self` to allow method chaining.
+    pub fn with_genesis_block_number(mut self, genesis_block_number: u64) -> Self {
+        self.inner.genesis_block_number = genesis_block_number;
+        self
+    }
+
     /// Builds the final [`StaticFileProvider`] and initializes the index.
     pub fn build(self) -> ProviderResult<StaticFileProvider<N>> {
         let provider = StaticFileProvider(Arc::new(self.inner));
@@ -1652,15 +1669,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             .get(&segment)
             .map(|index| &index.expected_block_ranges_by_max_block)
             .cloned()
-    }
-
-    /// Set genesis block number.
-    pub fn set_genesis_block_number(&mut self, genesis_block_number: u64) {
-        if let Some(inner) = Arc::get_mut(&mut self.0) {
-            inner.genesis_block_number = genesis_block_number;
-        } else {
-            panic!("set_genesis_block_number must be called when there's only one reference to StaticFileProvider");
-        }
     }
 }
 
