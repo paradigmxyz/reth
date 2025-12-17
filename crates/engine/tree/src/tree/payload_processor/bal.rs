@@ -6,6 +6,7 @@ use alloy_primitives::{keccak256, U256};
 use reth_primitives_traits::Account;
 use reth_provider::{AccountReader, ProviderError};
 use reth_trie::{HashedPostState, HashedStorage};
+use revm_primitives::B256;
 
 /// Converts a Block Access List into a [`HashedPostState`] by extracting the final state
 /// of modified accounts and storage slots.
@@ -65,13 +66,11 @@ where
             let mut storage_map = HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(slot_changes.slot);
+                let hashed_slot = keccak256(B256::from(slot_changes.slot));
 
                 // Get the last change for this slot
                 if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map
-                        .storage
-                        .insert(hashed_slot, U256::from_be_bytes(last_change.new_value.0));
+                    storage_map.storage.insert(hashed_slot, last_change.new_value);
                 }
             }
 
@@ -90,7 +89,7 @@ mod tests {
     use alloy_eip7928::{
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
-    use alloy_primitives::{Address, Bytes, StorageKey, B256};
+    use alloy_primitives::{Address, Bytes, B256};
     use reth_revm::test_utils::StateProviderTest;
 
     #[test]
@@ -127,8 +126,8 @@ mod tests {
         let provider = StateProviderTest::default();
 
         let address = Address::random();
-        let slot = StorageKey::random();
-        let value = B256::random();
+        let slot = U256::random();
+        let value = U256::random();
 
         let slot_changes = SlotChanges { slot, changes: vec![StorageChange::new(0, value)] };
 
@@ -148,10 +147,10 @@ mod tests {
         assert!(result.storages.contains_key(&hashed_address));
 
         let storage = result.storages.get(&hashed_address).unwrap();
-        let hashed_slot = keccak256(slot);
+        let hashed_slot = keccak256(B256::from(slot));
 
         let stored_value = storage.storage.get(&hashed_slot).unwrap();
-        assert_eq!(*stored_value, U256::from_be_bytes(value.0));
+        assert_eq!(*stored_value, value);
     }
 
     #[test]
@@ -282,15 +281,15 @@ mod tests {
         let provider = StateProviderTest::default();
 
         let address = Address::random();
-        let slot = StorageKey::random();
+        let slot = U256::random();
 
         // Multiple changes to the same slot - should take the last one
         let slot_changes = SlotChanges {
             slot,
             changes: vec![
-                StorageChange::new(0, B256::from(U256::from(100).to_be_bytes::<32>())),
-                StorageChange::new(1, B256::from(U256::from(200).to_be_bytes::<32>())),
-                StorageChange::new(2, B256::from(U256::from(300).to_be_bytes::<32>())),
+                StorageChange::new(0, U256::from(100)),
+                StorageChange::new(1, U256::from(200)),
+                StorageChange::new(2, U256::from(300)),
             ],
         };
 
@@ -308,7 +307,7 @@ mod tests {
 
         let hashed_address = keccak256(address);
         let storage = result.storages.get(&hashed_address).unwrap();
-        let hashed_slot = keccak256(slot);
+        let hashed_slot = keccak256(B256::from(slot));
 
         let stored_value = storage.storage.get(&hashed_slot).unwrap();
 
