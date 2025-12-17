@@ -7,7 +7,7 @@ use alloy_primitives::{
     Address, StorageKey, StorageValue, B256,
 };
 use metrics::Gauge;
-use papaya::HashMap as PapayaMap;
+use papaya::{Compute, HashMap as PapayaMap, Operation};
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
@@ -182,33 +182,53 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        match self.caches.get_storage(&account, &storage_key) {
-            (SlotStatus::NotCached, maybe_cache) => {
-                let final_res = self.state_provider.storage(account, storage_key)?;
+        // Get or create the account's storage cache (single map op on outer cache)
+        let (account_cache, _) = self
+            .caches
+            .storage_cache
+            .get_or_insert_with(account, || Arc::new(AccountStorageCache::default()));
 
-                if self.is_prewarm() {
-                    let account_cache = maybe_cache.unwrap_or_default();
-                    account_cache.insert_storage(storage_key, final_res);
-                    // we always need to insert the value to update the weights.
-                    // Note: there exists a race when the storage cache did not exist yet and two
-                    // consumers looking up the a storage value for this account for the first time,
-                    // however we can assume that this will only happen for the very first
-                    // (mostlikely the same) value, and don't expect that this
-                    // will accidentally replace an account storage cache with
-                    // additional values.
-                    self.caches.insert_storage_cache(account, account_cache);
+        if self.is_prewarm() {
+            // Prewarm mode: use get_or_insert to do a single map op on inner cache
+            let mut provider_error = None;
+            let (value, was_inserted) = account_cache.get_or_insert_storage(storage_key, || {
+                match self.state_provider.storage(account, storage_key) {
+                    Ok(v) => Some(v),
+                    Err(e) => {
+                        provider_error = Some(e);
+                        None
+                    }
                 }
+            });
 
+            if let Some(err) = provider_error {
                 self.metrics.storage_cache_misses.increment(1);
-                Ok(final_res)
+                return Err(err);
             }
-            (SlotStatus::Empty, _) => {
+
+            if was_inserted {
+                self.metrics.storage_cache_misses.increment(1);
+                self.caches.storage_cache.add_weight(STORAGE_SLOT_WEIGHT);
+            } else {
                 self.metrics.storage_cache_hits.increment(1);
-                Ok(None)
             }
-            (SlotStatus::Value(value), _) => {
-                self.metrics.storage_cache_hits.increment(1);
-                Ok(Some(value))
+
+            Ok(value)
+        } else {
+            // Non-prewarm mode: just check cache, don't insert
+            match account_cache.get_storage(&storage_key) {
+                SlotStatus::NotCached => {
+                    self.metrics.storage_cache_misses.increment(1);
+                    self.state_provider.storage(account, storage_key)
+                }
+                SlotStatus::Empty => {
+                    self.metrics.storage_cache_hits.increment(1);
+                    Ok(None)
+                }
+                SlotStatus::Value(value) => {
+                    self.metrics.storage_cache_hits.increment(1);
+                    Ok(Some(value))
+                }
             }
         }
     }
@@ -371,6 +391,7 @@ impl ExecutionCache {
     ///   - `Empty`: The slot exists in the account's cache but is empty
     ///   - `Value`: The slot exists and has a specific value
     /// - `Option<Arc<AccountStorageCache>>`: The account's storage cache if it exists
+    #[cfg(test)]
     pub(crate) fn get_storage(
         &self,
         address: &Address,
@@ -408,21 +429,17 @@ impl ExecutionCache {
             .storage_cache
             .get_or_insert_with(address, || Arc::new(AccountStorageCache::default()));
 
+        let mut new_slots = 0usize;
         for (key, value) in storage_entries {
-            account_cache.insert_storage(key, value);
+            if account_cache.insert_storage(key, value) {
+                new_slots += 1;
+            }
         }
 
-        // Re-insert to update weight tracking (the Arc value is the same, but weight may change)
-        self.storage_cache.insert(address, account_cache);
-    }
-
-    /// Inserts the [`AccountStorageCache`].
-    pub(crate) fn insert_storage_cache(
-        &self,
-        address: Address,
-        storage_cache: Arc<AccountStorageCache>,
-    ) {
-        self.storage_cache.insert(address, storage_cache);
+        // Update weight directly without re-inserting
+        if new_slots > 0 {
+            self.storage_cache.add_weight(new_slots * STORAGE_SLOT_WEIGHT);
+        }
     }
 
     /// Invalidate storage for specific account
@@ -528,12 +545,15 @@ impl ExecutionCache {
 #[derive(Debug, Default)]
 pub(crate) struct ExecutionCacheBuilder;
 
+/// Weight in bytes per storage slot (based on measure_storage_cache_overhead test).
+const STORAGE_SLOT_WEIGHT: usize = 218;
+
 /// Weigher function for storage cache entries.
 fn storage_weigher(_key: &Address, value: &Arc<AccountStorageCache>) -> u32 {
     // values based on results from measure_storage_cache_overhead test
-    let base_weight = 39_000;
-    let slots_weight = value.len() * 218;
-    (base_weight + slots_weight) as u32
+    const BASE_WEIGHT: usize = 39_000;
+    let slots_weight = value.len() * STORAGE_SLOT_WEIGHT;
+    (BASE_WEIGHT + slots_weight) as u32
 }
 
 /// Weigher function for account cache entries.
@@ -681,11 +701,55 @@ impl AccountStorageCache {
     }
 
     /// Insert a storage value. Uses a single map operation.
-    pub(crate) fn insert_storage(&self, key: StorageKey, value: Option<StorageValue>) {
+    ///
+    /// Returns `true` if this was a new slot, `false` if it replaced an existing value.
+    pub(crate) fn insert_storage(&self, key: StorageKey, value: Option<StorageValue>) -> bool {
         let guard = self.inner.slots.pin();
         // insert() returns None if new, Some(&old) if replaced
-        if guard.insert(key, value).is_none() {
+        let is_new = guard.insert(key, value).is_none();
+        if is_new {
             self.inner.slot_count.fetch_add(1, Ordering::Relaxed);
+        }
+        is_new
+    }
+
+    /// Gets a storage value if cached, otherwise calls `f` to get and insert the value.
+    ///
+    /// Returns `(value, was_inserted)` where `was_inserted` is true if `f` was called and
+    /// the value was newly inserted.
+    pub(crate) fn get_or_insert_storage<F>(
+        &self,
+        key: StorageKey,
+        mut f: F,
+    ) -> (Option<StorageValue>, bool)
+    where
+        F: FnMut() -> Option<Option<StorageValue>>,
+    {
+        let guard = self.inner.slots.pin();
+        let mut was_inserted = false;
+
+        let mut value = None;
+        let result = guard.compute(key, |entry| match entry {
+            Some((_, existing_value)) => {
+                value = *existing_value;
+                Operation::Abort(())
+            }
+            None => {
+                was_inserted = true;
+                if let Some(new_value) = f() {
+                    value = new_value;
+                    Operation::Insert(new_value)
+                } else {
+                    Operation::Abort(())
+                }
+            }
+        });
+
+        if matches!(result, Compute::Inserted(_, _)) {
+            self.inner.slot_count.fetch_add(1, Ordering::Relaxed);
+            (value, true)
+        } else {
+            (None, false)
         }
     }
 

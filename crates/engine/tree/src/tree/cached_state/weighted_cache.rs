@@ -174,6 +174,14 @@ where
         self.inner.entry_count.load(Ordering::Relaxed) as u64
     }
 
+    /// Adds the given delta to the current weight.
+    ///
+    /// Use this to update weight when the value's size changes in-place without re-inserting.
+    /// For example, when adding slots to an `AccountStorageCache` that's already in the cache.
+    pub(crate) fn add_weight(&self, delta: usize) {
+        self.inner.current_weight.fetch_add(delta, Ordering::Relaxed);
+    }
+
     /// Returns the current approximate weight of all entries.
     #[cfg(test)]
     pub(crate) fn weighted_size(&self) -> u64 {
