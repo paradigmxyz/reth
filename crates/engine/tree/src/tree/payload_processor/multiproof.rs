@@ -1459,9 +1459,8 @@ impl MultiProofTask {
 ///
 /// Contains processing state that persists across loop iterations.
 ///
-/// This context is used by `process_multiproof_message` to batch multiple messages of the same
-/// type together. Messages are received via `try_recv` in a loop, allowing consecutive messages
-/// of the same type to be accumulated and processed together for better efficiency.
+/// Used by `process_multiproof_message` to batch consecutive same-type messages received via
+/// `try_recv` for efficient processing.
 struct MultiproofBatchCtx {
     /// Buffers a non-matching message type encountered during batching.
     /// Processed first in next iteration to preserve ordering while allowing same-type
