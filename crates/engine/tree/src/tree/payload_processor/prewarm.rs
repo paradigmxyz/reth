@@ -709,14 +709,22 @@ where
 
         let start = Instant::now();
 
+        // Track last seen address to avoid fetching the same account multiple times.
+        let mut last_address = None;
+
         // Iterate through the assigned range of slots
         for (address, slot) in ChangedSlotIter::new(&bal, range.clone()) {
+            // Fetch the account if this is a different address than the last one
+            if last_address != Some(address) {
+                let _ = state_provider.basic_account(&address);
+                last_address = Some(address);
+            }
+
             // Access the slot to populate the cache
             let _ = state_provider.storage(address, slot);
         }
 
         let elapsed = start.elapsed();
-        metrics.bal_slot_iteration_duration.record(elapsed.as_secs_f64());
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
@@ -727,6 +735,7 @@ where
 
         // Signal completion
         let _ = done_tx.send(());
+        metrics.bal_slot_iteration_duration.record(elapsed.as_secs_f64());
     }
 }
 
