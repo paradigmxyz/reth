@@ -1383,8 +1383,7 @@ where
             number: last_persisted_block_number,
         }) = last_persisted_hash_num
         else {
-            // if this happened, then we persisted no blocks because we sent an
-            // empty vec of blocks
+            // if this happened, then we persisted no blocks because we sent an empty vec of blocks
             warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
             return Ok(())
         };
