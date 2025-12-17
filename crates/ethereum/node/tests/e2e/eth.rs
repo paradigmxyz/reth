@@ -7,6 +7,7 @@ use reth_e2e_test_utils::{
 use reth_node_builder::{NodeBuilder, NodeHandle};
 use reth_node_core::{args::RpcServerArgs, node_config::NodeConfig};
 use reth_node_ethereum::EthereumNode;
+use reth_provider::BlockNumReader;
 use reth_tasks::TaskManager;
 use std::sync::Arc;
 
@@ -124,6 +125,59 @@ async fn test_failed_run_eth_node_with_no_auth_engine_api_over_ipc_opts() -> eyr
     // Ensure that the engine api client is not available
     let client = node.inner.engine_ipc_client().await;
     assert!(client.is_none(), "ipc auth should be disabled by default");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
+    reth_tracing::init_test_tracing();
+
+    let (mut nodes, _tasks, wallet) = setup::<EthereumNode>(
+        1,
+        Arc::new(
+            ChainSpecBuilder::default()
+                .chain(MAINNET.chain)
+                .genesis(serde_json::from_str(include_str!("../assets/genesis.json")).unwrap())
+                .cancun_activated()
+                .build(),
+        ),
+        false,
+        eth_payload_attributes,
+    )
+    .await?;
+
+    let mut node = nodes.pop().unwrap();
+
+    let raw_tx = TransactionTestContext::transfer_tx_bytes(1, wallet.inner).await;
+    let tx_hash = node.rpc.inject_tx(raw_tx).await?;
+    let payload = node.advance_block().await?;
+    node.assert_new_block(tx_hash, payload.block().hash(), payload.block().number).await?;
+
+    // Get block number before shutdown
+    let block_before = node.inner.provider.best_block_number()?;
+    assert_eq!(block_before, 1, "Expected 1 block before shutdown");
+
+    // Verify block is NOT yet persisted to database
+    let db_block_before = node.inner.provider.last_block_number()?;
+    assert_eq!(db_block_before, 0, "Block should not be persisted yet");
+
+    // Trigger graceful shutdown
+    let done_rx = node
+        .inner
+        .add_ons_handle
+        .engine_shutdown
+        .shutdown()
+        .await
+        .expect("shutdown should return receiver");
+
+    tokio::time::timeout(std::time::Duration::from_secs(2), done_rx)
+        .await
+        .expect("shutdown timed out")
+        .expect("shutdown completion channel should not be closed");
+
+    let db_block = node.inner.provider.last_block_number()?;
+    assert_eq!(db_block, 1, "Database should have persisted block 1");
 
     Ok(())
 }
