@@ -163,7 +163,7 @@ impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
     /// # Returns
     ///
     /// Returns `Self` to allow method chaining.
-    pub fn with_genesis_block_number(mut self, genesis_block_number: u64) -> Self {
+    pub const fn with_genesis_block_number(mut self, genesis_block_number: u64) -> Self {
         self.inner.genesis_block_number = genesis_block_number;
         self
     }
