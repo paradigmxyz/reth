@@ -11,6 +11,7 @@ use crate::{
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
+use parking_lot::Mutex;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_node_api::{
@@ -43,7 +44,6 @@ use std::{
     ops::{Deref, DerefMut},
     sync::Arc,
 };
-use parking_lot::Mutex;
 use tokio::sync::oneshot;
 
 /// Contains the handles to the spawned RPC servers.
