@@ -185,7 +185,7 @@ where
     compute_state_root(&provider_rw, None)?;
 
     // set stage checkpoint to genesis block number for all stages
-    let checkpoint = StageCheckpoint { block_number: genesis_block_number, ..Default::default() };
+    let checkpoint = StageCheckpoint::new(genesis_block_number);
     for stage in StageId::ALL {
         provider_rw.save_stage_checkpoint(stage, checkpoint)?;
     }
