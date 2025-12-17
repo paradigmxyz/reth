@@ -295,7 +295,8 @@ impl RocksDBProvider {
     /// For `StoragesHistory`, the key contains `highest_block_number`, so we can iterate
     /// and delete entries where `key.sharded_key.highest_block_number > max_block`.
     ///
-    /// TODO(<https://github.com/paradigmxyz/reth/issues/20417>): use changeset-based pruning.
+    /// TODO(<https://github.com/paradigmxyz/reth/issues/20417>): this iterates the whole table,
+    /// which is inefficient. Use changeset-based pruning instead.
     fn prune_storages_history_above(&self, max_block: BlockNumber) -> ProviderResult<()> {
         use reth_db_api::models::storage_sharded_key::StorageShardedKey;
 
