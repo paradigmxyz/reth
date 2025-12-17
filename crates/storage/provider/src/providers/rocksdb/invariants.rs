@@ -74,8 +74,16 @@ impl RocksDBProvider {
 
     /// Checks invariants for the `TransactionHashNumbers` table.
     ///
-    /// Returns a block number to unwind to if `RocksDB` is behind the checkpoint.
-    /// If `RocksDB` is ahead of the checkpoint, excess entries are pruned (healed).
+    /// Returns a block number to unwind to if MDBX is behind the checkpoint.
+    /// If static files are ahead of MDBX, excess `RocksDB` entries are pruned (healed).
+    ///
+    /// # Approach
+    ///
+    /// Instead of iterating `RocksDB` entries (which is expensive and doesn't give us the
+    /// tx range we need), we use static files and MDBX to determine what needs pruning:
+    /// - Static files are committed before `RocksDB`, so they're at least at the same height
+    /// - MDBX `TransactionBlocks` tells us what's been fully committed
+    /// - If static files have more transactions than MDBX, prune the excess range
     fn check_transaction_hash_numbers<Provider>(
         &self,
         provider: &Provider,
@@ -92,112 +100,77 @@ impl RocksDBProvider {
             .map(|cp| cp.block_number)
             .unwrap_or(0);
 
-        // Find the max tx_number in RocksDB by iterating all entries.
-        // Note: We can't use `last()` because that returns the entry with the largest
-        // hash key, not the entry with the largest tx_number value.
-        let max_tx = self
-            .iter::<tables::TransactionHashNumbers>()?
-            .map(|r| r.map(|(_, tx_num)| tx_num))
-            .collect::<Result<Vec<_>, _>>()?
-            .into_iter()
-            .max();
+        // Get last tx_num from MDBX - this tells us what MDBX has fully committed
+        let mut cursor = provider.tx_ref().cursor_read::<tables::TransactionBlocks>()?;
+        let mdbx_last = cursor.last()?;
 
-        match max_tx {
-            Some(tx_number) => {
-                // If checkpoint is 0 but we have data, that's inconsistent
-                if checkpoint == 0 && tx_number > 0 {
-                    // RocksDB has data but stage hasn't run - need to clear all.
-                    // Prune all transactions in range [0, tx_number].
-                    self.prune_transaction_hash_numbers_in_range(provider, 0..=tx_number)?;
-                    return Ok(None);
+        // Get highest tx_num from static files - this tells us what tx data is available
+        let highest_static_tx = provider
+            .static_file_provider()
+            .get_highest_static_file_tx(StaticFileSegment::Transactions);
+
+        match (mdbx_last, highest_static_tx) {
+            (Some((mdbx_tx, mdbx_block)), Some(highest_tx)) if highest_tx > mdbx_tx => {
+                // Static files are ahead of MDBX - prune RocksDB entries for the excess range.
+                // This is the common case during recovery from a crash during unwinding.
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    mdbx_last_tx = mdbx_tx,
+                    mdbx_block,
+                    highest_static_tx = highest_tx,
+                    "Static files ahead of MDBX, pruning TransactionHashNumbers excess data"
+                );
+                self.prune_transaction_hash_numbers_in_range(provider, (mdbx_tx + 1)..=highest_tx)?;
+
+                // After pruning, check if MDBX is behind checkpoint
+                if checkpoint > mdbx_block {
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        mdbx_block,
+                        checkpoint,
+                        "MDBX behind checkpoint after pruning, unwind needed"
+                    );
+                    return Ok(Some(mdbx_block));
                 }
-
-                // Get last tx_num from MDBX - this tells us what MDBX has processed
-                let mut cursor = provider.tx_ref().cursor_read::<tables::TransactionBlocks>()?;
-                let mdbx_last_tx = cursor.last()?.map(|(tx_num, _)| tx_num);
-
-                // Get highest tx_num from static files - this tells us what tx data is available
-                let highest_static_tx = provider
-                    .static_file_provider()
-                    .get_highest_static_file_tx(StaticFileSegment::Transactions);
-
-                match (mdbx_last_tx, highest_static_tx) {
-                    (Some(mdbx_tx), Some(highest_tx)) if highest_tx > mdbx_tx => {
-                        // RocksDB is ahead of MDBX - prune excess entries
-                        // This is the common case during recovery from a crash during unwinding.
-                        // MDBX checkpoint was committed first, so we need to prune excess data.
-                        tracing::info!(
-                            target: "reth::providers::rocksdb",
-                            rocks_max_tx = tx_number,
-                            mdbx_last_tx = mdbx_tx,
-                            highest_static_tx = highest_tx,
-                            "TransactionHashNumbers ahead of MDBX, pruning excess data"
-                        );
-                        self.prune_transaction_hash_numbers_in_range(
-                            provider,
-                            (mdbx_tx + 1)..=highest_tx,
-                        )?;
-                    }
-                    (Some(mdbx_tx), _) if tx_number > mdbx_tx => {
-                        // RocksDB has entries beyond MDBX but static files don't have the data
-                        // to compute hashes. This shouldn't happen given the commit order
-                        // (static files are committed before RocksDB), but if it does, we need
-                        // to find the block for mdbx_tx and unwind there.
-                        let mut seek_cursor =
-                            provider.tx_ref().cursor_read::<tables::TransactionBlocks>()?;
-                        if let Some((_, mdbx_block)) = seek_cursor.seek(mdbx_tx)? {
-                            tracing::warn!(
-                                target: "reth::providers::rocksdb",
-                                rocks_max_tx = tx_number,
-                                mdbx_last_tx = mdbx_tx,
-                                mdbx_block,
-                                "TransactionHashNumbers ahead but static files unavailable, unwind needed"
-                            );
-                            return Ok(Some(mdbx_block));
-                        }
-                    }
-                    (None, Some(highest_tx)) if tx_number <= highest_tx => {
-                        // MDBX has no transactions but RocksDB does, and static files have the
-                        // data. Prune all RocksDB entries.
-                        tracing::info!(
-                            target: "reth::providers::rocksdb",
-                            rocks_max_tx = tx_number,
-                            highest_static_tx = highest_tx,
-                            "MDBX empty but RocksDB has data, pruning all"
-                        );
-                        self.prune_transaction_hash_numbers_in_range(provider, 0..=highest_tx)?;
-                    }
-                    _ => {
-                        // RocksDB is in sync or behind - check if behind checkpoint
-                        let mut seek_cursor =
-                            provider.tx_ref().cursor_read::<tables::TransactionBlocks>()?;
-                        if let Some((_, rocks_block)) = seek_cursor.seek(tx_number)? &&
-                            checkpoint > rocks_block
-                        {
-                            tracing::warn!(
-                                target: "reth::providers::rocksdb",
-                                rocks_max_tx = tx_number,
-                                rocks_block,
-                                checkpoint,
-                                "TransactionHashNumbers behind checkpoint, unwind needed"
-                            );
-                            return Ok(Some(rocks_block));
-                        }
-                    }
-                }
-
-                Ok(None)
             }
-            None => {
-                // Empty RocksDB table
-                // If checkpoint says we should have data, that's an inconsistency
+            (Some((_mdbx_tx, mdbx_block)), _) => {
+                // MDBX and static files are in sync (or static files don't have more data).
+                // Check if MDBX is behind checkpoint.
+                if checkpoint > mdbx_block {
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        mdbx_block,
+                        checkpoint,
+                        "MDBX behind checkpoint, unwind needed"
+                    );
+                    return Ok(Some(mdbx_block));
+                }
+            }
+            (None, Some(highest_tx)) => {
+                // MDBX has no transactions but static files have data.
+                // This means RocksDB might have stale entries - prune them all.
+                tracing::info!(
+                    target: "reth::providers::rocksdb",
+                    highest_static_tx = highest_tx,
+                    "MDBX empty but static files have data, pruning all TransactionHashNumbers"
+                );
+                self.prune_transaction_hash_numbers_in_range(provider, 0..=highest_tx)?;
+            }
+            (None, None) => {
+                // Both MDBX and static files are empty.
+                // If checkpoint says we should have data, that's an inconsistency.
                 if checkpoint > 0 {
-                    // Need to rebuild from scratch
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        checkpoint,
+                        "Checkpoint set but no transaction data exists, unwind needed"
+                    );
                     return Ok(Some(0));
                 }
-                Ok(None)
             }
         }
+
+        Ok(None)
     }
 
     /// Prunes `TransactionHashNumbers` entries for transactions in the given range.
@@ -464,14 +437,13 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_rocksdb_has_data_no_checkpoint_prunes_data() {
+    fn test_check_consistency_mdbx_empty_static_files_have_data_prunes_rocksdb() {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .build()
             .unwrap();
 
-        // Create a test provider factory for MDBX with NO checkpoint
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(
             StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
@@ -485,36 +457,58 @@ mod tests {
             BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
         );
 
-        let mut tx_count = 0u64;
+        let mut tx_hashes = Vec::new();
         {
             let provider = factory.database_provider_rw().unwrap();
+            let mut tx_count = 0u64;
             for block in &blocks {
                 provider.insert_block(block.clone().try_recover().expect("recover block")).unwrap();
                 for tx in &block.body().transactions {
                     let hash = tx.trie_hash();
+                    tx_hashes.push(hash);
                     rocksdb.put::<tables::TransactionHashNumbers>(hash, &tx_count).unwrap();
                     tx_count += 1;
                 }
+            }
+            provider.commit().unwrap();
+        }
+
+        // Simulate crash recovery: MDBX was reset but static files and RocksDB still have data.
+        // Clear TransactionBlocks to simulate empty MDBX state.
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            let mut cursor = provider.tx_ref().cursor_write::<tables::TransactionBlocks>().unwrap();
+            let mut to_delete = Vec::new();
+            let mut walker = cursor.walk(Some(0)).unwrap();
+            while let Some((tx_num, _)) = walker.next().transpose().unwrap() {
+                to_delete.push(tx_num);
+            }
+            drop(walker);
+            for tx_num in to_delete {
+                cursor.seek_exact(tx_num).unwrap();
+                cursor.delete_current().unwrap();
             }
             // No checkpoint set (checkpoint = 0)
             provider.commit().unwrap();
         }
 
-        // Verify data exists
+        // Verify RocksDB data exists
         assert!(rocksdb.last::<tables::TransactionHashNumbers>().unwrap().is_some());
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB has data but checkpoint is 0
-        // This means RocksDB has stale data that should be pruned (healed)
+        // MDBX TransactionBlocks is empty, but static files have transaction data.
+        // This means RocksDB has stale data that should be pruned (healed).
         let result = rocksdb.check_consistency(&provider).unwrap();
         assert_eq!(result, None, "Should heal by pruning, no unwind needed");
 
         // Verify data was pruned
-        assert!(
-            rocksdb.last::<tables::TransactionHashNumbers>().unwrap().is_none(),
-            "RocksDB should be empty after pruning"
-        );
+        for hash in &tx_hashes {
+            assert!(
+                rocksdb.get::<tables::TransactionHashNumbers>(*hash).unwrap().is_none(),
+                "RocksDB should be empty after pruning"
+            );
+        }
     }
 
     #[test]
@@ -584,51 +578,61 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_rocksdb_behind_checkpoint_needs_unwind() {
+    fn test_check_consistency_mdbx_behind_checkpoint_needs_unwind() {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
             .build()
             .unwrap();
 
-        // Insert data into RocksDB - tx hash mapping to tx_number 50
-        let tx_hash = B256::from([1u8; 32]);
-        rocksdb.put::<tables::TransactionHashNumbers>(tx_hash, &50).unwrap();
-
-        // Create a test provider factory for MDBX
         let factory = create_test_provider_factory();
         factory.set_storage_settings_cache(
             StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
         );
 
-        // Set up MDBX with:
-        // - TransactionBlocks: tx 50 is in block 10, tx 100 is in block 20
-        // - Checkpoint at block 20 (meaning we should have tx hashes up to tx 100)
+        // Generate blocks with real transactions (blocks 0-2, 6 transactions total)
+        let mut rng = generators::rng();
+        let blocks = generators::random_block_range(
+            &mut rng,
+            0..=2,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+
         {
             let provider = factory.database_provider_rw().unwrap();
+            let mut tx_count = 0u64;
+            for block in &blocks {
+                provider.insert_block(block.clone().try_recover().expect("recover block")).unwrap();
+                for tx in &block.body().transactions {
+                    let hash = tx.trie_hash();
+                    rocksdb.put::<tables::TransactionHashNumbers>(hash, &tx_count).unwrap();
+                    tx_count += 1;
+                }
+            }
+            provider.commit().unwrap();
+        }
 
-            // Insert TransactionBlocks entries
-            let mut cursor = provider.tx_ref().cursor_write::<tables::TransactionBlocks>().unwrap();
-            cursor.append(50, &10).unwrap(); // tx 50 is the last tx in block 10
-            cursor.append(100, &20).unwrap(); // tx 100 is the last tx in block 20
-
-            // Set checkpoint to block 20
+        // Now simulate a scenario where checkpoint is ahead of MDBX.
+        // This happens when the checkpoint was saved but MDBX data was lost/corrupted.
+        // Set checkpoint to block 10 (beyond our actual data at block 2)
+        {
+            let provider = factory.database_provider_rw().unwrap();
             provider
-                .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(20))
+                .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(10))
                 .unwrap();
             provider.commit().unwrap();
         }
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB has tx hashes only up to tx 50 (block 10)
-        // But checkpoint says we processed up to block 20 (tx 100)
-        // This means RocksDB is behind and needs to unwind to block 10 to rebuild
+        // MDBX has data up to block 2, but checkpoint says block 10 was processed.
+        // The static files highest tx matches MDBX last tx (both at block 2).
+        // Checkpoint > mdbx_block means we need to unwind to rebuild.
         let result = rocksdb.check_consistency(&provider).unwrap();
         assert_eq!(
             result,
-            Some(10),
-            "Should require unwind to block 10 where RocksDB's max tx belongs"
+            Some(2),
+            "Should require unwind to block 2 (MDBX's last block) to rebuild from checkpoint"
         );
     }
 
