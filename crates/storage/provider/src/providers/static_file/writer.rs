@@ -364,7 +364,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             .map(|block_range| block_range.end())
             .or_else(|| {
                 (self.writer.user_header().expected_block_start() >
-                    self.reader().get_genesis_block_number())
+                    self.reader().genesis_block_number())
                 .then(|| self.writer.user_header().expected_block_start() - 1)
             });
 

@@ -414,7 +414,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     }
 
     /// Get genesis block number
-    pub const fn get_genesis_block_number(&self) -> u64 {
+    pub const fn genesis_block_number(&self) -> u64 {
         self.genesis_block_number
     }
 }
@@ -1743,7 +1743,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         &self,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
-        let genesis_number = self.0.as_ref().get_genesis_block_number();
+        let genesis_number = self.0.as_ref().genesis_block_number();
         self.get_writer(
             self.get_highest_static_file_block(segment).unwrap_or(genesis_number),
             segment,
