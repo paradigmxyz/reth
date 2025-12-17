@@ -27,6 +27,7 @@ use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::TaskSpawner;
 use std::{
+    fmt,
     pin::Pin,
     sync::Arc,
     task::{Context, Poll},
@@ -50,7 +51,6 @@ type EngineServiceType<N, Client> = ChainOrchestrator<
 
 /// The type that drives the chain forward and communicates progress.
 #[pin_project]
-#[expect(missing_debug_implementations)]
 // TODO(mattsse): remove hidden once fixed : <https://github.com/rust-lang/rust/issues/135363>
 //  otherwise rustdoc fails to resolve the alias
 #[doc(hidden)]
@@ -135,6 +135,16 @@ where
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let mut orchestrator = self.project().orchestrator;
         StreamExt::poll_next_unpin(&mut orchestrator, cx)
+    }
+}
+
+impl<N, Client> fmt::Debug for EngineService<N, Client>
+where
+    N: ProviderNodeTypes,
+    Client: BlockClient<Block = BlockTy<N>> + 'static,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("EngineService").finish_non_exhaustive()
     }
 }
 
