@@ -526,7 +526,7 @@ impl<'a> RocksDBBatch<'a> {
     }
 
     /// Returns a reference to the underlying `RocksDB` provider.
-    pub fn provider(&self) -> &RocksDBProvider {
+    pub const fn provider(&self) -> &RocksDBProvider {
         self.provider
     }
 }
