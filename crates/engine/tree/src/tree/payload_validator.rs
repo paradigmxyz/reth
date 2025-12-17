@@ -374,7 +374,8 @@ where
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
-        // fetch parent block
+        // Fetch parent block. This goes to memory most of the time unless the parent block is
+        // beyond the in-memory buffer.
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
@@ -399,8 +400,16 @@ where
             "Decided which state root algorithm to run"
         );
 
-        // use prewarming background task
+        // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
+
+        // Extract the BAL, if valid and available
+        let block_access_list = ensure_ok!(input
+            .block_access_list()
+            .transpose()
+            // Eventually gets converted to a `InsertBlockErrorKind::Other`
+            .map_err(Box::<dyn std::error::Error + Send + Sync>::from))
+        .map(Arc::new);
 
         // Spawn the appropriate processor based on strategy
         let mut handle = ensure_ok!(self.spawn_payload_processor(
@@ -410,26 +419,23 @@ where
             parent_hash,
             ctx.state(),
             strategy,
+            block_access_list,
         ));
 
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
-            state_provider = Box::new(CachedStateProvider::new_with_caches(
-                state_provider,
-                caches,
-                cache_metrics,
-            ));
+            state_provider =
+                Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
         };
 
+        if self.config.state_provider_metrics() {
+            state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
+        }
+
         // Execute the block and handle any execution errors
-        let (output, senders) = match if self.config.state_provider_metrics() {
-            let state_provider =
-                InstrumentedStateProvider::from_state_provider(&state_provider, "engine");
-            self.execute_block(&state_provider, env, &input, &mut handle)
-        } else {
-            self.execute_block(&state_provider, env, &input, &mut handle)
-        } {
+        let (output, senders) = match self.execute_block(&state_provider, env, &input, &mut handle)
+        {
             Ok(output) => output,
             Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
@@ -607,7 +613,7 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
         let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(&state_provider))
+            .with_database(StateProviderDatabase::new(state_provider))
             .with_bundle_update()
             .with_bal_builder() //TODO
             .without_state_clear()
@@ -781,6 +787,7 @@ where
         parent_hash: B256,
         state: &EngineApiTreeState<N>,
         strategy: StateRootStrategy,
+        block_access_list: Option<Arc<BlockAccessList>>,
     ) -> Result<
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
@@ -810,12 +817,14 @@ where
                     .record(trie_input_start.elapsed().as_secs_f64());
 
                 let spawn_start = Instant::now();
+
                 let handle = self.payload_processor.spawn(
                     env,
                     txs,
                     provider_builder,
                     multiproof_provider_factory,
                     &self.config,
+                    block_access_list,
                 );
 
                 // record prewarming initialization duration

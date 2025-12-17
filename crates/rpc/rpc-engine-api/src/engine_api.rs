@@ -496,7 +496,7 @@ where
     /// Returns the most recent version of the payload that is available in the corresponding
     /// payload build process at the time of receiving this call.
     ///
-    /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_newpayloadv4>
+    /// See also <https://github.com/ethereum/execution-apis/blob/7907424db935b93c2fe6a3c0faab943adebe8557/src/engine/prague.md#engine_getpayloadv4>
     ///
     /// Note:
     /// > Provider software MAY stop the corresponding build process after serving this call.
@@ -1013,7 +1013,7 @@ where
         Ok(self.fork_choice_updated_v2_metered(fork_choice_state, payload_attributes).await?)
     }
 
-    /// Handler for `engine_forkchoiceUpdatedV2`
+    /// Handler for `engine_forkchoiceUpdatedV3`
     ///
     /// See also <https://github.com/ethereum/execution-apis/blob/main/src/engine/cancun.md#engine_forkchoiceupdatedv3>
     async fn fork_choice_updated_v3(

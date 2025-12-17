@@ -83,7 +83,7 @@ where
 {
     /// Creates a new [`InstrumentedStateProvider`] from a state provider with the provided label
     /// for metrics.
-    pub fn from_state_provider(state_provider: S, source: &'static str) -> Self {
+    pub fn new(state_provider: S, source: &'static str) -> Self {
         Self {
             state_provider,
             metrics: StateProviderMetrics::new_with_labels(&[("source", source)]),

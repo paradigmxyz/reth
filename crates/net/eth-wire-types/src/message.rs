@@ -1,4 +1,4 @@
-//! Implements Ethereum wire protocol for versions 66, 67, and 68.
+//! Implements Ethereum wire protocol for versions 66 through 70.
 //! Defines structs/enums for messages, request-response pairs, and broadcasts.
 //! Handles compatibility with [`EthVersion`].
 //!
@@ -8,13 +8,13 @@
 
 use super::{
     broadcast::NewBlockHashes, BlockBodies, BlockHeaders, GetBlockBodies, GetBlockHeaders,
-    GetNodeData, GetPooledTransactions, GetReceipts, NewPooledTransactionHashes66,
+    GetNodeData, GetPooledTransactions, GetReceipts, GetReceipts70, NewPooledTransactionHashes66,
     NewPooledTransactionHashes68, NodeData, PooledTransactions, Receipts, Status, StatusEth69,
     Transactions,
 };
 use crate::{
     status::StatusMessage, BlockRangeUpdate, EthNetworkPrimitives, EthVersion, NetworkPrimitives,
-    RawCapabilityMessage, Receipts69, SharedTransactions,
+    RawCapabilityMessage, Receipts69, Receipts70, SharedTransactions,
 };
 use alloc::{boxed::Box, string::String, sync::Arc};
 use alloy_primitives::{
@@ -111,13 +111,29 @@ impl<N: NetworkPrimitives> ProtocolMessage<N> {
                 }
                 EthMessage::NodeData(RequestPair::decode(buf)?)
             }
-            EthMessageID::GetReceipts => EthMessage::GetReceipts(RequestPair::decode(buf)?),
-            EthMessageID::Receipts => {
-                if version < EthVersion::Eth69 {
-                    EthMessage::Receipts(RequestPair::decode(buf)?)
+            EthMessageID::GetReceipts => {
+                if version >= EthVersion::Eth70 {
+                    EthMessage::GetReceipts70(RequestPair::decode(buf)?)
                 } else {
-                    // with eth69, receipts no longer include the bloom
-                    EthMessage::Receipts69(RequestPair::decode(buf)?)
+                    EthMessage::GetReceipts(RequestPair::decode(buf)?)
+                }
+            }
+            EthMessageID::Receipts => {
+                match version {
+                    v if v >= EthVersion::Eth70 => {
+                        // eth/70 continues to omit bloom filters and adds the
+                        // `lastBlockIncomplete` flag, encoded as
+                        // `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
+                        EthMessage::Receipts70(RequestPair::decode(buf)?)
+                    }
+                    EthVersion::Eth69 => {
+                        // with eth69, receipts no longer include the bloom
+                        EthMessage::Receipts69(RequestPair::decode(buf)?)
+                    }
+                    _ => {
+                        // before eth69 we need to decode the bloom  as well
+                        EthMessage::Receipts(RequestPair::decode(buf)?)
+                    }
                 }
             }
             EthMessageID::BlockRangeUpdate => {
@@ -205,6 +221,9 @@ impl<N: NetworkPrimitives> From<EthBroadcastMessage<N>> for ProtocolBroadcastMes
 ///
 /// The `eth/69` announces the historical block range served by the node. Removes total difficulty
 /// information. And removes the Bloom field from receipts transferred over the protocol.
+///
+/// The `eth/70` (EIP-7975) keeps the eth/69 status format and introduces partial receipts.
+/// requests/responses.
 #[derive(Clone, Debug, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
@@ -259,6 +278,12 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     NodeData(RequestPair<NodeData>),
     /// Represents a `GetReceipts` request-response pair.
     GetReceipts(RequestPair<GetReceipts>),
+    /// Represents a `GetReceipts` request for eth/70.
+    ///
+    /// Note: Unlike earlier protocol versions, the eth/70 encoding for
+    /// `GetReceipts` in EIP-7975 inlines the request id. The type still wraps
+    /// a [`RequestPair`], but with a custom inline encoding.
+    GetReceipts70(RequestPair<GetReceipts70>),
     /// Represents a Receipts request-response pair.
     #[cfg_attr(
         feature = "serde",
@@ -271,6 +296,16 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
         serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
     )]
     Receipts69(RequestPair<Receipts69<N::Receipt>>),
+    /// Represents a Receipts request-response pair for eth/70.
+    #[cfg_attr(
+        feature = "serde",
+        serde(bound = "N::Receipt: serde::Serialize + serde::de::DeserializeOwned")
+    )]
+    ///
+    /// Note: The eth/70 encoding for `Receipts` in EIP-7975 inlines the
+    /// request id. The type still wraps a [`RequestPair`], but with a custom
+    /// inline encoding.
+    Receipts70(RequestPair<Receipts70<N::Receipt>>),
     /// Represents a `BlockRangeUpdate` message broadcast to the network.
     #[cfg_attr(
         feature = "serde",
@@ -300,8 +335,8 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::PooledTransactions(_) => EthMessageID::PooledTransactions,
             Self::GetNodeData(_) => EthMessageID::GetNodeData,
             Self::NodeData(_) => EthMessageID::NodeData,
-            Self::GetReceipts(_) => EthMessageID::GetReceipts,
-            Self::Receipts(_) | Self::Receipts69(_) => EthMessageID::Receipts,
+            Self::GetReceipts(_) | Self::GetReceipts70(_) => EthMessageID::GetReceipts,
+            Self::Receipts(_) | Self::Receipts69(_) | Self::Receipts70(_) => EthMessageID::Receipts,
             Self::BlockRangeUpdate(_) => EthMessageID::BlockRangeUpdate,
             Self::Other(msg) => EthMessageID::Other(msg.id as u8),
         }
@@ -314,6 +349,7 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::GetBlockBodies(_) |
                 Self::GetBlockHeaders(_) |
                 Self::GetReceipts(_) |
+                Self::GetReceipts70(_) |
                 Self::GetPooledTransactions(_) |
                 Self::GetNodeData(_)
         )
@@ -326,10 +362,39 @@ impl<N: NetworkPrimitives> EthMessage<N> {
             Self::PooledTransactions(_) |
                 Self::Receipts(_) |
                 Self::Receipts69(_) |
+                Self::Receipts70(_) |
                 Self::BlockHeaders(_) |
                 Self::BlockBodies(_) |
                 Self::NodeData(_)
         )
+    }
+
+    /// Converts the message types where applicable.
+    ///
+    /// This handles up/downcasting where appropriate, for example for different receipt request
+    /// types.
+    pub fn map_versioned(self, version: EthVersion) -> Self {
+        // For eth/70 peers we send `GetReceipts` using the new eth/70
+        // encoding with `firstBlockReceiptIndex = 0`, while keeping the
+        // user-facing `PeerRequest` API unchanged.
+        if version >= EthVersion::Eth70 {
+            return match self {
+                Self::GetReceipts(pair) => {
+                    let RequestPair { request_id, message } = pair;
+                    let req = RequestPair {
+                        request_id,
+                        message: GetReceipts70 {
+                            first_block_receipt_index: 0,
+                            block_hashes: message.0,
+                        },
+                    };
+                    Self::GetReceipts70(req)
+                }
+                other => other,
+            }
+        }
+
+        self
     }
 }
 
@@ -351,8 +416,10 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetNodeData(request) => request.encode(out),
             Self::NodeData(data) => data.encode(out),
             Self::GetReceipts(request) => request.encode(out),
+            Self::GetReceipts70(request) => request.encode(out),
             Self::Receipts(receipts) => receipts.encode(out),
             Self::Receipts69(receipt69) => receipt69.encode(out),
+            Self::Receipts70(receipt70) => receipt70.encode(out),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.encode(out),
             Self::Other(unknown) => out.put_slice(&unknown.payload),
         }
@@ -374,8 +441,10 @@ impl<N: NetworkPrimitives> Encodable for EthMessage<N> {
             Self::GetNodeData(request) => request.length(),
             Self::NodeData(data) => data.length(),
             Self::GetReceipts(request) => request.length(),
+            Self::GetReceipts70(request) => request.length(),
             Self::Receipts(receipts) => receipts.length(),
             Self::Receipts69(receipt69) => receipt69.length(),
+            Self::Receipts70(receipt70) => receipt70.length(),
             Self::BlockRangeUpdate(block_range_update) => block_range_update.length(),
             Self::Other(unknown) => unknown.length(),
         }
