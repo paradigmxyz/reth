@@ -27,9 +27,9 @@ use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
+use reth_execution_types::ExecutionOutcome;
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
-use reth_execution_types::ExecutionOutcome;
 use reth_provider::{BlockReader, StateProviderBox, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_trie::MultiProofTargets;
@@ -136,8 +136,11 @@ where
     /// For Optimism chains, special handling is applied to the first transaction if it's a
     /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
     /// subsequent transactions in the block.
-    fn spawn_all<Tx>(&self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>)
-    where
+    fn spawn_all<Tx>(
+        &self,
+        pending: mpsc::Receiver<Tx>,
+        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
+    ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         let executor = self.executor.clone();

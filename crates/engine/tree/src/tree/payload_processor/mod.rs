@@ -23,10 +23,10 @@ use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
-use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor, TxEnvFor,
+    ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
+    TxEnvFor,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
@@ -92,6 +92,13 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// If we have 1 million entries of 144 bytes each, this conservative estimate comes out at around
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
+
+/// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
+type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
+    WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxTuple>::Tx>,
+    <I as ExecutableTxTuple>::Error,
+    <N as NodePrimitives>::Receipt,
+>;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -201,7 +208,6 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    #[allow(clippy::type_complexity)]
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor",
@@ -216,7 +222,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error, N::Receipt>
+    ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -321,7 +327,7 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error, N::Receipt>
+    ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
@@ -655,7 +661,10 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
     /// path without cloning the expensive `BundleState`.
-    pub(super) fn terminate_caching(&mut self, execution_outcome: Option<Arc<ExecutionOutcome<R>>>) {
+    pub(super) fn terminate_caching(
+        &mut self,
+        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
+    ) {
         self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
@@ -695,7 +704,10 @@ impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     ///
     /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
     /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
-    pub(super) fn terminate_caching(&mut self, execution_outcome: Option<Arc<ExecutionOutcome<R>>>) {
+    pub(super) fn terminate_caching(
+        &mut self,
+        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
+    ) {
         if let Some(tx) = self.to_prewarm_task.take() {
             let event = PrewarmTaskEvent::Terminate { execution_outcome };
             let _ = tx.send(event);
