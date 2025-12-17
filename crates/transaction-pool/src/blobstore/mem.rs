@@ -13,6 +13,30 @@ pub struct InMemoryBlobStore {
     inner: Arc<InMemoryBlobStoreInner>,
 }
 
+impl InMemoryBlobStore {
+    fn get_by_versioned_hashes_eip7594(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Vec<Option<BlobAndProofV2>> {
+        let mut result = vec![None; versioned_hashes.len()];
+        for (_tx_hash, blob_sidecar) in self.inner.store.read().iter() {
+            if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
+                for (hash_idx, match_result) in
+                    blob_sidecar.match_versioned_hashes(versioned_hashes)
+                {
+                    result[hash_idx] = Some(match_result);
+                }
+            }
+
+            // Return early if all blobs are found.
+            if result.iter().all(|blob| blob.is_some()) {
+                break;
+            }
+        }
+        result
+    }
+}
+
 #[derive(Debug, Default)]
 struct InMemoryBlobStoreInner {
     /// Storage for all blob data.
@@ -134,25 +158,19 @@ impl BlobStore for InMemoryBlobStore {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
-        let mut result = vec![None; versioned_hashes.len()];
-        for (_tx_hash, blob_sidecar) in self.inner.store.read().iter() {
-            if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                for (hash_idx, match_result) in
-                    blob_sidecar.match_versioned_hashes(versioned_hashes)
-                {
-                    result[hash_idx] = Some(match_result);
-                }
-            }
-
-            if result.iter().all(|blob| blob.is_some()) {
-                break;
-            }
-        }
+        let result = self.get_by_versioned_hashes_eip7594(versioned_hashes);
         if result.iter().all(|blob| blob.is_some()) {
             Ok(Some(result.into_iter().map(Option::unwrap).collect()))
         } else {
             Ok(None)
         }
+    }
+
+    fn get_by_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        Ok(self.get_by_versioned_hashes_eip7594(versioned_hashes))
     }
 
     fn data_size_hint(&self) -> Option<usize> {
@@ -182,4 +200,46 @@ fn insert_size(
     let add = blob.size();
     store.insert(tx, Arc::new(blob));
     add
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_eips::{
+        eip4844::{kzg_to_versioned_hash, Blob, BlobAndProofV2, Bytes48},
+        eip7594::{
+            BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, CELLS_PER_EXT_BLOB,
+        },
+    };
+
+    fn eip7594_single_blob_sidecar() -> (BlobTransactionSidecarVariant, B256, BlobAndProofV2) {
+        let blob = Blob::default();
+        let commitment = Bytes48::default();
+        let cell_proofs = vec![Bytes48::default(); CELLS_PER_EXT_BLOB];
+
+        let versioned_hash = kzg_to_versioned_hash(commitment.as_slice());
+
+        let expected =
+            BlobAndProofV2 { blob: Box::new(Blob::default()), proofs: cell_proofs.clone() };
+        let sidecar = BlobTransactionSidecarEip7594::new(vec![blob], vec![commitment], cell_proofs);
+
+        (BlobTransactionSidecarVariant::Eip7594(sidecar), versioned_hash, expected)
+    }
+
+    #[test]
+    fn mem_get_blobs_v3_returns_partial_results() {
+        let store = InMemoryBlobStore::default();
+
+        let (sidecar, versioned_hash, expected) = eip7594_single_blob_sidecar();
+        store.insert(B256::random(), sidecar).unwrap();
+
+        assert_ne!(versioned_hash, B256::ZERO);
+
+        let request = vec![versioned_hash, B256::ZERO];
+        let v2 = store.get_by_versioned_hashes_v2(&request).unwrap();
+        assert!(v2.is_none(), "v2 must return null if any requested blob is missing");
+
+        let v3 = store.get_by_versioned_hashes_v3(&request).unwrap();
+        assert_eq!(v3, vec![Some(expected), None]);
+    }
 }
