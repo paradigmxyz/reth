@@ -1533,6 +1533,9 @@ fn get_proof_targets(
         let mut changed_slots = storage
             .storage
             .keys()
+            // Only include slots that either (1) were not already fetched as part of the
+            // account proof, or (2) have been explicitly removed. This avoids redundant proofs
+            // while ensuring removed slots are still handled correctly.
             .filter(|slot| {
                 !fetched.is_some_and(|f| f.contains(*slot)) ||
                     storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
@@ -1568,6 +1571,8 @@ fn dispatch_with_chunking<T, I>(
 where
     I: IntoIterator<Item = T>,
 {
+    // Chunk multiproof work when: (1) work exceeds target limit, amortizing scheduler overhead,
+    // or (2) multiple workers are available for parallel processing.
     let should_chunk = chunking_len > max_targets_for_chunking ||
         available_account_workers > 1 ||
         available_storage_workers > 1;
@@ -1637,6 +1642,9 @@ fn same_source(lhs: Source, rhs: Source) -> bool {
 }
 
 /// Estimates target count from `EvmState` for batching decisions.
+///
+/// Each touched account needs one account proof (1), plus one proof per changed storage slot.
+/// This estimate drives batching decisions to optimize proof generation parallelism.
 fn estimate_evm_state_targets(state: &EvmState) -> usize {
     state
         .values()
