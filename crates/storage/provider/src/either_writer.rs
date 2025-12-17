@@ -1,20 +1,27 @@
 //! Generic reader and writer abstractions for interacting with either database tables or static
 //! files.
 
-use std::ops::Range;
+use std::{marker::PhantomData, ops::Range};
 
+#[cfg(all(unix, feature = "rocksdb"))]
+use crate::providers::rocksdb::RocksDBBatch;
 use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxNumber};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
 use reth_db::{
     cursor::DbCursorRO,
     static_file::TransactionSenderMask,
     table::Value,
     transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut},
 };
-use reth_db_api::{cursor::DbCursorRW, tables};
+use reth_db_api::{
+    cursor::DbCursorRW,
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    tables,
+    tables::BlockNumberList,
+};
 use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::ReceiptTy;
@@ -24,8 +31,8 @@ use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
 /// Type alias for [`EitherReader`] constructors.
-type EitherReaderTy<P, T> =
-    EitherReader<CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
+type EitherReaderTy<'a, P, T> =
+    EitherReader<'a, CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
@@ -34,13 +41,28 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
-/// Represents a destination for writing data, either to database or static files.
+// Helper types so constructors stay exported even when RocksDB feature is off.
+// Historical data tables use a write-only RocksDB batch (no read-your-writes needed).
+#[cfg(all(unix, feature = "rocksdb"))]
+type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
+#[cfg(not(all(unix, feature = "rocksdb")))]
+type RocksBatchArg<'a> = ();
+
+#[cfg(all(unix, feature = "rocksdb"))]
+type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
+#[cfg(not(all(unix, feature = "rocksdb")))]
+type RocksTxRefArg<'a> = ();
+
+/// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherWriter<'a, CURSOR, N> {
     /// Write to database table via cursor
     Database(CURSOR),
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
+    /// Write to `RocksDB` using a write-only batch (historical tables).
+    #[cfg(all(unix, feature = "rocksdb"))]
+    RocksDB(RocksDBBatch<'a>),
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -109,6 +131,59 @@ impl<'a> EitherWriter<'a, (), ()> {
             ))
         }
     }
+
+    /// Creates a new [`EitherWriter`] for storages history based on storage settings.
+    pub fn new_storages_history<P>(
+        provider: &P,
+        _rocksdb_batch: RocksBatchArg<'a>,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::StoragesHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTxMut,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().storages_history_in_rocksdb {
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+        }
+
+        Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
+    }
+
+    /// Creates a new [`EitherWriter`] for transaction hash numbers based on storage settings.
+    pub fn new_transaction_hash_numbers<P>(
+        provider: &P,
+        _rocksdb_batch: RocksBatchArg<'a>,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionHashNumbers>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTxMut,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+        }
+
+        Ok(EitherWriter::Database(
+            provider.tx_ref().cursor_write::<tables::TransactionHashNumbers>()?,
+        ))
+    }
+
+    /// Creates a new [`EitherWriter`] for account history based on storage settings.
+    pub fn new_accounts_history<P>(
+        provider: &P,
+        _rocksdb_batch: RocksBatchArg<'a>,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::AccountsHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTxMut,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+        }
+
+        Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::AccountsHistory>()?))
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
@@ -119,6 +194,8 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) => Ok(()),
             Self::StaticFile(writer) => writer.increment_block(expected_block_number),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -132,6 +209,8 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) => Ok(()),
             Self::StaticFile(writer) => writer.ensure_at_block(block_number),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -146,6 +225,8 @@ where
         match self {
             Self::Database(cursor) => Ok(cursor.append(tx_num, receipt)?),
             Self::StaticFile(writer) => writer.append_receipt(tx_num, receipt),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 }
@@ -159,6 +240,8 @@ where
         match self {
             Self::Database(cursor) => Ok(cursor.append(tx_num, sender)?),
             Self::StaticFile(writer) => writer.append_transaction_sender(tx_num, sender),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -175,6 +258,8 @@ where
                 Ok(())
             }
             Self::StaticFile(writer) => writer.append_transaction_senders(senders),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
     }
 
@@ -206,41 +291,209 @@ where
 
                 writer.prune_transaction_senders(to_delete, block)?;
             }
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
         }
 
         Ok(())
     }
 }
 
-/// Represents a source for reading data, either from database or static files.
-#[derive(Debug, Display)]
-pub enum EitherReader<CURSOR, N> {
-    /// Read from database table via cursor
-    Database(CURSOR),
-    /// Read from static file
-    StaticFile(StaticFileProvider<N>),
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::TransactionHashNumbers> + DbCursorRO<tables::TransactionHashNumbers>,
+{
+    /// Puts a transaction hash number mapping.
+    pub fn put_transaction_hash_number(
+        &mut self,
+        hash: TxHash,
+        tx_num: TxNumber,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(hash, &tx_num)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::TransactionHashNumbers>(hash, &tx_num),
+        }
+    }
+
+    /// Deletes a transaction hash number mapping.
+    pub fn delete_transaction_hash_number(&mut self, hash: TxHash) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(hash)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.delete::<tables::TransactionHashNumbers>(hash),
+        }
+    }
 }
 
-impl EitherReader<(), ()> {
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
+{
+    /// Puts a storage history entry.
+    pub fn put_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
+        }
+    }
+
+    /// Deletes a storage history entry.
+    pub fn delete_storage_history(&mut self, key: StorageShardedKey) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(key)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
+        }
+    }
+}
+
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
+{
+    /// Puts an account history entry.
+    pub fn put_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+        value: &BlockNumberList,
+    ) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
+        }
+    }
+
+    /// Deletes an account history entry.
+    pub fn delete_account_history(&mut self, key: ShardedKey<Address>) -> ProviderResult<()> {
+        match self {
+            Self::Database(cursor) => {
+                if cursor.seek_exact(key)?.is_some() {
+                    cursor.delete_current()?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
+        }
+    }
+}
+
+/// Represents a source for reading data, either from database, static files, or `RocksDB`.
+#[derive(Debug, Display)]
+pub enum EitherReader<'a, CURSOR, N> {
+    /// Read from database table via cursor
+    Database(CURSOR, PhantomData<&'a ()>),
+    /// Read from static file
+    StaticFile(StaticFileProvider<N>, PhantomData<&'a ()>),
+    /// Read from `RocksDB` transaction
+    #[cfg(all(unix, feature = "rocksdb"))]
+    RocksDB(&'a crate::providers::rocksdb::RocksTx<'a>),
+}
+
+impl<'a> EitherReader<'a, (), ()> {
     /// Creates a new [`EitherReader`] for senders based on storage settings.
     pub fn new_senders<P>(
         provider: &P,
-    ) -> ProviderResult<EitherReaderTy<P, tables::TransactionSenders>>
+    ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionSenders>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
         P::Tx: DbTx,
     {
         if EitherWriterDestination::senders(provider).is_static_file() {
-            Ok(EitherReader::StaticFile(provider.static_file_provider()))
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_read::<tables::TransactionSenders>()?,
+                PhantomData,
             ))
         }
     }
+
+    /// Creates a new [`EitherReader`] for storages history based on storage settings.
+    pub fn new_storages_history<P>(
+        provider: &P,
+        _rocksdb_tx: RocksTxRefArg<'a>,
+    ) -> ProviderResult<EitherReaderTy<'a, P, tables::StoragesHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTx,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().storages_history_in_rocksdb {
+            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+        }
+
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::StoragesHistory>()?,
+            PhantomData,
+        ))
+    }
+
+    /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
+    pub fn new_transaction_hash_numbers<P>(
+        provider: &P,
+        _rocksdb_tx: RocksTxRefArg<'a>,
+    ) -> ProviderResult<EitherReaderTy<'a, P, tables::TransactionHashNumbers>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTx,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+        }
+
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::TransactionHashNumbers>()?,
+            PhantomData,
+        ))
+    }
+
+    /// Creates a new [`EitherReader`] for account history based on storage settings.
+    pub fn new_accounts_history<P>(
+        provider: &P,
+        _rocksdb_tx: RocksTxRefArg<'a>,
+    ) -> ProviderResult<EitherReaderTy<'a, P, tables::AccountsHistory>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
+        P::Tx: DbTx,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            return Ok(EitherReader::RocksDB(_rocksdb_tx));
+        }
+
+        Ok(EitherReader::Database(
+            provider.tx_ref().cursor_read::<tables::AccountsHistory>()?,
+            PhantomData,
+        ))
+    }
 }
 
-impl<CURSOR, N: NodePrimitives> EitherReader<CURSOR, N>
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::TransactionSenders>,
 {
@@ -250,11 +503,11 @@ where
         range: Range<TxNumber>,
     ) -> ProviderResult<HashMap<TxNumber, Address>> {
         match self {
-            Self::Database(cursor) => cursor
+            Self::Database(cursor, _) => cursor
                 .walk_range(range)?
                 .map(|result| result.map_err(ProviderError::from))
                 .collect::<ProviderResult<HashMap<_, _>>>(),
-            Self::StaticFile(provider) => range
+            Self::StaticFile(provider, _) => range
                 .clone()
                 .zip(provider.fetch_range_iter(
                     StaticFileSegment::TransactionSenders,
@@ -266,6 +519,62 @@ where
                     Some(result.map(|sender| (tx_num, sender)))
                 })
                 .collect::<ProviderResult<HashMap<_, _>>>(),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::TransactionHashNumbers>,
+{
+    /// Gets a transaction number by its hash.
+    pub fn get_transaction_hash_number(
+        &mut self,
+        hash: TxHash,
+    ) -> ProviderResult<Option<TxNumber>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.get::<tables::TransactionHashNumbers>(hash),
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::StoragesHistory>,
+{
+    /// Gets a storage history entry.
+    pub fn get_storage_history(
+        &mut self,
+        key: StorageShardedKey,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.get::<tables::StoragesHistory>(key),
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::AccountsHistory>,
+{
+    /// Gets an account history entry.
+    pub fn get_account_history(
+        &mut self,
+        key: ShardedKey<Address>,
+    ) -> ProviderResult<Option<BlockNumberList>> {
+        match self {
+            Self::Database(cursor, _) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.get::<tables::AccountsHistory>(key),
         }
     }
 }
@@ -277,6 +586,8 @@ pub enum EitherWriterDestination {
     Database,
     /// Write to static file
     StaticFile,
+    /// Write to `RocksDB`
+    RocksDB,
 }
 
 impl EitherWriterDestination {
@@ -336,9 +647,9 @@ mod tests {
             let provider = factory.database_provider_ro().unwrap();
             let mut reader = EitherReader::new_senders(&provider).unwrap();
             if transaction_senders_in_static_files {
-                assert!(matches!(reader, EitherReader::StaticFile(_)));
+                assert!(matches!(reader, EitherReader::StaticFile(_, _)));
             } else {
-                assert!(matches!(reader, EitherReader::Database(_)));
+                assert!(matches!(reader, EitherReader::Database(_, _)));
             }
 
             assert_eq!(
@@ -347,5 +658,162 @@ mod tests {
                 "{reader}"
             );
         }
+    }
+}
+
+#[cfg(all(test, unix, feature = "rocksdb"))]
+mod rocksdb_tests {
+    use crate::providers::rocksdb::{RocksDBBuilder, RocksDBProvider};
+    use alloy_primitives::{Address, B256};
+    use reth_db_api::{
+        models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
+        tables,
+    };
+    use tempfile::TempDir;
+
+    fn create_rocksdb_provider() -> (TempDir, RocksDBProvider) {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::StoragesHistory>()
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+        (temp_dir, provider)
+    }
+
+    #[test]
+    fn test_rocksdb_batch_transaction_hash_numbers() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let hash1 = B256::from([1u8; 32]);
+        let hash2 = B256::from([2u8; 32]);
+        let tx_num1 = 100u64;
+        let tx_num2 = 200u64;
+
+        // Write via RocksDBBatch (same as EitherWriter::RocksDB would use internally)
+        let mut batch = provider.batch();
+        batch.put::<tables::TransactionHashNumbers>(hash1, &tx_num1).unwrap();
+        batch.put::<tables::TransactionHashNumbers>(hash2, &tx_num2).unwrap();
+        batch.commit().unwrap();
+
+        // Read via RocksTx (same as EitherReader::RocksDB would use internally)
+        let tx = provider.tx();
+        assert_eq!(tx.get::<tables::TransactionHashNumbers>(hash1).unwrap(), Some(tx_num1));
+        assert_eq!(tx.get::<tables::TransactionHashNumbers>(hash2).unwrap(), Some(tx_num2));
+
+        // Test missing key
+        let missing_hash = B256::from([99u8; 32]);
+        assert_eq!(tx.get::<tables::TransactionHashNumbers>(missing_hash).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_storage_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let storage_key = B256::from([1u8; 32]);
+        let key = StorageShardedKey::new(address, storage_key, 1000);
+        let value = IntegerList::new([1, 5, 10, 50]).unwrap();
+
+        // Write via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
+        batch.commit().unwrap();
+
+        // Read via RocksTx
+        let tx = provider.tx();
+        let result = tx.get::<tables::StoragesHistory>(key).unwrap();
+        assert_eq!(result, Some(value));
+
+        // Test missing key
+        let missing_key = StorageShardedKey::new(Address::random(), B256::ZERO, 0);
+        assert_eq!(tx.get::<tables::StoragesHistory>(missing_key).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_account_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let key = ShardedKey::new(address, 1000);
+        let value = IntegerList::new([1, 10, 100, 500]).unwrap();
+
+        // Write via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
+        batch.commit().unwrap();
+
+        // Read via RocksTx
+        let tx = provider.tx();
+        let result = tx.get::<tables::AccountsHistory>(key).unwrap();
+        assert_eq!(result, Some(value));
+
+        // Test missing key
+        let missing_key = ShardedKey::new(Address::random(), 0);
+        assert_eq!(tx.get::<tables::AccountsHistory>(missing_key).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_delete_transaction_hash_number() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let hash = B256::from([1u8; 32]);
+        let tx_num = 100u64;
+
+        // First write
+        provider.put::<tables::TransactionHashNumbers>(hash, &tx_num).unwrap();
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(tx_num));
+
+        // Delete via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.delete::<tables::TransactionHashNumbers>(hash).unwrap();
+        batch.commit().unwrap();
+
+        // Verify deletion
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(hash).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_delete_storage_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let storage_key = B256::from([1u8; 32]);
+        let key = StorageShardedKey::new(address, storage_key, 1000);
+        let value = IntegerList::new([1, 5, 10]).unwrap();
+
+        // First write
+        provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::StoragesHistory>(key.clone()).unwrap().is_some());
+
+        // Delete via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.delete::<tables::StoragesHistory>(key.clone()).unwrap();
+        batch.commit().unwrap();
+
+        // Verify deletion
+        assert_eq!(provider.get::<tables::StoragesHistory>(key).unwrap(), None);
+    }
+
+    #[test]
+    fn test_rocksdb_batch_delete_account_history() {
+        let (_temp_dir, provider) = create_rocksdb_provider();
+
+        let address = Address::random();
+        let key = ShardedKey::new(address, 1000);
+        let value = IntegerList::new([1, 10, 100]).unwrap();
+
+        // First write
+        provider.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::AccountsHistory>(key.clone()).unwrap().is_some());
+
+        // Delete via RocksDBBatch
+        let mut batch = provider.batch();
+        batch.delete::<tables::AccountsHistory>(key.clone()).unwrap();
+        batch.commit().unwrap();
+
+        // Verify deletion
+        assert_eq!(provider.get::<tables::AccountsHistory>(key).unwrap(), None);
     }
 }

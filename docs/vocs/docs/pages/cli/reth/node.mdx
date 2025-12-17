@@ -71,6 +71,9 @@ Datadir:
       --datadir.static-files <PATH>
           The absolute path to store static files in.
 
+      --datadir.rocksdb <PATH>
+          The absolute path to store `RocksDB` database in.
+
 Networking:
   -d, --disable-discovery
           Disable the discovery service
@@ -188,6 +191,11 @@ Networking:
 
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound peers. default: 30
+
+      --max-peers <COUNT>
+          Maximum number of total peers (inbound + outbound).
+
+          Splits peers using approximately 2:1 inbound:outbound ratio. Cannot be used together with `--max-outbound-peers` or `--max-inbound-peers`.
 
       --max-tx-reqs <COUNT>
           Max concurrent `GetPooledTransactions` requests.
@@ -891,6 +899,9 @@ Engine:
 
       --engine.legacy-state-root
           Enable legacy state root
+
+      --engine.disable-state-cache
+          Disable state cache
 
       --engine.disable-prewarming
           Disable parallel prewarming

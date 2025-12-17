@@ -66,7 +66,7 @@ pub use benchmark_args::BenchmarkArgs;
 
 /// EngineArgs for configuring the engine
 mod engine;
-pub use engine::EngineArgs;
+pub use engine::{DefaultEngineValues, EngineArgs};
 
 /// `RessArgs` for configuring ress subprotocol.
 mod ress_args;

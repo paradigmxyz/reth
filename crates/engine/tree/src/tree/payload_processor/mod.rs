@@ -13,6 +13,7 @@ use crate::tree::{
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
@@ -21,7 +22,7 @@ use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::prelude::*;
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
@@ -49,8 +50,9 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, warn, Span};
+use tracing::{debug, debug_span, error, instrument, warn, Span};
 
+pub mod bal;
 mod configured_sparse_trie;
 pub mod executor;
 pub mod multiproof;
@@ -106,6 +108,8 @@ where
     cross_block_cache_size: u64,
     /// Whether transactions should not be executed on prewarming task.
     disable_transaction_prewarming: bool,
+    /// Whether state cache should be disable
+    disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
     /// Whether precompile cache should be disabled.
@@ -149,6 +153,7 @@ where
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
             evm_config,
+            disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
@@ -209,6 +214,7 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
+        bal: Option<Arc<BlockAccessList>>,
     ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -249,19 +255,45 @@ where
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let prewarm_handle = self.spawn_caching_with(
-            env,
-            prewarm_rx,
-            transaction_count_hint,
-            provider_builder,
-            to_multi_proof.clone(),
-        );
+        // Handle BAL-based optimization if available
+        let prewarm_handle = if let Some(bal) = bal {
+            // When BAL is present, skip spawning prewarm tasks entirely and send BAL to multiproof
+            debug!(target: "engine::tree::payload_processor", "BAL present, skipping prewarm tasks");
+
+            // Send BAL message immediately to MultiProofTask
+            if let Some(ref sender) = to_multi_proof &&
+                let Err(err) = sender.send(MultiProofMessage::BlockAccessList(bal))
+            {
+                // In this case state root validation will simply fail
+                error!(target: "engine::tree::payload_processor", ?err, "Failed to send BAL to MultiProofTask");
+            }
+
+            // Spawn minimal cache-only task without prewarming
+            self.spawn_caching_with(
+                env,
+                prewarm_rx,
+                transaction_count_hint,
+                provider_builder.clone(),
+                None, // Don't send proof targets when BAL is present
+            )
+        } else {
+            // Normal path: spawn with full prewarming
+            self.spawn_caching_with(
+                env,
+                prewarm_rx,
+                transaction_count_hint,
+                provider_builder.clone(),
+                to_multi_proof.clone(),
+            )
+        };
 
         // spawn multi-proof task
         let parent_span = span.clone();
         self.executor.spawn_blocking(move || {
             let _enter = parent_span.entered();
-            multi_proof_task.run();
+            // Build a state provider for the multiproof task
+            let provider = provider_builder.build().expect("failed to build provider");
+            multi_proof_task.run(provider);
         });
 
         // wire the sparse trie to the state root response receiver
@@ -315,36 +347,32 @@ where
         usize,
     ) {
         let (transactions, convert) = transactions.into();
-        let transactions = transactions.into_iter();
-        // Get the transaction count for prewarming task
-        // Use upper bound if available (more accurate), otherwise use lower bound
-        let (lower, upper) = transactions.size_hint();
-        let transaction_count_hint = upper.unwrap_or(lower);
+        let transactions = transactions.into_par_iter();
+        let transaction_count_hint = transactions.len();
 
-        // Spawn a task that iterates through all transactions in parallel and sends them to the
-        // main task.
-        let (tx, rx) = mpsc::channel();
+        let (ooo_tx, ooo_rx) = mpsc::channel();
+        let (prewarm_tx, prewarm_rx) = mpsc::channel();
+        let (execute_tx, execute_rx) = mpsc::channel();
+
+        // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
         self.executor.spawn_blocking(move || {
-            transactions.enumerate().par_bridge().for_each_with(tx, |sender, (idx, tx)| {
+            transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
                 let tx = convert(tx);
                 let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
-                let _ = sender.send((idx, tx));
+                // Only send Ok(_) variants to prewarming task.
+                if let Ok(tx) = &tx {
+                    let _ = prewarm_tx.send(tx.clone());
+                }
+                let _ = ooo_tx.send((idx, tx));
             });
         });
 
         // Spawn a task that processes out-of-order transactions from the task above and sends them
-        // to prewarming and execution tasks.
-        let (prewarm_tx, prewarm_rx) = mpsc::channel();
-        let (execute_tx, execute_rx) = mpsc::channel();
+        // to the execution task in order.
         self.executor.spawn_blocking(move || {
             let mut next_for_execution = 0;
             let mut queue = BTreeMap::new();
-            while let Ok((idx, tx)) = rx.recv() {
-                // only send Ok(_) variants to prewarming task
-                if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
-                }
-
+            while let Ok((idx, tx)) = ooo_rx.recv() {
                 if next_for_execution == idx {
                     let _ = execute_tx.send(tx);
                     next_for_execution += 1;
@@ -382,9 +410,15 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let saved_cache = self.cache_for(env.parent_hash);
-        let cache = saved_cache.cache().clone();
-        let cache_metrics = saved_cache.metrics().clone();
+        let (saved_cache, cache, cache_metrics) = if self.disable_state_cache {
+            (None, None, None)
+        } else {
+            let saved_cache = self.cache_for(env.parent_hash);
+            let cache = saved_cache.cache().clone();
+            let cache_metrics = saved_cache.metrics().clone();
+            (Some(saved_cache), Some(cache), Some(cache_metrics))
+        };
+
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -590,18 +624,18 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source, state.clone()));
+                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
             }
         }
     }
 
     /// Returns a clone of the caches used by prewarming
-    pub(super) fn caches(&self) -> StateExecutionCache {
+    pub(super) fn caches(&self) -> Option<StateExecutionCache> {
         self.prewarm_handle.cache.clone()
     }
 
     /// Returns a clone of the cache metrics used by prewarming
-    pub(super) fn cache_metrics(&self) -> CachedStateMetrics {
+    pub(super) fn cache_metrics(&self) -> Option<CachedStateMetrics> {
         self.prewarm_handle.cache_metrics.clone()
     }
 
@@ -631,9 +665,9 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle {
     /// The shared cache the task operates with.
-    cache: StateExecutionCache,
+    cache: Option<StateExecutionCache>,
     /// Metrics for the caches
-    cache_metrics: CachedStateMetrics,
+    cache_metrics: Option<CachedStateMetrics>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent>>,
 }
@@ -1048,19 +1082,17 @@ mod tests {
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();
 
-        let mut handle =
-            payload_processor.spawn(
-                Default::default(),
-                (
-                    core::iter::empty::<
-                        Result<Recovered<TransactionSigned>, core::convert::Infallible>,
-                    >(),
-                    std::convert::identity,
-                ),
-                StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-                OverlayStateProviderFactory::new(provider_factory),
-                &TreeConfig::default(),
-            );
+        let mut handle = payload_processor.spawn(
+            Default::default(),
+            (
+                Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
+                std::convert::identity,
+            ),
+            StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
+            OverlayStateProviderFactory::new(provider_factory),
+            &TreeConfig::default(),
+            None, // No BAL for test
+        );
 
         let mut state_hook = handle.state_hook();
 

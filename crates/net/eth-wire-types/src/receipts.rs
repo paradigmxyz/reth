@@ -17,6 +17,42 @@ pub struct GetReceipts(
     pub Vec<B256>,
 );
 
+/// Eth/70 `GetReceipts` request payload that supports partial receipt queries.
+///
+/// When used with eth/70, the request id is carried by the surrounding
+/// [`crate::message::RequestPair`], and the on-wire shape is the flattened list
+/// `firstBlockReceiptIndex, [blockhash₁, ...]`.
+///
+/// See also [eip-7975](https://eips.ethereum.org/EIPS/eip-7975)
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+pub struct GetReceipts70 {
+    /// Index into the receipts of the first requested block hash.
+    pub first_block_receipt_index: u64,
+    /// The block hashes to request receipts for.
+    pub block_hashes: Vec<B256>,
+}
+
+impl alloy_rlp::Encodable for GetReceipts70 {
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.first_block_receipt_index.encode(out);
+        self.block_hashes.encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.first_block_receipt_index.length() + self.block_hashes.length()
+    }
+}
+
+impl alloy_rlp::Decodable for GetReceipts70 {
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let first_block_receipt_index = u64::decode(buf)?;
+        let block_hashes = Vec::<B256>::decode(buf)?;
+        Ok(Self { first_block_receipt_index, block_hashes })
+    }
+}
+
 /// The response to [`GetReceipts`], containing receipt lists that correspond to each block
 /// requested.
 #[derive(Clone, Debug, PartialEq, Eq, Default)]
@@ -58,7 +94,13 @@ pub struct Receipts69<T = Receipt>(pub Vec<Vec<T>>);
 impl<T: TxReceipt> Receipts69<T> {
     /// Encodes all receipts with the bloom filter.
     ///
-    /// Note: This is an expensive operation that recalculates the bloom for each receipt.
+    /// Eth/69 omits bloom filters on the wire, while some internal callers
+    /// (and legacy APIs) still operate on [`Receipts`] with
+    /// [`ReceiptWithBloom`]. This helper reconstructs the bloom locally from
+    /// each receipt's logs so the older API can be used on top of eth/69 data.
+    ///
+    /// Note: This is an expensive operation that recalculates the bloom for
+    /// every receipt.
     pub fn into_with_bloom(self) -> Receipts<T> {
         Receipts(
             self.0
@@ -71,6 +113,68 @@ impl<T: TxReceipt> Receipts69<T> {
 
 impl<T: TxReceipt> From<Receipts69<T>> for Receipts<T> {
     fn from(receipts: Receipts69<T>) -> Self {
+        receipts.into_with_bloom()
+    }
+}
+
+/// Eth/70 `Receipts` response payload.
+///
+/// This is used in conjunction with [`crate::message::RequestPair`] to encode the full wire
+/// message `[request-id, lastBlockIncomplete, [[receipt₁, receipt₂], ...]]`.
+#[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
+pub struct Receipts70<T = Receipt> {
+    /// Whether the receipts list for the last block is incomplete.
+    pub last_block_incomplete: bool,
+    /// Receipts grouped by block.
+    pub receipts: Vec<Vec<T>>,
+}
+
+impl<T> alloy_rlp::Encodable for Receipts70<T>
+where
+    T: alloy_rlp::Encodable,
+{
+    fn encode(&self, out: &mut dyn alloy_rlp::BufMut) {
+        self.last_block_incomplete.encode(out);
+        self.receipts.encode(out);
+    }
+
+    fn length(&self) -> usize {
+        self.last_block_incomplete.length() + self.receipts.length()
+    }
+}
+
+impl<T> alloy_rlp::Decodable for Receipts70<T>
+where
+    T: alloy_rlp::Decodable,
+{
+    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let last_block_incomplete = bool::decode(buf)?;
+        let receipts = Vec::<Vec<T>>::decode(buf)?;
+        Ok(Self { last_block_incomplete, receipts })
+    }
+}
+
+impl<T: TxReceipt> Receipts70<T> {
+    /// Encodes all receipts with the bloom filter.
+    ///
+    /// Just like eth/69, eth/70 does not transmit bloom filters over the wire.
+    /// When higher layers still expect the older bloom-bearing [`Receipts`]
+    /// type, this helper converts the eth/70 payload into that shape by
+    /// recomputing the bloom locally from the contained receipts.
+    ///
+    /// Note: This is an expensive operation that recalculates the bloom for
+    /// every receipt.
+    pub fn into_with_bloom(self) -> Receipts<T> {
+        // Reuse the eth/69 helper, since both variants carry the same
+        // receipt list shape (only eth/70 adds request metadata).
+        Receipts69(self.receipts).into_with_bloom()
+    }
+}
+
+impl<T: TxReceipt> From<Receipts70<T>> for Receipts<T> {
+    fn from(receipts: Receipts70<T>) -> Self {
         receipts.into_with_bloom()
     }
 }
@@ -224,5 +328,71 @@ mod tests {
 
         let encoded = alloy_rlp::encode(&request);
         assert_eq!(encoded, data);
+    }
+
+    #[test]
+    fn encode_get_receipts70_inline_shape() {
+        let req = RequestPair {
+            request_id: 1111,
+            message: GetReceipts70 {
+                first_block_receipt_index: 0,
+                block_hashes: vec![
+                    hex!("00000000000000000000000000000000000000000000000000000000deadc0de").into(),
+                    hex!("00000000000000000000000000000000000000000000000000000000feedbeef").into(),
+                ],
+            },
+        };
+
+        let mut out = vec![];
+        req.encode(&mut out);
+
+        let mut buf = out.as_slice();
+        let header = alloy_rlp::Header::decode(&mut buf).unwrap();
+        let payload_start = buf.len();
+        let request_id = u64::decode(&mut buf).unwrap();
+        let first_block_receipt_index = u64::decode(&mut buf).unwrap();
+        let block_hashes = Vec::<B256>::decode(&mut buf).unwrap();
+
+        assert!(buf.is_empty(), "buffer not fully consumed");
+        assert_eq!(request_id, 1111);
+        assert_eq!(first_block_receipt_index, 0);
+        assert_eq!(block_hashes.len(), 2);
+        // ensure payload length matches header
+        assert_eq!(payload_start - buf.len(), header.payload_length);
+
+        let mut buf = out.as_slice();
+        let decoded = RequestPair::<GetReceipts70>::decode(&mut buf).unwrap();
+        assert!(buf.is_empty(), "buffer not fully consumed on decode");
+        assert_eq!(decoded, req);
+    }
+
+    #[test]
+    fn encode_receipts70_inline_shape() {
+        let payload: Receipts70<Receipt> =
+            Receipts70 { last_block_incomplete: true, receipts: vec![vec![Receipt::default()]] };
+
+        let resp = RequestPair { request_id: 7, message: payload };
+
+        let mut out = vec![];
+        resp.encode(&mut out);
+
+        let mut buf = out.as_slice();
+        let header = alloy_rlp::Header::decode(&mut buf).unwrap();
+        let payload_start = buf.len();
+        let request_id = u64::decode(&mut buf).unwrap();
+        let last_block_incomplete = bool::decode(&mut buf).unwrap();
+        let receipts = Vec::<Vec<Receipt>>::decode(&mut buf).unwrap();
+
+        assert!(buf.is_empty(), "buffer not fully consumed");
+        assert_eq!(payload_start - buf.len(), header.payload_length);
+        assert_eq!(request_id, 7);
+        assert!(last_block_incomplete);
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(receipts[0].len(), 1);
+
+        let mut buf = out.as_slice();
+        let decoded = RequestPair::<Receipts70>::decode(&mut buf).unwrap();
+        assert!(buf.is_empty(), "buffer not fully consumed on decode");
+        assert_eq!(decoded, resp);
     }
 }

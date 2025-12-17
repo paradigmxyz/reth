@@ -23,7 +23,7 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider, StaticFileProvider},
+    providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider},
     ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
@@ -75,10 +75,12 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
+        let rocksdb_path = data_dir.rocksdb();
 
         if access.is_read_write() {
             reth_fs_util::create_dir_all(&db_path)?;
             reth_fs_util::create_dir_all(&sf_path)?;
+            reth_fs_util::create_dir_all(&rocksdb_path)?;
         }
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
@@ -108,8 +110,14 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                 StaticFileProvider::read_only(sf_path, false)?,
             ),
         };
+        // TransactionDB only support read-write mode
+        let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
+            .with_default_tables()
+            .with_database_log_level(self.db.log_level)
+            .build()?;
 
-        let provider_factory = self.create_provider_factory(&config, db, sfp, access)?;
+        let provider_factory =
+            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.static_files.to_settings())?;
@@ -128,6 +136,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         config: &Config,
         db: Arc<DatabaseEnv>,
         static_file_provider: StaticFileProvider<N::Primitives>,
+        rocksdb_provider: RocksDBProvider,
         access: AccessRights,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
     where
@@ -138,6 +147,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             db,
             self.chain.clone(),
             static_file_provider,
+            rocksdb_provider,
         )?
         .with_prune_modes(prune_modes.clone())
         .with_genesis_block_number(self.chain.genesis().number.unwrap());

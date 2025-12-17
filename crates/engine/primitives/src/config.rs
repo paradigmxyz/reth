@@ -1,5 +1,7 @@
 //! Engine tree configuration.
 
+use alloy_eips::merge::EPOCH_SLOTS;
+
 /// Triggers persistence when the number of canonical blocks in memory exceeds this threshold.
 pub const DEFAULT_PERSISTENCE_THRESHOLD: u64 = 2;
 
@@ -40,7 +42,7 @@ pub const DEFAULT_RESERVED_CPU_CORES: usize = 1;
 /// Default maximum concurrency for prewarm task.
 pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 
-const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = 256;
+const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
 const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
@@ -89,6 +91,8 @@ pub struct TreeConfig {
     /// Whether to always compare trie updates from the state root task to the trie updates from
     /// the regular state root calculation.
     always_compare_trie_updates: bool,
+    /// Whether to disable state cache.
+    disable_state_cache: bool,
     /// Whether to disable parallel prewarming.
     disable_prewarming: bool,
     /// Whether to disable the parallel sparse trie state root algorithm.
@@ -97,7 +101,7 @@ pub struct TreeConfig {
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
     cross_block_cache_size: u64,
-    /// Whether the host has enough parallelism to run state root in parallel.
+    /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
     /// Whether multiproof task should chunk proof targets.
     multiproof_chunking_enabled: bool,
@@ -143,6 +147,7 @@ impl Default for TreeConfig {
             max_execute_block_batch_size: DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE,
             legacy_state_root: false,
             always_compare_trie_updates: false,
+            disable_state_cache: false,
             disable_prewarming: false,
             disable_parallel_sparse_trie: false,
             state_provider_metrics: false,
@@ -173,6 +178,7 @@ impl TreeConfig {
         max_execute_block_batch_size: usize,
         legacy_state_root: bool,
         always_compare_trie_updates: bool,
+        disable_state_cache: bool,
         disable_prewarming: bool,
         disable_parallel_sparse_trie: bool,
         state_provider_metrics: bool,
@@ -197,6 +203,7 @@ impl TreeConfig {
             max_execute_block_batch_size,
             legacy_state_root,
             always_compare_trie_updates,
+            disable_state_cache,
             disable_prewarming,
             disable_parallel_sparse_trie,
             state_provider_metrics,
@@ -271,7 +278,12 @@ impl TreeConfig {
         self.disable_parallel_sparse_trie
     }
 
-    /// Returns whether or not parallel prewarming should be used.
+    /// Returns whether or not state cache is disabled.
+    pub const fn disable_state_cache(&self) -> bool {
+        self.disable_state_cache
+    }
+
+    /// Returns whether or not parallel prewarming is disabled.
     pub const fn disable_prewarming(&self) -> bool {
         self.disable_prewarming
     }
@@ -363,6 +375,12 @@ impl TreeConfig {
         self
     }
 
+    /// Setter for whether to disable state cache.
+    pub const fn without_state_cache(mut self, disable_state_cache: bool) -> Self {
+        self.disable_state_cache = disable_state_cache;
+        self
+    }
+
     /// Setter for whether to disable parallel prewarming.
     pub const fn without_prewarming(mut self, disable_prewarming: bool) -> Self {
         self.disable_prewarming = disable_prewarming;
@@ -385,15 +403,10 @@ impl TreeConfig {
         self
     }
 
-    /// Setter for whether or not the host has enough parallelism to run state root in parallel.
+    /// Setter for has enough parallelism.
     pub const fn with_has_enough_parallelism(mut self, has_enough_parallelism: bool) -> Self {
         self.has_enough_parallelism = has_enough_parallelism;
         self
-    }
-
-    /// Whether or not the host has enough parallelism to run state root in parallel.
-    pub const fn has_enough_parallelism(&self) -> bool {
-        self.has_enough_parallelism
     }
 
     /// Setter for state provider metrics.
