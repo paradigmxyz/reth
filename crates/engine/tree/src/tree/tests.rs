@@ -285,7 +285,8 @@ impl TestHarness {
         let fcu_state = self.fcu_state(block_hash);
 
         let (tx, rx) = oneshot::channel();
-        self.tree
+        let _ = self
+            .tree
             .on_engine_message(FromEngine::Request(
                 BeaconEngineMessage::ForkchoiceUpdated {
                     state: fcu_state,
@@ -498,7 +499,7 @@ fn test_tree_persist_block_batch() {
 
     // process the message
     let msg = test_harness.tree.try_recv_engine_message().unwrap().unwrap();
-    test_harness.tree.on_engine_message(msg).unwrap();
+    let _ = test_harness.tree.on_engine_message(msg).unwrap();
 
     // we now should receive the other batch
     let msg = test_harness.tree.try_recv_engine_message().unwrap().unwrap();
@@ -577,7 +578,7 @@ async fn test_engine_request_during_backfill() {
         .with_backfill_state(BackfillSyncState::Active);
 
     let (tx, rx) = oneshot::channel();
-    test_harness
+    let _ = test_harness
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
@@ -658,7 +659,7 @@ async fn test_holesky_payload() {
         TestHarness::new(HOLESKY.clone()).with_backfill_state(BackfillSyncState::Active);
 
     let (tx, rx) = oneshot::channel();
-    test_harness
+    let _ = test_harness
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::NewPayload {
@@ -983,7 +984,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
     let backfill_tip_block = main_chain[(backfill_finished_block_number - 1) as usize].clone();
     // add block to mock provider to enable persistence clean up.
     test_harness.provider.add_block(backfill_tip_block.hash(), backfill_tip_block.into_block());
-    test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
+    let _ = test_harness.tree.on_engine_message(FromEngine::Event(backfill_finished)).unwrap();
 
     let event = test_harness.from_tree_rx.recv().await.unwrap();
     match event {
@@ -993,7 +994,7 @@ async fn test_engine_tree_live_sync_transition_required_blocks_requested() {
         _ => panic!("Unexpected event: {event:#?}"),
     }
 
-    test_harness
+    let _ = test_harness
         .tree
         .on_engine_message(FromEngine::DownloadedBlocks(vec![main_chain
             .last()
@@ -1049,7 +1050,7 @@ async fn test_fcu_with_canonical_ancestor_updates_latest_block() {
 
     // Send FCU to the canonical ancestor
     let (tx, rx) = oneshot::channel();
-    test_harness
+    let _ = test_harness
         .tree
         .on_engine_message(FromEngine::Request(
             BeaconEngineMessage::ForkchoiceUpdated {
