@@ -132,7 +132,7 @@ where
     /// If the local head has not been set.
     #[inline]
     fn existing_local_block_number(&self) -> BlockNumber {
-        self.local_head.as_ref().expect("is initialized").number()
+        self.local_head.as_ref().expect("local_head must be set").number()
     }
 
     /// Returns the existing sync target.
@@ -142,7 +142,7 @@ where
     /// If the sync target has never been set.
     #[inline]
     fn existing_sync_target(&self) -> SyncTargetBlock {
-        self.sync_target.as_ref().expect("is initialized").clone()
+        self.sync_target.as_ref().expect("sync_target must be set").clone()
     }
 
     /// Max requests to handle at the same time
@@ -327,7 +327,7 @@ where
 
         // update tracked block info (falling block number)
         self.next_chain_tip_block_number =
-            validated.last().expect("exists").number().saturating_sub(1);
+            validated.last().expect("validated must not be empty").number().saturating_sub(1);
         self.queued_validated_headers.extend(validated);
 
         Ok(())
@@ -952,7 +952,7 @@ struct HeadersRequestOutcome<H> {
 
 impl<H> HeadersRequestOutcome<H> {
     const fn block_number(&self) -> u64 {
-        self.request.start.as_number().expect("is number")
+        self.request.start.as_number().expect("request.start must be a block number")
     }
 }
 
@@ -968,7 +968,7 @@ struct OrderedHeadersResponse<H> {
 
 impl<H> OrderedHeadersResponse<H> {
     const fn block_number(&self) -> u64 {
-        self.request.start.as_number().expect("is number")
+        self.request.start.as_number().expect("request.start must be a block number")
     }
 }
 
