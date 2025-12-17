@@ -1383,6 +1383,7 @@ where
         };
         let blobs_disabled =
             ctx.config.txpool.disable_blobs_support || ctx.config.txpool.blobpool_max_count == 0;
+        
         Ok(EngineApi::new(
             ctx.node.provider().clone(),
             ctx.config.chain.clone(),
