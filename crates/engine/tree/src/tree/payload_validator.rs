@@ -549,17 +549,14 @@ where
             .into())
         }
 
-        // terminate prewarming task with good state output
-        handle.terminate_caching(Some(&output.state));
+        // Create ExecutionOutcome and wrap in Arc for sharing with both the caching task
+        // and the deferred trie task. This avoids cloning the expensive BundleState.
+        let execution_outcome = Arc::new(ExecutionOutcome::from((output, block_num_hash.number)));
 
-        Ok(self.spawn_deferred_trie_task(
-            block,
-            output,
-            block_num_hash.number,
-            &ctx,
-            hashed_state,
-            trie_output,
-        ))
+        // Terminate prewarming task with the shared execution outcome
+        handle.terminate_caching(Some(Arc::clone(&execution_outcome)));
+
+        Ok(self.spawn_deferred_trie_task(block, execution_outcome, &ctx, hashed_state, trie_output))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -602,7 +599,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Vec<Address>), InsertBlockErrorKind>
     where
         S: StateProvider,
@@ -790,6 +787,7 @@ where
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
+            N::Receipt,
         >,
         InsertBlockErrorKind,
     > {
@@ -1024,8 +1022,7 @@ where
     fn spawn_deferred_trie_task(
         &self,
         block: RecoveredBlock<N::Block>,
-        output: BlockExecutionOutput<N::Receipt>,
-        block_number: u64,
+        execution_outcome: Arc<ExecutionOutcome<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
@@ -1075,7 +1072,7 @@ where
 
         ExecutedBlock::with_deferred_trie_data(
             Arc::new(block),
-            Arc::new(ExecutionOutcome::from((output, block_number))),
+            execution_outcome,
             deferred_trie_data,
         )
     }
