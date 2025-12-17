@@ -163,7 +163,7 @@ where
     pub(crate) fn remove(&self, key: &K) {
         let guard = self.inner.map.pin();
         if let Some(value) = guard.remove(key) {
-            let weight = (self.inner.weigher)(key, &value) as usize;
+            let weight = (self.inner.weigher)(key, value) as usize;
             self.inner.current_weight.fetch_sub(weight, Ordering::Relaxed);
             self.inner.entry_count.fetch_sub(1, Ordering::Relaxed);
         }
@@ -194,6 +194,10 @@ where
     /// (e.g., when saving the cache) rather than on every insert.
     pub(crate) fn evict_to_capacity(&self) {
         let guard = self.inner.map.pin();
+        let mut queue = match self.inner.eviction_queue.lock() {
+            Ok(q) => q,
+            Err(_) => return,
+        };
 
         loop {
             let current = self.inner.current_weight.load(Ordering::Relaxed) as u64;
@@ -203,10 +207,6 @@ where
 
             // Pop the oldest key from the eviction queue
             let key = {
-                let mut queue = match self.inner.eviction_queue.lock() {
-                    Ok(q) => q,
-                    Err(_) => break,
-                };
                 match queue.pop_front() {
                     Some(k) => k,
                     None => break,
@@ -215,7 +215,7 @@ where
 
             // Remove from the map and update weight
             if let Some(value) = guard.remove(&key) {
-                let weight = (self.inner.weigher)(&key, &value) as usize;
+                let weight = (self.inner.weigher)(&key, value) as usize;
                 self.inner.current_weight.fetch_sub(weight, Ordering::Relaxed);
                 self.inner.entry_count.fetch_sub(1, Ordering::Relaxed);
             }

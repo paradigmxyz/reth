@@ -537,7 +537,7 @@ fn storage_weigher(_key: &Address, value: &Arc<AccountStorageCache>) -> u32 {
 }
 
 /// Weigher function for account cache entries.
-fn account_weigher(_key: &Address, value: &Option<Account>) -> u32 {
+const fn account_weigher(_key: &Address, value: &Option<Account>) -> u32 {
     // Account has a fixed size (none, balance, code_hash)
     20 + std::mem::size_of_val(value) as u32
 }
@@ -638,12 +638,12 @@ impl SavedCache {
     }
 }
 
-/// Inner data for AccountStorageCache, wrapped in Arc for cheap cloning.
+/// Inner data for [`AccountStorageCache`], wrapped in Arc for cheap cloning.
 #[derive(Default)]
 struct AccountStorageCacheInner {
     /// Map of storage keys to their cached values.
     slots: PapayaMap<StorageKey, Option<StorageValue>, FbBuildHasher<32>>,
-    /// Number of slots in the cache (tracked separately for O(1) len()).
+    /// Number of slots in the cache (tracked separately for O(1) length).
     slot_count: AtomicUsize,
 }
 
@@ -808,7 +808,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder.build_caches(1000);
         let state_provider =
             CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
@@ -831,7 +831,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder.build_caches(1000);
         let state_provider =
             CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
@@ -849,7 +849,7 @@ mod tests {
         let storage_value = U256::from(1);
 
         // insert into caches directly
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder.build_caches(1000);
         caches.insert_storage(address, storage_key, Some(storage_value));
 
         // check that the storage returns the cached value
@@ -864,7 +864,7 @@ mod tests {
         let address = Address::random();
 
         // just create empty caches
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder.build_caches(1000);
 
         // check that the storage is not cached
         let (slot_status, _) = caches.get_storage(&address, &storage_key);
@@ -879,7 +879,7 @@ mod tests {
         let storage_key = StorageKey::random();
 
         // insert into caches directly
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCacheBuilder.build_caches(1000);
         caches.insert_storage(address, storage_key, None);
 
         // check that the storage is empty
@@ -890,7 +890,7 @@ mod tests {
     // Tests for SavedCache locking mechanism
     #[test]
     fn test_saved_cache_is_available() {
-        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let execution_cache = ExecutionCacheBuilder.build_caches(1000);
         let cache = SavedCache::new(B256::ZERO, execution_cache, CachedStateMetrics::zeroed());
 
         // Initially, the cache should be available (only one reference)
@@ -905,7 +905,7 @@ mod tests {
 
     #[test]
     fn test_saved_cache_multiple_references() {
-        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let execution_cache = ExecutionCacheBuilder.build_caches(1000);
         let cache =
             SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
 

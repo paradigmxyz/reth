@@ -462,7 +462,7 @@ where
             cache
         } else {
             debug!("creating new execution cache on cache miss");
-            let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
+            let cache = ExecutionCacheBuilder.build_caches(self.cross_block_cache_size);
             SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
         }
     }
@@ -559,7 +559,7 @@ where
                     existing.split()
                 }
                 None => (
-                    ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size),
+                    ExecutionCacheBuilder.build_caches(self.cross_block_cache_size),
                     CachedStateMetrics::zeroed(),
                 ),
             };
@@ -841,7 +841,7 @@ mod tests {
     use std::sync::Arc;
 
     fn make_saved_cache(hash: B256) -> SavedCache {
-        let execution_cache = ExecutionCacheBuilder::default().build_caches(1_000);
+        let execution_cache = ExecutionCacheBuilder.build_caches(1_000);
         SavedCache::new(hash, execution_cache, CachedStateMetrics::zeroed())
     }
 
