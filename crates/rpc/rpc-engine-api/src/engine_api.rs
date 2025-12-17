@@ -96,7 +96,6 @@ where
         validator: Validator,
         accept_execution_requests_hash: bool,
         network: impl NetworkInfo + 'static,
-        blobpool_enabled: bool,
     ) -> Self {
         let is_syncing = Arc::new(move || network.is_syncing());
         let inner = Arc::new(EngineApiInner {
@@ -112,7 +111,6 @@ where
             validator,
             accept_execution_requests_hash,
             is_syncing,
-            blobpool_enabled,
         });
         Self { inner }
     }
@@ -815,9 +813,8 @@ where
             return Err(EngineApiError::BlobRequestTooLarge { len: versioned_hashes.len() })
         }
 
-        // Spec requires returning `null` if syncing or otherwise unable to generally serve blob
-        // pool data.
-        if (*self.inner.is_syncing)() || !self.inner.blobpool_enabled {
+        // Spec requires returning `null` if syncing.
+        if (*self.inner.is_syncing)() {
             return Ok(None)
         }
 
@@ -1222,8 +1219,6 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     accept_execution_requests_hash: bool,
     /// Returns `true` if the node is currently syncing.
     is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
-    /// Whether the blob pool is enabled and generally able to serve blob pool data.
-    blobpool_enabled: bool,
 }
 
 #[cfg(test)]
@@ -1279,7 +1274,6 @@ mod tests {
             EthereumEngineValidator::new(chain_spec.clone()),
             false,
             NoopNetwork::default(),
-            true,
         );
         let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
         (handle, api)
@@ -1385,39 +1379,6 @@ mod tests {
             EthereumEngineValidator::new(chain_spec),
             false,
             TestNetworkInfo { syncing: true },
-            true,
-        );
-
-        let res = api.get_blobs_v3_metered(vec![B256::ZERO]);
-        assert_matches!(res, Ok(None));
-    }
-
-    #[tokio::test]
-    async fn get_blobs_v3_returns_null_when_blobpool_disabled() {
-        let chain_spec: Arc<ChainSpec> =
-            Arc::new(ChainSpecBuilder::mainnet().osaka_activated().build());
-        let provider = Arc::new(MockEthProvider::default());
-        let payload_store = spawn_test_payload_service::<EthEngineTypes>();
-        let (to_engine, _engine_rx) = unbounded_channel::<BeaconEngineMessage<EthEngineTypes>>();
-
-        let api = EngineApi::new(
-            provider,
-            chain_spec.clone(),
-            ConsensusEngineHandle::new(to_engine),
-            payload_store.into(),
-            NoopTransactionPool::default(),
-            Box::<TokioTaskExecutor>::default(),
-            ClientVersionV1 {
-                code: ClientCode::RH,
-                name: "Reth".to_string(),
-                version: "v0.0.0-test".to_string(),
-                commit: "test".to_string(),
-            },
-            EngineCapabilities::default(),
-            EthereumEngineValidator::new(chain_spec),
-            false,
-            TestNetworkInfo { syncing: false },
-            false,
         );
 
         let res = api.get_blobs_v3_metered(vec![B256::ZERO]);

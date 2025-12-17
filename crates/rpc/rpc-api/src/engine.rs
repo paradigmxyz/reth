@@ -246,7 +246,7 @@ pub trait EngineApi<Engine: EngineTypes> {
     /// Returns a response of the same length as the request. Missing or older-version blobs are
     /// returned as `null` elements.
     ///
-    /// Returns `null` if syncing or otherwise unable to generally serve blob pool data.
+    /// Returns `null` if syncing.
     #[method(name = "getBlobsV3")]
     async fn get_blobs_v3(
         &self,

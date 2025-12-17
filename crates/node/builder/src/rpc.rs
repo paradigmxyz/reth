@@ -1381,8 +1381,6 @@ where
             version: version_metadata().cargo_pkg_version.to_string(),
             commit: version_metadata().vergen_git_sha.to_string(),
         };
-        let blobs_disabled =
-            ctx.config.txpool.disable_blobs_support || ctx.config.txpool.blobpool_max_count == 0;
 
         Ok(EngineApi::new(
             ctx.node.provider().clone(),
@@ -1396,7 +1394,6 @@ where
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
             ctx.node.network().clone(),
-            !blobs_disabled,
         ))
     }
 }

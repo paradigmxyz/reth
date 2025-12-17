@@ -55,7 +55,6 @@ pub async fn launch_auth(secret: JwtSecret) -> AuthServerHandle {
         EthereumEngineValidator::new(MAINNET.clone()),
         false,
         NoopNetwork::default(),
-        true,
     );
     let module = AuthRpcModule::new(engine_api);
     module.start_server(config).await.unwrap()
