@@ -921,7 +921,7 @@ mod rocksdb_tests {
 
     /// Test that `RocksDB` commits happen at `provider.commit()` level, not at writer level.
     ///
-    /// This ensures all storage commits (MDBX, static files, RocksDB) happen atomically
+    /// This ensures all storage commits (MDBX, static files, `RocksDB`) happen atomically
     /// in a single place, making it easier to reason about commit ordering and consistency.
     #[test]
     fn test_rocksdb_commits_at_provider_level() {

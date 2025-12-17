@@ -88,11 +88,6 @@ use std::{
 };
 use tracing::{debug, trace};
 
-#[cfg(all(unix, feature = "rocksdb"))]
-type PendingRocksDBBatches = parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>;
-#[cfg(not(all(unix, feature = "rocksdb")))]
-type PendingRocksDBBatches = ();
-
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
 
@@ -172,24 +167,25 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
     /// Pending `RocksDB` batches to be committed at provider commit time.
-    pending_rocksdb_batches: PendingRocksDBBatches,
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("DatabaseProvider")
-            .field("tx", &self.tx)
+        let mut s = f.debug_struct("DatabaseProvider");
+        s.field("tx", &self.tx)
             .field("chain_spec", &self.chain_spec)
             .field("static_file_provider", &self.static_file_provider)
             .field("prune_modes", &self.prune_modes)
             .field("storage", &self.storage)
             .field("storage_settings", &self.storage_settings)
-            .field("rocksdb_provider", &self.rocksdb_provider)
-            .field("pending_rocksdb_batches", &"<pending batches>")
-            .field("minimum_pruning_distance", &self.minimum_pruning_distance)
-            .finish()
+            .field("rocksdb_provider", &self.rocksdb_provider);
+        #[cfg(all(unix, feature = "rocksdb"))]
+        s.field("pending_rocksdb_batches", &"<pending batches>");
+        s.field("minimum_pruning_distance", &self.minimum_pruning_distance).finish()
     }
 }
 
@@ -319,8 +315,6 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             rocksdb_provider,
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
-            #[cfg(not(all(unix, feature = "rocksdb")))]
-            pending_rocksdb_batches: (),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
     }
@@ -578,8 +572,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             rocksdb_provider,
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
-            #[cfg(not(all(unix, feature = "rocksdb")))]
-            pending_rocksdb_batches: (),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
     }
