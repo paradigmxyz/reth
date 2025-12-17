@@ -39,6 +39,7 @@ use revm::state::EvmState;
 use state::TreeState;
 use std::{
     fmt::Debug,
+    ops,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
         Arc,
@@ -277,8 +278,6 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
-    /// Termination signal sender, set when shutdown is requested.
-    pending_termination: Option<oneshot::Sender<()>>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -303,7 +302,6 @@ where
             .field("metrics", &self.metrics)
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
-            .field("pending_termination", &self.pending_termination)
             .finish()
     }
 }
@@ -360,7 +358,6 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
-            pending_termination: None,
         }
     }
 
@@ -427,20 +424,16 @@ where
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
         loop {
-            // If termination is requested, finish persistence and exit
-            if let Some(tx) = self.pending_termination.take() {
-                if let Err(err) = self.finish_termination(tx) {
-                    error!(target: "engine::tree", %err, "Termination failed");
-                }
-                return
-            }
-
             match self.try_recv_engine_message() {
                 Ok(Some(msg)) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
-                    if let Err(fatal) = self.on_engine_message(msg) {
-                        error!(target: "engine::tree", %fatal, "insert block fatal error");
-                        return
+                    match self.on_engine_message(msg) {
+                        Ok(ops::ControlFlow::Break(())) => return,
+                        Ok(ops::ControlFlow::Continue(())) => {}
+                        Err(fatal) => {
+                            error!(target: "engine::tree", %fatal, "insert block fatal error");
+                            return
+                        }
                     }
                 }
                 Ok(None) => {
@@ -1396,10 +1389,12 @@ where
     }
 
     /// Handles a message from the engine.
+    ///
+    /// Returns `ControlFlow::Break(())` if the engine should terminate.
     fn on_engine_message(
         &mut self,
         msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
-    ) -> Result<(), InsertBlockFatalError> {
+    ) -> Result<ops::ControlFlow<()>, InsertBlockFatalError> {
         match msg {
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
@@ -1411,7 +1406,10 @@ where
                 }
                 FromOrchestrator::Terminate { tx } => {
                     debug!(target: "engine::tree", "received terminate request");
-                    self.pending_termination = Some(tx);
+                    if let Err(err) = self.finish_termination(tx) {
+                        error!(target: "engine::tree", %err, "Termination failed");
+                    }
+                    return Ok(ops::ControlFlow::Break(()))
                 }
             },
             FromEngine::Request(request) => {
@@ -1420,7 +1418,7 @@ where
                         let block_num_hash = block.recovered_block().num_hash();
                         if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
                             // outdated block that can be skipped
-                            return Ok(())
+                            return Ok(ops::ControlFlow::Continue(()))
                         }
 
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
@@ -1528,7 +1526,7 @@ where
                 }
             }
         }
-        Ok(())
+        Ok(ops::ControlFlow::Continue(()))
     }
 
     /// Invoked if the backfill sync has finished to target.
