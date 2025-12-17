@@ -41,6 +41,7 @@ alloy-json-rpc.workspace = true
 alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-eth.workspace = true
+alloy-rpc-types-trace.workspace = true
 alloy-rpc-types-mev.workspace = true
 alloy-consensus.workspace = true
 

@@ -2,8 +2,7 @@
 //! the `eth_` namespace.
 use crate::{
     helpers::{
-        EthAddresses, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions,
-        FullEthApi,
+        EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi, Trace,
     },
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
@@ -893,6 +892,6 @@ where
     /// Handler for: `eth_getAddressesInBlock`
     async fn get_addresses_in_block(&self, block_id: BlockId) -> RpcResult<Vec<Address>> {
         trace!(target: "rpc::eth", ?block_id, "Serving eth_getAddressesInBlock");
-        Ok(EthAddresses::get_addresses_in_block(self, block_id).await?)
+        Ok(Trace::get_addresses_in_block(self, block_id).await?)
     }
 }

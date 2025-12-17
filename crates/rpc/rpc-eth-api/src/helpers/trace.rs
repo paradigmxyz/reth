@@ -1,8 +1,10 @@
 //! Loads a pending block from database. Helper trait for `eth_` call and trace RPC methods.
 
-use super::{Call, LoadBlock, LoadPendingBlock, LoadState, LoadTransaction};
+use super::{
+    Call, EthBlocks, LoadBlock, LoadPendingBlock, LoadReceipt, LoadState, LoadTransaction,
+};
 use crate::FromEvmError;
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::{transaction::TxHashRef, BlockHeader, TxReceipt};
 use alloy_primitives::B256;
 use alloy_rpc_types_eth::{BlockId, TransactionInfo};
 use futures::Future;
@@ -24,7 +26,7 @@ use revm_inspectors::tracing::{TracingInspector, TracingInspectorConfig};
 use std::sync::Arc;
 
 /// Executes CPU heavy tasks.
-pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
+pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + LoadBlock + Call + EthBlocks {
     /// Executes the [`TxEnvFor`] with [`reth_evm::EvmEnv`] against the given [Database] without
     /// committing state changes.
     fn inspect<DB, I>(
@@ -448,14 +450,157 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> {
 
         Ok(())
     }
-}
 
-/// Collects all addresses that appear in blocks during execution.
-#[async_trait::async_trait]
-pub trait EthAddresses: LoadState<Error: FromEvmError<Self::Evm>> {
-    /// Returns the list of addresses that appeared in the given block.
-    async fn get_addresses_in_block(
+    /// Returns all addresses seen in a block:
+    /// - Miner, tx senders, withdrawals, log contracts/topics
+    /// - Addresses from EVM execution traces (calls, creates, selfdestruct)
+    fn get_addresses_in_block(
         &self,
         block_id: BlockId,
-    ) -> Result<Vec<alloy_primitives::Address>, Self::Error>;
+    ) -> impl Future<Output = Result<Vec<alloy_primitives::Address>, Self::Error>> + Send
+    where
+        Self: LoadBlock + LoadState + LoadReceipt + Call + EthBlocks + Clone,
+    {
+        async move {
+            use alloy_primitives::Address;
+            use reth_primitives_traits::BlockBody;
+            use std::collections::BTreeSet;
+
+            if block_id.is_pending() {
+                return Ok(Vec::new());
+            }
+
+            let Some((block, receipts)) = self.load_block_and_receipts(block_id).await? else {
+                return Ok(Vec::new());
+            };
+
+            let mut set = BTreeSet::<Address>::new();
+
+            set.insert(block.header().beneficiary());
+
+            if let Some(withdrawals) = block.body().withdrawals() {
+                for w in withdrawals {
+                    set.insert(w.address);
+                }
+            }
+
+            for tx in block.transactions_recovered() {
+                set.insert(tx.signer());
+            }
+
+            for receipt in receipts.iter() {
+                for log in receipt.logs() {
+                    set.insert(log.address);
+
+                    for topic in log.topics() {
+                        let t = topic.as_slice();
+                        if t.len() == 32 && t[..12] == [0u8; 12] {
+                            if let Ok(bytes20) = <[u8; 20]>::try_from(&t[12..32]) {
+                                let addr = Address::from(bytes20);
+                                if addr != Address::ZERO {
+                                    set.insert(addr);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            fn extract_addresses_from_bytes(bytes: &[u8], addresses: &mut BTreeSet<Address>) {
+                for chunk in bytes.chunks(32) {
+                    if chunk.len() == 32 && chunk[..12] == [0u8; 12] {
+                        if let Ok(addr_bytes) = <[u8; 20]>::try_from(&chunk[12..]) {
+                            let addr = Address::from(addr_bytes);
+                            if addr != Address::ZERO {
+                                addresses.insert(addr);
+                            }
+                        }
+                    }
+                }
+            }
+
+            fn collect_from_traces(
+                traces: &[alloy_rpc_types_trace::parity::LocalizedTransactionTrace],
+                addresses: &mut BTreeSet<Address>,
+            ) {
+                for trace in traces {
+                    match &trace.trace.action {
+                        alloy_rpc_types_trace::parity::Action::Call(call) => {
+                            addresses.insert(call.from);
+                            addresses.insert(call.to);
+                            extract_addresses_from_bytes(&call.input, addresses);
+                        }
+                        alloy_rpc_types_trace::parity::Action::Create(create) => {
+                            addresses.insert(create.from);
+                            extract_addresses_from_bytes(&create.init, addresses);
+                        }
+                        alloy_rpc_types_trace::parity::Action::Selfdestruct(selfdestruct) => {
+                            addresses.insert(selfdestruct.address);
+                            addresses.insert(selfdestruct.refund_address);
+                        }
+                        alloy_rpc_types_trace::parity::Action::Reward(_) => {}
+                    }
+
+                    if let Some(result) = &trace.trace.result {
+                        match result {
+                            alloy_rpc_types_trace::parity::TraceOutput::Call(call_result) => {
+                                extract_addresses_from_bytes(&call_result.output, addresses);
+                            }
+                            alloy_rpc_types_trace::parity::TraceOutput::Create(create_result) => {
+                                addresses.insert(create_result.address);
+                                extract_addresses_from_bytes(&create_result.code, addresses);
+                            }
+                        }
+                    }
+                }
+            }
+
+            let block_hash = block.hash();
+            let block_number = block.header().number();
+            let base_fee = block.header().base_fee_per_gas().unwrap_or_default();
+
+            let (evm_env, _) = self.evm_env_at(block_id).await?;
+
+            for (tx_idx, recovered_tx) in block.transactions_recovered().enumerate() {
+                let tx_hash = *recovered_tx.tx_hash();
+                let tx_env = self.evm_config().tx_env(recovered_tx.clone());
+
+                let this = self.clone();
+                let evm_env = evm_env.clone();
+
+                let trace_result = self
+                    .spawn_with_state_at_block(block_id, move |state| {
+                        let config = TracingInspectorConfig::default_parity();
+                        let mut inspector = TracingInspector::new(config);
+
+                        let mut db = State::builder()
+                            .with_database(StateProviderDatabase::new(state))
+                            .build();
+
+                        this.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+
+                        let tx_info = TransactionInfo {
+                            hash: Some(tx_hash),
+                            index: Some(tx_idx as u64),
+                            block_hash: Some(block_hash),
+                            block_number: Some(block_number),
+                            base_fee: Some(base_fee),
+                        };
+
+                        let traces = inspector
+                            .into_parity_builder()
+                            .into_localized_transaction_traces(tx_info);
+
+                        Ok(traces)
+                    })
+                    .await;
+
+                if let Ok(traces) = trace_result {
+                    collect_from_traces(&traces, &mut set);
+                }
+            }
+
+            Ok(set.into_iter().collect())
+        }
+    }
 }
