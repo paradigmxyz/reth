@@ -750,8 +750,8 @@ impl ExecutionCache {
 
         cache
             .as_ref()
-            // Check `is_available()` because cache updates can happen in the background by other
-            // threads, and we want to ensure the cache is in a consistent state before using it.
+            // Check `is_available()` to ensure no other tasks (e.g., prewarming) currently hold
+  	       // a reference to this cache. We can only reuse it when we have exclusive access.
             .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())
             .cloned()
     }
