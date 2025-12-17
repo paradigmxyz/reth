@@ -1,7 +1,10 @@
 //! Implementation of the [`jsonrpsee`] generated [`EthApiServer`] trait. Handles RPC requests for
 //! the `eth_` namespace.
 use crate::{
-    helpers::{EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions, FullEthApi},
+    helpers::{
+        EthAddresses, EthApiSpec, EthBlocks, EthCall, EthFees, EthState, EthTransactions,
+        FullEthApi,
+    },
     RpcBlock, RpcHeader, RpcReceipt, RpcTransaction,
 };
 use alloy_dyn_abi::TypedData;
@@ -394,6 +397,12 @@ pub trait EthApi<
         address: Address,
         block: BlockId,
     ) -> RpcResult<alloy_rpc_types_eth::AccountInfo>;
+
+    /// Returns the list of addresses that appeared in the given block.
+    ///
+    /// This is a non-standard RPC method.
+    #[method(name = "getAddressesInBlock")]
+    async fn get_addresses_in_block(&self, block_id: BlockId) -> RpcResult<Vec<Address>>;
 }
 
 #[async_trait::async_trait]
@@ -880,5 +889,11 @@ where
     ) -> RpcResult<alloy_rpc_types_eth::AccountInfo> {
         trace!(target: "rpc::eth", "Serving eth_getAccountInfo");
         Ok(EthState::get_account_info(self, address, block).await?)
+    }
+
+    /// Handler for: `eth_getAddressesInBlock`
+    async fn get_addresses_in_block(&self, block_id: BlockId) -> RpcResult<Vec<Address>> {
+        trace!(target: "rpc::eth", ?block_id, "Serving eth_getAddressesInBlock");
+        Ok(EthAddresses::get_addresses_in_block(self, block_id).await?)
     }
 }

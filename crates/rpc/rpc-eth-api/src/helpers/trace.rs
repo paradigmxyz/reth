@@ -426,3 +426,13 @@ pub trait Trace: LoadState<Error: FromEvmError<Self::Evm>> + Call {
         Ok(())
     }
 }
+
+/// Collects all addresses that appear in blocks during execution.
+#[async_trait::async_trait]
+pub trait EthAddresses: LoadState<Error: FromEvmError<Self::Evm>> {
+    /// Returns the list of addresses that appeared in the given block.
+    async fn get_addresses_in_block(
+        &self,
+        block_id: BlockId,
+    ) -> Result<Vec<alloy_primitives::Address>, Self::Error>;
+}
