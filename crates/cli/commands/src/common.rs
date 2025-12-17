@@ -23,7 +23,10 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider, StaticFileProviderBuilder},
+    providers::{
+        BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
+        StaticFileProviderBuilder,
+    },
     ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
@@ -108,16 +111,15 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
                     .with_genesis_block_number(genesis_block_number)
                     .build()?,
             ),
-            AccessRights::RO | AccessRights::RoInconsistent => (
-                Arc::new(open_db_read_only(&db_path, self.db.database_args())?),
-                {
+            AccessRights::RO | AccessRights::RoInconsistent => {
+                (Arc::new(open_db_read_only(&db_path, self.db.database_args())?), {
                     let provider = StaticFileProviderBuilder::read_only(sf_path)?
                         .with_genesis_block_number(genesis_block_number)
                         .build()?;
                     provider.watch_directory();
                     provider
-                },
-            ),
+                })
+            }
         };
         // TransactionDB only support read-write mode
         let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
