@@ -36,7 +36,7 @@ use reth_primitives_traits::{
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
     DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderBox,
     StateProviderFactory, StateReader, TrieReader,
 };
 use reth_revm::db::State;
@@ -61,6 +61,30 @@ pub struct TreeCtx<'a, N: NodePrimitives> {
     state: &'a mut EngineApiTreeState<N>,
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
+    /// Optional precomputed state provider and builder to avoid redundant lookups.
+    /// This is set by [`crate::tree::EngineApiTreeHandler`] after validating parent state exists.
+    /// The builder is type-erased via `dyn Any` because adding a generic `P` to `TreeCtx` would
+    /// require cascading changes to the public `EngineValidator` trait signature.
+    precomputed_state: Option<PrecomputedState>,
+}
+
+/// Precomputed state provider and builder for block validation.
+///
+/// Stored as type-erased builder to avoid adding generics to `TreeCtx`.
+pub struct PrecomputedState {
+    /// The built state provider for main execution.
+    provider: StateProviderBox,
+    /// Type-erased builder for spawning parallel tasks.
+    builder: Box<dyn std::any::Any + Send>,
+}
+
+impl std::fmt::Debug for PrecomputedState {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PrecomputedState")
+            .field("provider", &"StateProviderBox")
+            .field("builder", &"Box<dyn Any + Send>")
+            .finish()
+    }
 }
 
 impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
@@ -68,6 +92,7 @@ impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
         f.debug_struct("TreeCtx")
             .field("state", &"EngineApiTreeState")
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
+            .field("precomputed_state", &self.precomputed_state.as_ref().map(|_| "Some(...)"))
             .finish()
     }
 }
@@ -78,7 +103,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         state: &'a mut EngineApiTreeState<N>,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
     ) -> Self {
-        Self { state, canonical_in_memory_state }
+        Self { state, canonical_in_memory_state, precomputed_state: None }
     }
 
     /// Returns a reference to the engine tree state
@@ -94,6 +119,29 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
     /// Returns a reference to the canonical in-memory state
     pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
         self.canonical_in_memory_state
+    }
+
+    /// Stores precomputed state provider and builder to avoid redundant lookups.
+    ///
+    /// This is used by [`crate::tree::EngineApiTreeHandler`] to pass both the provider
+    /// (for main execution) and builder (for spawning parallel tasks) computed during
+    /// parent state validation.
+    pub fn set_precomputed_state<B: std::any::Any + Send + 'static>(
+        &mut self,
+        provider: StateProviderBox,
+        builder: B,
+    ) {
+        self.precomputed_state = Some(PrecomputedState { provider, builder: Box::new(builder) });
+    }
+
+    /// Takes the precomputed state, if present.
+    ///
+    /// Returns the state provider and type-erased builder. The caller should downcast
+    /// the builder to the expected `StateProviderBuilder<N, P>` type.
+    pub fn take_precomputed_state(
+        &mut self,
+    ) -> Option<(StateProviderBox, Box<dyn std::any::Any + Send>)> {
+        self.precomputed_state.take().map(|s| (s.provider, s.builder))
     }
 }
 
@@ -359,20 +407,52 @@ where
         let parent_hash = input.parent_hash();
         let block_num_hash = input.num_hash();
 
-        trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
+        trace!(target: "engine::tree::payload_validator", "Building state provider");
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "state provider").entered();
-        let Some(provider_builder) =
-            ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
-        else {
-            // this is pre-validated in the tree
-            return Err(InsertBlockError::new(
-                self.convert_to_block(input)?,
-                ProviderError::HeaderNotFound(parent_hash.into()).into(),
-            )
-            .into())
+
+        // Use precomputed state from TreeCtx (set by EngineApiTreeHandler) to avoid
+        // redundant state lookups. Fall back to computing if not available (legacy callers).
+        let (mut state_provider, provider_builder) = if let Some((provider, any_builder)) =
+            ctx.take_precomputed_state()
+        {
+            // Downcast the type-erased builder to the expected type
+            match any_builder.downcast::<StateProviderBuilder<N, P>>() {
+                Ok(builder) => (provider, *builder),
+                Err(_) => {
+                    // Type mismatch should never happen - indicates a programming error
+                    // where the wrong builder type was stored in TreeCtx
+                    debug_assert!(
+                        false,
+                        "Precomputed builder type mismatch: expected StateProviderBuilder<N, P>"
+                    );
+                    debug!(target: "engine::tree::payload_validator", "Precomputed builder type mismatch, recomputing");
+                    let Some(builder) =
+                        ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
+                    else {
+                        return Err(InsertBlockError::new(
+                            self.convert_to_block(input)?,
+                            ProviderError::HeaderNotFound(parent_hash.into()).into(),
+                        )
+                        .into())
+                    };
+                    // Note: we still use the precomputed provider since it's type-safe
+                    (provider, builder)
+                }
+            }
+        } else {
+            // Legacy path: compute both builder and provider
+            let Some(builder) = ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
+            else {
+                return Err(InsertBlockError::new(
+                    self.convert_to_block(input)?,
+                    ProviderError::HeaderNotFound(parent_hash.into()).into(),
+                )
+                .into())
+            };
+            let provider = ensure_ok!(builder.clone().build());
+            (provider, builder)
         };
-        let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
