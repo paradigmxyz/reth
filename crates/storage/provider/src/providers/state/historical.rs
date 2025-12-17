@@ -1,25 +1,16 @@
-#[cfg(all(unix, feature = "rocksdb"))]
-use crate::RocksDBProviderFactory;
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    ChangeSetReader, HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
+    ChangeSetReader, EitherReader, HashedPostStateProvider, HistoryInfo, ProviderError,
+    RocksDBProviderFactory, StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
-use reth_db_api::{
-    cursor::{DbCursorRO, DbDupCursorRO},
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
-    table::Table,
-    tables,
-    transaction::DbTx,
-    BlockNumberList,
-};
+use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
-    BlockNumReader, BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider,
+    BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
+    StorageRootProvider, StorageSettingsCache,
 };
-#[cfg(all(unix, feature = "rocksdb"))]
-use reth_storage_api::{NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
     proof::{Proof, StorageProof},
@@ -57,14 +48,6 @@ pub struct HistoricalStateProviderRef<'b, Provider> {
     lowest_available_blocks: LowestAvailableBlocks,
 }
 
-#[derive(Debug, Eq, PartialEq)]
-pub enum HistoryInfo {
-    NotYetWritten,
-    InChangeset(u64),
-    InPlainState,
-    MaybeInPlainState,
-}
-
 impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, Provider> {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
@@ -81,47 +64,34 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
         Self { provider, block_number, lowest_available_blocks }
     }
 
-    /// Lookup an account in the `AccountsHistory` table
-    #[cfg(all(unix, feature = "rocksdb"))]
+    /// Lookup an account in the `AccountsHistory` table using `EitherReader`.
     pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo>
     where
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
-        if self.provider.cached_storage_settings().account_history_in_rocksdb {
-            return self.account_history_lookup_rocksdb(address);
-        }
+        // Create RocksDB tx only when the feature is enabled
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocks_provider = self.provider.rocksdb_provider();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocks_tx = rocks_provider.tx();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocks_tx_ref = &rocks_tx;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let rocks_tx_ref = ();
 
-        // history key to search IntegerList of block number changesets.
-        let history_key = ShardedKey::new(address, self.block_number);
-        self.history_info::<tables::AccountsHistory, _>(
-            history_key,
-            |key| key.key == address,
+        let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
+        reader.account_history_info(
+            address,
+            self.block_number,
             self.lowest_available_blocks.account_history_block_number,
         )
     }
 
-    /// Lookup an account in the `AccountsHistory` table
-    #[cfg(not(all(unix, feature = "rocksdb")))]
-    pub fn account_history_lookup(&self, address: Address) -> ProviderResult<HistoryInfo> {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
-        }
-
-        // history key to search IntegerList of block number changesets.
-        let history_key = ShardedKey::new(address, self.block_number);
-        self.history_info::<tables::AccountsHistory, _>(
-            history_key,
-            |key| key.key == address,
-            self.lowest_available_blocks.account_history_block_number,
-        )
-    }
-
-    /// Lookup a storage key in the `StoragesHistory` table
-    #[cfg(all(unix, feature = "rocksdb"))]
+    /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
     pub fn storage_history_lookup(
         &self,
         address: Address,
@@ -131,38 +101,24 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
+            return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
 
-        if self.provider.cached_storage_settings().storages_history_in_rocksdb {
-            return self.storage_history_lookup_rocksdb(address, storage_key);
-        }
+        // Create RocksDB tx only when the feature is enabled
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocks_provider = self.provider.rocksdb_provider();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocks_tx = rocks_provider.tx();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocks_tx_ref = &rocks_tx;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let rocks_tx_ref = ();
 
-        // history key to search IntegerList of block number changesets.
-        let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        self.history_info::<tables::StoragesHistory, _>(
-            history_key,
-            |key| key.address == address && key.sharded_key.key == storage_key,
-            self.lowest_available_blocks.storage_history_block_number,
-        )
-    }
-
-    /// Lookup a storage key in the `StoragesHistory` table
-    #[cfg(not(all(unix, feature = "rocksdb")))]
-    pub fn storage_history_lookup(
-        &self,
-        address: Address,
-        storage_key: StorageKey,
-    ) -> ProviderResult<HistoryInfo> {
-        if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number))
-        }
-
-        // history key to search IntegerList of block number changesets.
-        let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        self.history_info::<tables::StoragesHistory, _>(
-            history_key,
-            |key| key.address == address && key.sharded_key.key == storage_key,
+        let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
+        reader.storage_history_info(
+            address,
+            storage_key,
+            self.block_number,
             self.lowest_available_blocks.storage_history_block_number,
         )
     }
@@ -211,69 +167,6 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
         Ok(HashedStorage::from_reverts(self.tx(), address, self.block_number)?)
     }
 
-    fn history_info<T, K>(
-        &self,
-        key: K,
-        key_filter: impl Fn(&K) -> bool,
-        lowest_available_block_number: Option<BlockNumber>,
-    ) -> ProviderResult<HistoryInfo>
-    where
-        T: Table<Key = K, Value = BlockNumberList>,
-    {
-        let mut cursor = self.tx().cursor_read::<T>()?;
-
-        // Lookup the history chunk in the history index. If they key does not appear in the
-        // index, the first chunk for the next key will be returned so we filter out chunks that
-        // have a different key.
-        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
-            // Get the rank of the first entry before or equal to our block.
-            let mut rank = chunk.rank(self.block_number);
-
-            // Adjust the rank, so that we have the rank of the first entry strictly before our
-            // block (not equal to it).
-            if rank.checked_sub(1).and_then(|rank| chunk.select(rank)) == Some(self.block_number) {
-                rank -= 1
-            };
-
-            let block_number = chunk.select(rank);
-
-            // If our block is before the first entry in the index chunk and this first entry
-            // doesn't equal to our block, it might be before the first write ever. To check, we
-            // look at the previous entry and check if the key is the same.
-            // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
-            // short-circuit) and when it passes we save a full seek into the changeset/plain state
-            // table.
-            if rank == 0 &&
-                block_number != Some(self.block_number) &&
-                !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
-            {
-                if let (Some(_), Some(block_number)) = (lowest_available_block_number, block_number)
-                {
-                    // The key may have been written, but due to pruning we may not have changesets
-                    // and history, so we need to make a changeset lookup.
-                    Ok(HistoryInfo::InChangeset(block_number))
-                } else {
-                    // The key is written to, but only after our block.
-                    Ok(HistoryInfo::NotYetWritten)
-                }
-            } else if let Some(block_number) = block_number {
-                // The chunk contains an entry for a write after our block, return it.
-                Ok(HistoryInfo::InChangeset(block_number))
-            } else {
-                // The chunk does not contain an entry for a write after our block. This can only
-                // happen if this is the last chunk and so we need to look in the plain state.
-                Ok(HistoryInfo::InPlainState)
-            }
-        } else if lowest_available_block_number.is_some() {
-            // The key may have been written, but due to pruning we may not have changesets and
-            // history, so we need to make a plain state lookup.
-            Ok(HistoryInfo::MaybeInPlainState)
-        } else {
-            // The key has not been written to at all.
-            Ok(HistoryInfo::NotYetWritten)
-        }
-    }
-
     /// Set the lowest block number at which the account history is available.
     pub const fn with_lowest_available_account_history_block_number(
         mut self,
@@ -293,102 +186,12 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
     }
 }
 
-#[cfg(all(unix, feature = "rocksdb"))]
-impl<'b, Provider> HistoricalStateProviderRef<'b, Provider>
-where
-    Provider: DBProvider
-        + BlockNumReader
-        + RocksDBProviderFactory
-        + StorageSettingsCache
-        + NodePrimitivesProvider,
-{
-    /// `RocksDB` specific implementation for computing `HistoryInfo` from a single shard plus
-    /// knowledge of whether a previous shard exists.
-    ///
-    /// This mirrors `history_info` logic without reading/flattening all shards:
-    /// - Use the first shard whose `highest_block_number >= target`.
-    /// - If the target is before the first entry of that shard, we need to know if a previous shard
-    ///   exists to decide between `NotYetWritten` and `InChangeset(first)`.
-    fn history_info_from_shard(
-        &self,
-        has_previous_shard: bool,
-        shard: Option<BlockNumberList>,
-        lowest_available_block_number: Option<BlockNumber>,
-    ) -> HistoryInfo {
-        let Some(list) = shard else {
-            return if has_previous_shard {
-                HistoryInfo::InPlainState
-            } else if lowest_available_block_number.is_some() {
-                HistoryInfo::MaybeInPlainState
-            } else {
-                HistoryInfo::NotYetWritten
-            }
-        };
-
-        let mut iter = list.0.iter();
-        let Some(first) = iter.next() else {
-            // Should not happen, but be defensive.
-            return HistoryInfo::InPlainState
-        };
-
-        if self.block_number < first {
-            // Target is before the first recorded change in this shard.
-            return if has_previous_shard || lowest_available_block_number.is_some() {
-                HistoryInfo::InChangeset(first)
-            } else {
-                HistoryInfo::NotYetWritten
-            };
-        }
-
-        // Find the smallest block number >= target within this shard.
-        if let Some(bn) = list.0.iter().find(|&b| b >= self.block_number) {
-            HistoryInfo::InChangeset(bn)
-        } else {
-            // No change at or after our block in this shard, and no later shard exists (by
-            // construction), so the value is in plain state.
-            HistoryInfo::InPlainState
-        }
-    }
-
-    /// RocksDB-specific account history lookup.
-    fn account_history_lookup_rocksdb(&self, address: Address) -> ProviderResult<HistoryInfo> {
-        let rocks_provider = self.provider.rocksdb_provider();
-        let rocks_tx = rocks_provider.tx();
-        let (has_prev, shard) = rocks_tx.seek_account_history_shard(address, self.block_number)?;
-
-        Ok(self.history_info_from_shard(
-            has_prev,
-            shard.map(|(_, list)| list),
-            self.lowest_available_blocks.account_history_block_number,
-        ))
-    }
-
-    /// RocksDB-specific storage history lookup.
-    fn storage_history_lookup_rocksdb(
-        &self,
-        address: Address,
-        storage_key: StorageKey,
-    ) -> ProviderResult<HistoryInfo> {
-        let rocks_provider = self.provider.rocksdb_provider();
-        let rocks_tx = rocks_provider.tx();
-        let (has_prev, shard) =
-            rocks_tx.seek_storage_history_shard(address, storage_key, self.block_number)?;
-
-        Ok(self.history_info_from_shard(
-            has_prev,
-            shard.map(|(_, list)| list),
-            self.lowest_available_blocks.storage_history_block_number,
-        ))
-    }
-}
-
 impl<Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'_, Provider> {
     fn tx(&self) -> &Provider::Tx {
         self.provider.tx_ref()
     }
 }
 
-#[cfg(all(unix, feature = "rocksdb"))]
 impl<
         Provider: DBProvider
             + BlockNumReader
@@ -397,31 +200,6 @@ impl<
             + RocksDBProviderFactory
             + NodePrimitivesProvider,
     > AccountReader for HistoricalStateProviderRef<'_, Provider>
-{
-    /// Get basic account information.
-    fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        match self.account_history_lookup(*address)? {
-            HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => {
-                // Use ChangeSetReader trait method to get the account from changesets
-                self.provider
-                    .get_account_before_block(changeset_block_number, *address)?
-                    .ok_or(ProviderError::AccountChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address: *address,
-                    })
-                    .map(|account_before| account_before.info)
-            }
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
-                Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
-            }
-        }
-    }
-}
-
-#[cfg(not(all(unix, feature = "rocksdb")))]
-impl<Provider: DBProvider + BlockNumReader + ChangeSetReader> AccountReader
-    for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
@@ -580,7 +358,6 @@ impl<Provider: Sync> HashedPostStateProvider for HistoricalStateProviderRef<'_, 
     }
 }
 
-#[cfg(all(unix, feature = "rocksdb"))]
 impl<
         Provider: DBProvider
             + BlockNumReader
@@ -590,41 +367,6 @@ impl<
             + RocksDBProviderFactory
             + NodePrimitivesProvider,
     > StateProvider for HistoricalStateProviderRef<'_, Provider>
-{
-    /// Get storage.
-    fn storage(
-        &self,
-        address: Address,
-        storage_key: StorageKey,
-    ) -> ProviderResult<Option<StorageValue>> {
-        match self.storage_history_lookup(address, storage_key)? {
-            HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
-                self.tx()
-                    .cursor_dup_read::<tables::StorageChangeSets>()?
-                    .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
-                    .filter(|entry| entry.key == storage_key)
-                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address,
-                        storage_key: Box::new(storage_key),
-                    })?
-                    .value,
-            )),
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
-                .tx()
-                .cursor_dup_read::<tables::PlainStorageState>()?
-                .seek_by_key_subkey(address, storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .map(|entry| entry.value)
-                .or(Some(StorageValue::ZERO))),
-        }
-    }
-}
-
-#[cfg(not(all(unix, feature = "rocksdb")))]
-impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> StateProvider
-    for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get storage.
     fn storage(
@@ -714,10 +456,7 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-#[cfg(all(unix, feature = "rocksdb"))]
 delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader + StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider]);
-#[cfg(not(all(unix, feature = "rocksdb")))]
-delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
@@ -752,13 +491,13 @@ mod tests {
     #[cfg(all(unix, feature = "rocksdb"))]
     use crate::{
         providers::rocksdb::RocksDBProvider, providers::StaticFileProvider,
-        test_utils::MockNodeTypesWithDB, NodePrimitivesProvider, ProviderFactory,
-        RocksDBProviderFactory, StorageSettings, StorageSettingsCache,
+        test_utils::MockNodeTypesWithDB, ProviderFactory,
     };
     use crate::{
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
-        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
+        AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, NodePrimitivesProvider,
+        RocksDBProviderFactory, StateProvider, StorageSettingsCache,
     };
     use alloy_primitives::{address, b256, Address, B256, U256};
     #[cfg(all(unix, feature = "rocksdb"))]
@@ -776,6 +515,8 @@ mod tests {
     use reth_primitives_traits::{Account, StorageEntry};
     #[cfg(all(unix, feature = "rocksdb"))]
     use reth_storage_api::HistoryWriter;
+    #[cfg(all(unix, feature = "rocksdb"))]
+    use reth_storage_api::StorageSettings;
     use reth_storage_api::{
         BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
     };
@@ -788,7 +529,6 @@ mod tests {
 
     const fn assert_state_provider<T: StateProvider>() {}
     #[expect(dead_code)]
-    #[cfg(all(unix, feature = "rocksdb"))]
     const fn assert_historical_state_provider<
         T: DBProvider
             + BlockNumReader
@@ -797,14 +537,6 @@ mod tests {
             + StorageSettingsCache
             + RocksDBProviderFactory
             + NodePrimitivesProvider,
-    >() {
-        assert_state_provider::<HistoricalStateProvider<T>>();
-    }
-
-    #[expect(dead_code)]
-    #[cfg(not(all(unix, feature = "rocksdb")))]
-    const fn assert_historical_state_provider<
-        T: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader,
     >() {
         assert_state_provider::<HistoricalStateProvider<T>>();
     }

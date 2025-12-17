@@ -30,6 +30,54 @@ use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageSettingsCache}
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
+/// Result of a history lookup for an account or storage slot.
+#[derive(Debug, Eq, PartialEq)]
+pub enum HistoryInfo {
+    /// The key has not been written to yet at this block.
+    NotYetWritten,
+    /// The value is found in the changeset at the given block number.
+    InChangeset(u64),
+    /// The value is in the current plain state (no changes after the target block).
+    InPlainState,
+    /// The value might be in plain state (pruning may have removed history).
+    MaybeInPlainState,
+}
+
+/// Computes [`HistoryInfo`] from a shard chunk using rank/select.
+///
+/// This is the core algorithm shared by both MDBX and `RocksDB` backends.
+///
+/// # Arguments
+/// * `chunk` - The block number list from the shard (wraps `RoaringTreemap`)
+/// * `block_number` - Target block to look up
+/// * `has_previous_shard` - Whether there's a shard before this one for the same key
+/// * `lowest_available` - Lowest block where history is available (pruning boundary)
+pub fn history_info_from_shard(
+    chunk: &BlockNumberList,
+    block_number: BlockNumber,
+    has_previous_shard: bool,
+    lowest_available: Option<BlockNumber>,
+) -> HistoryInfo {
+    let mut rank = chunk.rank(block_number);
+
+    // Adjust rank if block_number itself is in the list
+    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+        rank -= 1;
+    }
+
+    let found_block = chunk.select(rank);
+
+    // Check if we're before the first-ever change
+    if rank == 0 && found_block != Some(block_number) && !has_previous_shard {
+        if let (Some(_), Some(bn)) = (lowest_available, found_block) {
+            return HistoryInfo::InChangeset(bn);
+        }
+        return HistoryInfo::NotYetWritten;
+    }
+
+    found_block.map(HistoryInfo::InChangeset).unwrap_or(HistoryInfo::InPlainState)
+}
+
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<'a, P, T> =
     EitherReader<'a, CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
@@ -653,6 +701,93 @@ where
                 }
                 Ok(out)
             }
+        }
+    }
+
+    /// Lookup account history and return [`HistoryInfo`] directly.
+    ///
+    /// Uses the rank/select logic to efficiently find the first block >= target
+    /// where the account was modified.
+    pub fn account_history_info(
+        &mut self,
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        match self {
+            Self::Database(cursor, _) => {
+                let key = ShardedKey::new(address, block_number);
+                if let Some(chunk) =
+                    cursor.seek(key)?.filter(|(k, _)| k.key == address).map(|x| x.1)
+                {
+                    let has_prev = cursor.prev()?.is_some_and(|(k, _)| k.key == address);
+                    Ok(history_info_from_shard(
+                        &chunk,
+                        block_number,
+                        has_prev,
+                        lowest_available_block_number,
+                    ))
+                } else if lowest_available_block_number.is_some() {
+                    Ok(HistoryInfo::MaybeInPlainState)
+                } else {
+                    Ok(HistoryInfo::NotYetWritten)
+                }
+            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => {
+                tx.account_history_info(address, block_number, lowest_available_block_number)
+            }
+        }
+    }
+}
+
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::StoragesHistory>,
+{
+    /// Lookup storage history and return [`HistoryInfo`] directly.
+    ///
+    /// Uses the rank/select logic to efficiently find the first block >= target
+    /// where the storage slot was modified.
+    pub fn storage_history_info(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        match self {
+            Self::Database(cursor, _) => {
+                let key = StorageShardedKey::new(address, storage_key, block_number);
+                if let Some(chunk) = cursor
+                    .seek(key)?
+                    .filter(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
+                    .map(|x| x.1)
+                {
+                    let has_prev = cursor.prev()?.is_some_and(|(k, _)| {
+                        k.address == address && k.sharded_key.key == storage_key
+                    });
+                    Ok(history_info_from_shard(
+                        &chunk,
+                        block_number,
+                        has_prev,
+                        lowest_available_block_number,
+                    ))
+                } else if lowest_available_block_number.is_some() {
+                    Ok(HistoryInfo::MaybeInPlainState)
+                } else {
+                    Ok(HistoryInfo::NotYetWritten)
+                }
+            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.storage_history_info(
+                address,
+                storage_key,
+                block_number,
+                lowest_available_block_number,
+            ),
         }
     }
 }

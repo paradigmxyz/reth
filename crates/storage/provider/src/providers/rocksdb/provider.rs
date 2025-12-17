@@ -1,9 +1,10 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
+use crate::{history_info_from_shard, HistoryInfo};
 use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::{Compress, Decompress, Encode, Table},
-    tables, BlockNumberList, DatabaseError,
+    tables, DatabaseError,
 };
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
@@ -20,13 +21,6 @@ use std::{
     sync::Arc,
     time::Instant,
 };
-
-/// Result of seeking an account history shard.
-///
-/// Returns `(has_previous_shard, matching_shard)` where `matching_shard` is the shard
-/// whose `highest_block_number >= target`, or `None` if no such shard exists.
-pub(crate) type AccountHistoryShardSeekResult =
-    ProviderResult<(bool, Option<(ShardedKey<Address>, BlockNumberList)>)>;
 
 /// Default cache size for `RocksDB` block cache (128 MB).
 const DEFAULT_CACHE_SIZE: usize = 128 << 20;
@@ -595,53 +589,134 @@ impl<'db> RocksTx<'db> {
         Ok(RocksTxIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
-    /// Finds the first account history shard whose `highest_block_number >= target`.
+    /// Lookup account history and return [`HistoryInfo`] directly.
     ///
-    /// Returns `(has_previous_shard, matching_shard)` where `matching_shard` is `(key, list)` or
-    /// `None` if no shard covers/extends beyond `target`.
-    pub fn seek_account_history_shard(
+    /// Uses the rank/select logic to efficiently find the first block >= target
+    /// where the account was modified.
+    pub fn account_history_info(
         &self,
         address: Address,
-        target: BlockNumber,
-    ) -> AccountHistoryShardSeekResult {
-        let start = ShardedKey::new(address, 0);
-        let mut iter = self.iter_from::<reth_db_api::tables::AccountsHistory>(start)?;
-        let mut has_prev = false;
-        while let Some((key, value)) = iter.next().transpose()? {
-            if key.key != address {
-                break;
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        let key = ShardedKey::new(address, block_number);
+        let mut iter = self.iter_from::<tables::AccountsHistory>(key)?;
+
+        if let Some((found_key, value)) = iter.next().transpose()? {
+            if found_key.key != address {
+                // No shard for this address at or after target
+                if lowest_available_block_number.is_some() {
+                    return Ok(HistoryInfo::MaybeInPlainState);
+                }
+                // Check if any shard exists (meaning there was history, now in plain state)
+                let start = ShardedKey::new(address, 0);
+                let mut start_iter = self.iter_from::<tables::AccountsHistory>(start)?;
+                return if start_iter.next().transpose()?.is_some_and(|(k, _)| k.key == address) {
+                    Ok(HistoryInfo::InPlainState)
+                } else {
+                    Ok(HistoryInfo::NotYetWritten)
+                };
             }
-            if key.highest_block_number >= target {
-                return Ok((has_prev, Some((key, value))))
+
+            // Found a matching shard - check for previous shard
+            let chunk = value;
+            let start = ShardedKey::new(address, 0);
+            let mut start_iter = self.iter_from::<tables::AccountsHistory>(start)?;
+            let has_prev = start_iter.next().transpose()?.is_some_and(|(k, _)| {
+                k.key == address && k.highest_block_number < found_key.highest_block_number
+            });
+
+            Ok(history_info_from_shard(
+                &chunk,
+                block_number,
+                has_prev,
+                lowest_available_block_number,
+            ))
+        } else {
+            // Iterator exhausted, no shards exist at or after target
+            if lowest_available_block_number.is_some() {
+                return Ok(HistoryInfo::MaybeInPlainState);
             }
-            has_prev = true;
+            // Check if any shards exist before target
+            let start = ShardedKey::new(address, 0);
+            let mut start_iter = self.iter_from::<tables::AccountsHistory>(start)?;
+            if start_iter.next().transpose()?.is_some_and(|(k, _)| k.key == address) {
+                Ok(HistoryInfo::InPlainState)
+            } else {
+                Ok(HistoryInfo::NotYetWritten)
+            }
         }
-        Ok((has_prev, None))
     }
 
-    /// Finds the first storage history shard whose `highest_block_number >= target`.
+    /// Lookup storage history and return [`HistoryInfo`] directly.
     ///
-    /// Returns `(has_previous_shard, matching_shard)` where `matching_shard` is `(key, list)` or
-    /// `None` if no shard covers/extends beyond `target`.
-    pub fn seek_storage_history_shard(
+    /// Uses the rank/select logic to efficiently find the first block >= target
+    /// where the storage slot was modified.
+    pub fn storage_history_info(
         &self,
         address: Address,
         storage_key: B256,
-        target: BlockNumber,
-    ) -> ProviderResult<(bool, Option<(StorageShardedKey, BlockNumberList)>)> {
-        let start = StorageShardedKey::new(address, storage_key, 0);
-        let mut iter = self.iter_from::<reth_db_api::tables::StoragesHistory>(start)?;
-        let mut has_prev = false;
-        while let Some((key, value)) = iter.next().transpose()? {
-            if key.address != address || key.sharded_key.key != storage_key {
-                break;
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        let key = StorageShardedKey::new(address, storage_key, block_number);
+        let mut iter = self.iter_from::<tables::StoragesHistory>(key)?;
+
+        if let Some((found_key, value)) = iter.next().transpose()? {
+            if found_key.address != address || found_key.sharded_key.key != storage_key {
+                // No shard for this address/key at or after target
+                if lowest_available_block_number.is_some() {
+                    return Ok(HistoryInfo::MaybeInPlainState);
+                }
+                // Check if any shard exists (meaning there was history, now in plain state)
+                let start = StorageShardedKey::new(address, storage_key, 0);
+                let mut start_iter = self.iter_from::<tables::StoragesHistory>(start)?;
+                return if start_iter
+                    .next()
+                    .transpose()?
+                    .is_some_and(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
+                {
+                    Ok(HistoryInfo::InPlainState)
+                } else {
+                    Ok(HistoryInfo::NotYetWritten)
+                };
             }
-            if key.sharded_key.highest_block_number >= target {
-                return Ok((has_prev, Some((key, value))))
+
+            // Found a matching shard - check for previous shard
+            let chunk = value;
+            let start = StorageShardedKey::new(address, storage_key, 0);
+            let mut start_iter = self.iter_from::<tables::StoragesHistory>(start)?;
+            let has_prev = start_iter.next().transpose()?.is_some_and(|(k, _)| {
+                k.address == address &&
+                    k.sharded_key.key == storage_key &&
+                    k.sharded_key.highest_block_number <
+                        found_key.sharded_key.highest_block_number
+            });
+
+            Ok(history_info_from_shard(
+                &chunk,
+                block_number,
+                has_prev,
+                lowest_available_block_number,
+            ))
+        } else {
+            // Iterator exhausted, no shards exist at or after target
+            if lowest_available_block_number.is_some() {
+                return Ok(HistoryInfo::MaybeInPlainState);
             }
-            has_prev = true;
+            // Check if any shards exist before target
+            let start = StorageShardedKey::new(address, storage_key, 0);
+            let mut start_iter = self.iter_from::<tables::StoragesHistory>(start)?;
+            if start_iter
+                .next()
+                .transpose()?
+                .is_some_and(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
+            {
+                Ok(HistoryInfo::InPlainState)
+            } else {
+                Ok(HistoryInfo::NotYetWritten)
+            }
         }
-        Ok((has_prev, None))
     }
 
     /// Commits the transaction, persisting all changes.
