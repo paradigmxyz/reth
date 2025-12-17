@@ -110,4 +110,5 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-evm-ethereum/test-utils",
+    "reth-stages-types/test-utils",
 ]
