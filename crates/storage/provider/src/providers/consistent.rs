@@ -1166,9 +1166,10 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ConsistentProvider<N> {
                         state.block_ref().recovered_block().body().transactions().len() as u64;
                     if state.block_ref().recovered_block().number() == number {
                         stored_indices.tx_count = block_tx_count;
-                    } else {
-                        stored_indices.first_tx_num += block_tx_count;
+                      break;
                     }
+
+                    stored_indices.first_tx_num += block_tx_count;
                 }
 
                 Ok(Some(stored_indices))
