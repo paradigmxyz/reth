@@ -1,7 +1,7 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
 use reth_db_api::{
     table::{Compress, Decompress, Encode, Table},
-    DatabaseError,
+    tables, DatabaseError,
 };
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
@@ -33,6 +33,11 @@ const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 
 /// Default bloom filter bits per key (~1% false positive rate).
 const DEFAULT_BLOOM_FILTER_BITS: f64 = 10.0;
+
+/// Default buffer capacity for compression in batches.
+/// 4 KiB matches common block/page sizes and comfortably holds typical history values,
+/// reducing the first few reallocations without over-allocating.
+const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
@@ -138,6 +143,18 @@ impl RocksDBBuilder {
         self
     }
 
+    /// Registers the default tables used by reth for `RocksDB` storage.
+    ///
+    /// This registers:
+    /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
+    /// - [`tables::AccountsHistory`] - Account history index
+    /// - [`tables::StoragesHistory`] - Storage history index
+    pub fn with_default_tables(self) -> Self {
+        self.with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
+    }
+
     /// Enables metrics.
     pub const fn with_metrics(mut self) -> Self {
         self.enable_metrics = true;
@@ -151,8 +168,10 @@ impl RocksDBBuilder {
     }
 
     /// Sets the log level from `DatabaseArgs` configuration.
-    pub const fn with_database_log_level(mut self, log_level: LogLevel) -> Self {
-        self.log_level = convert_log_level(log_level);
+    pub const fn with_database_log_level(mut self, log_level: Option<LogLevel>) -> Self {
+        if let Some(level) = log_level {
+            self.log_level = convert_log_level(level);
+        }
         self
     }
 
@@ -259,6 +278,18 @@ impl RocksDBProvider {
         RocksTx { inner, provider: self }
     }
 
+    /// Creates a new batch for atomic writes.
+    ///
+    /// Use [`Self::write_batch`] for closure-based atomic writes.
+    /// Use this method when the batch needs to be held by [`crate::EitherWriter`].
+    pub fn batch(&self) -> RocksDBBatch<'_> {
+        RocksDBBatch {
+            provider: self,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+        }
+    }
+
     /// Gets the column family handle for a table.
     fn get_cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
         self.0
@@ -354,29 +385,21 @@ impl RocksDBProvider {
     where
         F: FnOnce(&mut RocksDBBatch<'_>) -> ProviderResult<()>,
     {
-        // Note: Using "Batch" as table name for batch operations across multiple tables
         self.execute_with_operation_metric(RocksDBOperation::BatchWrite, "Batch", |this| {
-            let mut batch_handle = RocksDBBatch {
-                provider: this,
-                inner: WriteBatchWithTransaction::<true>::default(),
-                buf: Vec::new(),
-            };
-
+            let mut batch_handle = this.batch();
             f(&mut batch_handle)?;
-
-            this.0.db.write(batch_handle.inner).map_err(|e| {
-                ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })
+            batch_handle.commit()
         })
     }
 }
 
 /// Handle for building a batch of operations atomically.
 ///
-/// Uses `WriteBatchWithTransaction<true>` for compatibility with `TransactionDB`.
+/// Uses `WriteBatchWithTransaction` for atomic writes without full transaction overhead.
+/// Unlike [`RocksTx`], this does NOT support read-your-writes. Use for write-only flows
+/// where you don't need to read back uncommitted data within the same operation
+/// (e.g., history index writes).
+#[must_use = "batch must be committed"]
 pub struct RocksDBBatch<'a> {
     provider: &'a RocksDBProvider,
     inner: WriteBatchWithTransaction<true>,
@@ -419,6 +442,28 @@ impl<'a> RocksDBBatch<'a> {
     pub fn delete<T: Table>(&mut self, key: T::Key) -> ProviderResult<()> {
         self.inner.delete_cf(self.provider.get_cf_handle::<T>()?, key.encode().as_ref());
         Ok(())
+    }
+
+    /// Commits the batch to the database.
+    ///
+    /// This consumes the batch and writes all operations atomically to `RocksDB`.
+    pub fn commit(self) -> ProviderResult<()> {
+        self.provider.0.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+
+    /// Returns the number of write operations (puts + deletes) queued in this batch.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Returns `true` if the batch contains no operations.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
     }
 }
 
@@ -597,9 +642,37 @@ const fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{TxHash, B256};
-    use reth_db_api::{table::Table, tables};
+    use alloy_primitives::{Address, TxHash, B256};
+    use reth_db_api::{
+        models::{sharded_key::ShardedKey, storage_sharded_key::StorageShardedKey, IntegerList},
+        table::Table,
+        tables,
+    };
     use tempfile::TempDir;
+
+    #[test]
+    fn test_with_default_tables_registers_required_column_families() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Build with default tables
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        // Should be able to write/read TransactionHashNumbers
+        let tx_hash = TxHash::from(B256::from([1u8; 32]));
+        provider.put::<tables::TransactionHashNumbers>(tx_hash, &100).unwrap();
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(tx_hash).unwrap(), Some(100));
+
+        // Should be able to write/read AccountsHistory
+        let key = ShardedKey::new(Address::ZERO, 100);
+        let value = IntegerList::default();
+        provider.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::AccountsHistory>(key).unwrap().is_some());
+
+        // Should be able to write/read StoragesHistory
+        let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 100);
+        provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
+    }
 
     #[derive(Debug)]
     struct TestTable;
@@ -836,5 +909,37 @@ mod tests {
 
         // Commit
         tx.commit().unwrap();
+    }
+
+    #[test]
+    fn test_batch_manual_commit() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Create a batch via provider.batch()
+        let mut batch = provider.batch();
+
+        // Add entries
+        for i in 0..10u64 {
+            let value = format!("batch_value_{i}").into_bytes();
+            batch.put::<TestTable>(i, &value).unwrap();
+        }
+
+        // Verify len/is_empty
+        assert_eq!(batch.len(), 10);
+        assert!(!batch.is_empty());
+
+        // Data should NOT be visible before commit
+        assert_eq!(provider.get::<TestTable>(0).unwrap(), None);
+
+        // Commit the batch
+        batch.commit().unwrap();
+
+        // Now data should be visible
+        for i in 0..10u64 {
+            let value = format!("batch_value_{i}").into_bytes();
+            assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
+        }
     }
 }

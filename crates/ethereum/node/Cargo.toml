@@ -24,7 +24,7 @@ reth-provider.workspace = true
 reth-transaction-pool.workspace = true
 reth-network.workspace = true
 reth-evm.workspace = true
-reth-evm-ethereum.workspace = true
+reth-evm-ethereum = { workspace = true, features = ["std"] }
 reth-rpc.workspace = true
 reth-rpc-api.workspace = true
 reth-rpc-eth-api.workspace = true
@@ -35,7 +35,7 @@ reth-chainspec.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-rpc-eth-types.workspace = true
 reth-engine-local.workspace = true
-reth-engine-primitives.workspace = true
+reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-payload-primitives.workspace = true
 
 # ethereum
@@ -61,6 +61,7 @@ reth-node-core.workspace = true
 reth-e2e-test-utils.workspace = true
 reth-tasks.workspace = true
 reth-testing-utils.workspace = true
+reth-stages-types.workspace = true
 tempfile.workspace = true
 jsonrpsee-core.workspace = true
 
@@ -88,6 +89,9 @@ asm-keccak = [
     "reth-node-core/asm-keccak",
     "revm/asm-keccak",
 ]
+keccak-cache-global = [
+    "alloy-primitives/keccak-cache-global",
+]
 js-tracer = [
     "reth-node-builder/js-tracer",
     "reth-rpc/js-tracer",
@@ -106,4 +110,5 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
     "reth-evm-ethereum/test-utils",
+    "reth-stages-types/test-utils",
 ]

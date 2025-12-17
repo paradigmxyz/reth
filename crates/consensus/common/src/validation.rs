@@ -279,18 +279,26 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
     header: &H,
     parent: &SealedHeader<H>,
 ) -> Result<(), ConsensusError> {
-    // Parent number is consistent.
-    if parent.number() + 1 != header.number() {
-        return Err(ConsensusError::ParentBlockNumberMismatch {
-            parent_block_number: parent.number(),
-            block_number: header.number(),
-        })
-    }
-
     if parent.hash() != header.parent_hash() {
         return Err(ConsensusError::ParentHashMismatch(
             GotExpected { got: header.parent_hash(), expected: parent.hash() }.into(),
         ))
+    }
+
+    let Some(parent_number) = parent.number().checked_add(1) else {
+        // parent block already reached the maximum
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number(),
+            block_number: u64::MAX,
+        })
+    };
+
+    // Parent number is consistent.
+    if parent_number != header.number() {
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number(),
+            block_number: header.number(),
+        })
     }
 
     Ok(())
