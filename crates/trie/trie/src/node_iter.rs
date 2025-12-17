@@ -160,15 +160,15 @@ where
     ///
     /// If `metrics` feature is enabled, it also updates the metrics.
     fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
-        let result = self.hashed_cursor.next();
+        let next = self.hashed_cursor.next()?;
 
-        self.last_next_result = result.clone()?;
+        self.last_next_result = next.clone();
 
         #[cfg(feature = "metrics")]
         {
             self.metrics.inc_leaf_nodes_advanced();
         }
-        result
+        Ok(next)
     }
 }
 
