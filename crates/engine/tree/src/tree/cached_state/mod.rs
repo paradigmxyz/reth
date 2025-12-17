@@ -2,7 +2,10 @@
 
 mod weighted_cache;
 
-use alloy_primitives::{Address, StorageKey, StorageValue, B256};
+use alloy_primitives::{
+    map::{DefaultHashBuilder, FbBuildHasher},
+    Address, StorageKey, StorageValue, B256,
+};
 use metrics::Gauge;
 use papaya::HashMap as PapayaMap;
 use reth_errors::ProviderResult;
@@ -17,7 +20,6 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use revm_primitives::map::DefaultHashBuilder;
 use std::{
     fmt,
     sync::{
@@ -28,7 +30,7 @@ use std::{
 use tracing::{debug_span, instrument, trace};
 use weighted_cache::WeightedCache;
 
-pub(crate) type Cache<K, V> = WeightedCache<K, V, alloy_primitives::map::DefaultHashBuilder>;
+pub(crate) type Cache<K, V, H = DefaultHashBuilder> = WeightedCache<K, V, H>;
 
 /// A wrapper of a state provider and a shared cache.
 pub(crate) struct CachedStateProvider<S> {
@@ -350,14 +352,14 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider
 #[derive(Debug, Clone)]
 pub(crate) struct ExecutionCache {
     /// Cache for contract bytecode, keyed by code hash.
-    code_cache: Cache<B256, Option<Bytecode>>,
+    code_cache: Cache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
     /// Per-account storage cache: outer cache keyed by Address, inner cache tracks that account’s
     /// storage slots.
-    storage_cache: Cache<Address, Arc<AccountStorageCache>>,
+    storage_cache: Cache<Address, Arc<AccountStorageCache>, FbBuildHasher<20>>,
 
     /// Cache for basic account information (nonce, balance, code hash).
-    account_cache: Cache<Address, Option<Account>>,
+    account_cache: Cache<Address, Option<Account>, FbBuildHasher<20>>,
 }
 
 impl ExecutionCache {
@@ -637,9 +639,10 @@ impl SavedCache {
 }
 
 /// Inner data for AccountStorageCache, wrapped in Arc for cheap cloning.
+#[derive(Default)]
 struct AccountStorageCacheInner {
     /// Map of storage keys to their cached values.
-    slots: PapayaMap<StorageKey, Option<StorageValue>, DefaultHashBuilder>,
+    slots: PapayaMap<StorageKey, Option<StorageValue>, FbBuildHasher<32>>,
     /// Number of slots in the cache (tracked separately for O(1) len()).
     slot_count: AtomicUsize,
 }
@@ -650,7 +653,7 @@ struct AccountStorageCacheInner {
 /// Each account gets its own `AccountStorageCache` to store accessed storage slots.
 ///
 /// This type is cheaply cloneable (just an Arc clone).
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub(crate) struct AccountStorageCache {
     inner: Arc<AccountStorageCacheInner>,
 }
@@ -664,17 +667,6 @@ impl fmt::Debug for AccountStorageCache {
 }
 
 impl AccountStorageCache {
-    /// Create a new [`AccountStorageCache`]
-    #[allow(unused)]
-    pub(crate) fn new(_max_slots: u64) -> Self {
-        Self {
-            inner: Arc::new(AccountStorageCacheInner {
-                slots: PapayaMap::with_hasher(DefaultHashBuilder::default()),
-                slot_count: AtomicUsize::new(0),
-            }),
-        }
-    }
-
     /// Get a storage value from this account's cache.
     /// - `NotCached`: The slot is not in the cache
     /// - `Empty`: The slot is empty
@@ -700,17 +692,6 @@ impl AccountStorageCache {
     /// Returns the number of slots in the cache
     pub(crate) fn len(&self) -> usize {
         self.inner.slot_count.load(Ordering::Relaxed)
-    }
-}
-
-impl Default for AccountStorageCache {
-    fn default() -> Self {
-        Self {
-            inner: Arc::new(AccountStorageCacheInner {
-                slots: PapayaMap::with_hasher(DefaultHashBuilder::default()),
-                slot_count: AtomicUsize::new(0),
-            }),
-        }
     }
 }
 
@@ -788,7 +769,7 @@ mod tests {
 
     #[test]
     fn measure_storage_cache_overhead() {
-        let (base_overhead, cache) = measure_allocation(|| AccountStorageCache::new(1000));
+        let (base_overhead, cache) = measure_allocation(AccountStorageCache::default);
         println!("Base AccountStorageCache overhead: {base_overhead} bytes");
         let mut rng = rand::rng();
 
