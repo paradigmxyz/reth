@@ -170,11 +170,6 @@ impl ProofSequencer {
         while let Some(pending) = self.pending_proofs.remove(&current_sequence) {
             consecutive_proofs.push(pending);
             current_sequence += 1;
-
-            // if we don't have the next number, stop collecting
-            if !self.pending_proofs.contains_key(&current_sequence) {
-                break;
-            }
         }
 
         self.next_to_deliver += consecutive_proofs.len() as u64;
