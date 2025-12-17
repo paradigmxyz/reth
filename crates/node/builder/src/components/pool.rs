@@ -6,7 +6,7 @@ use reth_chain_state::CanonStateSubscriptions;
 use reth_chainspec::EthereumHardforks;
 use reth_node_api::{NodeTypes, TxTy};
 use reth_transaction_pool::{
-    blobstore::DiskFileBlobStore, BlobStore, CoinbaseTipOrdering, PoolConfig, PoolTransaction,
+    blobstore::DiskFileBlobStore, BlobStore, ConfigurableOrdering, PoolConfig, PoolTransaction,
     SubPoolLimit, TransactionPool, TransactionValidationTaskExecutor, TransactionValidator,
 };
 use std::{collections::HashSet, future::Future};
@@ -133,15 +133,15 @@ where
     V::Transaction:
         PoolTransaction<Consensus = TxTy<Node::Types>> + reth_transaction_pool::EthPoolTransaction,
 {
-    /// Consume the ype and build the [`reth_transaction_pool::Pool`] with the given config and blob
-    /// store.
+    /// Consume the type and build the [`reth_transaction_pool::Pool`] with the given config and
+    /// blob store.
     pub fn build<BS>(
         self,
         blob_store: BS,
         pool_config: PoolConfig,
     ) -> reth_transaction_pool::Pool<
         TransactionValidationTaskExecutor<V>,
-        CoinbaseTipOrdering<V::Transaction>,
+        ConfigurableOrdering<V::Transaction>,
         BS,
     >
     where
@@ -150,7 +150,7 @@ where
         let TxPoolBuilder { validator, .. } = self;
         reth_transaction_pool::Pool::new(
             validator,
-            CoinbaseTipOrdering::default(),
+            ConfigurableOrdering::new(pool_config.fifo_ordering),
             blob_store,
             pool_config,
         )
@@ -165,7 +165,7 @@ where
     ) -> eyre::Result<
         reth_transaction_pool::Pool<
             TransactionValidationTaskExecutor<V>,
-            CoinbaseTipOrdering<V::Transaction>,
+            ConfigurableOrdering<V::Transaction>,
             BS,
         >,
     >
