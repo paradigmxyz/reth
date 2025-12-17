@@ -168,7 +168,6 @@ async fn test_engine_graceful_shutdown() -> eyre::Result<()> {
         .add_ons_handle
         .engine_shutdown
         .shutdown()
-        .await
         .expect("shutdown should return receiver");
 
     tokio::time::timeout(std::time::Duration::from_secs(2), done_rx)
