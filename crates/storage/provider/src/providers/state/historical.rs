@@ -1,11 +1,11 @@
 use crate::{
     providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    ChangeSetReader, EitherReader, HashedPostStateProvider, HistoryInfo, ProviderError,
-    RocksDBProviderFactory, StateProvider, StateRootProvider,
+    ChangeSetReader, EitherReader, HashedPostStateProvider, ProviderError, RocksDBProviderFactory,
+    StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
-use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
+use reth_db_api::{cursor::DbDupCursorRO, tables, tables::BlockNumberList, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
@@ -26,6 +26,19 @@ use reth_trie_db::{
 };
 
 use std::fmt::Debug;
+
+/// Result of a history lookup for an account or storage slot.
+#[derive(Debug, Eq, PartialEq)]
+pub enum HistoryInfo {
+    /// The key has not been written to yet at this block.
+    NotYetWritten,
+    /// The value is found in the changeset at the given block number.
+    InChangeset(u64),
+    /// The value is in the current plain state (no changes after the target block).
+    InPlainState,
+    /// The value might be in plain state (pruning may have removed history).
+    MaybeInPlainState,
+}
 
 /// State provider for a given block number which takes a tx reference.
 ///
@@ -484,6 +497,41 @@ impl LowestAvailableBlocks {
     pub fn is_storage_history_available(&self, at: BlockNumber) -> bool {
         self.storage_history_block_number.map(|block_number| block_number <= at).unwrap_or(true)
     }
+}
+
+/// Computes [`HistoryInfo`] from a shard chunk using rank/select.
+///
+/// This is the core algorithm shared by both MDBX and `RocksDB` backends.
+///
+/// # Arguments
+/// * `chunk` - The block number list from the shard (wraps `RoaringTreemap`)
+/// * `block_number` - Target block to look up
+/// * `has_previous_shard` - Whether there's a shard before this one for the same key
+/// * `lowest_available` - Lowest block where history is available (pruning boundary)
+pub fn history_info_from_shard(
+    chunk: &BlockNumberList,
+    block_number: BlockNumber,
+    has_previous_shard: bool,
+    lowest_available: Option<BlockNumber>,
+) -> HistoryInfo {
+    let mut rank = chunk.rank(block_number);
+
+    // Adjust rank if block_number itself is in the list
+    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+        rank -= 1;
+    }
+
+    let found_block = chunk.select(rank);
+
+    // Check if we're before the first-ever change
+    if rank == 0 && found_block != Some(block_number) && !has_previous_shard {
+        if let (Some(_), Some(bn)) = (lowest_available, found_block) {
+            return HistoryInfo::InChangeset(bn);
+        }
+        return HistoryInfo::NotYetWritten;
+    }
+
+    found_block.map(HistoryInfo::InChangeset).unwrap_or(HistoryInfo::InPlainState)
 }
 
 #[cfg(test)]

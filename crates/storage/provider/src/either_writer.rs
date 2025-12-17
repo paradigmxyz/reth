@@ -30,53 +30,7 @@ use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageSettingsCache}
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
-/// Result of a history lookup for an account or storage slot.
-#[derive(Debug, Eq, PartialEq)]
-pub enum HistoryInfo {
-    /// The key has not been written to yet at this block.
-    NotYetWritten,
-    /// The value is found in the changeset at the given block number.
-    InChangeset(u64),
-    /// The value is in the current plain state (no changes after the target block).
-    InPlainState,
-    /// The value might be in plain state (pruning may have removed history).
-    MaybeInPlainState,
-}
-
-/// Computes [`HistoryInfo`] from a shard chunk using rank/select.
-///
-/// This is the core algorithm shared by both MDBX and `RocksDB` backends.
-///
-/// # Arguments
-/// * `chunk` - The block number list from the shard (wraps `RoaringTreemap`)
-/// * `block_number` - Target block to look up
-/// * `has_previous_shard` - Whether there's a shard before this one for the same key
-/// * `lowest_available` - Lowest block where history is available (pruning boundary)
-pub fn history_info_from_shard(
-    chunk: &BlockNumberList,
-    block_number: BlockNumber,
-    has_previous_shard: bool,
-    lowest_available: Option<BlockNumber>,
-) -> HistoryInfo {
-    let mut rank = chunk.rank(block_number);
-
-    // Adjust rank if block_number itself is in the list
-    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
-        rank -= 1;
-    }
-
-    let found_block = chunk.select(rank);
-
-    // Check if we're before the first-ever change
-    if rank == 0 && found_block != Some(block_number) && !has_previous_shard {
-        if let (Some(_), Some(bn)) = (lowest_available, found_block) {
-            return HistoryInfo::InChangeset(bn);
-        }
-        return HistoryInfo::NotYetWritten;
-    }
-
-    found_block.map(HistoryInfo::InChangeset).unwrap_or(HistoryInfo::InPlainState)
-}
+use crate::providers::{history_info_from_shard, HistoryInfo};
 
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<'a, P, T> =

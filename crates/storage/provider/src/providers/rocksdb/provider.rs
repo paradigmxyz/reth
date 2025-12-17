@@ -1,5 +1,5 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
-use crate::{history_info_from_shard, HistoryInfo};
+use crate::providers::{history_info_from_shard, HistoryInfo};
 use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
