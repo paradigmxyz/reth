@@ -47,11 +47,9 @@ serde = { workspace = true, optional = true }
 alloy-signer = { workspace = true, optional = true }
 alloy-signer-local = { workspace = true, optional = true }
 rand = { workspace = true, optional = true }
-reth-trie-db = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-primitives-traits = { workspace = true, features = ["test-utils"] }
-reth-provider = { workspace = true, features = ["test-utils"] }
 reth-testing-utils.workspace = true
 alloy-signer.workspace = true
 alloy-signer-local.workspace = true
@@ -71,7 +69,6 @@ serde = [
     "reth-execution-types/serde",
     "reth-primitives-traits/serde",
     "reth-trie/serde",
-    "reth-trie-db?/serde",
     "revm-database/serde",
     "revm-state?/serde",
     "reth-storage-api/serde",
@@ -86,9 +83,6 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie/test-utils",
     "reth-ethereum-primitives/test-utils",
-    "reth-trie-db",
-    "reth-provider/test-utils",
-    "reth-trie-db?/test-utils",
 ]
 
 [[bench]]
