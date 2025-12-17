@@ -838,8 +838,12 @@ where
             }
             StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
                 let start = Instant::now();
-                let handle =
-                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
+                let handle = self.payload_processor.spawn_cache_exclusive(
+                    env,
+                    txs,
+                    provider_builder,
+                    block_access_list,
+                );
 
                 // Record prewarming initialization duration
                 self.metrics

@@ -257,33 +257,35 @@ where
 
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
-            // When BAL is present, skip spawning prewarm tasks entirely and send BAL to multiproof
-            debug!(target: "engine::tree::payload_processor", "BAL present, skipping prewarm tasks");
+            // When BAL is present, use BAL prewarming and send BAL to multiproof
+            debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
 
             // Send BAL message immediately to MultiProofTask
             if let Some(ref sender) = to_multi_proof &&
-                let Err(err) = sender.send(MultiProofMessage::BlockAccessList(bal))
+                let Err(err) = sender.send(MultiProofMessage::BlockAccessList(Arc::clone(&bal)))
             {
                 // In this case state root validation will simply fail
                 error!(target: "engine::tree::payload_processor", ?err, "Failed to send BAL to MultiProofTask");
             }
 
-            // Spawn minimal cache-only task without prewarming
+            // Spawn with BAL prewarming
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
                 transaction_count_hint,
                 provider_builder.clone(),
                 None, // Don't send proof targets when BAL is present
+                Some(bal),
             )
         } else {
-            // Normal path: spawn with full prewarming
+            // Normal path: spawn with transaction prewarming
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
                 transaction_count_hint,
                 provider_builder.clone(),
                 to_multi_proof.clone(),
+                None,
             )
         };
 
@@ -320,13 +322,14 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
+        bal: Option<Arc<BlockAccessList>>,
     ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
         let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None);
+            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -400,11 +403,12 @@ where
         transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        bal: Option<Arc<BlockAccessList>>,
     ) -> CacheTaskHandle
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        if self.disable_transaction_prewarming {
+        if self.disable_transaction_prewarming && bal.is_none() {
             // if no transactions should be executed we clear them but still spawn the task for
             // caching updates
             transactions = mpsc::channel().1;
@@ -444,7 +448,12 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking(move || {
-                prewarm_task.run(PrewarmMode::Transactions(transactions), to_prewarm_task);
+                let mode = if let Some(bal) = bal {
+                    PrewarmMode::BlockAccessList(bal)
+                } else {
+                    PrewarmMode::Transactions(transactions)
+                };
+                prewarm_task.run(mode, to_prewarm_task);
             });
         }
 
