@@ -181,8 +181,11 @@ where
                     writer.put_transaction_hash_number(hash, tx_num)?;
                 }
 
-                // Commit the writer (no-op for MDBX, commits batch for RocksDB)
-                writer.commit()?;
+                // Extract and register RocksDB batch for commit at provider level
+                #[cfg(all(unix, feature = "rocksdb"))]
+                if let Some(batch) = writer.into_raw_rocksdb_batch() {
+                    provider.set_pending_rocksdb_batch(batch);
+                }
 
                 trace!(target: "sync::stages::transaction_lookup",
                     total_hashes,
@@ -239,8 +242,11 @@ where
             }
         }
 
-        // Commit the writer (no-op for MDBX, commits batch for RocksDB)
-        writer.commit()?;
+        // Extract and register RocksDB batch for commit at provider level
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)

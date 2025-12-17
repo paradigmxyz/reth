@@ -187,17 +187,18 @@ impl<'a> EitherWriter<'a, (), ()> {
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
-    /// Commits the writer.
+    /// Extracts the raw `RocksDB` write batch from this writer, if it contains one.
     ///
-    /// - For [`Self::Database`]: No-op, as MDBX commits happen at the provider level.
-    /// - For [`Self::StaticFile`]: No-op, as static files have their own commit mechanism.
-    /// - For [`Self::RocksDB`]: Commits the underlying batch.
-    pub fn commit(self) -> ProviderResult<()> {
+    /// Returns `Some(WriteBatchWithTransaction)` for [`Self::RocksDB`] variant,
+    /// `None` for other variants.
+    ///
+    /// This is used to defer `RocksDB` commits to the provider level, ensuring all
+    /// storage commits (MDBX, static files, `RocksDB`) happen atomically in a single place.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pub fn into_raw_rocksdb_batch(self) -> Option<rocksdb::WriteBatchWithTransaction<true>> {
         match self {
-            Self::Database(_) => Ok(()),
-            Self::StaticFile(_) => Ok(()),
-            #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => batch.commit(),
+            Self::Database(_) | Self::StaticFile(_) => None,
+            Self::RocksDB(batch) => Some(batch.into_inner()),
         }
     }
 
@@ -734,8 +735,13 @@ mod rocksdb_tests {
         writer.put_transaction_hash_number(hash1, tx_num1).unwrap();
         writer.put_transaction_hash_number(hash2, tx_num2).unwrap();
 
-        // Commit the writer (for RocksDB, this commits the batch)
-        writer.commit().unwrap();
+        // Extract the batch and register with provider for commit
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+
+        // Commit via provider - this commits RocksDB batch too
+        provider.commit().unwrap();
 
         // Verify data was written to RocksDB
         let rocksdb = factory.rocksdb_provider();
@@ -766,7 +772,12 @@ mod rocksdb_tests {
         let provider = factory.database_provider_rw().unwrap();
         let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
         writer.delete_transaction_hash_number(hash).unwrap();
-        writer.commit().unwrap();
+
+        // Extract the batch and commit via provider
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
 
         // Verify deletion
         let rocksdb = factory.rocksdb_provider();
@@ -906,5 +917,66 @@ mod rocksdb_tests {
 
         // Verify deletion
         assert_eq!(provider.get::<tables::AccountsHistory>(key).unwrap(), None);
+    }
+
+    /// Test that `RocksDB` commits happen at `provider.commit()` level, not at writer level.
+    ///
+    /// This ensures all storage commits (MDBX, static files, RocksDB) happen atomically
+    /// in a single place, making it easier to reason about commit ordering and consistency.
+    #[test]
+    fn test_rocksdb_commits_at_provider_level() {
+        let factory = create_test_provider_factory();
+
+        // Enable RocksDB for transaction hash numbers
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+        );
+
+        let hash1 = B256::from([1u8; 32]);
+        let hash2 = B256::from([2u8; 32]);
+        let tx_num1 = 100u64;
+        let tx_num2 = 200u64;
+
+        // Get the RocksDB batch from the provider
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+
+        // Create provider and EitherWriter
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+
+        // Write transaction hash numbers
+        writer.put_transaction_hash_number(hash1, tx_num1).unwrap();
+        writer.put_transaction_hash_number(hash2, tx_num2).unwrap();
+
+        // Extract the raw batch from the writer and register it with the provider
+        let raw_batch = writer.into_raw_rocksdb_batch();
+        if let Some(batch) = raw_batch {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+
+        // Data should NOT be visible yet (batch not committed)
+        let rocksdb = factory.rocksdb_provider();
+        assert_eq!(
+            rocksdb.get::<tables::TransactionHashNumbers>(hash1).unwrap(),
+            None,
+            "Data should not be visible before provider.commit()"
+        );
+
+        // Commit the provider - this should commit both MDBX and RocksDB
+        provider.commit().unwrap();
+
+        // Now data should be visible in RocksDB
+        let rocksdb = factory.rocksdb_provider();
+        assert_eq!(
+            rocksdb.get::<tables::TransactionHashNumbers>(hash1).unwrap(),
+            Some(tx_num1),
+            "Data should be visible after provider.commit()"
+        );
+        assert_eq!(
+            rocksdb.get::<tables::TransactionHashNumbers>(hash2).unwrap(),
+            Some(tx_num2),
+            "Data should be visible after provider.commit()"
+        );
     }
 }
