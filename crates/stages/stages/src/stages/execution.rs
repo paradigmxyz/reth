@@ -23,7 +23,7 @@ use reth_stages_api::{
 };
 use reth_static_file_types::StaticFileSegment;
 use std::{
-    cmp::Ordering,
+    cmp::{max, Ordering},
     ops::RangeInclusive,
     sync::Arc,
     task::{ready, Context, Poll},
