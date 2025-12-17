@@ -643,10 +643,12 @@ where
 
         let execution_start = Instant::now();
         let state_hook = Box::new(handle.state_hook());
+        let executed_tx_index = Arc::clone(handle.executed_tx_index());
         let (output, senders) = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
             state_hook,
+            executed_tx_index,
         )?;
         let execution_finish = Instant::now();
         let execution_time = execution_finish.duration_since(execution_start);

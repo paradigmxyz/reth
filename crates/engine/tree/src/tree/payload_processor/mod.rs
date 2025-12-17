@@ -44,7 +44,7 @@ use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
     sync::{
-        atomic::AtomicBool,
+        atomic::{AtomicBool, AtomicUsize},
         mpsc::{self, channel},
         Arc,
     },
@@ -256,7 +256,7 @@ where
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
         // Handle BAL-based optimization if available
-        let prewarm_handle = if let Some(bal) = bal {
+        let (prewarm_handle, executed_tx_index) = if let Some(bal) = bal {
             // When BAL is present, skip spawning prewarm tasks entirely and send BAL to multiproof
             debug!(target: "engine::tree::payload_processor", "BAL present, skipping prewarm tasks");
 
@@ -307,6 +307,7 @@ where
             prewarm_handle,
             state_root: Some(state_root_rx),
             transactions: execution_rx,
+            executed_tx_index,
             _span: span,
         }
     }
@@ -325,13 +326,14 @@ where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
-        let prewarm_handle =
+        let (prewarm_handle, executed_tx_index) =
             self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
             state_root: None,
             transactions: execution_rx,
+            executed_tx_index,
             _span: Span::current(),
         }
     }
@@ -342,7 +344,7 @@ where
         &self,
         transactions: I,
     ) -> (
-        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Tx>>,
+        mpsc::Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Tx>)>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
         usize,
     ) {
@@ -359,9 +361,9 @@ where
             transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
                 let tx = convert(tx);
                 let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
-                // Only send Ok(_) variants to prewarming task.
+                // Only send Ok(_) variants to prewarming task, with original index.
                 if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
+                    let _ = prewarm_tx.send((idx, tx.clone()));
                 }
                 let _ = ooo_tx.send((idx, tx));
             });
@@ -393,16 +395,17 @@ where
     }
 
     /// Spawn prewarming optionally wired to the multiproof task for target updates.
-    fn spawn_caching_with<P>(
+    fn spawn_caching_with<P, Tx>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        mut transactions: mpsc::Receiver<(usize, Tx)>,
         transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-    ) -> CacheTaskHandle
+    ) -> (CacheTaskHandle, Arc<AtomicUsize>)
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
+        Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
@@ -420,6 +423,7 @@ where
         };
 
         // configure prewarming
+        let executed_tx_index = Arc::new(AtomicUsize::new(0));
         let prewarm_ctx = PrewarmContext {
             env,
             evm_config: self.evm_config.clone(),
@@ -429,6 +433,7 @@ where
             terminate_execution: Arc::new(AtomicBool::new(false)),
             precompile_cache_disabled: self.precompile_cache_disabled,
             precompile_cache_map: self.precompile_cache_map.clone(),
+            executed_tx_index: executed_tx_index.clone(),
         };
 
         let (prewarm_task, to_prewarm_task) = PrewarmCacheTask::new(
@@ -448,7 +453,10 @@ where
             });
         }
 
-        CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
+        (
+            CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics },
+            executed_tx_index,
+        )
     }
 
     /// Returns the cache for the given parent hash.
@@ -591,6 +599,9 @@ pub struct PayloadHandle<Tx, Err> {
     transactions: mpsc::Receiver<Result<Tx, Err>>,
     /// Receiver for the state root
     state_root: Option<mpsc::Receiver<Result<StateRootComputeOutcome, ParallelStateRootError>>>,
+    /// Shared counter tracking the current transaction index being executed by the main execution
+    /// path. Updated by the main execution path and checked by prewarming tasks.
+    executed_tx_index: Arc<AtomicUsize>,
     /// Span for tracing
     _span: Span,
 }
@@ -658,6 +669,15 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
         core::iter::repeat_with(|| self.transactions.recv())
             .take_while(|res| res.is_ok())
             .map(|res| res.unwrap())
+    }
+
+    /// Returns a reference to the executed transaction index counter.
+    ///
+    /// This counter should be updated by the main execution path to indicate the current
+    /// transaction being executed, allowing prewarming tasks to skip already-executed
+    /// transactions.
+    pub const fn executed_tx_index(&self) -> &Arc<AtomicUsize> {
+        &self.executed_tx_index
     }
 }
 

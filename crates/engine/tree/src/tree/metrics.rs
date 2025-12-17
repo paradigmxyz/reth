@@ -18,7 +18,10 @@ use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
 use revm_primitives::Address;
-use std::time::Instant;
+use std::{
+    sync::{atomic::AtomicUsize, Arc},
+    time::Instant,
+};
 use tracing::{debug_span, trace};
 
 /// Metrics for the `EngineApi`.
@@ -65,6 +68,7 @@ impl EngineApiMetrics {
         executor: E,
         mut transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
         state_hook: Box<dyn OnStateHook>,
+        executed_tx_index: Arc<AtomicUsize>,
     ) -> Result<(BlockExecutionOutput<E::Receipt>, Vec<Address>), BlockExecutionError>
     where
         DB: alloy_evm::Database,
@@ -86,6 +90,7 @@ impl EngineApiMetrics {
             self.executor.pre_execution_histogram.record(start.elapsed());
 
             let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+            let mut tx_count = 0usize;
             loop {
                 let start = Instant::now();
                 let Some(tx) = transactions.next() else { break };
@@ -104,6 +109,10 @@ impl EngineApiMetrics {
 
                 // record the tx gas used
                 enter.record("gas_used", gas_used);
+
+                // Update the executed transaction index to inform prewarming tasks
+                tx_count += 1;
+                executed_tx_index.store(tx_count, std::sync::atomic::Ordering::Relaxed);
             }
             drop(exec_span);
 
@@ -526,10 +535,12 @@ mod tests {
         let executor = MockExecutor::new(state);
 
         // This will fail to create the EVM but should still call the hook
+        let executed_tx_index = Arc::new(AtomicUsize::new(0));
         let _result = metrics.execute_metered::<_, EmptyDB>(
             executor,
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
             state_hook,
+            executed_tx_index,
         );
 
         // Check if hook was called (it might not be if finish() fails early)
@@ -582,10 +593,12 @@ mod tests {
         let executor = MockExecutor::new(state);
 
         // Execute (will fail but should still update some metrics)
+        let executed_tx_index = Arc::new(AtomicUsize::new(0));
         let _result = metrics.execute_metered::<_, EmptyDB>(
             executor,
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
             state_hook,
+            executed_tx_index,
         );
 
         let snapshot = snapshotter.snapshot().into_vec();
