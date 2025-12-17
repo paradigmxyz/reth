@@ -3,7 +3,7 @@ use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::{Compress, Decompress, Encode, Table},
-    BlockNumberList, DatabaseError, tables
+    tables, BlockNumberList, DatabaseError,
 };
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
