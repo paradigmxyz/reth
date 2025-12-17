@@ -65,13 +65,13 @@ where
 impl<S> CachedStateProvider<S> {
     /// Enables pre-warm mode so that every cache miss is populated.
     ///
-    /// This is only relevant for pre-warm transaction execution with the intentation to
-    /// pre-populate the cache with data for regular block execution. During regular block
-    /// execution the cache doesn't need to be populated because the actual EVM database
+    /// This is only relevant for pre-warm transaction execution with the intention to pre-populate
+    /// the cache with data for regular block execution. During regular block execution the
+    /// cache doesn't need to be populated because the actual EVM database
     /// [`State`](revm::database::State) also caches internally during block execution and the cache
     /// is then updated after the block with the entire [`BundleState`] output of that block which
     /// contains all accessed accounts,code,storage. See also [`ExecutionCache::insert_state`].
-    pub(crate) fn prewarm(mut self) -> Self {
+    pub(crate) const fn prewarm(mut self) -> Self {
         self.prewarm = true;
         self
     }

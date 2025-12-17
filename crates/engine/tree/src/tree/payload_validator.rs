@@ -374,7 +374,8 @@ where
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
-        // fetch parent block
+        // Fetch parent block. This goes to memory most of the time unless the parent block is
+        // beyond the in-memory buffer.
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
@@ -399,7 +400,7 @@ where
             "Decided which state root algorithm to run"
         );
 
-        // use prewarming background task
+        // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
         // Extract the BAL, if valid and available
