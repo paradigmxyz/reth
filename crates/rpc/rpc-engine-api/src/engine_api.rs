@@ -19,7 +19,6 @@ use jsonrpsee_core::{server::RpcModule, RpcResult};
 use reth_chainspec::EthereumHardforks;
 use reth_engine_primitives::{ConsensusEngineHandle, EngineApiValidator, EngineTypes};
 use reth_network_api::NetworkInfo;
-use reth_network_p2p::sync::SyncStateProvider;
 use reth_payload_builder::PayloadStore;
 use reth_payload_primitives::{
     validate_payload_timestamp, EngineApiMessageVersion, MessageValidationKind,
@@ -45,24 +44,6 @@ const MAX_PAYLOAD_BODIES_LIMIT: u64 = 1024;
 
 /// The upper limit for blobs in `engine_getBlobsVx`.
 const MAX_BLOB_LIMIT: usize = 128;
-
-/// Adapter that maps [`NetworkInfo`] to [`SyncStateProvider`].
-struct SyncStateFromNetworkInfo<N> {
-    network: N,
-}
-
-impl<N> SyncStateProvider for SyncStateFromNetworkInfo<N>
-where
-    N: NetworkInfo,
-{
-    fn is_syncing(&self) -> bool {
-        self.network.is_syncing()
-    }
-
-    fn is_initially_syncing(&self) -> bool {
-        self.network.is_initially_syncing()
-    }
-}
 
 /// The Engine API implementation that grants the Consensus layer access to data and
 /// functions in the Execution layer that are crucial for the consensus process.
@@ -117,6 +98,7 @@ where
         network: impl NetworkInfo + 'static,
         blobpool_enabled: bool,
     ) -> Self {
+        let is_syncing = Arc::new(move || network.is_syncing());
         let inner = Arc::new(EngineApiInner {
             provider,
             chain_spec,
@@ -129,7 +111,7 @@ where
             tx_pool,
             validator,
             accept_execution_requests_hash,
-            sync_state: Box::new(SyncStateFromNetworkInfo { network }),
+            is_syncing,
             blobpool_enabled,
         });
         Self { inner }
@@ -835,7 +817,7 @@ where
 
         // Spec requires returning `null` if syncing or otherwise unable to generally serve blob
         // pool data.
-        if self.inner.sync_state.is_syncing() || !self.inner.blobpool_enabled {
+        if (*self.inner.is_syncing)() || !self.inner.blobpool_enabled {
             return Ok(None)
         }
 
@@ -1238,8 +1220,8 @@ struct EngineApiInner<Provider, PayloadT: PayloadTypes, Pool, Validator, ChainSp
     /// Engine validator.
     validator: Validator,
     accept_execution_requests_hash: bool,
-    /// Provides the node's sync state.
-    sync_state: Box<dyn SyncStateProvider>,
+    /// Returns `true` if the node is currently syncing.
+    is_syncing: Arc<dyn Fn() -> bool + Send + Sync>,
     /// Whether the blob pool is enabled and generally able to serve blob pool data.
     blobpool_enabled: bool,
 }
