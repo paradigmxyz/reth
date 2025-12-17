@@ -60,6 +60,14 @@ impl DiskFileBlobStore {
         self.inner.blob_cache.lock().clear()
     }
 
+    /// Look up EIP-7594 blobs by their versioned hashes.
+    ///
+    /// This returns a result vector with the **same length and order** as the input
+    /// `versioned_hashes`. Each element is `Some(BlobAndProofV2)` if the blob is available, or
+    /// `None` if it is missing or an older sidecar version.
+    ///
+    /// The lookup first scans the in-memory cache and, if not all blobs are found, falls back to
+    /// reading candidate sidecars from disk using the `versioned_hash -> tx_hash` index.
     fn get_by_versioned_hashes_eip7594(
         &self,
         versioned_hashes: &[B256],

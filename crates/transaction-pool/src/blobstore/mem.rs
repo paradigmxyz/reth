@@ -14,6 +14,11 @@ pub struct InMemoryBlobStore {
 }
 
 impl InMemoryBlobStore {
+    /// Look up EIP-7594 blobs by their versioned hashes.
+    ///
+    /// This returns a result vector with the **same length and order** as the input
+    /// `versioned_hashes`. Each element is `Some(BlobAndProofV2)` if the blob is available, or
+    /// `None` if it is missing or an older sidecar version.
     fn get_by_versioned_hashes_eip7594(
         &self,
         versioned_hashes: &[B256],
