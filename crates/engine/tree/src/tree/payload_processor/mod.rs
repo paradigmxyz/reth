@@ -676,7 +676,7 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
     /// This counter should be updated by the main execution path to indicate the current
     /// transaction being executed, allowing prewarming tasks to skip already-executed
     /// transactions.
-    pub fn executed_tx_index(&self) -> &Arc<AtomicUsize> {
+    pub const fn executed_tx_index(&self) -> &Arc<AtomicUsize> {
         &self.executed_tx_index
     }
 }

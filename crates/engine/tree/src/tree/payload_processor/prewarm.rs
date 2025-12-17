@@ -394,9 +394,11 @@ where
     /// Splits this context into an evm, an evm config, metrics, and the atomic bool for terminating
     /// execution.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
+    #[allow(clippy::type_complexity)]
     fn evm_for_ctx(
         self,
-    ) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>, Arc<AtomicUsize>)> {
+    ) -> Option<(EvmFor<Evm, impl Database>, PrewarmMetrics, Arc<AtomicBool>, Arc<AtomicUsize>)>
+    {
         let Self {
             env,
             evm_config,
