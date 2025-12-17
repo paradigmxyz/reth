@@ -239,12 +239,8 @@ where
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let proof_handle = ProofWorkerHandle::new(
-            self.executor.handle().clone(),
-            task_ctx,
-            storage_worker_count,
-            account_worker_count,
-        );
+        let proof_handle =
+            ProofWorkerHandle::new(task_ctx, storage_worker_count, account_worker_count);
 
         let multi_proof_task = MultiProofTask::new(
             proof_handle.clone(),
@@ -443,7 +439,7 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            self.executor.spawn_blocking(move || {
+            self.executor.spawn_blocking_named("reth-prewarm".to_string(), move || {
                 prewarm_task.run(transactions, to_prewarm_task);
             });
         }

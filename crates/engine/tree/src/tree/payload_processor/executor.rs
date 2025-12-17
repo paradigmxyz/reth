@@ -22,11 +22,6 @@ impl Default for WorkloadExecutor {
 }
 
 impl WorkloadExecutor {
-    /// Returns the handle to the tokio runtime
-    pub(super) const fn handle(&self) -> &Handle {
-        &self.inner.handle
-    }
-
     /// Shorthand for [`Runtime::spawn_blocking`]
     #[track_caller]
     pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
@@ -35,6 +30,18 @@ impl WorkloadExecutor {
         R: Send + 'static,
     {
         self.inner.handle.spawn_blocking(func)
+    }
+
+    /// Spawns a blocking task with a descriptive thread name for profiling.
+    ///
+    /// Unlike [`Self::spawn_blocking`], this creates a dedicated OS thread with the given name,
+    /// making it easily identifiable in profiling tools like Samply.
+    pub fn spawn_blocking_named<F, R>(&self, name: String, func: F) -> std::thread::JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        std::thread::Builder::new().name(name).spawn(func).expect("failed to spawn named thread")
     }
 }
 

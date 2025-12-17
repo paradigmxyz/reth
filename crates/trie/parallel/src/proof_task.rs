@@ -68,7 +68,6 @@ use std::{
     },
     time::{Duration, Instant},
 };
-use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, trace};
 
 #[cfg(feature = "metrics")]
@@ -109,12 +108,10 @@ impl ProofWorkerHandle {
     /// Workers run until the last handle is dropped.
     ///
     /// # Parameters
-    /// - `executor`: Tokio runtime handle for spawning blocking tasks
     /// - `task_ctx`: Shared context with database view and prefix sets
     /// - `storage_worker_count`: Number of storage workers to spawn
     /// - `account_worker_count`: Number of account workers to spawn
     pub fn new<Factory>(
-        executor: Handle,
         task_ctx: ProofTaskCtx<Factory>,
         storage_worker_count: usize,
         account_worker_count: usize,
@@ -150,32 +147,35 @@ impl ProofWorkerHandle {
             let work_rx_clone = storage_work_rx.clone();
             let storage_available_workers_clone = storage_available_workers.clone();
 
-            executor.spawn_blocking(move || {
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-                #[cfg(feature = "metrics")]
-                let cursor_metrics = ProofTaskCursorMetrics::new();
+            std::thread::Builder::new()
+                .name(format!("reth-proof-storage-{worker_id}"))
+                .spawn(move || {
+                    #[cfg(feature = "metrics")]
+                    let metrics = ProofTaskTrieMetrics::default();
+                    #[cfg(feature = "metrics")]
+                    let cursor_metrics = ProofTaskCursorMetrics::new();
 
-                let _guard = span.enter();
-                let worker = StorageProofWorker::new(
-                    task_ctx_clone,
-                    work_rx_clone,
-                    worker_id,
-                    storage_available_workers_clone,
-                    #[cfg(feature = "metrics")]
-                    metrics,
-                    #[cfg(feature = "metrics")]
-                    cursor_metrics,
-                );
-                if let Err(error) = worker.run() {
-                    error!(
-                        target: "trie::proof_task",
+                    let _guard = span.enter();
+                    let worker = StorageProofWorker::new(
+                        task_ctx_clone,
+                        work_rx_clone,
                         worker_id,
-                        ?error,
-                        "Storage worker failed"
+                        storage_available_workers_clone,
+                        #[cfg(feature = "metrics")]
+                        metrics,
+                        #[cfg(feature = "metrics")]
+                        cursor_metrics,
                     );
-                }
-            });
+                    if let Err(error) = worker.run() {
+                        error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            ?error,
+                            "Storage worker failed"
+                        );
+                    }
+                })
+                .expect("failed to spawn storage proof worker");
         }
         drop(parent_span);
 
@@ -190,33 +190,36 @@ impl ProofWorkerHandle {
             let storage_work_tx_clone = storage_work_tx.clone();
             let account_available_workers_clone = account_available_workers.clone();
 
-            executor.spawn_blocking(move || {
-                #[cfg(feature = "metrics")]
-                let metrics = ProofTaskTrieMetrics::default();
-                #[cfg(feature = "metrics")]
-                let cursor_metrics = ProofTaskCursorMetrics::new();
+            std::thread::Builder::new()
+                .name(format!("reth-proof-account-{worker_id}"))
+                .spawn(move || {
+                    #[cfg(feature = "metrics")]
+                    let metrics = ProofTaskTrieMetrics::default();
+                    #[cfg(feature = "metrics")]
+                    let cursor_metrics = ProofTaskCursorMetrics::new();
 
-                let _guard = span.enter();
-                let worker = AccountProofWorker::new(
-                    task_ctx_clone,
-                    work_rx_clone,
-                    worker_id,
-                    storage_work_tx_clone,
-                    account_available_workers_clone,
-                    #[cfg(feature = "metrics")]
-                    metrics,
-                    #[cfg(feature = "metrics")]
-                    cursor_metrics,
-                );
-                if let Err(error) = worker.run() {
-                    error!(
-                        target: "trie::proof_task",
+                    let _guard = span.enter();
+                    let worker = AccountProofWorker::new(
+                        task_ctx_clone,
+                        work_rx_clone,
                         worker_id,
-                        ?error,
-                        "Account worker failed"
+                        storage_work_tx_clone,
+                        account_available_workers_clone,
+                        #[cfg(feature = "metrics")]
+                        metrics,
+                        #[cfg(feature = "metrics")]
+                        cursor_metrics,
                     );
-                }
-            });
+                    if let Err(error) = worker.run() {
+                        error!(
+                            target: "trie::proof_task",
+                            worker_id,
+                            ?error,
+                            "Account worker failed"
+                        );
+                    }
+                })
+                .expect("failed to spawn account proof worker");
         }
         drop(parent_span);
 
@@ -1588,7 +1591,6 @@ enum AccountWorkerJob {
 mod tests {
     use super::*;
     use reth_provider::test_utils::create_test_provider_factory;
-    use tokio::{runtime::Builder, task};
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
@@ -1597,22 +1599,19 @@ mod tests {
     /// Ensures `ProofWorkerHandle::new` spawns workers correctly.
     #[test]
     fn spawn_proof_workers_creates_handle() {
-        let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
-        runtime.block_on(async {
-            let handle = tokio::runtime::Handle::current();
-            let provider_factory = create_test_provider_factory();
-            let factory =
-                reth_provider::providers::OverlayStateProviderFactory::new(provider_factory);
-            let ctx = test_ctx(factory);
+        let provider_factory = create_test_provider_factory();
+        let factory = reth_provider::providers::OverlayStateProviderFactory::new(provider_factory);
+        let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3);
+        let proof_handle = ProofWorkerHandle::new(ctx, 5, 3);
 
-            // Verify handle can be cloned
-            let _cloned_handle = proof_handle.clone();
+        // Verify handle can be cloned
+        let _cloned_handle = proof_handle.clone();
 
-            // Workers shut down automatically when handle is dropped
-            drop(proof_handle);
-            task::yield_now().await;
-        });
+        // Workers shut down automatically when handle is dropped
+        drop(proof_handle);
+
+        // Give threads time to shut down
+        std::thread::sleep(std::time::Duration::from_millis(10));
     }
 }
