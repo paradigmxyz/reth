@@ -1,13 +1,13 @@
 //! Contains a precompile cache backed by `schnellru::LruMap` (LRU by length).
 
 use alloy_primitives::Bytes;
+use dashmap::DashMap;
 use parking_lot::Mutex;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
 use schnellru::LruMap;
 use std::{
-    collections::HashMap,
     hash::{Hash, Hasher},
     sync::Arc,
 };
@@ -17,7 +17,7 @@ const MAX_CACHE_SIZE: u32 = 10_000;
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
-pub struct PrecompileCacheMap<S>(HashMap<Address, PrecompileCache<S>>)
+pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>>>)
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone;
 
@@ -25,7 +25,10 @@ impl<S> PrecompileCacheMap<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    pub(crate) fn cache_for_address(&mut self, address: Address) -> PrecompileCache<S> {
+    pub(crate) fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
+        if let Some(cache) = self.0.get(&address) {
+            return cache.clone();
+        }
         self.0.entry(address).or_default().clone()
     }
 }
