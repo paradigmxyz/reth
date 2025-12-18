@@ -3,8 +3,8 @@
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
-        CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
-        SavedCache,
+        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache,
+        ExecutionCacheBuilder, SavedCache,
     },
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
@@ -223,6 +223,8 @@ where
             + Send
             + 'static,
     {
+        let parent_hash = env.parent_hash;
+
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx, transaction_count_hint) =
             self.spawn_tx_iterator(transactions);
@@ -291,11 +293,17 @@ where
 
         // spawn multi-proof task
         let parent_span = span.clone();
-        self.executor.spawn_blocking(move || {
-            let _enter = parent_span.entered();
-            // Build a state provider for the multiproof task
-            let provider = provider_builder.build().expect("failed to build provider");
-            multi_proof_task.run(provider);
+        self.executor.spawn_blocking({
+            let saved_cache = self.cache_for(parent_hash);
+            let cache = saved_cache.cache().clone();
+            let cache_metrics = saved_cache.metrics().clone();
+            move || {
+                let _enter = parent_span.entered();
+                // Build a state provider for the multiproof task
+                let provider = provider_builder.build().expect("failed to build provider");
+                let provider = CachedStateProvider::new(provider, cache, cache_metrics);
+                multi_proof_task.run(provider);
+            }
         });
 
         // wire the sparse trie to the state root response receiver

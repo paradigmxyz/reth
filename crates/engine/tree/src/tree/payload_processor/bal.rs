@@ -1,5 +1,6 @@
 //! BAL (Block Access List, EIP-7928) related functionality.
 
+use crate::tree::cached_state::CachedStateProvider;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_eip7928::BlockAccessList;
 use alloy_primitives::{keccak256, Address, StorageKey, U256};
@@ -19,7 +20,7 @@ pub fn total_changed_slots(bal: &BlockAccessList) -> usize {
 /// across all accounts in the BAL. The iterator intelligently skips accounts and slots
 /// outside the specified range for efficient traversal.
 #[derive(Debug)]
-pub struct ChangedSlotIter<'a> {
+pub(crate) struct ChangedSlotIter<'a> {
     bal: &'a BlockAccessList,
     range: Range<usize>,
     current_index: usize,
@@ -29,7 +30,7 @@ pub struct ChangedSlotIter<'a> {
 
 impl<'a> ChangedSlotIter<'a> {
     /// Creates a new iterator over changed slots within the specified range.
-    pub fn new(bal: &'a BlockAccessList, range: Range<usize>) -> Self {
+    pub(crate) fn new(bal: &'a BlockAccessList, range: Range<usize>) -> Self {
         let mut iter = Self { bal, range, current_index: 0, account_idx: 0, slot_idx: 0 };
         iter.skip_to_range_start();
         iter
@@ -103,9 +104,9 @@ impl<'a> Iterator for ChangedSlotIter<'a> {
 
 /// Converts a Block Access List into a [`HashedPostState`] by extracting the final state
 /// of modified accounts and storage slots.
-pub fn bal_to_hashed_post_state<P>(
+pub(crate) fn bal_to_hashed_post_state<P>(
     bal: &BlockAccessList,
-    provider: &P,
+    provider: &CachedStateProvider<P>,
 ) -> Result<HashedPostState, ProviderError>
 where
     P: AccountReader,
@@ -133,12 +134,9 @@ where
             None
         };
 
-        // Only fetch account from provider if we're missing any field
-        let existing_account = if balance.is_none() || nonce.is_none() || code_hash.is_none() {
-            provider.basic_account(&address)?
-        } else {
-            None
-        };
+        // Always fetch the account; even if we don't need the db account to construct the final
+        // `Account`, doing this fills the cache.
+        let existing_account = provider.basic_account(&address)?;
 
         // Build the final account state
         let account = Account {
@@ -181,11 +179,16 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::cached_state::{ExecutionCache, ExecutionCacheBuilder};
     use alloy_eip7928::{
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
     use alloy_primitives::{Address, Bytes, StorageKey, B256};
     use reth_revm::test_utils::StateProviderTest;
+
+    fn new_cache() -> ExecutionCache {
+        ExecutionCacheBuilder::default().build_caches(1000)
+    }
 
     #[test]
     fn test_bal_to_hashed_post_state_basic() {
@@ -202,6 +205,7 @@ mod tests {
         };
 
         let bal = vec![account_changes];
+        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         assert_eq!(result.accounts.len(), 1);
@@ -236,6 +240,7 @@ mod tests {
         };
 
         let bal = vec![account_changes];
+        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
@@ -265,6 +270,7 @@ mod tests {
         };
 
         let bal = vec![account_changes];
+        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
@@ -292,6 +298,7 @@ mod tests {
         };
 
         let bal = vec![account_changes];
+        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
@@ -326,6 +333,7 @@ mod tests {
         };
 
         let bal = vec![account_changes];
+        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
@@ -358,6 +366,7 @@ mod tests {
         };
 
         let bal = vec![account_changes];
+        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
@@ -398,6 +407,7 @@ mod tests {
         };
 
         let bal = vec![account_changes];
+        let provider = CachedStateProvider::new(provider, new_cache(), Default::default());
         let result = bal_to_hashed_post_state(&bal, &provider).unwrap();
 
         let hashed_address = keccak256(address);
