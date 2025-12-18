@@ -319,13 +319,24 @@ where
     CURSOR: DbCursorRW<tables::TransactionHashNumbers> + DbCursorRO<tables::TransactionHashNumbers>,
 {
     /// Puts a transaction hash number mapping.
+    ///
+    /// When `append_only` is true, uses `cursor.append()` which is significantly faster
+    /// but requires entries to be inserted in order and the table to be empty.
+    /// When false, uses `cursor.insert()` which handles arbitrary insertion order.
     pub fn put_transaction_hash_number(
         &mut self,
         hash: TxHash,
         tx_num: TxNumber,
+        append_only: bool,
     ) -> ProviderResult<()> {
         match self {
-            Self::Database(cursor) => Ok(cursor.upsert(hash, &tx_num)?),
+            Self::Database(cursor) => {
+                if append_only {
+                    Ok(cursor.append(hash, &tx_num)?)
+                } else {
+                    Ok(cursor.insert(hash, &tx_num)?)
+                }
+            }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::TransactionHashNumbers>(hash, &tx_num),
@@ -731,9 +742,9 @@ mod rocksdb_tests {
         // Verify we got a RocksDB writer
         assert!(matches!(writer, EitherWriter::RocksDB(_)));
 
-        // Write transaction hash numbers
-        writer.put_transaction_hash_number(hash1, tx_num1).unwrap();
-        writer.put_transaction_hash_number(hash2, tx_num2).unwrap();
+        // Write transaction hash numbers (append_only=false since we're using RocksDB)
+        writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
+        writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
 
         // Extract the batch and register with provider for commit
         if let Some(batch) = writer.into_raw_rocksdb_batch() {
@@ -945,9 +956,9 @@ mod rocksdb_tests {
         let provider = factory.database_provider_rw().unwrap();
         let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
 
-        // Write transaction hash numbers
-        writer.put_transaction_hash_number(hash1, tx_num1).unwrap();
-        writer.put_transaction_hash_number(hash2, tx_num2).unwrap();
+        // Write transaction hash numbers (append_only=false since we're using RocksDB)
+        writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
+        writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
 
         // Extract the raw batch from the writer and register it with the provider
         let raw_batch = writer.into_raw_rocksdb_batch();

@@ -1,5 +1,6 @@
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{TxHash, TxNumber};
+use num_traits::Zero;
 use reth_config::config::{EtlConfig, TransactionLookupConfig};
 use reth_db_api::{
     table::{Decode, Decompress, Value},
@@ -153,6 +154,10 @@ where
                 let total_hashes = hash_collector.len();
                 let interval = (total_hashes / 10).max(1);
 
+                // Use append mode when table is empty (first sync) - significantly faster
+                let append_only =
+                    provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
+
                 // Create RocksDB batch if feature is enabled
                 #[cfg(all(unix, feature = "rocksdb"))]
                 let rocksdb = provider.rocksdb_provider();
@@ -170,6 +175,7 @@ where
                     if index > 0 && index.is_multiple_of(interval) {
                         info!(
                             target: "sync::stages::transaction_lookup",
+                            ?append_only,
                             progress = %format!("{:.2}%", (index as f64 / total_hashes as f64) * 100.0),
                             "Inserting hashes"
                         );
@@ -178,7 +184,7 @@ where
                     // Decode from raw ETL bytes
                     let hash = TxHash::decode(&hash_bytes)?;
                     let tx_num = TxNumber::decompress(&number_bytes)?;
-                    writer.put_transaction_hash_number(hash, tx_num)?;
+                    writer.put_transaction_hash_number(hash, tx_num, append_only)?;
                 }
 
                 // Extract and register RocksDB batch for commit at provider level
