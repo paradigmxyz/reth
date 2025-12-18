@@ -64,49 +64,37 @@ where
     T::Key: Clone + for<'de> serde::Deserialize<'de>,
     T::Value: Clone + for<'de> serde::Deserialize<'de>,
 {
-    let input = &load_vectors::<T>();
-    group.bench_function(format!("{}.KeyEncode", T::NAME), move |b| {
-        b.iter_with_setup(
-            || input.clone(),
-            |input| {
-                for (k, _, _, _) in input {
-                    k.encode();
-                }
-            },
-        )
+    let input = load_vectors::<T>();
+    group.bench_function(format!("{}.KeyEncode", T::NAME), |b| {
+        b.iter(|| {
+            for (k, _, _, _) in &input {
+                k.encode();
+            }
+        })
     });
 
     group.bench_function(format!("{}.KeyDecode", T::NAME), |b| {
-        b.iter_with_setup(
-            || input.clone(),
-            |input| {
-                for (_, k, _, _) in input {
-                    let _ = <T as Table>::Key::decode(&k);
-                }
-            },
-        )
+        b.iter(|| {
+            for (_, k, _, _) in &input {
+                let _ = <T as Table>::Key::decode(k);
+            }
+        })
     });
 
     group.bench_function(format!("{}.ValueCompress", T::NAME), move |b| {
-        b.iter_with_setup(
-            || input.clone(),
-            |input| {
-                for (_, _, v, _) in input {
-                    v.compress();
-                }
-            },
-        )
+        b.iter(|| {
+            for (_, _, v, _) in &input {
+                v.compress();
+            }
+        })
     });
 
     group.bench_function(format!("{}.ValueDecompress", T::NAME), |b| {
-        b.iter_with_setup(
-            || input.clone(),
-            |input| {
-                for (_, _, _, v) in input {
-                    let _ = <T as Table>::Value::decompress(&v);
-                }
-            },
-        )
+        b.iter(|| {
+            for (_, _, _, v) in &input {
+                let _ = <T as Table>::Value::decompress(v);
+            }
+        })
     });
 }
 
