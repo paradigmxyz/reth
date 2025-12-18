@@ -797,6 +797,13 @@ where
             // This is critical to ensure the database state is reverted BEFORE the FCU returns
             // and the payload builder starts building new blocks on top
             let persisted_num = self.persistence_state.last_persisted_block.number;
+            debug!(
+                target: "engine::tree",
+                new_head_number,
+                persisted_num,
+                needs_sync_persistence = new_head_number < persisted_num,
+                "Checking if synchronous disk removal needed during FCU unwind"
+            );
             if new_head_number < persisted_num {
                 debug!(
                     target: "engine::tree",
