@@ -5,15 +5,14 @@ use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
     keccak256,
-    map::{B256Set, HashMap, HashSet},
-    Address, B256, U256,
+    map::{B256Set, HashSet},
+    B256,
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
-use reth_primitives_traits::Account;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -110,12 +109,7 @@ pub(super) enum MultiProofMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution with its source.
-    ///
-    /// The state is "sealed" - the `is_changed` filter has been applied at the producer,
-    /// but keys are not yet hashed. This allows:
-    /// 1. Safe batching (no `is_changed` flags to corrupt)
-    /// 2. Deferred hashing (hash once after batching, not per-TX)
-    StateUpdate(Source, SealedStateUpdate),
+    StateUpdate(Source, EvmState),
     /// State update that can be applied to the sparse trie without any new proofs.
     ///
     /// It can be the case when all accounts and storage slots from the state update were already
@@ -210,17 +204,19 @@ impl Drop for StateHookSender {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn evm_state_to_hashed_post_state(update: &EvmState) -> HashedPostState {
+/// Converts an `EvmState` to a `HashedPostState` by hashing addresses and storage keys.
+///
+/// Only includes accounts that are touched and storage slots that are changed.
+pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
     for (address, account) in update {
         if account.is_touched() {
-            let hashed_address = keccak256(*address);
+            let hashed_address = keccak256(address);
             trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
-            let info = if destroyed { None } else { Some((&account.info).into()) };
+            let info = if destroyed { None } else { Some(account.info.into()) };
             hashed_state.accounts.insert(hashed_address, info);
 
             if destroyed {
@@ -228,9 +224,9 @@ pub(crate) fn evm_state_to_hashed_post_state(update: &EvmState) -> HashedPostSta
             } else {
                 let mut changed_storage_iter = account
                     .storage
-                    .iter()
+                    .into_iter()
                     .filter(|(_slot, value)| value.is_changed())
-                    .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value))
+                    .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
                     .peekable();
 
                 if changed_storage_iter.peek().is_some() {
@@ -246,149 +242,64 @@ pub(crate) fn evm_state_to_hashed_post_state(update: &EvmState) -> HashedPostSta
     hashed_state
 }
 
-/// A state update that has been "sealed" - the `is_changed` filter has been applied,
-/// but keys have not been hashed yet.
-///
-/// This allows batching multiple state updates safely (no `is_changed` flags to corrupt)
-/// while deferring the expensive keccak256 hashing until after batching.
-///
-/// # Design Rationale
-///
-/// The core problem: `EvmStorageSlot::is_changed()` returns `original_value != present_value`.
-/// When batching via `EvmState::extend`, later TXs can overwrite `original_value`, making
-/// `is_changed` return false for slots that were actually modified.
-///
-/// Solution: Capture which keys changed (filter by `is_changed`) at seal time, but store
-/// unhashed keys. This allows:
-/// 1. Safe batching via `extend()` - just key-value pairs, no flags to corrupt
-/// 2. Deferred hashing - hash once after batching, not per-TX
-#[derive(Debug, Clone, Default)]
-pub(super) struct SealedStateUpdate {
-    /// Account states that changed. `None` value means the account was destroyed.
-    /// Keys are unhashed addresses (20 bytes).
-    pub accounts: HashMap<Address, Option<Account>>,
-    /// Storage slots that changed, grouped by account.
-    /// Keys are unhashed addresses and slot keys.
-    pub storage: HashMap<Address, HashMap<U256, U256>>,
-    /// Accounts whose storage was wiped (selfdestruct).
-    /// When converting to [`HashedPostState`], these get `HashedStorage::new(true)`.
-    pub wiped: HashSet<Address>,
+/// Estimates the number of proof targets for an `EvmState` (accounts + storage slots).
+fn estimate_evm_state_targets(state: &EvmState) -> usize {
+    state
+        .iter()
+        .filter(|(_, account)| account.is_touched())
+        .map(|(_, account)| {
+            1 + account.storage.iter().filter(|(_, slot)| slot.is_changed()).count()
+        })
+        .sum()
 }
 
-impl SealedStateUpdate {
-    /// Seal an `EvmState` by capturing which keys changed.
-    ///
-    /// This applies the `is_changed` filter NOW, while the information is correct,
-    /// but defers hashing until later.
-    pub(super) fn seal(state: &EvmState) -> Self {
-        let mut sealed = Self::default();
+/// Merges `overlay` into `base` while preserving `original_value` from `base`.
+///
+/// # Why this is needed
+///
+/// The standard `EvmState::extend` overwrites storage slots entirely, including their
+/// `original_value`. This breaks `is_changed()` semantics when batching multiple state updates:
+///
+/// - TX1: slot X changes 0→10 (original=0, present=10, `is_changed=true`)
+/// - TX2: reads slot X (original=10, present=10, `is_changed=false`)
+/// - After `extend`: slot X has original=10, present=10, `is_changed=false` ❌
+///
+/// This function preserves `base.original_value` when merging, so `is_changed()` stays correct:
+///
+/// - After `merge_evm_state`: slot X has original=0, present=10, `is_changed=true` ✓
+fn merge_evm_state(base: &mut EvmState, overlay: EvmState) {
+    for (addr, overlay_account) in overlay {
+        match base.get_mut(&addr) {
+            Some(base_account) => {
+                // Merge account info - overlay wins for latest state
+                base_account.info = overlay_account.info;
+                // Merge status flags
+                base_account.status |= overlay_account.status;
+                // Update transaction_id to latest
+                base_account.transaction_id = overlay_account.transaction_id;
 
-        for (address, account) in state {
-            if !account.is_touched() {
-                continue;
-            }
-
-            let destroyed = account.is_selfdestructed();
-            let info = if destroyed { None } else { Some((&account.info).into()) };
-            sealed.accounts.insert(*address, info);
-
-            if destroyed {
-                sealed.wiped.insert(*address);
-            } else {
-                // Collect changed storage slots
-                let changed_slots: HashMap<U256, U256> = account
-                    .storage
-                    .iter()
-                    .filter(|(_slot, value)| value.is_changed())
-                    .map(|(slot, value)| (*slot, value.present_value))
-                    .collect();
-
-                if !changed_slots.is_empty() {
-                    sealed.storage.insert(*address, changed_slots);
+                // Merge storage: preserve base's original_value, take overlay's present_value
+                for (slot, overlay_slot) in overlay_account.storage {
+                    match base_account.storage.get_mut(&slot) {
+                        Some(base_slot) => {
+                            // Key insight: keep base's original_value, update present_value
+                            base_slot.present_value = overlay_slot.present_value;
+                            // Update cold/transaction tracking from overlay
+                            base_slot.transaction_id = overlay_slot.transaction_id;
+                            base_slot.is_cold = overlay_slot.is_cold;
+                        }
+                        None => {
+                            // Slot is new in overlay - use overlay's values as-is
+                            base_account.storage.insert(slot, overlay_slot);
+                        }
+                    }
                 }
             }
-        }
-
-        sealed
-    }
-
-    /// Merge another sealed update into this one.
-    ///
-    /// This is safe because both updates have already captured their `is_changed` semantics.
-    /// Later values win (last-writer-wins), which is correct for final state.
-    fn extend(&mut self, other: Self) {
-        // Accounts: last writer wins
-        self.accounts.extend(other.accounts);
-
-        // Wiped: if other wiped an account, it's wiped
-        // (handles selfdestruct in later TX)
-        for addr in other.wiped {
-            self.wiped.insert(addr);
-            // Clear any storage we had for this account
-            self.storage.remove(&addr);
-        }
-
-        // Storage: merge per-slot, last writer wins.
-        //
-        // Important: do *not* clear the wiped marker here. A wipe earlier in the batch must
-        // persist even if the account is later recreated, because the final update still needs
-        // to wipe the pre-batch storage before applying the new slots.
-        for (addr, other_slots) in other.storage {
-            match self.storage.get_mut(&addr) {
-                Some(slots) => slots.extend(other_slots),
-                None => {
-                    self.storage.insert(addr, other_slots);
-                }
+            None => {
+                // Account is new in overlay - insert as-is
+                base.insert(addr, overlay_account);
             }
         }
-    }
-
-    /// Convert to `HashedPostState` by hashing all keys.
-    ///
-    /// This is the expensive operation that we want to do only once after batching.
-    fn into_hashed_post_state(self) -> HashedPostState {
-        let Self { accounts, storage, wiped } = self;
-
-        let mut hashed = HashedPostState::with_capacity(accounts.len() + storage.len());
-        let mut hashed_addresses =
-            HashMap::with_capacity(accounts.len() + storage.len() + wiped.len());
-
-        for (address, account_info) in accounts {
-            let hashed_address =
-                *hashed_addresses.entry(address).or_insert_with(|| keccak256(address));
-            hashed.accounts.insert(hashed_address, account_info);
-        }
-
-        for (address, slots) in storage {
-            let hashed_address =
-                *hashed_addresses.entry(address).or_insert_with(|| keccak256(address));
-
-            let mut hashed_storage = HashedStorage::new(wiped.contains(&address));
-            hashed_storage.storage.reserve(slots.len());
-            for (slot, value) in slots {
-                hashed_storage.storage.insert(keccak256(B256::from(slot)), value);
-            }
-
-            if !hashed_storage.is_empty() {
-                hashed.storages.insert(hashed_address, hashed_storage);
-            }
-        }
-
-        // Ensure wiped accounts with no storage slots still generate a wiped storage update.
-        for address in wiped {
-            let hashed_address =
-                *hashed_addresses.entry(address).or_insert_with(|| keccak256(address));
-            hashed.storages.entry(hashed_address).or_insert_with(|| HashedStorage::new(true));
-        }
-
-        hashed
-    }
-
-    /// Estimate the number of proof targets for batching decisions.
-    fn estimate_targets(&self) -> usize {
-        let accounts = self.accounts.len();
-        let storage_slots: usize = self.storage.values().map(|slots| slots.len()).sum();
-        accounts + storage_slots + self.wiped.len()
     }
 }
 
@@ -1253,7 +1164,7 @@ impl MultiProofTask {
                 false
             }
             // State update: batch consecutive sealed updates, then hash once
-            MultiProofMessage::StateUpdate(source, sealed_update) => {
+            MultiProofMessage::StateUpdate(source, update) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
 
                 if ctx.first_update_time.is_none() {
@@ -1265,16 +1176,15 @@ impl MultiProofTask {
                 }
 
                 // Accumulate messages including the first one; reuse buffer to avoid allocations.
-                // SealedStateUpdate has no is_changed flags - safe to batch across sources.
-                let mut accumulated_targets = sealed_update.estimate_targets();
+                let mut accumulated_targets = estimate_evm_state_targets(&update);
                 ctx.accumulated_state_updates.clear();
-                ctx.accumulated_state_updates.push((source, sealed_update));
+                ctx.accumulated_state_updates.push((source, update));
 
                 // Batch consecutive state update messages up to target limit.
                 while accumulated_targets < STATE_UPDATE_MAX_BATCH_TARGETS {
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                            let next_estimate = next_update.estimate_targets();
+                            let next_estimate = estimate_evm_state_targets(&next_update);
                             // Would exceed batch cap; leave pending to dispatch on next iteration.
                             if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
                             {
@@ -1297,23 +1207,21 @@ impl MultiProofTask {
                 let num_batched = ctx.accumulated_state_updates.len();
                 self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
 
-                // Merge all accumulated SealedStateUpdates.
-                // This is safe because SealedStateUpdate has no is_changed semantics.
-                // Use drain to preserve the buffer allocation.
+                // Merge all accumulated EvmState updates.
+                // Use merge_evm_state instead of extend to preserve original_value,
+                // ensuring is_changed() returns correct results after batching.
                 let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
-                let (mut batch_source, mut merged_sealed) = accumulated_iter
+                let (mut batch_source, mut merged_update) = accumulated_iter
                     .next()
                     .expect("state update batch always has at least one entry");
                 for (next_source, next_update) in accumulated_iter {
                     batch_source = next_source;
-                    merged_sealed.extend(next_update);
+                    merge_evm_state(&mut merged_update, next_update);
                 }
 
-                // Convert to HashedPostState ONCE after merging - this is where hashing happens.
-                // This is the key optimization: we hash unique keys only once per batch,
-                // not once per TX.
-                let batch_len = merged_sealed.accounts.len();
-                let hashed_state = merged_sealed.into_hashed_post_state();
+                // Convert to HashedPostState after merging.
+                let batch_len = merged_update.len();
+                let hashed_state = evm_state_to_hashed_post_state(merged_update);
 
                 batch_metrics.state_update_proofs_requested +=
                     self.on_hashed_state_update(batch_source, hashed_state);
@@ -1613,9 +1521,9 @@ struct MultiproofBatchCtx {
     accumulated_prefetch_targets: Vec<MultiProofTargets>,
     /// Reusable buffer for accumulating state updates during batching.
     ///
-    /// Uses `SealedStateUpdate` which captures `is_changed` semantics at seal time but defers
-    /// hashing. This allows safe batching (no flags to corrupt) while hashing once after merge.
-    accumulated_state_updates: Vec<(Source, SealedStateUpdate)>,
+    /// Uses `EvmState` with `merge_evm_state` which preserves `original_value` from base state,
+    /// ensuring `is_changed()` returns correct results after batching.
+    accumulated_state_updates: Vec<(Source, EvmState)>,
 }
 
 impl MultiproofBatchCtx {
@@ -1731,8 +1639,7 @@ where
 mod tests {
     use super::*;
     use alloy_eip7928::{AccountChanges, BalanceChange};
-    use alloy_primitives::{keccak256, map::B256Set, Address};
-    use reth_primitives_traits::Account;
+    use alloy_primitives::{map::B256Set, Address};
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
@@ -1747,19 +1654,26 @@ mod tests {
     };
     use tokio::runtime::{Handle, Runtime};
 
-    /// Creates a `HashedPostState` with a single account for testing.
-    fn create_hashed_state_update(addr: Address, balance: u64) -> HashedPostState {
-        let hashed_address = keccak256(addr);
-        let account = Account { balance: U256::from(balance), nonce: 1, bytecode_hash: None };
-        HashedPostState::default().with_accounts([(hashed_address, Some(account))])
-    }
+    /// Creates an `EvmState` with a single touched account for testing.
+    fn create_evm_state_update(addr: Address, balance: u64) -> EvmState {
+        use revm_state::{Account, AccountInfo, AccountStatus};
 
-    /// Creates a `SealedStateUpdate` with a single account for testing.
-    fn create_sealed_state_update(addr: Address, balance: u64) -> SealedStateUpdate {
-        let account = Account { balance: U256::from(balance), nonce: 1, bytecode_hash: None };
-        let mut sealed = SealedStateUpdate::default();
-        sealed.accounts.insert(addr, Some(account));
-        sealed
+        let mut state = EvmState::default();
+        state.insert(
+            addr,
+            Account {
+                info: AccountInfo {
+                    balance: U256::from(balance),
+                    nonce: 1,
+                    code_hash: revm_primitives::KECCAK_EMPTY,
+                    code: None,
+                },
+                storage: Default::default(),
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
+        state
     }
 
     /// Checks whether two sources refer to the same origin (for test assertions).
@@ -2307,8 +2221,8 @@ mod tests {
         let addr1 = alloy_primitives::Address::random();
         let addr2 = alloy_primitives::Address::random();
 
-        let update1 = create_sealed_state_update(addr1, 100);
-        let update2 = create_sealed_state_update(addr2, 200);
+        let update1 = create_evm_state_update(addr1, 100);
+        let update2 = create_evm_state_update(addr2, 200);
 
         let source = StateChangeSource::Transaction(0);
 
@@ -2329,12 +2243,12 @@ mod tests {
                 }
 
                 assert_eq!(num_batched, 2);
-                assert_eq!(merged_update.accounts.len(), 2);
-                assert!(merged_update.accounts.contains_key(&addr1));
-                assert!(merged_update.accounts.contains_key(&addr2));
+                assert_eq!(merged_update.len(), 2);
+                assert!(merged_update.contains_key(&addr1));
+                assert!(merged_update.contains_key(&addr2));
 
                 // Convert to HashedPostState and process
-                let hashed = merged_update.into_hashed_post_state();
+                let hashed = evm_state_to_hashed_post_state(merged_update);
                 task.on_hashed_state_update(source.into(), hashed)
             } else {
                 panic!("Expected StateUpdate message");
@@ -2364,17 +2278,17 @@ mod tests {
         let tx = task.state_root_message_sender();
         tx.send(MultiProofMessage::StateUpdate(
             source_a.into(),
-            create_sealed_state_update(addr_a1, 100),
+            create_evm_state_update(addr_a1, 100),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source_b.into(),
-            create_sealed_state_update(addr_b1, 200),
+            create_evm_state_update(addr_b1, 200),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source_a.into(),
-            create_sealed_state_update(addr_a2, 300),
+            create_evm_state_update(addr_a2, 300),
         ))
         .unwrap();
 
@@ -2394,10 +2308,10 @@ mod tests {
 
             // All 3 should be batched together now
             assert_eq!(num_batched, 3, "All updates should batch together");
-            assert_eq!(merged_update.accounts.len(), 3);
-            assert!(merged_update.accounts.contains_key(&addr_a1));
-            assert!(merged_update.accounts.contains_key(&addr_b1));
-            assert!(merged_update.accounts.contains_key(&addr_a2));
+            assert_eq!(merged_update.len(), 3);
+            assert!(merged_update.contains_key(&addr_a1));
+            assert!(merged_update.contains_key(&addr_b1));
+            assert!(merged_update.contains_key(&addr_a2));
         } else {
             panic!("Expected first StateUpdate");
         }
@@ -2421,25 +2335,16 @@ mod tests {
 
         // Queue 3 pre-block updates - they should all batch together now
         let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(
-            source.into(),
-            create_sealed_state_update(addr1, 100),
-        ))
-        .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(
-            source.into(),
-            create_sealed_state_update(addr2, 200),
-        ))
-        .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(
-            source.into(),
-            create_sealed_state_update(addr3, 300),
-        ))
-        .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source.into(), create_evm_state_update(addr1, 100)))
+            .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source.into(), create_evm_state_update(addr2, 200)))
+            .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source.into(), create_evm_state_update(addr3, 300)))
+            .unwrap();
 
         if let Ok(MultiProofMessage::StateUpdate(first_source, first_update)) = task.rx.recv() {
             assert!(same_source(first_source, source.into()));
-            assert!(first_update.accounts.contains_key(&addr1));
+            assert!(first_update.contains_key(&addr1));
 
             let mut merged_update = first_update;
             let mut num_batched = 1;
@@ -2453,10 +2358,10 @@ mod tests {
 
             // All 3 should be batched together
             assert_eq!(num_batched, 3, "All pre-block updates should batch");
-            assert_eq!(merged_update.accounts.len(), 3);
-            assert!(merged_update.accounts.contains_key(&addr1));
-            assert!(merged_update.accounts.contains_key(&addr2));
-            assert!(merged_update.accounts.contains_key(&addr3));
+            assert_eq!(merged_update.len(), 3);
+            assert!(merged_update.contains_key(&addr1));
+            assert!(merged_update.contains_key(&addr2));
+            assert!(merged_update.contains_key(&addr3));
         } else {
             panic!("Expected first StateUpdate");
         }
@@ -2487,8 +2392,8 @@ mod tests {
         targets3.insert(addr3, HashSet::default());
 
         // Create SealedStateUpdate updates
-        let state_update1 = create_sealed_state_update(state_addr1, 100);
-        let state_update2 = create_sealed_state_update(state_addr2, 200);
+        let state_update1 = create_evm_state_update(state_addr1, 100);
+        let state_update2 = create_evm_state_update(state_addr2, 200);
 
         let source = StateChangeSource::Transaction(42);
 
@@ -2534,7 +2439,7 @@ mod tests {
         // Step 2: The pending message should be StateUpdate1 (preserved ordering)
         match pending_msg {
             Some(MultiProofMessage::StateUpdate(_src, update)) => {
-                assert!(update.accounts.contains_key(&state_addr1), "Should be first StateUpdate");
+                assert!(update.contains_key(&state_addr1), "Should be first StateUpdate");
             }
             _ => panic!("StateUpdate1 was lost or reordered! The ordering fix is broken."),
         }
@@ -2542,7 +2447,7 @@ mod tests {
         // Step 3: Next in channel should be StateUpdate2
         match task.rx.try_recv() {
             Ok(MultiProofMessage::StateUpdate(_src, update)) => {
-                assert!(update.accounts.contains_key(&state_addr2), "Should be second StateUpdate");
+                assert!(update.contains_key(&state_addr2), "Should be second StateUpdate");
             }
             _ => panic!("StateUpdate2 was lost!"),
         }
@@ -2575,7 +2480,7 @@ mod tests {
         prefetch2.insert(prefetch_addr2, HashSet::default());
 
         let state_addr = alloy_primitives::Address::random();
-        let state_update = create_sealed_state_update(state_addr, 42);
+        let state_update = create_evm_state_update(state_addr, 42);
 
         let source = StateChangeSource::Transaction(99);
 
@@ -2658,17 +2563,17 @@ mod tests {
         tx.send(MultiProofMessage::PrefetchProofs(prefetch1.clone())).unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_sealed_state_update(state_addr1, 100),
+            create_evm_state_update(state_addr1, 100),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_sealed_state_update(state_addr2, 200),
+            create_evm_state_update(state_addr2, 200),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_sealed_state_update(state_addr3, 300),
+            create_evm_state_update(state_addr3, 300),
         ))
         .unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch2.clone())).unwrap();
@@ -2726,14 +2631,10 @@ mod tests {
                 num_batched, 3,
                 "Pending message should get full batching treatment and merge all 3 StateUpdates"
             );
-            assert_eq!(
-                merged_update.accounts.len(),
-                3,
-                "Should have all 3 addresses in merged update"
-            );
-            assert!(merged_update.accounts.contains_key(&state_addr1));
-            assert!(merged_update.accounts.contains_key(&state_addr2));
-            assert!(merged_update.accounts.contains_key(&state_addr3));
+            assert_eq!(merged_update.len(), 3, "Should have all 3 addresses in merged update");
+            assert!(merged_update.contains_key(&state_addr1));
+            assert!(merged_update.contains_key(&state_addr2));
+            assert!(merged_update.contains_key(&state_addr3));
         } else {
             panic!("Expected pending StateUpdate");
         }
@@ -2788,287 +2689,170 @@ mod tests {
         assert!(!should_finish, "Should continue waiting for proofs");
     }
 
-    // ==================== SealedStateUpdate Unit Tests ====================
+    // ==================== merge_evm_state Unit Tests ====================
 
-    /// Verifies `SealedStateUpdate::extend()` with wiped (selfdestructed) accounts.
+    /// Verifies that `merge_evm_state` preserves `original_value` from base state.
     ///
-    /// Scenario: TX1 modifies storage on account A. TX2 selfdestructs account A.
-    /// The merged update should have A wiped and no storage slots.
+    /// This is the core fix for the batching bug: when merging TX1's state with TX2's state,
+    /// the `original_value` from TX1 must be preserved so `is_changed()` returns correct results.
     #[test]
-    fn test_sealed_update_extend_with_selfdestruct() {
+    fn test_merge_evm_state_preserves_original_value() {
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
         let addr = Address::random();
+        let slot = U256::from(42);
 
-        // TX1: account A modified with storage slot
-        let mut update1 = SealedStateUpdate::default();
-        update1
-            .accounts
-            .insert(addr, Some(Account { balance: U256::from(100), ..Default::default() }));
-        let mut slots = HashMap::default();
-        slots.insert(U256::from(1), U256::from(999));
-        update1.storage.insert(addr, slots);
-
-        // TX2: account A selfdestructed
-        let mut update2 = SealedStateUpdate::default();
-        update2.accounts.insert(addr, None);
-        update2.wiped.insert(addr);
-
-        update1.extend(update2);
-
-        // Account should be destroyed
-        assert_eq!(update1.accounts.get(&addr), Some(&None));
-        // Account should be marked as wiped
-        assert!(update1.wiped.contains(&addr));
-        // Storage should be cleared (selfdestruct wipes storage)
-        assert!(!update1.storage.contains_key(&addr));
-    }
-
-    /// Verifies `SealedStateUpdate::extend()` when an account is selfdestructed then recreated.
-    ///
-    /// Scenario: TX1 selfdestructs account A. TX2 recreates account A with new storage.
-    /// The merged update should have A wiped (so old storage is cleared) but with new slots.
-    #[test]
-    fn test_sealed_update_extend_selfdestruct_then_recreate() {
-        let addr = Address::random();
-
-        // TX1: account A selfdestructed
-        let mut update1 = SealedStateUpdate::default();
-        update1.accounts.insert(addr, None);
-        update1.wiped.insert(addr);
-
-        // TX2: account A recreated with new storage
-        let mut update2 = SealedStateUpdate::default();
-        update2
-            .accounts
-            .insert(addr, Some(Account { balance: U256::from(200), ..Default::default() }));
-        let mut slots = HashMap::default();
-        slots.insert(U256::from(42), U256::from(1234));
-        update2.storage.insert(addr, slots);
-
-        update1.extend(update2);
-
-        // Account should be recreated with new balance
-        let account = update1.accounts.get(&addr).unwrap();
-        assert_eq!(account.as_ref().unwrap().balance, U256::from(200));
-        // Account should STILL be marked as wiped (to clear old storage before applying new)
-        assert!(update1.wiped.contains(&addr));
-        // New storage should be present
-        assert!(update1.storage.contains_key(&addr));
-        assert_eq!(
-            update1.storage.get(&addr).unwrap().get(&U256::from(42)),
-            Some(&U256::from(1234))
-        );
-    }
-
-    /// Verifies `SealedStateUpdate::extend()` merges storage slots correctly (last writer wins).
-    #[test]
-    fn test_sealed_update_extend_storage_last_writer_wins() {
-        let addr = Address::random();
-        let slot = U256::from(5);
-
-        // TX1: writes 100 to slot 5
-        let mut update1 = SealedStateUpdate::default();
-        update1.accounts.insert(addr, Some(Default::default()));
-        let mut slots1 = HashMap::default();
-        slots1.insert(slot, U256::from(100));
-        update1.storage.insert(addr, slots1);
-
-        // TX2: writes 200 to slot 5
-        let mut update2 = SealedStateUpdate::default();
-        update2.accounts.insert(addr, Some(Default::default()));
-        let mut slots2 = HashMap::default();
-        slots2.insert(slot, U256::from(200));
-        update2.storage.insert(addr, slots2);
-
-        update1.extend(update2);
-
-        // Slot should have the value from TX2
-        assert_eq!(update1.storage.get(&addr).unwrap().get(&slot), Some(&U256::from(200)));
-    }
-
-    /// Verifies `SealedStateUpdate::into_hashed_post_state()` correctly hashes keys.
-    #[test]
-    fn test_sealed_update_into_hashed_post_state() {
-        let addr = Address::random();
-        let slot = U256::from(7);
-        let slot_value = U256::from(42);
-
-        let mut sealed = SealedStateUpdate::default();
-        let account = Account { balance: U256::from(500), nonce: 3, bytecode_hash: None };
-        sealed.accounts.insert(addr, Some(account));
-        let mut slots = HashMap::default();
-        slots.insert(slot, slot_value);
-        sealed.storage.insert(addr, slots);
-
-        let hashed = sealed.into_hashed_post_state();
-
-        // Check account is hashed
-        let hashed_addr = keccak256(addr);
-        assert!(hashed.accounts.contains_key(&hashed_addr));
-        let hashed_account = hashed.accounts.get(&hashed_addr).unwrap().unwrap();
-        assert_eq!(hashed_account.balance, U256::from(500));
-        assert_eq!(hashed_account.nonce, 3);
-
-        // Check storage is hashed
-        let storage = hashed.storages.get(&hashed_addr).unwrap();
-        assert!(!storage.wiped);
-        let hashed_slot = keccak256(B256::from(slot));
-        assert_eq!(storage.storage.get(&hashed_slot), Some(&slot_value));
-    }
-
-    /// Verifies `SealedStateUpdate::into_hashed_post_state()` handles wiped accounts correctly.
-    #[test]
-    fn test_sealed_update_into_hashed_post_state_with_wipe() {
-        let addr = Address::random();
-
-        let mut sealed = SealedStateUpdate::default();
-        sealed.accounts.insert(addr, None);
-        sealed.wiped.insert(addr);
-
-        let hashed = sealed.into_hashed_post_state();
-
-        let hashed_addr = keccak256(addr);
-        // Account should be destroyed (None)
-        assert_eq!(hashed.accounts.get(&hashed_addr), Some(&None));
-        // Storage should be marked as wiped
-        let storage = hashed.storages.get(&hashed_addr).unwrap();
-        assert!(storage.wiped);
-    }
-
-    /// Verifies `SealedStateUpdate::into_hashed_post_state()` with selfdestruct + recreate.
-    ///
-    /// When an account is wiped but then has new storage, both `wiped=true` and the new slots
-    /// should appear in the final `HashedStorage`.
-    #[test]
-    fn test_sealed_update_into_hashed_post_state_wiped_with_new_storage() {
-        let addr = Address::random();
-        let slot = U256::from(99);
-
-        let mut sealed = SealedStateUpdate::default();
-        sealed
-            .accounts
-            .insert(addr, Some(Account { balance: U256::from(1), ..Default::default() }));
-        sealed.wiped.insert(addr);
-        let mut slots = HashMap::default();
-        slots.insert(slot, U256::from(123));
-        sealed.storage.insert(addr, slots);
-
-        let hashed = sealed.into_hashed_post_state();
-
-        let hashed_addr = keccak256(addr);
-        let storage = hashed.storages.get(&hashed_addr).unwrap();
-        // Should be wiped (to clear old storage)
-        assert!(storage.wiped);
-        // Should also have the new slot
-        let hashed_slot = keccak256(B256::from(slot));
-        assert_eq!(storage.storage.get(&hashed_slot), Some(&U256::from(123)));
-    }
-
-    /// Verifies `SealedStateUpdate::estimate_targets()` returns correct count.
-    #[test]
-    fn test_sealed_update_estimate_targets() {
-        let addr1 = Address::random();
-        let addr2 = Address::random();
-
-        let mut sealed = SealedStateUpdate::default();
-        sealed.accounts.insert(addr1, Some(Default::default()));
-        sealed.accounts.insert(addr2, Some(Default::default()));
-
-        let mut slots1 = HashMap::default();
-        slots1.insert(U256::from(1), U256::from(100));
-        slots1.insert(U256::from(2), U256::from(200));
-        sealed.storage.insert(addr1, slots1);
-
-        let mut slots2 = HashMap::default();
-        slots2.insert(U256::from(3), U256::from(300));
-        sealed.storage.insert(addr2, slots2);
-
-        // 2 accounts + 3 storage slots = 5 targets
-        assert_eq!(sealed.estimate_targets(), 5);
-    }
-
-    /// Verifies `SealedStateUpdate::seal()` captures only changed storage and touched accounts.
-    #[test]
-    fn test_sealed_update_seal_from_evm_state() {
-        use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
-
-        let touched_addr = Address::random();
-        let untouched_addr = Address::random();
-
-        let mut evm_state = EvmState::default();
-
-        // Touched account with changed storage
-        let mut touched_storage = alloy_primitives::map::HashMap::default();
-        // Changed slot (original != present)
-        touched_storage
-            .insert(U256::from(1), EvmStorageSlot::new_changed(U256::from(10), U256::from(20), 0));
-        // Unchanged slot (original == present) - should be filtered out
-        touched_storage.insert(U256::from(2), EvmStorageSlot::new(U256::from(50), 0));
-
-        let touched_account = revm_state::Account {
-            info: AccountInfo {
-                balance: U256::from(1000),
-                nonce: 5,
-                code_hash: revm_primitives::KECCAK_EMPTY,
-                code: None,
-            },
-            storage: touched_storage,
+        // TX1: slot changes from DB value 0 → 10
+        let mut base = EvmState::default();
+        let mut base_storage = alloy_primitives::map::HashMap::default();
+        base_storage.insert(slot, EvmStorageSlot::new_changed(U256::ZERO, U256::from(10), 0));
+        let base_account = Account {
+            info: AccountInfo { balance: U256::from(100), ..Default::default() },
+            storage: base_storage,
             status: AccountStatus::Touched,
             transaction_id: 0,
         };
-        evm_state.insert(touched_addr, touched_account);
+        base.insert(addr, base_account);
 
-        // Untouched account - should be filtered out entirely
-        let untouched_account = revm_state::Account {
-            info: AccountInfo {
-                balance: U256::from(500),
-                nonce: 1,
-                code_hash: revm_primitives::KECCAK_EMPTY,
-                code: None,
-            },
-            storage: Default::default(),
-            status: AccountStatus::default(),
-            transaction_id: 0,
+        // TX2: slot is read but not changed (still 10)
+        let mut overlay = EvmState::default();
+        let mut overlay_storage = alloy_primitives::map::HashMap::default();
+        overlay_storage.insert(slot, EvmStorageSlot::new(U256::from(10), 1));
+        let overlay_account = Account {
+            info: AccountInfo { balance: U256::from(100), ..Default::default() },
+            storage: overlay_storage,
+            status: AccountStatus::Touched,
+            transaction_id: 1,
         };
-        evm_state.insert(untouched_addr, untouched_account);
+        overlay.insert(addr, overlay_account);
 
-        let sealed = SealedStateUpdate::seal(&evm_state);
+        merge_evm_state(&mut base, overlay);
 
-        // Only touched account should be in sealed update
-        assert!(sealed.accounts.contains_key(&touched_addr));
-        assert!(!sealed.accounts.contains_key(&untouched_addr));
-
-        // Only changed storage slot should be captured
-        let storage = sealed.storage.get(&touched_addr).unwrap();
-        assert!(storage.contains_key(&U256::from(1)));
-        assert!(!storage.contains_key(&U256::from(2)));
-        assert_eq!(storage.get(&U256::from(1)), Some(&U256::from(20)));
+        // CRITICAL: original_value should still be 0 (from base), not 10 (from overlay)
+        let merged_slot = &base.get(&addr).unwrap().storage.get(&slot).unwrap();
+        assert_eq!(merged_slot.original_value(), U256::ZERO, "original_value must be preserved");
+        assert_eq!(merged_slot.present_value(), U256::from(10));
+        assert!(merged_slot.is_changed(), "is_changed() should return true");
     }
 
-    /// Verifies `SealedStateUpdate::seal()` handles selfdestructed accounts correctly.
+    /// Verifies that `merge_evm_state` correctly handles new slots from overlay.
     #[test]
-    fn test_sealed_update_seal_selfdestruct() {
-        use revm_state::{AccountInfo, AccountStatus, EvmState};
+    fn test_merge_evm_state_new_slot_from_overlay() {
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let addr = Address::random();
+        let slot1 = U256::from(1);
+        let slot2 = U256::from(2);
+
+        let mut base = EvmState::default();
+        let mut base_storage = alloy_primitives::map::HashMap::default();
+        base_storage.insert(slot1, EvmStorageSlot::new_changed(U256::ZERO, U256::from(100), 0));
+        base.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: base_storage,
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
+
+        let mut overlay = EvmState::default();
+        let mut overlay_storage = alloy_primitives::map::HashMap::default();
+        overlay_storage.insert(slot2, EvmStorageSlot::new_changed(U256::ZERO, U256::from(200), 1));
+        overlay.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: overlay_storage,
+                status: AccountStatus::Touched,
+                transaction_id: 1,
+            },
+        );
+
+        merge_evm_state(&mut base, overlay);
+
+        let account = base.get(&addr).unwrap();
+        assert!(account.storage.contains_key(&slot1));
+        assert!(account.storage.contains_key(&slot2));
+    }
+
+    /// Verifies last-writer-wins for storage values with preserved `original_value`.
+    #[test]
+    fn test_merge_evm_state_last_writer_wins() {
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let addr = Address::random();
+        let slot = U256::from(99);
+
+        let mut base = EvmState::default();
+        let mut base_storage = alloy_primitives::map::HashMap::default();
+        base_storage.insert(slot, EvmStorageSlot::new_changed(U256::ZERO, U256::from(10), 0));
+        base.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: base_storage,
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
+
+        let mut overlay = EvmState::default();
+        let mut overlay_storage = alloy_primitives::map::HashMap::default();
+        overlay_storage
+            .insert(slot, EvmStorageSlot::new_changed(U256::from(10), U256::from(20), 1));
+        overlay.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: overlay_storage,
+                status: AccountStatus::Touched,
+                transaction_id: 1,
+            },
+        );
+
+        merge_evm_state(&mut base, overlay);
+
+        let merged_slot = base.get(&addr).unwrap().storage.get(&slot).unwrap();
+        assert_eq!(merged_slot.original_value(), U256::ZERO);
+        assert_eq!(merged_slot.present_value(), U256::from(20));
+        assert!(merged_slot.is_changed());
+    }
+
+    /// Verifies status flags are OR'd together during merge.
+    #[test]
+    fn test_merge_evm_state_status_flags_merged() {
+        use revm_state::{Account, AccountInfo, AccountStatus};
 
         let addr = Address::random();
 
-        let mut evm_state = EvmState::default();
+        let mut base = EvmState::default();
+        base.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: Default::default(),
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
 
-        // SelfDestructed accounts are also touched in practice
-        let destructed_account = revm_state::Account {
-            info: AccountInfo::default(),
-            storage: Default::default(),
-            status: AccountStatus::SelfDestructed | AccountStatus::Touched,
-            transaction_id: 0,
-        };
-        evm_state.insert(addr, destructed_account);
+        let mut overlay = EvmState::default();
+        overlay.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: Default::default(),
+                status: AccountStatus::SelfDestructed,
+                transaction_id: 1,
+            },
+        );
 
-        let sealed = SealedStateUpdate::seal(&evm_state);
+        merge_evm_state(&mut base, overlay);
 
-        // Account should be None (destroyed)
-        assert_eq!(sealed.accounts.get(&addr), Some(&None));
-        // Account should be marked as wiped
-        assert!(sealed.wiped.contains(&addr));
-        // No storage should be recorded
-        assert!(!sealed.storage.contains_key(&addr));
+        let merged = base.get(&addr).unwrap();
+        assert!(merged.is_touched());
+        assert!(merged.is_selfdestructed());
     }
 }

@@ -634,10 +634,9 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                // Capture changed keys now (before batching corrupts `is_changed` flags),
-                // defer hashing until after merging.
-                let sealed = SealedStateUpdate::seal(state);
-                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), sealed));
+                // Clone the EvmState - the multiproof task will use merge_evm_state
+                // to batch updates while preserving original_value for correct is_changed().
+                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
             }
         }
     }
@@ -1086,7 +1085,7 @@ mod tests {
         }
 
         for update in &state_updates {
-            hashed_state.extend(evm_state_to_hashed_post_state(update));
+            hashed_state.extend(evm_state_to_hashed_post_state(update.clone()));
 
             for (address, account) in update {
                 let storage: HashMap<B256, U256> = account
