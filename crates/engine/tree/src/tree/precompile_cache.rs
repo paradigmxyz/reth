@@ -8,7 +8,7 @@ use revm_primitives::Address;
 use std::{hash::Hash, sync::Arc};
 
 /// Default max cache size for [`PrecompileCache`]
-const MAX_CACHE_SIZE: u32 = 10_000;
+const MAX_CACHE_SIZE: u32 = 16_384;
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
