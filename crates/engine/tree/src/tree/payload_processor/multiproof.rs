@@ -349,7 +349,8 @@ impl SealedStateUpdate {
         let Self { accounts, storage, wiped } = self;
 
         let mut hashed = HashedPostState::with_capacity(accounts.len() + storage.len());
-        let mut hashed_addresses = HashMap::with_capacity(accounts.len() + storage.len() + wiped.len());
+        let mut hashed_addresses =
+            HashMap::with_capacity(accounts.len() + storage.len() + wiped.len());
 
         for (address, account_info) in accounts {
             let hashed_address =
@@ -376,10 +377,7 @@ impl SealedStateUpdate {
         for address in wiped {
             let hashed_address =
                 *hashed_addresses.entry(address).or_insert_with(|| keccak256(address));
-            hashed
-                .storages
-                .entry(hashed_address)
-                .or_insert_with(|| HashedStorage::new(true));
+            hashed.storages.entry(hashed_address).or_insert_with(|| HashedStorage::new(true));
         }
 
         hashed
@@ -2787,61 +2785,5 @@ mod tests {
 
         // Should need to wait for the results of those proofs to arrive
         assert!(!should_finish, "Should continue waiting for proofs");
-    }
-
-    // Local perf sanity check for the regression report.
-    //
-    // Run with:
-    // `cargo test -p reth-engine-tree --release --ignored
-    // bench_clone_vs_hash_conversion_small_updates -- --nocapture`
-    #[test]
-    #[ignore]
-    fn bench_clone_vs_hash_conversion_small_updates() {
-        use std::{hint::black_box, time::Instant};
-
-        use alloy_consensus::constants::KECCAK_EMPTY;
-        use alloy_primitives::Address;
-        use revm_primitives::U256;
-        use revm_state::{
-            Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot,
-        };
-
-        // 1 touched account, 1 changed slot: approximates a "small tx update" hot path.
-        let mut state = EvmState::default();
-        let address = Address::with_last_byte(1);
-        let storage = EvmStorage::from_iter([(
-            U256::from(1),
-            EvmStorageSlot::new_changed(U256::ZERO, U256::from(1), 0),
-        )]);
-        state.insert(
-            address,
-            Account {
-                info: AccountInfo {
-                    balance: U256::from(1),
-                    nonce: 1,
-                    code_hash: KECCAK_EMPTY,
-                    code: None,
-                },
-                storage,
-                status: AccountStatus::Touched,
-                transaction_id: 0,
-            },
-        );
-
-        let iters = 50_000usize;
-
-        let start = Instant::now();
-        for _ in 0..iters {
-            black_box(state.clone());
-        }
-        let clone_dur = start.elapsed();
-
-        let start = Instant::now();
-        for _ in 0..iters {
-            black_box(evm_state_to_hashed_post_state(&state));
-        }
-        let hash_dur = start.elapsed();
-
-        eprintln!("iters={iters} clone={clone_dur:?} evm_state_to_hashed_post_state={hash_dur:?}");
     }
 }
