@@ -12,7 +12,7 @@ use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
-    LatestStateProvider, OriginalValuesKnown, ProviderError, StateWriter,
+    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -295,7 +295,7 @@ where
 
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
-        let db = StateProviderDatabase(LatestStateProvider::new(provider));
+        let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
         let mut executor = self.evm_config.batch_executor(db);
 
         // Progress tracking

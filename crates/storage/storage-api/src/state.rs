@@ -27,7 +27,7 @@ pub trait StateReader: Send {
 }
 
 /// Type alias of boxed [`StateProvider`].
-pub type StateProviderBox = Box<dyn StateProvider + Send>;
+pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
 
 /// An abstraction for a type that provides state data.
 #[auto_impl(&, Box)]
