@@ -33,7 +33,9 @@ where
 /// [`LruMap`] requires a mutable reference on `get` since it updates the LRU order,
 /// so we use a [`Mutex`] instead of an `RwLock`.
 #[derive(Debug, Clone)]
-pub struct PrecompileCache<S>(moka::sync::Cache<Bytes, CacheEntry<S>>)
+pub struct PrecompileCache<S>(
+    moka::sync::Cache<Bytes, CacheEntry<S>, alloy_primitives::map::DefaultHashBuilder>,
+)
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
 
@@ -42,7 +44,11 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(moka::sync::Cache::new(MAX_CACHE_SIZE as u64))
+        Self(
+            moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
+                .initial_capacity(MAX_CACHE_SIZE as usize)
+                .build_with_hasher(Default::default()),
+        )
     }
 }
 
