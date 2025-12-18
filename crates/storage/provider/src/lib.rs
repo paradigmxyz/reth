@@ -20,8 +20,8 @@ pub use traits::*;
 pub mod providers;
 pub use providers::{
     DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, HistoricalStateProvider,
-    HistoricalStateProviderRef, LatestStateProvider, ProviderFactory, StaticFileAccess,
-    StaticFileProviderBuilder, StaticFileWriter,
+    HistoricalStateProviderRef, LatestStateProvider, LatestStateProviderRef, ProviderFactory,
+    StaticFileAccess, StaticFileProviderBuilder, StaticFileWriter,
 };
 
 pub mod changesets_utils;

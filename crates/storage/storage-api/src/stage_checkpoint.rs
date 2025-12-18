@@ -19,7 +19,7 @@ pub trait StageCheckpointReader: Send {
 
 /// The trait for updating stage checkpoint related data.
 #[auto_impl::auto_impl(&)]
-pub trait StageCheckpointWriter: Send {
+pub trait StageCheckpointWriter {
     /// Save stage checkpoint.
     fn save_stage_checkpoint(&self, id: StageId, checkpoint: StageCheckpoint)
         -> ProviderResult<()>;

@@ -155,7 +155,7 @@ where
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
     let state = StateProviderDatabase::new(state_provider);
     let mut db =
-        State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
+        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
 
     let mut builder = evm_config
         .builder_for_next_block(
@@ -358,6 +358,7 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
+    let state_provider = client.state_by_block_hash(parent_header.hash())?;
     let BlockBuilderOutcome { execution_result, block, .. } = builder.finish(state_provider)?;
 
     let requests = chain_spec

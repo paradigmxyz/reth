@@ -9,7 +9,7 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///
 /// This serves as the data layer for [`Database`].
-pub trait EvmStateProvider: Send {
+pub trait EvmStateProvider {
     /// Get basic account information.
     ///
     /// Returns [`None`] if the account doesn't exist.
@@ -34,7 +34,7 @@ pub trait EvmStateProvider: Send {
 }
 
 // Blanket implementation of EvmStateProvider for any type that implements StateProvider.
-impl<T: StateProvider + Send> EvmStateProvider for T {
+impl<T: StateProvider> EvmStateProvider for T {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         <T as AccountReader>::basic_account(self, address)
     }
