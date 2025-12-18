@@ -9,8 +9,8 @@ use reth_storage_errors::provider::ProviderResult;
 pub type ProviderHeader<P> = <P as HeaderProvider>::Header;
 
 /// Client trait for fetching `Header` related data.
-#[auto_impl::auto_impl(&, Arc)]
-pub trait HeaderProvider: Send + Sync {
+#[auto_impl::auto_impl(&)]
+pub trait HeaderProvider: Send {
     /// The header type this provider supports.
     type Header: BlockHeader;
 
