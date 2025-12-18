@@ -29,9 +29,6 @@ where
 }
 
 /// Cache for precompiles, for each input stores the result.
-///
-/// [`LruMap`] requires a mutable reference on `get` since it updates the LRU order,
-/// so we use a [`Mutex`] instead of an `RwLock`.
 #[derive(Debug, Clone)]
 pub struct PrecompileCache<S>(
     moka::sync::Cache<Bytes, CacheEntry<S>, alloy_primitives::map::DefaultHashBuilder>,
