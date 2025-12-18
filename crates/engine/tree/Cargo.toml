@@ -52,7 +52,7 @@ futures.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros"] }
 mini-moka = { workspace = true, features = ["sync"] }
-moka = { workspace = true, features = ["sync"] }
+fixed-cache.workspace = true
 smallvec.workspace = true
 
 # metrics

@@ -4079,7 +4079,6 @@ dependencies = [
  "equivalent",
 ]
 
-[[package]]
 name = "fixed-hash"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8440,6 +8439,7 @@ dependencies = [
  "dashmap 6.1.0",
  "derive_more",
  "eyre",
+ "fixed-cache",
  "futures",
  "metrics",
  "metrics-util",
