@@ -791,7 +791,45 @@ where
                 "FCU unwind detected: reverting to canonical ancestor"
             );
 
-            self.handle_canonical_chain_unwind(current_head_number, canonical_header)
+            self.handle_canonical_chain_unwind(current_head_number, canonical_header)?;
+
+            // If unwinding to a block older than persisted, synchronously remove from disk
+            // This is critical to ensure the database state is reverted BEFORE the FCU returns
+            // and the payload builder starts building new blocks on top
+            let persisted_num = self.persistence_state.last_persisted_block.number;
+            if new_head_number < persisted_num {
+                debug!(
+                    target: "engine::tree",
+                    new_head_number,
+                    persisted_num,
+                    "Synchronously removing blocks from disk during FCU unwind"
+                );
+                let (tx, rx) = oneshot::channel();
+                let _ = self.persistence.remove_blocks_above(new_head_number, tx);
+
+                // Wait for persistence to complete - this ensures DB state is correct
+                // before payload building starts
+                match rx.blocking_recv() {
+                    Ok(result) => {
+                        if let Some(new_tip) = result {
+                            debug!(
+                                target: "engine::tree",
+                                ?new_tip,
+                                "Persistence removal completed during FCU unwind"
+                            );
+                            self.persistence_state.finish(new_tip.hash, new_tip.number);
+                        }
+                    }
+                    Err(_) => {
+                        warn!(
+                            target: "engine::tree",
+                            "Persistence channel closed unexpectedly during FCU unwind"
+                        );
+                    }
+                }
+            }
+
+            Ok(())
         } else {
             debug!(
                 target: "engine::tree",
