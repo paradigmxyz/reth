@@ -5,14 +5,15 @@ use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
     keccak256,
-    map::{B256Set, HashSet},
-    B256,
+    map::{B256Set, HashMap, HashSet},
+    Address, B256, U256,
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
+use reth_primitives_traits::Account;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
 use reth_trie::{
@@ -110,10 +111,11 @@ pub(super) enum MultiProofMessage {
     PrefetchProofs(MultiProofTargets),
     /// New state update from transaction execution with its source.
     ///
-    /// The state is already converted to a `HashedPostState` by the producer (state hook).
-    /// This avoids issues with `EvmState::extend` overwriting `is_changed` flags, which
-    /// could cause state updates to be lost during batching.
-    StateUpdate(Source, HashedPostState),
+    /// The state is "sealed" - the `is_changed` filter has been applied at the producer,
+    /// but keys are not yet hashed. This allows:
+    /// 1. Safe batching (no `is_changed` flags to corrupt)
+    /// 2. Deferred hashing (hash once after batching, not per-TX)
+    StateUpdate(Source, SealedStateUpdate),
     /// State update that can be applied to the sparse trie without any new proofs.
     ///
     /// It can be the case when all accounts and storage slots from the state update were already
@@ -211,7 +213,7 @@ impl Drop for StateHookSender {
 pub(crate) fn evm_state_to_hashed_post_state(update: &EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
-    for (address, account) in update.iter() {
+    for (address, account) in update {
         if account.is_touched() {
             let hashed_address = keccak256(*address);
             trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
@@ -220,24 +222,175 @@ pub(crate) fn evm_state_to_hashed_post_state(update: &EvmState) -> HashedPostSta
             let info = if destroyed { None } else { Some((&account.info).into()) };
             hashed_state.accounts.insert(hashed_address, info);
 
-            let changed_storage: Vec<_> = account
-                .storage
-                .iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value))
-                .collect();
-
             if destroyed {
                 hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if !changed_storage.is_empty() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage));
+            } else {
+                let mut changed_storage_iter = account
+                    .storage
+                    .iter()
+                    .filter(|(_slot, value)| value.is_changed())
+                    .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value))
+                    .peekable();
+
+                if changed_storage_iter.peek().is_some() {
+                    hashed_state.storages.insert(
+                        hashed_address,
+                        HashedStorage::from_iter(false, changed_storage_iter),
+                    );
+                }
             }
         }
     }
 
     hashed_state
+}
+
+/// A state update that has been "sealed" - the `is_changed` filter has been applied,
+/// but keys have not been hashed yet.
+///
+/// This allows batching multiple state updates safely (no `is_changed` flags to corrupt)
+/// while deferring the expensive keccak256 hashing until after batching.
+///
+/// # Design Rationale
+///
+/// The core problem: `EvmStorageSlot::is_changed()` returns `original_value != present_value`.
+/// When batching via `EvmState::extend`, later TXs can overwrite `original_value`, making
+/// `is_changed` return false for slots that were actually modified.
+///
+/// Solution: Capture which keys changed (filter by `is_changed`) at seal time, but store
+/// unhashed keys. This allows:
+/// 1. Safe batching via `extend()` - just key-value pairs, no flags to corrupt
+/// 2. Deferred hashing - hash once after batching, not per-TX
+#[derive(Debug, Clone, Default)]
+pub(super) struct SealedStateUpdate {
+    /// Account states that changed. `None` value means the account was destroyed.
+    /// Keys are unhashed addresses (20 bytes).
+    pub accounts: HashMap<Address, Option<Account>>,
+    /// Storage slots that changed, grouped by account.
+    /// Keys are unhashed addresses and slot keys.
+    pub storage: HashMap<Address, HashMap<U256, U256>>,
+    /// Accounts whose storage was wiped (selfdestruct).
+    /// When converting to HashedPostState, these get `HashedStorage::new(true)`.
+    pub wiped: HashSet<Address>,
+}
+
+impl SealedStateUpdate {
+    /// Seal an `EvmState` by capturing which keys changed.
+    ///
+    /// This applies the `is_changed` filter NOW, while the information is correct,
+    /// but defers hashing until later.
+    pub(super) fn seal(state: &EvmState) -> Self {
+        let mut sealed = Self::default();
+
+        for (address, account) in state {
+            if !account.is_touched() {
+                continue;
+            }
+
+            let destroyed = account.is_selfdestructed();
+            let info = if destroyed { None } else { Some((&account.info).into()) };
+            sealed.accounts.insert(*address, info);
+
+            if destroyed {
+                sealed.wiped.insert(*address);
+            } else {
+                // Collect changed storage slots
+                let changed_slots: HashMap<U256, U256> = account
+                    .storage
+                    .iter()
+                    .filter(|(_slot, value)| value.is_changed())
+                    .map(|(slot, value)| (*slot, value.present_value))
+                    .collect();
+
+                if !changed_slots.is_empty() {
+                    sealed.storage.insert(*address, changed_slots);
+                }
+            }
+        }
+
+        sealed
+    }
+
+    /// Merge another sealed update into this one.
+    ///
+    /// This is safe because both updates have already captured their `is_changed` semantics.
+    /// Later values win (last-writer-wins), which is correct for final state.
+    fn extend(&mut self, other: Self) {
+        // Accounts: last writer wins
+        self.accounts.extend(other.accounts);
+
+        // Wiped: if other wiped an account, it's wiped
+        // (handles selfdestruct in later TX)
+        for addr in other.wiped {
+            self.wiped.insert(addr);
+            // Clear any storage we had for this account
+            self.storage.remove(&addr);
+        }
+
+        // Storage: merge per-slot, last writer wins.
+        //
+        // Important: do *not* clear the wiped marker here. A wipe earlier in the batch must
+        // persist even if the account is later recreated, because the final update still needs
+        // to wipe the pre-batch storage before applying the new slots.
+        for (addr, other_slots) in other.storage {
+            match self.storage.get_mut(&addr) {
+                Some(slots) => slots.extend(other_slots),
+                None => {
+                    self.storage.insert(addr, other_slots);
+                }
+            }
+        }
+    }
+
+    /// Convert to `HashedPostState` by hashing all keys.
+    ///
+    /// This is the expensive operation that we want to do only once after batching.
+    fn into_hashed_post_state(self) -> HashedPostState {
+        let Self { accounts, storage, wiped } = self;
+
+        let mut hashed = HashedPostState::with_capacity(accounts.len() + storage.len());
+        let mut hashed_addresses = HashMap::with_capacity(accounts.len() + storage.len() + wiped.len());
+
+        for (address, account_info) in accounts {
+            let hashed_address =
+                *hashed_addresses.entry(address).or_insert_with(|| keccak256(address));
+            hashed.accounts.insert(hashed_address, account_info);
+        }
+
+        for (address, slots) in storage {
+            let hashed_address =
+                *hashed_addresses.entry(address).or_insert_with(|| keccak256(address));
+
+            let mut hashed_storage = HashedStorage::new(wiped.contains(&address));
+            hashed_storage.storage.reserve(slots.len());
+            for (slot, value) in slots {
+                hashed_storage.storage.insert(keccak256(B256::from(slot)), value);
+            }
+
+            if !hashed_storage.is_empty() {
+                hashed.storages.insert(hashed_address, hashed_storage);
+            }
+        }
+
+        // Ensure wiped accounts with no storage slots still generate a wiped storage update.
+        for address in wiped {
+            let hashed_address =
+                *hashed_addresses.entry(address).or_insert_with(|| keccak256(address));
+            hashed
+                .storages
+                .entry(hashed_address)
+                .or_insert_with(|| HashedStorage::new(true));
+        }
+
+        hashed
+    }
+
+    /// Estimate the number of proof targets for batching decisions.
+    fn estimate_targets(&self) -> usize {
+        let accounts = self.accounts.len();
+        let storage_slots: usize = self.storage.values().map(|slots| slots.len()).sum();
+        accounts + storage_slots + self.wiped.len()
+    }
 }
 
 /// A pending multiproof task, either [`StorageMultiproofInput`] or [`MultiproofInput`].
@@ -1100,8 +1253,8 @@ impl MultiProofTask {
 
                 false
             }
-            // State update: batch consecutive updates from the same source
-            MultiProofMessage::StateUpdate(source, hashed_update) => {
+            // State update: batch consecutive sealed updates, then hash once
+            MultiProofMessage::StateUpdate(source, sealed_update) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
 
                 if ctx.first_update_time.is_none() {
@@ -1113,16 +1266,16 @@ impl MultiProofTask {
                 }
 
                 // Accumulate messages including the first one; reuse buffer to avoid allocations.
-                // Now using HashedPostState instead of EvmState - batching is safe across sources.
-                let mut accumulated_targets = estimate_hashed_state_targets(&hashed_update);
+                // SealedStateUpdate has no is_changed flags - safe to batch across sources.
+                let mut accumulated_targets = sealed_update.estimate_targets();
                 ctx.accumulated_state_updates.clear();
-                ctx.accumulated_state_updates.push((source, hashed_update));
+                ctx.accumulated_state_updates.push((source, sealed_update));
 
                 // Batch consecutive state update messages up to target limit.
                 while accumulated_targets < STATE_UPDATE_MAX_BATCH_TARGETS {
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                            let next_estimate = estimate_hashed_state_targets(&next_update);
+                            let next_estimate = next_update.estimate_targets();
                             // Would exceed batch cap; leave pending to dispatch on next iteration.
                             if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
                             {
@@ -1145,24 +1298,26 @@ impl MultiProofTask {
                 let num_batched = ctx.accumulated_state_updates.len();
                 self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
 
-                // Merge all accumulated updates into a single HashedPostState payload.
-                // This is safe because HashedPostState has no is_changed semantics.
+                // Merge all accumulated SealedStateUpdates.
+                // This is safe because SealedStateUpdate has no is_changed semantics.
                 // Use drain to preserve the buffer allocation.
                 let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
-                let (mut batch_source, mut merged_update) = accumulated_iter
+                let (mut batch_source, mut merged_sealed) = accumulated_iter
                     .next()
                     .expect("state update batch always has at least one entry");
                 for (next_source, next_update) in accumulated_iter {
                     batch_source = next_source;
-                    merged_update.extend(next_update);
+                    merged_sealed.extend(next_update);
                 }
 
-                // Call update_with_state once on the merged state instead of per sub-update.
-                // This is correct because MultiAddedRemovedKeys only cares about final values
-                // (last-writer-wins), not intermediate states.
-                let batch_len = merged_update.accounts.len();
+                // Convert to HashedPostState ONCE after merging - this is where hashing happens.
+                // This is the key optimization: we hash unique keys only once per batch,
+                // not once per TX.
+                let batch_len = merged_sealed.accounts.len();
+                let hashed_state = merged_sealed.into_hashed_post_state();
+
                 batch_metrics.state_update_proofs_requested +=
-                    self.on_hashed_state_update(batch_source, merged_update);
+                    self.on_hashed_state_update(batch_source, hashed_state);
                 trace!(
                     target: "engine::tree::payload_processor::multiproof",
                     ?batch_source,
@@ -1459,10 +1614,9 @@ struct MultiproofBatchCtx {
     accumulated_prefetch_targets: Vec<MultiProofTargets>,
     /// Reusable buffer for accumulating state updates during batching.
     ///
-    /// Uses `HashedPostState` instead of `EvmState` to avoid issues with `is_changed` flag
-    /// overwrites during batching. The conversion from `EvmState` to `HashedPostState` happens
-    /// at the producer side (state hook) before sending.
-    accumulated_state_updates: Vec<(Source, HashedPostState)>,
+    /// Uses `SealedStateUpdate` which captures `is_changed` semantics at seal time but defers
+    /// hashing. This allows safe batching (no flags to corrupt) while hashing once after merge.
+    accumulated_state_updates: Vec<(Source, SealedStateUpdate)>,
 }
 
 impl MultiproofBatchCtx {
@@ -1574,16 +1728,6 @@ where
     1
 }
 
-/// Estimates target count from `HashedPostState` for batching decisions.
-///
-/// Returns the number of accounts plus the number of storage slots, which approximates
-/// the number of proof targets that will be needed.
-fn estimate_hashed_state_targets(state: &HashedPostState) -> usize {
-    let accounts = state.accounts.len();
-    let storage_slots: usize = state.storages.values().map(|storage| storage.storage.len()).sum();
-    accounts + storage_slots
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1604,11 +1748,19 @@ mod tests {
     };
     use tokio::runtime::{Handle, Runtime};
 
-    /// Creates a HashedPostState with a single account for testing.
+    /// Creates a `HashedPostState` with a single account for testing.
     fn create_hashed_state_update(addr: Address, balance: u64) -> HashedPostState {
         let hashed_address = keccak256(addr);
         let account = Account { balance: U256::from(balance), nonce: 1, bytecode_hash: None };
         HashedPostState::default().with_accounts([(hashed_address, Some(account))])
+    }
+
+    /// Creates a `SealedStateUpdate` with a single account for testing.
+    fn create_sealed_state_update(addr: Address, balance: u64) -> SealedStateUpdate {
+        let account = Account { balance: U256::from(balance), nonce: 1, bytecode_hash: None };
+        let mut sealed = SealedStateUpdate::default();
+        sealed.accounts.insert(addr, Some(account));
+        sealed
     }
 
     /// Checks whether two sources refer to the same origin (for test assertions).
@@ -2143,7 +2295,7 @@ mod tests {
 
     /// Verifies that consecutive state update messages are batched together.
     ///
-    /// Now that we use HashedPostState (which has no is_changed semantics), batching
+    /// Now that we use `SealedStateUpdate` (which has no `is_changed` semantics), batching
     /// is safe across sources.
     #[test]
     fn test_state_update_batching() {
@@ -2152,20 +2304,18 @@ mod tests {
         let test_provider_factory = create_test_provider_factory();
         let mut task = create_test_state_root_task(test_provider_factory);
 
-        // create multiple state updates using HashedPostState
+        // create multiple state updates using SealedStateUpdate
         let addr1 = alloy_primitives::Address::random();
         let addr2 = alloy_primitives::Address::random();
-        let hashed_addr1 = keccak256(addr1);
-        let hashed_addr2 = keccak256(addr2);
 
-        let update1 = create_hashed_state_update(addr1, 100);
-        let update2 = create_hashed_state_update(addr2, 200);
+        let update1 = create_sealed_state_update(addr1, 100);
+        let update2 = create_sealed_state_update(addr2, 200);
 
         let source = StateChangeSource::Transaction(0);
 
         let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), update1.clone())).unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), update2.clone())).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source.into(), update1)).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source.into(), update2)).unwrap();
 
         let proofs_requested =
             if let Ok(MultiProofMessage::StateUpdate(_src, update)) = task.rx.recv() {
@@ -2181,10 +2331,12 @@ mod tests {
 
                 assert_eq!(num_batched, 2);
                 assert_eq!(merged_update.accounts.len(), 2);
-                assert!(merged_update.accounts.contains_key(&hashed_addr1));
-                assert!(merged_update.accounts.contains_key(&hashed_addr2));
+                assert!(merged_update.accounts.contains_key(&addr1));
+                assert!(merged_update.accounts.contains_key(&addr2));
 
-                task.on_hashed_state_update(source.into(), merged_update)
+                // Convert to HashedPostState and process
+                let hashed = merged_update.into_hashed_post_state();
+                task.on_hashed_state_update(source.into(), hashed)
             } else {
                 panic!("Expected StateUpdate message");
             };
@@ -2193,8 +2345,8 @@ mod tests {
 
     /// Verifies that state updates from different sources CAN be batched together.
     ///
-    /// With HashedPostState (instead of EvmState), batching is safe across sources because
-    /// there are no is_changed flags that could be overwritten.
+    /// With `HashedPostState` (instead of `EvmState`), batching is safe across sources because
+    /// there are no `is_changed` flags that could be overwritten.
     #[test]
     fn test_state_update_batching_across_sources() {
         use alloy_evm::block::StateChangeSource;
@@ -2205,9 +2357,6 @@ mod tests {
         let addr_a1 = alloy_primitives::Address::random();
         let addr_b1 = alloy_primitives::Address::random();
         let addr_a2 = alloy_primitives::Address::random();
-        let hashed_a1 = keccak256(addr_a1);
-        let hashed_b1 = keccak256(addr_b1);
-        let hashed_a2 = keccak256(addr_a2);
 
         let source_a = StateChangeSource::Transaction(1);
         let source_b = StateChangeSource::Transaction(2);
@@ -2216,17 +2365,17 @@ mod tests {
         let tx = task.state_root_message_sender();
         tx.send(MultiProofMessage::StateUpdate(
             source_a.into(),
-            create_hashed_state_update(addr_a1, 100),
+            create_sealed_state_update(addr_a1, 100),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source_b.into(),
-            create_hashed_state_update(addr_b1, 200),
+            create_sealed_state_update(addr_b1, 200),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source_a.into(),
-            create_hashed_state_update(addr_a2, 300),
+            create_sealed_state_update(addr_a2, 300),
         ))
         .unwrap();
 
@@ -2247,9 +2396,9 @@ mod tests {
             // All 3 should be batched together now
             assert_eq!(num_batched, 3, "All updates should batch together");
             assert_eq!(merged_update.accounts.len(), 3);
-            assert!(merged_update.accounts.contains_key(&hashed_a1));
-            assert!(merged_update.accounts.contains_key(&hashed_b1));
-            assert!(merged_update.accounts.contains_key(&hashed_a2));
+            assert!(merged_update.accounts.contains_key(&addr_a1));
+            assert!(merged_update.accounts.contains_key(&addr_b1));
+            assert!(merged_update.accounts.contains_key(&addr_a2));
         } else {
             panic!("Expected first StateUpdate");
         }
@@ -2257,7 +2406,7 @@ mod tests {
 
     /// Verifies that pre-block updates can be batched together.
     ///
-    /// With HashedPostState, batching is safe regardless of source or payload.
+    /// With `HashedPostState`, batching is safe regardless of source or payload.
     #[test]
     fn test_pre_block_updates_batch() {
         use alloy_evm::block::{StateChangePreBlockSource, StateChangeSource};
@@ -2268,9 +2417,6 @@ mod tests {
         let addr1 = alloy_primitives::Address::random();
         let addr2 = alloy_primitives::Address::random();
         let addr3 = alloy_primitives::Address::random();
-        let hashed_addr1 = keccak256(addr1);
-        let hashed_addr2 = keccak256(addr2);
-        let hashed_addr3 = keccak256(addr3);
 
         let source = StateChangeSource::PreBlock(StateChangePreBlockSource::BeaconRootContract);
 
@@ -2278,23 +2424,23 @@ mod tests {
         let tx = task.state_root_message_sender();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_hashed_state_update(addr1, 100),
+            create_sealed_state_update(addr1, 100),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_hashed_state_update(addr2, 200),
+            create_sealed_state_update(addr2, 200),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_hashed_state_update(addr3, 300),
+            create_sealed_state_update(addr3, 300),
         ))
         .unwrap();
 
         if let Ok(MultiProofMessage::StateUpdate(first_source, first_update)) = task.rx.recv() {
             assert!(same_source(first_source, source.into()));
-            assert!(first_update.accounts.contains_key(&hashed_addr1));
+            assert!(first_update.accounts.contains_key(&addr1));
 
             let mut merged_update = first_update;
             let mut num_batched = 1;
@@ -2309,9 +2455,9 @@ mod tests {
             // All 3 should be batched together
             assert_eq!(num_batched, 3, "All pre-block updates should batch");
             assert_eq!(merged_update.accounts.len(), 3);
-            assert!(merged_update.accounts.contains_key(&hashed_addr1));
-            assert!(merged_update.accounts.contains_key(&hashed_addr2));
-            assert!(merged_update.accounts.contains_key(&hashed_addr3));
+            assert!(merged_update.accounts.contains_key(&addr1));
+            assert!(merged_update.accounts.contains_key(&addr2));
+            assert!(merged_update.accounts.contains_key(&addr3));
         } else {
             panic!("Expected first StateUpdate");
         }
@@ -2330,8 +2476,6 @@ mod tests {
         let addr3 = B256::random();
         let state_addr1 = alloy_primitives::Address::random();
         let state_addr2 = alloy_primitives::Address::random();
-        let hashed_state_addr1 = keccak256(state_addr1);
-        let hashed_state_addr2 = keccak256(state_addr2);
 
         // Create PrefetchProofs targets
         let mut targets1 = MultiProofTargets::default();
@@ -2343,9 +2487,9 @@ mod tests {
         let mut targets3 = MultiProofTargets::default();
         targets3.insert(addr3, HashSet::default());
 
-        // Create HashedPostState updates
-        let state_update1 = create_hashed_state_update(state_addr1, 100);
-        let state_update2 = create_hashed_state_update(state_addr2, 200);
+        // Create SealedStateUpdate updates
+        let state_update1 = create_sealed_state_update(state_addr1, 100);
+        let state_update2 = create_sealed_state_update(state_addr2, 200);
 
         let source = StateChangeSource::Transaction(42);
 
@@ -2391,10 +2535,7 @@ mod tests {
         // Step 2: The pending message should be StateUpdate1 (preserved ordering)
         match pending_msg {
             Some(MultiProofMessage::StateUpdate(_src, update)) => {
-                assert!(
-                    update.accounts.contains_key(&hashed_state_addr1),
-                    "Should be first StateUpdate"
-                );
+                assert!(update.accounts.contains_key(&state_addr1), "Should be first StateUpdate");
             }
             _ => panic!("StateUpdate1 was lost or reordered! The ordering fix is broken."),
         }
@@ -2402,10 +2543,7 @@ mod tests {
         // Step 3: Next in channel should be StateUpdate2
         match task.rx.try_recv() {
             Ok(MultiProofMessage::StateUpdate(_src, update)) => {
-                assert!(
-                    update.accounts.contains_key(&hashed_state_addr2),
-                    "Should be second StateUpdate"
-                );
+                assert!(update.accounts.contains_key(&state_addr2), "Should be second StateUpdate");
             }
             _ => panic!("StateUpdate2 was lost!"),
         }
@@ -2438,7 +2576,7 @@ mod tests {
         prefetch2.insert(prefetch_addr2, HashSet::default());
 
         let state_addr = alloy_primitives::Address::random();
-        let state_update = create_hashed_state_update(state_addr, 42);
+        let state_update = create_sealed_state_update(state_addr, 42);
 
         let source = StateChangeSource::Transaction(99);
 
@@ -2506,9 +2644,6 @@ mod tests {
         let state_addr1 = alloy_primitives::Address::random();
         let state_addr2 = alloy_primitives::Address::random();
         let state_addr3 = alloy_primitives::Address::random();
-        let hashed_state_addr1 = keccak256(state_addr1);
-        let hashed_state_addr2 = keccak256(state_addr2);
-        let hashed_state_addr3 = keccak256(state_addr3);
 
         // Create Prefetch targets
         let mut prefetch1 = MultiProofTargets::default();
@@ -2524,17 +2659,17 @@ mod tests {
         tx.send(MultiProofMessage::PrefetchProofs(prefetch1.clone())).unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_hashed_state_update(state_addr1, 100),
+            create_sealed_state_update(state_addr1, 100),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_hashed_state_update(state_addr2, 200),
+            create_sealed_state_update(state_addr2, 200),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_hashed_state_update(state_addr3, 300),
+            create_sealed_state_update(state_addr3, 300),
         ))
         .unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch2.clone())).unwrap();
@@ -2597,9 +2732,9 @@ mod tests {
                 3,
                 "Should have all 3 addresses in merged update"
             );
-            assert!(merged_update.accounts.contains_key(&hashed_state_addr1));
-            assert!(merged_update.accounts.contains_key(&hashed_state_addr2));
-            assert!(merged_update.accounts.contains_key(&hashed_state_addr3));
+            assert!(merged_update.accounts.contains_key(&state_addr1));
+            assert!(merged_update.accounts.contains_key(&state_addr2));
+            assert!(merged_update.accounts.contains_key(&state_addr3));
         } else {
             panic!("Expected pending StateUpdate");
         }
@@ -2652,5 +2787,61 @@ mod tests {
 
         // Should need to wait for the results of those proofs to arrive
         assert!(!should_finish, "Should continue waiting for proofs");
+    }
+
+    // Local perf sanity check for the regression report.
+    //
+    // Run with:
+    // `cargo test -p reth-engine-tree --release --ignored
+    // bench_clone_vs_hash_conversion_small_updates -- --nocapture`
+    #[test]
+    #[ignore]
+    fn bench_clone_vs_hash_conversion_small_updates() {
+        use std::{hint::black_box, time::Instant};
+
+        use alloy_consensus::constants::KECCAK_EMPTY;
+        use alloy_primitives::Address;
+        use revm_primitives::U256;
+        use revm_state::{
+            Account, AccountInfo, AccountStatus, EvmState, EvmStorage, EvmStorageSlot,
+        };
+
+        // 1 touched account, 1 changed slot: approximates a "small tx update" hot path.
+        let mut state = EvmState::default();
+        let address = Address::with_last_byte(1);
+        let storage = EvmStorage::from_iter([(
+            U256::from(1),
+            EvmStorageSlot::new_changed(U256::ZERO, U256::from(1), 0),
+        )]);
+        state.insert(
+            address,
+            Account {
+                info: AccountInfo {
+                    balance: U256::from(1),
+                    nonce: 1,
+                    code_hash: KECCAK_EMPTY,
+                    code: None,
+                },
+                storage,
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
+
+        let iters = 50_000usize;
+
+        let start = Instant::now();
+        for _ in 0..iters {
+            black_box(state.clone());
+        }
+        let clone_dur = start.elapsed();
+
+        let start = Instant::now();
+        for _ in 0..iters {
+            black_box(evm_state_to_hashed_post_state(&state));
+        }
+        let hash_dur = start.elapsed();
+
+        eprintln!("iters={iters} clone={clone_dur:?} evm_state_to_hashed_post_state={hash_dur:?}");
     }
 }
