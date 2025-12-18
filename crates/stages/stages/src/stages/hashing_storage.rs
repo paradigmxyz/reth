@@ -102,7 +102,8 @@ where
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
                     // Cache hashed address since PlainStorageState is sorted by address
-                    let (mut last_addr, mut hashed_addr) = (Address::ZERO, keccak256(Address::Zero));
+                    let (mut last_addr, mut hashed_addr) =
+                        (Address::ZERO, keccak256(Address::ZERO));
                     for (address, slot) in chunk {
                         if address != last_addr {
                             last_addr = address;
