@@ -44,6 +44,7 @@ use tracing::trace;
 
 mod provider;
 pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+pub(crate) use provider::{PlainStorageCursor, StorageChangesetCursor};
 
 use super::ProviderNodeTypes;
 use reth_trie::KeccakKeyHasher;
@@ -671,7 +672,7 @@ mod tests {
     #[test]
     fn common_history_provider() {
         let factory = create_test_provider_factory();
-        let _ = factory.latest();
+        let _ = factory.latest().unwrap();
     }
 
     #[test]

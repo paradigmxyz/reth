@@ -6,7 +6,7 @@ use crate::{
         database::{chain::ChainStorage, metrics},
         rocksdb::RocksDBProvider,
         static_file::StaticFileWriter,
-        NodeTypesForProvider, StaticFileProvider,
+        LowestAvailableBlocks, NodeTypesForProvider, StaticFileProvider,
     },
     to_range,
     traits::{
@@ -33,7 +33,8 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
-use parking_lot::RwLock;
+use once_cell::sync::OnceCell;
+use parking_lot::{Mutex, RwLock};
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
@@ -90,6 +91,13 @@ use tracing::{debug, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
+
+/// Cached cursor for plain storage state.
+pub(crate) type PlainStorageCursor<Tx> =
+    Arc<OnceCell<Mutex<<Tx as DbTx>::DupCursor<tables::PlainStorageState>>>>;
+/// Cached cursor for storage changeset.
+pub(crate) type StorageChangesetCursor<Tx> =
+    Arc<OnceCell<Mutex<<Tx as DbTx>::DupCursor<tables::StorageChangeSets>>>>;
 
 /// A [`DatabaseProvider`] that holds a read-write database transaction.
 ///
@@ -151,8 +159,7 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
 
 /// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
-#[derive(Debug)]
-pub struct DatabaseProvider<TX, N: NodeTypes> {
+pub struct DatabaseProvider<TX: DbTx, N: NodeTypes> {
     /// Database transaction.
     tx: TX,
     /// Chain spec
@@ -169,9 +176,26 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     rocksdb_provider: RocksDBProvider,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
+    plain_storage_cursor: PlainStorageCursor<TX>,
+    storage_changeset_cursor: StorageChangesetCursor<TX>,
 }
 
-impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
+impl<TX: DbTx, N: NodeTypes> std::fmt::Debug for DatabaseProvider<TX, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DatabaseProvider")
+            .field("tx", &self.tx)
+            .field("chain_spec", &self.chain_spec)
+            .field("static_file_provider", &self.static_file_provider)
+            .field("prune_modes", &self.prune_modes)
+            .field("storage", &self.storage)
+            .field("storage_settings", &self.storage_settings)
+            .field("rocksdb_provider", &self.rocksdb_provider)
+            .field("minimum_pruning_distance", &self.minimum_pruning_distance)
+            .finish()
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Returns reference to prune modes.
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
@@ -182,7 +206,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// State provider for latest state
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Box::new(LatestStateProviderRef::new(self))
+        Box::new(LatestStateProviderRef::new_with_cursor(self, self.plain_storage_cursor.clone()))
     }
 
     /// Storage provider for state at that given block hash
@@ -195,7 +219,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProviderRef::new(self)))
+            return Ok(Box::new(LatestStateProviderRef::new_with_cursor(
+                self,
+                self.plain_storage_cursor.clone(),
+            )))
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -206,7 +233,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProviderRef::new(self, block_number);
+        let mut state_provider = HistoricalStateProviderRef::new_with_cursors(
+            self,
+            block_number,
+            LowestAvailableBlocks::default(),
+            self.plain_storage_cursor.clone(),
+            self.storage_changeset_cursor.clone(),
+        );
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -235,11 +268,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX, N: NodeTypes> NodePrimitivesProvider for DatabaseProvider<TX, N> {
+impl<TX: DbTx, N: NodeTypes> NodePrimitivesProvider for DatabaseProvider<TX, N> {
     type Primitives = N::Primitives;
 }
 
-impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
+impl<TX: DbTx, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     /// Returns a static file provider
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
@@ -254,15 +287,15 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
+impl<TX: DbTx, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
     /// Returns the `RocksDB` provider.
     fn rocksdb_provider(&self) -> RocksDBProvider {
         self.rocksdb_provider.clone()
     }
 }
 
-impl<TX: Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
-    for DatabaseProvider<TX, N>
+impl<TX: DbTx + Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>>
+    ChainSpecProvider for DatabaseProvider<TX, N>
 {
     type ChainSpec = N::ChainSpec;
 
@@ -271,9 +304,9 @@ impl<TX: Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> C
     }
 }
 
-impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-write transaction.
-    pub const fn new_rw(
+    pub fn new_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
@@ -291,11 +324,13 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+            plain_storage_cursor: PlainStorageCursor::<TX>::default(),
+            storage_changeset_cursor: StorageChangesetCursor::<TX>::default(),
         }
     }
 }
 
-impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
+impl<TX: DbTx, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
     fn as_ref(&self) -> &Self {
         self
     }
@@ -440,7 +475,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
-        let mut state_provider = HistoricalStateProvider::new(self, block_number);
+        let plain_storage_cursor = self.plain_storage_cursor.clone();
+        let storage_cursor = self.storage_changeset_cursor.clone();
+        let mut state_provider =
+            HistoricalStateProvider::new(self, block_number, plain_storage_cursor, storage_cursor);
 
         // If we pruned account or storage history, we can't return state on every historical block.
         // Instead, we should cap it at the latest prune checkpoint for corresponding prune segment.
@@ -528,7 +566,7 @@ where
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
-    pub const fn new(
+    pub fn new(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
@@ -546,6 +584,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage_settings,
             rocksdb_provider,
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+            plain_storage_cursor: PlainStorageCursor::<TX>::default(),
+            storage_changeset_cursor: StorageChangesetCursor::<TX>::default(),
         }
     }
 
@@ -1512,7 +1552,7 @@ impl<TX: DbTx, N: NodeTypes> StageCheckpointReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N> {
     /// Save stage checkpoint.
     fn save_stage_checkpoint(
         &self,
@@ -3098,7 +3138,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
     }
 }
 
-impl<TX: DbTxMut, N: NodeTypes> PruneCheckpointWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut, N: NodeTypes> PruneCheckpointWriter for DatabaseProvider<TX, N> {
     fn save_prune_checkpoint(
         &self,
         segment: PruneSegment,
@@ -3147,7 +3187,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> ChainStateBlockReader for DatabaseProvide
     }
 }
 
-impl<TX: DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut, N: NodeTypes> ChainStateBlockWriter for DatabaseProvider<TX, N> {
     fn save_finalized_block_number(&self, block_number: BlockNumber) -> ProviderResult<()> {
         Ok(self
             .tx
@@ -3202,13 +3242,13 @@ impl<TX: DbTx, N: NodeTypes> MetadataProvider for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTx + DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
     fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()> {
         self.tx.put::<tables::Metadata>(key.to_string(), value).map_err(Into::into)
     }
 }
 
-impl<TX: Send + Sync, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
+impl<TX: DbTx + Send + Sync, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
     fn cached_storage_settings(&self) -> StorageSettings {
         *self.storage_settings.read()
     }

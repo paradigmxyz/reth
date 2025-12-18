@@ -1,9 +1,13 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    ChangeSetReader, HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
+    providers::{
+        state::macros::delegate_provider_impls, PlainStorageCursor, StorageChangesetCursor,
+    },
+    AccountReader, BlockHashReader, ChangeSetReader, HashedPostStateProvider, ProviderError,
+    StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use parking_lot::Mutex;
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -43,14 +47,27 @@ use std::fmt::Debug;
 /// - [`tables::StoragesHistory`]
 /// - [`tables::AccountChangeSets`]
 /// - [`tables::StorageChangeSets`]
-#[derive(Debug)]
-pub struct HistoricalStateProviderRef<'b, Provider> {
+pub struct HistoricalStateProviderRef<'b, Provider: DBProvider> {
     /// Database provider
     provider: &'b Provider,
     /// Block number is main index for the history state of accounts and storages.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
+    /// Cached plain storage state cursor.
+    plain_storage_cursor: PlainStorageCursor<Provider::Tx>,
+    /// Cached storage changeset cursor.
+    storage_changeset_cursor: StorageChangesetCursor<Provider::Tx>,
+}
+
+impl<Provider: DBProvider + Debug> Debug for HistoricalStateProviderRef<'_, Provider> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HistoricalStateProviderRef")
+            .field("provider", &self.provider)
+            .field("block_number", &self.block_number)
+            .field("lowest_available_blocks", &self.lowest_available_blocks)
+            .finish()
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -64,17 +81,62 @@ pub enum HistoryInfo {
 impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, Provider> {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: LowestAvailableBlocks::default(),
+            storage_changeset_cursor: StorageChangesetCursor::<Provider::Tx>::default(),
+            plain_storage_cursor: PlainStorageCursor::<Provider::Tx>::default(),
+        }
     }
 
     /// Create new `StateProvider` for historical block number and lowest block numbers at which
     /// account & storage histories are available.
-    pub const fn new_with_lowest_available_blocks(
+    pub fn new_with_lowest_available_blocks(
         provider: &'b Provider,
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
     ) -> Self {
-        Self { provider, block_number, lowest_available_blocks }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks,
+            storage_changeset_cursor: StorageChangesetCursor::<Provider::Tx>::default(),
+            plain_storage_cursor: PlainStorageCursor::<Provider::Tx>::default(),
+        }
+    }
+
+    /// Create new `StateProvider` with shared cursors.
+    pub const fn new_with_cursors(
+        provider: &'b Provider,
+        block_number: BlockNumber,
+        lowest_available_blocks: LowestAvailableBlocks,
+        plain_storage_cursor: PlainStorageCursor<Provider::Tx>,
+        storage_changeset_cursor: StorageChangesetCursor<Provider::Tx>,
+    ) -> Self {
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks,
+            plain_storage_cursor,
+            storage_changeset_cursor,
+        }
+    }
+
+    fn storage_changeset_cursor(
+        &self,
+    ) -> ProviderResult<&Mutex<<Provider::Tx as DbTx>::DupCursor<tables::StorageChangeSets>>> {
+        self.storage_changeset_cursor
+            .get_or_try_init(|| self.provider.tx_ref().cursor_dup_read().map(Mutex::new))
+            .map_err(Into::into)
+    }
+
+    fn plain_storage_cursor(
+        &self,
+    ) -> ProviderResult<&Mutex<<Provider::Tx as DbTx>::DupCursor<tables::PlainStorageState>>> {
+        self.plain_storage_cursor
+            .get_or_try_init(|| self.provider.tx_ref().cursor_dup_read().map(Mutex::new))
+            .map_err(Into::into)
     }
 
     /// Lookup an account in the `AccountsHistory` table
@@ -397,7 +459,9 @@ impl<Provider: DBProvider + BlockNumReader> StateProofProvider
     }
 }
 
-impl<Provider: Sync> HashedPostStateProvider for HistoricalStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + Sync> HashedPostStateProvider
+    for HistoricalStateProviderRef<'_, Provider>
+{
     fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
@@ -414,25 +478,30 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
     ) -> ProviderResult<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
             HistoryInfo::NotYetWritten => Ok(None),
-            HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
-                self.tx()
-                    .cursor_dup_read::<tables::StorageChangeSets>()?
+            HistoryInfo::InChangeset(changeset_block_number) => {
+                let entry = self
+                    .storage_changeset_cursor()?
+                    .lock()
                     .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
-                    .filter(|entry| entry.key == storage_key)
-                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address,
-                        storage_key: Box::new(storage_key),
-                    })?
-                    .value,
-            )),
-            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
-                .tx()
-                .cursor_dup_read::<tables::PlainStorageState>()?
-                .seek_by_key_subkey(address, storage_key)?
-                .filter(|entry| entry.key == storage_key)
-                .map(|entry| entry.value)
-                .or(Some(StorageValue::ZERO))),
+                    .filter(|entry| entry.key == storage_key);
+                Ok(Some(
+                    entry
+                        .ok_or_else(|| ProviderError::StorageChangesetNotFound {
+                            block_number: changeset_block_number,
+                            address,
+                            storage_key: Box::new(storage_key),
+                        })?
+                        .value,
+                ))
+            }
+            HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
+                let entry = self
+                    .plain_storage_cursor()?
+                    .lock()
+                    .seek_by_key_subkey(address, storage_key)?
+                    .filter(|entry| entry.key == storage_key);
+                Ok(entry.map(|e| e.value).or(Some(StorageValue::ZERO)))
+            }
         }
     }
 }
@@ -448,20 +517,56 @@ impl<Provider: DBProvider + BlockNumReader> BytecodeReader
 
 /// State provider for a given block number.
 /// For more detailed description, see [`HistoricalStateProviderRef`].
-#[derive(Debug)]
-pub struct HistoricalStateProvider<Provider> {
+pub struct HistoricalStateProvider<Provider: DBProvider> {
     /// Database provider.
     provider: Provider,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
+    /// Cached plain storage state cursor.
+    plain_storage_cursor: PlainStorageCursor<Provider::Tx>,
+    /// Cached storage changeset cursor.
+    storage_changeset_cursor: StorageChangesetCursor<Provider::Tx>,
+}
+
+impl<Provider: DBProvider + Debug> Debug for HistoricalStateProvider<Provider> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HistoricalStateProvider")
+            .field("provider", &self.provider)
+            .field("block_number", &self.block_number)
+            .field("lowest_available_blocks", &self.lowest_available_blocks)
+            .finish()
+    }
 }
 
 impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
     /// Create new `StateProvider` for historical block number
-    pub fn new(provider: Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+    pub fn new(
+        provider: Provider,
+        block_number: BlockNumber,
+        plain_storage_cursor: PlainStorageCursor<Provider::Tx>,
+        storage_changeset_cursor: StorageChangesetCursor<Provider::Tx>,
+    ) -> Self {
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: LowestAvailableBlocks::default(),
+            plain_storage_cursor,
+            storage_changeset_cursor,
+        }
+    }
+
+    /// Returns a [`HistoricalStateProviderRef`] that shares the cached cursors with this provider.
+    #[inline(always)]
+    pub fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
+        HistoricalStateProviderRef::new_with_cursors(
+            &self.provider,
+            self.block_number,
+            self.lowest_available_blocks,
+            self.plain_storage_cursor.clone(),
+            self.storage_changeset_cursor.clone(),
+        )
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -480,16 +585,6 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
     ) -> Self {
         self.lowest_available_blocks.storage_history_block_number = Some(block_number);
         self
-    }
-
-    /// Returns a new provider that takes the `TX` as reference
-    #[inline(always)]
-    const fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
-        HistoricalStateProviderRef::new_with_lowest_available_blocks(
-            &self.provider,
-            self.block_number,
-            self.lowest_available_blocks,
-        )
     }
 }
 
@@ -527,7 +622,7 @@ impl LowestAvailableBlocks {
 #[cfg(test)]
 mod tests {
     use crate::{
-        providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
+        providers::{state::historical::HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
         AccountReader, HistoricalStateProvider, HistoricalStateProviderRef, StateProvider,
     };

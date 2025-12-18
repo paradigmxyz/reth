@@ -1,8 +1,9 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    HashedPostStateProvider, StateProvider, StateRootProvider,
+    providers::{state::macros::delegate_provider_impls, PlainStorageCursor},
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
+use parking_lot::Mutex;
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider};
@@ -22,17 +23,45 @@ use reth_trie_db::{
 /// State provider over latest state that takes tx reference.
 ///
 /// Wraps a [`DBProvider`] to get access to database.
-#[derive(Debug)]
-pub struct LatestStateProviderRef<'b, Provider>(&'b Provider);
+pub struct LatestStateProviderRef<'b, Provider: DBProvider> {
+    /// Database provider.
+    provider: &'b Provider,
+    /// Optional cached plain storage state cursor (shared with [`LatestStateProvider`]).
+    plain_storage_cursor: PlainStorageCursor<Provider::Tx>,
+}
+
+impl<Provider: DBProvider + std::fmt::Debug> std::fmt::Debug
+    for LatestStateProviderRef<'_, Provider>
+{
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LatestStateProviderRef").field("provider", &self.provider).finish()
+    }
+}
 
 impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     /// Create new state provider
-    pub const fn new(provider: &'b Provider) -> Self {
-        Self(provider)
+    pub fn new(provider: &'b Provider) -> Self {
+        Self { provider, plain_storage_cursor: PlainStorageCursor::<Provider::Tx>::default() }
+    }
+
+    /// Create new state provider with a shared cursor.
+    pub const fn new_with_cursor(
+        provider: &'b Provider,
+        plain_storage_cursor: PlainStorageCursor<Provider::Tx>,
+    ) -> Self {
+        Self { provider, plain_storage_cursor }
+    }
+
+    fn plain_storage_cursor(
+        &self,
+    ) -> ProviderResult<&Mutex<<Provider::Tx as DbTx>::DupCursor<tables::PlainStorageState>>> {
+        self.plain_storage_cursor
+            .get_or_try_init(|| self.provider.tx_ref().cursor_dup_read().map(Mutex::new))
+            .map_err(Into::into)
     }
 
     fn tx(&self) -> &Provider::Tx {
-        self.0.tx_ref()
+        self.provider.tx_ref()
     }
 }
 
@@ -43,10 +72,12 @@ impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider
     }
 }
 
-impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + BlockHashReader> BlockHashReader
+    for LatestStateProviderRef<'_, Provider>
+{
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.0.block_hash(number)
+        self.provider.block_hash(number)
     }
 
     fn canonical_hashes_range(
@@ -54,7 +85,7 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.0.canonical_hashes_range(start, end)
+        self.provider.canonical_hashes_range(start, end)
     }
 }
 
@@ -162,8 +193,9 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
-        if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? &&
+        // Use the shared cursor
+        if let Some(entry) =
+            self.plain_storage_cursor()?.lock().seek_by_key_subkey(account, storage_key)? &&
             entry.key == storage_key
         {
             return Ok(Some(entry.value))
@@ -182,19 +214,29 @@ impl<Provider: DBProvider + BlockHashReader> BytecodeReader
 }
 
 /// State provider for the latest state.
-#[derive(Debug)]
-pub struct LatestStateProvider<Provider>(Provider);
+pub struct LatestStateProvider<Provider: DBProvider> {
+    /// Database provider.
+    provider: Provider,
+    /// Cached plain storage state cursor (shared via Arc for ref types).
+    plain_storage_cursor: PlainStorageCursor<Provider::Tx>,
+}
+
+impl<Provider: DBProvider + std::fmt::Debug> std::fmt::Debug for LatestStateProvider<Provider> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LatestStateProvider").field("provider", &self.provider).finish()
+    }
+}
 
 impl<Provider: DBProvider> LatestStateProvider<Provider> {
     /// Create new state provider
-    pub const fn new(db: Provider) -> Self {
-        Self(db)
+    pub fn new(provider: Provider) -> Self {
+        Self { provider, plain_storage_cursor: PlainStorageCursor::<Provider::Tx>::default() }
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    const fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
-        LatestStateProviderRef::new(&self.0)
+    fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
+        LatestStateProviderRef::new_with_cursor(&self.provider, self.plain_storage_cursor.clone())
     }
 }
 
