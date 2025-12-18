@@ -51,7 +51,7 @@ where
 #[allow(dead_code)]
 pub(crate) fn set_up_db<T>(
     bench_db_path: &Path,
-    pair: &Vec<(<T as Table>::Key, Bytes, <T as Table>::Value, Bytes)>,
+    pair: &[(<T as Table>::Key, Bytes, <T as Table>::Value, Bytes)],
 ) -> DatabaseEnv
 where
     T: Table,
@@ -65,8 +65,8 @@ where
     {
         // Prepare data to be read
         let tx = db.tx_mut().expect("tx");
-        for (k, _, v, _) in pair.clone() {
-            tx.put::<T>(k, v).expect("submit");
+        for (k, _, v, _) in pair {
+            tx.put::<T>(k.clone(), v.clone()).expect("submit");
         }
         tx.inner.commit().unwrap();
     }
