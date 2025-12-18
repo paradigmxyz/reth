@@ -634,7 +634,11 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
+                // Convert EvmState to HashedPostState BEFORE sending to avoid issues with
+                // EvmState::extend overwriting is_changed flags during batching.
+                // This ensures each transaction's state changes are captured correctly.
+                let hashed_state = evm_state_to_hashed_post_state(state.clone());
+                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), hashed_state));
             }
         }
     }
