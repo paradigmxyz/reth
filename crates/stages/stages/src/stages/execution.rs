@@ -12,7 +12,7 @@ use reth_primitives_traits::{format_gas_throughput, BlockBody, NodePrimitives};
 use reth_provider::{
     providers::{StaticFileProvider, StaticFileWriter},
     BlockHashReader, BlockReader, DBProvider, EitherWriter, ExecutionOutcome, HeaderProvider,
-    LatestStateProviderRef, OriginalValuesKnown, ProviderError, StateWriter,
+    LatestStateProvider, OriginalValuesKnown, ProviderError, StateWriter,
     StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionVariant,
 };
 use reth_revm::database::StateProviderDatabase;
@@ -42,8 +42,8 @@ use super::missing_static_data_error;
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
-/// For state access [`LatestStateProviderRef`] provides us latest state and history state
-/// For latest most recent state [`LatestStateProviderRef`] would need (Used for execution Stage):
+/// For state access [`LatestStateProvider`] provides us latest state and history state
+/// For latest most recent state [`LatestStateProvider`] would need (Used for execution Stage):
 /// - [`tables::PlainAccountState`]
 /// - [`tables::Bytecodes`]
 /// - [`tables::PlainStorageState`]
@@ -295,7 +295,7 @@ where
 
         self.ensure_consistency(provider, input.checkpoint().block_number, None)?;
 
-        let db = StateProviderDatabase(LatestStateProviderRef::new(provider));
+        let db = StateProviderDatabase(LatestStateProvider::new(provider));
         let mut executor = self.evm_config.batch_executor(db);
 
         // Progress tracking

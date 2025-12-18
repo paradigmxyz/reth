@@ -1,6 +1,5 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    HashedPostStateProvider, StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
@@ -199,7 +198,7 @@ impl<Provider: DBProvider> LatestStateProvider<Provider> {
 }
 
 // Delegates all provider impls to [LatestStateProviderRef]
-delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader ]);
+reth_storage_api::macros::delegate_provider_impls!(LatestStateProvider<Provider> where [Provider: DBProvider + BlockHashReader ]);
 
 #[cfg(test)]
 mod tests {
