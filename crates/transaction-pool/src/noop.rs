@@ -345,6 +345,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
         Ok(None)
     }
+
+    fn get_blobs_for_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        Ok(vec![None; versioned_hashes.len()])
+    }
 }
 
 /// A [`TransactionValidator`] that does nothing.

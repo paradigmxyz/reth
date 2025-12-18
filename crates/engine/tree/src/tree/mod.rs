@@ -1302,22 +1302,7 @@ where
             // Check if persistence has complete
             match rx.try_recv() {
                 Ok(last_persisted_hash_num) => {
-                    self.metrics.engine.persistence_duration.record(start_time.elapsed());
-                    let Some(BlockNumHash {
-                        hash: last_persisted_block_hash,
-                        number: last_persisted_block_number,
-                    }) = last_persisted_hash_num
-                    else {
-                        // if this happened, then we persisted no blocks because we sent an
-                        // empty vec of blocks
-                        warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
-                        return Ok(())
-                    };
-
-                    debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
-                    self.persistence_state
-                        .finish(last_persisted_block_hash, last_persisted_block_number);
-                    self.on_new_persisted_block()?;
+                    self.on_persistence_complete(last_persisted_hash_num, start_time)?;
                 }
                 Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
                 Err(TryRecvError::Empty) => {
@@ -1335,6 +1320,30 @@ where
             }
         }
 
+        Ok(())
+    }
+
+    /// Handles a completed persistence task.
+    fn on_persistence_complete(
+        &mut self,
+        last_persisted_hash_num: Option<BlockNumHash>,
+        start_time: Instant,
+    ) -> Result<(), AdvancePersistenceError> {
+        self.metrics.engine.persistence_duration.record(start_time.elapsed());
+
+        let Some(BlockNumHash {
+            hash: last_persisted_block_hash,
+            number: last_persisted_block_number,
+        }) = last_persisted_hash_num
+        else {
+            // if this happened, then we persisted no blocks because we sent an empty vec of blocks
+            warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
+            return Ok(())
+        };
+
+        debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
+        self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
+        self.on_new_persisted_block()?;
         Ok(())
     }
 

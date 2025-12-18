@@ -374,7 +374,8 @@ where
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
-        // fetch parent block
+        // Fetch parent block. This goes to memory most of the time unless the parent block is
+        // beyond the in-memory buffer.
         let Some(parent_block) = ensure_ok!(self.sealed_header_by_hash(parent_hash, ctx.state()))
         else {
             return Err(InsertBlockError::new(
@@ -399,7 +400,7 @@ where
             "Decided which state root algorithm to run"
         );
 
-        // use prewarming background task
+        // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
 
         // Extract the BAL, if valid and available
@@ -424,21 +425,17 @@ where
         // Use cached state provider before executing, used in execution after prewarming threads
         // complete
         if let Some((caches, cache_metrics)) = handle.caches().zip(handle.cache_metrics()) {
-            state_provider = Box::new(CachedStateProvider::new_with_caches(
-                state_provider,
-                caches,
-                cache_metrics,
-            ));
+            state_provider =
+                Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
         };
 
+        if self.config.state_provider_metrics() {
+            state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
+        }
+
         // Execute the block and handle any execution errors
-        let (output, senders) = match if self.config.state_provider_metrics() {
-            let state_provider =
-                InstrumentedStateProvider::from_state_provider(&state_provider, "engine");
-            self.execute_block(&state_provider, env, &input, &mut handle)
-        } else {
-            self.execute_block(&state_provider, env, &input, &mut handle)
-        } {
+        let (output, senders) = match self.execute_block(&state_provider, env, &input, &mut handle)
+        {
             Ok(output) => output,
             Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
@@ -552,17 +549,14 @@ where
             .into())
         }
 
-        // terminate prewarming task with good state output
-        handle.terminate_caching(Some(&output.state));
+        // Create ExecutionOutcome and wrap in Arc for sharing with both the caching task
+        // and the deferred trie task. This avoids cloning the expensive BundleState.
+        let execution_outcome = Arc::new(ExecutionOutcome::from((output, block_num_hash.number)));
 
-        Ok(self.spawn_deferred_trie_task(
-            block,
-            output,
-            block_num_hash.number,
-            &ctx,
-            hashed_state,
-            trie_output,
-        ))
+        // Terminate prewarming task with the shared execution outcome
+        handle.terminate_caching(Some(Arc::clone(&execution_outcome)));
+
+        Ok(self.spawn_deferred_trie_task(block, execution_outcome, &ctx, hashed_state, trie_output))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -605,7 +599,7 @@ where
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
-        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err>,
+        handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Vec<Address>), InsertBlockErrorKind>
     where
         S: StateProvider,
@@ -617,7 +611,7 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(&state_provider))
+            .with_database(StateProviderDatabase::new(state_provider))
             .with_bundle_update()
             .without_state_clear()
             .build();
@@ -793,6 +787,7 @@ where
         PayloadHandle<
             impl ExecutableTxFor<Evm> + use<N, P, Evm, V, T>,
             impl core::error::Error + Send + Sync + 'static + use<N, P, Evm, V, T>,
+            N::Receipt,
         >,
         InsertBlockErrorKind,
     > {
@@ -1027,8 +1022,7 @@ where
     fn spawn_deferred_trie_task(
         &self,
         block: RecoveredBlock<N::Block>,
-        output: BlockExecutionOutput<N::Receipt>,
-        block_number: u64,
+        execution_outcome: Arc<ExecutionOutcome<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
@@ -1078,7 +1072,7 @@ where
 
         ExecutedBlock::with_deferred_trie_data(
             Arc::new(block),
-            Arc::new(ExecutionOutcome::from((output, block_number))),
+            execution_outcome,
             deferred_trie_data,
         )
     }

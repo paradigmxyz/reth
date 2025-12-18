@@ -1381,6 +1381,7 @@ where
             version: version_metadata().cargo_pkg_version.to_string(),
             commit: version_metadata().vergen_git_sha.to_string(),
         };
+
         Ok(EngineApi::new(
             ctx.node.provider().clone(),
             ctx.config.chain.clone(),
@@ -1392,6 +1393,7 @@ where
             EngineCapabilities::default(),
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
+            ctx.node.network().clone(),
         ))
     }
 }

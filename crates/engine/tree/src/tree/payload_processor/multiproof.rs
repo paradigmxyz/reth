@@ -108,8 +108,12 @@ impl SparseTrieUpdate {
 pub(super) enum MultiProofMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
-    /// New state update from transaction execution with its source
-    StateUpdate(Source, EvmState),
+    /// New state update from transaction execution with its source.
+    ///
+    /// The state is already converted to a `HashedPostState` by the producer (state hook).
+    /// This avoids issues with `EvmState::extend` overwriting `is_changed` flags, which
+    /// could cause state updates to be lost during batching.
+    StateUpdate(Source, HashedPostState),
     /// State update that can be applied to the sparse trie without any new proofs.
     ///
     /// It can be the case when all accounts and storage slots from the state update were already
@@ -170,11 +174,6 @@ impl ProofSequencer {
         while let Some(pending) = self.pending_proofs.remove(&current_sequence) {
             consecutive_proofs.push(pending);
             current_sequence += 1;
-
-            // if we don't have the next number, stop collecting
-            if !self.pending_proofs.contains_key(&current_sequence) {
-                break;
-            }
         }
 
         self.next_to_deliver += consecutive_proofs.len() as u64;
@@ -1458,6 +1457,9 @@ impl MultiProofTask {
 /// Context for multiproof message batching loop.
 ///
 /// Contains processing state that persists across loop iterations.
+///
+/// Used by `process_multiproof_message` to batch consecutive same-type messages received via
+/// `try_recv` for efficient processing.
 struct MultiproofBatchCtx {
     /// Buffers a non-matching message type encountered during batching.
     /// Processed first in next iteration to preserve ordering while allowing same-type

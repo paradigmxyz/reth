@@ -389,6 +389,65 @@ impl RocksDBProvider {
         })
     }
 
+    /// Gets the first (smallest key) entry from the specified table.
+    pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
+            let cf = this.get_cf_handle::<T>()?;
+            let mut iter = this.0.db.iterator_cf(cf, IteratorMode::Start);
+
+            match iter.next() {
+                Some(Ok((key_bytes, value_bytes))) => {
+                    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    let value = T::Value::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    Ok(Some((key, value)))
+                }
+                Some(Err(e)) => {
+                    Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })))
+                }
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Gets the last (largest key) entry from the specified table.
+    pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
+            let cf = this.get_cf_handle::<T>()?;
+            let mut iter = this.0.db.iterator_cf(cf, IteratorMode::End);
+
+            match iter.next() {
+                Some(Ok((key_bytes, value_bytes))) => {
+                    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    let value = T::Value::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    Ok(Some((key, value)))
+                }
+                Some(Err(e)) => {
+                    Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })))
+                }
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Creates an iterator over all entries in the specified table.
+    ///
+    /// Returns decoded `(Key, Value)` pairs in key order.
+    pub fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let iter = self.0.db.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
@@ -488,6 +547,7 @@ impl RocksDBBatch {
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
     }
+
 }
 
 /// `RocksDB` transaction wrapper providing MDBX-like semantics.
@@ -738,6 +798,50 @@ impl<'db> RocksTx<'db> {
         self.inner.rollback().map_err(|e| {
             ProviderError::Database(DatabaseError::Other(format!("rollback failed: {e}")))
         })
+    }
+}
+
+/// Iterator over a `RocksDB` table (non-transactional).
+///
+/// Yields decoded `(Key, Value)` pairs in key order.
+pub struct RocksDBIter<'db, T: Table> {
+    inner: rocksdb::DBIteratorWithThreadMode<'db, TransactionDB>,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: Table> fmt::Debug for RocksDBIter<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBIter").field("table", &T::NAME).finish_non_exhaustive()
+    }
+}
+
+impl<T: Table> Iterator for RocksDBIter<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key_bytes, value_bytes) = match self.inner.next()? {
+            Ok(kv) => kv,
+            Err(e) => {
+                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))))
+            }
+        };
+
+        // Decode key
+        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
+            Ok(k) => k,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        // Decompress value
+        let value = match T::Value::decompress(&value_bytes) {
+            Ok(v) => v,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        Some(Ok((key, value)))
     }
 }
 
@@ -1098,5 +1202,29 @@ mod tests {
             let value = format!("batch_value_{i}").into_bytes();
             assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
         }
+    }
+
+    #[test]
+    fn test_first_and_last_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Empty table should return None for both
+        assert_eq!(provider.first::<TestTable>().unwrap(), None);
+        assert_eq!(provider.last::<TestTable>().unwrap(), None);
+
+        // Insert some entries
+        provider.put::<TestTable>(10, &b"value_10".to_vec()).unwrap();
+        provider.put::<TestTable>(20, &b"value_20".to_vec()).unwrap();
+        provider.put::<TestTable>(5, &b"value_5".to_vec()).unwrap();
+
+        // First should return the smallest key
+        let first = provider.first::<TestTable>().unwrap();
+        assert_eq!(first, Some((5, b"value_5".to_vec())));
+
+        // Last should return the largest key
+        let last = provider.last::<TestTable>().unwrap();
+        assert_eq!(last, Some((20, b"value_20".to_vec())));
     }
 }

@@ -27,10 +27,11 @@ use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
+use reth_execution_types::ExecutionOutcome;
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, StateProviderBox, StateProviderFactory, StateReader};
-use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
+use reth_provider::{BlockReader, StateProviderFactory, StateReader};
+use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_trie::MultiProofTargets;
 use std::{
     sync::{
@@ -86,7 +87,7 @@ where
     /// Sender to emit evm state outcome messages, if any.
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     /// Receiver for events produced by tx execution
-    actions_rx: Receiver<PrewarmTaskEvent>,
+    actions_rx: Receiver<PrewarmTaskEvent<N::Receipt>>,
     /// Parent span for tracing
     parent_span: Span,
 }
@@ -105,7 +106,7 @@ where
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         transaction_count_hint: usize,
         max_concurrency: usize,
-    ) -> (Self, Sender<PrewarmTaskEvent>) {
+    ) -> (Self, Sender<PrewarmTaskEvent<N::Receipt>>) {
         let (actions_tx, actions_rx) = channel();
 
         trace!(
@@ -135,8 +136,11 @@ where
     /// For Optimism chains, special handling is applied to the first transaction if it's a
     /// deposit transaction (type 0x7E/126) which sets critical metadata that affects all
     /// subsequent transactions in the block.
-    fn spawn_all<Tx>(&self, pending: mpsc::Receiver<Tx>, actions_tx: Sender<PrewarmTaskEvent>)
-    where
+    fn spawn_all<Tx>(
+        &self,
+        pending: mpsc::Receiver<Tx>,
+        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
+    ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
         let executor = self.executor.clone();
@@ -248,7 +252,7 @@ where
     ///
     /// This method is called from `run()` only after all execution tasks are complete.
     #[instrument(level = "debug", target = "engine::tree::payload_processor::prewarm", skip_all)]
-    fn save_cache(self, state: BundleState) {
+    fn save_cache(self, execution_outcome: Arc<ExecutionOutcome<N::Receipt>>) {
         let start = Instant::now();
 
         let Self { execution_cache, ctx: PrewarmContext { env, metrics, saved_cache, .. }, .. } =
@@ -265,7 +269,8 @@ where
                 let new_cache = SavedCache::new(hash, caches, cache_metrics);
 
                 // Insert state into cache while holding the lock
-                if new_cache.cache().insert_state(&state).is_err() {
+                // Access the BundleState through the shared ExecutionOutcome
+                if new_cache.cache().insert_state(execution_outcome.state()).is_err() {
                     // Clear the cache on error to prevent having a polluted cache
                     *cached = None;
                     debug!(target: "engine::caching", "cleared execution cache on update error");
@@ -300,12 +305,12 @@ where
     pub(super) fn run(
         self,
         pending: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
-        actions_tx: Sender<PrewarmTaskEvent>,
+        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
     ) {
         // spawn execution tasks.
         self.spawn_all(pending, actions_tx);
 
-        let mut final_block_output = None;
+        let mut final_execution_outcome = None;
         let mut finished_execution = false;
         while let Ok(event) = self.actions_rx.recv() {
             match event {
@@ -318,9 +323,9 @@ where
                     // completed executing a set of transactions
                     self.send_multi_proof_targets(proof_targets);
                 }
-                PrewarmTaskEvent::Terminate { block_output } => {
+                PrewarmTaskEvent::Terminate { execution_outcome } => {
                     trace!(target: "engine::tree::payload_processor::prewarm", "Received termination signal");
-                    final_block_output = Some(block_output);
+                    final_execution_outcome = Some(execution_outcome);
 
                     if finished_execution {
                         // all tasks are done, we can exit, which will save caches and exit
@@ -334,7 +339,7 @@ where
 
                     finished_execution = true;
 
-                    if final_block_output.is_some() {
+                    if final_execution_outcome.is_some() {
                         // all tasks are done, we can exit, which will save caches and exit
                         break
                     }
@@ -344,9 +349,9 @@ where
 
         debug!(target: "engine::tree::payload_processor::prewarm", "Completed prewarm execution");
 
-        // save caches and finish
-        if let Some(Some(state)) = final_block_output {
-            self.save_cache(state);
+        // save caches and finish using the shared ExecutionOutcome
+        if let Some(Some(execution_outcome)) = final_execution_outcome {
+            self.save_cache(execution_outcome);
         }
     }
 }
@@ -391,7 +396,7 @@ where
             mut precompile_cache_map,
         } = self;
 
-        let state_provider = match provider.build() {
+        let mut state_provider = match provider.build() {
             Ok(provider) => provider,
             Err(err) => {
                 trace!(
@@ -404,13 +409,15 @@ where
         };
 
         // Use the caches to create a new provider with caching
-        let state_provider: StateProviderBox = if let Some(saved_cache) = saved_cache {
+        if let Some(saved_cache) = saved_cache {
             let caches = saved_cache.cache().clone();
             let cache_metrics = saved_cache.metrics().clone();
-            Box::new(CachedStateProvider::new_with_caches(state_provider, caches, cache_metrics))
-        } else {
-            state_provider
-        };
+            state_provider = Box::new(
+                CachedStateProvider::new(state_provider, caches, cache_metrics)
+                    // ensure we pre-warm the cache
+                    .prewarm(),
+            );
+        }
 
         let state_provider = StateProviderDatabase::new(state_provider);
 
@@ -452,7 +459,7 @@ where
     fn transact_batch<Tx>(
         self,
         txs: mpsc::Receiver<IndexedTransaction<Tx>>,
-        sender: Sender<PrewarmTaskEvent>,
+        sender: Sender<PrewarmTaskEvent<N::Receipt>>,
         done_tx: Sender<()>,
     ) where
         Tx: ExecutableTxFor<Evm>,
@@ -533,7 +540,7 @@ where
         &self,
         idx: usize,
         executor: &WorkloadExecutor,
-        actions_tx: Sender<PrewarmTaskEvent>,
+        actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
         done_tx: Sender<()>,
     ) -> mpsc::Sender<IndexedTransaction<Tx>>
     where
@@ -589,14 +596,18 @@ fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) 
 }
 
 /// The events the pre-warm task can handle.
-pub(super) enum PrewarmTaskEvent {
+///
+/// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the main
+/// execution path without cloning the expensive `BundleState`.
+pub(super) enum PrewarmTaskEvent<R> {
     /// Forcefully terminate all remaining transaction execution.
     TerminateTransactionExecution,
     /// Forcefully terminate the task on demand and update the shared cache with the given output
     /// before exiting.
     Terminate {
-        /// The final block state output.
-        block_output: Option<BundleState>,
+        /// The final execution outcome. Using `Arc` allows sharing with the main execution
+        /// path without cloning the expensive `BundleState`.
+        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
     },
     /// The outcome of a pre-warm task
     Outcome {
