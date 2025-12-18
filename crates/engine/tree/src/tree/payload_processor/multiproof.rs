@@ -26,7 +26,7 @@ use reth_trie_parallel::{
         StorageProofInput,
     },
 };
-use std::{collections::BTreeMap, mem, ops::DerefMut, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -904,21 +904,6 @@ impl MultiProofTask {
         targets
     }
 
-    /// Handles state updates.
-    ///
-    /// Returns how many proof dispatches were spawned (including an `EmptyProof` for already
-    /// fetched targets).
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::multiproof",
-        skip(self, update),
-        fields(accounts = update.len(), chunks = 0)
-    )]
-    fn on_state_update(&mut self, source: Source, update: EvmState) -> u64 {
-        let hashed_state_update = evm_state_to_hashed_post_state(update);
-        self.on_hashed_state_update(source, hashed_state_update)
-    }
-
     /// Processes a hashed state update and dispatches multiproofs as needed.
     ///
     /// Returns the number of state updates dispatched (both `EmptyProof` and regular multiproofs).
@@ -1595,54 +1580,6 @@ where
     1
 }
 
-/// Checks whether two state updates can be merged in a batch.
-///
-/// Transaction updates with the same transaction ID (`StateChangeSource::Transaction(id)`)
-/// are safe to merge because they originate from the same logical execution and can be
-/// coalesced to amortize proof work.
-fn can_batch_state_update(
-    batch_source: Source,
-    batch_update: &EvmState,
-    next_source: Source,
-    next_update: &EvmState,
-) -> bool {
-    if !same_source(batch_source, next_source) {
-        return false;
-    }
-
-    match (batch_source, next_source) {
-        (
-            Source::Evm(StateChangeSource::PreBlock(_)),
-            Source::Evm(StateChangeSource::PreBlock(_)),
-        ) |
-        (
-            Source::Evm(StateChangeSource::PostBlock(_)),
-            Source::Evm(StateChangeSource::PostBlock(_)),
-        ) => batch_update == next_update,
-        _ => true,
-    }
-}
-
-/// Checks whether two sources refer to the same origin.
-fn same_source(lhs: Source, rhs: Source) -> bool {
-    match (lhs, rhs) {
-        (
-            Source::Evm(StateChangeSource::Transaction(a)),
-            Source::Evm(StateChangeSource::Transaction(b)),
-        ) => a == b,
-        (
-            Source::Evm(StateChangeSource::PreBlock(a)),
-            Source::Evm(StateChangeSource::PreBlock(b)),
-        ) => mem::discriminant(&a) == mem::discriminant(&b),
-        (
-            Source::Evm(StateChangeSource::PostBlock(a)),
-            Source::Evm(StateChangeSource::PostBlock(b)),
-        ) => mem::discriminant(&a) == mem::discriminant(&b),
-        (Source::BlockAccessList, Source::BlockAccessList) => true,
-        _ => false,
-    }
-}
-
 /// Estimates target count from `HashedPostState` for batching decisions.
 ///
 /// Returns the number of accounts plus the number of storage slots, which approximates
@@ -1657,7 +1594,8 @@ fn estimate_hashed_state_targets(state: &HashedPostState) -> usize {
 mod tests {
     use super::*;
     use alloy_eip7928::{AccountChanges, BalanceChange};
-    use alloy_primitives::{map::B256Set, Address};
+    use alloy_primitives::{keccak256, map::B256Set, Address};
+    use reth_primitives_traits::Account;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
@@ -1666,8 +1604,38 @@ mod tests {
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
-    use std::sync::{Arc, OnceLock};
+    use std::{
+        mem,
+        sync::{Arc, OnceLock},
+    };
     use tokio::runtime::{Handle, Runtime};
+
+    /// Creates a [`HashedPostState`] with a single account for testing.
+    fn create_hashed_state_update(addr: Address, balance: u64) -> HashedPostState {
+        let hashed_address = keccak256(addr);
+        let account = Account { balance: U256::from(balance), nonce: 1, bytecode_hash: None };
+        HashedPostState::default().with_accounts([(hashed_address, Some(account))])
+    }
+
+    /// Checks whether two sources refer to the same origin (for test assertions).
+    fn same_source(lhs: Source, rhs: Source) -> bool {
+        match (lhs, rhs) {
+            (
+                Source::Evm(StateChangeSource::Transaction(a)),
+                Source::Evm(StateChangeSource::Transaction(b)),
+            ) => a == b,
+            (
+                Source::Evm(StateChangeSource::PreBlock(a)),
+                Source::Evm(StateChangeSource::PreBlock(b)),
+            ) => mem::discriminant(&a) == mem::discriminant(&b),
+            (
+                Source::Evm(StateChangeSource::PostBlock(a)),
+                Source::Evm(StateChangeSource::PostBlock(b)),
+            ) => mem::discriminant(&a) == mem::discriminant(&b),
+            (Source::BlockAccessList, Source::BlockAccessList) => true,
+            _ => false,
+        }
+    }
 
     /// Get a handle to the test runtime, creating it if necessary
     fn get_test_runtime_handle() -> Handle {
@@ -2179,56 +2147,31 @@ mod tests {
         assert_eq!(proofs_requested, 1);
     }
 
-    /// Verifies that consecutive state update messages from the same source are batched together.
+    /// Verifies that consecutive state update messages are batched together.
+    ///
+    /// Now that we use [`HashedPostState`] (which has no `is_changed` semantics), batching
+    /// is safe across sources.
     #[test]
     fn test_state_update_batching() {
         use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let mut task = create_test_state_root_task(test_provider_factory);
 
-        // create multiple state updates
+        // create multiple state updates using HashedPostState
         let addr1 = alloy_primitives::Address::random();
         let addr2 = alloy_primitives::Address::random();
+        let hashed_addr1 = keccak256(addr1);
+        let hashed_addr2 = keccak256(addr2);
 
-        let mut update1 = EvmState::default();
-        update1.insert(
-            addr1,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(100),
-                    nonce: 1,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
-
-        let mut update2 = EvmState::default();
-        update2.insert(
-            addr2,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(200),
-                    nonce: 2,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
+        let update1 = create_hashed_state_update(addr1, 100);
+        let update2 = create_hashed_state_update(addr2, 200);
 
         let source = StateChangeSource::Transaction(0);
 
         let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), update1.clone())).unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), update2.clone())).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source.into(), update1)).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source.into(), update2)).unwrap();
 
         let proofs_requested =
             if let Ok(MultiProofMessage::StateUpdate(_src, update)) = task.rx.recv() {
@@ -2243,22 +2186,24 @@ mod tests {
                 }
 
                 assert_eq!(num_batched, 2);
-                assert_eq!(merged_update.len(), 2);
-                assert!(merged_update.contains_key(&addr1));
-                assert!(merged_update.contains_key(&addr2));
+                assert_eq!(merged_update.accounts.len(), 2);
+                assert!(merged_update.accounts.contains_key(&hashed_addr1));
+                assert!(merged_update.accounts.contains_key(&hashed_addr2));
 
-                task.on_state_update(source.into(), merged_update)
+                task.on_hashed_state_update(source.into(), merged_update)
             } else {
                 panic!("Expected StateUpdate message");
             };
         assert_eq!(proofs_requested, 1);
     }
 
-    /// Verifies that state updates from different sources are not batched together.
+    /// Verifies that state updates from different sources CAN be batched together.
+    ///
+    /// With [`HashedPostState`] (instead of `EvmState`), batching is safe across sources because
+    /// there are no `is_changed` flags that could be overwritten.
     #[test]
-    fn test_state_update_batching_separates_sources() {
+    fn test_state_update_batching_across_sources() {
         use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let task = create_test_state_root_task(test_provider_factory);
@@ -2266,122 +2211,62 @@ mod tests {
         let addr_a1 = alloy_primitives::Address::random();
         let addr_b1 = alloy_primitives::Address::random();
         let addr_a2 = alloy_primitives::Address::random();
-
-        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
-            let mut state = EvmState::default();
-            state.insert(
-                addr,
-                Account {
-                    info: revm_state::AccountInfo {
-                        balance: U256::from(balance),
-                        nonce: 1,
-                        code_hash: Default::default(),
-                        code: Default::default(),
-                    },
-                    transaction_id: Default::default(),
-                    storage: Default::default(),
-                    status: revm_state::AccountStatus::Touched,
-                },
-            );
-            state
-        };
+        let hashed_a1 = keccak256(addr_a1);
+        let hashed_b1 = keccak256(addr_b1);
+        let hashed_a2 = keccak256(addr_a2);
 
         let source_a = StateChangeSource::Transaction(1);
         let source_b = StateChangeSource::Transaction(2);
 
-        // Queue: A1 (immediate dispatch), B1 (batched), A2 (should become pending)
+        // Queue 3 updates from different sources - they should ALL be batchable now
         let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(source_a.into(), create_state_update(addr_a1, 100)))
-            .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source_b.into(), create_state_update(addr_b1, 200)))
-            .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source_a.into(), create_state_update(addr_a2, 300)))
-            .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source_a.into(),
+            create_hashed_state_update(addr_a1, 100),
+        ))
+        .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source_b.into(),
+            create_hashed_state_update(addr_b1, 200),
+        ))
+        .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source_a.into(),
+            create_hashed_state_update(addr_a2, 300),
+        ))
+        .unwrap();
 
-        let mut pending_msg: Option<MultiProofMessage> = None;
-
-        if let Ok(MultiProofMessage::StateUpdate(first_source, _)) = task.rx.recv() {
+        // Receive the first message
+        if let Ok(MultiProofMessage::StateUpdate(first_source, first_update)) = task.rx.recv() {
             assert!(same_source(first_source, source_a.into()));
+            let mut merged_update = first_update;
+            let mut num_batched = 1;
 
-            // Simulate batching loop for remaining messages
-            let mut accumulated_updates: Vec<(Source, EvmState)> = Vec::new();
-            let mut accumulated_targets = 0usize;
-
-            loop {
-                if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
-                    break;
-                }
-                match task.rx.try_recv() {
-                    Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                            !can_batch_state_update(
-                                *batch_source,
-                                batch_update,
-                                next_source,
-                                &next_update,
-                            )
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-
-                        let next_estimate = estimate_evm_state_targets(&next_update);
-                        if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                            !accumulated_updates.is_empty()
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        accumulated_targets += next_estimate;
-                        accumulated_updates.push((next_source, next_update));
-                    }
-                    Ok(other_msg) => {
-                        pending_msg = Some(other_msg);
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-
-            assert_eq!(accumulated_updates.len(), 1, "Should only batch matching sources");
-            let batch_source = accumulated_updates[0].0;
-            assert!(same_source(batch_source, source_b.into()));
-
-            let batch_source = accumulated_updates[0].0;
-            let mut merged_update = accumulated_updates.remove(0).1;
-            for (_, next_update) in accumulated_updates {
+            // Batch all remaining messages (no source restriction)
+            while let Ok(MultiProofMessage::StateUpdate(_next_source, next_update)) =
+                task.rx.try_recv()
+            {
                 merged_update.extend(next_update);
+                num_batched += 1;
             }
 
-            assert!(same_source(batch_source, source_b.into()), "Batch should use matching source");
-            assert!(merged_update.contains_key(&addr_b1));
-            assert!(!merged_update.contains_key(&addr_a1));
-            assert!(!merged_update.contains_key(&addr_a2));
+            // All 3 should be batched together now
+            assert_eq!(num_batched, 3, "All updates should batch together");
+            assert_eq!(merged_update.accounts.len(), 3);
+            assert!(merged_update.accounts.contains_key(&hashed_a1));
+            assert!(merged_update.accounts.contains_key(&hashed_b1));
+            assert!(merged_update.accounts.contains_key(&hashed_a2));
         } else {
             panic!("Expected first StateUpdate");
         }
-
-        match pending_msg {
-            Some(MultiProofMessage::StateUpdate(pending_source, pending_update)) => {
-                assert!(same_source(pending_source, source_a.into()));
-                assert!(pending_update.contains_key(&addr_a2));
-            }
-            other => panic!("Expected pending StateUpdate with source_a, got {:?}", other),
-        }
     }
 
-    /// Verifies that pre-block updates only batch when their payloads are identical.
+    /// Verifies that pre-block updates can be batched together.
+    ///
+    /// With [`HashedPostState`], batching is safe regardless of source or payload.
     #[test]
-    fn test_pre_block_updates_require_payload_match_to_batch() {
+    fn test_pre_block_updates_batch() {
         use alloy_evm::block::{StateChangePreBlockSource, StateChangeSource};
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let task = create_test_state_root_task(test_provider_factory);
@@ -2389,105 +2274,50 @@ mod tests {
         let addr1 = alloy_primitives::Address::random();
         let addr2 = alloy_primitives::Address::random();
         let addr3 = alloy_primitives::Address::random();
-
-        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
-            let mut state = EvmState::default();
-            state.insert(
-                addr,
-                Account {
-                    info: revm_state::AccountInfo {
-                        balance: U256::from(balance),
-                        nonce: 1,
-                        code_hash: Default::default(),
-                        code: Default::default(),
-                    },
-                    transaction_id: Default::default(),
-                    storage: Default::default(),
-                    status: revm_state::AccountStatus::Touched,
-                },
-            );
-            state
-        };
+        let hashed_addr1 = keccak256(addr1);
+        let hashed_addr2 = keccak256(addr2);
+        let hashed_addr3 = keccak256(addr3);
 
         let source = StateChangeSource::PreBlock(StateChangePreBlockSource::BeaconRootContract);
 
-        // Queue: first update dispatched immediately, next two should not merge
+        // Queue 3 pre-block updates - they should all batch together now
         let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr1, 100)))
-            .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr2, 200)))
-            .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr3, 300)))
-            .unwrap();
-
-        let mut pending_msg: Option<MultiProofMessage> = None;
+        tx.send(MultiProofMessage::StateUpdate(
+            source.into(),
+            create_hashed_state_update(addr1, 100),
+        ))
+        .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source.into(),
+            create_hashed_state_update(addr2, 200),
+        ))
+        .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source.into(),
+            create_hashed_state_update(addr3, 300),
+        ))
+        .unwrap();
 
         if let Ok(MultiProofMessage::StateUpdate(first_source, first_update)) = task.rx.recv() {
             assert!(same_source(first_source, source.into()));
-            assert!(first_update.contains_key(&addr1));
+            assert!(first_update.accounts.contains_key(&hashed_addr1));
 
-            let mut accumulated_updates: Vec<(Source, EvmState)> = Vec::new();
-            let mut accumulated_targets = 0usize;
+            let mut merged_update = first_update;
+            let mut num_batched = 1;
 
-            loop {
-                if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
-                    break;
-                }
-                match task.rx.try_recv() {
-                    Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                            !can_batch_state_update(
-                                *batch_source,
-                                batch_update,
-                                next_source,
-                                &next_update,
-                            )
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-
-                        let next_estimate = estimate_evm_state_targets(&next_update);
-                        if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                            !accumulated_updates.is_empty()
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        accumulated_targets += next_estimate;
-                        accumulated_updates.push((next_source, next_update));
-                    }
-                    Ok(other_msg) => {
-                        pending_msg = Some(other_msg);
-                        break;
-                    }
-                    Err(_) => break,
-                }
+            while let Ok(MultiProofMessage::StateUpdate(_next_source, next_update)) =
+                task.rx.try_recv()
+            {
+                merged_update.extend(next_update);
+                num_batched += 1;
             }
 
-            assert_eq!(
-                accumulated_updates.len(),
-                1,
-                "Second pre-block update should not merge with a different payload"
-            );
-            let (batched_source, batched_update) = accumulated_updates.remove(0);
-            assert!(same_source(batched_source, source.into()));
-            assert!(batched_update.contains_key(&addr2));
-            assert!(!batched_update.contains_key(&addr3));
-
-            match pending_msg {
-                Some(MultiProofMessage::StateUpdate(_, pending_update)) => {
-                    assert!(pending_update.contains_key(&addr3));
-                }
-                other => panic!("Expected pending third pre-block update, got {:?}", other),
-            }
+            // All 3 should be batched together
+            assert_eq!(num_batched, 3, "All pre-block updates should batch");
+            assert_eq!(merged_update.accounts.len(), 3);
+            assert!(merged_update.accounts.contains_key(&hashed_addr1));
+            assert!(merged_update.accounts.contains_key(&hashed_addr2));
+            assert!(merged_update.accounts.contains_key(&hashed_addr3));
         } else {
             panic!("Expected first StateUpdate");
         }
@@ -2497,7 +2327,6 @@ mod tests {
     #[test]
     fn test_batching_preserves_ordering_with_different_message_type() {
         use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let task = create_test_state_root_task(test_provider_factory);
@@ -2507,6 +2336,8 @@ mod tests {
         let addr3 = B256::random();
         let state_addr1 = alloy_primitives::Address::random();
         let state_addr2 = alloy_primitives::Address::random();
+        let hashed_state_addr1 = keccak256(state_addr1);
+        let hashed_state_addr2 = keccak256(state_addr2);
 
         // Create PrefetchProofs targets
         let mut targets1 = MultiProofTargets::default();
@@ -2518,39 +2349,9 @@ mod tests {
         let mut targets3 = MultiProofTargets::default();
         targets3.insert(addr3, HashSet::default());
 
-        // Create StateUpdate 1
-        let mut state_update1 = EvmState::default();
-        state_update1.insert(
-            state_addr1,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(100),
-                    nonce: 1,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
-
-        // Create StateUpdate 2
-        let mut state_update2 = EvmState::default();
-        state_update2.insert(
-            state_addr2,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(200),
-                    nonce: 2,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
+        // Create HashedPostState updates
+        let state_update1 = create_hashed_state_update(state_addr1, 100);
+        let state_update2 = create_hashed_state_update(state_addr2, 200);
 
         let source = StateChangeSource::Transaction(42);
 
@@ -2596,7 +2397,10 @@ mod tests {
         // Step 2: The pending message should be StateUpdate1 (preserved ordering)
         match pending_msg {
             Some(MultiProofMessage::StateUpdate(_src, update)) => {
-                assert!(update.contains_key(&state_addr1), "Should be first StateUpdate");
+                assert!(
+                    update.accounts.contains_key(&hashed_state_addr1),
+                    "Should be first StateUpdate"
+                );
             }
             _ => panic!("StateUpdate1 was lost or reordered! The ordering fix is broken."),
         }
@@ -2604,7 +2408,10 @@ mod tests {
         // Step 3: Next in channel should be StateUpdate2
         match task.rx.try_recv() {
             Ok(MultiProofMessage::StateUpdate(_src, update)) => {
-                assert!(update.contains_key(&state_addr2), "Should be second StateUpdate");
+                assert!(
+                    update.accounts.contains_key(&hashed_state_addr2),
+                    "Should be second StateUpdate"
+                );
             }
             _ => panic!("StateUpdate2 was lost!"),
         }
@@ -2623,7 +2430,6 @@ mod tests {
     #[test]
     fn test_pending_message_processed_before_next_iteration() {
         use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let test_provider = test_provider_factory.latest().unwrap();
@@ -2638,21 +2444,7 @@ mod tests {
         prefetch2.insert(prefetch_addr2, HashSet::default());
 
         let state_addr = alloy_primitives::Address::random();
-        let mut state_update = EvmState::default();
-        state_update.insert(
-            state_addr,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(42),
-                    nonce: 1,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
+        let state_update = create_hashed_state_update(state_addr, 42);
 
         let source = StateChangeSource::Transaction(99);
 
@@ -2711,7 +2503,6 @@ mod tests {
         //
         // Without the state-machine fix, State1 would be processed alone (no batching).
         use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let task = create_test_state_root_task(test_provider_factory);
@@ -2721,6 +2512,9 @@ mod tests {
         let state_addr1 = alloy_primitives::Address::random();
         let state_addr2 = alloy_primitives::Address::random();
         let state_addr3 = alloy_primitives::Address::random();
+        let hashed_state_addr1 = keccak256(state_addr1);
+        let hashed_state_addr2 = keccak256(state_addr2);
+        let hashed_state_addr3 = keccak256(state_addr3);
 
         // Create Prefetch targets
         let mut prefetch1 = MultiProofTargets::default();
@@ -2729,26 +2523,6 @@ mod tests {
         let mut prefetch2 = MultiProofTargets::default();
         prefetch2.insert(prefetch_addr2, HashSet::default());
 
-        // Create StateUpdates
-        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
-            let mut state = EvmState::default();
-            state.insert(
-                addr,
-                Account {
-                    info: revm_state::AccountInfo {
-                        balance: U256::from(balance),
-                        nonce: 1,
-                        code_hash: Default::default(),
-                        code: Default::default(),
-                    },
-                    transaction_id: Default::default(),
-                    storage: Default::default(),
-                    status: revm_state::AccountStatus::Touched,
-                },
-            );
-            state
-        };
-
         let source = StateChangeSource::Transaction(42);
 
         // Queue: [Prefetch1, State1, State2, State3, Prefetch2]
@@ -2756,17 +2530,17 @@ mod tests {
         tx.send(MultiProofMessage::PrefetchProofs(prefetch1.clone())).unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_state_update(state_addr1, 100),
+            create_hashed_state_update(state_addr1, 100),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_state_update(state_addr2, 200),
+            create_hashed_state_update(state_addr2, 200),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_state_update(state_addr3, 300),
+            create_hashed_state_update(state_addr3, 300),
         ))
         .unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch2.clone())).unwrap();
@@ -2824,10 +2598,14 @@ mod tests {
                 num_batched, 3,
                 "Pending message should get full batching treatment and merge all 3 StateUpdates"
             );
-            assert_eq!(merged_update.len(), 3, "Should have all 3 addresses in merged update");
-            assert!(merged_update.contains_key(&state_addr1));
-            assert!(merged_update.contains_key(&state_addr2));
-            assert!(merged_update.contains_key(&state_addr3));
+            assert_eq!(
+                merged_update.accounts.len(),
+                3,
+                "Should have all 3 addresses in merged update"
+            );
+            assert!(merged_update.accounts.contains_key(&hashed_state_addr1));
+            assert!(merged_update.accounts.contains_key(&hashed_state_addr2));
+            assert!(merged_update.accounts.contains_key(&hashed_state_addr3));
         } else {
             panic!("Expected pending StateUpdate");
         }
