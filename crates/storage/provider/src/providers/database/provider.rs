@@ -3207,25 +3207,33 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
     /// Commit database transaction, static files, and pending `RocksDB` batches.
     fn commit(self) -> ProviderResult<bool> {
-        // Commit pending RocksDB batches first.
-        // RocksDB uses WAL so data is durable once the batch commit returns.
-        #[cfg(all(unix, feature = "rocksdb"))]
-        {
-            let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
-            for batch in batches {
-                self.rocksdb_provider.commit_batch(batch)?;
-            }
-        }
-
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just
         // truncate the static files according to the
         // checkpoints on the next start-up.
         if self.static_file_provider.has_unwind_queued() {
             self.tx.commit()?;
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+                for batch in batches {
+                    self.rocksdb_provider.commit_batch(batch)?;
+                }
+            }
+
             self.static_file_provider.commit()?;
         } else {
             self.static_file_provider.commit()?;
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+                for batch in batches {
+                    self.rocksdb_provider.commit_batch(batch)?;
+                }
+            }
+
             self.tx.commit()?;
         }
 
