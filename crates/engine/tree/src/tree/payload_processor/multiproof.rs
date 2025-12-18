@@ -930,6 +930,20 @@ impl MultiProofTask {
         // Update removed keys based on the state update.
         self.multi_added_removed_keys.update_with_state(&hashed_state_update);
 
+        self.on_hashed_state_update_without_added_removed(source, hashed_state_update)
+    }
+
+    /// Processes a hashed state update and dispatches multiproofs as needed.
+    ///
+    /// This variant skips updating `MultiAddedRemovedKeys` because the caller has already
+    /// done so (e.g., per sub-update before batching).
+    ///
+    /// Returns the number of state updates dispatched (both `EmptyProof` and regular multiproofs).
+    fn on_hashed_state_update_without_added_removed(
+        &mut self,
+        source: Source,
+        hashed_state_update: HashedPostState,
+    ) -> u64 {
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
         let (fetched_state_update, not_fetched_state_update) = hashed_state_update
@@ -1102,7 +1116,7 @@ impl MultiProofTask {
                 false
             }
             // State update: batch consecutive updates from the same source
-            MultiProofMessage::StateUpdate(source, update) => {
+            MultiProofMessage::StateUpdate(source, hashed_update) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
 
                 if ctx.first_update_time.is_none() {
@@ -1114,27 +1128,18 @@ impl MultiProofTask {
                 }
 
                 // Accumulate messages including the first one; reuse buffer to avoid allocations.
-                let mut accumulated_targets = estimate_evm_state_targets(&update);
+                // Now using HashedPostState instead of EvmState - batching is safe across sources.
+                let mut accumulated_targets = estimate_hashed_state_targets(&hashed_update);
                 ctx.accumulated_state_updates.clear();
-                ctx.accumulated_state_updates.push((source, update));
+                ctx.accumulated_state_updates.push((source, hashed_update));
 
                 // Batch consecutive state update messages up to target limit.
+                // Note: We no longer need can_batch_state_update check because HashedPostState
+                // has no is_changed semantics that could be overwritten during extend.
                 while accumulated_targets < STATE_UPDATE_MAX_BATCH_TARGETS {
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                            let (batch_source, batch_update) = &ctx.accumulated_state_updates[0];
-                            if !can_batch_state_update(
-                                *batch_source,
-                                batch_update,
-                                next_source,
-                                &next_update,
-                            ) {
-                                ctx.pending_msg =
-                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                                break;
-                            }
-
-                            let next_estimate = estimate_evm_state_targets(&next_update);
+                            let next_estimate = estimate_hashed_state_targets(&next_update);
                             // Would exceed batch cap; leave pending to dispatch on next iteration.
                             if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
                             {
@@ -1157,16 +1162,15 @@ impl MultiProofTask {
                 let num_batched = ctx.accumulated_state_updates.len();
                 self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
 
-                #[cfg(debug_assertions)]
-                {
-                    let batch_source = ctx.accumulated_state_updates[0].0;
-                    let batch_update = &ctx.accumulated_state_updates[0].1;
-                    debug_assert!(ctx.accumulated_state_updates.iter().all(|(source, update)| {
-                        can_batch_state_update(batch_source, batch_update, *source, update)
-                    }));
+                // Update MultiAddedRemovedKeys per sub-update BEFORE merging.
+                // This preserves the correct semantics of tracking added/removed keys
+                // as if each update was processed individually.
+                for (_, update) in &ctx.accumulated_state_updates {
+                    self.multi_added_removed_keys.update_with_state(update);
                 }
 
-                // Merge all accumulated updates into a single EvmState payload.
+                // Merge all accumulated updates into a single HashedPostState payload.
+                // This is safe because HashedPostState has no is_changed semantics.
                 // Use drain to preserve the buffer allocation.
                 let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
                 let (mut batch_source, mut merged_update) = accumulated_iter
@@ -1177,9 +1181,9 @@ impl MultiProofTask {
                     merged_update.extend(next_update);
                 }
 
-                let batch_len = merged_update.len();
+                let batch_len = merged_update.accounts.len();
                 batch_metrics.state_update_proofs_requested +=
-                    self.on_state_update(batch_source, merged_update);
+                    self.on_hashed_state_update_without_added_removed(batch_source, merged_update);
                 trace!(
                     target: "engine::tree::payload_processor::multiproof",
                     ?batch_source,
@@ -1475,7 +1479,11 @@ struct MultiproofBatchCtx {
     /// Reusable buffer for accumulating prefetch targets during batching.
     accumulated_prefetch_targets: Vec<MultiProofTargets>,
     /// Reusable buffer for accumulating state updates during batching.
-    accumulated_state_updates: Vec<(Source, EvmState)>,
+    ///
+    /// Uses `HashedPostState` instead of `EvmState` to avoid issues with `is_changed` flag
+    /// overwrites during batching. The conversion from `EvmState` to `HashedPostState` happens
+    /// at the producer side (state hook) before sending.
+    accumulated_state_updates: Vec<(Source, HashedPostState)>,
 }
 
 impl MultiproofBatchCtx {
@@ -1635,16 +1643,14 @@ fn same_source(lhs: Source, rhs: Source) -> bool {
     }
 }
 
-/// Estimates target count from `EvmState` for batching decisions.
-fn estimate_evm_state_targets(state: &EvmState) -> usize {
-    state
-        .values()
-        .filter(|account| account.is_touched())
-        .map(|account| {
-            let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
-            1 + changed_slots
-        })
-        .sum()
+/// Estimates target count from `HashedPostState` for batching decisions.
+///
+/// Returns the number of accounts plus the number of storage slots, which approximates
+/// the number of proof targets that will be needed.
+fn estimate_hashed_state_targets(state: &HashedPostState) -> usize {
+    let accounts = state.accounts.len();
+    let storage_slots: usize = state.storages.values().map(|storage| storage.storage.len()).sum();
+    accounts + storage_slots
 }
 
 #[cfg(test)]
