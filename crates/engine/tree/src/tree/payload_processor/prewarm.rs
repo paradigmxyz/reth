@@ -14,7 +14,7 @@
 use crate::tree::{
     cached_state::{CachedStateProvider, SavedCache},
     payload_processor::{
-        bal::{total_changed_slots, ChangedSlotIter},
+        bal::{total_slots, BALSlotIter},
         executor::WorkloadExecutor,
         multiproof::MultiProofMessage,
         ExecutionCache as PayloadExecutionCache,
@@ -315,7 +315,7 @@ where
             return;
         }
 
-        let total_slots = total_changed_slots(&bal);
+        let total_slots = total_slots(&bal);
 
         trace!(
             target: "engine::tree::payload_processor::prewarm",
@@ -717,7 +717,7 @@ where
         let mut last_address = None;
 
         // Iterate through the assigned range of slots
-        for (address, slot) in ChangedSlotIter::new(&bal, range.clone()) {
+        for (address, slot) in BALSlotIter::new(&bal, range.clone()) {
             // Fetch the account if this is a different address than the last one
             if last_address != Some(address) {
                 let _ = state_provider.basic_account(&address);
