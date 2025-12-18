@@ -515,16 +515,6 @@ impl LowestAvailableBlocks {
 /// * `block_number` - Target block to look up
 /// * `has_previous_shard` - Whether there's a shard before this one for the same key
 /// * `lowest_available` - Lowest block where history is available (pruning boundary)
-///
-/// # Algorithm
-/// 1. Get the rank of the first entry before or equal to our block.
-/// 2. Adjust the rank, so that we have the rank of the first entry strictly before our block (not
-///    equal to it).
-/// 3. If our block is before the first entry in the index chunk and this first entry doesn't equal
-///    to our block, it might be before the first write ever. To check, we look at the previous
-///    entry and check if the key is the same. This check is worth it, the `cursor.prev()` check is
-///    rarely triggered (the if will short-circuit) and when it passes we save a full seek into the
-///    changeset/plain state table.
 pub fn history_info_from_shard(
     chunk: &BlockNumberList,
     block_number: BlockNumber,
