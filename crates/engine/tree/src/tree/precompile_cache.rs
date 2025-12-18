@@ -2,15 +2,10 @@
 
 use alloy_primitives::Bytes;
 use dashmap::DashMap;
-use parking_lot::Mutex;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
-use schnellru::LruMap;
-use std::{
-    hash::{Hash, Hasher},
-    sync::Arc,
-};
+use std::{hash::Hash, sync::Arc};
 
 /// Default max cache size for [`PrecompileCache`]
 const MAX_CACHE_SIZE: u32 = 10_000;
@@ -19,7 +14,7 @@ const MAX_CACHE_SIZE: u32 = 10_000;
 #[derive(Debug, Clone, Default)]
 pub struct PrecompileCacheMap<S>(Arc<DashMap<Address, PrecompileCache<S>>>)
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone;
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
 
 impl<S> PrecompileCacheMap<S>
 where
@@ -38,16 +33,16 @@ where
 /// [`LruMap`] requires a mutable reference on `get` since it updates the LRU order,
 /// so we use a [`Mutex`] instead of an `RwLock`.
 #[derive(Debug, Clone)]
-pub struct PrecompileCache<S>(Arc<Mutex<LruMap<CacheKey<S>, CacheEntry>>>)
+pub struct PrecompileCache<S>(moka::sync::Cache<Bytes, CacheEntry<S>>)
 where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone;
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
 
 impl<S> Default for PrecompileCache<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn default() -> Self {
-        Self(Arc::new(Mutex::new(LruMap::new(schnellru::ByLength::new(MAX_CACHE_SIZE)))))
+        Self(moka::sync::Cache::new(MAX_CACHE_SIZE as u64))
     }
 }
 
@@ -55,63 +50,31 @@ impl<S> PrecompileCache<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    fn get(&self, key: &CacheKeyRef<'_, S>) -> Option<CacheEntry> {
-        self.0.lock().get(key).cloned()
+    fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
+        self.0.get(input).filter(|e| e.spec == spec)
     }
 
     /// Inserts the given key and value into the cache, returning the new cache size.
-    fn insert(&self, key: CacheKey<S>, value: CacheEntry) -> usize {
-        let mut cache = self.0.lock();
-        cache.insert(key, value);
-        cache.len()
-    }
-}
-
-/// Cache key, spec id and precompile call input. spec id is included in the key to account for
-/// precompile repricing across fork activations.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CacheKey<S>((S, Bytes));
-
-impl<S> CacheKey<S> {
-    const fn new(spec_id: S, input: Bytes) -> Self {
-        Self((spec_id, input))
-    }
-}
-
-/// Cache key reference, used to avoid cloning the input bytes when looking up using a [`CacheKey`].
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CacheKeyRef<'a, S>((S, &'a [u8]));
-
-impl<'a, S> CacheKeyRef<'a, S> {
-    const fn new(spec_id: S, input: &'a [u8]) -> Self {
-        Self((spec_id, input))
-    }
-}
-
-impl<S: PartialEq> PartialEq<CacheKey<S>> for CacheKeyRef<'_, S> {
-    fn eq(&self, other: &CacheKey<S>) -> bool {
-        self.0 .0 == other.0 .0 && self.0 .1 == other.0 .1.as_ref()
-    }
-}
-
-impl<'a, S: Hash> Hash for CacheKeyRef<'a, S> {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.0 .0.hash(state);
-        self.0 .1.hash(state);
+    fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
+        self.0.insert(input, value);
+        self.0.entry_count() as usize
     }
 }
 
 /// Cache entry, precompile successful output.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct CacheEntry(PrecompileOutput);
+pub struct CacheEntry<S> {
+    output: PrecompileOutput,
+    spec: S,
+}
 
-impl CacheEntry {
+impl<S> CacheEntry<S> {
     const fn gas_used(&self) -> u64 {
-        self.0.gas_used
+        self.output.gas_used
     }
 
     fn to_precompile_result(&self) -> PrecompileResult {
-        Ok(self.0.clone())
+        Ok(self.output.clone())
     }
 }
 
@@ -193,9 +156,7 @@ where
     }
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
-        let key = CacheKeyRef::new(self.spec_id.clone(), input.data);
-
-        if let Some(entry) = &self.cache.get(&key) {
+        if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) {
             self.increment_by_one_precompile_cache_hits();
             if input.gas >= entry.gas_used() {
                 return entry.to_precompile_result()
@@ -207,8 +168,10 @@ where
 
         match &result {
             Ok(output) => {
-                let key = CacheKey::new(self.spec_id.clone(), Bytes::copy_from_slice(calldata));
-                let size = self.cache.insert(key, CacheEntry(output.clone()));
+                let size = self.cache.insert(
+                    Bytes::copy_from_slice(calldata),
+                    CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
+                );
                 self.set_precompile_cache_size_metric(size as f64);
                 self.increment_by_one_precompile_cache_misses();
             }
