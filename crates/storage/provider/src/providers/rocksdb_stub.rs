@@ -77,6 +77,16 @@ impl RocksDBProvider {
     pub const fn tx(&self) -> RocksTx {
         RocksTx
     }
+
+    /// Check consistency of `RocksDB` tables (stub implementation).
+    ///
+    /// Returns `None` since there is no `RocksDB` data to check when the feature is disabled.
+    pub fn check_consistency<Provider>(
+        &self,
+        _provider: &Provider,
+    ) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
+        Ok(None)
+    }
 }
 
 /// A stub batch writer for `RocksDB` on non-Unix platforms.
