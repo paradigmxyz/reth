@@ -236,6 +236,56 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     hashed_state
 }
 
+/// Merges `overlay` into `base` while preserving `original_value` from `base`.
+///
+/// # Why this is needed
+///
+/// The standard `EvmState::extend` overwrites storage slots entirely, including their
+/// `original_value`. This breaks `is_changed()` semantics when batching multiple state updates:
+///
+/// - TX1: slot X changes 0→10 (original=0, present=10, `is_changed=true`)
+/// - TX2: reads slot X (original=10, present=10, `is_changed=false`)
+/// - After `extend`: slot X has original=10, present=10, `is_changed=false` ❌
+///
+/// This function preserves `base.original_value` when merging, so `is_changed()` stays correct:
+///
+/// - After `merge_evm_state`: slot X has original=0, present=10, `is_changed=true` ✓
+fn merge_evm_state(base: &mut EvmState, overlay: EvmState) {
+    for (addr, overlay_account) in overlay {
+        match base.get_mut(&addr) {
+            Some(base_account) => {
+                // Merge account info - overlay wins for latest state
+                base_account.info = overlay_account.info;
+                // Merge status flags
+                base_account.status |= overlay_account.status;
+                // Update transaction_id to latest
+                base_account.transaction_id = overlay_account.transaction_id;
+
+                // Merge storage: preserve base's original_value, take overlay's present_value
+                for (slot, overlay_slot) in overlay_account.storage {
+                    match base_account.storage.get_mut(&slot) {
+                        Some(base_slot) => {
+                            // Key insight: keep base's original_value, update present_value
+                            base_slot.present_value = overlay_slot.present_value;
+                            // Update cold/transaction tracking from overlay
+                            base_slot.transaction_id = overlay_slot.transaction_id;
+                            base_slot.is_cold = overlay_slot.is_cold;
+                        }
+                        None => {
+                            // Slot is new in overlay - use overlay's values as-is
+                            base_account.storage.insert(slot, overlay_slot);
+                        }
+                    }
+                }
+            }
+            None => {
+                // Account is new in overlay - insert as-is
+                base.insert(addr, overlay_account);
+            }
+        }
+    }
+}
+
 /// A pending multiproof task, either [`StorageMultiproofInput`] or [`MultiproofInput`].
 #[derive(Debug)]
 enum PendingMultiproofTask {
@@ -1164,13 +1214,17 @@ impl MultiProofTask {
 
                 // Merge all accumulated updates into a single EvmState payload.
                 // Use drain to preserve the buffer allocation.
+                //
+                // IMPORTANT: We use `merge_evm_state` instead of `extend` to preserve
+                // `original_value` in storage slots. This ensures `is_changed()` returns
+                // correct results after batching multiple state updates.
                 let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
                 let (mut batch_source, mut merged_update) = accumulated_iter
                     .next()
                     .expect("state update batch always has at least one entry");
                 for (next_source, next_update) in accumulated_iter {
                     batch_source = next_source;
-                    merged_update.extend(next_update);
+                    merge_evm_state(&mut merged_update, next_update);
                 }
 
                 let batch_len = merged_update.len();
@@ -2228,7 +2282,7 @@ mod tests {
                 while let Ok(MultiProofMessage::StateUpdate(_next_source, next_update)) =
                     task.rx.try_recv()
                 {
-                    merged_update.extend(next_update);
+                    merge_evm_state(&mut merged_update, next_update);
                     num_batched += 1;
                 }
 
@@ -2347,7 +2401,7 @@ mod tests {
             let batch_source = accumulated_updates[0].0;
             let mut merged_update = accumulated_updates.remove(0).1;
             for (_, next_update) in accumulated_updates {
-                merged_update.extend(next_update);
+                merge_evm_state(&mut merged_update, next_update);
             }
 
             assert!(same_source(batch_source, source_b.into()), "Batch should use matching source");
@@ -2798,7 +2852,7 @@ mod tests {
             loop {
                 match task.rx.try_recv() {
                     Ok(MultiProofMessage::StateUpdate(_src, next_update)) => {
-                        merged_update.extend(next_update);
+                        merge_evm_state(&mut merged_update, next_update);
                         num_batched += 1;
                     }
                     Ok(other_msg) => {
@@ -2870,5 +2924,218 @@ mod tests {
 
         // Should need to wait for the results of those proofs to arrive
         assert!(!should_finish, "Should continue waiting for proofs");
+    }
+
+    // ==================== merge_evm_state Unit Tests ====================
+
+    /// Verifies that `merge_evm_state` preserves `original_value` from base state.
+    ///
+    /// This is the core fix for the batching bug: when merging TX1's state with TX2's state,
+    /// the `original_value` from TX1 must be preserved so `is_changed()` returns correct results.
+    #[test]
+    fn test_merge_evm_state_preserves_original_value() {
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let addr = Address::random();
+        let slot = U256::from(42);
+
+        // TX1: slot changes from DB value 0 → 10
+        let mut base = EvmState::default();
+        let mut base_storage = alloy_primitives::map::HashMap::default();
+        base_storage.insert(slot, EvmStorageSlot::new_changed(U256::ZERO, U256::from(10), 0));
+        let base_account = Account {
+            info: AccountInfo { balance: U256::from(100), ..Default::default() },
+            storage: base_storage,
+            status: AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        base.insert(addr, base_account);
+
+        // TX2: slot is read but not changed (still 10)
+        // This simulates what happens when TX2 reads a slot that TX1 modified
+        let mut overlay = EvmState::default();
+        let mut overlay_storage = alloy_primitives::map::HashMap::default();
+        // The overlay sees original=10, present=10 (not changed from its perspective)
+        overlay_storage.insert(slot, EvmStorageSlot::new(U256::from(10), 1));
+        let overlay_account = Account {
+            info: AccountInfo { balance: U256::from(100), ..Default::default() },
+            storage: overlay_storage,
+            status: AccountStatus::Touched,
+            transaction_id: 1,
+        };
+        overlay.insert(addr, overlay_account);
+
+        // Merge using our custom function
+        merge_evm_state(&mut base, overlay);
+
+        // CRITICAL: original_value should still be 0 (from base), not 10 (from overlay)
+        let merged_slot = &base.get(&addr).unwrap().storage.get(&slot).unwrap();
+        assert_eq!(
+            merged_slot.original_value(),
+            U256::ZERO,
+            "original_value must be preserved from base"
+        );
+        assert_eq!(merged_slot.present_value(), U256::from(10));
+        assert!(merged_slot.is_changed(), "is_changed() should return true");
+    }
+
+    /// Verifies that `merge_evm_state` correctly handles new slots from overlay.
+    #[test]
+    fn test_merge_evm_state_new_slot_from_overlay() {
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let addr = Address::random();
+        let slot1 = U256::from(1);
+        let slot2 = U256::from(2);
+
+        // TX1: writes to slot1
+        let mut base = EvmState::default();
+        let mut base_storage = alloy_primitives::map::HashMap::default();
+        base_storage.insert(slot1, EvmStorageSlot::new_changed(U256::ZERO, U256::from(100), 0));
+        let base_account = Account {
+            info: AccountInfo::default(),
+            storage: base_storage,
+            status: AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        base.insert(addr, base_account);
+
+        // TX2: writes to slot2 (new slot, not in base)
+        let mut overlay = EvmState::default();
+        let mut overlay_storage = alloy_primitives::map::HashMap::default();
+        overlay_storage.insert(slot2, EvmStorageSlot::new_changed(U256::ZERO, U256::from(200), 1));
+        let overlay_account = Account {
+            info: AccountInfo::default(),
+            storage: overlay_storage,
+            status: AccountStatus::Touched,
+            transaction_id: 1,
+        };
+        overlay.insert(addr, overlay_account);
+
+        merge_evm_state(&mut base, overlay);
+
+        // Both slots should exist
+        let account = base.get(&addr).unwrap();
+        assert!(account.storage.contains_key(&slot1));
+        assert!(account.storage.contains_key(&slot2));
+
+        // slot2 should have overlay's values
+        let slot2_data = account.storage.get(&slot2).unwrap();
+        assert_eq!(slot2_data.original_value(), U256::ZERO);
+        assert_eq!(slot2_data.present_value(), U256::from(200));
+        assert!(slot2_data.is_changed());
+    }
+
+    /// Verifies that `merge_evm_state` correctly handles new accounts from overlay.
+    #[test]
+    fn test_merge_evm_state_new_account_from_overlay() {
+        use revm_state::{Account, AccountInfo, AccountStatus};
+
+        let addr1 = Address::random();
+        let addr2 = Address::random();
+
+        // TX1: modifies addr1
+        let mut base = EvmState::default();
+        let base_account = Account {
+            info: AccountInfo { balance: U256::from(100), ..Default::default() },
+            storage: Default::default(),
+            status: AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        base.insert(addr1, base_account);
+
+        // TX2: modifies addr2 (new account, not in base)
+        let mut overlay = EvmState::default();
+        let overlay_account = Account {
+            info: AccountInfo { balance: U256::from(200), ..Default::default() },
+            storage: Default::default(),
+            status: AccountStatus::Touched,
+            transaction_id: 1,
+        };
+        overlay.insert(addr2, overlay_account);
+
+        merge_evm_state(&mut base, overlay);
+
+        // Both accounts should exist
+        assert!(base.contains_key(&addr1));
+        assert!(base.contains_key(&addr2));
+        assert_eq!(base.get(&addr2).unwrap().info.balance, U256::from(200));
+    }
+
+    /// Verifies last-writer-wins for storage values with preserved `original_value`.
+    #[test]
+    fn test_merge_evm_state_last_writer_wins() {
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let addr = Address::random();
+        let slot = U256::from(99);
+
+        // TX1: slot changes 0 → 10
+        let mut base = EvmState::default();
+        let mut base_storage = alloy_primitives::map::HashMap::default();
+        base_storage.insert(slot, EvmStorageSlot::new_changed(U256::ZERO, U256::from(10), 0));
+        let base_account = Account {
+            info: AccountInfo::default(),
+            storage: base_storage,
+            status: AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        base.insert(addr, base_account);
+
+        // TX2: slot changes 10 → 20
+        let mut overlay = EvmState::default();
+        let mut overlay_storage = alloy_primitives::map::HashMap::default();
+        overlay_storage
+            .insert(slot, EvmStorageSlot::new_changed(U256::from(10), U256::from(20), 1));
+        let overlay_account = Account {
+            info: AccountInfo::default(),
+            storage: overlay_storage,
+            status: AccountStatus::Touched,
+            transaction_id: 1,
+        };
+        overlay.insert(addr, overlay_account);
+
+        merge_evm_state(&mut base, overlay);
+
+        let merged_slot = base.get(&addr).unwrap().storage.get(&slot).unwrap();
+        // original_value should be from base (0), present_value from overlay (20)
+        assert_eq!(merged_slot.original_value(), U256::ZERO);
+        assert_eq!(merged_slot.present_value(), U256::from(20));
+        assert!(merged_slot.is_changed());
+    }
+
+    /// Verifies status flags are OR'd together during merge.
+    #[test]
+    fn test_merge_evm_state_status_flags_merged() {
+        use revm_state::{Account, AccountInfo, AccountStatus};
+
+        let addr = Address::random();
+
+        // TX1: account is touched
+        let mut base = EvmState::default();
+        let base_account = Account {
+            info: AccountInfo::default(),
+            storage: Default::default(),
+            status: AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        base.insert(addr, base_account);
+
+        // TX2: account is selfdestructed
+        let mut overlay = EvmState::default();
+        let overlay_account = Account {
+            info: AccountInfo::default(),
+            storage: Default::default(),
+            status: AccountStatus::SelfDestructed,
+            transaction_id: 1,
+        };
+        overlay.insert(addr, overlay_account);
+
+        merge_evm_state(&mut base, overlay);
+
+        let merged = base.get(&addr).unwrap();
+        // Should have both flags
+        assert!(merged.is_touched());
+        assert!(merged.is_selfdestructed());
     }
 }
