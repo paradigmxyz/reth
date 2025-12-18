@@ -65,7 +65,7 @@ pub struct TreeCtx<'a, N: NodePrimitives, P> {
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
     /// Optional precomputed state provider and builder to avoid redundant lookups.
     /// This is set by [`crate::tree::EngineApiTreeHandler`] after validating parent state exists.
-    precomputed: Option<StateProviderAndBuilder<N, P>>,
+    pub precomputed: Option<StateProviderAndBuilder<N, P>>,
 }
 
 /// Precomputed state provider and builder for block validation.
@@ -137,11 +137,6 @@ impl<'a, N: NodePrimitives, P> TreeCtx<'a, N, P> {
     /// Returns a reference to the canonical in-memory state
     pub const fn canonical_in_memory_state(&self) -> &'a CanonicalInMemoryState<N> {
         self.canonical_in_memory_state
-    }
-
-    /// Takes the precomputed state provider and builder, if present.
-    pub const fn take_precomputed(&mut self) -> Option<StateProviderAndBuilder<N, P>> {
-        self.precomputed.take()
     }
 }
 
@@ -414,7 +409,7 @@ where
         // Use precomputed state from TreeCtx (set by EngineApiTreeHandler) to avoid
         // redundant state lookups. Fall back to computing if not available (legacy callers).
         let (mut state_provider, provider_builder) = if let Some(precomputed) =
-            ctx.take_precomputed()
+            ctx.precomputed.take()
         {
             (precomputed.provider, precomputed.builder)
         } else {
@@ -1108,14 +1103,8 @@ where
     fn spawn_deferred_trie_task(
         &self,
         block: RecoveredBlock<N::Block>,
-<<<<<<< HEAD
         execution_outcome: Arc<ExecutionOutcome<N::Receipt>>,
-        ctx: &TreeCtx<'_, N>,
-=======
-        output: BlockExecutionOutput<N::Receipt>,
-        block_number: u64,
         ctx: &TreeCtx<'_, N, P>,
->>>>>>> c138a3e4ff (perf(engine): deduplicate state_provider_builder calls with type-safe TreeCtx)
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
     ) -> ExecutedBlock<N> {

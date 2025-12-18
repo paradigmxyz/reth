@@ -2501,8 +2501,7 @@ where
             _ => {}
         };
 
-        // Ensure that the parent state is available and get the provider builder to avoid
-        // redundant lookups during execution.
+        // Get the state provider builder for the parent block.
         let provider_builder = match self.state_provider_builder(block_id.parent) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
@@ -2530,8 +2529,7 @@ where
             Ok(Some(builder)) => builder,
         };
 
-        // Build the state provider immediately and pass both provider and builder to avoid
-        // redundant lookups in the validator. The builder is needed for spawning parallel tasks.
+        // Build the state provider. The builder is cloned because it's also needed for parallel tasks.
         let state_provider = match provider_builder.clone().build() {
             Ok(provider) => provider,
             Err(err) => {
