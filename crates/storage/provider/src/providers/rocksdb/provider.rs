@@ -614,6 +614,7 @@ impl<'db> RocksTx<'db> {
                 return if start_iter.next().transpose()?.is_some_and(|(k, _)| k.key == address) {
                     Ok(HistoryInfo::InPlainState)
                 } else {
+                    // The key has not been written to at all.
                     Ok(HistoryInfo::NotYetWritten)
                 };
             }
@@ -643,6 +644,7 @@ impl<'db> RocksTx<'db> {
             if start_iter.next().transpose()?.is_some_and(|(k, _)| k.key == address) {
                 Ok(HistoryInfo::InPlainState)
             } else {
+                // The key has not been written to at all.
                 Ok(HistoryInfo::NotYetWritten)
             }
         }
@@ -678,6 +680,7 @@ impl<'db> RocksTx<'db> {
                 {
                     Ok(HistoryInfo::InPlainState)
                 } else {
+                    // The key has not been written to at all.
                     Ok(HistoryInfo::NotYetWritten)
                 };
             }
@@ -714,6 +717,7 @@ impl<'db> RocksTx<'db> {
             {
                 Ok(HistoryInfo::InPlainState)
             } else {
+                // The key has not been written to at all.
                 Ok(HistoryInfo::NotYetWritten)
             }
         }
