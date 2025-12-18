@@ -883,6 +883,24 @@ where
                     // Add the block to in-memory state
                     self.canonical_in_memory_state.update_chain(chain_update);
 
+                    // Verify the block was added to in-memory state
+                    let head_state = self.canonical_in_memory_state.head_state();
+                    if let Some(state) = &head_state {
+                        debug!(
+                            target: "engine::tree",
+                            head_block_number = state.number(),
+                            head_block_hash = ?state.hash(),
+                            "Verified: block added to in-memory state after Commit"
+                        );
+                    } else {
+                        warn!(
+                            target: "engine::tree",
+                            expected_block_number = new_head_number,
+                            expected_block_hash = ?new_head_hash,
+                            "WARNING: head_state() returned None after update_chain(Commit)"
+                        );
+                    }
+
                     // Update the canonical head
                     self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
 
