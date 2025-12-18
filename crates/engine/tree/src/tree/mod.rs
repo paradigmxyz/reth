@@ -869,15 +869,27 @@ where
         // Try to load the canonical ancestor's block
         match self.canonical_block_by_hash(new_head_hash)? {
             Some(executed_block) => {
+                // Create the reorg chain update
+                let chain_update =
+                    NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks };
+
+                // Convert to notification before consuming chain_update
+                let notification = chain_update.to_chain_notification();
+
                 // Perform the reorg to properly handle the unwind
-                self.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
-                    new: vec![executed_block],
-                    old: old_blocks,
-                });
+                self.canonical_in_memory_state.update_chain(chain_update);
 
                 // CRITICAL: Update the canonical head after the reorg
                 // This ensures get_canonical_head() returns the correct block
                 self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
+                // Notify listeners (including txpool) about the reorg
+                // This is critical for txpool to update transaction states after unwind
+                self.canonical_in_memory_state.notify_canon_state(notification);
+
+                // Synchronously clear the transaction pool if configured
+                // This prevents "nonce too low" errors after large reorgs
+                self.clear_pool_if_configured("after unwind");
 
                 debug!(
                     target: "engine::tree",
@@ -894,6 +906,10 @@ where
                     "Could not find canonical ancestor block, updating header only"
                 );
                 self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
+                // Still clear pool even without full reorg to match new head
+                // This prevents stale transactions after unwind
+                self.clear_pool_if_configured("after unwind fallback");
             }
         }
 
@@ -936,6 +952,28 @@ where
         }
 
         Ok(())
+    }
+
+    /// Synchronously clears the transaction pool if configured.
+    ///
+    /// This method checks if pool clearing is enabled and attempts to clear
+    /// the pool synchronously. It logs debug messages for success cases and
+    /// warnings for failures.
+    fn clear_pool_if_configured(&self, context: &str) {
+        if !self.config.clear_pool_after_fcu() {
+            return;
+        }
+
+        let Some(handle) = &self.pool_clear_handle else {
+            return;
+        };
+
+        debug!(target: "engine::tree", context, "waiting for pool clear");
+        if handle.clear_and_wait() {
+            debug!(target: "engine::tree", context, "pool clear complete");
+        } else {
+            warn!(target: "engine::tree", context, "pool clear timed out or failed");
+        }
     }
 
     /// Determines if the given block is part of a fork by checking that these
@@ -2338,16 +2376,7 @@ where
         self.canonical_in_memory_state.notify_canon_state(notification);
 
         // Synchronously clear the transaction pool if configured
-        if self.config.clear_pool_after_fcu() {
-            if let Some(handle) = &self.pool_clear_handle {
-                debug!(target: "engine::tree", "waiting for pool clear after FCU");
-                if handle.clear_and_wait() {
-                    debug!(target: "engine::tree", "pool clear complete");
-                } else {
-                    warn!(target: "engine::tree", "pool clear timed out or failed");
-                }
-            }
-        }
+        self.clear_pool_if_configured("after FCU");
 
         // emit event
         self.emit_event(ConsensusEngineEvent::CanonicalChainCommitted(
