@@ -17,7 +17,10 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use tracing::{debug_span, instrument, trace};
 
 /// Type alias for the mini-moka cache used for bytecode.
@@ -150,7 +153,7 @@ impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
 /// Represents the status of a storage slot in the cache.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum SlotStatus {
-    /// The storage slot is not in the cache.
+    /// The storage slot is not in the cache (or was invalidated).
     NotCached(StorageValue),
     /// The storage slot exists in cache and has a specific value.
     Value(StorageValue),
@@ -167,11 +170,11 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         })? {
             SlotStatus::NotCached(value) => {
                 self.metrics.storage_cache_misses.increment(1);
-                Ok(Some(value))
+                Ok(Some(value).filter(|v| !v.is_zero()))
             }
             SlotStatus::Value(value) => {
                 self.metrics.storage_cache_hits.increment(1);
-                Ok(Some(value).filter(|value| !value.is_zero()))
+                Ok(Some(value).filter(|v| !v.is_zero()))
             }
         }
     }
@@ -295,20 +298,46 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider
     }
 }
 
+/// Storage entry with timestamp for invalidation tracking.
+/// The timestamp is used to detect stale entries after account destruction.
+#[derive(Debug, Clone, Copy)]
+struct TimestampedStorage {
+    /// Timestamp when this entry was inserted
+    insert_ts: u64,
+    /// The storage value
+    value: StorageValue,
+}
+
 /// Execution cache used during block processing.
 ///
 /// Optimizes state access by maintaining in-memory copies of frequently accessed
 /// accounts, storage slots, and bytecode. Works in conjunction with prewarming
 /// to reduce database I/O during block execution.
+///
+/// ## Storage Invalidation
+///
+/// When an account is destroyed (SELFDESTRUCT), all its storage must be invalidated.
+/// This is handled using timestamps:
+/// - Each storage entry stores the timestamp when it was inserted
+/// - Each account tracks when it was last wiped (destroyed)
+/// - On lookup, if the entry's timestamp <= wipe timestamp, the entry is stale
 #[derive(Debug, Clone)]
 pub(crate) struct ExecutionCache {
     /// Cache for contract bytecode, keyed by code hash.
     /// Uses mini-moka for LRU eviction since bytecode is variable-sized.
     code_cache: MokaCache<B256, Option<Bytecode>, FbBuildHasher<32>>,
 
-    /// Flat storage cache: maps `(Address, StorageKey)` to storage value.
+    /// Flat storage cache: maps `(Address, StorageKey)` to timestamped storage value.
     /// Uses fixed-cache for lock-free access with no eviction.
-    storage_cache: Arc<FixedCache<(Address, StorageKey), StorageValue>>,
+    storage_cache: Arc<FixedCache<(Address, StorageKey), TimestampedStorage>>,
+
+    /// Wipe timestamps: tracks when each account was last destroyed.
+    /// Used to invalidate stale storage entries.
+    wipe_cache: Arc<FixedCache<Address, u64, FbBuildHasher<20>>>,
+
+    /// Global counter for generating timestamps.
+    /// Incremented on every insert and wipe operation.
+    counter: Arc<AtomicU64>,
 
     /// Cache for basic account information (nonce, balance, code hash).
     /// Uses fixed-cache for lock-free access with no eviction.
@@ -316,15 +345,26 @@ pub(crate) struct ExecutionCache {
 }
 
 impl ExecutionCache {
-    /// Insert storage value into cache
+    /// Gets the next timestamp from the global counter.
+    fn next_timestamp(&self) -> u64 {
+        self.counter.fetch_add(1, Ordering::Relaxed)
+    }
+
+    /// Gets the wipe timestamp for an address (0 if never wiped).
+    fn get_wipe_timestamp(&self, address: &Address) -> u64 {
+        self.wipe_cache.get(address).unwrap_or(0)
+    }
+
+    /// Insert storage value into cache with current timestamp.
     pub(crate) fn insert_storage(
         &self,
         address: Address,
         key: StorageKey,
         value: Option<StorageValue>,
     ) {
-        let cache_value = value.unwrap_or_default();
-        self.storage_cache.insert((address, key), cache_value);
+        let ts = self.next_timestamp();
+        let entry = TimestampedStorage { insert_ts: ts, value: value.unwrap_or_default() };
+        self.storage_cache.insert((address, key), entry);
     }
 
     /// Insert multiple storage values into cache for a single account.
@@ -337,22 +377,39 @@ impl ExecutionCache {
         }
     }
 
+    /// Invalidates all storage for an account by recording a wipe timestamp.
+    /// Any cached storage entries with `insert_ts <= wipe_ts` are considered stale.
+    pub(crate) fn invalidate_account_storage(&self, address: Address) {
+        let ts = self.next_timestamp();
+        self.wipe_cache.insert(address, ts);
+    }
+
+    /// Gets storage from cache, or inserts using the provided function.
+    /// Returns `SlotStatus::NotCached` if the value was freshly fetched,
+    /// or `SlotStatus::Value` if it was already cached and valid.
     pub(crate) fn get_or_try_insert_storage_with<E>(
         &self,
         address: Address,
         key: StorageKey,
         f: impl FnOnce() -> Result<StorageValue, E>,
     ) -> Result<SlotStatus, E> {
-        let mut init = false;
-        Ok(
-            match self.storage_cache.get_or_try_insert_with((address, key), |_| {
-                init = true;
-                f()
-            })? {
-                value if init => SlotStatus::NotCached(value),
-                value => SlotStatus::Value(value),
-            },
-        )
+        let wipe_ts = self.get_wipe_timestamp(&address);
+
+        // Check if we have a valid cached entry
+        if let Some(entry) = self.storage_cache.get(&(address, key)) &&
+            entry.insert_ts > wipe_ts
+        {
+            // Entry is valid (inserted after last wipe)
+            return Ok(SlotStatus::Value(entry.value));
+        }
+
+        // Cache miss or stale entry - fetch from provider
+        let value = f()?;
+        let ts = self.next_timestamp();
+        let entry = TimestampedStorage { insert_ts: ts, value };
+        self.storage_cache.insert((address, key), entry);
+
+        Ok(SlotStatus::NotCached(value))
     }
 
     /// Inserts the post-execution state changes into the cache.
@@ -404,8 +461,8 @@ impl ExecutionCache {
                 // For account cache, we insert None to indicate destroyed
                 self.account_cache.insert(*addr, None);
 
-                // For storage, we can't efficiently invalidate all slots
-                // They will be overwritten on next access
+                // Invalidate all storage for this account
+                self.invalidate_account_storage(*addr);
                 continue
             }
 
@@ -444,6 +501,9 @@ pub(crate) struct ExecutionCacheBuilder {
 
     /// Account cache entries (for fixed-cache)
     account_cache_entries: usize,
+
+    /// Wipe cache entries (for tracking destroyed accounts)
+    wipe_cache_entries: usize,
 }
 
 impl ExecutionCacheBuilder {
@@ -480,11 +540,18 @@ impl ExecutionCacheBuilder {
         let storage_cache =
             Arc::new(FixedCache::new(self.storage_cache_entries, DefaultHashBuilder::default()));
 
+        // Wipe cache tracks destroyed accounts
+        let wipe_cache =
+            Arc::new(FixedCache::new(self.wipe_cache_entries, FbBuildHasher::<20>::default()));
+
+        // Global counter for timestamps
+        let counter = Arc::new(AtomicU64::new(1));
+
         // Account cache uses fixed-cache (no eviction, lock-free)
         let account_cache =
             Arc::new(FixedCache::new(self.account_cache_entries, FbBuildHasher::<20>::default()));
 
-        ExecutionCache { code_cache, storage_cache, account_cache }
+        ExecutionCache { code_cache, storage_cache, wipe_cache, counter, account_cache }
     }
 }
 
@@ -493,10 +560,12 @@ impl Default for ExecutionCacheBuilder {
         // Fixed-cache requires power-of-two sizes
         // Storage: 16M entries for (Address, StorageKey) pairs
         // Account: 4M entries for addresses
+        // Wipe: 1M entries for destroyed accounts
         Self {
             code_cache_entries: 10_000_000,
             storage_cache_entries: 16 * 1024 * 1024, // 16M, power of 2
             account_cache_entries: 4 * 1024 * 1024,  // 4M, power of 2
+            wipe_cache_entries: 1024 * 1024,         // 1M, power of 2
         }
     }
 }
@@ -578,12 +647,10 @@ mod tests {
 
     #[test]
     fn test_empty_storage_cached_state_provider() {
-        // make sure when we have an empty value in storage, we return `Empty` and not `NotCached`
         let address = Address::random();
         let storage_key = StorageKey::random();
         let account = ExtendedAccount::new(0, U256::ZERO);
 
-        // note there is no storage here
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
@@ -591,7 +658,6 @@ mod tests {
         let state_provider =
             CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
-        // check that the storage is empty
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), None);
@@ -599,14 +665,12 @@ mod tests {
 
     #[test]
     fn test_uncached_storage_cached_state_provider() {
-        // make sure when we have something uncached, we get the cached value
         let address = Address::random();
         let storage_key = StorageKey::random();
         let storage_value = U256::from(1);
         let account =
             ExtendedAccount::new(0, U256::ZERO).extend_storage(vec![(storage_key, storage_value)]);
 
-        // note that we extend storage here with one value
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
@@ -614,71 +678,99 @@ mod tests {
         let state_provider =
             CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
-        // check that the storage returns the expected value
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Some(storage_value));
     }
 
     #[test]
+    fn test_storage_invalidation_on_destroy() {
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+        let storage_value = U256::from(42);
+
+        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+
+        // Insert a storage value
+        caches.insert_storage(address, storage_key, Some(storage_value));
+
+        // Verify it's cached
+        let result = caches.get_or_try_insert_storage_with(address, storage_key, || {
+            Ok::<_, ()>(U256::from(999)) // Should not be called
+        });
+        assert_eq!(result.unwrap(), SlotStatus::Value(storage_value));
+
+        // Invalidate the account's storage (simulating SELFDESTRUCT)
+        caches.invalidate_account_storage(address);
+
+        // Now the cached value should be stale, so the fallback should be called
+        let result = caches.get_or_try_insert_storage_with(address, storage_key, || {
+            Ok::<_, ()>(U256::from(0)) // This should be called now
+        });
+        assert_eq!(result.unwrap(), SlotStatus::NotCached(U256::ZERO));
+    }
+
+    #[test]
+    fn test_storage_after_destroy_and_recreate() {
+        let address = Address::random();
+        let storage_key = StorageKey::random();
+        let old_value = U256::from(100);
+        let new_value = U256::from(200);
+
+        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+
+        // Insert old storage value
+        caches.insert_storage(address, storage_key, Some(old_value));
+
+        // Destroy the account
+        caches.invalidate_account_storage(address);
+
+        // Insert new storage value (account recreated with new storage)
+        caches.insert_storage(address, storage_key, Some(new_value));
+
+        // Should get the new value, not the old one
+        let result = caches.get_or_try_insert_storage_with(address, storage_key, || {
+            Ok::<_, ()>(U256::from(999)) // Should not be called
+        });
+        assert_eq!(result.unwrap(), SlotStatus::Value(new_value));
+    }
+
+    #[test]
     fn test_get_storage_populated() {
-        // make sure when we have something cached, we get the cached value in the `SlotStatus`
         let address = Address::random();
         let storage_key = StorageKey::random();
         let storage_value = U256::from(1);
 
-        // insert into caches directly
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
         caches.insert_storage(address, storage_key, Some(storage_value));
 
-        // // check that the storage returns the cached value
-        // let slot_status = caches.get_storage(&address, &storage_key);
-        // assert_eq!(slot_status, SlotStatus::Value(storage_value));
+        let result = caches
+            .get_or_try_insert_storage_with(address, storage_key, || Ok::<_, ()>(U256::from(999)));
+        assert_eq!(result.unwrap(), SlotStatus::Value(storage_value));
     }
-
-    // #[test]
-    // fn test_get_storage_not_cached() {
-    //     // make sure when we have nothing cached, we get the `NotCached` value in the
-    // `SlotStatus`     let storage_key = StorageKey::random();
-    //     let address = Address::random();
-
-    //     // just create empty caches
-    //     let caches = ExecutionCacheBuilder::default().build_caches(1000);
-
-    //     // // check that the storage is not cached
-    //     // let slot_status = caches.get_storage(&address, &storage_key);
-    //     // assert_eq!(slot_status, SlotStatus::NotCached);
-    // }
 
     #[test]
     fn test_get_storage_empty() {
-        // make sure when we insert an empty value to the cache, we get the `Empty` value in the
-        // `SlotStatus`
         let address = Address::random();
         let storage_key = StorageKey::random();
 
-        // insert into caches directly
         let caches = ExecutionCacheBuilder::default().build_caches(1000);
         caches.insert_storage(address, storage_key, None);
 
-        // // check that the storage is empty
-        // let slot_status = caches.get_storage(&address, &storage_key);
-        // assert_eq!(slot_status, SlotStatus::Empty);
+        let result = caches
+            .get_or_try_insert_storage_with(address, storage_key, || Ok::<_, ()>(U256::from(999)));
+        assert_eq!(result.unwrap(), SlotStatus::Value(U256::ZERO));
     }
 
-    // Tests for SavedCache locking mechanism
     #[test]
     fn test_saved_cache_is_available() {
         let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
         let cache = SavedCache::new(B256::ZERO, execution_cache, CachedStateMetrics::zeroed());
 
-        // Initially, the cache should be available (only one reference)
         assert!(cache.is_available(), "Cache should be available initially");
 
-        // Clone the usage guard (simulating it being handed out)
         let _guard = cache.clone_guard_for_test();
 
-        // Now the cache should not be available (two references)
         assert!(!cache.is_available(), "Cache should not be available with active guard");
     }
 
@@ -688,22 +780,19 @@ mod tests {
         let cache =
             SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
 
-        // Create multiple references to the usage guard
         let guard1 = cache.clone_guard_for_test();
         let guard2 = cache.clone_guard_for_test();
         let guard3 = guard1.clone();
 
-        // Cache should not be available with multiple guards
         assert!(!cache.is_available());
 
-        // Drop guards one by one
         drop(guard1);
-        assert!(!cache.is_available()); // Still not available
+        assert!(!cache.is_available());
 
         drop(guard2);
-        assert!(!cache.is_available()); // Still not available
+        assert!(!cache.is_available());
 
         drop(guard3);
-        assert!(cache.is_available()); // Now available
+        assert!(cache.is_available());
     }
 }
