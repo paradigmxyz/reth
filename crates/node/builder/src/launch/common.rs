@@ -518,9 +518,8 @@ where
 
         // RocksDB consistency check - runs after static files since it may use static file data
         // for pruning transaction hashes.
-        let rocksdb_unwind = factory
-            .rocksdb_provider()
-            .check_consistency(&factory.database_provider_ro()?)?;
+        let rocksdb_unwind =
+            factory.rocksdb_provider().check_consistency(&factory.database_provider_ro()?)?;
 
         // Combine unwind targets - take the minimum (most conservative) if both exist
         let unwind_target = match (static_file_unwind, rocksdb_unwind) {
@@ -579,9 +578,9 @@ where
                     let _ = tx.send(result);
                 }),
             );
-            rx.await?.inspect_err(|err| {
-                error!(target: "reth::cli", %unwind_target, %err, "failed to run unwind")
-            })?;
+            rx.await?.inspect_err(
+                |err| error!(target: "reth::cli", %unwind_target, %err, "failed to run unwind"),
+            )?;
         }
 
         Ok(factory)
