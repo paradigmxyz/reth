@@ -31,7 +31,7 @@ use reth_execution_types::ExecutionOutcome;
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, StateProviderBox, StateProviderFactory, StateReader};
-use reth_revm::{database::StateProviderDatabase, state::EvmState};
+use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
 use reth_trie::MultiProofTargets;
 use std::{
     sync::{
@@ -396,7 +396,7 @@ where
             mut precompile_cache_map,
         } = self;
 
-        let state_provider = match provider.build() {
+        let mut state_provider = match provider.build() {
             Ok(provider) => provider,
             Err(err) => {
                 trace!(
@@ -409,13 +409,15 @@ where
         };
 
         // Use the caches to create a new provider with caching
-        let state_provider: StateProviderBox = if let Some(saved_cache) = saved_cache {
+        if let Some(saved_cache) = saved_cache {
             let caches = saved_cache.cache().clone();
             let cache_metrics = saved_cache.metrics().clone();
-            Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics))
-        } else {
-            state_provider
-        };
+            state_provider = Box::new(
+                CachedStateProvider::new(state_provider, caches, cache_metrics)
+                    // ensure we pre-warm the cache
+                    .prewarm(),
+            );
+        }
 
         let state_provider = StateProviderDatabase::new(state_provider);
 
