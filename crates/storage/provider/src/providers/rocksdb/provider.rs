@@ -450,6 +450,19 @@ impl RocksDBProvider {
             batch_handle.commit()
         })
     }
+
+    /// Commits a raw `WriteBatchWithTransaction` to `RocksDB`.
+    ///
+    /// This is used when the batch was extracted via [`RocksDBBatch::into_inner`]
+    /// and needs to be committed at a later point (e.g., at provider commit time).
+    pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
+        self.0.db.write_opt(batch, &WriteOptions::default()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
 }
 
 /// Handle for building a batch of operations atomically.
@@ -528,6 +541,13 @@ impl<'a> RocksDBBatch<'a> {
     /// Returns a reference to the underlying `RocksDB` provider.
     pub const fn provider(&self) -> &RocksDBProvider {
         self.provider
+    }
+
+    /// Consumes the batch and returns the underlying `WriteBatchWithTransaction`.
+    ///
+    /// This is used to defer commits to the provider level.
+    pub fn into_inner(self) -> WriteBatchWithTransaction<true> {
+        self.inner
     }
 }
 
