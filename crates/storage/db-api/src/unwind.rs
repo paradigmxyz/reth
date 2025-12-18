@@ -1,4 +1,4 @@
-use crate::{table::Table, transaction::DbTxMut};
+use crate::{cursor::DbCursorRO, table::Table, transaction::DbTxMut};
 use reth_storage_errors::db::DatabaseError;
 use std::ops::RangeBounds;
 
