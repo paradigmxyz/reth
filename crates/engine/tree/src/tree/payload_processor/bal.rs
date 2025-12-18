@@ -115,7 +115,10 @@ where
 
     for account_changes in bal {
         let address = account_changes.address;
-        let hashed_address = keccak256(address);
+
+        // Always fetch the account; even if we don't need the db account to construct the final
+        // `Account`, doing this fills the cache.
+        let existing_account = provider.basic_account(&address)?;
 
         // Get the latest balance (last balance change if any)
         let balance = account_changes.balance_changes.last().map(|change| change.post_balance);
@@ -134,9 +137,14 @@ where
             None
         };
 
-        // Always fetch the account; even if we don't need the db account to construct the final
-        // `Account`, doing this fills the cache.
-        let existing_account = provider.basic_account(&address)?;
+        // If the account was only read then don't add it to the HashedPostState
+        if balance.is_none() &&
+            nonce.is_none() &&
+            code_hash.is_none() &&
+            account_changes.storage_changes.is_empty()
+        {
+            continue
+        }
 
         // Build the final account state
         let account = Account {
@@ -150,6 +158,7 @@ where
             }),
         };
 
+        let hashed_address = keccak256(address);
         hashed_state.accounts.insert(hashed_address, Some(account));
 
         // Process storage changes
@@ -167,9 +176,7 @@ where
                 }
             }
 
-            if !storage_map.storage.is_empty() {
-                hashed_state.storages.insert(hashed_address, storage_map);
-            }
+            hashed_state.storages.insert(hashed_address, storage_map);
         }
     }
 
