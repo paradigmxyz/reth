@@ -22,7 +22,11 @@ impl RocksDBProvider {
     /// Checks consistency of `RocksDB` tables against MDBX stage checkpoints.
     ///
     /// Returns an unwind target block number if the pipeline needs to unwind to rebuild
-    /// `RocksDB` data. Returns `None` if all invariants pass or if inconsistencies were healed.
+    /// `RocksDB` data. Returns `Ok(None)` if all invariants pass or if inconsistencies were healed.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if database operations fail during consistency checks.
     ///
     /// # Invariants checked
     ///
