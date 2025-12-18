@@ -210,6 +210,7 @@ impl Drop for StateHookSender {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn evm_state_to_hashed_post_state(update: &EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
@@ -270,7 +271,7 @@ pub(super) struct SealedStateUpdate {
     /// Keys are unhashed addresses and slot keys.
     pub storage: HashMap<Address, HashMap<U256, U256>>,
     /// Accounts whose storage was wiped (selfdestruct).
-    /// When converting to HashedPostState, these get `HashedStorage::new(true)`.
+    /// When converting to [`HashedPostState`], these get `HashedStorage::new(true)`.
     pub wiped: HashSet<Address>,
 }
 
@@ -2785,5 +2786,289 @@ mod tests {
 
         // Should need to wait for the results of those proofs to arrive
         assert!(!should_finish, "Should continue waiting for proofs");
+    }
+
+    // ==================== SealedStateUpdate Unit Tests ====================
+
+    /// Verifies `SealedStateUpdate::extend()` with wiped (selfdestructed) accounts.
+    ///
+    /// Scenario: TX1 modifies storage on account A. TX2 selfdestructs account A.
+    /// The merged update should have A wiped and no storage slots.
+    #[test]
+    fn test_sealed_update_extend_with_selfdestruct() {
+        let addr = Address::random();
+
+        // TX1: account A modified with storage slot
+        let mut update1 = SealedStateUpdate::default();
+        update1
+            .accounts
+            .insert(addr, Some(Account { balance: U256::from(100), ..Default::default() }));
+        let mut slots = HashMap::default();
+        slots.insert(U256::from(1), U256::from(999));
+        update1.storage.insert(addr, slots);
+
+        // TX2: account A selfdestructed
+        let mut update2 = SealedStateUpdate::default();
+        update2.accounts.insert(addr, None);
+        update2.wiped.insert(addr);
+
+        update1.extend(update2);
+
+        // Account should be destroyed
+        assert_eq!(update1.accounts.get(&addr), Some(&None));
+        // Account should be marked as wiped
+        assert!(update1.wiped.contains(&addr));
+        // Storage should be cleared (selfdestruct wipes storage)
+        assert!(!update1.storage.contains_key(&addr));
+    }
+
+    /// Verifies `SealedStateUpdate::extend()` when an account is selfdestructed then recreated.
+    ///
+    /// Scenario: TX1 selfdestructs account A. TX2 recreates account A with new storage.
+    /// The merged update should have A wiped (so old storage is cleared) but with new slots.
+    #[test]
+    fn test_sealed_update_extend_selfdestruct_then_recreate() {
+        let addr = Address::random();
+
+        // TX1: account A selfdestructed
+        let mut update1 = SealedStateUpdate::default();
+        update1.accounts.insert(addr, None);
+        update1.wiped.insert(addr);
+
+        // TX2: account A recreated with new storage
+        let mut update2 = SealedStateUpdate::default();
+        update2
+            .accounts
+            .insert(addr, Some(Account { balance: U256::from(200), ..Default::default() }));
+        let mut slots = HashMap::default();
+        slots.insert(U256::from(42), U256::from(1234));
+        update2.storage.insert(addr, slots);
+
+        update1.extend(update2);
+
+        // Account should be recreated with new balance
+        let account = update1.accounts.get(&addr).unwrap();
+        assert_eq!(account.as_ref().unwrap().balance, U256::from(200));
+        // Account should STILL be marked as wiped (to clear old storage before applying new)
+        assert!(update1.wiped.contains(&addr));
+        // New storage should be present
+        assert!(update1.storage.contains_key(&addr));
+        assert_eq!(
+            update1.storage.get(&addr).unwrap().get(&U256::from(42)),
+            Some(&U256::from(1234))
+        );
+    }
+
+    /// Verifies `SealedStateUpdate::extend()` merges storage slots correctly (last writer wins).
+    #[test]
+    fn test_sealed_update_extend_storage_last_writer_wins() {
+        let addr = Address::random();
+        let slot = U256::from(5);
+
+        // TX1: writes 100 to slot 5
+        let mut update1 = SealedStateUpdate::default();
+        update1.accounts.insert(addr, Some(Default::default()));
+        let mut slots1 = HashMap::default();
+        slots1.insert(slot, U256::from(100));
+        update1.storage.insert(addr, slots1);
+
+        // TX2: writes 200 to slot 5
+        let mut update2 = SealedStateUpdate::default();
+        update2.accounts.insert(addr, Some(Default::default()));
+        let mut slots2 = HashMap::default();
+        slots2.insert(slot, U256::from(200));
+        update2.storage.insert(addr, slots2);
+
+        update1.extend(update2);
+
+        // Slot should have the value from TX2
+        assert_eq!(update1.storage.get(&addr).unwrap().get(&slot), Some(&U256::from(200)));
+    }
+
+    /// Verifies `SealedStateUpdate::into_hashed_post_state()` correctly hashes keys.
+    #[test]
+    fn test_sealed_update_into_hashed_post_state() {
+        let addr = Address::random();
+        let slot = U256::from(7);
+        let slot_value = U256::from(42);
+
+        let mut sealed = SealedStateUpdate::default();
+        let account = Account { balance: U256::from(500), nonce: 3, bytecode_hash: None };
+        sealed.accounts.insert(addr, Some(account));
+        let mut slots = HashMap::default();
+        slots.insert(slot, slot_value);
+        sealed.storage.insert(addr, slots);
+
+        let hashed = sealed.into_hashed_post_state();
+
+        // Check account is hashed
+        let hashed_addr = keccak256(addr);
+        assert!(hashed.accounts.contains_key(&hashed_addr));
+        let hashed_account = hashed.accounts.get(&hashed_addr).unwrap().unwrap();
+        assert_eq!(hashed_account.balance, U256::from(500));
+        assert_eq!(hashed_account.nonce, 3);
+
+        // Check storage is hashed
+        let storage = hashed.storages.get(&hashed_addr).unwrap();
+        assert!(!storage.wiped);
+        let hashed_slot = keccak256(B256::from(slot));
+        assert_eq!(storage.storage.get(&hashed_slot), Some(&slot_value));
+    }
+
+    /// Verifies `SealedStateUpdate::into_hashed_post_state()` handles wiped accounts correctly.
+    #[test]
+    fn test_sealed_update_into_hashed_post_state_with_wipe() {
+        let addr = Address::random();
+
+        let mut sealed = SealedStateUpdate::default();
+        sealed.accounts.insert(addr, None);
+        sealed.wiped.insert(addr);
+
+        let hashed = sealed.into_hashed_post_state();
+
+        let hashed_addr = keccak256(addr);
+        // Account should be destroyed (None)
+        assert_eq!(hashed.accounts.get(&hashed_addr), Some(&None));
+        // Storage should be marked as wiped
+        let storage = hashed.storages.get(&hashed_addr).unwrap();
+        assert!(storage.wiped);
+    }
+
+    /// Verifies `SealedStateUpdate::into_hashed_post_state()` with selfdestruct + recreate.
+    ///
+    /// When an account is wiped but then has new storage, both `wiped=true` and the new slots
+    /// should appear in the final `HashedStorage`.
+    #[test]
+    fn test_sealed_update_into_hashed_post_state_wiped_with_new_storage() {
+        let addr = Address::random();
+        let slot = U256::from(99);
+
+        let mut sealed = SealedStateUpdate::default();
+        sealed
+            .accounts
+            .insert(addr, Some(Account { balance: U256::from(1), ..Default::default() }));
+        sealed.wiped.insert(addr);
+        let mut slots = HashMap::default();
+        slots.insert(slot, U256::from(123));
+        sealed.storage.insert(addr, slots);
+
+        let hashed = sealed.into_hashed_post_state();
+
+        let hashed_addr = keccak256(addr);
+        let storage = hashed.storages.get(&hashed_addr).unwrap();
+        // Should be wiped (to clear old storage)
+        assert!(storage.wiped);
+        // Should also have the new slot
+        let hashed_slot = keccak256(B256::from(slot));
+        assert_eq!(storage.storage.get(&hashed_slot), Some(&U256::from(123)));
+    }
+
+    /// Verifies `SealedStateUpdate::estimate_targets()` returns correct count.
+    #[test]
+    fn test_sealed_update_estimate_targets() {
+        let addr1 = Address::random();
+        let addr2 = Address::random();
+
+        let mut sealed = SealedStateUpdate::default();
+        sealed.accounts.insert(addr1, Some(Default::default()));
+        sealed.accounts.insert(addr2, Some(Default::default()));
+
+        let mut slots1 = HashMap::default();
+        slots1.insert(U256::from(1), U256::from(100));
+        slots1.insert(U256::from(2), U256::from(200));
+        sealed.storage.insert(addr1, slots1);
+
+        let mut slots2 = HashMap::default();
+        slots2.insert(U256::from(3), U256::from(300));
+        sealed.storage.insert(addr2, slots2);
+
+        // 2 accounts + 3 storage slots = 5 targets
+        assert_eq!(sealed.estimate_targets(), 5);
+    }
+
+    /// Verifies `SealedStateUpdate::seal()` captures only changed storage and touched accounts.
+    #[test]
+    fn test_sealed_update_seal_from_evm_state() {
+        use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
+
+        let touched_addr = Address::random();
+        let untouched_addr = Address::random();
+
+        let mut evm_state = EvmState::default();
+
+        // Touched account with changed storage
+        let mut touched_storage = alloy_primitives::map::HashMap::default();
+        // Changed slot (original != present)
+        touched_storage
+            .insert(U256::from(1), EvmStorageSlot::new_changed(U256::from(10), U256::from(20), 0));
+        // Unchanged slot (original == present) - should be filtered out
+        touched_storage.insert(U256::from(2), EvmStorageSlot::new(U256::from(50), 0));
+
+        let touched_account = revm_state::Account {
+            info: AccountInfo {
+                balance: U256::from(1000),
+                nonce: 5,
+                code_hash: revm_primitives::KECCAK_EMPTY,
+                code: None,
+            },
+            storage: touched_storage,
+            status: AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        evm_state.insert(touched_addr, touched_account);
+
+        // Untouched account - should be filtered out entirely
+        let untouched_account = revm_state::Account {
+            info: AccountInfo {
+                balance: U256::from(500),
+                nonce: 1,
+                code_hash: revm_primitives::KECCAK_EMPTY,
+                code: None,
+            },
+            storage: Default::default(),
+            status: AccountStatus::default(),
+            transaction_id: 0,
+        };
+        evm_state.insert(untouched_addr, untouched_account);
+
+        let sealed = SealedStateUpdate::seal(&evm_state);
+
+        // Only touched account should be in sealed update
+        assert!(sealed.accounts.contains_key(&touched_addr));
+        assert!(!sealed.accounts.contains_key(&untouched_addr));
+
+        // Only changed storage slot should be captured
+        let storage = sealed.storage.get(&touched_addr).unwrap();
+        assert!(storage.contains_key(&U256::from(1)));
+        assert!(!storage.contains_key(&U256::from(2)));
+        assert_eq!(storage.get(&U256::from(1)), Some(&U256::from(20)));
+    }
+
+    /// Verifies `SealedStateUpdate::seal()` handles selfdestructed accounts correctly.
+    #[test]
+    fn test_sealed_update_seal_selfdestruct() {
+        use revm_state::{AccountInfo, AccountStatus, EvmState};
+
+        let addr = Address::random();
+
+        let mut evm_state = EvmState::default();
+
+        // SelfDestructed accounts are also touched in practice
+        let destructed_account = revm_state::Account {
+            info: AccountInfo::default(),
+            storage: Default::default(),
+            status: AccountStatus::SelfDestructed | AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        evm_state.insert(addr, destructed_account);
+
+        let sealed = SealedStateUpdate::seal(&evm_state);
+
+        // Account should be None (destroyed)
+        assert_eq!(sealed.accounts.get(&addr), Some(&None));
+        // Account should be marked as wiped
+        assert!(sealed.wiped.contains(&addr));
+        // No storage should be recorded
+        assert!(!sealed.storage.contains_key(&addr));
     }
 }
