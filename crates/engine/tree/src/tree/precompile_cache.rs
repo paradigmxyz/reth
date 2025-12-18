@@ -218,30 +218,11 @@ impl CachedPrecompileMetrics {
 
 #[cfg(test)]
 mod tests {
-    use std::hash::DefaultHasher;
-
     use super::*;
     use reth_evm::{EthEvmFactory, Evm, EvmEnv, EvmFactory};
     use reth_revm::db::EmptyDB;
     use revm::{context::TxEnv, precompile::PrecompileOutput};
     use revm_primitives::hardfork::SpecId;
-
-    #[test]
-    fn test_cache_key_ref_hash() {
-        let key1 = CacheKey::new(SpecId::PRAGUE, b"test_input".into());
-        let key2 = CacheKeyRef::new(SpecId::PRAGUE, b"test_input");
-        assert!(PartialEq::eq(&key2, &key1));
-
-        let mut hasher = DefaultHasher::new();
-        key1.hash(&mut hasher);
-        let hash1 = hasher.finish();
-
-        let mut hasher = DefaultHasher::new();
-        key2.hash(&mut hasher);
-        let hash2 = hasher.finish();
-
-        assert_eq!(hash1, hash2);
-    }
 
     #[test]
     fn test_precompile_cache_basic() {
@@ -265,12 +246,11 @@ mod tests {
             reverted: false,
         };
 
-        let key = CacheKey::new(SpecId::PRAGUE, b"test_input".into());
-        let expected = CacheEntry(output);
-        cache.cache.insert(key, expected.clone());
+        let input = b"test_input";
+        let expected = CacheEntry { output, spec: SpecId::PRAGUE };
+        cache.cache.insert(input.into(), expected.clone());
 
-        let key = CacheKeyRef::new(SpecId::PRAGUE, b"test_input");
-        let actual = cache.cache.get(&key).unwrap();
+        let actual = cache.cache.get(input, SpecId::PRAGUE).unwrap();
 
         assert_eq!(actual, expected);
     }
@@ -284,7 +264,7 @@ mod tests {
         let address1 = Address::repeat_byte(1);
         let address2 = Address::repeat_byte(2);
 
-        let mut cache_map = PrecompileCacheMap::default();
+        let cache_map = PrecompileCacheMap::default();
 
         // create the first precompile with a specific output
         let precompile1: DynPrecompile = (PrecompileId::custom("custom"), {
