@@ -781,6 +781,13 @@ where
         // Update tree state with the new canonical head
         self.state.tree_state.set_canonical_head(canonical_header.num_hash());
 
+        // CRITICAL: Update canonical_in_memory_state's canonical head EARLY
+        // This ensures any concurrent callers of latest() get the correct block number
+        // when falling back to database state via history_by_block_number().
+        // Without this, get_canonical_head() would return the old head number until
+        // apply_canonical_ancestor_via_reorg() completes, causing stale state lookups.
+        self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
         // Handle the state update based on whether this is an unwind scenario
         if new_head_number < current_head_number {
             debug!(
