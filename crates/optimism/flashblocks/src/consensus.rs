@@ -123,12 +123,10 @@ where
         sequence: &FlashBlockCompleteSequence,
     ) {
         let block_number = sequence.block_number();
-        let safe_hash = sequence.payload_base().parent_hash;
-        let finalized_hash = sequence.payload_base().parent_hash;
         let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
             head_block_hash,
-            safe_block_hash: safe_hash,
-            finalized_block_hash: finalized_hash,
+            safe_block_hash: B256::ZERO,
+            finalized_block_hash: B256::ZERO,
         };
 
         match self
