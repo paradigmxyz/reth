@@ -30,8 +30,8 @@ use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_execution_types::ExecutionOutcome;
 use reth_metrics::Metrics;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, StateProviderBox, StateProviderFactory, StateReader};
-use reth_revm::{database::StateProviderDatabase, db::BundleState, state::EvmState};
+use reth_provider::{BlockReader, StateProviderFactory, StateReader};
+use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_trie::MultiProofTargets;
 use std::{
     sync::{
