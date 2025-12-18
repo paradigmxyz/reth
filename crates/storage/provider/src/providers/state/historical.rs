@@ -7,7 +7,7 @@ use crate::{
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
-use parking_lot::Mutex;
+use parking_lot::{MappedMutexGuard, MutexGuard};
 use reth_db_api::{
     cursor::{DbCursorRO, DbDupCursorRO},
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -125,18 +125,30 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
 
     fn storage_changeset_cursor(
         &self,
-    ) -> ProviderResult<&Mutex<<Provider::Tx as DbTx>::DupCursor<tables::StorageChangeSets>>> {
-        self.storage_changeset_cursor
-            .get_or_try_init(|| self.provider.tx_ref().cursor_dup_read().map(Mutex::new))
-            .map_err(Into::into)
+    ) -> ProviderResult<
+        MappedMutexGuard<'_, <Provider::Tx as DbTx>::DupCursor<tables::StorageChangeSets>>,
+    > {
+        MutexGuard::try_map_or_err(self.storage_changeset_cursor.lock(), |cursor| {
+            ProviderResult::Ok(match cursor {
+                Some(cursor) => cursor,
+                None => cursor.insert(self.provider.tx_ref().cursor_dup_read()?),
+            })
+        })
+        .map_err(|(_, err)| err)
     }
 
     fn plain_storage_cursor(
         &self,
-    ) -> ProviderResult<&Mutex<<Provider::Tx as DbTx>::DupCursor<tables::PlainStorageState>>> {
-        self.plain_storage_cursor
-            .get_or_try_init(|| self.provider.tx_ref().cursor_dup_read().map(Mutex::new))
-            .map_err(Into::into)
+    ) -> ProviderResult<
+        MappedMutexGuard<'_, <Provider::Tx as DbTx>::DupCursor<tables::PlainStorageState>>,
+    > {
+        MutexGuard::try_map_or_err(self.plain_storage_cursor.lock(), |cursor| {
+            ProviderResult::Ok(match cursor {
+                Some(cursor) => cursor,
+                None => cursor.insert(self.provider.tx_ref().cursor_dup_read()?),
+            })
+        })
+        .map_err(|(_, err)| err)
     }
 
     /// Lookup an account in the `AccountsHistory` table
@@ -481,7 +493,6 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
             HistoryInfo::InChangeset(changeset_block_number) => {
                 let entry = self
                     .storage_changeset_cursor()?
-                    .lock()
                     .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
                     .filter(|entry| entry.key == storage_key);
                 Ok(Some(
@@ -497,7 +508,6 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                 let entry = self
                     .plain_storage_cursor()?
-                    .lock()
                     .seek_by_key_subkey(address, storage_key)?
                     .filter(|entry| entry.key == storage_key);
                 Ok(entry.map(|e| e.value).or(Some(StorageValue::ZERO)))

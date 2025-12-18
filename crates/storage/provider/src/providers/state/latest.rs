@@ -3,7 +3,7 @@ use crate::{
     AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
-use parking_lot::Mutex;
+use parking_lot::{MappedMutexGuard, MutexGuard};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{BytecodeReader, DBProvider, StateProofProvider, StorageRootProvider};
@@ -54,10 +54,16 @@ impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
 
     fn plain_storage_cursor(
         &self,
-    ) -> ProviderResult<&Mutex<<Provider::Tx as DbTx>::DupCursor<tables::PlainStorageState>>> {
-        self.plain_storage_cursor
-            .get_or_try_init(|| self.provider.tx_ref().cursor_dup_read().map(Mutex::new))
-            .map_err(Into::into)
+    ) -> ProviderResult<
+        MappedMutexGuard<'_, <Provider::Tx as DbTx>::DupCursor<tables::PlainStorageState>>,
+    > {
+        MutexGuard::try_map_or_err(self.plain_storage_cursor.lock(), |cursor| {
+            ProviderResult::Ok(match cursor {
+                Some(cursor) => cursor,
+                None => cursor.insert(self.provider.tx_ref().cursor_dup_read()?),
+            })
+        })
+        .map_err(|(_, err)| err)
     }
 
     fn tx(&self) -> &Provider::Tx {
@@ -194,7 +200,7 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         if let Some(entry) =
-            self.plain_storage_cursor()?.lock().seek_by_key_subkey(account, storage_key)? &&
+            self.plain_storage_cursor()?.seek_by_key_subkey(account, storage_key)? &&
             entry.key == storage_key
         {
             return Ok(Some(entry.value))

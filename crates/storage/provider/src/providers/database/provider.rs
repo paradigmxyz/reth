@@ -33,7 +33,6 @@ use alloy_primitives::{
     Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
-use once_cell::sync::OnceCell;
 use parking_lot::{Mutex, RwLock};
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
@@ -94,10 +93,10 @@ pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
 
 /// Cached cursor for plain storage state.
 pub(crate) type PlainStorageCursor<Tx> =
-    Arc<OnceCell<Mutex<<Tx as DbTx>::DupCursor<tables::PlainStorageState>>>>;
+    Arc<Mutex<Option<<Tx as DbTx>::DupCursor<tables::PlainStorageState>>>>;
 /// Cached cursor for storage changeset.
 pub(crate) type StorageChangesetCursor<Tx> =
-    Arc<OnceCell<Mutex<<Tx as DbTx>::DupCursor<tables::StorageChangeSets>>>>;
+    Arc<Mutex<Option<<Tx as DbTx>::DupCursor<tables::StorageChangeSets>>>>;
 
 /// A [`DatabaseProvider`] that holds a read-write database transaction.
 ///
