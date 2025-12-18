@@ -66,20 +66,20 @@ impl<B: Block> BlockBuffer<B> {
     pub fn insert_block(&mut self, block: SealedBlock<B>) {
         let hash = block.hash();
 
-        if self.blocks.contains_key(&hash) {
-            return;
-        }
+        let entry = match self.blocks.entry(hash) {
+            std::collections::hash_map::Entry::Occupied(_) => return,
+            std::collections::hash_map::Entry::Vacant(entry) => entry,
+        };
 
         self.parent_to_child.entry(block.parent_hash()).or_default().insert(hash);
         self.earliest_blocks.entry(block.number()).or_default().insert(hash);
-        self.blocks.insert(hash, block);
+        entry.insert(block);
 
-        // Add block to FIFO queue and handle eviction if needed
-        if self.block_queue.len() >= self.max_blocks {
-            // Evict oldest block if limit is hit
-            if let Some(evicted_hash) = self.block_queue.pop_front() {
-                self.remove_block(&evicted_hash);
-            }
+        // Evict oldest block if capacity is reached
+        if self.block_queue.len() >= self.max_blocks &&
+            let Some(evicted_hash) = self.block_queue.pop_front()
+        {
+            self.remove_block(&evicted_hash);
         }
         self.block_queue.push_back(hash);
         self.metrics.blocks.set(self.blocks.len() as f64);
