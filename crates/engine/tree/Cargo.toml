@@ -54,6 +54,7 @@ tokio = { workspace = true, features = ["rt", "rt-multi-thread", "sync", "macros
 mini-moka = { workspace = true, features = ["sync"] }
 moka = { workspace = true, features = ["sync"] }
 smallvec.workspace = true
+fixed-cache = "0.1.1"
 
 # metrics
 metrics.workspace = true
