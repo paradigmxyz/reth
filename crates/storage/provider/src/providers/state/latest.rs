@@ -193,7 +193,6 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        // Use the shared cursor
         if let Some(entry) =
             self.plain_storage_cursor()?.lock().seek_by_key_subkey(account, storage_key)? &&
             entry.key == storage_key
