@@ -108,19 +108,21 @@ where
         let mut withdrawals_cursor =
             provider.tx_ref().cursor_write::<tables::BlockWithdrawals>()?;
 
-        for (block_number, body) in bodies {
+        for (block_number, body) in &bodies {
             let Some(body) = body else { continue };
 
             // Write ommers if any
             if !body.ommers.is_empty() {
-                ommers_cursor.append(block_number, &StoredBlockOmmers { ommers: body.ommers })?;
+                ommers_cursor
+                    .append(*block_number, &StoredBlockOmmers { ommers: body.ommers.clone() })?;
             }
 
             // Write withdrawals if any
-            if let Some(withdrawals) = body.withdrawals &&
+            if let Some(withdrawals) = body.withdrawals.clone() &&
                 !withdrawals.is_empty()
             {
-                withdrawals_cursor.append(block_number, &StoredBlockWithdrawals { withdrawals })?;
+                withdrawals_cursor
+                    .append(*block_number, &StoredBlockWithdrawals { withdrawals })?;
             }
         }
 
