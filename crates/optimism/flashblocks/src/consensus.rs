@@ -2,9 +2,14 @@ use crate::{FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use op_alloy_rpc_types_engine::OpExecutionData;
+use reth_chainspec::{ChainSpecProvider, EthChainSpec};
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_optimism_payload_builder::OpPayloadTypes;
-use reth_payload_primitives::{EngineApiMessageVersion, ExecutionPayload, PayloadTypes};
+use reth_payload_primitives::{
+    BuiltPayload, EngineApiMessageVersion, ExecutionPayload, PayloadTypes,
+};
+use reth_primitives_traits::{AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy};
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use tracing::*;
 
 /// Consensus client that sends FCUs and new payloads using blocks from a [`FlashBlockService`].
@@ -15,7 +20,7 @@ use tracing::*;
 ///
 /// [`FlashBlockService`]: crate::FlashBlockService
 #[derive(Debug)]
-pub struct FlashBlockConsensusClient<P = OpPayloadTypes>
+pub struct FlashBlockConsensusClient<Provider, P = OpPayloadTypes>
 where
     P: PayloadTypes,
 {
@@ -23,9 +28,11 @@ where
     engine_handle: ConsensusEngineHandle<P>,
     /// Receiver for completed flashblock sequences from `FlashBlockService`.
     sequence_receiver: FlashBlockCompleteSequenceRx,
+    /// Provider for interacting with the node's blockchain state.
+    provider: Provider,
 }
 
-impl<P> FlashBlockConsensusClient<P>
+impl<Provider, P> FlashBlockConsensusClient<Provider, P>
 where
     P: PayloadTypes,
     P::ExecutionData: for<'a> TryFrom<&'a FlashBlockCompleteSequence, Error: std::fmt::Display>,
@@ -34,22 +41,42 @@ where
     pub const fn new(
         engine_handle: ConsensusEngineHandle<P>,
         sequence_receiver: FlashBlockCompleteSequenceRx,
+        provider: Provider,
     ) -> eyre::Result<Self> {
-        Ok(Self { engine_handle, sequence_receiver })
+        Ok(Self { engine_handle, sequence_receiver, provider })
     }
+}
 
+impl<N, Provider, P> FlashBlockConsensusClient<Provider, P>
+where
+    N: NodePrimitives,
+    P: PayloadTypes,
+    P::BuiltPayload: BuiltPayload<Primitives = N>,
+    P::ExecutionData: for<'a> TryFrom<&'a FlashBlockCompleteSequence, Error: std::fmt::Display>,
+    Provider: StateProviderFactory
+        + ChainSpecProvider
+        + BlockReaderIdExt<
+            Header = HeaderTy<N>,
+            Block = BlockTy<N>,
+            Transaction = N::SignedTx,
+            Receipt = ReceiptTy<N>,
+        > + Unpin,
+{
     /// Attempts to submit a new payload to the engine.
     ///
     /// The `TryFrom` conversion will fail if `execution_outcome.state_root` is `B256::ZERO`,
     /// in which case this returns the `parent_hash` instead to drive the chain forward.
     ///
     /// Returns the block hash to use for FCU (either the new block or parent).
-    async fn submit_new_payload(&self, sequence: &FlashBlockCompleteSequence) -> B256 {
+    async fn submit_new_payload(&self, sequence: &FlashBlockCompleteSequence) -> (u64, B256) {
         let payload = match P::ExecutionData::try_from(sequence) {
             Ok(payload) => payload,
             Err(err) => {
                 trace!(target: "flashblocks", %err, "Failed payload conversion, using parent hash");
-                return sequence.payload_base().parent_hash;
+                return (
+                    sequence.block_number().saturating_sub(1),
+                    sequence.payload_base().parent_hash,
+                );
             }
         };
 
@@ -86,7 +113,7 @@ where
             }
         }
 
-        block_hash
+        (block_number, block_hash)
     }
 
     /// Submit a forkchoice update to the engine.
@@ -150,7 +177,19 @@ where
             // Returns block_hash for FCU:
             // - If state_root is available: submits newPayload and returns the new block's hash
             // - If state_root is zero: skips newPayload and returns parent_hash (no progress yet)
-            let block_hash = self.submit_new_payload(&sequence).await;
+            let (block_number, block_hash) = self.submit_new_payload(&sequence).await;
+
+            // We cannot assume that the flashblock consensus is ahead of the current canonical
+            // chainstate. We skip submitting the FCU request if:
+            // (1) already at/ahead, OR (2) genesis with no parent
+            let Some(latest) = self.provider.latest_header().ok().flatten() else {
+                continue;
+            };
+            if latest.number() >= block_number ||
+                block_number < self.provider.chain_spec().genesis_header().number()
+            {
+                continue;
+            }
 
             self.submit_forkchoice_update(block_hash, &sequence).await;
         }
@@ -289,6 +328,7 @@ mod tests {
 
     mod consensus_client_creation {
         use super::*;
+        use reth_storage_api::noop::NoopProvider;
         use tokio::sync::broadcast;
 
         #[test]
@@ -298,7 +338,8 @@ mod tests {
 
             let (_, sequence_rx) = broadcast::channel(1);
 
-            let result = FlashBlockConsensusClient::new(engine_handle, sequence_rx);
+            let result =
+                FlashBlockConsensusClient::new(engine_handle, sequence_rx, NoopProvider::default());
             assert!(result.is_ok());
         }
     }

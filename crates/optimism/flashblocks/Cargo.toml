@@ -23,6 +23,8 @@ reth-optimism-payload-builder.workspace = true
 reth-rpc-eth-types.workspace = true
 reth-errors.workspace = true
 reth-payload-primitives.workspace = true
+reth-chainspec.workspace = true
+reth-provider = { workspace = true, features = ["test-utils"] }
 reth-storage-api.workspace = true
 reth-tasks.workspace = true
 reth-metrics.workspace = true

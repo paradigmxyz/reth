@@ -544,6 +544,7 @@ where
                 let flashblock_client = FlashBlockConsensusClient::new(
                     ctx.engine_handle.clone(),
                     flashblocks_sequence.subscribe(),
+                    ctx.components.provider().clone(),
                 )?;
                 ctx.components.task_executor().spawn(Box::pin(flashblock_client.run()));
             }
