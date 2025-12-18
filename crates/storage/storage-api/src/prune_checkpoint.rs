@@ -17,7 +17,7 @@ pub trait PruneCheckpointReader: Send {
 
 /// The trait for updating prune checkpoint related data.
 #[auto_impl::auto_impl(&)]
-pub trait PruneCheckpointWriter: Send {
+pub trait PruneCheckpointWriter {
     /// Save prune checkpoint.
     fn save_prune_checkpoint(
         &self,
