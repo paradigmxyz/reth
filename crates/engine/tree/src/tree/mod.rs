@@ -35,6 +35,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_transaction_pool::sync_clear::PoolClearHandle;
 use revm::state::EvmState;
 use state::TreeState;
 use std::{
@@ -278,6 +279,8 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
+    /// Optional handle for synchronous transaction pool clearing after FCU.
+    pool_clear_handle: Option<PoolClearHandle>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -338,6 +341,7 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
+        pool_clear_handle: Option<PoolClearHandle>,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
@@ -358,6 +362,7 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
+            pool_clear_handle,
         }
     }
 
@@ -377,6 +382,7 @@ where
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
+        pool_clear_handle: Option<PoolClearHandle>,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -408,6 +414,7 @@ where
             config,
             kind,
             evm_config,
+            pool_clear_handle,
         );
         let incoming = task.incoming_tx.clone();
         std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
@@ -2329,6 +2336,18 @@ where
 
         // sends an event to all active listeners about the new canonical chain
         self.canonical_in_memory_state.notify_canon_state(notification);
+
+        // Synchronously clear the transaction pool if configured
+        if self.config.clear_pool_after_fcu() {
+            if let Some(handle) = &self.pool_clear_handle {
+                debug!(target: "engine::tree", "waiting for pool clear after FCU");
+                if handle.clear_and_wait() {
+                    debug!(target: "engine::tree", "pool clear complete");
+                } else {
+                    warn!(target: "engine::tree", "pool clear timed out or failed");
+                }
+            }
+        }
 
         // emit event
         self.emit_event(ConsensusEngineEvent::CanonicalChainCommitted(

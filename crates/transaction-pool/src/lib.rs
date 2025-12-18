@@ -316,6 +316,7 @@ pub mod maintain;
 pub mod metrics;
 pub mod noop;
 pub mod pool;
+pub mod sync_clear;
 pub mod validate;
 
 pub mod batcher;

@@ -8222,6 +8222,7 @@ dependencies = [
  "reth-prune",
  "reth-stages-api",
  "reth-tasks",
+ "reth-transaction-pool",
  "tokio",
  "tokio-stream",
 ]
@@ -8285,6 +8286,7 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
+ "reth-transaction-pool",
  "reth-trie",
  "reth-trie-parallel",
  "reth-trie-sparse",

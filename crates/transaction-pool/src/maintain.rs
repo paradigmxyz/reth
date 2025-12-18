@@ -43,7 +43,7 @@ use tracing::{debug, error, info, trace, warn};
 pub const MAX_QUEUED_TRANSACTION_LIFETIME: Duration = Duration::from_secs(3 * 60 * 60);
 
 /// Additional settings for maintaining the transaction pool
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug)]
 pub struct MaintainPoolConfig {
     /// Maximum (reorg) depth we handle when updating the transaction pool: `new.number -
     /// last_seen.number`

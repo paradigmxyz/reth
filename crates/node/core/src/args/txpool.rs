@@ -435,6 +435,15 @@ pub struct TxPoolArgs {
     /// and transaction fee markets are important.
     #[arg(long = "txpool.fifo-ordering", default_value_t = false)]
     pub fifo_ordering: bool,
+
+    /// Clear the transaction pool synchronously after each successful forkchoice update.
+    ///
+    /// When enabled, FCU responses are delayed until the pool is confirmed empty.
+    /// This provides deterministic pool clearing at the cost of increased latency.
+    ///
+    /// Default: false (asynchronous clearing)
+    #[arg(long = "txpool.clear-after-fcu")]
+    pub clear_after_fcu: bool,
 }
 
 impl TxPoolArgs {
@@ -522,6 +531,7 @@ impl Default for TxPoolArgs {
             max_batch_size,
             discard_reorged_transactions: false,
             fifo_ordering: false,
+            clear_after_fcu: false,
         }
     }
 }
@@ -654,6 +664,7 @@ mod tests {
             max_batch_size: 10,
             discard_reorged_transactions: false,
             fifo_ordering: false,
+            clear_after_fcu: false,
         };
 
         let parsed_args = CommandParser::<TxPoolArgs>::parse_from([
