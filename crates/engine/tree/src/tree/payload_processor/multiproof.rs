@@ -1656,19 +1656,7 @@ mod tests {
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
-    use std::sync::{Arc, OnceLock};
-    use tokio::runtime::{Handle, Runtime};
-
-    /// Get a handle to the test runtime, creating it if necessary
-    fn get_test_runtime_handle() -> Handle {
-        static TEST_RT: OnceLock<Runtime> = OnceLock::new();
-        TEST_RT
-            .get_or_init(|| {
-                tokio::runtime::Builder::new_multi_thread().enable_all().build().unwrap()
-            })
-            .handle()
-            .clone()
-    }
+    use std::sync::Arc;
 
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
     where
@@ -1678,10 +1666,9 @@ mod tests {
             + Send
             + 'static,
     {
-        let rt_handle = get_test_runtime_handle();
         let overlay_factory = OverlayStateProviderFactory::new(factory);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
+        let proof_handle = ProofWorkerHandle::new(task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 
         MultiProofTask::new(proof_handle, to_sparse_trie, Some(1))

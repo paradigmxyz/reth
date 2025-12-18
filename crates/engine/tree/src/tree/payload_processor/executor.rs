@@ -1,12 +1,6 @@
 //! Executor for mixed I/O and CPU workloads.
 
-use std::{
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        OnceLock,
-    },
-    time::Duration,
-};
+use std::{sync::OnceLock, time::Duration};
 use tokio::{
     runtime::{Builder, Handle, Runtime},
     task::JoinHandle,
@@ -28,11 +22,6 @@ impl Default for WorkloadExecutor {
 }
 
 impl WorkloadExecutor {
-    /// Returns the handle to the tokio runtime
-    pub(super) const fn handle(&self) -> &Handle {
-        &self.inner.handle
-    }
-
     /// Shorthand for [`Runtime::spawn_blocking`]
     #[track_caller]
     pub fn spawn_blocking<F, R>(&self, func: F) -> JoinHandle<R>
@@ -41,6 +30,25 @@ impl WorkloadExecutor {
         R: Send + 'static,
     {
         self.inner.handle.spawn_blocking(func)
+    }
+
+    /// Spawns a blocking task with a descriptive thread name for profiling.
+    ///
+    /// Unlike [`Self::spawn_blocking`], this creates a dedicated OS thread with the given name,
+    /// making it easily identifiable in profiling tools like Samply.
+    pub fn spawn_blocking_named<F, R>(
+        &self,
+        name: &'static str,
+        func: F,
+    ) -> std::thread::JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        std::thread::Builder::new()
+            .name(name.into())
+            .spawn(func)
+            .expect("failed to spawn named thread")
     }
 }
 
@@ -57,8 +65,6 @@ impl WorkloadExecutorInner {
                 static RT: OnceLock<Runtime> = OnceLock::new();
 
                 let rt = RT.get_or_init(|| {
-                    static THREAD_IDX: AtomicUsize = AtomicUsize::new(0);
-
                     Builder::new_multi_thread()
                         .enable_all()
                         // Keep the threads alive for at least the block time, which is 12 seconds
@@ -68,10 +74,6 @@ impl WorkloadExecutorInner {
                         // new block, and instead reuse the existing
                         // threads.
                         .thread_keep_alive(Duration::from_secs(15))
-                        .thread_name_fn(|| {
-                            let idx = THREAD_IDX.fetch_add(1, Ordering::Relaxed);
-                            format!("reth-eng-{idx}")
-                        })
                         .build()
                         .unwrap()
                 });

@@ -246,12 +246,8 @@ where
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
         let account_worker_count = config.account_worker_count();
-        let proof_handle = ProofWorkerHandle::new(
-            self.executor.handle().clone(),
-            task_ctx,
-            storage_worker_count,
-            account_worker_count,
-        );
+        let proof_handle =
+            ProofWorkerHandle::new(task_ctx, storage_worker_count, account_worker_count);
 
         let multi_proof_task = MultiProofTask::new(
             proof_handle.clone(),
@@ -296,7 +292,7 @@ where
 
         // spawn multi-proof task
         let parent_span = span.clone();
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("reth-multiproof", move || {
             let _enter = parent_span.entered();
             // Build a state provider for the multiproof task
             let provider = provider_builder.build().expect("failed to build provider");
@@ -362,7 +358,7 @@ where
         let (execute_tx, execute_rx) = mpsc::channel();
 
         // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("reth-tx-conv", move || {
             transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
                 let tx = convert(tx);
                 let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
@@ -376,7 +372,7 @@ where
 
         // Spawn a task that processes out-of-order transactions from the task above and sends them
         // to the execution task in order.
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("reth-tx-order", move || {
             let mut next_for_execution = 0;
             let mut queue = BTreeMap::new();
             while let Ok((idx, tx)) = ooo_rx.recv() {
@@ -450,7 +446,7 @@ where
         // spawn pre-warm task
         {
             let to_prewarm_task = to_prewarm_task.clone();
-            self.executor.spawn_blocking(move || {
+            self.executor.spawn_blocking_named("reth-prewarm", move || {
                 prewarm_task.run(transactions, to_prewarm_task);
             });
         }
@@ -515,7 +511,7 @@ where
             );
 
         let span = Span::current();
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("reth-sparse", move || {
             let _enter = span.entered();
 
             let (result, trie) = task.run();
