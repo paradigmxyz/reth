@@ -869,23 +869,44 @@ where
         // Try to load the canonical ancestor's block
         match self.canonical_block_by_hash(new_head_hash)? {
             Some(executed_block) => {
-                // Create the reorg chain update
-                let chain_update =
-                    NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks };
+                // Handle empty old_blocks separately to avoid Chain::first() panic in txpool
+                // When old_blocks is empty, use Commit (not Reorg) to still add executed_block to
+                // memory
+                if old_blocks.is_empty() {
+                    // No blocks in memory to reorg, use Commit instead of Reorg
+                    // This still adds executed_block to memory without creating empty Chain
+                    let chain_update = NewCanonicalChain::Commit { new: vec![executed_block] };
 
-                // Convert to notification before consuming chain_update
-                let notification = chain_update.to_chain_notification();
+                    // Convert to notification before consuming chain_update
+                    let notification = chain_update.to_chain_notification();
 
-                // Perform the reorg to properly handle the unwind
-                self.canonical_in_memory_state.update_chain(chain_update);
+                    // Add the block to in-memory state
+                    self.canonical_in_memory_state.update_chain(chain_update);
 
-                // CRITICAL: Update the canonical head after the reorg
-                // This ensures get_canonical_head() returns the correct block
-                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+                    // Update the canonical head
+                    self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
 
-                // Notify listeners (including txpool) about the reorg
-                // This is critical for txpool to update transaction states after unwind
-                self.canonical_in_memory_state.notify_canon_state(notification);
+                    // Notify listeners - Commit notification is safe (no empty Chain)
+                    self.canonical_in_memory_state.notify_canon_state(notification);
+                } else {
+                    // Reorg case: old_blocks is not empty, safe to create Chain from old
+                    let chain_update =
+                        NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks };
+
+                    // Convert to notification before consuming chain_update
+                    let notification = chain_update.to_chain_notification();
+
+                    // Perform the reorg to properly handle the unwind
+                    self.canonical_in_memory_state.update_chain(chain_update);
+
+                    // CRITICAL: Update the canonical head after the reorg
+                    // This ensures get_canonical_head() returns the correct block
+                    self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
+                    // Notify listeners (including txpool) about the reorg
+                    // This is critical for txpool to update transaction states after unwind
+                    self.canonical_in_memory_state.notify_canon_state(notification);
+                }
 
                 // Synchronously clear the transaction pool if configured
                 // This prevents "nonce too low" errors after large reorgs
