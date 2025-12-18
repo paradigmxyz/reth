@@ -670,6 +670,9 @@ where
     ) -> ProviderResult<HistoryInfo> {
         match self {
             Self::Database(cursor, _) => {
+                // Lookup the history chunk in the history index. If the key does not appear in the
+                // index, the first chunk for the next key will be returned so we filter out chunks
+                // that have a different key.
                 let key = ShardedKey::new(address, block_number);
                 if let Some(chunk) =
                     cursor.seek(key)?.filter(|(k, _)| k.key == address).map(|x| x.1)
@@ -682,8 +685,11 @@ where
                         lowest_available_block_number,
                     ))
                 } else if lowest_available_block_number.is_some() {
+                    // The key may have been written, but due to pruning we may not have changesets
+                    // and history, so we need to make a plain state lookup.
                     Ok(HistoryInfo::MaybeInPlainState)
                 } else {
+                    // The key has not been written to at all.
                     Ok(HistoryInfo::NotYetWritten)
                 }
             }
@@ -713,6 +719,9 @@ where
     ) -> ProviderResult<HistoryInfo> {
         match self {
             Self::Database(cursor, _) => {
+                // Lookup the history chunk in the history index. If the key does not appear in the
+                // index, the first chunk for the next key will be returned so we filter out chunks
+                // that have a different key.
                 let key = StorageShardedKey::new(address, storage_key, block_number);
                 if let Some(chunk) = cursor
                     .seek(key)?
@@ -729,8 +738,11 @@ where
                         lowest_available_block_number,
                     ))
                 } else if lowest_available_block_number.is_some() {
+                    // The key may have been written, but due to pruning we may not have changesets
+                    // and history, so we need to make a plain state lookup.
                     Ok(HistoryInfo::MaybeInPlainState)
                 } else {
+                    // The key has not been written to at all.
                     Ok(HistoryInfo::NotYetWritten)
                 }
             }
