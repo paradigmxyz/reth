@@ -262,7 +262,6 @@ mod tests {
     use reth_provider::{test_utils::create_test_provider_factory, HashingWriter};
     use reth_trie::proof::Proof;
     use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-    use tokio::runtime::Runtime;
 
     #[test]
     fn random_parallel_proof() {
@@ -326,7 +325,7 @@ mod tests {
         let trie_cursor_factory = DatabaseTrieCursorFactory::new(provider_rw.tx_ref());
         let hashed_cursor_factory = DatabaseHashedCursorFactory::new(provider_rw.tx_ref());
 
-        let rt = Runtime::new().unwrap();
+        let rt = tokio::runtime::Runtime::new().unwrap();
 
         let factory = reth_provider::providers::OverlayStateProviderFactory::new(factory);
         let task_ctx = ProofTaskCtx::new(factory);

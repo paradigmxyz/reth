@@ -36,6 +36,9 @@ itertools.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 crossbeam-channel.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # `metrics` feature
 reth-metrics = { workspace = true, optional = true }
 metrics = { workspace = true, optional = true }

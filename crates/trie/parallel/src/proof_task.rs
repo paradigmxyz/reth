@@ -71,6 +71,33 @@ use std::{
 use tokio::runtime::Handle;
 use tracing::{debug, debug_span, error, trace};
 
+/// Sets the current thread's name for profiling visibility.
+#[inline]
+fn set_thread_name(name: &str) {
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: prctl with PR_SET_NAME is safe with a valid string pointer
+        unsafe {
+            let mut buf = [0u8; 16];
+            let len = name.len().min(15);
+            buf[..len].copy_from_slice(&name.as_bytes()[..len]);
+            libc::prctl(libc::PR_SET_NAME, buf.as_ptr());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: pthread_setname_np is safe with a valid CString
+        unsafe {
+            let c_name = std::ffi::CString::new(name).unwrap_or_default();
+            libc::pthread_setname_np(c_name.as_ptr());
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = name;
+    }
+}
+
 #[cfg(feature = "metrics")]
 use crate::proof_task_metrics::{
     ProofTaskCursorMetrics, ProofTaskCursorMetricsCache, ProofTaskTrieMetrics,
@@ -151,6 +178,7 @@ impl ProofWorkerHandle {
             let storage_available_workers_clone = storage_available_workers.clone();
 
             executor.spawn_blocking(move || {
+                set_thread_name("reth-stor-proof");
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
                 #[cfg(feature = "metrics")]
@@ -191,6 +219,7 @@ impl ProofWorkerHandle {
             let account_available_workers_clone = account_available_workers.clone();
 
             executor.spawn_blocking(move || {
+                set_thread_name("reth-acct-proof");
                 #[cfg(feature = "metrics")]
                 let metrics = ProofTaskTrieMetrics::default();
                 #[cfg(feature = "metrics")]
@@ -1588,7 +1617,7 @@ enum AccountWorkerJob {
 mod tests {
     use super::*;
     use reth_provider::test_utils::create_test_provider_factory;
-    use tokio::{runtime::Builder, task};
+    use tokio::runtime::Builder;
 
     fn test_ctx<Factory>(factory: Factory) -> ProofTaskCtx<Factory> {
         ProofTaskCtx::new(factory)
@@ -1598,21 +1627,16 @@ mod tests {
     #[test]
     fn spawn_proof_workers_creates_handle() {
         let runtime = Builder::new_multi_thread().worker_threads(1).enable_all().build().unwrap();
-        runtime.block_on(async {
-            let handle = tokio::runtime::Handle::current();
-            let provider_factory = create_test_provider_factory();
-            let factory =
-                reth_provider::providers::OverlayStateProviderFactory::new(provider_factory);
-            let ctx = test_ctx(factory);
+        let provider_factory = create_test_provider_factory();
+        let factory = reth_provider::providers::OverlayStateProviderFactory::new(provider_factory);
+        let ctx = test_ctx(factory);
 
-            let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3);
+        let proof_handle = ProofWorkerHandle::new(runtime.handle().clone(), ctx, 5, 3);
 
-            // Verify handle can be cloned
-            let _cloned_handle = proof_handle.clone();
+        // Verify handle can be cloned
+        let _cloned_handle = proof_handle.clone();
 
-            // Workers shut down automatically when handle is dropped
-            drop(proof_handle);
-            task::yield_now().await;
-        });
+        // Workers shut down automatically when handle is dropped
+        drop(proof_handle);
     }
 }

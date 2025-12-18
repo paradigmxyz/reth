@@ -1,16 +1,38 @@
 //! Executor for mixed I/O and CPU workloads.
 
-use std::{
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        OnceLock,
-    },
-    time::Duration,
-};
+use std::{sync::OnceLock, time::Duration};
 use tokio::{
     runtime::{Builder, Handle, Runtime},
     task::JoinHandle,
 };
+
+/// Sets the current thread's name for profiling visibility.
+#[inline]
+fn set_thread_name(name: &str) {
+    #[cfg(target_os = "linux")]
+    {
+        // SAFETY: name is a valid string, prctl with PR_SET_NAME is safe
+        unsafe {
+            // PR_SET_NAME expects a null-terminated string, truncated to 16 bytes (including null)
+            let mut buf = [0u8; 16];
+            let len = name.len().min(15);
+            buf[..len].copy_from_slice(&name.as_bytes()[..len]);
+            libc::prctl(libc::PR_SET_NAME, buf.as_ptr());
+        }
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // SAFETY: name is a valid string
+        unsafe {
+            let c_name = std::ffi::CString::new(name).unwrap_or_default();
+            libc::pthread_setname_np(c_name.as_ptr());
+        }
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    {
+        let _ = name;
+    }
+}
 
 /// An executor for mixed I/O and CPU workloads.
 ///
@@ -42,6 +64,22 @@ impl WorkloadExecutor {
     {
         self.inner.handle.spawn_blocking(func)
     }
+
+    /// Spawns a blocking task with a descriptive thread name for profiling.
+    ///
+    /// Sets the thread name at runtime, making it identifiable in profiling tools like Samply.
+    /// Uses Tokio's blocking thread pool for efficiency.
+    #[track_caller]
+    pub fn spawn_blocking_named<F, R>(&self, name: &'static str, func: F) -> JoinHandle<R>
+    where
+        F: FnOnce() -> R + Send + 'static,
+        R: Send + 'static,
+    {
+        self.inner.handle.spawn_blocking(move || {
+            set_thread_name(name);
+            func()
+        })
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -57,8 +95,6 @@ impl WorkloadExecutorInner {
                 static RT: OnceLock<Runtime> = OnceLock::new();
 
                 let rt = RT.get_or_init(|| {
-                    static THREAD_IDX: AtomicUsize = AtomicUsize::new(0);
-
                     Builder::new_multi_thread()
                         .enable_all()
                         // Keep the threads alive for at least the block time, which is 12 seconds
@@ -68,10 +104,6 @@ impl WorkloadExecutorInner {
                         // new block, and instead reuse the existing
                         // threads.
                         .thread_keep_alive(Duration::from_secs(15))
-                        .thread_name_fn(|| {
-                            let idx = THREAD_IDX.fetch_add(1, Ordering::Relaxed);
-                            format!("reth-eng-{idx}")
-                        })
                         .build()
                         .unwrap()
                 });

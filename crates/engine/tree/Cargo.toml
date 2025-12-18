@@ -67,6 +67,9 @@ derive_more.workspace = true
 parking_lot.workspace = true
 crossbeam-channel.workspace = true
 
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
 # optional deps for test-utils
 reth-prune-types = { workspace = true, optional = true }
 reth-stages = { workspace = true, optional = true }

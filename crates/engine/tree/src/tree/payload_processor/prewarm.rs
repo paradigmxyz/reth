@@ -149,7 +149,7 @@ where
         let transaction_count_hint = self.transaction_count_hint;
         let span = Span::current();
 
-        self.executor.spawn_blocking(move || {
+        self.executor.spawn_blocking_named("reth-prewarm", move || {
             let _enter = debug_span!(target: "engine::tree::payload_processor::prewarm", parent: span, "spawn_all").entered();
 
             let (done_tx, done_rx) = mpsc::channel();
@@ -551,7 +551,7 @@ where
         let span =
             debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm worker", idx);
 
-        executor.spawn_blocking(move || {
+        executor.spawn_blocking_named("reth-prewarm-w", move || {
             let _enter = span.entered();
             ctx.transact_batch(rx, actions_tx, done_tx);
         });
