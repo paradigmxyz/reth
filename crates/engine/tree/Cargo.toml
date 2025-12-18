@@ -29,6 +29,7 @@ reth-provider.workspace = true
 reth-prune.workspace = true
 reth-revm.workspace = true
 reth-stages-api.workspace = true
+reth-storage-errors.workspace = true
 reth-tasks.workspace = true
 reth-trie-parallel.workspace = true
 reth-trie-sparse = { workspace = true, features = ["std", "metrics"] }

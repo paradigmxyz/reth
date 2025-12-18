@@ -23,11 +23,12 @@ use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
-use reth_engine_primitives::ExecutableTxIterator;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor, TxEnvFor,
+    ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
+    TxEnvFor,
 };
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
 use reth_revm::{db::BundleState, state::EvmState};
@@ -91,6 +92,13 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// If we have 1 million entries of 144 bytes each, this conservative estimate comes out at around
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
+
+/// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
+type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
+    WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxTuple>::Tx>,
+    <I as ExecutableTxTuple>::Error,
+    <N as NodePrimitives>::Receipt,
+>;
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
@@ -200,7 +208,6 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    #[allow(clippy::type_complexity)]
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor",
@@ -215,7 +222,7 @@ where
         multiproof_provider_factory: F,
         config: &TreeConfig,
         bal: Option<Arc<BlockAccessList>>,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+    ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -331,7 +338,7 @@ where
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
         bal: Option<Arc<BlockAccessList>>,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+    ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
@@ -412,11 +419,11 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
         bal: Option<Arc<BlockAccessList>>,
-    ) -> CacheTaskHandle
+    ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
-        if self.disable_transaction_prewarming && bal.is_none() {
+        if self.disable_transaction_prewarming {
             // if no transactions should be executed we clear them but still spawn the task for
             // caching updates
             transactions = mpsc::channel().1;
@@ -598,12 +605,15 @@ where
 }
 
 /// Handle to all the spawned tasks.
+///
+/// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
+/// caching task without cloning the expensive `BundleState`.
 #[derive(Debug)]
-pub struct PayloadHandle<Tx, Err> {
+pub struct PayloadHandle<Tx, Err, R> {
     /// Channel for evm state updates
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
-    prewarm_handle: CacheTaskHandle,
+    prewarm_handle: CacheTaskHandle<R>,
     /// Stream of block transactions
     transactions: mpsc::Receiver<Result<Tx, Err>>,
     /// Receiver for the state root
@@ -612,7 +622,7 @@ pub struct PayloadHandle<Tx, Err> {
     _span: Span,
 }
 
-impl<Tx, Err> PayloadHandle<Tx, Err> {
+impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Awaits the state root
     ///
     /// # Panics
@@ -665,9 +675,14 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 
     /// Terminates the entire caching task.
     ///
-    /// If the [`BundleState`] is provided it will update the shared cache.
-    pub(super) fn terminate_caching(&mut self, block_output: Option<&BundleState>) {
-        self.prewarm_handle.terminate_caching(block_output)
+    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
+    /// path without cloning the expensive `BundleState`.
+    pub(super) fn terminate_caching(
+        &mut self,
+        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
+    ) {
+        self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
     /// Returns iterator yielding transactions from the stream.
@@ -679,17 +694,20 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 }
 
 /// Access to the spawned [`PrewarmCacheTask`].
+///
+/// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
+/// prewarm task without cloning the expensive `BundleState`.
 #[derive(Debug)]
-pub(crate) struct CacheTaskHandle {
+pub(crate) struct CacheTaskHandle<R> {
     /// The shared cache the task operates with.
     cache: Option<StateExecutionCache>,
     /// Metrics for the caches
     cache_metrics: Option<CachedStateMetrics>,
     /// Channel to the spawned prewarm task if any
-    to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent>>,
+    to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
 }
 
-impl CacheTaskHandle {
+impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -701,20 +719,25 @@ impl CacheTaskHandle {
 
     /// Terminates the entire pre-warming task.
     ///
-    /// If the [`BundleState`] is provided it will update the shared cache.
-    pub(super) fn terminate_caching(&mut self, block_output: Option<&BundleState>) {
+    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
+    pub(super) fn terminate_caching(
+        &mut self,
+        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
+    ) {
         if let Some(tx) = self.to_prewarm_task.take() {
-            // Only clone when we have an active task and a state to send
-            let event = PrewarmTaskEvent::Terminate { block_output: block_output.cloned() };
+            let event = PrewarmTaskEvent::Terminate { execution_outcome };
             let _ = tx.send(event);
         }
     }
 }
 
-impl Drop for CacheTaskHandle {
+impl<R> Drop for CacheTaskHandle<R> {
     fn drop(&mut self) {
-        // Ensure we always terminate on drop
-        self.terminate_caching(None);
+        // Ensure we always terminate on drop - send None without needing Send + Sync bounds
+        if let Some(tx) = self.to_prewarm_task.take() {
+            let _ = tx.send(PrewarmTaskEvent::Terminate { execution_outcome: None });
+        }
     }
 }
 
