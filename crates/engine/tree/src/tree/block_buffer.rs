@@ -66,6 +66,10 @@ impl<B: Block> BlockBuffer<B> {
     pub fn insert_block(&mut self, block: SealedBlock<B>) {
         let hash = block.hash();
 
+        if self.blocks.contains_key(&hash) {
+            return;
+        }
+
         self.parent_to_child.entry(block.parent_hash()).or_default().insert(hash);
         self.earliest_blocks.entry(block.number()).or_default().insert(hash);
         self.blocks.insert(hash, block);
