@@ -1202,7 +1202,7 @@ impl MultiProofTask {
                 }
 
                 // Convert BAL to HashedPostState and process it
-                match bal_to_hashed_post_state(&bal, &provider) {
+                match bal_to_hashed_post_state(&bal, provider) {
                     Ok(hashed_state) => {
                         debug!(
                             target: "engine::tree::payload_processor::multiproof",
