@@ -21,9 +21,14 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     pub(crate) fn cache_for_address(&self, address: Address) -> PrecompileCache<S> {
+        // Try just using `.get` first to avoid acquiring a write lock.
         if let Some(cache) = self.0.get(&address) {
             return cache.clone();
         }
+        // Otherwise, fallback to `.entry` and initialize the cache.
+        //
+        // This should be very rare as caches for all precompiles will be initialized as soon as
+        // first EVM is created.
         self.0.entry(address).or_default().clone()
     }
 }
