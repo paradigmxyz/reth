@@ -88,7 +88,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
         if !self.lowest_available_blocks.is_account_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number));
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
         // Create RocksDB tx only when the feature is enabled
@@ -119,7 +119,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
         Provider: StorageSettingsCache + RocksDBProviderFactory + NodePrimitivesProvider,
     {
         if !self.lowest_available_blocks.is_storage_history_available(self.block_number) {
-            return Err(ProviderError::StateAtBlockPruned(self.block_number));
+            return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
         // Create RocksDB tx only when the feature is enabled
