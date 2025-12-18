@@ -127,7 +127,12 @@ impl RocksDBProvider {
                     highest_static_tx = highest_tx,
                     "Static files ahead of MDBX, pruning TransactionHashNumbers excess data"
                 );
-                self.prune_transaction_hash_numbers_in_range(provider, (mdbx_tx + 1)..=highest_tx)?;
+                // Use checked_add to prevent overflow when mdbx_tx == u64::MAX
+                if let Some(start) = mdbx_tx.checked_add(1) {
+                    if start <= highest_tx {
+                        self.prune_transaction_hash_numbers_in_range(provider, start..=highest_tx)?;
+                    }
+                }
 
                 // After pruning, check if MDBX is behind checkpoint
                 if checkpoint > mdbx_block {
@@ -162,6 +167,16 @@ impl RocksDBProvider {
                     "MDBX empty but static files have data, pruning all TransactionHashNumbers"
                 );
                 self.prune_transaction_hash_numbers_in_range(provider, 0..=highest_tx)?;
+
+                // If checkpoint claims progress but MDBX is empty, that's an inconsistency
+                if checkpoint > 0 {
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        checkpoint,
+                        "Checkpoint set but MDBX has no transactions, unwind needed"
+                    );
+                    return Ok(Some(0));
+                }
             }
             (None, None) => {
                 // Both MDBX and static files are empty.

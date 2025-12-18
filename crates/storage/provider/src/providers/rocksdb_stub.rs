@@ -23,7 +23,9 @@ pub struct RocksDBProvider;
 impl RocksDBProvider {
     /// Creates a new stub `RocksDB` provider.
     ///
-    /// On non-Unix platforms, this returns an error indicating `RocksDB` is not supported.
+    /// This stub always succeeds but any actual operations will return `UnsupportedProvider`.
+    /// When using this stub, all `*_in_rocksdb` flags should be set to `false` to ensure
+    /// operations route to MDBX instead.
     pub fn new(_path: impl AsRef<Path>) -> ProviderResult<Self> {
         Ok(Self)
     }
@@ -78,6 +80,26 @@ impl RocksDBProvider {
         RocksTx
     }
 
+    /// Creates a new batch for atomic writes (stub implementation).
+    pub const fn batch(&self) -> RocksDBBatch {
+        RocksDBBatch
+    }
+
+    /// Gets the first key-value pair from a table (stub implementation).
+    pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        Ok(None)
+    }
+
+    /// Gets the last key-value pair from a table (stub implementation).
+    pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        Ok(None)
+    }
+
+    /// Creates an iterator for the specified table (stub implementation).
+    pub const fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
+        Err(UnsupportedProvider)
+    }
+
     /// Check consistency of `RocksDB` tables (stub implementation).
     ///
     /// Returns `None` since there is no `RocksDB` data to check when the feature is disabled.
@@ -111,6 +133,25 @@ impl RocksDBBatch {
     /// Deletes a value from the batch (stub implementation).
     pub fn delete<T: Table>(&self, _key: T::Key) -> ProviderResult<()> {
         Err(UnsupportedProvider)
+    }
+
+    /// Commits the batch (stub implementation).
+    pub const fn commit(self) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+}
+
+/// A stub iterator for `RocksDB` (non-transactional).
+#[derive(Debug)]
+pub struct RocksDBIter<'a, T> {
+    _marker: std::marker::PhantomData<(&'a (), T)>,
+}
+
+impl<T: Table> Iterator for RocksDBIter<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
     }
 }
 
