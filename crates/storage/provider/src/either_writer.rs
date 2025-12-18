@@ -785,7 +785,7 @@ mod rocksdb_tests {
 
         // First write
         provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
-        assert!(provider.get::<tables::StoragesHistory>(key.clone()).unwrap().is_some());
+        assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
 
         // Delete via RocksDBBatch
         let mut batch = provider.batch();
@@ -806,7 +806,7 @@ mod rocksdb_tests {
 
         // First write
         provider.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
-        assert!(provider.get::<tables::AccountsHistory>(key.clone()).unwrap().is_some());
+        assert!(provider.get::<tables::AccountsHistory>(key).unwrap().is_some());
 
         // Delete via RocksDBBatch
         let mut batch = provider.batch();
