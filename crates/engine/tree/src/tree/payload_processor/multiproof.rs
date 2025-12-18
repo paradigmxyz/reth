@@ -1119,8 +1119,6 @@ impl MultiProofTask {
                 ctx.accumulated_state_updates.push((source, hashed_update));
 
                 // Batch consecutive state update messages up to target limit.
-                // Note: We no longer need can_batch_state_update check because HashedPostState
-                // has no is_changed semantics that could be overwritten during extend.
                 while accumulated_targets < STATE_UPDATE_MAX_BATCH_TARGETS {
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
