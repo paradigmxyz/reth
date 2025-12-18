@@ -634,9 +634,8 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                // Seal the EvmState - captures is_changed semantics NOW, but defers hashing.
-                // This is cheaper than full hashing and allows the multiproof task to
-                // batch multiple sealed updates and hash once after merging.
+                // Capture changed keys now (before batching corrupts `is_changed` flags),
+                // defer hashing until after merging.
                 let sealed = SealedStateUpdate::seal(state);
                 let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), sealed));
             }
