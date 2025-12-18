@@ -1279,6 +1279,7 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
     type EngineValidator: EngineValidator<
         <Node::Types as NodeTypes>::Payload,
         <Node::Types as NodeTypes>::Primitives,
+        Provider = Node::Provider,
     >;
 
     /// Builds the tree validator for the consensus engine.

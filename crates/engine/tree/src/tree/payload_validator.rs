@@ -55,55 +55,73 @@ use tracing::{debug, debug_span, error, info, instrument, trace, warn};
 /// Context providing access to tree state during validation.
 ///
 /// This context is provided to the [`EngineValidator`] and includes the state of the tree's
-/// internals
-pub struct TreeCtx<'a, N: NodePrimitives> {
+/// internals.
+///
+/// The generic parameter `P` represents the provider type used for state lookups.
+pub struct TreeCtx<'a, N: NodePrimitives, P> {
     /// The engine API tree state
     state: &'a mut EngineApiTreeState<N>,
     /// Reference to the canonical in-memory state
     canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
     /// Optional precomputed state provider and builder to avoid redundant lookups.
     /// This is set by [`crate::tree::EngineApiTreeHandler`] after validating parent state exists.
-    /// The builder is type-erased via `dyn Any` because adding a generic `P` to `TreeCtx` would
-    /// require cascading changes to the public `EngineValidator` trait signature.
-    precomputed_state: Option<PrecomputedState>,
+    precomputed: Option<StateProviderAndBuilder<N, P>>,
 }
 
 /// Precomputed state provider and builder for block validation.
 ///
-/// Stored as type-erased builder to avoid adding generics to `TreeCtx`.
-pub struct PrecomputedState {
+/// Contains both the built state provider (for main execution) and the builder
+/// (for spawning parallel tasks that need their own providers).
+pub struct StateProviderAndBuilder<N: NodePrimitives, P> {
     /// The built state provider for main execution.
-    provider: StateProviderBox,
-    /// Type-erased builder for spawning parallel tasks.
-    builder: Box<dyn std::any::Any + Send>,
+    pub provider: StateProviderBox,
+    /// The builder for spawning parallel tasks.
+    pub builder: StateProviderBuilder<N, P>,
 }
 
-impl std::fmt::Debug for PrecomputedState {
+impl<N: NodePrimitives, P> std::fmt::Debug for StateProviderAndBuilder<N, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("PrecomputedState")
+        f.debug_struct("StateProviderAndBuilder")
             .field("provider", &"StateProviderBox")
-            .field("builder", &"Box<dyn Any + Send>")
+            .field("builder", &"StateProviderBuilder")
             .finish()
     }
 }
 
-impl<'a, N: NodePrimitives> std::fmt::Debug for TreeCtx<'a, N> {
+impl<'a, N: NodePrimitives, P> std::fmt::Debug for TreeCtx<'a, N, P> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TreeCtx")
             .field("state", &"EngineApiTreeState")
             .field("canonical_in_memory_state", &self.canonical_in_memory_state)
-            .field("precomputed_state", &self.precomputed_state.as_ref().map(|_| "Some(...)"))
+            .field("precomputed", &self.precomputed.as_ref().map(|_| "Some(...)"))
             .finish()
     }
 }
 
-impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
-    /// Creates a new tree context
+impl<'a, N: NodePrimitives, P> TreeCtx<'a, N, P> {
+    /// Creates a new tree context.
     pub const fn new(
         state: &'a mut EngineApiTreeState<N>,
         canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
     ) -> Self {
-        Self { state, canonical_in_memory_state, precomputed_state: None }
+        Self { state, canonical_in_memory_state, precomputed: None }
+    }
+
+    /// Creates a new tree context with precomputed state provider and builder.
+    ///
+    /// This is the preferred constructor when the provider and builder are available,
+    /// as it avoids redundant state lookups in the validator.
+    pub const fn with_precomputed(
+        state: &'a mut EngineApiTreeState<N>,
+        canonical_in_memory_state: &'a CanonicalInMemoryState<N>,
+        provider: StateProviderBox,
+        builder: StateProviderBuilder<N, P>,
+    ) -> Self {
+        Self {
+            state,
+            canonical_in_memory_state,
+            precomputed: Some(StateProviderAndBuilder { provider, builder }),
+        }
     }
 
     /// Returns a reference to the engine tree state
@@ -121,27 +139,9 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
         self.canonical_in_memory_state
     }
 
-    /// Stores precomputed state provider and builder to avoid redundant lookups.
-    ///
-    /// This is used by [`crate::tree::EngineApiTreeHandler`] to pass both the provider
-    /// (for main execution) and builder (for spawning parallel tasks) computed during
-    /// parent state validation.
-    pub fn set_precomputed_state<B: std::any::Any + Send + 'static>(
-        &mut self,
-        provider: StateProviderBox,
-        builder: B,
-    ) {
-        self.precomputed_state = Some(PrecomputedState { provider, builder: Box::new(builder) });
-    }
-
-    /// Takes the precomputed state, if present.
-    ///
-    /// Returns the state provider and type-erased builder. The caller should downcast
-    /// the builder to the expected `StateProviderBuilder<N, P>` type.
-    pub fn take_precomputed_state(
-        &mut self,
-    ) -> Option<(StateProviderBox, Box<dyn std::any::Any + Send>)> {
-        self.precomputed_state.take().map(|s| (s.provider, s.builder))
+    /// Takes the precomputed state provider and builder, if present.
+    pub const fn take_precomputed(&mut self) -> Option<StateProviderAndBuilder<N, P>> {
+        self.precomputed.take()
     }
 }
 
@@ -370,7 +370,7 @@ where
     pub fn validate_block_with_state<T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &mut self,
         input: BlockOrPayload<T>,
-        mut ctx: TreeCtx<'_, N>,
+        mut ctx: TreeCtx<'_, N, P>,
     ) -> ValidationOutcome<N, InsertPayloadError<N::Block>>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -413,33 +413,10 @@ where
 
         // Use precomputed state from TreeCtx (set by EngineApiTreeHandler) to avoid
         // redundant state lookups. Fall back to computing if not available (legacy callers).
-        let (mut state_provider, provider_builder) = if let Some((provider, any_builder)) =
-            ctx.take_precomputed_state()
+        let (mut state_provider, provider_builder) = if let Some(precomputed) =
+            ctx.take_precomputed()
         {
-            // Downcast the type-erased builder to the expected type
-            match any_builder.downcast::<StateProviderBuilder<N, P>>() {
-                Ok(builder) => (provider, *builder),
-                Err(_) => {
-                    // Type mismatch should never happen - indicates a programming error
-                    // where the wrong builder type was stored in TreeCtx
-                    debug_assert!(
-                        false,
-                        "Precomputed builder type mismatch: expected StateProviderBuilder<N, P>"
-                    );
-                    debug!(target: "engine::tree::payload_validator", "Precomputed builder type mismatch, recomputing");
-                    let Some(builder) =
-                        ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
-                    else {
-                        return Err(InsertBlockError::new(
-                            self.convert_to_block(input)?,
-                            ProviderError::HeaderNotFound(parent_hash.into()).into(),
-                        )
-                        .into())
-                    };
-                    // Note: we still use the precomputed provider since it's type-safe
-                    (provider, builder)
-                }
-            }
+            (precomputed.provider, precomputed.builder)
         } else {
             // Legacy path: compute both builder and provider
             let Some(builder) = ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
@@ -809,7 +786,7 @@ where
         block: &RecoveredBlock<N::Block>,
         parent_block: &SealedHeader<N::BlockHeader>,
         output: &BlockExecutionOutput<N::Receipt>,
-        ctx: &mut TreeCtx<'_, N>,
+        ctx: &mut TreeCtx<'_, N, P>,
     ) -> Result<HashedPostState, InsertBlockErrorKind>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -1131,8 +1108,14 @@ where
     fn spawn_deferred_trie_task(
         &self,
         block: RecoveredBlock<N::Block>,
+<<<<<<< HEAD
         execution_outcome: Arc<ExecutionOutcome<N::Receipt>>,
         ctx: &TreeCtx<'_, N>,
+=======
+        output: BlockExecutionOutput<N::Receipt>,
+        block_number: u64,
+        ctx: &TreeCtx<'_, N, P>,
+>>>>>>> c138a3e4ff (perf(engine): deduplicate state_provider_builder calls with type-safe TreeCtx)
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
     ) -> ExecutedBlock<N> {
@@ -1209,6 +1192,9 @@ pub trait EngineValidator<
     N: NodePrimitives = <<Types as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives,
 >: Send + Sync + 'static
 {
+    /// The provider type used for state lookups.
+    type Provider: Send + Sync;
+
     /// Validates the payload attributes with respect to the header.
     ///
     /// By default, this enforces that the payload attributes timestamp is greater than the
@@ -1241,14 +1227,14 @@ pub trait EngineValidator<
     fn validate_payload(
         &mut self,
         payload: Types::ExecutionData,
-        ctx: TreeCtx<'_, N>,
+        ctx: TreeCtx<'_, N, Self::Provider>,
     ) -> ValidationOutcome<N>;
 
     /// Validates a block downloaded from the network.
     fn validate_block(
         &mut self,
         block: SealedBlock<N::Block>,
-        ctx: TreeCtx<'_, N>,
+        ctx: TreeCtx<'_, N, Self::Provider>,
     ) -> ValidationOutcome<N>;
 
     /// Hook called after an executed block is inserted directly into the tree.
@@ -1267,12 +1253,16 @@ where
         + StateReader
         + HashedPostStateProvider
         + Clone
+        + Send
+        + Sync
         + 'static,
     N: NodePrimitives,
     V: PayloadValidator<Types, Block = N::Block>,
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
+    type Provider = P;
+
     fn validate_payload_attributes_against_header(
         &self,
         attr: &Types::PayloadAttributes,
@@ -1292,7 +1282,7 @@ where
     fn validate_payload(
         &mut self,
         payload: Types::ExecutionData,
-        ctx: TreeCtx<'_, N>,
+        ctx: TreeCtx<'_, N, P>,
     ) -> ValidationOutcome<N> {
         self.validate_block_with_state(BlockOrPayload::Payload(payload), ctx)
     }
@@ -1300,7 +1290,7 @@ where
     fn validate_block(
         &mut self,
         block: SealedBlock<N::Block>,
-        ctx: TreeCtx<'_, N>,
+        ctx: TreeCtx<'_, N, P>,
     ) -> ValidationOutcome<N> {
         self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
     }

@@ -86,7 +86,7 @@ where
         evm_config: C,
     ) -> Self
     where
-        V: EngineValidator<N::Payload>,
+        V: EngineValidator<N::Payload, Provider = BlockchainProvider<N>>,
         C: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
         let engine_kind =
