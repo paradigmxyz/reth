@@ -214,7 +214,16 @@ pub struct CliContext {
 /// Creates a new default tokio multi-thread [Runtime](tokio::runtime::Runtime) with all features
 /// enabled
 pub fn tokio_runtime() -> Result<tokio::runtime::Runtime, std::io::Error> {
-    tokio::runtime::Builder::new_multi_thread().enable_all().build()
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    static THREAD_IDX: AtomicUsize = AtomicUsize::new(0);
+
+    tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name_fn(|| {
+            let idx = THREAD_IDX.fetch_add(1, Ordering::Relaxed);
+            format!("reth-node-{idx}")
+        })
+        .build()
 }
 
 /// Runs the given future to completion or until a critical task panicked.

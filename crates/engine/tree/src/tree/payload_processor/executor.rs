@@ -1,6 +1,12 @@
 //! Executor for mixed I/O and CPU workloads.
 
-use std::{sync::OnceLock, time::Duration};
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        OnceLock,
+    },
+    time::Duration,
+};
 use tokio::{
     runtime::{Builder, Handle, Runtime},
     task::JoinHandle,
@@ -51,6 +57,8 @@ impl WorkloadExecutorInner {
                 static RT: OnceLock<Runtime> = OnceLock::new();
 
                 let rt = RT.get_or_init(|| {
+                    static THREAD_IDX: AtomicUsize = AtomicUsize::new(0);
+
                     Builder::new_multi_thread()
                         .enable_all()
                         // Keep the threads alive for at least the block time, which is 12 seconds
@@ -60,6 +68,10 @@ impl WorkloadExecutorInner {
                         // new block, and instead reuse the existing
                         // threads.
                         .thread_keep_alive(Duration::from_secs(15))
+                        .thread_name_fn(|| {
+                            let idx = THREAD_IDX.fetch_add(1, Ordering::Relaxed);
+                            format!("reth-eng-{idx}")
+                        })
                         .build()
                         .unwrap()
                 });

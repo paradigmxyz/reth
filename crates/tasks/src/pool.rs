@@ -73,7 +73,7 @@ impl BlockingTaskPool {
     /// If a different stack size or other parameters are needed, they can be configured via
     /// [`rayon::ThreadPoolBuilder`] returned by [`Self::builder`].
     pub fn build() -> Result<Self, rayon::ThreadPoolBuildError> {
-        Self::builder().build().map(Self::new)
+        Self::builder().thread_name(|i| format!("reth-blk-{i}")).build().map(Self::new)
     }
 
     /// Asynchronous wrapper around Rayon's
