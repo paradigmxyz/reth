@@ -208,31 +208,31 @@ impl Drop for StateHookSender {
     }
 }
 
-pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
+pub(crate) fn evm_state_to_hashed_post_state(update: &EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
-    for (address, account) in update {
+    for (address, account) in update.iter() {
         if account.is_touched() {
-            let hashed_address = keccak256(address);
+            let hashed_address = keccak256(*address);
             trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
-            let info = if destroyed { None } else { Some(account.info.into()) };
+            let info = if destroyed { None } else { Some((&account.info).into()) };
             hashed_state.accounts.insert(hashed_address, info);
 
-            let mut changed_storage_iter = account
+            let changed_storage: Vec<_> = account
                 .storage
-                .into_iter()
+                .iter()
                 .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
+                .map(|(slot, value)| (keccak256(B256::from(*slot)), value.present_value))
+                .collect();
 
             if destroyed {
                 hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
+            } else if !changed_storage.is_empty() {
                 hashed_state
                     .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage));
             }
         }
     }
@@ -1145,13 +1145,6 @@ impl MultiProofTask {
                 let num_batched = ctx.accumulated_state_updates.len();
                 self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
 
-                // Update MultiAddedRemovedKeys per sub-update BEFORE merging.
-                // This preserves the correct semantics of tracking added/removed keys
-                // as if each update was processed individually.
-                for (_, update) in &ctx.accumulated_state_updates {
-                    self.multi_added_removed_keys.update_with_state(update);
-                }
-
                 // Merge all accumulated updates into a single HashedPostState payload.
                 // This is safe because HashedPostState has no is_changed semantics.
                 // Use drain to preserve the buffer allocation.
@@ -1164,9 +1157,12 @@ impl MultiProofTask {
                     merged_update.extend(next_update);
                 }
 
+                // Call update_with_state once on the merged state instead of per sub-update.
+                // This is correct because MultiAddedRemovedKeys only cares about final values
+                // (last-writer-wins), not intermediate states.
                 let batch_len = merged_update.accounts.len();
                 batch_metrics.state_update_proofs_requested +=
-                    self.on_hashed_state_update_without_added_removed(batch_source, merged_update);
+                    self.on_hashed_state_update(batch_source, merged_update);
                 trace!(
                     target: "engine::tree::payload_processor::multiproof",
                     ?batch_source,
@@ -1594,7 +1590,6 @@ mod tests {
     use alloy_eip7928::{AccountChanges, BalanceChange};
     use alloy_primitives::{keccak256, map::B256Set, Address};
     use reth_primitives_traits::Account;
-    use std::mem;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
@@ -1603,7 +1598,10 @@ mod tests {
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
-    use std::sync::{Arc, OnceLock};
+    use std::{
+        mem,
+        sync::{Arc, OnceLock},
+    };
     use tokio::runtime::{Handle, Runtime};
 
     /// Creates a HashedPostState with a single account for testing.
