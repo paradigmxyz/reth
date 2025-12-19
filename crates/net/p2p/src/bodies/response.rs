@@ -39,9 +39,9 @@ where
     }
 
     /// Return the reference to the response body
-    pub fn body(&self) -> Option<&B::Body> {
+    pub const fn body(&self) -> Option<&B::Body> {
         match self {
-            Self::Full(block) => Some(&block.body()),
+            Self::Full(block) => Some(block.body()),
             Self::Empty(_) => None,
         }
     }
