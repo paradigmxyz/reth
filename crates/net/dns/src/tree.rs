@@ -273,7 +273,7 @@ where
 impl<K> Eq for LinkEntry<K>
 where
     K: EnrKeyUnambiguous,
-    K::PublicKey: Eq + PartialEq,
+    K::PublicKey: Eq,
 {
 }
 impl<K> Hash for LinkEntry<K>
