@@ -2974,7 +2974,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             }
         }
 
-        self.storage.writer().write_block_bodies(self, bodies)?;
+        self.storage.writer().write_block_bodies(self, &bodies)?;
 
         Ok(())
     }

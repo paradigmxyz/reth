@@ -28,7 +28,7 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
     fn write_block_bodies(
         &self,
         provider: &Provider,
-        bodies: Vec<(BlockNumber, Option<Body>)>,
+        bodies: &[(BlockNumber, Option<Body>)],
     ) -> ProviderResult<()>;
 
     /// Removes all block bodies above the given block number from the database.
@@ -102,13 +102,13 @@ where
     fn write_block_bodies(
         &self,
         provider: &Provider,
-        bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
+        bodies: &[(u64, Option<alloy_consensus::BlockBody<T, H>>)],
     ) -> ProviderResult<()> {
         let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers<H>>()?;
         let mut withdrawals_cursor =
             provider.tx_ref().cursor_write::<tables::BlockWithdrawals>()?;
 
-        for (block_number, body) in &bodies {
+        for (block_number, body) in bodies {
             let Some(body) = body else { continue };
 
             // Write ommers if any
@@ -214,7 +214,7 @@ where
     fn write_block_bodies(
         &self,
         _provider: &Provider,
-        _bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
+        _bodies: &[(u64, Option<alloy_consensus::BlockBody<T, H>>)],
     ) -> ProviderResult<()> {
         // noop
         Ok(())
