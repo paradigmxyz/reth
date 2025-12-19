@@ -4403,6 +4403,49 @@ LIBMDBX_API int mdbx_txn_unpark(MDBX_txn *txn, bool restart_if_ousted);
  * \retval MDBX_EINVAL           Transaction handle is NULL. */
 LIBMDBX_API int mdbx_txn_renew(MDBX_txn *txn);
 
+/** \brief Clone a read-only transaction.
+ * \ingroup c_transactions
+ *
+ * This creates a new read-only transaction that uses the same MVCC snapshot
+ * as the source transaction. The cloned transaction can be used independently
+ * and concurrently with the source transaction (but each transaction must
+ * still only be used by one thread at a time).
+ *
+ * This is useful for parallelizing read operations across multiple threads
+ * while ensuring all threads see a consistent view of the database.
+ *
+ * \note Only read-only transactions can be cloned.
+ *
+ * \note The cloned transaction must be aborted or committed independently
+ * of the source transaction.
+ *
+ * \note The source transaction must remain valid (not aborted, reset, or
+ * committed) for the duration of this call.
+ *
+ * \note In sticky-thread mode (the default), the cloned transaction is bound
+ * to the thread that calls this function. In \ref MDBX_NOSTICKYTHREADS mode,
+ * the cloned transaction can be used from any thread.
+ *
+ * \param [in] src   A read-only transaction handle to clone.
+ * \param [out] out  Address where the new \ref MDBX_txn handle will be stored.
+ *
+ * \returns A non-zero error value on failure and 0 on success,
+ *          some possible errors are:
+ * \retval MDBX_PANIC            A fatal error occurred earlier and the
+ *                               environment must be shut down.
+ * \retval MDBX_BAD_TXN          The source transaction is not read-only,
+ *                               has already finished, is parked, or in error.
+ * \retval MDBX_EBADSIGN         Transaction object has invalid signature.
+ * \retval MDBX_MVCC_RETARDED    The MVCC snapshot used by source transaction
+ *                               has been reclaimed by a writer.
+ * \retval MDBX_READERS_FULL     The reader lock table is full.
+ *                               See \ref mdbx_env_set_maxreaders().
+ * \retval MDBX_EPERM            Environment opened in exclusive mode
+ *                               (no reader table available).
+ * \retval MDBX_ENOMEM           Out of memory.
+ * \retval MDBX_EINVAL           An invalid parameter was specified. */
+LIBMDBX_API int mdbx_txn_clone(const MDBX_txn *src, MDBX_txn **out);
+
 /** \brief The fours integers markers (aka "canary") associated with the
  * environment.
  * \ingroup c_crud

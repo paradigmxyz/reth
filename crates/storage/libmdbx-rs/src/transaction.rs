@@ -493,6 +493,23 @@ impl Transaction<RO> {
 
         Ok(())
     }
+
+    /// Creates a new read-only transaction that uses the same MVCC snapshot as this transaction.
+    ///
+    /// The cloned transaction can be used independently and concurrently with the source
+    /// transaction (but each transaction must still only be used by one thread at a time).
+    ///
+    /// This is useful for parallelizing read operations across multiple threads while ensuring
+    /// all threads see a consistent view of the database.
+    pub fn clone_txn(&self) -> Result<Self> {
+        self.txn_execute(|txn| {
+            let mut out: *mut ffi::MDBX_txn = ptr::null_mut();
+            unsafe {
+                mdbx_result(ffi::mdbx_txn_clone(txn, &mut out))?;
+                Ok(Self::new_from_ptr(self.env().clone(), out))
+            }
+        })?
+    }
 }
 
 impl Transaction<RW> {

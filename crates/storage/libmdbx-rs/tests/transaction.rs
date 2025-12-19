@@ -373,3 +373,137 @@ fn test_stat_dupsort() {
         assert_eq!(stat.entries(), 8);
     }
 }
+
+#[test]
+fn test_clone_txn_same_snapshot() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder().open(dir.path()).unwrap();
+
+    let txn = env.begin_rw_txn().unwrap();
+    let db = txn.create_db(None, DatabaseFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key1", b"val1", WriteFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key2", b"val2", WriteFlags::empty()).unwrap();
+    txn.commit().unwrap();
+
+    let txn1 = env.begin_ro_txn().unwrap();
+    let txn1_id = txn1.id().unwrap();
+
+    let txn2 = txn1.clone_txn().unwrap();
+    let txn2_id = txn2.id().unwrap();
+
+    assert_eq!(txn1_id, txn2_id, "cloned txn should have same txnid");
+
+    let db1 = txn1.open_db(None).unwrap();
+    let db2 = txn2.open_db(None).unwrap();
+
+    assert_eq!(txn1.get::<[u8; 4]>(db1.dbi(), b"key1").unwrap(), Some(*b"val1"));
+    assert_eq!(txn2.get::<[u8; 4]>(db2.dbi(), b"key1").unwrap(), Some(*b"val1"));
+    assert_eq!(txn1.get::<[u8; 4]>(db1.dbi(), b"key2").unwrap(), Some(*b"val2"));
+    assert_eq!(txn2.get::<[u8; 4]>(db2.dbi(), b"key2").unwrap(), Some(*b"val2"));
+}
+
+#[test]
+fn test_clone_txn_independent_lifetime() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder().open(dir.path()).unwrap();
+
+    let txn = env.begin_rw_txn().unwrap();
+    let db = txn.create_db(None, DatabaseFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key1", b"val1", WriteFlags::empty()).unwrap();
+    txn.commit().unwrap();
+
+    let txn1 = env.begin_ro_txn().unwrap();
+    let txn2 = txn1.clone_txn().unwrap();
+    let txn2_id = txn2.id().unwrap();
+
+    drop(txn1);
+
+    let db2 = txn2.open_db(None).unwrap();
+    assert_eq!(txn2.get::<[u8; 4]>(db2.dbi(), b"key1").unwrap(), Some(*b"val1"));
+    assert_eq!(txn2.id().unwrap(), txn2_id);
+}
+
+#[test]
+fn test_clone_txn_sees_same_snapshot_after_write() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder().open(dir.path()).unwrap();
+
+    let txn = env.begin_rw_txn().unwrap();
+    let db = txn.create_db(None, DatabaseFlags::empty()).unwrap();
+    txn.put(db.dbi(), b"key1", b"val1", WriteFlags::empty()).unwrap();
+    txn.commit().unwrap();
+
+    let ro_txn = env.begin_ro_txn().unwrap();
+    let cloned_txn = ro_txn.clone_txn().unwrap();
+
+    {
+        let write_txn = env.begin_rw_txn().unwrap();
+        let db = write_txn.open_db(None).unwrap();
+        write_txn.put(db.dbi(), b"key2", b"val2", WriteFlags::empty()).unwrap();
+        write_txn.commit().unwrap();
+    }
+
+    let db1 = ro_txn.open_db(None).unwrap();
+    let db2 = cloned_txn.open_db(None).unwrap();
+
+    assert_eq!(ro_txn.get::<()>(db1.dbi(), b"key2").unwrap(), None);
+    assert_eq!(cloned_txn.get::<()>(db2.dbi(), b"key2").unwrap(), None);
+
+    let new_txn = env.begin_ro_txn().unwrap();
+    let new_db = new_txn.open_db(None).unwrap();
+    assert_eq!(new_txn.get::<[u8; 4]>(new_db.dbi(), b"key2").unwrap(), Some(*b"val2"));
+}
+
+#[test]
+fn test_clone_txn_parallel_reads() {
+    let dir = tempdir().unwrap();
+    let env: Arc<Environment> = Arc::new(Environment::builder().open(dir.path()).unwrap());
+
+    let txn = env.begin_rw_txn().unwrap();
+    let db = txn.create_db(None, DatabaseFlags::empty()).unwrap();
+    for i in 0..100 {
+        txn.put(
+            db.dbi(),
+            format!("key{i:02}").as_bytes(),
+            format!("val{i:02}").as_bytes(),
+            WriteFlags::empty(),
+        )
+        .unwrap();
+    }
+    txn.commit().unwrap();
+
+    let base_txn = env.begin_ro_txn().unwrap();
+    let base_id = base_txn.id().unwrap();
+
+    let n = 4usize;
+    let barrier = Arc::new(Barrier::new(n));
+    let mut handles: Vec<JoinHandle<(u64, usize)>> = Vec::with_capacity(n);
+
+    for i in 0..n {
+        let cloned_txn = base_txn.clone_txn().unwrap();
+        let thread_barrier = barrier.clone();
+
+        handles.push(thread::spawn(move || {
+            thread_barrier.wait();
+
+            let txn_id = cloned_txn.id().unwrap();
+            let db = cloned_txn.open_db(None).unwrap();
+            let mut count = 0usize;
+
+            for j in (i * 25)..((i + 1) * 25) {
+                let val: Cow<'_, [u8]> =
+                    cloned_txn.get(db.dbi(), format!("key{j:02}").as_bytes()).unwrap().unwrap();
+                assert!(val.starts_with(b"val"));
+                count += 1;
+            }
+
+            (txn_id, count)
+        }));
+    }
+
+    for handle in handles {
+        let (txn_id, count) = handle.join().unwrap();
+        assert_eq!(txn_id, base_id);
+        assert_eq!(count, 25);
+    }
+}
