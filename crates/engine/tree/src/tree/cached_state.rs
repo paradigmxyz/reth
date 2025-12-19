@@ -86,12 +86,6 @@ pub(crate) struct CachedStateMetrics {
     /// Code cache misses
     code_cache_misses: Gauge,
 
-    /// Code cache size
-    ///
-    /// NOTE: this uses the moka caches' `entry_count`, NOT the `weighted_size` method to calculate
-    /// size.
-    code_cache_size: Gauge,
-
     /// Storage cache hits
     storage_cache_hits: Gauge,
 
@@ -131,17 +125,25 @@ impl CachedStateMetrics {
 
 impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        match self.caches.get_or_try_insert_account_with(*address, || {
+        if self.is_prewarm() {
+            match self.caches.get_or_try_insert_account_with(*address, || {
+                self.state_provider.basic_account(address)
+            })? {
+                CachedStatus::NotCached(value) => {
+                    self.metrics.account_cache_misses.increment(1);
+                    Ok(value)
+                }
+                CachedStatus::Cached(value) => {
+                    self.metrics.account_cache_hits.increment(1);
+                    Ok(value)
+                }
+            }
+        } else if let Some(account) = self.caches.account_cache.get(address) {
+            self.metrics.account_cache_hits.increment(1);
+            Ok(account)
+        } else {
+            self.metrics.account_cache_misses.increment(1);
             self.state_provider.basic_account(address)
-        })? {
-            CachedStatus::NotCached(value) => {
-                self.metrics.account_cache_misses.increment(1);
-                return Ok(value)
-            }
-            CachedStatus::Cached(value) => {
-                self.metrics.account_cache_hits.increment(1);
-                Ok(value)
-            }
         }
     }
 }
@@ -161,16 +163,32 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
-            self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
-        })? {
-            CachedStatus::NotCached(value) => {
-                self.metrics.storage_cache_misses.increment(1);
-                Ok(Some(value).filter(|v| !v.is_zero()))
+        if self.is_prewarm() {
+            match self.caches.get_or_try_insert_storage_with(account, storage_key, || {
+                self.state_provider.storage(account, storage_key).map(Option::unwrap_or_default)
+            })? {
+                CachedStatus::NotCached(value) => {
+                    self.metrics.storage_cache_misses.increment(1);
+                    Ok(Some(value).filter(|v| !v.is_zero()))
+                }
+                CachedStatus::Cached(value) => {
+                    self.metrics.storage_cache_hits.increment(1);
+                    Ok(Some(value).filter(|v| !v.is_zero()))
+                }
             }
-            CachedStatus::Cached(value) => {
-                self.metrics.storage_cache_hits.increment(1);
-                Ok(Some(value).filter(|v| !v.is_zero()))
+        } else {
+            match self.caches.get_storage(account, storage_key) {
+                CachedStatus::NotCached(_) => {
+                    self.metrics.storage_cache_misses.increment(1);
+                    let value =
+                        self.state_provider.storage(account, storage_key)?.unwrap_or_default();
+                    Ok(Some(value).filter(|v| !v.is_zero()))
+                }
+                CachedStatus::Cached(value) => {
+                    self.metrics.storage_cache_hits.increment(1);
+
+                    Ok(value)
+                }
             }
         }
     }
@@ -178,17 +196,25 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        match self.caches.get_or_try_insert_code_with(*code_hash, || {
+        if self.is_prewarm() {
+            match self.caches.get_or_try_insert_code_with(*code_hash, || {
+                self.state_provider.bytecode_by_hash(code_hash)
+            })? {
+                CachedStatus::NotCached(code) => {
+                    self.metrics.code_cache_misses.increment(1);
+                    Ok(code)
+                }
+                CachedStatus::Cached(code) => {
+                    self.metrics.code_cache_hits.increment(1);
+                    Ok(code)
+                }
+            }
+        } else if let Some(code) = self.caches.code_cache.get(code_hash) {
+            self.metrics.code_cache_hits.increment(1);
+            Ok(code)
+        } else {
+            self.metrics.code_cache_misses.increment(1);
             self.state_provider.bytecode_by_hash(code_hash)
-        })? {
-            CachedStatus::NotCached(value) => {
-                self.metrics.code_cache_misses.increment(1);
-                Ok(value)
-            }
-            CachedStatus::Cached(value) => {
-                self.metrics.code_cache_misses.increment(1);
-                Ok(value)
-            }
         }
     }
 }
@@ -389,6 +415,22 @@ impl ExecutionCache {
         self.storage_cache.insert((address, key), entry);
 
         Ok(CachedStatus::NotCached(value))
+    }
+
+    pub(crate) fn get_storage(
+        &self,
+        address: Address,
+        key: StorageKey,
+    ) -> CachedStatus<Option<StorageValue>> {
+        let Some(entry) = self.storage_cache.get(&(address, key)) else {
+            return CachedStatus::NotCached(None)
+        };
+        let wipe_ts = self.get_wipe_timestamp(&address);
+        if entry.insert_ts > wipe_ts {
+            let value = entry.value;
+            return CachedStatus::Cached(Some(value).filter(|v| !v.is_zero()));
+        }
+        CachedStatus::NotCached(None)
     }
 
     /// Gets account from cache, or inserts using the provided function.
@@ -628,7 +670,7 @@ impl SavedCache {
     }
 
     /// Updates the metrics for the [`ExecutionCache`].
-    pub(crate) fn update_metrics(&self) {
+    pub(crate) const fn update_metrics(&self) {
         // fixed-cache doesn't provide entry_count, so we can't track size accurately.
         // We could track inserts manually if needed.
     }
