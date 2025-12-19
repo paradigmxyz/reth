@@ -1,7 +1,7 @@
 //! Execution cache implementation for block processing.
 use alloy_primitives::{Address, StorageKey, StorageValue, B256};
 use metrics::Gauge;
-use mini_moka::sync::CacheBuilder;
+use moka::sync::CacheBuilder;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{Account, Bytecode};
@@ -18,8 +18,7 @@ use revm_primitives::map::DefaultHashBuilder;
 use std::{sync::Arc, time::Duration};
 use tracing::{debug_span, instrument, trace};
 
-pub(crate) type Cache<K, V> =
-    mini_moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
+pub(crate) type Cache<K, V> = moka::sync::Cache<K, V, alloy_primitives::map::DefaultHashBuilder>;
 
 /// A wrapper of a state provider and a shared cache.
 pub(crate) struct CachedStateProvider<S> {
@@ -420,7 +419,7 @@ impl ExecutionCache {
 
     /// Returns the total number of storage slots cached across all accounts
     pub(crate) fn total_storage_slots(&self) -> usize {
-        self.storage_cache.iter().map(|addr| addr.len()).sum()
+        self.storage_cache.iter().map(|(_, cache)| cache.len()).sum()
     }
 
     /// Inserts the post-execution state changes into the cache.
