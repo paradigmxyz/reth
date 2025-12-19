@@ -944,7 +944,7 @@ where
             StageId::ALL.into_iter().filter(|id| era_enabled || id != &StageId::Era);
 
         // Get the expected first stage based on config.
-        let first_stage = all_stages.next().expect("there must be at least once stage");
+        let first_stage = all_stages.next().expect("there must be at least one stage");
 
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
