@@ -1,5 +1,7 @@
 use std::{
+    cell::Cell,
     fmt,
+    mem::ManuallyDrop,
     ops::{Bound, RangeBounds},
 };
 
@@ -367,5 +369,57 @@ impl<T: DupSort, CURSOR: DbDupCursorRO<T>> Iterator for DupWalker<'_, T, CURSOR>
             return start
         }
         self.cursor.next_dup().transpose()
+    }
+}
+
+/// A wrapper around a cursor that returns it to a cell on drop.
+///
+/// This allows cursors to be reused across multiple operations,
+/// reducing the overhead of repeatedly creating new cursors.
+pub struct ReusableCursor<'tx, 'cell, T: Table, C: DbCursorRO<T>> {
+    cursor: ManuallyDrop<C>,
+    cell: &'cell Cell<Option<C>>,
+    _phantom: std::marker::PhantomData<&'tx T>,
+}
+
+impl<'tx, 'cell, T, C> fmt::Debug for ReusableCursor<'tx, 'cell, T, C>
+where
+    T: Table,
+    C: DbCursorRO<T> + fmt::Debug,
+{
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("ReusableCursor").field("cursor", &self.cursor).finish()
+    }
+}
+
+impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> ReusableCursor<'tx, 'cell, T, C> {
+    /// Creates a new `ReusableCursor` from a cursor and a cell to return it to.
+    pub const fn new(cursor: C, cell: &'cell Cell<Option<C>>) -> Self {
+        Self { cursor: ManuallyDrop::new(cursor), cell, _phantom: std::marker::PhantomData }
+    }
+}
+
+impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> Drop for ReusableCursor<'tx, 'cell, T, C> {
+    fn drop(&mut self) {
+        // SAFETY: We take ownership of the cursor and return it to the cell.
+        // The cursor won't be dropped automatically due to ManuallyDrop.
+        let cursor = unsafe { ManuallyDrop::take(&mut self.cursor) };
+        self.cell.set(Some(cursor));
+    }
+}
+
+impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> std::ops::Deref for ReusableCursor<'tx, 'cell, T, C> {
+    type Target = C;
+
+    fn deref(&self) -> &Self::Target {
+        &self.cursor
+    }
+}
+
+impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> std::ops::DerefMut
+    for ReusableCursor<'tx, 'cell, T, C>
+{
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.cursor
     }
 }

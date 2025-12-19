@@ -1,5 +1,6 @@
 use crate::{
-    AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
+    providers::state::cursor_reuse::ReusableStateCursors, AccountReader, BlockHashReader,
+    HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
@@ -22,16 +23,20 @@ use reth_trie_db::{
 ///
 /// Wraps a [`DBProvider`] to get access to database.
 #[derive(Debug)]
-pub struct LatestStateProviderRef<'b, Provider>(&'b Provider);
+pub struct LatestStateProviderRef<'b, Provider: DBProvider> {
+    provider: &'b Provider,
+    /// Reusable cursors for state lookups
+    cursors: ReusableStateCursors<Provider::Tx>,
+}
 
 impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     /// Create new state provider
     pub const fn new(provider: &'b Provider) -> Self {
-        Self(provider)
+        Self { provider, cursors: ReusableStateCursors::new() }
     }
 
     fn tx(&self) -> &Provider::Tx {
-        self.0.tx_ref()
+        self.provider.tx_ref()
     }
 }
 
@@ -42,10 +47,12 @@ impl<Provider: DBProvider> AccountReader for LatestStateProviderRef<'_, Provider
     }
 }
 
-impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, Provider> {
+impl<Provider: DBProvider + BlockHashReader> BlockHashReader
+    for LatestStateProviderRef<'_, Provider>
+{
     /// Get block hash by number.
     fn block_hash(&self, number: u64) -> ProviderResult<Option<B256>> {
-        self.0.block_hash(number)
+        self.provider.block_hash(number)
     }
 
     fn canonical_hashes_range(
@@ -53,7 +60,7 @@ impl<Provider: BlockHashReader> BlockHashReader for LatestStateProviderRef<'_, P
         start: BlockNumber,
         end: BlockNumber,
     ) -> ProviderResult<Vec<B256>> {
-        self.0.canonical_hashes_range(start, end)
+        self.provider.canonical_hashes_range(start, end)
     }
 }
 
@@ -161,7 +168,7 @@ impl<Provider: DBProvider + BlockHashReader> StateProvider
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        let mut cursor = self.tx().cursor_dup_read::<tables::PlainStorageState>()?;
+        let mut cursor = self.cursors.plain_storage_state(self.tx())?;
         if let Some(entry) = cursor.seek_by_key_subkey(account, storage_key)? &&
             entry.key == storage_key
         {
@@ -192,7 +199,7 @@ impl<Provider: DBProvider> LatestStateProvider<Provider> {
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    const fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
+    fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
         LatestStateProviderRef::new(&self.0)
     }
 }
