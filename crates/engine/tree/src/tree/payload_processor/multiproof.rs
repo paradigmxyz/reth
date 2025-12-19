@@ -242,70 +242,6 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     hashed_state
 }
 
-/// Estimates the number of proof targets for an `EvmState` (accounts + storage slots).
-fn estimate_evm_state_targets(state: &EvmState) -> usize {
-    state
-        .iter()
-        .filter(|(_, account)| account.is_touched())
-        .map(|(_, account)| {
-            1 + account.storage.iter().filter(|(_, slot)| slot.is_changed()).count()
-        })
-        .sum()
-}
-
-/// Merges `overlay` into `base` while preserving `original_value` from `base`.
-///
-/// `EvmState::extend` overwrites `original_value`, breaking `is_changed()` when batching:
-///
-/// - TX1: slot X changes 0->10 (original=0, present=10, is_changed=true)
-/// - TX2: reads slot X (original=10, present=10, is_changed=false)
-/// - After extend: original=10, present=10, is_changed=false (WRONG)
-///
-/// This function keeps base's `original_value`, so `is_changed()` stays correct:
-///
-/// - After merge: original=0, present=10, is_changed=true (CORRECT)
-fn merge_evm_state(base: &mut EvmState, overlay: EvmState) {
-    for (addr, overlay_account) in overlay {
-        match base.get_mut(&addr) {
-            Some(base_account) => {
-                // Merge account info - overlay wins for latest state
-                base_account.info = overlay_account.info;
-                // Merge status flags
-                base_account.status |= overlay_account.status;
-                // Update transaction_id to latest
-                base_account.transaction_id = overlay_account.transaction_id;
-
-                if base_account.is_selfdestructed() {
-                    // Selfdestructed account has its storage cleared, so we can
-                    // replace it entirely with overlay's storage
-                    base_account.storage = overlay_account.storage;
-                } else {
-                    // Merge storage: preserve base's original_value, take overlay's present_value
-                    for (slot, overlay_slot) in overlay_account.storage {
-                        match base_account.storage.get_mut(&slot) {
-                            Some(base_slot) => {
-                                // Key insight: keep base's original_value, update present_value
-                                base_slot.present_value = overlay_slot.present_value;
-                                // Update cold/transaction tracking from overlay
-                                base_slot.transaction_id = overlay_slot.transaction_id;
-                                base_slot.is_cold = overlay_slot.is_cold;
-                            }
-                            None => {
-                                // Slot is new in overlay - use overlay's values as-is
-                                base_account.storage.insert(slot, overlay_slot);
-                            }
-                        }
-                    }
-                }
-            }
-            None => {
-                // Account is new in overlay - insert as-is
-                base.insert(addr, overlay_account);
-            }
-        }
-    }
-}
-
 /// A pending multiproof task, either [`StorageMultiproofInput`] or [`MultiproofInput`].
 #[derive(Debug)]
 enum PendingMultiproofTask {
@@ -1636,6 +1572,70 @@ where
 
     dispatch(items);
     1
+}
+
+/// Estimates the number of proof targets for an `EvmState` (accounts + storage slots).
+fn estimate_evm_state_targets(state: &EvmState) -> usize {
+    state
+        .iter()
+        .filter(|(_, account)| account.is_touched())
+        .map(|(_, account)| {
+            1 + account.storage.iter().filter(|(_, slot)| slot.is_changed()).count()
+        })
+        .sum()
+}
+
+/// Merges `overlay` into `base` while preserving `original_value` from `base`.
+///
+/// `EvmState::extend` overwrites `original_value`, breaking `is_changed()` when batching:
+///
+/// - TX1: slot X changes 0->10 (original=0, present=10, is_changed=true)
+/// - TX2: reads slot X (original=10, present=10, is_changed=false)
+/// - After extend: original=10, present=10, is_changed=false (WRONG)
+///
+/// This function keeps base's `original_value`, so `is_changed()` stays correct:
+///
+/// - After merge: original=0, present=10, is_changed=true (CORRECT)
+fn merge_evm_state(base: &mut EvmState, overlay: EvmState) {
+    for (addr, overlay_account) in overlay {
+        match base.get_mut(&addr) {
+            Some(base_account) => {
+                // Merge account info - overlay wins for latest state
+                base_account.info = overlay_account.info;
+                // Merge status flags
+                base_account.status |= overlay_account.status;
+                // Update transaction_id to latest
+                base_account.transaction_id = overlay_account.transaction_id;
+
+                if base_account.is_selfdestructed() {
+                    // Selfdestructed account has its storage cleared, so we can
+                    // replace it entirely with overlay's storage
+                    base_account.storage = overlay_account.storage;
+                } else {
+                    // Merge storage: preserve base's original_value, take overlay's present_value
+                    for (slot, overlay_slot) in overlay_account.storage {
+                        match base_account.storage.get_mut(&slot) {
+                            Some(base_slot) => {
+                                // Key insight: keep base's original_value, update present_value
+                                base_slot.present_value = overlay_slot.present_value;
+                                // Update cold/transaction tracking from overlay
+                                base_slot.transaction_id = overlay_slot.transaction_id;
+                                base_slot.is_cold = overlay_slot.is_cold;
+                            }
+                            None => {
+                                // Slot is new in overlay - use overlay's values as-is
+                                base_account.storage.insert(slot, overlay_slot);
+                            }
+                        }
+                    }
+                }
+            }
+            None => {
+                // Account is new in overlay - insert as-is
+                base.insert(addr, overlay_account);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
