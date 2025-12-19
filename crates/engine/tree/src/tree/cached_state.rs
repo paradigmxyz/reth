@@ -604,13 +604,10 @@ impl ExecutionCacheBuilder {
 impl Default for ExecutionCacheBuilder {
     fn default() -> Self {
         // Fixed-cache requires power-of-two sizes
-        // Storage: 16M entries for (Address, StorageKey) pairs
-        // Account: 4M entries for addresses
-        // Code: 8M entries for bytecode
         Self {
-            code_cache_entries: 8 * 1024 * 1024,     // 8M, power of 2
-            storage_cache_entries: 16 * 1024 * 1024, // 16M, power of 2
-            account_cache_entries: 4 * 1024 * 1024,  // 4M, power of 2
+            code_cache_entries: 64 * 1024,
+            storage_cache_entries: 64 * 1024,
+            account_cache_entries: 64 * 1024,
         }
     }
 }
