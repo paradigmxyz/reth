@@ -275,19 +275,25 @@ fn merge_evm_state(base: &mut EvmState, overlay: EvmState) {
                 // Update transaction_id to latest
                 base_account.transaction_id = overlay_account.transaction_id;
 
-                // Merge storage: preserve base's original_value, take overlay's present_value
-                for (slot, overlay_slot) in overlay_account.storage {
-                    match base_account.storage.get_mut(&slot) {
-                        Some(base_slot) => {
-                            // Key insight: keep base's original_value, update present_value
-                            base_slot.present_value = overlay_slot.present_value;
-                            // Update cold/transaction tracking from overlay
-                            base_slot.transaction_id = overlay_slot.transaction_id;
-                            base_slot.is_cold = overlay_slot.is_cold;
-                        }
-                        None => {
-                            // Slot is new in overlay - use overlay's values as-is
-                            base_account.storage.insert(slot, overlay_slot);
+                if base_account.is_selfdestructed() {
+                    // Selfdestructed account has its storage cleared, so we can
+                    // replace it entirely with overlay's storage
+                    base_account.storage = overlay_account.storage;
+                } else {
+                    // Merge storage: preserve base's original_value, take overlay's present_value
+                    for (slot, overlay_slot) in overlay_account.storage {
+                        match base_account.storage.get_mut(&slot) {
+                            Some(base_slot) => {
+                                // Key insight: keep base's original_value, update present_value
+                                base_slot.present_value = overlay_slot.present_value;
+                                // Update cold/transaction tracking from overlay
+                                base_slot.transaction_id = overlay_slot.transaction_id;
+                                base_slot.is_cold = overlay_slot.is_cold;
+                            }
+                            None => {
+                                // Slot is new in overlay - use overlay's values as-is
+                                base_account.storage.insert(slot, overlay_slot);
+                            }
                         }
                     }
                 }
