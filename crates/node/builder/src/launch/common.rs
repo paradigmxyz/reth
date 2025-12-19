@@ -529,32 +529,19 @@ where
         };
 
         if let Some(unwind_block) = unwind_target {
+            // Highly unlikely to happen, and given its destructive nature, it's better to panic
+            // instead. Unwinding to 0 would leave MDBX with a huge free list size.
             let inconsistency_source = match (static_file_unwind, rocksdb_unwind) {
                 (Some(_), Some(_)) => "static file <> database and RocksDB <> database",
                 (Some(_), None) => "static file <> database",
                 (None, Some(_)) => "RocksDB <> database",
                 (None, None) => unreachable!(),
             };
-
-            // Unwind to block 0 from static file inconsistency is destructive and likely
-            // indicates corruption - panic to prevent data loss.
-            // However, RocksDB returning unwind to 0 is expected when migrating an existing
-            // node to use RocksDB flags - allow this case to proceed with a full resync.
-            if unwind_block == 0 && static_file_unwind == Some(0) {
-                panic!(
-                    "A {inconsistency_source} inconsistency was found that requires unwind to \
-                     block 0. This likely indicates database corruption."
-                );
-            }
-
-            if unwind_block == 0 {
-                warn!(
-                    target: "reth::cli",
-                    %inconsistency_source,
-                    "Consistency check requires unwind to block 0. This is expected when \
-                     migrating an existing node to use RocksDB. A full resync will be performed."
-                );
-            }
+            assert_ne!(
+                unwind_block,
+                0,
+                "A {inconsistency_source} inconsistency was found that would trigger an unwind to block 0"
+            );
 
             let unwind_target = PipelineTarget::Unwind(unwind_block);
 
