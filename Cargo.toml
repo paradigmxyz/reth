@@ -587,6 +587,7 @@ url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
 mini-moka = "0.10"
+moka = "0.12"
 tar-no-std = { version = "0.3.2", default-features = false }
 miniz_oxide = { version = "0.8.4", default-features = false }
 chrono = "0.4.41"
@@ -785,3 +786,13 @@ ipnet = "2.11"
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
+
+[patch.crates-io]
+revm = { git = "https://github.com/Rjected/revm", branch = "dan/backport-hash-perf-fixes" }
+revm-bytecode = { git = "https://github.com/Rjected/revm", branch = "dan/backport-hash-perf-fixes" }
+revm-database = { git = "https://github.com/Rjected/revm", branch = "dan/backport-hash-perf-fixes" }
+revm-state = { git = "https://github.com/Rjected/revm", branch = "dan/backport-hash-perf-fixes" }
+revm-primitives = { git = "https://github.com/Rjected/revm", branch = "dan/backport-hash-perf-fixes" }
+revm-interpreter = { git = "https://github.com/Rjected/revm", branch = "dan/backport-hash-perf-fixes" }
+revm-database-interface = { git = "https://github.com/Rjected/revm", branch = "dan/backport-hash-perf-fixes" }
+op-revm = { git = "https://github.com/Rjected/revm", branch = "dan/backport-hash-perf-fixes" }

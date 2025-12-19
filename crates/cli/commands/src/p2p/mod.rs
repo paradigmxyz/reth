@@ -72,7 +72,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                 .split();
                 if result.len() != 1 {
                     eyre::bail!(
-                        "Invalid number of headers received. Expected: 1. Received: {}",
+                        "Invalid number of bodies received. Expected: 1. Received: {}",
                         result.len()
                     )
                 }

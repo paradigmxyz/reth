@@ -103,7 +103,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         }
 
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
-        let genesis_block_number = self.chain.genesis().number.unwrap();
+        let genesis_block_number = self.chain.genesis().number.unwrap_or_default();
         let (db, sfp) = match access {
             AccessRights::RW => (
                 Arc::new(init_db(db_path, self.db.database_args())?),

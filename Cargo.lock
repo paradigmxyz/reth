@@ -6354,8 +6354,7 @@ dependencies = [
 [[package]]
 name = "op-revm"
 version = "14.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1475a779c73999fc803778524042319691b31f3d6699d2b560c4ed8be1db802a"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "auto_impl",
  "revm",
@@ -8247,6 +8246,7 @@ dependencies = [
  "metrics",
  "metrics-util",
  "mini-moka",
+ "moka",
  "parking_lot",
  "proptest",
  "rand 0.8.5",
@@ -10583,6 +10583,7 @@ dependencies = [
  "reth-stages-api",
  "reth-static-file",
  "reth-static-file-types",
+ "reth-storage-api",
  "reth-storage-errors",
  "reth-testing-utils",
  "reth-trie",
@@ -11088,8 +11089,7 @@ dependencies = [
 [[package]]
 name = "revm"
 version = "33.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0c85ed0028f043f87b3c88d4a4cb6f0a76440085523b6a8afe5ff003cf418054"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "revm-bytecode",
  "revm-context",
@@ -11107,8 +11107,7 @@ dependencies = [
 [[package]]
 name = "revm-bytecode"
 version = "7.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e2c6b5e6e8dd1e28a4a60e5f46615d4ef0809111c9e63208e55b5c7058200fb0"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "bitvec",
  "phf",
@@ -11119,8 +11118,7 @@ dependencies = [
 [[package]]
 name = "revm-context"
 version = "12.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f038f0c9c723393ac897a5df9140b21cfa98f5753a2cb7d0f28fa430c4118abf"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "bitvec",
  "cfg-if",
@@ -11136,8 +11134,7 @@ dependencies = [
 [[package]]
 name = "revm-context-interface"
 version = "13.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "431c9a14e4ef1be41ae503708fd02d974f80ef1f2b6b23b5e402e8d854d1b225"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "alloy-eip2930",
  "alloy-eip7702",
@@ -11152,8 +11149,7 @@ dependencies = [
 [[package]]
 name = "revm-database"
 version = "9.0.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "980d8d6bba78c5dd35b83abbb6585b0b902eb25ea4448ed7bfba6283b0337191"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "alloy-eips",
  "revm-bytecode",
@@ -11166,8 +11162,7 @@ dependencies = [
 [[package]]
 name = "revm-database-interface"
 version = "8.0.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8cce03e3780287b07abe58faf4a7f5d8be7e81321f93ccf3343c8f7755602bae"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "auto_impl",
  "either",
@@ -11179,8 +11174,7 @@ dependencies = [
 [[package]]
 name = "revm-handler"
 version = "14.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d44f8f6dbeec3fecf9fe55f78ef0a758bdd92ea46cd4f1ca6e2a946b32c367f3"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "auto_impl",
  "derive-where",
@@ -11198,8 +11192,7 @@ dependencies = [
 [[package]]
 name = "revm-inspector"
 version = "14.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5617e49216ce1ca6c8826bcead0386bc84f49359ef67cde6d189961735659f93"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "auto_impl",
  "either",
@@ -11236,8 +11229,7 @@ dependencies = [
 [[package]]
 name = "revm-interpreter"
 version = "31.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "26ec36405f7477b9dccdc6caa3be19adf5662a7a0dffa6270cdb13a090c077e5"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "revm-bytecode",
  "revm-context-interface",
@@ -11249,8 +11241,7 @@ dependencies = [
 [[package]]
 name = "revm-precompile"
 version = "31.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a62958af953cc4043e93b5be9b8497df84cc3bd612b865c49a7a7dfa26a84e2"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "ark-bls12-381",
  "ark-bn254",
@@ -11274,8 +11265,7 @@ dependencies = [
 [[package]]
 name = "revm-primitives"
 version = "21.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "29e161db429d465c09ba9cbff0df49e31049fe6b549e28eb0b7bd642fcbd4412"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "alloy-primitives",
  "num_enum",
@@ -11286,8 +11276,7 @@ dependencies = [
 [[package]]
 name = "revm-state"
 version = "8.1.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d8be953b7e374dbdea0773cf360debed8df394ea8d82a8b240a6b5da37592fc"
+source = "git+https://github.com/Rjected/revm?branch=dan%2Fbackport-hash-perf-fixes#1455c4099fa4900216ec9f83f11f0ca59cbf0466"
 dependencies = [
  "bitflags 2.10.0",
  "revm-bytecode",
