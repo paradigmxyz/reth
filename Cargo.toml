@@ -587,7 +587,6 @@ tracing-appender = "0.2"
 url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
-mini-moka = "0.10"
 fixed-cache = "0.1.1"
 moka = "0.12"
 tar-no-std = { version = "0.3.2", default-features = false }
