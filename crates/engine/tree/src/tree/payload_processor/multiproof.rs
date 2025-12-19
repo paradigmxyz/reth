@@ -5,7 +5,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
     keccak256,
-    map::{B256Set, HashSet},
+    map::{B256Set, Entry, HashSet},
     B256,
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -26,7 +26,7 @@ use reth_trie_parallel::{
         StorageProofInput,
     },
 };
-use std::{collections::BTreeMap, mem, ops::DerefMut, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -67,9 +67,6 @@ const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
 /// partitioning) before dispatch.
 const STATE_UPDATE_MAX_BATCH_TARGETS: usize = 64;
 
-/// Preallocation hint for state update batching to avoid repeated reallocations on small bursts.
-const STATE_UPDATE_BATCH_PREALLOC: usize = 16;
-
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
 const DEFAULT_MAX_TARGETS_FOR_CHUNKING: usize = 300;
@@ -108,7 +105,7 @@ impl SparseTrieUpdate {
 pub(super) enum MultiProofMessage {
     /// Prefetch proof targets
     PrefetchProofs(MultiProofTargets),
-    /// New state update from transaction execution with its source
+    /// New state update from transaction execution with its source.
     StateUpdate(Source, EvmState),
     /// State update that can be applied to the sparse trie without any new proofs.
     ///
@@ -204,6 +201,9 @@ impl Drop for StateHookSender {
     }
 }
 
+/// Converts an `EvmState` to a `HashedPostState` by hashing addresses and storage keys.
+///
+/// Only includes accounts that are touched and storage slots that are changed.
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     let mut hashed_state = HashedPostState::with_capacity(update.len());
 
@@ -216,19 +216,25 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
             let info = if destroyed { None } else { Some(account.info.into()) };
             hashed_state.accounts.insert(hashed_address, info);
 
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
-
             if destroyed {
                 hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            } else {
+                let changed_storage: Vec<_> = account
+                    .storage
+                    .into_iter()
+                    .filter_map(|(slot, value)| {
+                        value
+                            .is_changed()
+                            .then(|| (keccak256(B256::from(slot)), value.present_value))
+                    })
+                    .collect();
+
+                if !changed_storage.is_empty() {
+                    hashed_state.storages.insert(
+                        hashed_address,
+                        HashedStorage::from_iter(false, changed_storage),
+                    );
+                }
             }
         }
     }
@@ -900,21 +906,6 @@ impl MultiProofTask {
         targets
     }
 
-    /// Handles state updates.
-    ///
-    /// Returns how many proof dispatches were spawned (including an `EmptyProof` for already
-    /// fetched targets).
-    #[instrument(
-        level = "debug",
-        target = "engine::tree::payload_processor::multiproof",
-        skip(self, update),
-        fields(accounts = update.len(), chunks = 0)
-    )]
-    fn on_state_update(&mut self, source: Source, update: EvmState) -> u64 {
-        let hashed_state_update = evm_state_to_hashed_post_state(update);
-        self.on_hashed_state_update(source, hashed_state_update)
-    }
-
     /// Processes a hashed state update and dispatches multiproofs as needed.
     ///
     /// Returns the number of state updates dispatched (both `EmptyProof` and regular multiproofs).
@@ -926,6 +917,20 @@ impl MultiProofTask {
         // Update removed keys based on the state update.
         self.multi_added_removed_keys.update_with_state(&hashed_state_update);
 
+        self.on_hashed_state_update_without_added_removed(source, hashed_state_update)
+    }
+
+    /// Processes a hashed state update and dispatches multiproofs as needed.
+    ///
+    /// This variant skips updating `MultiAddedRemovedKeys` because the caller has already
+    /// done so (e.g., per sub-update before batching).
+    ///
+    /// Returns the number of state updates dispatched (both `EmptyProof` and regular multiproofs).
+    fn on_hashed_state_update_without_added_removed(
+        &mut self,
+        source: Source,
+        hashed_state_update: HashedPostState,
+    ) -> u64 {
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
         let (fetched_state_update, not_fetched_state_update) = hashed_state_update
@@ -1042,13 +1047,15 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                let mut accumulated_count = targets.chunking_length();
-                ctx.accumulated_prefetch_targets.clear();
-                ctx.accumulated_prefetch_targets.push(targets);
+                // Initialize batch with first targets - merge in-place as messages arrive
+                let mut merged_targets = targets;
+                let mut accumulated_count = merged_targets.chunking_length();
+                let mut num_batched = 1usize;
 
                 // Batch consecutive prefetch messages up to limits.
+                // Merge directly instead of accumulating to Vec to reduce allocations.
                 while accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
-                    ctx.accumulated_prefetch_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
+                    num_batched < PREFETCH_MAX_BATCH_MESSAGES
                 {
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
@@ -1059,7 +1066,9 @@ impl MultiProofTask {
                                 break;
                             }
                             accumulated_count += next_count;
-                            ctx.accumulated_prefetch_targets.push(next_targets);
+                            // Merge in-place: next_targets freed immediately
+                            merged_targets.extend(next_targets);
+                            num_batched += 1;
                         }
                         Ok(other_msg) => {
                             ctx.pending_msg = Some(other_msg);
@@ -1069,18 +1078,7 @@ impl MultiProofTask {
                     }
                 }
 
-                // Process all accumulated messages in a single batch
-                let num_batched = ctx.accumulated_prefetch_targets.len();
                 self.metrics.prefetch_batch_size_histogram.record(num_batched as f64);
-
-                // Merge all accumulated prefetch targets into a single dispatch payload.
-                // Use drain to preserve the buffer allocation.
-                let mut accumulated_iter = ctx.accumulated_prefetch_targets.drain(..);
-                let mut merged_targets =
-                    accumulated_iter.next().expect("prefetch batch always has at least one entry");
-                for next_targets in accumulated_iter {
-                    merged_targets.extend(next_targets);
-                }
 
                 let account_targets = merged_targets.len();
                 let storage_targets =
@@ -1097,7 +1095,6 @@ impl MultiProofTask {
 
                 false
             }
-            // State update: batch consecutive updates from the same source
             MultiProofMessage::StateUpdate(source, update) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
 
@@ -1109,27 +1106,17 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Accumulate messages including the first one; reuse buffer to avoid allocations.
-                let mut accumulated_targets = estimate_evm_state_targets(&update);
-                ctx.accumulated_state_updates.clear();
-                ctx.accumulated_state_updates.push((source, update));
+                // Initialize batch with first update - merge in-place as messages arrive
+                let mut batch_source = source;
+                let mut merged_update = update;
+                let mut accumulated_targets = estimate_evm_state_targets(&merged_update);
+                let mut num_batched = 1usize;
 
                 // Batch consecutive state update messages up to target limit.
+                // Merge directly instead of accumulating to Vec to reduce allocations.
                 while accumulated_targets < STATE_UPDATE_MAX_BATCH_TARGETS {
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                            let (batch_source, batch_update) = &ctx.accumulated_state_updates[0];
-                            if !can_batch_state_update(
-                                *batch_source,
-                                batch_update,
-                                next_source,
-                                &next_update,
-                            ) {
-                                ctx.pending_msg =
-                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                                break;
-                            }
-
                             let next_estimate = estimate_evm_state_targets(&next_update);
                             // Would exceed batch cap; leave pending to dispatch on next iteration.
                             if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
@@ -1139,7 +1126,10 @@ impl MultiProofTask {
                                 break;
                             }
                             accumulated_targets += next_estimate;
-                            ctx.accumulated_state_updates.push((next_source, next_update));
+                            batch_source = next_source;
+                            // Merge in-place: preserves original_value, overlay freed immediately
+                            merge_evm_state(&mut merged_update, next_update);
+                            num_batched += 1;
                         }
                         Ok(other_msg) => {
                             ctx.pending_msg = Some(other_msg);
@@ -1149,33 +1139,14 @@ impl MultiProofTask {
                     }
                 }
 
-                // Process all accumulated messages in a single batch
-                let num_batched = ctx.accumulated_state_updates.len();
                 self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
 
-                #[cfg(debug_assertions)]
-                {
-                    let batch_source = ctx.accumulated_state_updates[0].0;
-                    let batch_update = &ctx.accumulated_state_updates[0].1;
-                    debug_assert!(ctx.accumulated_state_updates.iter().all(|(source, update)| {
-                        can_batch_state_update(batch_source, batch_update, *source, update)
-                    }));
-                }
-
-                // Merge all accumulated updates into a single EvmState payload.
-                // Use drain to preserve the buffer allocation.
-                let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
-                let (mut batch_source, mut merged_update) = accumulated_iter
-                    .next()
-                    .expect("state update batch always has at least one entry");
-                for (next_source, next_update) in accumulated_iter {
-                    batch_source = next_source;
-                    merged_update.extend(next_update);
-                }
-
+                // Convert to HashedPostState after merging.
                 let batch_len = merged_update.len();
+                let hashed_state = evm_state_to_hashed_post_state(merged_update);
+
                 batch_metrics.state_update_proofs_requested +=
-                    self.on_state_update(batch_source, merged_update);
+                    self.on_hashed_state_update(batch_source, hashed_state);
                 trace!(
                     target: "engine::tree::payload_processor::multiproof",
                     ?batch_source,
@@ -1468,23 +1439,12 @@ struct MultiproofBatchCtx {
     /// Timestamp when state updates finished. `Some` indicates all state updates have been
     /// received.
     updates_finished_time: Option<Instant>,
-    /// Reusable buffer for accumulating prefetch targets during batching.
-    accumulated_prefetch_targets: Vec<MultiProofTargets>,
-    /// Reusable buffer for accumulating state updates during batching.
-    accumulated_state_updates: Vec<(Source, EvmState)>,
 }
 
 impl MultiproofBatchCtx {
     /// Creates a new batch context with the given start time.
     fn new(start: Instant) -> Self {
-        Self {
-            pending_msg: None,
-            first_update_time: None,
-            start,
-            updates_finished_time: None,
-            accumulated_prefetch_targets: Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES),
-            accumulated_state_updates: Vec::with_capacity(STATE_UPDATE_BATCH_PREALLOC),
-        }
+        Self { pending_msg: None, first_update_time: None, start, updates_finished_time: None }
     }
 
     /// Returns `true` if all state updates have been received.
@@ -1583,64 +1543,75 @@ where
     1
 }
 
-/// Checks whether two state updates can be merged in a batch.
-///
-/// Transaction updates with the same transaction ID (`StateChangeSource::Transaction(id)`)
-/// are safe to merge because they originate from the same logical execution and can be
-/// coalesced to amortize proof work.
-fn can_batch_state_update(
-    batch_source: Source,
-    batch_update: &EvmState,
-    next_source: Source,
-    next_update: &EvmState,
-) -> bool {
-    if !same_source(batch_source, next_source) {
-        return false;
-    }
-
-    match (batch_source, next_source) {
-        (
-            Source::Evm(StateChangeSource::PreBlock(_)),
-            Source::Evm(StateChangeSource::PreBlock(_)),
-        ) |
-        (
-            Source::Evm(StateChangeSource::PostBlock(_)),
-            Source::Evm(StateChangeSource::PostBlock(_)),
-        ) => batch_update == next_update,
-        _ => true,
-    }
-}
-
-/// Checks whether two sources refer to the same origin.
-fn same_source(lhs: Source, rhs: Source) -> bool {
-    match (lhs, rhs) {
-        (
-            Source::Evm(StateChangeSource::Transaction(a)),
-            Source::Evm(StateChangeSource::Transaction(b)),
-        ) => a == b,
-        (
-            Source::Evm(StateChangeSource::PreBlock(a)),
-            Source::Evm(StateChangeSource::PreBlock(b)),
-        ) => mem::discriminant(&a) == mem::discriminant(&b),
-        (
-            Source::Evm(StateChangeSource::PostBlock(a)),
-            Source::Evm(StateChangeSource::PostBlock(b)),
-        ) => mem::discriminant(&a) == mem::discriminant(&b),
-        (Source::BlockAccessList, Source::BlockAccessList) => true,
-        _ => false,
-    }
-}
-
-/// Estimates target count from `EvmState` for batching decisions.
+/// Estimates the number of proof targets for an `EvmState` (accounts + storage slots).
+/// Single-pass fold to avoid double iteration over storage.
 fn estimate_evm_state_targets(state: &EvmState) -> usize {
-    state
-        .values()
-        .filter(|account| account.is_touched())
-        .map(|account| {
-            let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
-            1 + changed_slots
-        })
-        .sum()
+    state.values().fold(0, |acc, account| {
+        if !account.is_touched() {
+            return acc;
+        }
+        acc + 1 + account.storage.values().filter(|slot| slot.is_changed()).count()
+    })
+}
+
+/// Merges `overlay` into `base` while preserving `original_value` from `base`.
+///
+/// `EvmState::extend` overwrites `original_value`, breaking `is_changed()` when batching:
+///
+/// - TX1: slot X changes 0->10 (original=0, present=10, is_changed=true)
+/// - TX2: reads slot X (original=10, present=10, is_changed=false)
+/// - After extend: original=10, present=10, is_changed=false (WRONG)
+///
+/// This function keeps base's `original_value`, so `is_changed()` stays correct:
+///
+/// - After merge: original=0, present=10, is_changed=true (CORRECT)
+fn merge_evm_state(base: &mut EvmState, overlay: EvmState) {
+    for (addr, overlay_account) in overlay {
+        match base.entry(addr) {
+            Entry::Occupied(mut entry) => {
+                let base_account = entry.get_mut();
+                // Merge account info - overlay wins for latest state
+                base_account.info = overlay_account.info;
+                // Merge status flags
+                base_account.status |= overlay_account.status;
+                // Update transaction_id to latest
+                base_account.transaction_id = overlay_account.transaction_id;
+
+                if base_account.is_selfdestructed() {
+                    // Selfdestructed account has its storage cleared, so we can
+                    // replace it entirely with overlay's storage
+                    base_account.storage = overlay_account.storage;
+                } else {
+                    // Reserve capacity to reduce rehashing when inserting new slots
+                    if !overlay_account.storage.is_empty() {
+                        base_account.storage.reserve(overlay_account.storage.len());
+                    }
+
+                    // Merge storage: preserve base's original_value, take overlay's present_value
+                    for (slot, overlay_slot) in overlay_account.storage {
+                        match base_account.storage.entry(slot) {
+                            Entry::Occupied(mut slot_entry) => {
+                                let base_slot = slot_entry.get_mut();
+                                // Key insight: keep base's original_value, update present_value
+                                base_slot.present_value = overlay_slot.present_value;
+                                // Update cold/transaction tracking from overlay
+                                base_slot.transaction_id = overlay_slot.transaction_id;
+                                base_slot.is_cold = overlay_slot.is_cold;
+                            }
+                            Entry::Vacant(slot_entry) => {
+                                // Slot is new in overlay - use overlay's values as-is
+                                slot_entry.insert(overlay_slot);
+                            }
+                        }
+                    }
+                }
+            }
+            Entry::Vacant(entry) => {
+                // Account is new in overlay - insert as-is
+                entry.insert(overlay_account);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -1656,8 +1627,53 @@ mod tests {
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
-    use std::sync::{Arc, OnceLock};
+    use std::{
+        mem,
+        sync::{Arc, OnceLock},
+    };
     use tokio::runtime::{Handle, Runtime};
+
+    /// Creates an `EvmState` with a single touched account for testing.
+    fn create_evm_state_update(addr: Address, balance: u64) -> EvmState {
+        use revm_state::{Account, AccountInfo, AccountStatus};
+
+        let mut state = EvmState::default();
+        state.insert(
+            addr,
+            Account {
+                info: AccountInfo {
+                    balance: U256::from(balance),
+                    nonce: 1,
+                    code_hash: revm_primitives::KECCAK_EMPTY,
+                    code: None,
+                },
+                storage: Default::default(),
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
+        state
+    }
+
+    /// Checks whether two sources refer to the same origin (for test assertions).
+    fn same_source(lhs: Source, rhs: Source) -> bool {
+        match (lhs, rhs) {
+            (
+                Source::Evm(StateChangeSource::Transaction(a)),
+                Source::Evm(StateChangeSource::Transaction(b)),
+            ) => a == b,
+            (
+                Source::Evm(StateChangeSource::PreBlock(a)),
+                Source::Evm(StateChangeSource::PreBlock(b)),
+            ) => mem::discriminant(&a) == mem::discriminant(&b),
+            (
+                Source::Evm(StateChangeSource::PostBlock(a)),
+                Source::Evm(StateChangeSource::PostBlock(b)),
+            ) => mem::discriminant(&a) == mem::discriminant(&b),
+            (Source::BlockAccessList, Source::BlockAccessList) => true,
+            _ => false,
+        }
+    }
 
     /// Get a handle to the test runtime, creating it if necessary
     fn get_test_runtime_handle() -> Handle {
@@ -2169,56 +2185,29 @@ mod tests {
         assert_eq!(proofs_requested, 1);
     }
 
-    /// Verifies that consecutive state update messages from the same source are batched together.
+    /// Verifies that consecutive state update messages are batched together.
+    ///
+    /// Now that we use `SealedStateUpdate` (which has no `is_changed` semantics), batching
+    /// is safe across sources.
     #[test]
     fn test_state_update_batching() {
         use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let mut task = create_test_state_root_task(test_provider_factory);
 
-        // create multiple state updates
+        // create multiple state updates using SealedStateUpdate
         let addr1 = alloy_primitives::Address::random();
         let addr2 = alloy_primitives::Address::random();
 
-        let mut update1 = EvmState::default();
-        update1.insert(
-            addr1,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(100),
-                    nonce: 1,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
-
-        let mut update2 = EvmState::default();
-        update2.insert(
-            addr2,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(200),
-                    nonce: 2,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
+        let update1 = create_evm_state_update(addr1, 100);
+        let update2 = create_evm_state_update(addr2, 200);
 
         let source = StateChangeSource::Transaction(0);
 
         let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), update1.clone())).unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), update2.clone())).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source.into(), update1)).unwrap();
+        tx.send(MultiProofMessage::StateUpdate(source.into(), update2)).unwrap();
 
         let proofs_requested =
             if let Ok(MultiProofMessage::StateUpdate(_src, update)) = task.rx.recv() {
@@ -2237,18 +2226,22 @@ mod tests {
                 assert!(merged_update.contains_key(&addr1));
                 assert!(merged_update.contains_key(&addr2));
 
-                task.on_state_update(source.into(), merged_update)
+                // Convert to HashedPostState and process
+                let hashed = evm_state_to_hashed_post_state(merged_update);
+                task.on_hashed_state_update(source.into(), hashed)
             } else {
                 panic!("Expected StateUpdate message");
             };
         assert_eq!(proofs_requested, 1);
     }
 
-    /// Verifies that state updates from different sources are not batched together.
+    /// Verifies that state updates from different sources CAN be batched together.
+    ///
+    /// With `HashedPostState` (instead of `EvmState`), batching is safe across sources because
+    /// there are no `is_changed` flags that could be overwritten.
     #[test]
-    fn test_state_update_batching_separates_sources() {
+    fn test_state_update_batching_across_sources() {
         use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let task = create_test_state_root_task(test_provider_factory);
@@ -2257,121 +2250,58 @@ mod tests {
         let addr_b1 = alloy_primitives::Address::random();
         let addr_a2 = alloy_primitives::Address::random();
 
-        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
-            let mut state = EvmState::default();
-            state.insert(
-                addr,
-                Account {
-                    info: revm_state::AccountInfo {
-                        balance: U256::from(balance),
-                        nonce: 1,
-                        code_hash: Default::default(),
-                        code: Default::default(),
-                    },
-                    transaction_id: Default::default(),
-                    storage: Default::default(),
-                    status: revm_state::AccountStatus::Touched,
-                },
-            );
-            state
-        };
-
         let source_a = StateChangeSource::Transaction(1);
         let source_b = StateChangeSource::Transaction(2);
 
-        // Queue: A1 (immediate dispatch), B1 (batched), A2 (should become pending)
+        // Queue 3 updates from different sources - they should ALL be batchable now
         let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(source_a.into(), create_state_update(addr_a1, 100)))
-            .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source_b.into(), create_state_update(addr_b1, 200)))
-            .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source_a.into(), create_state_update(addr_a2, 300)))
-            .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source_a.into(),
+            create_evm_state_update(addr_a1, 100),
+        ))
+        .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source_b.into(),
+            create_evm_state_update(addr_b1, 200),
+        ))
+        .unwrap();
+        tx.send(MultiProofMessage::StateUpdate(
+            source_a.into(),
+            create_evm_state_update(addr_a2, 300),
+        ))
+        .unwrap();
 
-        let mut pending_msg: Option<MultiProofMessage> = None;
-
-        if let Ok(MultiProofMessage::StateUpdate(first_source, _)) = task.rx.recv() {
+        // Receive the first message
+        if let Ok(MultiProofMessage::StateUpdate(first_source, first_update)) = task.rx.recv() {
             assert!(same_source(first_source, source_a.into()));
+            let mut merged_update = first_update;
+            let mut num_batched = 1;
 
-            // Simulate batching loop for remaining messages
-            let mut accumulated_updates: Vec<(Source, EvmState)> = Vec::new();
-            let mut accumulated_targets = 0usize;
-
-            loop {
-                if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
-                    break;
-                }
-                match task.rx.try_recv() {
-                    Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                            !can_batch_state_update(
-                                *batch_source,
-                                batch_update,
-                                next_source,
-                                &next_update,
-                            )
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-
-                        let next_estimate = estimate_evm_state_targets(&next_update);
-                        if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                            !accumulated_updates.is_empty()
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        accumulated_targets += next_estimate;
-                        accumulated_updates.push((next_source, next_update));
-                    }
-                    Ok(other_msg) => {
-                        pending_msg = Some(other_msg);
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-
-            assert_eq!(accumulated_updates.len(), 1, "Should only batch matching sources");
-            let batch_source = accumulated_updates[0].0;
-            assert!(same_source(batch_source, source_b.into()));
-
-            let batch_source = accumulated_updates[0].0;
-            let mut merged_update = accumulated_updates.remove(0).1;
-            for (_, next_update) in accumulated_updates {
+            // Batch all remaining messages (no source restriction)
+            while let Ok(MultiProofMessage::StateUpdate(_next_source, next_update)) =
+                task.rx.try_recv()
+            {
                 merged_update.extend(next_update);
+                num_batched += 1;
             }
 
-            assert!(same_source(batch_source, source_b.into()), "Batch should use matching source");
+            // All 3 should be batched together now
+            assert_eq!(num_batched, 3, "All updates should batch together");
+            assert_eq!(merged_update.len(), 3);
+            assert!(merged_update.contains_key(&addr_a1));
             assert!(merged_update.contains_key(&addr_b1));
-            assert!(!merged_update.contains_key(&addr_a1));
-            assert!(!merged_update.contains_key(&addr_a2));
+            assert!(merged_update.contains_key(&addr_a2));
         } else {
             panic!("Expected first StateUpdate");
         }
-
-        match pending_msg {
-            Some(MultiProofMessage::StateUpdate(pending_source, pending_update)) => {
-                assert!(same_source(pending_source, source_a.into()));
-                assert!(pending_update.contains_key(&addr_a2));
-            }
-            other => panic!("Expected pending StateUpdate with source_a, got {:?}", other),
-        }
     }
 
-    /// Verifies that pre-block updates only batch when their payloads are identical.
+    /// Verifies that pre-block updates can be batched together.
+    ///
+    /// With `HashedPostState`, batching is safe regardless of source or payload.
     #[test]
-    fn test_pre_block_updates_require_payload_match_to_batch() {
+    fn test_pre_block_updates_batch() {
         use alloy_evm::block::{StateChangePreBlockSource, StateChangeSource};
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let task = create_test_state_root_task(test_provider_factory);
@@ -2380,104 +2310,37 @@ mod tests {
         let addr2 = alloy_primitives::Address::random();
         let addr3 = alloy_primitives::Address::random();
 
-        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
-            let mut state = EvmState::default();
-            state.insert(
-                addr,
-                Account {
-                    info: revm_state::AccountInfo {
-                        balance: U256::from(balance),
-                        nonce: 1,
-                        code_hash: Default::default(),
-                        code: Default::default(),
-                    },
-                    transaction_id: Default::default(),
-                    storage: Default::default(),
-                    status: revm_state::AccountStatus::Touched,
-                },
-            );
-            state
-        };
-
         let source = StateChangeSource::PreBlock(StateChangePreBlockSource::BeaconRootContract);
 
-        // Queue: first update dispatched immediately, next two should not merge
+        // Queue 3 pre-block updates - they should all batch together now
         let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr1, 100)))
+        tx.send(MultiProofMessage::StateUpdate(source.into(), create_evm_state_update(addr1, 100)))
             .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr2, 200)))
+        tx.send(MultiProofMessage::StateUpdate(source.into(), create_evm_state_update(addr2, 200)))
             .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr3, 300)))
+        tx.send(MultiProofMessage::StateUpdate(source.into(), create_evm_state_update(addr3, 300)))
             .unwrap();
-
-        let mut pending_msg: Option<MultiProofMessage> = None;
 
         if let Ok(MultiProofMessage::StateUpdate(first_source, first_update)) = task.rx.recv() {
             assert!(same_source(first_source, source.into()));
             assert!(first_update.contains_key(&addr1));
 
-            let mut accumulated_updates: Vec<(Source, EvmState)> = Vec::new();
-            let mut accumulated_targets = 0usize;
+            let mut merged_update = first_update;
+            let mut num_batched = 1;
 
-            loop {
-                if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
-                    break;
-                }
-                match task.rx.try_recv() {
-                    Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                            !can_batch_state_update(
-                                *batch_source,
-                                batch_update,
-                                next_source,
-                                &next_update,
-                            )
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-
-                        let next_estimate = estimate_evm_state_targets(&next_update);
-                        if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                            !accumulated_updates.is_empty()
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        accumulated_targets += next_estimate;
-                        accumulated_updates.push((next_source, next_update));
-                    }
-                    Ok(other_msg) => {
-                        pending_msg = Some(other_msg);
-                        break;
-                    }
-                    Err(_) => break,
-                }
+            while let Ok(MultiProofMessage::StateUpdate(_next_source, next_update)) =
+                task.rx.try_recv()
+            {
+                merged_update.extend(next_update);
+                num_batched += 1;
             }
 
-            assert_eq!(
-                accumulated_updates.len(),
-                1,
-                "Second pre-block update should not merge with a different payload"
-            );
-            let (batched_source, batched_update) = accumulated_updates.remove(0);
-            assert!(same_source(batched_source, source.into()));
-            assert!(batched_update.contains_key(&addr2));
-            assert!(!batched_update.contains_key(&addr3));
-
-            match pending_msg {
-                Some(MultiProofMessage::StateUpdate(_, pending_update)) => {
-                    assert!(pending_update.contains_key(&addr3));
-                }
-                other => panic!("Expected pending third pre-block update, got {:?}", other),
-            }
+            // All 3 should be batched together
+            assert_eq!(num_batched, 3, "All pre-block updates should batch");
+            assert_eq!(merged_update.len(), 3);
+            assert!(merged_update.contains_key(&addr1));
+            assert!(merged_update.contains_key(&addr2));
+            assert!(merged_update.contains_key(&addr3));
         } else {
             panic!("Expected first StateUpdate");
         }
@@ -2487,7 +2350,6 @@ mod tests {
     #[test]
     fn test_batching_preserves_ordering_with_different_message_type() {
         use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let task = create_test_state_root_task(test_provider_factory);
@@ -2508,39 +2370,9 @@ mod tests {
         let mut targets3 = MultiProofTargets::default();
         targets3.insert(addr3, HashSet::default());
 
-        // Create StateUpdate 1
-        let mut state_update1 = EvmState::default();
-        state_update1.insert(
-            state_addr1,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(100),
-                    nonce: 1,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
-
-        // Create StateUpdate 2
-        let mut state_update2 = EvmState::default();
-        state_update2.insert(
-            state_addr2,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(200),
-                    nonce: 2,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
+        // Create SealedStateUpdate updates
+        let state_update1 = create_evm_state_update(state_addr1, 100);
+        let state_update2 = create_evm_state_update(state_addr2, 200);
 
         let source = StateChangeSource::Transaction(42);
 
@@ -2613,7 +2445,6 @@ mod tests {
     #[test]
     fn test_pending_message_processed_before_next_iteration() {
         use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let test_provider = test_provider_factory.latest().unwrap();
@@ -2628,21 +2459,7 @@ mod tests {
         prefetch2.insert(prefetch_addr2, HashSet::default());
 
         let state_addr = alloy_primitives::Address::random();
-        let mut state_update = EvmState::default();
-        state_update.insert(
-            state_addr,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(42),
-                    nonce: 1,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
+        let state_update = create_evm_state_update(state_addr, 42);
 
         let source = StateChangeSource::Transaction(99);
 
@@ -2701,7 +2518,6 @@ mod tests {
         //
         // Without the state-machine fix, State1 would be processed alone (no batching).
         use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
         let task = create_test_state_root_task(test_provider_factory);
@@ -2719,26 +2535,6 @@ mod tests {
         let mut prefetch2 = MultiProofTargets::default();
         prefetch2.insert(prefetch_addr2, HashSet::default());
 
-        // Create StateUpdates
-        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
-            let mut state = EvmState::default();
-            state.insert(
-                addr,
-                Account {
-                    info: revm_state::AccountInfo {
-                        balance: U256::from(balance),
-                        nonce: 1,
-                        code_hash: Default::default(),
-                        code: Default::default(),
-                    },
-                    transaction_id: Default::default(),
-                    storage: Default::default(),
-                    status: revm_state::AccountStatus::Touched,
-                },
-            );
-            state
-        };
-
         let source = StateChangeSource::Transaction(42);
 
         // Queue: [Prefetch1, State1, State2, State3, Prefetch2]
@@ -2746,17 +2542,17 @@ mod tests {
         tx.send(MultiProofMessage::PrefetchProofs(prefetch1.clone())).unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_state_update(state_addr1, 100),
+            create_evm_state_update(state_addr1, 100),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_state_update(state_addr2, 200),
+            create_evm_state_update(state_addr2, 200),
         ))
         .unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
-            create_state_update(state_addr3, 300),
+            create_evm_state_update(state_addr3, 300),
         ))
         .unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch2.clone())).unwrap();
@@ -2870,5 +2666,172 @@ mod tests {
 
         // Should need to wait for the results of those proofs to arrive
         assert!(!should_finish, "Should continue waiting for proofs");
+    }
+
+    // ==================== merge_evm_state Unit Tests ====================
+
+    /// Verifies that `merge_evm_state` preserves `original_value` from base state.
+    ///
+    /// This is the core fix for the batching bug: when merging TX1's state with TX2's state,
+    /// the `original_value` from TX1 must be preserved so `is_changed()` returns correct results.
+    #[test]
+    fn test_merge_evm_state_preserves_original_value() {
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let addr = Address::random();
+        let slot = U256::from(42);
+
+        // TX1: slot changes from DB value 0 → 10
+        let mut base = EvmState::default();
+        let mut base_storage = alloy_primitives::map::HashMap::default();
+        base_storage.insert(slot, EvmStorageSlot::new_changed(U256::ZERO, U256::from(10), 0));
+        let base_account = Account {
+            info: AccountInfo { balance: U256::from(100), ..Default::default() },
+            storage: base_storage,
+            status: AccountStatus::Touched,
+            transaction_id: 0,
+        };
+        base.insert(addr, base_account);
+
+        // TX2: slot is read but not changed (still 10)
+        let mut overlay = EvmState::default();
+        let mut overlay_storage = alloy_primitives::map::HashMap::default();
+        overlay_storage.insert(slot, EvmStorageSlot::new(U256::from(10), 1));
+        let overlay_account = Account {
+            info: AccountInfo { balance: U256::from(100), ..Default::default() },
+            storage: overlay_storage,
+            status: AccountStatus::Touched,
+            transaction_id: 1,
+        };
+        overlay.insert(addr, overlay_account);
+
+        merge_evm_state(&mut base, overlay);
+
+        // CRITICAL: original_value should still be 0 (from base), not 10 (from overlay)
+        let merged_slot = &base.get(&addr).unwrap().storage.get(&slot).unwrap();
+        assert_eq!(merged_slot.original_value(), U256::ZERO, "original_value must be preserved");
+        assert_eq!(merged_slot.present_value(), U256::from(10));
+        assert!(merged_slot.is_changed(), "is_changed() should return true");
+    }
+
+    /// Verifies that `merge_evm_state` correctly handles new slots from overlay.
+    #[test]
+    fn test_merge_evm_state_new_slot_from_overlay() {
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let addr = Address::random();
+        let slot1 = U256::from(1);
+        let slot2 = U256::from(2);
+
+        let mut base = EvmState::default();
+        let mut base_storage = alloy_primitives::map::HashMap::default();
+        base_storage.insert(slot1, EvmStorageSlot::new_changed(U256::ZERO, U256::from(100), 0));
+        base.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: base_storage,
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
+
+        let mut overlay = EvmState::default();
+        let mut overlay_storage = alloy_primitives::map::HashMap::default();
+        overlay_storage.insert(slot2, EvmStorageSlot::new_changed(U256::ZERO, U256::from(200), 1));
+        overlay.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: overlay_storage,
+                status: AccountStatus::Touched,
+                transaction_id: 1,
+            },
+        );
+
+        merge_evm_state(&mut base, overlay);
+
+        let account = base.get(&addr).unwrap();
+        assert!(account.storage.contains_key(&slot1));
+        assert!(account.storage.contains_key(&slot2));
+    }
+
+    /// Verifies last-writer-wins for storage values with preserved `original_value`.
+    #[test]
+    fn test_merge_evm_state_last_writer_wins() {
+        use revm_state::{Account, AccountInfo, AccountStatus, EvmStorageSlot};
+
+        let addr = Address::random();
+        let slot = U256::from(99);
+
+        let mut base = EvmState::default();
+        let mut base_storage = alloy_primitives::map::HashMap::default();
+        base_storage.insert(slot, EvmStorageSlot::new_changed(U256::ZERO, U256::from(10), 0));
+        base.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: base_storage,
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
+
+        let mut overlay = EvmState::default();
+        let mut overlay_storage = alloy_primitives::map::HashMap::default();
+        overlay_storage
+            .insert(slot, EvmStorageSlot::new_changed(U256::from(10), U256::from(20), 1));
+        overlay.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: overlay_storage,
+                status: AccountStatus::Touched,
+                transaction_id: 1,
+            },
+        );
+
+        merge_evm_state(&mut base, overlay);
+
+        let merged_slot = base.get(&addr).unwrap().storage.get(&slot).unwrap();
+        assert_eq!(merged_slot.original_value(), U256::ZERO);
+        assert_eq!(merged_slot.present_value(), U256::from(20));
+        assert!(merged_slot.is_changed());
+    }
+
+    /// Verifies status flags are OR'd together during merge.
+    #[test]
+    fn test_merge_evm_state_status_flags_merged() {
+        use revm_state::{Account, AccountInfo, AccountStatus};
+
+        let addr = Address::random();
+
+        let mut base = EvmState::default();
+        base.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: Default::default(),
+                status: AccountStatus::Touched,
+                transaction_id: 0,
+            },
+        );
+
+        let mut overlay = EvmState::default();
+        overlay.insert(
+            addr,
+            Account {
+                info: AccountInfo::default(),
+                storage: Default::default(),
+                status: AccountStatus::SelfDestructed,
+                transaction_id: 1,
+            },
+        );
+
+        merge_evm_state(&mut base, overlay);
+
+        let merged = base.get(&addr).unwrap();
+        assert!(merged.is_touched());
+        assert!(merged.is_selfdestructed());
     }
 }
