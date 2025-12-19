@@ -137,19 +137,27 @@ impl CachedStateMetrics {
 
 impl<S: AccountReader> AccountReader for CachedStateProvider<S> {
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
-        if let Some(res) = self.caches.account_cache.get(address) {
-            self.metrics.account_cache_hits.increment(1);
-            return Ok(res)
-        }
-
-        self.metrics.account_cache_misses.increment(1);
-
-        let res = self.state_provider.basic_account(address)?;
-
+        let entry = self.caches.account_cache.entry(*address);
         if self.is_prewarm() {
-            self.caches.account_cache.insert(*address, res);
+            let entry = entry
+                .or_try_insert_with(|| self.state_provider.basic_account(address))
+                .map_err(Arc::unwrap_or_clone)?;
+
+            if entry.is_fresh() {
+                self.metrics.account_cache_misses.increment(1);
+            } else {
+                self.metrics.account_cache_hits.increment(1);
+            }
+            Ok(entry.into_value())
+        } else {
+            if let Some(res) = entry.or_optionally_insert_with(|| None) {
+                self.metrics.account_cache_hits.increment(1);
+                return Ok(*res.value())
+            }
+
+            self.metrics.account_cache_misses.increment(1);
+            self.state_provider.basic_account(address)
         }
-        Ok(res)
     }
 }
 
@@ -170,33 +178,44 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
         account: Address,
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
-        match self.caches.get_storage(&account, &storage_key) {
-            (SlotStatus::NotCached, maybe_cache) => {
-                let final_res = self.state_provider.storage(account, storage_key)?;
+        let entry = self.caches.storage_cache.entry(account);
+        if self.is_prewarm() {
+            let account_cache =
+                entry.or_insert_with(|| Arc::new(AccountStorageCache::default())).into_value();
 
-                if self.is_prewarm() {
-                    let account_cache = maybe_cache.unwrap_or_default();
-                    account_cache.insert_storage(storage_key, final_res);
-                    // we always need to insert the value to update the weights.
-                    // Note: there exists a race when the storage cache did not exist yet and two
-                    // consumers looking up the a storage value for this account for the first time,
-                    // however we can assume that this will only happen for the very first
-                    // (mostlikely the same) value, and don't expect that this
-                    // will accidentally replace an account storage cache with
-                    // additional values.
-                    self.caches.insert_storage_cache(account, account_cache);
+            match account_cache.get_storage(&storage_key) {
+                SlotStatus::NotCached => {
+                    self.metrics.storage_cache_misses.increment(1);
+                    let res = self.state_provider.storage(account, storage_key)?;
+                    account_cache.insert_storage(storage_key, res);
+                    Ok(res)
                 }
-
-                self.metrics.storage_cache_misses.increment(1);
-                Ok(final_res)
+                SlotStatus::Empty => {
+                    self.metrics.storage_cache_hits.increment(1);
+                    Ok(None)
+                }
+                SlotStatus::Value(value) => {
+                    self.metrics.storage_cache_hits.increment(1);
+                    Ok(Some(value))
+                }
             }
-            (SlotStatus::Empty, _) => {
-                self.metrics.storage_cache_hits.increment(1);
-                Ok(None)
-            }
-            (SlotStatus::Value(value), _) => {
-                self.metrics.storage_cache_hits.increment(1);
-                Ok(Some(value))
+        } else {
+            match entry
+                .or_optionally_insert_with(|| None)
+                .map(|cache| cache.value().get_storage(&storage_key))
+            {
+                None | Some(SlotStatus::NotCached) => {
+                    self.metrics.storage_cache_misses.increment(1);
+                    self.state_provider.storage(account, storage_key)
+                }
+                Some(SlotStatus::Empty) => {
+                    self.metrics.storage_cache_hits.increment(1);
+                    Ok(None)
+                }
+                Some(SlotStatus::Value(value)) => {
+                    self.metrics.storage_cache_hits.increment(1);
+                    Ok(Some(value))
+                }
             }
         }
     }
@@ -204,20 +223,27 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
 
 impl<S: BytecodeReader> BytecodeReader for CachedStateProvider<S> {
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>> {
-        if let Some(res) = self.caches.code_cache.get(code_hash) {
-            self.metrics.code_cache_hits.increment(1);
-            return Ok(res)
-        }
-
-        self.metrics.code_cache_misses.increment(1);
-
-        let final_res = self.state_provider.bytecode_by_hash(code_hash)?;
-
+        let entry = self.caches.code_cache.entry(*code_hash);
         if self.is_prewarm() {
-            self.caches.code_cache.insert(*code_hash, final_res.clone());
-        }
+            let entry = entry
+                .or_try_insert_with(|| self.state_provider.bytecode_by_hash(code_hash))
+                .map_err(Arc::unwrap_or_clone)?;
 
-        Ok(final_res)
+            if entry.is_fresh() {
+                self.metrics.code_cache_misses.increment(1);
+            } else {
+                self.metrics.code_cache_hits.increment(1);
+            }
+            Ok(entry.into_value())
+        } else {
+            if let Some(res) = entry.or_optionally_insert_with(|| None) {
+                self.metrics.code_cache_hits.increment(1);
+                return Ok(res.value().clone())
+            }
+
+            self.metrics.code_cache_misses.increment(1);
+            self.state_provider.bytecode_by_hash(code_hash)
+        }
     }
 }
 
@@ -359,6 +385,7 @@ impl ExecutionCache {
     ///   - `Empty`: The slot exists in the account's cache but is empty
     ///   - `Value`: The slot exists and has a specific value
     /// - `Option<Arc<AccountStorageCache>>`: The account's storage cache if it exists
+    #[cfg(test)]
     pub(crate) fn get_storage(
         &self,
         address: &Address,
@@ -401,15 +428,6 @@ impl ExecutionCache {
         // Insert to the cache so that moka picks up on the changed size, even though the actual
         // value (the Arc<AccountStorageCache>) is the same
         self.storage_cache.insert(address, account_cache);
-    }
-
-    /// Inserts the [`AccountStorageCache`].
-    pub(crate) fn insert_storage_cache(
-        &self,
-        address: Address,
-        storage_cache: Arc<AccountStorageCache>,
-    ) {
-        self.storage_cache.insert(address, storage_cache);
     }
 
     /// Invalidate storage for specific account
