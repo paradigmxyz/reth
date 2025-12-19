@@ -170,17 +170,13 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// All history index writes accumulate here and commit together at provider commit time.
     #[cfg(all(unix, feature = "rocksdb"))]
     pending_rocks_batch: parking_lot::Mutex<crate::providers::rocksdb::RocksDBBatch>,
-    /// In-memory overlay for history index last-shards written into the shared `RocksDB` batch.
+    /// In-memory cache of history-index "last shards" (the `u64::MAX` shard that receives appends)
+    /// for the shared `RocksDB` batch.
     ///
-    /// History index appending requires a read-modify-write pattern: we read the existing
-    /// last shard (or create a new one if it doesn't exist or is full), merge new block numbers
-    /// into it, and write the updated shard back. With MDBX, the write transaction supports
-    /// read-your-writes so subsequent appends within the same transaction see earlier updates.
-    ///
-    /// `RocksDBBatch` is write-only (no read-your-writes), so subsequent appends would only see
-    /// the persisted state and overwrite earlier batch updates ("last write wins"). This overlay
-    /// caches the current state of last shards so that appending blocks 100, 200, 300 in sequence
-    /// within a single batch correctly produces a shard containing all three block numbers.
+    /// History index appends are read-modify-write: read last shard, merge new block numbers,
+    /// then write it back. With MDBX, the write transaction can read its own writes, so
+    /// subsequent appends see earlier updates. `RocksDBBatch` is write-only, so without this
+    /// cache each append would read only the persisted state and clobber earlier batch writes.
     #[cfg(all(unix, feature = "rocksdb"))]
     pending_history_index_last_shards: parking_lot::Mutex<PendingHistoryIndexLastShards>,
     /// Pending `RocksDB` batches to be committed at provider commit time (from `EitherWriter`).
@@ -5450,5 +5446,189 @@ mod tests {
             .unwrap();
 
         assert_eq!(list.iter().collect::<Vec<_>>(), vec![1, 2, 3, 4, 5]);
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    #[test]
+    fn unwind_account_history_indices_rocksdb_removes_entries() {
+        use crate::{
+            providers::{rocksdb::RocksDBProvider, StaticFileProvider},
+            test_utils::MockNodeTypesWithDB,
+            ProviderFactory, StorageSettings, StorageSettingsCache,
+        };
+        use alloy_primitives::Address;
+        use reth_chainspec::MAINNET;
+        use reth_db::{
+            models::AccountBeforeTx,
+            test_utils::{
+                create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir,
+            },
+        };
+        use reth_storage_api::HistoryWriter;
+
+        let db = create_test_rw_db();
+        let (static_dir, _) = create_test_static_files_dir();
+        let (_rocks_dir, rocks_path) = create_test_rocksdb_dir();
+
+        let rocksdb_provider = RocksDBProvider::builder(&rocks_path)
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+
+        let factory: ProviderFactory<MockNodeTypesWithDB> = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir.keep()).unwrap(),
+            rocksdb_provider,
+        )
+        .unwrap();
+
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        let address = Address::from([0x44; 20]);
+
+        // Insert history entries for blocks 1, 2, 3, 4, 5
+        {
+            let provider = factory.provider_rw().unwrap();
+            provider
+                .insert_account_history_index([(address, [1u64, 2u64, 3u64, 4u64, 5u64])])
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        // Verify all entries exist
+        {
+            let rocks = factory.provider().unwrap().rocksdb_provider();
+            let rocks_tx = rocks.tx();
+            let list = rocks_tx
+                .get::<tables::AccountsHistory>(ShardedKey::last(address))
+                .unwrap()
+                .unwrap();
+            assert_eq!(list.iter().collect::<Vec<_>>(), vec![1, 2, 3, 4, 5]);
+        }
+
+        // Unwind from block 3 (should remove entries >= 3)
+        {
+            let provider = factory.provider_rw().unwrap();
+            let changesets = vec![
+                (3u64, AccountBeforeTx { address, info: None }),
+                (4u64, AccountBeforeTx { address, info: None }),
+                (5u64, AccountBeforeTx { address, info: None }),
+            ];
+            let count = provider.unwind_account_history_indices(changesets.iter()).unwrap();
+            assert_eq!(count, 3, "should report 3 changesets walked");
+            provider.commit().unwrap();
+        }
+
+        // Verify only entries 1, 2 remain
+        {
+            let rocks = factory.provider().unwrap().rocksdb_provider();
+            let rocks_tx = rocks.tx();
+            let list = rocks_tx
+                .get::<tables::AccountsHistory>(ShardedKey::last(address))
+                .unwrap()
+                .unwrap();
+            assert_eq!(list.iter().collect::<Vec<_>>(), vec![1, 2]);
+        }
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    #[test]
+    fn unwind_storage_history_indices_rocksdb_removes_entries() {
+        use crate::{
+            providers::{rocksdb::RocksDBProvider, StaticFileProvider},
+            test_utils::MockNodeTypesWithDB,
+            ProviderFactory, StorageSettings, StorageSettingsCache,
+        };
+        use alloy_primitives::{Address, B256, U256};
+        use reth_chainspec::MAINNET;
+        use reth_db::test_utils::{
+            create_test_rocksdb_dir, create_test_rw_db, create_test_static_files_dir,
+        };
+        use reth_db_api::models::BlockNumberAddress;
+        use reth_primitives_traits::StorageEntry;
+        use reth_storage_api::HistoryWriter;
+
+        let db = create_test_rw_db();
+        let (static_dir, _) = create_test_static_files_dir();
+        let (_rocks_dir, rocks_path) = create_test_rocksdb_dir();
+
+        let rocksdb_provider = RocksDBProvider::builder(&rocks_path)
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+
+        let factory: ProviderFactory<MockNodeTypesWithDB> = ProviderFactory::new(
+            db,
+            MAINNET.clone(),
+            StaticFileProvider::read_write(static_dir.keep()).unwrap(),
+            rocksdb_provider,
+        )
+        .unwrap();
+
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        let address = Address::from([0x55; 20]);
+        let storage_key = B256::from([0x66; 32]);
+
+        // Insert history entries for blocks 1, 2, 3, 4, 5
+        {
+            let provider = factory.provider_rw().unwrap();
+            provider
+                .insert_storage_history_index([(
+                    (address, storage_key),
+                    [1u64, 2u64, 3u64, 4u64, 5u64],
+                )])
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        // Verify all entries exist
+        {
+            let rocks = factory.provider().unwrap().rocksdb_provider();
+            let rocks_tx = rocks.tx();
+            let list = rocks_tx
+                .get::<tables::StoragesHistory>(StorageShardedKey::last(address, storage_key))
+                .unwrap()
+                .unwrap();
+            assert_eq!(list.iter().collect::<Vec<_>>(), vec![1, 2, 3, 4, 5]);
+        }
+
+        // Unwind from block 3 (should remove entries >= 3)
+        {
+            let provider = factory.provider_rw().unwrap();
+            let changesets = vec![
+                (
+                    BlockNumberAddress((3u64, address)),
+                    StorageEntry { key: storage_key, value: U256::ZERO },
+                ),
+                (
+                    BlockNumberAddress((4u64, address)),
+                    StorageEntry { key: storage_key, value: U256::ZERO },
+                ),
+                (
+                    BlockNumberAddress((5u64, address)),
+                    StorageEntry { key: storage_key, value: U256::ZERO },
+                ),
+            ];
+            let count = provider.unwind_storage_history_indices(changesets.into_iter()).unwrap();
+            assert_eq!(count, 3, "should report 3 changesets walked");
+            provider.commit().unwrap();
+        }
+
+        // Verify only entries 1, 2 remain
+        {
+            let rocks = factory.provider().unwrap().rocksdb_provider();
+            let rocks_tx = rocks.tx();
+            let list = rocks_tx
+                .get::<tables::StoragesHistory>(StorageShardedKey::last(address, storage_key))
+                .unwrap()
+                .unwrap();
+            assert_eq!(list.iter().collect::<Vec<_>>(), vec![1, 2]);
+        }
     }
 }
