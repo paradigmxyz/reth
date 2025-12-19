@@ -3,6 +3,7 @@ use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
 };
+use dashmap::DashMap;
 use metrics::Gauge;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
@@ -314,6 +315,10 @@ struct TimestampedStorage {
 /// - Each storage entry stores the timestamp when it was inserted
 /// - Each account tracks when it was last wiped (destroyed)
 /// - On lookup, if the entry's timestamp <= wipe timestamp, the entry is stale
+///
+/// Since EIP-6780, SELFDESTRUCT only works within the same transaction where the
+/// contract was created, so we only need to track wiped accounts for the current block.
+/// The wipe map is cleared after each block execution via [`Self::clear_wiped_accounts`].
 #[derive(Debug, Clone)]
 pub(crate) struct ExecutionCache {
     /// Cache for contract bytecode, keyed by code hash.
@@ -323,8 +328,8 @@ pub(crate) struct ExecutionCache {
     storage_cache: Arc<FixedCache<(Address, StorageKey), TimestampedStorage>>,
 
     /// Wipe timestamps: tracks when each account was last destroyed.
-    /// Used to invalidate stale storage entries.
-    wipe_cache: Arc<FixedCache<Address, u64, FbBuildHasher<20>>>,
+    /// Cleared after each block execution.
+    wiped_accounts: Arc<DashMap<Address, u64>>,
 
     /// Global counter for generating timestamps.
     /// Incremented on every insert and wipe operation.
@@ -342,7 +347,7 @@ impl ExecutionCache {
 
     /// Gets the wipe timestamp for an address (0 if never wiped).
     fn get_wipe_timestamp(&self, address: &Address) -> u64 {
-        self.wipe_cache.get(address).unwrap_or(0)
+        self.wiped_accounts.get(address).map(|v| *v).unwrap_or(0)
     }
 
     /// Gets code from cache, or inserts using the provided function.
@@ -427,7 +432,13 @@ impl ExecutionCache {
     /// Any cached storage entries with `insert_ts <= wipe_ts` are considered stale.
     pub(crate) fn invalidate_account_storage(&self, address: Address) {
         let ts = self.next_timestamp();
-        self.wipe_cache.insert(address, ts);
+        self.wiped_accounts.insert(address, ts);
+    }
+
+    /// Clears the set of wiped accounts.
+    /// Should be called after block execution completes.
+    pub(crate) fn clear_wiped_accounts(&self) {
+        self.wiped_accounts.clear();
     }
 
     /// Inserts the post-execution state changes into the cache.
@@ -504,6 +515,11 @@ impl ExecutionCache {
             self.account_cache.insert(*addr, Some(Account::from(account_info)));
         }
 
+        // Clear wiped accounts set after block execution is complete.
+        // Since EIP-6780, SELFDESTRUCT only works within the same transaction,
+        // so we only need to track wipes for the duration of a single block.
+        self.clear_wiped_accounts();
+
         Ok(())
     }
 }
@@ -512,21 +528,18 @@ impl ExecutionCache {
 #[derive(Debug)]
 pub(crate) struct ExecutionCacheBuilder {
     /// Code cache entries
-    code_cache_entries: u64,
+    code_cache_entries: usize,
 
     /// Storage cache entries
     storage_cache_entries: usize,
 
     /// Account cache entries
     account_cache_entries: usize,
-
-    /// Wipe cache entries (for tracking destroyed accounts)
-    wipe_cache_entries: usize,
 }
 
 impl ExecutionCacheBuilder {
     /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
-    pub(crate) fn build_caches(self, total_cache_size: u64) -> ExecutionCache {
+    pub(crate) fn build_caches(self, _total_cache_size: u64) -> ExecutionCache {
         ExecutionCache {
             code_cache: Arc::new(FixedCache::new(
                 self.code_cache_entries,
@@ -536,10 +549,7 @@ impl ExecutionCacheBuilder {
                 self.storage_cache_entries,
                 DefaultHashBuilder::default(),
             )),
-            wipe_cache: Arc::new(FixedCache::new(
-                self.wipe_cache_entries,
-                FbBuildHasher::<20>::default(),
-            )),
+            wiped_accounts: Arc::new(DashMap::new()),
             counter: Arc::new(AtomicU64::new(1)),
             account_cache: Arc::new(FixedCache::new(
                 self.account_cache_entries,
@@ -554,12 +564,11 @@ impl Default for ExecutionCacheBuilder {
         // Fixed-cache requires power-of-two sizes
         // Storage: 16M entries for (Address, StorageKey) pairs
         // Account: 4M entries for addresses
-        // Wipe: 1M entries for destroyed accounts
+        // Code: 8M entries for bytecode
         Self {
-            code_cache_entries: 10_000_000,
+            code_cache_entries: 8 * 1024 * 1024,     // 8M, power of 2
             storage_cache_entries: 16 * 1024 * 1024, // 16M, power of 2
             account_cache_entries: 4 * 1024 * 1024,  // 4M, power of 2
-            wipe_cache_entries: 1024 * 1024,         // 1M, power of 2
         }
     }
 }
@@ -620,9 +629,8 @@ impl SavedCache {
 
     /// Updates the metrics for the [`ExecutionCache`].
     pub(crate) fn update_metrics(&self) {
-        // fixed-cache doesn't provide entry_count, so we can't track size accurately
-        // We could track inserts manually if needed
-        self.metrics.code_cache_size.set(self.caches.code_cache.entry_count() as f64);
+        // fixed-cache doesn't provide entry_count, so we can't track size accurately.
+        // We could track inserts manually if needed.
     }
 }
 
