@@ -36,7 +36,7 @@ where
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
 pub struct PrecompileCache<S>(
-    moka::sync::Cache<Bytes, CacheEntry<S>, alloy_primitives::map::DefaultHashBuilder>,
+    mini_moka::sync::Cache<Bytes, CacheEntry<S>, alloy_primitives::map::DefaultHashBuilder>,
 )
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
@@ -47,7 +47,7 @@ where
 {
     fn default() -> Self {
         Self(
-            moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
+            mini_moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
                 .initial_capacity(MAX_CACHE_SIZE as usize)
                 .build_with_hasher(Default::default()),
         )
@@ -59,7 +59,7 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.0.get(input).filter(|e| e.spec == spec)
+        self.0.get(&Bytes::copy_from_slice(input)).filter(|e| e.spec == spec)
     }
 
     /// Inserts the given key and value into the cache, returning the new cache size.
