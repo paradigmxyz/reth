@@ -978,9 +978,13 @@ where
                     self.canonical_in_memory_state.notify_canon_state(notification);
                 }
 
-                // Synchronously clear the transaction pool if configured
-                // This prevents "nonce too low" errors after large reorgs
-                self.clear_pool_if_configured("after unwind");
+                // NOTE: We intentionally do NOT clear the transaction pool during unwind.
+                // The txpool receives the notification above and will naturally re-validate
+                // transactions against the new canonical state. Clearing the pool here would
+                // remove valid transactions before the payload builder can include them.
+                // The "nonce too low" issue during eth_sendRawTransaction is handled by:
+                // 1. Early set_canonical_head() call ensuring correct canonical head
+                // 2. history_by_block_number() fallback in latest() for correct state
 
                 debug!(
                     target: "engine::tree",
@@ -998,9 +1002,9 @@ where
                 );
                 self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
 
-                // Still clear pool even without full reorg to match new head
-                // This prevents stale transactions after unwind
-                self.clear_pool_if_configured("after unwind fallback");
+                // NOTE: We do NOT clear the pool here either. The canonical head update above
+                // ensures transaction validation uses correct state. Keeping transactions
+                // allows them to be included in the next block if they're still valid.
             }
         }
 
