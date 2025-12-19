@@ -1303,7 +1303,7 @@ mod tests {
         .try_recover()
         .unwrap();
         let provider_rw = provider_factory.database_provider_rw().unwrap();
-        provider_rw.insert_block(&block.clone()).unwrap();
+        provider_rw.insert_block(&block).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = BlockchainProvider::new(provider_factory).unwrap();
