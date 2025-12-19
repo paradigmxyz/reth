@@ -135,6 +135,10 @@ pub struct TreeConfig {
     storage_worker_count: usize,
     /// Number of account proof worker threads.
     account_worker_count: usize,
+    /// Whether to synchronously clear the transaction pool after FCU success.
+    ///
+    /// When enabled, forkchoice updates block until the pool confirms clearing.
+    clear_pool_after_fcu: bool,
 }
 
 impl Default for TreeConfig {
@@ -163,6 +167,7 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
+            clear_pool_after_fcu: false,
         }
     }
 }
@@ -219,6 +224,7 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
+            clear_pool_after_fcu: false,
         }
     }
 
@@ -498,6 +504,17 @@ impl TreeConfig {
     /// Setter for the number of account proof worker threads.
     pub fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
         self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
+        self
+    }
+
+    /// Returns whether to synchronously clear the transaction pool after FCU success.
+    pub const fn clear_pool_after_fcu(&self) -> bool {
+        self.clear_pool_after_fcu
+    }
+
+    /// Sets whether to synchronously clear the transaction pool after FCU success.
+    pub const fn with_clear_pool_after_fcu(mut self, clear_pool_after_fcu: bool) -> Self {
+        self.clear_pool_after_fcu = clear_pool_after_fcu;
         self
     }
 }

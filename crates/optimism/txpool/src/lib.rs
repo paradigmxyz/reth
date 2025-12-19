@@ -21,11 +21,11 @@ pub mod maintain;
 pub use error::InvalidCrossTx;
 pub mod estimated_da_size;
 
-use reth_transaction_pool::{CoinbaseTipOrdering, Pool, TransactionValidationTaskExecutor};
+use reth_transaction_pool::{ConfigurableOrdering, Pool, TransactionValidationTaskExecutor};
 
 /// Type alias for default optimism transaction pool
 pub type OpTransactionPool<Client, S, T = OpPooledTransaction> = Pool<
     TransactionValidationTaskExecutor<OpTransactionValidator<Client, T>>,
-    CoinbaseTipOrdering<T>,
+    ConfigurableOrdering<T>,
     S,
 >;

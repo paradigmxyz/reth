@@ -97,6 +97,96 @@ impl<T> Clone for CoinbaseTipOrdering<T> {
     }
 }
 
+/// FIFO ordering for the pool.
+///
+/// All transactions have equal priority and are processed in the order they were received.
+/// Since all transactions return the same priority value, ordering falls back to `submission_id`.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct FifoOrdering<T>(PhantomData<T>);
+
+impl<T> TransactionOrdering for FifoOrdering<T>
+where
+    T: PoolTransaction + 'static,
+{
+    type PriorityValue = u128;
+    type Transaction = T;
+
+    fn priority(
+        &self,
+        _transaction: &Self::Transaction,
+        _base_fee: u64,
+    ) -> Priority<Self::PriorityValue> {
+        Priority::Value(0)
+    }
+}
+
+impl<T> Default for FifoOrdering<T> {
+    fn default() -> Self {
+        Self(Default::default())
+    }
+}
+
+impl<T> Clone for FifoOrdering<T> {
+    fn clone(&self) -> Self {
+        Self::default()
+    }
+}
+
+/// Configurable transaction ordering that can switch between gas-based and FIFO ordering.
+///
+/// Allows selection between different ordering strategies at pool initialization:
+/// - [`CoinbaseTipOrdering`]: Gas price-based ordering (default)
+/// - [`FifoOrdering`]: First-in-first-out ordering
+///
+/// **Note**: The ordering strategy is fixed at pool creation time and cannot be changed
+/// during runtime. To switch ordering modes, the pool must be recreated.
+#[derive(Debug, Clone)]
+pub enum ConfigurableOrdering<T> {
+    /// Gas price-based ordering where higher gas tips have higher priority.
+    CoinbaseTip(CoinbaseTipOrdering<T>),
+    /// FIFO ordering where all transactions have equal priority.
+    Fifo(FifoOrdering<T>),
+}
+
+impl<T> ConfigurableOrdering<T> {
+    /// Creates a new configurable ordering based on the provided flag.
+    ///
+    /// Returns [`FifoOrdering`] if `fifo_enabled` is true, otherwise [`CoinbaseTipOrdering`].
+    pub fn new(fifo_enabled: bool) -> Self {
+        if fifo_enabled {
+            Self::Fifo(FifoOrdering::default())
+        } else {
+            Self::CoinbaseTip(CoinbaseTipOrdering::default())
+        }
+    }
+}
+
+impl<T> TransactionOrdering for ConfigurableOrdering<T>
+where
+    T: PoolTransaction + 'static,
+{
+    type PriorityValue = u128;
+    type Transaction = T;
+
+    fn priority(
+        &self,
+        transaction: &Self::Transaction,
+        base_fee: u64,
+    ) -> Priority<Self::PriorityValue> {
+        match self {
+            Self::CoinbaseTip(ordering) => ordering.priority(transaction, base_fee),
+            Self::Fifo(ordering) => ordering.priority(transaction, base_fee),
+        }
+    }
+}
+
+impl<T> Default for ConfigurableOrdering<T> {
+    fn default() -> Self {
+        Self::CoinbaseTip(CoinbaseTipOrdering::default())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -111,5 +201,40 @@ mod tests {
         assert!(p1 > p3); // Value(3) > None
         assert!(p2 > p3); // Value(1) > None
         assert_eq!(p3, Priority::None);
+    }
+
+    #[cfg(any(test, feature = "test-utils"))]
+    mod fifo_tests {
+        use super::*;
+        use crate::test_utils::MockTransaction;
+
+        #[test]
+        fn fifo_ordering_returns_constant_priority() {
+            let ordering = FifoOrdering::<MockTransaction>::default();
+            let tx1 = MockTransaction::legacy();
+            let tx2 = MockTransaction::legacy();
+
+            assert_eq!(ordering.priority(&tx1, 1000), Priority::Value(0));
+            assert_eq!(ordering.priority(&tx2, 1000), Priority::Value(0));
+            assert_eq!(ordering.priority(&tx1, 5000), Priority::Value(0));
+        }
+
+        #[test]
+        fn configurable_ordering_selects_gas_based() {
+            let ordering = ConfigurableOrdering::<MockTransaction>::new(false);
+            assert!(matches!(ordering, ConfigurableOrdering::CoinbaseTip(_)));
+        }
+
+        #[test]
+        fn configurable_ordering_selects_fifo() {
+            let ordering = ConfigurableOrdering::<MockTransaction>::new(true);
+            assert!(matches!(ordering, ConfigurableOrdering::Fifo(_)));
+        }
+
+        #[test]
+        fn configurable_ordering_defaults_to_gas_based() {
+            let ordering = ConfigurableOrdering::<MockTransaction>::default();
+            assert!(matches!(ordering, ConfigurableOrdering::CoinbaseTip(_)));
+        }
     }
 }

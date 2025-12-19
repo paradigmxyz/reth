@@ -114,8 +114,33 @@ impl<N: NodePrimitives> InMemoryState<N> {
 
     /// Returns the current chain head state.
     pub(crate) fn head_state(&self) -> Option<Arc<BlockState<N>>> {
-        let hash = *self.numbers.read().last_key_value()?.1;
-        self.state_by_hash(hash)
+        let numbers = self.numbers.read();
+        let numbers_count = numbers.len();
+        let last_entry = numbers.last_key_value();
+
+        let Some((last_number, hash)) = last_entry else {
+            tracing::debug!(
+                target: "chain-state::memory",
+                numbers_count,
+                "head_state: numbers map is empty"
+            );
+            return None;
+        };
+
+        let last_number = *last_number;
+        let hash = *hash;
+        drop(numbers); // Release lock before state_by_hash
+
+        let state = self.state_by_hash(hash);
+        if state.is_none() {
+            tracing::warn!(
+                target: "chain-state::memory",
+                ?hash,
+                block_number = last_number,
+                "head_state: block hash not found in blocks map"
+            );
+        }
+        state
     }
 
     /// Returns the pending state corresponding to the current head plus one,
@@ -266,17 +291,24 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             let mut numbers = self.inner.in_memory_state.numbers.write();
             let mut blocks = self.inner.in_memory_state.blocks.write();
 
+            let numbers_before = numbers.len();
+            let blocks_before = blocks.len();
+
             // we first remove the blocks from the reorged chain
+            let mut removed_count = 0;
             for block in reorged {
                 let hash = block.recovered_block().hash();
                 let number = block.recovered_block().number();
                 blocks.remove(&hash);
                 numbers.remove(&number);
+                removed_count += 1;
             }
 
             // insert the new blocks
+            let mut inserted_count = 0;
             for block in new_blocks {
                 let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
+                let has_parent = parent.is_some();
                 let block_state = BlockState::with_parent(block, parent);
                 let hash = block_state.hash();
                 let number = block_state.number();
@@ -284,7 +316,27 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
                 // append new blocks
                 blocks.insert(hash, Arc::new(block_state));
                 numbers.insert(number, hash);
+                inserted_count += 1;
+
+                tracing::debug!(
+                    target: "chain-state::memory",
+                    block_number = number,
+                    ?hash,
+                    has_parent,
+                    "update_blocks: inserted block"
+                );
             }
+
+            tracing::debug!(
+                target: "chain-state::memory",
+                numbers_before,
+                blocks_before,
+                numbers_after = numbers.len(),
+                blocks_after = blocks.len(),
+                removed_count,
+                inserted_count,
+                "update_blocks: completed"
+            );
 
             // remove the pending state
             self.inner.in_memory_state.pending.send_modify(|p| {

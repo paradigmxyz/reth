@@ -26,6 +26,7 @@ use reth_provider::{
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::TaskSpawner;
+use reth_transaction_pool::sync_clear::PoolClearHandle;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -84,6 +85,7 @@ where
         tree_config: TreeConfig,
         sync_metrics_tx: MetricEventsSender,
         evm_config: C,
+        pool_clear_handle: Option<PoolClearHandle>,
     ) -> Self
     where
         V: EngineValidator<N::Payload>,
@@ -109,6 +111,7 @@ where
             tree_config,
             engine_kind,
             evm_config,
+            pool_clear_handle,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);
@@ -214,6 +217,7 @@ mod tests {
             TreeConfig::default(),
             sync_metrics_tx,
             evm_config,
+            None, // pool_clear_handle
         );
     }
 }

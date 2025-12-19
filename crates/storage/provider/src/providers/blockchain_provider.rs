@@ -23,7 +23,9 @@ use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
 use reth_execution_types::ExecutionOutcome;
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
-use reth_primitives_traits::{Account, RecoveredBlock, SealedHeader, StorageEntry};
+use reth_primitives_traits::{
+    Account, AlloyBlockHeader, RecoveredBlock, SealedHeader, StorageEntry,
+};
 use reth_prune_types::{PruneCheckpoint, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -507,11 +509,23 @@ impl<N: ProviderNodeTypes> StateProviderFactory for BlockchainProvider<N> {
         trace!(target: "providers::blockchain", "Getting latest block state provider");
         // use latest state provider if the head state exists
         if let Some(state) = self.canonical_in_memory_state.head_state() {
-            trace!(target: "providers::blockchain", "Using head state for latest state provider");
+            let block_num = state.number();
+            trace!(target: "providers::blockchain", block_number = block_num, "Using head state for latest state provider");
             Ok(self.block_state_provider(&state)?.boxed())
         } else {
-            trace!(target: "providers::blockchain", "Using database state for latest state provider");
-            self.database.latest()
+            // When head_state() returns None (in-memory state is empty), we must use
+            // historical state at the canonical head block number to ensure correct state.
+            // Using database.latest() would return LatestStateProvider which reads from
+            // plain state tables without any block number filtering - this could return
+            // stale state after FCU unwind if the plain state tables haven't been reverted.
+            let canonical_head = self.canonical_in_memory_state.get_canonical_head();
+            tracing::warn!(
+                target: "providers::blockchain",
+                canonical_head_number = canonical_head.number(),
+                canonical_head_hash = ?canonical_head.hash(),
+                "head_state() returned None, using historical state at canonical head block"
+            );
+            self.database.history_by_block_number(canonical_head.number())
         }
     }
 

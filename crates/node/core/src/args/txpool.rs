@@ -411,6 +411,39 @@ pub struct TxPoolArgs {
     /// Max batch size for transaction pool insertions
     #[arg(long = "txpool.max-batch-size", default_value_t = DefaultTxPoolValues::get_global().max_batch_size)]
     pub max_batch_size: usize,
+
+    /// Discard reorged transactions instead of re-injecting them into the mempool.
+    ///
+    /// When enabled, transactions from reorged blocks are permanently discarded rather
+    /// than being re-added to the transaction pool. This is useful for custom chains
+    /// that have different transaction validity rules or require strict control over
+    /// mempool contents after reorgs.
+    ///
+    /// Default: false (re-inject transactions to preserve standard Ethereum behavior)
+    #[arg(long = "txpool.discard-reorged-transactions")]
+    pub discard_reorged_transactions: bool,
+
+    /// Enable FIFO ordering for transactions.
+    ///
+    /// When enabled, transactions are processed in the order they were received
+    /// rather than being prioritized by gas price. This is useful for:
+    /// - Private networks where gas price competition is not desired
+    /// - Testing scenarios requiring deterministic transaction ordering
+    /// - Applications requiring fairness guarantees
+    ///
+    /// Not recommended for public Ethereum networks where MEV considerations
+    /// and transaction fee markets are important.
+    #[arg(long = "txpool.fifo-ordering", default_value_t = false)]
+    pub fifo_ordering: bool,
+
+    /// Clear the transaction pool synchronously after each successful forkchoice update.
+    ///
+    /// When enabled, FCU responses are delayed until the pool is confirmed empty.
+    /// This provides deterministic pool clearing at the cost of increased latency.
+    ///
+    /// Default: false (asynchronous clearing)
+    #[arg(long = "txpool.clear-after-fcu")]
+    pub clear_after_fcu: bool,
 }
 
 impl TxPoolArgs {
@@ -496,6 +529,9 @@ impl Default for TxPoolArgs {
             transactions_backup_path,
             disable_transactions_backup,
             max_batch_size,
+            discard_reorged_transactions: false,
+            fifo_ordering: false,
+            clear_after_fcu: false,
         }
     }
 }
@@ -540,6 +576,7 @@ impl RethTransactionPoolConfig for TxPoolArgs {
             max_new_pending_txs_notifications: self.max_new_pending_txs_notifications,
             max_queued_lifetime: self.max_queued_lifetime,
             max_inflight_delegated_slot_limit: default_config.max_inflight_delegated_slot_limit,
+            fifo_ordering: self.fifo_ordering,
         }
     }
 
@@ -625,6 +662,9 @@ mod tests {
             transactions_backup_path: Some(PathBuf::from("/tmp/txpool-backup")),
             disable_transactions_backup: false,
             max_batch_size: 10,
+            discard_reorged_transactions: false,
+            fifo_ordering: false,
+            clear_after_fcu: false,
         };
 
         let parsed_args = CommandParser::<TxPoolArgs>::parse_from([

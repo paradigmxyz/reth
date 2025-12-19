@@ -35,6 +35,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_transaction_pool::sync_clear::PoolClearHandle;
 use revm::state::EvmState;
 use state::TreeState;
 use std::{
@@ -278,6 +279,8 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
+    /// Optional handle for synchronous transaction pool clearing after FCU.
+    pool_clear_handle: Option<PoolClearHandle>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -338,6 +341,7 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
+        pool_clear_handle: Option<PoolClearHandle>,
     ) -> Self {
         let (incoming_tx, incoming) = std::sync::mpsc::channel();
 
@@ -358,6 +362,7 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
+            pool_clear_handle,
         }
     }
 
@@ -377,6 +382,7 @@ where
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
+        pool_clear_handle: Option<PoolClearHandle>,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -408,6 +414,7 @@ where
             config,
             kind,
             evm_config,
+            pool_clear_handle,
         );
         let incoming = task.incoming_tx.clone();
         std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
@@ -774,6 +781,13 @@ where
         // Update tree state with the new canonical head
         self.state.tree_state.set_canonical_head(canonical_header.num_hash());
 
+        // CRITICAL: Update canonical_in_memory_state's canonical head EARLY
+        // This ensures any concurrent callers of latest() get the correct block number
+        // when falling back to database state via history_by_block_number().
+        // Without this, get_canonical_head() would return the old head number until
+        // apply_canonical_ancestor_via_reorg() completes, causing stale state lookups.
+        self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
         // Handle the state update based on whether this is an unwind scenario
         if new_head_number < current_head_number {
             debug!(
@@ -784,7 +798,52 @@ where
                 "FCU unwind detected: reverting to canonical ancestor"
             );
 
-            self.handle_canonical_chain_unwind(current_head_number, canonical_header)
+            self.handle_canonical_chain_unwind(current_head_number, canonical_header)?;
+
+            // If unwinding to a block older than persisted, synchronously remove from disk
+            // This is critical to ensure the database state is reverted BEFORE the FCU returns
+            // and the payload builder starts building new blocks on top
+            let persisted_num = self.persistence_state.last_persisted_block.number;
+            debug!(
+                target: "engine::tree",
+                new_head_number,
+                persisted_num,
+                needs_sync_persistence = new_head_number < persisted_num,
+                "Checking if synchronous disk removal needed during FCU unwind"
+            );
+            if new_head_number < persisted_num {
+                debug!(
+                    target: "engine::tree",
+                    new_head_number,
+                    persisted_num,
+                    "Synchronously removing blocks from disk during FCU unwind"
+                );
+                let (tx, rx) = oneshot::channel();
+                let _ = self.persistence.remove_blocks_above(new_head_number, tx);
+
+                // Wait for persistence to complete - this ensures DB state is correct
+                // before payload building starts
+                match rx.blocking_recv() {
+                    Ok(result) => {
+                        if let Some(new_tip) = result {
+                            debug!(
+                                target: "engine::tree",
+                                ?new_tip,
+                                "Persistence removal completed during FCU unwind"
+                            );
+                            self.persistence_state.finish(new_tip.hash, new_tip.number);
+                        }
+                    }
+                    Err(_) => {
+                        warn!(
+                            target: "engine::tree",
+                            "Persistence channel closed unexpectedly during FCU unwind"
+                        );
+                    }
+                }
+            }
+
+            Ok(())
         } else {
             debug!(
                 target: "engine::tree",
@@ -862,15 +921,70 @@ where
         // Try to load the canonical ancestor's block
         match self.canonical_block_by_hash(new_head_hash)? {
             Some(executed_block) => {
-                // Perform the reorg to properly handle the unwind
-                self.canonical_in_memory_state.update_chain(NewCanonicalChain::Reorg {
-                    new: vec![executed_block],
-                    old: old_blocks,
-                });
+                // Handle empty old_blocks separately to avoid Chain::first() panic in txpool
+                // When old_blocks is empty, use Commit (not Reorg) to still add executed_block to
+                // memory
+                if old_blocks.is_empty() {
+                    // No blocks in memory to reorg, use Commit instead of Reorg
+                    // This still adds executed_block to memory without creating empty Chain
+                    let chain_update = NewCanonicalChain::Commit { new: vec![executed_block] };
 
-                // CRITICAL: Update the canonical head after the reorg
-                // This ensures get_canonical_head() returns the correct block
-                self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+                    // Convert to notification before consuming chain_update
+                    let notification = chain_update.to_chain_notification();
+
+                    // Add the block to in-memory state
+                    self.canonical_in_memory_state.update_chain(chain_update);
+
+                    // Verify the block was added to in-memory state
+                    let head_state = self.canonical_in_memory_state.head_state();
+                    if let Some(state) = &head_state {
+                        debug!(
+                            target: "engine::tree",
+                            head_block_number = state.number(),
+                            head_block_hash = ?state.hash(),
+                            "Verified: block added to in-memory state after Commit"
+                        );
+                    } else {
+                        warn!(
+                            target: "engine::tree",
+                            expected_block_number = new_head_number,
+                            expected_block_hash = ?new_head_hash,
+                            "WARNING: head_state() returned None after update_chain(Commit)"
+                        );
+                    }
+
+                    // Update the canonical head
+                    self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
+                    // Notify listeners - Commit notification is safe (no empty Chain)
+                    self.canonical_in_memory_state.notify_canon_state(notification);
+                } else {
+                    // Reorg case: old_blocks is not empty, safe to create Chain from old
+                    let chain_update =
+                        NewCanonicalChain::Reorg { new: vec![executed_block], old: old_blocks };
+
+                    // Convert to notification before consuming chain_update
+                    let notification = chain_update.to_chain_notification();
+
+                    // Perform the reorg to properly handle the unwind
+                    self.canonical_in_memory_state.update_chain(chain_update);
+
+                    // CRITICAL: Update the canonical head after the reorg
+                    // This ensures get_canonical_head() returns the correct block
+                    self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
+                    // Notify listeners (including txpool) about the reorg
+                    // This is critical for txpool to update transaction states after unwind
+                    self.canonical_in_memory_state.notify_canon_state(notification);
+                }
+
+                // NOTE: We intentionally do NOT clear the transaction pool during unwind.
+                // The txpool receives the notification above and will naturally re-validate
+                // transactions against the new canonical state. Clearing the pool here would
+                // remove valid transactions before the payload builder can include them.
+                // The "nonce too low" issue during eth_sendRawTransaction is handled by:
+                // 1. Early set_canonical_head() call ensuring correct canonical head
+                // 2. history_by_block_number() fallback in latest() for correct state
 
                 debug!(
                     target: "engine::tree",
@@ -887,6 +1001,10 @@ where
                     "Could not find canonical ancestor block, updating header only"
                 );
                 self.canonical_in_memory_state.set_canonical_head(canonical_header.clone());
+
+                // NOTE: We do NOT clear the pool here either. The canonical head update above
+                // ensures transaction validation uses correct state. Keeping transactions
+                // allows them to be included in the next block if they're still valid.
             }
         }
 
@@ -929,6 +1047,28 @@ where
         }
 
         Ok(())
+    }
+
+    /// Synchronously clears the transaction pool if configured.
+    ///
+    /// This method checks if pool clearing is enabled and attempts to clear
+    /// the pool synchronously. It logs debug messages for success cases and
+    /// warnings for failures.
+    fn clear_pool_if_configured(&self, context: &str) {
+        if !self.config.clear_pool_after_fcu() {
+            return;
+        }
+
+        let Some(handle) = &self.pool_clear_handle else {
+            return;
+        };
+
+        debug!(target: "engine::tree", context, "waiting for pool clear");
+        if handle.clear_and_wait() {
+            debug!(target: "engine::tree", context, "pool clear complete");
+        } else {
+            warn!(target: "engine::tree", context, "pool clear timed out or failed");
+        }
     }
 
     /// Determines if the given block is part of a fork by checking that these
@@ -2329,6 +2469,9 @@ where
 
         // sends an event to all active listeners about the new canonical chain
         self.canonical_in_memory_state.notify_canon_state(notification);
+
+        // Synchronously clear the transaction pool if configured
+        self.clear_pool_if_configured("after FCU");
 
         // emit event
         self.emit_event(ConsensusEngineEvent::CanonicalChainCommitted(

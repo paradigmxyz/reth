@@ -22,6 +22,7 @@ reth-provider.workspace = true
 reth-prune.workspace = true
 reth-stages-api.workspace = true
 reth-tasks.workspace = true
+reth-transaction-pool.workspace = true
 reth-node-types.workspace = true
 reth-chainspec.workspace = true
 reth-engine-primitives.workspace = true

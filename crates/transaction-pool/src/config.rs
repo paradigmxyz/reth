@@ -72,6 +72,11 @@ pub struct PoolConfig {
     ///
     /// This restricts how many executable transaction a delegated sender can stack.
     pub max_inflight_delegated_slot_limit: usize,
+    /// Whether to use FIFO ordering for transactions instead of gas-based ordering.
+    ///
+    /// When enabled, transactions are processed in the order they were received rather than
+    /// prioritized by gas price.
+    pub fifo_ordering: bool,
 }
 
 impl PoolConfig {
@@ -129,6 +134,7 @@ impl Default for PoolConfig {
             max_new_pending_txs_notifications: MAX_NEW_PENDING_TXS_NOTIFICATIONS,
             max_queued_lifetime: MAX_QUEUED_TRANSACTION_LIFETIME,
             max_inflight_delegated_slot_limit: DEFAULT_MAX_INFLIGHT_DELEGATED_SLOTS,
+            fifo_ordering: false,
         }
     }
 }

@@ -37,6 +37,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
+use reth_transaction_pool::TransactionPool;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -224,6 +225,18 @@ impl EngineNodeLauncher {
             // during this run.
             .maybe_store_messages(node_config.debug.engine_api_store.clone());
 
+        // Create channel for synchronous pool clearing if enabled
+        let (pool_clear_handle, pool_clear_receiver) = if node_config.txpool.clear_after_fcu {
+            let (handle, receiver) = reth_transaction_pool::sync_clear::pool_clear_channel();
+            (Some(handle), Some(receiver))
+        } else {
+            (None, None)
+        };
+
+        // Update engine tree config with clear_pool_after_fcu setting
+        let engine_tree_config =
+            engine_tree_config.with_clear_pool_after_fcu(node_config.txpool.clear_after_fcu);
+
         let mut engine_service = EngineService::new(
             consensus.clone(),
             ctx.chain_spec(),
@@ -239,9 +252,29 @@ impl EngineNodeLauncher {
             engine_tree_config,
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
+            pool_clear_handle,
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");
+
+        // Spawn dedicated task for synchronous pool clearing if enabled
+        if let Some(mut receiver) = pool_clear_receiver {
+            let pool = ctx.components().pool().clone();
+            ctx.task_executor().spawn_critical(
+                "txpool sync clear",
+                Box::pin(async move {
+                    while let Some(cmd) = receiver.recv().await {
+                        let all_hashes = pool.all_transaction_hashes();
+                        if !all_hashes.is_empty() {
+                            debug!(target: "txpool", tx_count = all_hashes.len(), "clearing pool after FCU");
+                            pool.remove_transactions(all_hashes);
+                        }
+                        cmd.acknowledge();
+                    }
+                }),
+            );
+            info!(target: "reth::cli", "Transaction pool synchronous clearing enabled");
+        }
 
         #[allow(clippy::needless_continue)]
         let events = stream_select!(

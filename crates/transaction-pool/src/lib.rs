@@ -281,7 +281,9 @@ pub use crate::{
         TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
     },
     error::PoolResult,
-    ordering::{CoinbaseTipOrdering, Priority, TransactionOrdering},
+    ordering::{
+        CoinbaseTipOrdering, ConfigurableOrdering, FifoOrdering, Priority, TransactionOrdering,
+    },
     pool::{
         blob_tx_priority, fee_delta, state::SubPool, AddedTransactionOutcome,
         AllTransactionsEvents, FullTransactionEvent, NewTransactionEvent, TransactionEvent,
@@ -314,6 +316,7 @@ pub mod maintain;
 pub mod metrics;
 pub mod noop;
 pub mod pool;
+pub mod sync_clear;
 pub mod validate;
 
 pub mod batcher;
@@ -330,7 +333,7 @@ pub mod test_utils;
 /// Type alias for default ethereum transaction pool
 pub type EthTransactionPool<Client, S, T = EthPooledTransaction> = Pool<
     TransactionValidationTaskExecutor<EthTransactionValidator<Client, T>>,
-    CoinbaseTipOrdering<T>,
+    ConfigurableOrdering<T>,
     S,
 >;
 
@@ -417,7 +420,7 @@ where
     S: BlobStore,
 {
     /// Returns a new [`Pool`] that uses the default [`TransactionValidationTaskExecutor`] when
-    /// validating [`EthPooledTransaction`]s and ords via [`CoinbaseTipOrdering`]
+    /// validating [`EthPooledTransaction`]s and ords via [`ConfigurableOrdering`]
     ///
     /// # Example
     ///
@@ -450,7 +453,7 @@ where
         blob_store: S,
         config: PoolConfig,
     ) -> Self {
-        Self::new(validator, CoinbaseTipOrdering::default(), blob_store, config)
+        Self::new(validator, ConfigurableOrdering::default(), blob_store, config)
     }
 }
 
