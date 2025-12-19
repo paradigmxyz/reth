@@ -12958,10 +12958,6 @@ int mdbx_txn_clone(const MDBX_txn *source, MDBX_txn **dest) {
   if (unlikely(!source->to.reader))
     return LOG_IFERR(MDBX_BAD_TXN);
 
-  const txnid_t snap_oldest = atomic_load64(&env->lck->cached_oldest, mo_AcquireRelease);
-  if (unlikely(source->txnid < snap_oldest))
-    return LOG_IFERR(MDBX_MVCC_RETARDED);
-
   const uint32_t snapshot_pages_used = atomic_load32(&source->to.reader->snapshot_pages_used, mo_Relaxed);
   const uint64_t snapshot_pages_retired = atomic_load64(&source->to.reader->snapshot_pages_retired, mo_Relaxed);
 
@@ -13046,6 +13042,17 @@ int mdbx_txn_clone(const MDBX_txn *source, MDBX_txn **dest) {
   atomic_store64(&r->snapshot_pages_retired, snapshot_pages_retired, mo_Relaxed);
   safe64_write(&r->txnid, source->txnid);
   atomic_store32(&env->lck->rdt_refresh_flag, true, mo_AcquireRelease);
+
+  const txnid_t snap_oldest = atomic_load64(&env->lck->cached_oldest, mo_AcquireRelease);
+  if (unlikely(source->txnid < snap_oldest)) {
+    safe64_reset(&r->txnid, true);
+    if ((env->flags & ENV_TXKEY) == 0)
+      atomic_store32(&r->pid, 0, mo_Relaxed);
+    txn->to.reader = nullptr;
+    if (!reuse)
+      osal_free(txn);
+    return LOG_IFERR(MDBX_MVCC_RETARDED);
+  }
 
   txn->flags = MDBX_TXN_RDONLY | (env->flags & MDBX_NOSTICKYTHREADS);
 #if defined(_WIN32) || defined(_WIN64)
