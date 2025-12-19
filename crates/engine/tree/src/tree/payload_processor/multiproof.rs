@@ -255,18 +255,15 @@ fn estimate_evm_state_targets(state: &EvmState) -> usize {
 
 /// Merges `overlay` into `base` while preserving `original_value` from `base`.
 ///
-/// # Why this is needed
+/// `EvmState::extend` overwrites `original_value`, breaking `is_changed()` when batching:
 ///
-/// The standard `EvmState::extend` overwrites storage slots entirely, including their
-/// `original_value`. This breaks `is_changed()` semantics when batching multiple state updates:
+/// - TX1: slot X changes 0->10 (original=0, present=10, is_changed=true)
+/// - TX2: reads slot X (original=10, present=10, is_changed=false)
+/// - After extend: original=10, present=10, is_changed=false (WRONG)
 ///
-/// - TX1: slot X changes 0→10 (original=0, present=10, `is_changed=true`)
-/// - TX2: reads slot X (original=10, present=10, `is_changed=false`)
-/// - After `extend`: slot X has original=10, present=10, `is_changed=false` ❌
+/// This function keeps base's `original_value`, so `is_changed()` stays correct:
 ///
-/// This function preserves `base.original_value` when merging, so `is_changed()` stays correct:
-///
-/// - After `merge_evm_state`: slot X has original=0, present=10, `is_changed=true` ✓
+/// - After merge: original=0, present=10, is_changed=true (CORRECT)
 fn merge_evm_state(base: &mut EvmState, overlay: EvmState) {
     for (addr, overlay_account) in overlay {
         match base.get_mut(&addr) {
