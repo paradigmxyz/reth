@@ -5,7 +5,7 @@ use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{
     keccak256,
-    map::{B256Set, HashSet},
+    map::{B256Set, Entry, HashSet},
     B256,
 };
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
@@ -222,17 +222,21 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
             if destroyed {
                 hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
             } else {
-                let mut changed_storage_iter = account
+                // Collect changed storage slots directly to avoid Peekable allocation
+                let changed_storage: Vec<_> = account
                     .storage
                     .into_iter()
-                    .filter(|(_slot, value)| value.is_changed())
-                    .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                    .peekable();
+                    .filter_map(|(slot, value)| {
+                        value
+                            .is_changed()
+                            .then(|| (keccak256(B256::from(slot)), value.present_value))
+                    })
+                    .collect();
 
-                if changed_storage_iter.peek().is_some() {
+                if !changed_storage.is_empty() {
                     hashed_state.storages.insert(
                         hashed_address,
-                        HashedStorage::from_iter(false, changed_storage_iter),
+                        HashedStorage::from_iter(false, changed_storage),
                     );
                 }
             }
@@ -1102,7 +1106,7 @@ impl MultiProofTask {
 
                 false
             }
-            // State update: batch consecutive sealed updates, then hash once
+            // State update: batch consecutive updates, then hash once
             MultiProofMessage::StateUpdate(source, update) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
 
@@ -1575,14 +1579,14 @@ where
 }
 
 /// Estimates the number of proof targets for an `EvmState` (accounts + storage slots).
+/// Single-pass fold to avoid double iteration over storage.
 fn estimate_evm_state_targets(state: &EvmState) -> usize {
-    state
-        .iter()
-        .filter(|(_, account)| account.is_touched())
-        .map(|(_, account)| {
-            1 + account.storage.iter().filter(|(_, slot)| slot.is_changed()).count()
-        })
-        .sum()
+    state.values().fold(0, |acc, account| {
+        if !account.is_touched() {
+            return acc;
+        }
+        acc + 1 + account.storage.values().filter(|slot| slot.is_changed()).count()
+    })
 }
 
 /// Merges `overlay` into `base` while preserving `original_value` from `base`.
@@ -1598,8 +1602,9 @@ fn estimate_evm_state_targets(state: &EvmState) -> usize {
 /// - After merge: original=0, present=10, is_changed=true (CORRECT)
 fn merge_evm_state(base: &mut EvmState, overlay: EvmState) {
     for (addr, overlay_account) in overlay {
-        match base.get_mut(&addr) {
-            Some(base_account) => {
+        match base.entry(addr) {
+            Entry::Occupied(mut entry) => {
+                let base_account = entry.get_mut();
                 // Merge account info - overlay wins for latest state
                 base_account.info = overlay_account.info;
                 // Merge status flags
@@ -1612,27 +1617,33 @@ fn merge_evm_state(base: &mut EvmState, overlay: EvmState) {
                     // replace it entirely with overlay's storage
                     base_account.storage = overlay_account.storage;
                 } else {
+                    // Reserve capacity to reduce rehashing when inserting new slots
+                    if !overlay_account.storage.is_empty() {
+                        base_account.storage.reserve(overlay_account.storage.len());
+                    }
+
                     // Merge storage: preserve base's original_value, take overlay's present_value
                     for (slot, overlay_slot) in overlay_account.storage {
-                        match base_account.storage.get_mut(&slot) {
-                            Some(base_slot) => {
+                        match base_account.storage.entry(slot) {
+                            Entry::Occupied(mut slot_entry) => {
+                                let base_slot = slot_entry.get_mut();
                                 // Key insight: keep base's original_value, update present_value
                                 base_slot.present_value = overlay_slot.present_value;
                                 // Update cold/transaction tracking from overlay
                                 base_slot.transaction_id = overlay_slot.transaction_id;
                                 base_slot.is_cold = overlay_slot.is_cold;
                             }
-                            None => {
+                            Entry::Vacant(slot_entry) => {
                                 // Slot is new in overlay - use overlay's values as-is
-                                base_account.storage.insert(slot, overlay_slot);
+                                slot_entry.insert(overlay_slot);
                             }
                         }
                     }
                 }
             }
-            None => {
+            Entry::Vacant(entry) => {
                 // Account is new in overlay - insert as-is
-                base.insert(addr, overlay_account);
+                entry.insert(overlay_account);
             }
         }
     }

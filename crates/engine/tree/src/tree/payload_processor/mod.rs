@@ -634,8 +634,6 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                // Clone the EvmState - the multiproof task will use merge_evm_state
-                // to batch updates while preserving original_value for correct is_changed().
                 let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
             }
         }
