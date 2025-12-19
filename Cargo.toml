@@ -589,6 +589,7 @@ zstd = "0.13"
 byteorder = "1"
 mini-moka = "0.10"
 fixed-cache = "0.1.1"
+moka = "0.12"
 tar-no-std = { version = "0.3.2", default-features = false }
 miniz_oxide = { version = "0.8.4", default-features = false }
 chrono = "0.4.41"

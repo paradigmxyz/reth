@@ -8445,6 +8445,7 @@ dependencies = [
  "metrics",
  "metrics-util",
  "mini-moka",
+ "moka",
  "parking_lot",
  "proptest",
  "rand 0.8.5",
