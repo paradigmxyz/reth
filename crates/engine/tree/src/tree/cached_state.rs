@@ -3,7 +3,6 @@ use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
 };
-use dashmap::DashMap;
 use metrics::Gauge;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
@@ -17,10 +16,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
-};
+use std::sync::Arc;
 use tracing::{debug_span, instrument, trace};
 
 /// Type alias for the fixed-cache used for accounts and storage.
@@ -176,20 +172,12 @@ impl<S: StateProvider> StateProvider for CachedStateProvider<S> {
                     Ok(Some(value).filter(|v| !v.is_zero()))
                 }
             }
+        } else if let Some(value) = self.caches.storage_cache.get(&(account, storage_key)) {
+            self.metrics.storage_cache_hits.increment(1);
+            Ok(Some(value).filter(|v| !v.is_zero()))
         } else {
-            match self.caches.get_storage(account, storage_key) {
-                CachedStatus::NotCached(_) => {
-                    self.metrics.storage_cache_misses.increment(1);
-                    let value =
-                        self.state_provider.storage(account, storage_key)?.unwrap_or_default();
-                    Ok(Some(value).filter(|v| !v.is_zero()))
-                }
-                CachedStatus::Cached(value) => {
-                    self.metrics.storage_cache_hits.increment(1);
-
-                    Ok(value)
-                }
-            }
+            self.metrics.storage_cache_misses.increment(1);
+            self.state_provider.storage(account, storage_key)
         }
     }
 }
@@ -318,16 +306,6 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider
     }
 }
 
-/// Storage entry with timestamp for invalidation tracking.
-/// The timestamp is used to detect stale entries after account destruction.
-#[derive(Debug, Clone, Copy)]
-struct TimestampedStorage {
-    /// Timestamp when this entry was inserted
-    insert_ts: u64,
-    /// The storage value
-    value: StorageValue,
-}
-
 /// Execution cache used during block processing.
 ///
 /// Optimizes state access by maintaining in-memory copies of frequently accessed
@@ -351,31 +329,13 @@ pub(crate) struct ExecutionCache {
     code_cache: Arc<FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>>,
 
     /// Flat storage cache: maps `(Address, StorageKey)` to timestamped storage value.
-    storage_cache: Arc<FixedCache<(Address, StorageKey), TimestampedStorage>>,
-
-    /// Wipe timestamps: tracks when each account was last destroyed.
-    /// Cleared after each block execution.
-    wiped_accounts: Arc<DashMap<Address, u64>>,
-
-    /// Global counter for generating timestamps.
-    /// Incremented on every insert and wipe operation.
-    counter: Arc<AtomicU64>,
+    storage_cache: Arc<FixedCache<(Address, StorageKey), StorageValue>>,
 
     /// Cache for basic account information (nonce, balance, code hash).
     account_cache: Arc<FixedCache<Address, Option<Account>, FbBuildHasher<20>>>,
 }
 
 impl ExecutionCache {
-    /// Gets the next timestamp from the global counter.
-    fn next_timestamp(&self) -> u64 {
-        self.counter.fetch_add(1, Ordering::Relaxed)
-    }
-
-    /// Gets the wipe timestamp for an address (0 if never wiped).
-    fn get_wipe_timestamp(&self, address: &Address) -> u64 {
-        self.wiped_accounts.get(address).map(|v| *v).unwrap_or(0)
-    }
-
     /// Gets code from cache, or inserts using the provided function.
     pub(crate) fn get_or_try_insert_code_with<E>(
         &self,
@@ -398,39 +358,13 @@ impl ExecutionCache {
         key: StorageKey,
         f: impl FnOnce() -> Result<StorageValue, E>,
     ) -> Result<CachedStatus<StorageValue>, E> {
-        let wipe_ts = self.get_wipe_timestamp(&address);
+        let mut miss = false;
+        let result = self.storage_cache.get_or_try_insert_with((address, key), |_| {
+            miss = true;
+            f()
+        })?;
 
-        // Check if we have a valid cached entry
-        if let Some(entry) = self.storage_cache.get(&(address, key)) &&
-            entry.insert_ts > wipe_ts
-        {
-            // Entry is valid (inserted after last wipe)
-            return Ok(CachedStatus::Cached(entry.value));
-        }
-
-        // Cache miss or stale entry - fetch from provider
-        let value = f()?;
-        let ts = self.next_timestamp();
-        let entry = TimestampedStorage { insert_ts: ts, value };
-        self.storage_cache.insert((address, key), entry);
-
-        Ok(CachedStatus::NotCached(value))
-    }
-
-    pub(crate) fn get_storage(
-        &self,
-        address: Address,
-        key: StorageKey,
-    ) -> CachedStatus<Option<StorageValue>> {
-        let Some(entry) = self.storage_cache.get(&(address, key)) else {
-            return CachedStatus::NotCached(None)
-        };
-        let wipe_ts = self.get_wipe_timestamp(&address);
-        if entry.insert_ts > wipe_ts {
-            let value = entry.value;
-            return CachedStatus::Cached(Some(value).filter(|v| !v.is_zero()));
-        }
-        CachedStatus::NotCached(None)
+        Ok(if miss { CachedStatus::NotCached(result) } else { CachedStatus::Cached(result) })
     }
 
     /// Gets account from cache, or inserts using the provided function.
@@ -455,9 +389,7 @@ impl ExecutionCache {
         key: StorageKey,
         value: Option<StorageValue>,
     ) {
-        let ts = self.next_timestamp();
-        let entry = TimestampedStorage { insert_ts: ts, value: value.unwrap_or_default() };
-        self.storage_cache.insert((address, key), entry);
+        self.storage_cache.insert((address, key), value.unwrap_or_default());
     }
 
     /// Insert multiple storage values into cache for a single account.
@@ -468,19 +400,6 @@ impl ExecutionCache {
         for (key, value) in storage_entries {
             self.insert_storage(address, key, value)
         }
-    }
-
-    /// Invalidates all storage for an account by recording a wipe timestamp.
-    /// Any cached storage entries with `insert_ts <= wipe_ts` are considered stale.
-    pub(crate) fn invalidate_account_storage(&self, address: Address) {
-        let ts = self.next_timestamp();
-        self.wiped_accounts.insert(address, ts);
-    }
-
-    /// Clears the set of wiped accounts.
-    /// Should be called after block execution completes.
-    pub(crate) fn clear_wiped_accounts(&self) {
-        self.wiped_accounts.clear();
     }
 
     /// Inserts the post-execution state changes into the cache.
@@ -531,9 +450,6 @@ impl ExecutionCache {
             if account.was_destroyed() {
                 // For account cache, we insert None to indicate destroyed
                 self.account_cache.insert(*addr, None);
-
-                // Invalidate all storage for this account
-                self.invalidate_account_storage(*addr);
                 continue
             }
 
@@ -556,11 +472,6 @@ impl ExecutionCache {
             // for the account cache
             self.account_cache.insert(*addr, Some(Account::from(account_info)));
         }
-
-        // Clear wiped accounts set after block execution is complete.
-        // Since EIP-6780, SELFDESTRUCT only works within the same transaction,
-        // so we only need to track wipes for the duration of a single block.
-        self.clear_wiped_accounts();
 
         Ok(())
     }
@@ -591,8 +502,6 @@ impl ExecutionCacheBuilder {
                 self.storage_cache_entries,
                 DefaultHashBuilder::default(),
             )),
-            wiped_accounts: Arc::new(DashMap::new()),
-            counter: Arc::new(AtomicU64::new(1)),
             account_cache: Arc::new(FixedCache::new(
                 self.account_cache_entries,
                 FbBuildHasher::<20>::default(),
@@ -722,58 +631,6 @@ mod tests {
         let res = state_provider.storage(address, storage_key);
         assert!(res.is_ok());
         assert_eq!(res.unwrap(), Some(storage_value));
-    }
-
-    #[test]
-    fn test_storage_invalidation_on_destroy() {
-        let address = Address::random();
-        let storage_key = StorageKey::random();
-        let storage_value = U256::from(42);
-
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
-
-        // Insert a storage value
-        caches.insert_storage(address, storage_key, Some(storage_value));
-
-        // Verify it's cached
-        let result = caches.get_or_try_insert_storage_with(address, storage_key, || {
-            Ok::<_, ()>(U256::from(999)) // Should not be called
-        });
-        assert_eq!(result.unwrap(), CachedStatus::Cached(storage_value));
-
-        // Invalidate the account's storage (simulating SELFDESTRUCT)
-        caches.invalidate_account_storage(address);
-
-        // Now the cached value should be stale, so the fallback should be called
-        let result = caches.get_or_try_insert_storage_with(address, storage_key, || {
-            Ok::<_, ()>(U256::from(0)) // This should be called now
-        });
-        assert_eq!(result.unwrap(), CachedStatus::NotCached(U256::ZERO));
-    }
-
-    #[test]
-    fn test_storage_after_destroy_and_recreate() {
-        let address = Address::random();
-        let storage_key = StorageKey::random();
-        let old_value = U256::from(100);
-        let new_value = U256::from(200);
-
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
-
-        // Insert old storage value
-        caches.insert_storage(address, storage_key, Some(old_value));
-
-        // Destroy the account
-        caches.invalidate_account_storage(address);
-
-        // Insert new storage value (account recreated with new storage)
-        caches.insert_storage(address, storage_key, Some(new_value));
-
-        // Should get the new value, not the old one
-        let result = caches.get_or_try_insert_storage_with(address, storage_key, || {
-            Ok::<_, ()>(U256::from(999)) // Should not be called
-        });
-        assert_eq!(result.unwrap(), CachedStatus::Cached(new_value));
     }
 
     #[test]
