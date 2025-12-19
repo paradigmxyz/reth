@@ -3882,6 +3882,35 @@ MDBX_NOTHROW_PURE_FUNCTION LIBMDBX_API void *mdbx_env_get_userctx(const MDBX_env
 LIBMDBX_API int mdbx_txn_begin_ex(MDBX_env *env, MDBX_txn *parent, MDBX_txn_flags_t flags, MDBX_txn **txn,
                                   void *context);
 
+/** \brief Clone a read-only transaction snapshot.
+ * \ingroup c_transactions
+ *
+ * Creates a new read-only transaction that uses the same MVCC snapshot as
+ * the \p src transaction. This allows parallel read operations across threads
+ * without re-opening a read transaction and re-fetching state.
+ *
+ * \note This function requires \ref MDBX_NOSTICKYTHREADS (aka MDBX_NOTLS)
+ * to be enabled for the environment. Otherwise it will return
+ * \ref MDBX_TXN_OVERLAPPING.
+ *
+ * \note The \p src transaction must be an active read-only transaction.
+ *
+ * \note The \p src transaction and the cloned transaction must not be used
+ * concurrently from multiple threads. Each transaction and its cursors must
+ * be confined to a single thread at a time.
+ *
+ * \param [in]  src   A read-only transaction handle returned by
+ *                    \ref mdbx_txn_begin_ex() or \ref mdbx_txn_begin().
+ * \param [out] dest  Address where the cloned \ref MDBX_txn handle will be
+ *                    stored. Must not be NULL.
+ *
+ * \returns A non-zero error value on failure and 0 on success.
+ * \retval MDBX_EINVAL        Invalid arguments or \p src is not read-only.
+ * \retval MDBX_TXN_OVERLAPPING \ref MDBX_NOSTICKYTHREADS is not enabled.
+ * \retval MDBX_READERS_FULL  Reader lock table is full.
+ * \retval MDBX_ENOMEM        Out of memory. */
+LIBMDBX_API int mdbx_txn_clone(const MDBX_txn *src, MDBX_txn **dest);
+
 /** \brief Create a transaction for use with the environment.
  * \ingroup c_transactions
  *

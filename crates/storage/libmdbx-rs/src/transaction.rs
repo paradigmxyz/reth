@@ -483,6 +483,20 @@ impl Transaction<RW> {
 }
 
 impl Transaction<RO> {
+    /// Clones this read-only transaction, preserving the same MVCC snapshot.
+    ///
+    /// This requires the environment to be opened with `MDBX_NOSTICKYTHREADS` (aka `MDBX_NOTLS`).
+    /// The cloned transaction must not be used concurrently with this transaction from multiple
+    /// threads.
+    pub fn clone_snapshot(&self) -> Result<Self> {
+        let cloned = self.txn_execute(|txn| {
+            let mut cloned: *mut ffi::MDBX_txn = ptr::null_mut();
+            mdbx_result(unsafe { ffi::mdbx_txn_clone(txn, &mut cloned) }).map(|_| cloned)
+        })??;
+
+        Ok(Self::new_from_ptr(self.env().clone(), cloned))
+    }
+
     /// Closes the database handle.
     ///
     /// # Safety

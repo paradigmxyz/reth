@@ -373,3 +373,35 @@ fn test_stat_dupsort() {
         assert_eq!(stat.entries(), 8);
     }
 }
+
+#[test]
+fn test_txn_clone_snapshot() {
+    let dir = tempdir().unwrap();
+    let env = Environment::builder().open(dir.path()).unwrap();
+    {
+        let txn = env.begin_rw_txn().unwrap();
+        let db = txn.open_db(None).unwrap();
+        txn.put(db.dbi(), b"k", b"v1", WriteFlags::empty()).unwrap();
+        txn.commit().unwrap();
+    }
+
+    let ro = env.begin_ro_txn().unwrap();
+    let clone = ro.clone_snapshot().unwrap();
+
+    {
+        let txn = env.begin_rw_txn().unwrap();
+        let db = txn.open_db(None).unwrap();
+        txn.put(db.dbi(), b"k", b"v2", WriteFlags::empty()).unwrap();
+        txn.commit().unwrap();
+    }
+
+    let db = ro.open_db(None).unwrap();
+    assert_eq!(ro.get::<[u8; 2]>(db.dbi(), b"k").unwrap(), Some(*b"v1"));
+
+    let db = clone.open_db(None).unwrap();
+    assert_eq!(clone.get::<[u8; 2]>(db.dbi(), b"k").unwrap(), Some(*b"v1"));
+
+    let ro2 = env.begin_ro_txn().unwrap();
+    let db = ro2.open_db(None).unwrap();
+    assert_eq!(ro2.get::<[u8; 2]>(db.dbi(), b"k").unwrap(), Some(*b"v2"));
+}
