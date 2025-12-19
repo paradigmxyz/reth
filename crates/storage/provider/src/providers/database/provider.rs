@@ -3740,10 +3740,10 @@ mod tests {
             .unwrap();
         for i in 0..3 {
             let mut block = data.blocks[i].0.clone();
-            if let Some(tx) = block.block_mut().transactions.first_mut() {
-                if let TransactionSigned::Legacy(signed) = tx {
-                    signed.tx_mut().nonce = signed.tx().nonce.saturating_add(i as u64 + 1);
-                }
+            if let Some(TransactionSigned::Legacy(signed)) =
+                block.block_mut().transactions.first_mut()
+            {
+                signed.tx_mut().nonce = signed.tx().nonce.saturating_add(i as u64 + 1);
             }
             provider_rw.insert_block(block).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
