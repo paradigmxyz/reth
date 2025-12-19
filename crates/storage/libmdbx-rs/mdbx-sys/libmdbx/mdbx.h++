@@ -3797,6 +3797,21 @@ public:
   /// \brief Start nested write transaction.
   txn_managed start_nested();
 
+  /// \brief Clone a read-only transaction.
+  ///
+  /// Creates a new read-only transaction that views the same MVCC snapshot
+  /// as this transaction. The cloned transaction has its own reader slot
+  /// and is completely independent from this transaction.
+  ///
+  /// This is useful for parallelizing read operations across multiple threads
+  /// where all threads need to see the same consistent view of the database.
+  ///
+  /// \note Only read-only transactions can be cloned.
+  /// \note Works with both sticky-thread and MDBX_NOSTICKYTHREADS modes.
+  /// \throws exception if this transaction is not read-only.
+  /// \returns A managed clone of this transaction.
+  txn_managed clone_reader() const;
+
   /// \brief Opens cursor for specified key-value map handle.
   inline cursor_managed open_cursor(map_handle map) const;
 
