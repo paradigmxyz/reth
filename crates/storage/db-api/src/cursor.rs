@@ -1,7 +1,6 @@
 use std::{
-    cell::Cell,
+    cell::RefCell,
     fmt,
-    mem::ManuallyDrop,
     ops::{Bound, RangeBounds},
 };
 
@@ -372,54 +371,41 @@ impl<T: DupSort, CURSOR: DbDupCursorRO<T>> Iterator for DupWalker<'_, T, CURSOR>
     }
 }
 
-/// A wrapper around a cursor that returns it to a cell on drop.
-///
-/// This allows cursors to be reused across multiple operations,
-/// reducing the overhead of repeatedly creating new cursors.
-pub struct ReusableCursor<'tx, 'cell, T: Table, C: DbCursorRO<T>> {
-    cursor: ManuallyDrop<C>,
-    cell: &'cell Cell<Option<C>>,
-    _phantom: std::marker::PhantomData<&'tx T>,
+/// A guard that returns a cursor to its slot on drop.
+pub struct CursorGuard<'a, C> {
+    cursor: Option<C>,
+    slot: &'a RefCell<Option<C>>,
 }
 
-impl<'tx, 'cell, T, C> fmt::Debug for ReusableCursor<'tx, 'cell, T, C>
-where
-    T: Table,
-    C: DbCursorRO<T> + fmt::Debug,
-{
+impl<C: fmt::Debug> fmt::Debug for CursorGuard<'_, C> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("ReusableCursor").field("cursor", &self.cursor).finish()
+        f.debug_struct("CursorGuard").field("cursor", &self.cursor).finish()
     }
 }
 
-impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> ReusableCursor<'tx, 'cell, T, C> {
-    /// Creates a new `ReusableCursor` from a cursor and a cell to return it to.
-    pub const fn new(cursor: C, cell: &'cell Cell<Option<C>>) -> Self {
-        Self { cursor: ManuallyDrop::new(cursor), cell, _phantom: std::marker::PhantomData }
+impl<C> CursorGuard<'_, C> {
+    /// Creates a new `CursorGuard` from a cursor and a slot to return it to.
+    pub const fn new(cursor: C, slot: &RefCell<Option<C>>) -> CursorGuard<'_, C> {
+        CursorGuard { cursor: Some(cursor), slot }
     }
 }
 
-impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> Drop for ReusableCursor<'tx, 'cell, T, C> {
+impl<C> Drop for CursorGuard<'_, C> {
     fn drop(&mut self) {
-        // SAFETY: We take ownership of the cursor and return it to the cell.
-        // The cursor won't be dropped automatically due to ManuallyDrop.
-        let cursor = unsafe { ManuallyDrop::take(&mut self.cursor) };
-        self.cell.set(Some(cursor));
+        *self.slot.borrow_mut() = self.cursor.take();
     }
 }
 
-impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> std::ops::Deref for ReusableCursor<'tx, 'cell, T, C> {
+impl<C> std::ops::Deref for CursorGuard<'_, C> {
     type Target = C;
 
     fn deref(&self) -> &Self::Target {
-        &self.cursor
+        self.cursor.as_ref().expect("cursor is always Some until drop")
     }
 }
 
-impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> std::ops::DerefMut
-    for ReusableCursor<'tx, 'cell, T, C>
-{
+impl<C> std::ops::DerefMut for CursorGuard<'_, C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.cursor
+        self.cursor.as_mut().expect("cursor is always Some until drop")
     }
 }

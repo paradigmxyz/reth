@@ -199,7 +199,7 @@ impl<Provider: DBProvider> LatestStateProvider<Provider> {
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
-    fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
+    const fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
         LatestStateProviderRef::new(&self.0)
     }
 }
