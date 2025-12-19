@@ -2974,7 +2974,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             }
         }
 
-        self.storage.writer().write_block_bodies(self, &bodies)?;
+        let bodies_refs: Vec<_> =
+            bodies.iter().map(|(block_num, body)| (*block_num, body.as_ref())).collect();
+        self.storage.writer().write_block_bodies(self, bodies_refs)?;
 
         Ok(())
     }
