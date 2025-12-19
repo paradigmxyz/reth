@@ -41,11 +41,11 @@ impl<TX: DbTx> ReusableStateCursors<TX> {
     /// Gets a reusable cursor for the `StorageChangeSets` table.
     ///
     /// If a cursor is cached, it will be reused. Otherwise, a new cursor is created.
-    pub(crate) fn storage_changesets<'cell>(
-        &'cell self,
+    pub(crate) fn storage_changesets(
+        &self,
         tx: &TX,
     ) -> Result<
-        ReusableCursor<'cell, StorageChangeSets, TX::DupCursor<StorageChangeSets>>,
+        ReusableCursor<'_, StorageChangeSets, TX::DupCursor<StorageChangeSets>>,
         DatabaseError,
     >
     where
@@ -59,11 +59,11 @@ impl<TX: DbTx> ReusableStateCursors<TX> {
     /// Gets a reusable cursor for the `PlainStorageState` table.
     ///
     /// If a cursor is cached, it will be reused. Otherwise, a new cursor is created.
-    pub(crate) fn plain_storage_state<'cell>(
-        &'cell self,
+    pub(crate) fn plain_storage_state(
+        &self,
         tx: &TX,
     ) -> Result<
-        ReusableCursor<'cell, PlainStorageState, TX::DupCursor<PlainStorageState>>,
+        ReusableCursor<'_, PlainStorageState, TX::DupCursor<PlainStorageState>>,
         DatabaseError,
     >
     where
@@ -77,10 +77,10 @@ impl<TX: DbTx> ReusableStateCursors<TX> {
     /// Gets a reusable cursor for the `AccountsHistory` table.
     ///
     /// If a cursor is cached, it will be reused. Otherwise, a new cursor is created.
-    pub(crate) fn accounts_history<'cell>(
-        &'cell self,
+    pub(crate) fn accounts_history(
+        &self,
         tx: &TX,
-    ) -> Result<ReusableCursor<'cell, AccountsHistory, TX::Cursor<AccountsHistory>>, DatabaseError>
+    ) -> Result<ReusableCursor<'_, AccountsHistory, TX::Cursor<AccountsHistory>>, DatabaseError>
     where
         TX::Cursor<AccountsHistory>: DbCursorRO<AccountsHistory>,
     {
@@ -91,10 +91,10 @@ impl<TX: DbTx> ReusableStateCursors<TX> {
     /// Gets a reusable cursor for the `StoragesHistory` table.
     ///
     /// If a cursor is cached, it will be reused. Otherwise, a new cursor is created.
-    pub(crate) fn storages_history<'cell>(
-        &'cell self,
+    pub(crate) fn storages_history(
+        &self,
         tx: &TX,
-    ) -> Result<ReusableCursor<'cell, StoragesHistory, TX::Cursor<StoragesHistory>>, DatabaseError>
+    ) -> Result<ReusableCursor<'_, StoragesHistory, TX::Cursor<StoragesHistory>>, DatabaseError>
     where
         TX::Cursor<StoragesHistory>: DbCursorRO<StoragesHistory>,
     {

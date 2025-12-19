@@ -381,7 +381,7 @@ pub struct ReusableCursor<'cell, T: Table, C: DbCursorRO<T>> {
     _phantom: std::marker::PhantomData<T>,
 }
 
-impl<'cell, T, C> fmt::Debug for ReusableCursor<'cell, T, C>
+impl<T, C> fmt::Debug for ReusableCursor<'_, T, C>
 where
     T: Table,
     C: DbCursorRO<T> + fmt::Debug,
@@ -398,13 +398,13 @@ impl<'cell, T: Table, C: DbCursorRO<T>> ReusableCursor<'cell, T, C> {
     }
 }
 
-impl<'cell, T: Table, C: DbCursorRO<T>> Drop for ReusableCursor<'cell, T, C> {
+impl<T: Table, C: DbCursorRO<T>> Drop for ReusableCursor<'_, T, C> {
     fn drop(&mut self) {
         self.cell.set(self.cursor.take());
     }
 }
 
-impl<'cell, T: Table, C: DbCursorRO<T>> std::ops::Deref for ReusableCursor<'cell, T, C> {
+impl<T: Table, C: DbCursorRO<T>> std::ops::Deref for ReusableCursor<'_, T, C> {
     type Target = C;
 
     fn deref(&self) -> &Self::Target {
@@ -412,7 +412,7 @@ impl<'cell, T: Table, C: DbCursorRO<T>> std::ops::Deref for ReusableCursor<'cell
     }
 }
 
-impl<'cell, T: Table, C: DbCursorRO<T>> std::ops::DerefMut for ReusableCursor<'cell, T, C> {
+impl<T: Table, C: DbCursorRO<T>> std::ops::DerefMut for ReusableCursor<'_, T, C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.cursor.as_mut().expect("cursor always exists")
     }
