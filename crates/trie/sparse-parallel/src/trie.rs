@@ -4,7 +4,7 @@ use alloy_primitives::{
     map::{Entry, HashMap},
     B256,
 };
-use alloy_rlp::Decodable;
+use alloy_rlp::{Decodable, Encodable};
 use alloy_trie::{BranchNodeCompact, TrieMask, EMPTY_ROOT_HASH};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
@@ -14,8 +14,8 @@ use reth_trie_common::{
 };
 use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode, SparseNodeType, SparseTrieInterface,
-    SparseTrieUpdates,
+    rlp_node_from_rlp_cached, LeafLookup, LeafLookupError, RlpNodeStackItem, SparseNode,
+    SparseNodeType, SparseTrieInterface, SparseTrieUpdates,
 };
 use smallvec::SmallVec;
 use std::cmp::{Ord, Ordering, PartialOrd};
@@ -2206,7 +2206,8 @@ impl SparseSubtrieInner {
                     // Encode the leaf node and update its hash
                     let value = self.values.get(&path).unwrap();
                     self.buffers.rlp_buf.clear();
-                    let rlp_node = LeafNodeRef { key, value }.rlp(&mut self.buffers.rlp_buf);
+                    LeafNodeRef { key, value }.encode(&mut self.buffers.rlp_buf);
+                    let rlp_node = rlp_node_from_rlp_cached(&self.buffers.rlp_buf);
                     *hash = rlp_node.as_hash();
                     (rlp_node, SparseNodeType::Leaf)
                 }
@@ -2229,8 +2230,8 @@ impl SparseSubtrieInner {
                     let RlpNodeStackItem { path: _, rlp_node: child, node_type: child_node_type } =
                         self.buffers.rlp_node_stack.pop().unwrap();
                     self.buffers.rlp_buf.clear();
-                    let rlp_node =
-                        ExtensionNodeRef::new(key, &child).rlp(&mut self.buffers.rlp_buf);
+                    ExtensionNodeRef::new(key, &child).encode(&mut self.buffers.rlp_buf);
+                    let rlp_node = rlp_node_from_rlp_cached(&self.buffers.rlp_buf);
                     *hash = rlp_node.as_hash();
 
                     let store_in_db_trie_value = child_node_type.store_in_db_trie();
@@ -2387,7 +2388,8 @@ impl SparseSubtrieInner {
                 self.buffers.rlp_buf.clear();
                 let branch_node_ref =
                     BranchNodeRef::new(&self.buffers.branch_value_stack_buf, *state_mask);
-                let rlp_node = branch_node_ref.rlp(&mut self.buffers.rlp_buf);
+                branch_node_ref.encode(&mut self.buffers.rlp_buf);
+                let rlp_node = rlp_node_from_rlp_cached(&self.buffers.rlp_buf);
                 *hash = rlp_node.as_hash();
 
                 // Save a branch node update only if it's not a root node, and we need to

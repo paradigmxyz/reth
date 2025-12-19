@@ -27,6 +27,7 @@ alloy-rlp.workspace = true
 auto_impl.workspace = true
 rayon = { workspace = true, optional = true }
 smallvec = { workspace = true, features = ["const_new"] }
+fixed-cache = { workspace = true, optional = true }
 
 # metrics
 reth-metrics = { workspace = true, optional = true }
@@ -59,6 +60,7 @@ std = [
     "alloy-primitives/std",
     "alloy-rlp/std",
     "alloy-trie/std",
+    "dep:fixed-cache",
     "reth-execution-errors/std",
     "reth-primitives-traits/std",
     "reth-storage-api/std",

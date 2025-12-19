@@ -16,6 +16,9 @@ pub use traits::*;
 
 pub mod provider;
 
+mod hash_cache;
+pub use hash_cache::{hash_trie_node_cached, rlp_node_from_rlp_cached};
+
 #[cfg(feature = "metrics")]
 mod metrics;
 

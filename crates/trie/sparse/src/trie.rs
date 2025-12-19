@@ -1,6 +1,7 @@
 use crate::{
+    hash_trie_node_cached,
     provider::{RevealedNode, TrieNodeProvider},
-    LeafLookup, LeafLookupError, SparseTrieInterface, SparseTrieUpdates,
+    rlp_node_from_rlp_cached, LeafLookup, LeafLookupError, SparseTrieInterface, SparseTrieUpdates,
 };
 use alloc::{
     borrow::Cow,
@@ -11,11 +12,11 @@ use alloc::{
     vec::Vec,
 };
 use alloy_primitives::{
-    hex, keccak256,
+    hex,
     map::{Entry, HashMap, HashSet},
     B256,
 };
-use alloy_rlp::Decodable;
+use alloy_rlp::{Decodable, Encodable};
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -928,7 +929,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         if let Some(root_hash) = rlp_node.as_hash() {
             root_hash
         } else {
-            keccak256(rlp_node)
+            hash_trie_node_cached(rlp_node.as_ref())
         }
     }
 
@@ -1532,7 +1533,8 @@ impl SerialSparseTrie {
                     } else {
                         let value = self.values.get(&path).unwrap();
                         rlp_buf.clear();
-                        let rlp_node = LeafNodeRef { key, value }.rlp(rlp_buf);
+                        LeafNodeRef { key, value }.encode(rlp_buf);
+                        let rlp_node = rlp_node_from_rlp_cached(rlp_buf);
                         *hash = rlp_node.as_hash();
                         (rlp_node, SparseNodeType::Leaf)
                     }
@@ -1554,7 +1556,8 @@ impl SerialSparseTrie {
                             node_type: child_node_type,
                         } = buffers.rlp_node_stack.pop().unwrap();
                         rlp_buf.clear();
-                        let rlp_node = ExtensionNodeRef::new(key, &child).rlp(rlp_buf);
+                        ExtensionNodeRef::new(key, &child).encode(rlp_buf);
+                        let rlp_node = rlp_node_from_rlp_cached(rlp_buf);
                         *hash = rlp_node.as_hash();
 
                         let store_in_db_trie_value = child_node_type.store_in_db_trie();
@@ -1708,7 +1711,8 @@ impl SerialSparseTrie {
                     rlp_buf.clear();
                     let branch_node_ref =
                         BranchNodeRef::new(&buffers.branch_value_stack_buf, *state_mask);
-                    let rlp_node = branch_node_ref.rlp(rlp_buf);
+                    branch_node_ref.encode(rlp_buf);
+                    let rlp_node = rlp_node_from_rlp_cached(rlp_buf);
                     *hash = rlp_node.as_hash();
 
                     // Save a branch node update only if it's not a root node, and we need to

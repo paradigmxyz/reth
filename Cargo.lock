@@ -3987,6 +3987,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "fixed-cache"
+version = "0.1.2"
+source = "git+https://github.com/danipopes/fixed-cache#2324460d2b7c43f7665c37f21e6b3aab6298a1f0"
+dependencies = [
+ "equivalent",
+]
+
+[[package]]
 name = "fixed-hash"
 version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -11029,6 +11037,7 @@ dependencies = [
  "assert_matches",
  "auto_impl",
  "codspeed-criterion-compat",
+ "fixed-cache",
  "itertools 0.14.0",
  "metrics",
  "pretty_assertions",
