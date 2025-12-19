@@ -393,7 +393,7 @@ where
             metrics,
             terminate_execution,
             precompile_cache_disabled,
-            mut precompile_cache_map,
+            precompile_cache_map,
         } = self;
 
         let mut state_provider = match provider.build() {

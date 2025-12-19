@@ -151,7 +151,6 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
 
 /// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
-#[derive(Debug)]
 pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Database transaction.
     tx: TX,
@@ -167,8 +166,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
-    /// Single `RocksDB` batch for this provider's lifetime.
-    /// All `RocksDB` writes accumulate here and commit together at provider commit time.
+    /// Single `RocksDB` batch for history index operations.
+    /// All history index writes accumulate here and commit together at provider commit time.
     #[cfg(all(unix, feature = "rocksdb"))]
     pending_rocks_batch: std::sync::Mutex<crate::providers::rocksdb::RocksDBBatch>,
     /// In-memory overlay for history index last-shards written into the shared `RocksDB` batch.
@@ -179,6 +178,9 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// wins").
     #[cfg(all(unix, feature = "rocksdb"))]
     pending_history_index_last_shards: std::sync::Mutex<PendingHistoryIndexLastShards>,
+    /// Pending `RocksDB` batches to be committed at provider commit time (from `EitherWriter`).
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
 }
@@ -189,6 +191,22 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
 struct PendingHistoryIndexLastShards {
     accounts: HashMap<Address, Vec<u64>>,
     storages: HashMap<(Address, B256), Vec<u64>>,
+}
+
+impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("DatabaseProvider");
+        s.field("tx", &self.tx)
+            .field("chain_spec", &self.chain_spec)
+            .field("static_file_provider", &self.static_file_provider)
+            .field("prune_modes", &self.prune_modes)
+            .field("storage", &self.storage)
+            .field("storage_settings", &self.storage_settings)
+            .field("rocksdb_provider", &self.rocksdb_provider);
+        #[cfg(all(unix, feature = "rocksdb"))]
+        s.field("pending_rocksdb_batches", &"<pending batches>");
+        s.field("minimum_pruning_distance", &self.minimum_pruning_distance).finish()
+    }
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -279,6 +297,11 @@ impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
     fn rocksdb_provider(&self) -> RocksDBProvider {
         self.rocksdb_provider.clone()
     }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn set_pending_rocksdb_batch(&self, batch: rocksdb::WriteBatchWithTransaction<true>) {
+        self.pending_rocksdb_batches.lock().push(batch);
+    }
 }
 
 impl<TX: Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
@@ -315,6 +338,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_history_index_last_shards: Default::default(),
             rocksdb_provider,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
     }
@@ -575,6 +600,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_history_index_last_shards: Default::default(),
             rocksdb_provider,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
     }
@@ -601,7 +628,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
-    /// Returns mutable access to the `RocksDB` batch for this provider.
+    /// Returns mutable access to the `RocksDB` batch for history index operations.
     ///
     /// All writes accumulate in this batch and are committed together at provider commit time.
     /// The returned guard releases the lock when dropped.
@@ -3251,7 +3278,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
             for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
                 let hash = transaction.tx_hash();
-                writer.put_transaction_hash_number(*hash, tx_num)?;
+                writer.put_transaction_hash_number(*hash, tx_num, false)?;
             }
             // Batch commits at provider commit time
             durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
@@ -3558,7 +3585,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         self.prune_modes_ref()
     }
 
-    /// Commit database transaction and static files.
+    /// Commit database transaction, static files, and pending `RocksDB` batches.
     fn commit(self) -> ProviderResult<bool> {
         // Commit ordering ensures consistency between storage layers on crash recovery.
         //
@@ -3574,9 +3601,15 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
             #[cfg(all(unix, feature = "rocksdb"))]
             {
+                // Commit the shared history index batch
                 let batch = self.pending_rocks_batch.into_inner().expect("rocks batch poisoned");
                 if !batch.is_empty() {
                     batch.commit()?;
+                }
+                // Commit EitherWriter batches
+                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+                for batch in batches {
+                    self.rocksdb_provider.commit_batch(batch)?;
                 }
             }
 
@@ -3587,9 +3620,15 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
             #[cfg(all(unix, feature = "rocksdb"))]
             {
+                // Commit the shared history index batch
                 let batch = self.pending_rocks_batch.into_inner().expect("rocks batch poisoned");
                 if !batch.is_empty() {
                     batch.commit()?;
+                }
+                // Commit EitherWriter batches
+                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+                for batch in batches {
+                    self.rocksdb_provider.commit_batch(batch)?;
                 }
             }
 
