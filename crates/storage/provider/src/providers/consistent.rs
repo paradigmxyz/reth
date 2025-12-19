@@ -1565,8 +1565,9 @@ mod tests {
         // Insert first 5 blocks into the database
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
-            let recovered = block.clone().try_recover().expect("failed to seal block with senders");
-            provider_rw.insert_block(&recovered)?;
+            provider_rw.insert_block(
+                &block.clone().try_recover().expect("failed to seal block with senders"),
+            )?;
         }
         provider_rw.commit()?;
 
@@ -1675,8 +1676,9 @@ mod tests {
         // Insert first 5 blocks into the database
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
-            let recovered = block.clone().try_recover().expect("failed to seal block with senders");
-            provider_rw.insert_block(&recovered)?;
+            provider_rw.insert_block(
+                &block.clone().try_recover().expect("failed to seal block with senders"),
+            )?;
         }
         provider_rw.commit()?;
 

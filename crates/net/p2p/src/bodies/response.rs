@@ -37,6 +37,14 @@ where
             Self::Empty(_) => None,
         }
     }
+
+    /// Return the reference to the response body
+    pub fn body(&self) -> Option<&B::Body> {
+        match self {
+            Self::Full(block) => Some(&block.body()),
+            Self::Empty(_) => None,
+        }
+    }
 }
 
 impl<B: Block> InMemorySize for BlockResponse<B> {
