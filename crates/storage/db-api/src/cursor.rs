@@ -375,13 +375,13 @@ impl<T: DupSort, CURSOR: DbDupCursorRO<T>> Iterator for DupWalker<'_, T, CURSOR>
 ///
 /// This allows cursors to be reused across multiple operations,
 /// reducing the overhead of repeatedly creating new cursors.
-pub struct ReusableCursor<'tx, 'cell, T: Table, C: DbCursorRO<T>> {
+pub struct ReusableCursor<'cell, T: Table, C: DbCursorRO<T>> {
     cursor: Option<C>,
     cell: &'cell Cell<Option<C>>,
-    _phantom: std::marker::PhantomData<&'tx T>,
+    _phantom: std::marker::PhantomData<T>,
 }
 
-impl<'tx, 'cell, T, C> fmt::Debug for ReusableCursor<'tx, 'cell, T, C>
+impl<'cell, T, C> fmt::Debug for ReusableCursor<'cell, T, C>
 where
     T: Table,
     C: DbCursorRO<T> + fmt::Debug,
@@ -391,20 +391,20 @@ where
     }
 }
 
-impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> ReusableCursor<'tx, 'cell, T, C> {
+impl<'cell, T: Table, C: DbCursorRO<T>> ReusableCursor<'cell, T, C> {
     /// Creates a new `ReusableCursor` from a cursor and a cell to return it to.
     pub const fn new(cursor: C, cell: &'cell Cell<Option<C>>) -> Self {
         Self { cursor: Some(cursor), cell, _phantom: std::marker::PhantomData }
     }
 }
 
-impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> Drop for ReusableCursor<'tx, 'cell, T, C> {
+impl<'cell, T: Table, C: DbCursorRO<T>> Drop for ReusableCursor<'cell, T, C> {
     fn drop(&mut self) {
         self.cell.set(self.cursor.take());
     }
 }
 
-impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> std::ops::Deref for ReusableCursor<'tx, 'cell, T, C> {
+impl<'cell, T: Table, C: DbCursorRO<T>> std::ops::Deref for ReusableCursor<'cell, T, C> {
     type Target = C;
 
     fn deref(&self) -> &Self::Target {
@@ -412,9 +412,7 @@ impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> std::ops::Deref for ReusableCursor<
     }
 }
 
-impl<'tx, 'cell, T: Table, C: DbCursorRO<T>> std::ops::DerefMut
-    for ReusableCursor<'tx, 'cell, T, C>
-{
+impl<'cell, T: Table, C: DbCursorRO<T>> std::ops::DerefMut for ReusableCursor<'cell, T, C> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.cursor.as_mut().expect("cursor always exists")
     }
