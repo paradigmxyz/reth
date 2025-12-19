@@ -145,7 +145,8 @@ impl LaunchContext {
     /// Loads the reth config with the configured `data_dir` and overrides settings according to the
     /// `config`.
     ///
-    /// This is async because the trusted peers may have to be resolved.
+    /// Persists updated pruning settings back to the config file when needed and merges static file
+    /// CLI options with the config file, giving precedence to CLI values.
     pub fn load_toml_config<ChainSpec>(
         &self,
         config: &NodeConfig<ChainSpec>,
