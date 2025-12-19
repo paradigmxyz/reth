@@ -897,22 +897,25 @@ mod rocksdb_tests {
 
         // Get the RocksDB batch from the provider
         let rocksdb = factory.rocksdb_provider();
-        let batch = rocksdb.batch();
+        let mut batch = rocksdb.batch();
 
         // Create EitherWriter with RocksDB
         let provider = factory.database_provider_rw().unwrap();
-        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+        {
+            let mut writer =
+                EitherWriter::new_transaction_hash_numbers(&provider, &mut batch).unwrap();
 
-        // Verify we got a RocksDB writer
-        assert!(matches!(writer, EitherWriter::RocksDB(_)));
+            // Verify we got a RocksDB writer
+            assert!(matches!(writer, EitherWriter::RocksDB(_)));
 
-        // Write transaction hash numbers (append_only=false since we're using RocksDB)
-        writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
-        writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
+            // Write transaction hash numbers (append_only=false since we're using RocksDB)
+            writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
+            writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
+        }
 
-        // Extract the batch and register with provider for commit
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
-            provider.set_pending_rocksdb_batch(batch);
+        // Register the batch with provider for commit
+        if !batch.is_empty() {
+            provider.set_pending_rocksdb_batch(batch.into_inner());
         }
 
         // Commit via provider - this commits RocksDB batch too
@@ -943,14 +946,17 @@ mod rocksdb_tests {
         assert_eq!(rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap(), Some(tx_num));
 
         // Now delete using EitherWriter
-        let batch = rocksdb.batch();
+        let mut batch = rocksdb.batch();
         let provider = factory.database_provider_rw().unwrap();
-        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
-        writer.delete_transaction_hash_number(hash).unwrap();
+        {
+            let mut writer =
+                EitherWriter::new_transaction_hash_numbers(&provider, &mut batch).unwrap();
+            writer.delete_transaction_hash_number(hash).unwrap();
+        }
 
-        // Extract the batch and commit via provider
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
-            provider.set_pending_rocksdb_batch(batch);
+        // Register the batch and commit via provider
+        if !batch.is_empty() {
+            provider.set_pending_rocksdb_batch(batch.into_inner());
         }
         provider.commit().unwrap();
 
@@ -1114,20 +1120,22 @@ mod rocksdb_tests {
 
         // Get the RocksDB batch from the provider
         let rocksdb = factory.rocksdb_provider();
-        let batch = rocksdb.batch();
+        let mut batch = rocksdb.batch();
 
         // Create provider and EitherWriter
         let provider = factory.database_provider_rw().unwrap();
-        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+        {
+            let mut writer =
+                EitherWriter::new_transaction_hash_numbers(&provider, &mut batch).unwrap();
 
-        // Write transaction hash numbers (append_only=false since we're using RocksDB)
-        writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
-        writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
+            // Write transaction hash numbers (append_only=false since we're using RocksDB)
+            writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
+            writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
+        }
 
-        // Extract the raw batch from the writer and register it with the provider
-        let raw_batch = writer.into_raw_rocksdb_batch();
-        if let Some(batch) = raw_batch {
-            provider.set_pending_rocksdb_batch(batch);
+        // Register the batch with the provider
+        if !batch.is_empty() {
+            provider.set_pending_rocksdb_batch(batch.into_inner());
         }
 
         // Data should NOT be visible yet (batch not committed)

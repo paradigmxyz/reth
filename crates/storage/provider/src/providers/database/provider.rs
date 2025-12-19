@@ -172,10 +172,15 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     pending_rocks_batch: std::sync::Mutex<crate::providers::rocksdb::RocksDBBatch>,
     /// In-memory overlay for history index last-shards written into the shared `RocksDB` batch.
     ///
-    /// `RocksDBBatch` is write-only (no read-your-writes). When history indices are appended
-    /// multiple times before `commit`, subsequent appends must not rebuild shards from the
-    /// persisted `RocksDB` state alone, or earlier batch updates would be lost ("last write
-    /// wins").
+    /// History index appending requires a read-modify-write pattern: we read the existing
+    /// last shard (or create a new one if it doesn't exist or is full), merge new block numbers
+    /// into it, and write the updated shard back. With MDBX, the write transaction supports
+    /// read-your-writes so subsequent appends within the same transaction see earlier updates.
+    ///
+    /// `RocksDBBatch` is write-only (no read-your-writes), so subsequent appends would only see
+    /// the persisted state and overwrite earlier batch updates ("last write wins"). This overlay
+    /// caches the current state of last shards so that appending blocks 100, 200, 300 in sequence
+    /// within a single batch correctly produces a shard containing all three block numbers.
     #[cfg(all(unix, feature = "rocksdb"))]
     pending_history_index_last_shards: std::sync::Mutex<PendingHistoryIndexLastShards>,
     /// Pending `RocksDB` batches to be committed at provider commit time (from `EitherWriter`).
