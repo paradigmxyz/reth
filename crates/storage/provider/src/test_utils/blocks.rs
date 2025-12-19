@@ -57,6 +57,29 @@ pub fn assert_genesis_block<DB: Database, N: NodeTypes>(
     // StageCheckpoints is not updated in tests
 }
 
+fn test_transaction(nonce: u64) -> TransactionSigned {
+    TransactionSigned::new_unhashed(
+        Transaction::Legacy(TxLegacy {
+            nonce,
+            gas_price: 10,
+            gas_limit: 400_000,
+            to: TxKind::Call(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87").into()),
+            ..Default::default()
+        }),
+        Signature::new(
+            U256::from_str(
+                "51983300959770368863831494747186777928121405155922056726144551509338672451120",
+            )
+            .unwrap(),
+            U256::from_str(
+                "29056683545955299640297374067888344259176096769870751649153779895496107008675",
+            )
+            .unwrap(),
+            false,
+        ),
+    )
+}
+
 pub(crate) static TEST_BLOCK: LazyLock<SealedBlock<reth_ethereum_primitives::Block>> =
     LazyLock::new(|| {
         SealedBlock::from_sealed_parts(
@@ -89,28 +112,7 @@ pub(crate) static TEST_BLOCK: LazyLock<SealedBlock<reth_ethereum_primitives::Blo
                 },
                 hex!("cf7b274520720b50e6a4c3e5c4d553101f44945396827705518ce17cb7219a42").into(),
             ),
-            BlockBody {
-                transactions: vec![TransactionSigned::new_unhashed(
-            Transaction::Legacy(TxLegacy {
-                gas_price: 10,
-                gas_limit: 400_000,
-                to: TxKind::Call(hex!("095e7baea6a6c7c4c2dfeb977efac326af552d87").into()),
-                ..Default::default()
-            }),
-            Signature::new(
-                U256::from_str(
-                    "51983300959770368863831494747186777928121405155922056726144551509338672451120",
-                )
-                .unwrap(),
-                U256::from_str(
-                    "29056683545955299640297374067888344259176096769870751649153779895496107008675",
-                )
-                .unwrap(),
-                false,
-            )
-        )],
-                ..Default::default()
-            },
+            BlockBody { transactions: vec![test_transaction(0)], ..Default::default() },
         )
     });
 
@@ -225,6 +227,7 @@ fn block1(
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    body.transactions = vec![test_transaction(number)];
     header.number = number;
     header.state_root = state_root;
     header.parent_hash = B256::ZERO;
@@ -282,6 +285,7 @@ fn block2(
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
 
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    body.transactions = vec![test_transaction(number)];
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
@@ -340,6 +344,7 @@ fn block3(
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    body.transactions = vec![test_transaction(number)];
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
@@ -423,6 +428,7 @@ fn block4(
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    body.transactions = vec![test_transaction(number)];
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash
@@ -503,6 +509,7 @@ fn block5(
 
     let (mut header, mut body) = TEST_BLOCK.clone().split_header_body();
     body.withdrawals = Some(Withdrawals::new(vec![Withdrawal::default()]));
+    body.transactions = vec![test_transaction(number)];
     header.number = number;
     header.state_root = state_root;
     // parent_hash points to block1 hash

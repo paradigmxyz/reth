@@ -3673,7 +3673,7 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
-    use reth_ethereum_primitives::Receipt;
+    use reth_ethereum_primitives::{Receipt, TransactionSigned};
     use reth_testing_utils::generators::{self, random_block, BlockParams};
     use reth_trie::Nibbles;
 
@@ -3739,7 +3739,13 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            let mut block = data.blocks[i].0.clone();
+            if let Some(tx) = block.block_mut().transactions.first_mut() {
+                if let TransactionSigned::Legacy(signed) = tx {
+                    signed.tx_mut().nonce = signed.tx().nonce.saturating_add(i as u64 + 1);
+                }
+            }
+            provider_rw.insert_block(block).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
