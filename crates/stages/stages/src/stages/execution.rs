@@ -42,8 +42,8 @@ use super::missing_static_data_error;
 /// - [`tables::BlockBodyIndices`] to get tx number
 /// - [`tables::Transactions`] to execute
 ///
-/// For state access [`LatestStateProvider`] provides us latest state and history state
-/// For latest most recent state [`LatestStateProvider`] would need (Used for execution Stage):
+/// For state access [`LatestStateProviderRef`] provides us latest state and history state
+/// For latest most recent state [`LatestStateProviderRef`] would need (Used for execution Stage):
 /// - [`tables::PlainAccountState`]
 /// - [`tables::Bytecodes`]
 /// - [`tables::PlainStorageState`]
