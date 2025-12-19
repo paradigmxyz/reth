@@ -219,9 +219,9 @@ start_reth_node() {
         --engine.state-root-fallback \
         --txpool.discard-reorged-transactions \
         --txpool.fifo-ordering \
-        --txpool.clear-after-fcu \
         --engine.allow-unwind-canonical-header \
         -vv
+        # --txpool.clear-after-fcu \
 }
 
 # ==============================================================================
