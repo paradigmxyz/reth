@@ -483,7 +483,7 @@ mod tests {
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
         );
         let provider_rw = provider_factory.provider_rw()?;
-        provider_rw.insert_block(node_head_block.clone().try_recover()?)?;
+        provider_rw.insert_block(&node_head_block.clone().try_recover()?)?;
         provider_rw.commit()?;
 
         let node_head = node_head_block.num_hash();
@@ -613,7 +613,7 @@ mod tests {
         .try_recover()?;
         let node_head = node_head_block.num_hash();
         let provider_rw = provider.database_provider_rw()?;
-        provider_rw.insert_block(node_head_block)?;
+        provider_rw.insert_block(&node_head_block)?;
         provider_rw.commit()?;
         let node_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(
