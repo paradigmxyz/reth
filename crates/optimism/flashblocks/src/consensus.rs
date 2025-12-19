@@ -135,8 +135,7 @@ where
         }
     }
 
-    /// Runs the consensus client loop. The flashblock consensus should be the only source that
-    /// drive the chain forward.
+    /// Runs the consensus client loop.
     ///
     /// Continuously receives completed flashblock sequences and submits them to the execution
     /// engine:
