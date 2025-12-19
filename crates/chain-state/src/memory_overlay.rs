@@ -24,7 +24,7 @@ pub struct MemoryOverlayStateProviderRef<
     /// Historical state provider for state lookups that are not found in memory blocks.
     pub(crate) historical: Box<dyn StateProvider + 'a>,
     /// The collection of executed parent blocks. Expected order is newest to oldest.
-    pub(crate) in_memory: Cow<'a, Vec<ExecutedBlock<N>>>,
+    pub(crate) in_memory: Cow<'a, [ExecutedBlock<N>]>,
     /// Lazy-loaded in-memory trie data.
     pub(crate) trie_input: OnceLock<TrieInput>,
 }

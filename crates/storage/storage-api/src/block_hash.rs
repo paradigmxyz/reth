@@ -4,7 +4,7 @@ use alloy_primitives::{BlockNumber, B256};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Client trait for fetching block hashes by number.
-#[auto_impl::auto_impl(&, Box)]
+#[auto_impl::auto_impl(&, Box, Arc)]
 pub trait BlockHashReader {
     /// Get the hash of the block with the given number. Returns `None` if no block with this number
     /// exists.

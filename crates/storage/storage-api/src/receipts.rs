@@ -10,7 +10,7 @@ use reth_storage_errors::provider::ProviderResult;
 pub type ProviderReceipt<P> = <P as ReceiptProvider>::Receipt;
 
 /// Client trait for fetching receipt data.
-#[auto_impl::auto_impl(&)]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait ReceiptProvider {
     /// The receipt type.
     type Receipt: Receipt;

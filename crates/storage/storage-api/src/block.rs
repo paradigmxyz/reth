@@ -2,7 +2,7 @@ use crate::{
     BlockBodyIndicesProvider, BlockNumReader, HeaderProvider, ReceiptProvider,
     ReceiptProviderIdExt, TransactionVariant, TransactionsProvider,
 };
-use alloc::vec::Vec;
+use alloc::{sync::Arc, vec::Vec};
 use alloy_eips::{BlockHashOrNumber, BlockId, BlockNumberOrTag};
 use alloy_primitives::{BlockNumber, TxNumber, B256};
 use core::ops::RangeInclusive;
@@ -48,7 +48,12 @@ pub type ProviderBlock<P> = <P as BlockReader>::Block;
 /// If not requested otherwise, implementers of this trait should prioritize fetching blocks from
 /// the database.
 pub trait BlockReader:
-    BlockNumReader + HeaderProvider + BlockBodyIndicesProvider + TransactionsProvider + ReceiptProvider
+    BlockNumReader
+    + HeaderProvider
+    + BlockBodyIndicesProvider
+    + TransactionsProvider
+    + ReceiptProvider
+    + Send
 {
     /// The block type this provider reads.
     type Block: reth_primitives_traits::Block<
@@ -141,6 +146,128 @@ pub trait BlockReader:
 
     /// Returns the block number that contains the given transaction.
     fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>>;
+}
+
+impl<T: BlockReader + Send + Sync> BlockReader for Arc<T> {
+    type Block = T::Block;
+
+    fn find_block_by_hash(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<Self::Block>> {
+        T::find_block_by_hash(self, hash, source)
+    }
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
+        T::block(self, id)
+    }
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        T::pending_block(self)
+    }
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+        T::pending_block_and_receipts(self)
+    }
+    fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
+        T::block_by_hash(self, hash)
+    }
+    fn block_by_number(&self, num: u64) -> ProviderResult<Option<Self::Block>> {
+        T::block_by_number(self, num)
+    }
+    fn recovered_block(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        T::recovered_block(self, id, transaction_kind)
+    }
+    fn sealed_block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        T::sealed_block_with_senders(self, id, transaction_kind)
+    }
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
+        T::block_range(self, range)
+    }
+    fn block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        T::block_with_senders_range(self, range)
+    }
+    fn recovered_block_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        T::recovered_block_range(self, range)
+    }
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        T::block_by_transaction_id(self, id)
+    }
+}
+
+impl<T: BlockReader + Send + Sync> BlockReader for &T {
+    type Block = T::Block;
+
+    fn find_block_by_hash(
+        &self,
+        hash: B256,
+        source: BlockSource,
+    ) -> ProviderResult<Option<Self::Block>> {
+        T::find_block_by_hash(self, hash, source)
+    }
+    fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
+        T::block(self, id)
+    }
+    fn pending_block(&self) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        T::pending_block(self)
+    }
+    fn pending_block_and_receipts(
+        &self,
+    ) -> ProviderResult<Option<(RecoveredBlock<Self::Block>, Vec<Self::Receipt>)>> {
+        T::pending_block_and_receipts(self)
+    }
+    fn block_by_hash(&self, hash: B256) -> ProviderResult<Option<Self::Block>> {
+        T::block_by_hash(self, hash)
+    }
+    fn block_by_number(&self, num: u64) -> ProviderResult<Option<Self::Block>> {
+        T::block_by_number(self, num)
+    }
+    fn recovered_block(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        T::recovered_block(self, id, transaction_kind)
+    }
+    fn sealed_block_with_senders(
+        &self,
+        id: BlockHashOrNumber,
+        transaction_kind: TransactionVariant,
+    ) -> ProviderResult<Option<RecoveredBlock<Self::Block>>> {
+        T::sealed_block_with_senders(self, id, transaction_kind)
+    }
+    fn block_range(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<Vec<Self::Block>> {
+        T::block_range(self, range)
+    }
+    fn block_with_senders_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        T::block_with_senders_range(self, range)
+    }
+    fn recovered_block_range(
+        &self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<RecoveredBlock<Self::Block>>> {
+        T::recovered_block_range(self, range)
+    }
+    fn block_by_transaction_id(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
+        T::block_by_transaction_id(self, id)
+    }
 }
 
 /// Trait extension for `BlockReader`, for types that implement `BlockId` conversion.

@@ -530,9 +530,7 @@ mod tests {
         // Create a State with StateProviderTest
         let state_provider = StateProviderTest::default();
         let mut state = State::builder()
-            .with_database(StateProviderDatabase::new(
-                Box::new(state_provider) as Box<dyn StateProvider>
-            ))
+            .with_database(StateProviderDatabase::new(Box::new(state_provider) as StateProviderBox))
             .with_bundle_update()
             .build();
 

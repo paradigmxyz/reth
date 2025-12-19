@@ -21,7 +21,7 @@ pub enum TransactionVariant {
 }
 
 ///  Client trait for fetching transactions related data.
-#[auto_impl::auto_impl(&)]
+#[auto_impl::auto_impl(&, Arc)]
 pub trait TransactionsProvider: BlockNumReader + Send {
     /// The transaction type this provider reads.
     type Transaction: Send + Sync + SignedTransaction;

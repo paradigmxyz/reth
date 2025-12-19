@@ -140,7 +140,7 @@ pub trait TryIntoHistoricalStateProvider {
 /// This affects tracing, or replaying blocks, which will need to be executed on top of the state of
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
-#[auto_impl(&, Box)]
+#[auto_impl(&, Box, Arc)]
 pub trait StateProviderFactory: BlockIdReader + Send {
     /// Storage provider for latest block.
     fn latest(&self) -> ProviderResult<StateProviderBox>;
