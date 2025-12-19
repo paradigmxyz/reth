@@ -5518,7 +5518,7 @@ mod tests {
         // Unwind from block 3 (should remove entries >= 3)
         {
             let provider = factory.provider_rw().unwrap();
-            let changesets = vec![
+            let changesets = [
                 (3u64, AccountBeforeTx { address, info: None }),
                 (4u64, AccountBeforeTx { address, info: None }),
                 (5u64, AccountBeforeTx { address, info: None }),
