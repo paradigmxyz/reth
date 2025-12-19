@@ -1093,9 +1093,12 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ) -> ProviderResult<usize> {
         let mut last_indices =
             changesets.map(|(index, account)| (account.address, *index)).collect::<Vec<_>>();
+        // Capture count before dedup to match trait's "changesets walked" semantics
+        let changesets_walked = last_indices.len();
         // Sort by (address, block_number) so the smallest block number comes first for each address
         last_indices.sort_unstable_by(|a, b| a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)));
-        // Deduplicate by address, keeping only the first (smallest block number) entry
+        // Deduplicate by address, keeping only the first (smallest block number) entry.
+        // Dedup is required because RocksDB WriteBatch uses "last write wins" semantics.
         last_indices.dedup_by_key(|(a, _)| *a);
 
         let rocks_tx = self.rocksdb_provider.tx();
@@ -1140,7 +1143,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
 
         // Batch commits at provider commit time
-        Ok(last_indices.len())
+        Ok(changesets_walked)
     }
 
     /// `RocksDB` specific implementation of unwind storage history indices.
@@ -1167,11 +1170,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         let mut storage_changesets = changesets
             .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
             .collect::<Vec<_>>();
+        // Capture count before dedup to match trait's "changesets walked" semantics
+        let changesets_walked = storage_changesets.len();
         // Sort by (address, storage_key, block_number) so smallest block number comes first
         storage_changesets.sort_unstable_by(|a, b| {
             a.0.cmp(&b.0).then_with(|| a.1.cmp(&b.1)).then_with(|| a.2.cmp(&b.2))
         });
-        // Deduplicate by (address, storage_key), keeping only the first (smallest block number)
+        // Deduplicate by (address, storage_key), keeping only the first (smallest block number).
+        // Dedup is required because RocksDB WriteBatch uses "last write wins" semantics.
         storage_changesets.dedup_by_key(|(address, key, _)| (*address, *key));
 
         let rocks_tx = self.rocksdb_provider.tx();
@@ -1217,7 +1223,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         }
 
         // Batch commits at provider commit time
-        Ok(storage_changesets.len())
+        Ok(changesets_walked)
     }
 }
 

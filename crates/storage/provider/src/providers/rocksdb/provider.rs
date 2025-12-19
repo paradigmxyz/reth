@@ -683,19 +683,13 @@ impl<'db> RocksTx<'db> {
 
         if let Some((found_key, value)) = iter.next().transpose()? {
             if found_key.key != address {
-                // No shard for this address at or after target
+                // No shard for this address at or after target.
+                // With the u64::MAX last-shard invariant, this means no history exists.
+                // Match MDBX behavior: return NotYetWritten (or MaybeInPlainState if pruned).
                 if lowest_available_block_number.is_some() {
                     return Ok(HistoryInfo::MaybeInPlainState);
                 }
-                // Check if any shard exists (meaning there was history, now in plain state)
-                let start = ShardedKey::new(address, 0);
-                let mut start_iter = self.iter_from::<tables::AccountsHistory>(start)?;
-                return if start_iter.next().transpose()?.is_some_and(|(k, _)| k.key == address) {
-                    Ok(HistoryInfo::InPlainState)
-                } else {
-                    // The key has not been written to at all.
-                    Ok(HistoryInfo::NotYetWritten)
-                };
+                return Ok(HistoryInfo::NotYetWritten);
             }
 
             // Found a matching shard - check for previous shard
@@ -713,19 +707,13 @@ impl<'db> RocksTx<'db> {
                 lowest_available_block_number,
             ))
         } else {
-            // Iterator exhausted, no shards exist at or after target
+            // Iterator exhausted, no shards exist at or after target.
+            // With the u64::MAX last-shard invariant, this means no history exists.
+            // Match MDBX behavior: return NotYetWritten (or MaybeInPlainState if pruned).
             if lowest_available_block_number.is_some() {
                 return Ok(HistoryInfo::MaybeInPlainState);
             }
-            // Check if any shards exist before target
-            let start = ShardedKey::new(address, 0);
-            let mut start_iter = self.iter_from::<tables::AccountsHistory>(start)?;
-            if start_iter.next().transpose()?.is_some_and(|(k, _)| k.key == address) {
-                Ok(HistoryInfo::InPlainState)
-            } else {
-                // The key has not been written to at all.
-                Ok(HistoryInfo::NotYetWritten)
-            }
+            Ok(HistoryInfo::NotYetWritten)
         }
     }
 
@@ -745,23 +733,13 @@ impl<'db> RocksTx<'db> {
 
         if let Some((found_key, value)) = iter.next().transpose()? {
             if found_key.address != address || found_key.sharded_key.key != storage_key {
-                // No shard for this address/key at or after target
+                // No shard for this address/key at or after target.
+                // With the u64::MAX last-shard invariant, this means no history exists.
+                // Match MDBX behavior: return NotYetWritten (or MaybeInPlainState if pruned).
                 if lowest_available_block_number.is_some() {
                     return Ok(HistoryInfo::MaybeInPlainState);
                 }
-                // Check if any shard exists (meaning there was history, now in plain state)
-                let start = StorageShardedKey::new(address, storage_key, 0);
-                let mut start_iter = self.iter_from::<tables::StoragesHistory>(start)?;
-                return if start_iter
-                    .next()
-                    .transpose()?
-                    .is_some_and(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
-                {
-                    Ok(HistoryInfo::InPlainState)
-                } else {
-                    // The key has not been written to at all.
-                    Ok(HistoryInfo::NotYetWritten)
-                };
+                return Ok(HistoryInfo::NotYetWritten);
             }
 
             // Found a matching shard - check for previous shard
@@ -782,23 +760,13 @@ impl<'db> RocksTx<'db> {
                 lowest_available_block_number,
             ))
         } else {
-            // Iterator exhausted, no shards exist at or after target
+            // Iterator exhausted, no shards exist at or after target.
+            // With the u64::MAX last-shard invariant, this means no history exists.
+            // Match MDBX behavior: return NotYetWritten (or MaybeInPlainState if pruned).
             if lowest_available_block_number.is_some() {
                 return Ok(HistoryInfo::MaybeInPlainState);
             }
-            // Check if any shards exist before target
-            let start = StorageShardedKey::new(address, storage_key, 0);
-            let mut start_iter = self.iter_from::<tables::StoragesHistory>(start)?;
-            if start_iter
-                .next()
-                .transpose()?
-                .is_some_and(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
-            {
-                Ok(HistoryInfo::InPlainState)
-            } else {
-                // The key has not been written to at all.
-                Ok(HistoryInfo::NotYetWritten)
-            }
+            Ok(HistoryInfo::NotYetWritten)
         }
     }
 
