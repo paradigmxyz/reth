@@ -169,7 +169,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Single `RocksDB` batch for history index operations.
     /// All history index writes accumulate here and commit together at provider commit time.
     #[cfg(all(unix, feature = "rocksdb"))]
-    pending_rocks_batch: std::sync::Mutex<crate::providers::rocksdb::RocksDBBatch>,
+    pending_rocks_batch: parking_lot::Mutex<crate::providers::rocksdb::RocksDBBatch>,
     /// In-memory overlay for history index last-shards written into the shared `RocksDB` batch.
     ///
     /// History index appending requires a read-modify-write pattern: we read the existing
@@ -182,7 +182,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// caches the current state of last shards so that appending blocks 100, 200, 300 in sequence
     /// within a single batch correctly produces a shard containing all three block numbers.
     #[cfg(all(unix, feature = "rocksdb"))]
-    pending_history_index_last_shards: std::sync::Mutex<PendingHistoryIndexLastShards>,
+    pending_history_index_last_shards: parking_lot::Mutex<PendingHistoryIndexLastShards>,
     /// Pending `RocksDB` batches to be committed at provider commit time (from `EitherWriter`).
     #[cfg(all(unix, feature = "rocksdb"))]
     pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
@@ -339,9 +339,9 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             #[cfg(all(unix, feature = "rocksdb"))]
-            pending_rocks_batch: std::sync::Mutex::new(rocksdb_provider.batch()),
+            pending_rocks_batch: parking_lot::Mutex::new(rocksdb_provider.batch()),
             #[cfg(all(unix, feature = "rocksdb"))]
-            pending_history_index_last_shards: Default::default(),
+            pending_history_index_last_shards: parking_lot::Mutex::new(Default::default()),
             rocksdb_provider,
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
@@ -601,9 +601,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             #[cfg(all(unix, feature = "rocksdb"))]
-            pending_rocks_batch: std::sync::Mutex::new(rocksdb_provider.batch()),
+            pending_rocks_batch: parking_lot::Mutex::new(rocksdb_provider.batch()),
             #[cfg(all(unix, feature = "rocksdb"))]
-            pending_history_index_last_shards: Default::default(),
+            pending_history_index_last_shards: parking_lot::Mutex::new(Default::default()),
             rocksdb_provider,
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
@@ -638,17 +638,15 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     /// All writes accumulate in this batch and are committed together at provider commit time.
     /// The returned guard releases the lock when dropped.
     #[cfg(all(unix, feature = "rocksdb"))]
-    fn rocks_batch(&self) -> std::sync::MutexGuard<'_, crate::providers::rocksdb::RocksDBBatch> {
-        self.pending_rocks_batch.lock().expect("rocks batch mutex poisoned")
+    fn rocks_batch(&self) -> parking_lot::MutexGuard<'_, crate::providers::rocksdb::RocksDBBatch> {
+        self.pending_rocks_batch.lock()
     }
 
     #[cfg(all(unix, feature = "rocksdb"))]
     fn history_index_last_shards(
         &self,
-    ) -> std::sync::MutexGuard<'_, PendingHistoryIndexLastShards> {
-        self.pending_history_index_last_shards
-            .lock()
-            .expect("pending history shards mutex poisoned")
+    ) -> parking_lot::MutexGuard<'_, PendingHistoryIndexLastShards> {
+        self.pending_history_index_last_shards.lock()
     }
 }
 
@@ -3607,7 +3605,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             #[cfg(all(unix, feature = "rocksdb"))]
             {
                 // Commit the shared history index batch
-                let batch = self.pending_rocks_batch.into_inner().expect("rocks batch poisoned");
+                let batch = self.pending_rocks_batch.into_inner();
                 if !batch.is_empty() {
                     batch.commit()?;
                 }
@@ -3626,7 +3624,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             #[cfg(all(unix, feature = "rocksdb"))]
             {
                 // Commit the shared history index batch
-                let batch = self.pending_rocks_batch.into_inner().expect("rocks batch poisoned");
+                let batch = self.pending_rocks_batch.into_inner();
                 if !batch.is_empty() {
                     batch.commit()?;
                 }
