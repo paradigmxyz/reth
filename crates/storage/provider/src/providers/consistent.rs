@@ -155,7 +155,7 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
 
         // We are not removing block meta as it is used to get block changesets.
         let mut block_bodies = Vec::new();
-        for block_num in range.clone() {
+        for block_num in start_block_number..=end_block_number {
             let block_body = self
                 .block_body_indices(block_num)?
                 .ok_or(ProviderError::BlockBodyIndicesNotFound(block_num))?;
@@ -172,14 +172,14 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
         };
 
         let mut account_changeset = Vec::new();
-        for block_num in range.clone() {
+        for block_num in start_block_number..=end_block_number {
             let changeset =
                 self.account_block_changeset(block_num)?.into_iter().map(|elem| (block_num, elem));
             account_changeset.extend(changeset);
         }
 
         let mut storage_changeset = Vec::new();
-        for block_num in range {
+        for block_num in start_block_number..=end_block_number {
             let changeset = self.storage_changeset(block_num)?;
             storage_changeset.extend(changeset);
         }
@@ -1160,13 +1160,17 @@ impl<N: ProviderNodeTypes> BlockBodyIndicesProvider for ConsistentProvider<N> {
                 stored_indices.first_tx_num = stored_indices.next_tx_num();
                 stored_indices.tx_count = 0;
 
-                // Iterate from the lowest block in memory until our target block
-                for state in block_state.chain().collect::<Vec<_>>().into_iter().rev() {
+                // Iterate from the target block back to the anchor, accumulating tx counts for the
+                // older blocks to compute the starting tx index of the target block without
+                // allocating an intermediate Vec.
+                let mut past_target = false;
+                for state in block_state.chain() {
                     let block_tx_count =
                         state.block_ref().recovered_block().body().transactions().len() as u64;
                     if state.block_ref().recovered_block().number() == number {
                         stored_indices.tx_count = block_tx_count;
-                    } else {
+                        past_target = true;
+                    } else if past_target {
                         stored_indices.first_tx_num += block_tx_count;
                     }
                 }
