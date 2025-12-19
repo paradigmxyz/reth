@@ -930,8 +930,8 @@ where
     /// conditions are true:
     /// * walking back from the target hash to verify that the target hash is not part of an
     ///   extension of the canonical chain.
-    /// * walking back from the current head to verify that the target hash is not already part of
-    ///   the canonical chain.
+    /// * check if target hash is already in memory state or database (if yes, it's already
+    ///   canonical, not a fork)
     ///
     /// The header is required as an arg, because we might be checking that the header is a fork
     /// block before it's in the tree state and before it's in the database.
