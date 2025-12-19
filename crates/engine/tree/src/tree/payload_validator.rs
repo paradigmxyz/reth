@@ -5,7 +5,7 @@ use crate::tree::{
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
     instrumented_state::InstrumentedStateProvider,
     payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
-    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    precompile_cache::{CachedPrecompile, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
     EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
     StateProviderDatabase, TreeConfig,
@@ -45,7 +45,6 @@ use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorte
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
 use std::{
-    collections::HashMap,
     panic::{self, AssertUnwindSafe},
     sync::Arc,
     time::Instant,
@@ -121,8 +120,6 @@ where
     payload_processor: PayloadProcessor<Evm>,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
-    /// Precompile cache metrics.
-    precompile_cache_metrics: HashMap<alloy_primitives::Address, CachedPrecompileMetrics>,
     /// Hook to call when invalid blocks are encountered.
     #[debug(skip)]
     invalid_block_hook: Box<dyn InvalidBlockHook<Evm::Primitives>>,
@@ -168,7 +165,6 @@ where
             evm_config,
             payload_processor,
             precompile_cache_map,
-            precompile_cache_metrics: HashMap::new(),
             config,
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
@@ -596,7 +592,7 @@ where
     /// Executes a block with the given state provider
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn execute_block<S, Err, T>(
-        &mut self,
+        &self,
         state_provider: S,
         env: ExecutionEnv<Evm>,
         input: &BlockOrPayload<T>,
@@ -625,16 +621,11 @@ where
         if !self.config.precompile_cache_disabled() {
             // Only cache pure precompiles to avoid issues with stateful precompiles
             executor.evm_mut().precompiles_mut().map_pure_precompiles(|address, precompile| {
-                let metrics = self
-                    .precompile_cache_metrics
-                    .entry(*address)
-                    .or_insert_with(|| CachedPrecompileMetrics::new_with_address(*address))
-                    .clone();
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
                     *env.evm_env.spec_id(),
-                    Some(metrics),
+                    true,
                 )
             });
         }

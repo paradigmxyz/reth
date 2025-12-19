@@ -8,7 +8,7 @@ use revm_primitives::Address;
 use std::{hash::Hash, sync::Arc};
 
 /// Default max cache size for [`PrecompileCache`]
-const MAX_CACHE_SIZE: u32 = 10_000;
+const MAX_CACHE_SIZE: u32 = 131_072;
 
 /// Stores caches for each precompile.
 #[derive(Debug, Clone, Default)]
@@ -29,28 +29,33 @@ where
         //
         // This should be very rare as caches for all precompiles will be initialized as soon as
         // first EVM is created.
-        self.0.entry(address).or_default().clone()
+        self.0.entry(address).or_insert_with(|| PrecompileCache::new(address)).clone()
     }
 }
 
 /// Cache for precompiles, for each input stores the result.
 #[derive(Debug, Clone)]
-pub struct PrecompileCache<S>(
-    moka::sync::Cache<Bytes, CacheEntry<S>, alloy_primitives::map::DefaultHashBuilder>,
-)
-where
-    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static;
-
-impl<S> Default for PrecompileCache<S>
+pub struct PrecompileCache<S>
 where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
-    fn default() -> Self {
-        Self(
-            moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
-                .initial_capacity(MAX_CACHE_SIZE as usize)
-                .build_with_hasher(Default::default()),
-        )
+    cache: Arc<fixed_cache::Cache<Bytes, CacheEntry<S>, alloy_primitives::map::DefaultHashBuilder>>,
+    metrics: CachedPrecompileMetrics,
+}
+
+impl<S> PrecompileCache<S>
+where
+    S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
+{
+    fn new(address: Address) -> Self {
+        let metrics = CachedPrecompileMetrics::new_with_address(address);
+        Self {
+            cache: Arc::new(
+                fixed_cache::Cache::new(MAX_CACHE_SIZE as usize, Default::default())
+                    .with_stats(Some(fixed_cache::Stats::new(metrics.clone()))),
+            ),
+            metrics,
+        }
     }
 }
 
@@ -59,13 +64,16 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     fn get(&self, input: &[u8], spec: S) -> Option<CacheEntry<S>> {
-        self.0.get(input).filter(|e| e.spec == spec)
+        self.cache
+            .get(input)
+            .filter(|e| e.spec == spec)
+            .inspect(|_| self.metrics.precompile_cache_hits.increment(1))
     }
 
     /// Inserts the given key and value into the cache, returning the new cache size.
     fn insert(&self, input: Bytes, value: CacheEntry<S>) -> usize {
-        self.0.insert(input, value);
-        self.0.entry_count() as usize
+        self.cache.insert(input, value);
+        MAX_CACHE_SIZE as usize
     }
 }
 
@@ -107,12 +115,13 @@ where
     S: Eq + Hash + std::fmt::Debug + Send + Sync + Clone + 'static,
 {
     /// `CachedPrecompile` constructor.
-    pub(crate) const fn new(
+    pub(crate) fn new(
         precompile: DynPrecompile,
         cache: PrecompileCache<S>,
         spec_id: S,
-        metrics: Option<CachedPrecompileMetrics>,
+        track_hits_and_misses: bool,
     ) -> Self {
+        let metrics = track_hits_and_misses.then(|| cache.metrics.clone());
         Self { precompile, cache, spec_id, metrics }
     }
 
@@ -120,10 +129,10 @@ where
         precompile: DynPrecompile,
         cache: PrecompileCache<S>,
         spec_id: S,
-        metrics: Option<CachedPrecompileMetrics>,
+        track_hits_and_misses: bool,
     ) -> DynPrecompile {
         let precompile_id = precompile.precompile_id().clone();
-        let wrapped = Self::new(precompile, cache, spec_id, metrics);
+        let wrapped = Self::new(precompile, cache, spec_id, track_hits_and_misses);
         (precompile_id, move |input: PrecompileInput<'_>| -> PrecompileResult {
             wrapped.call(input)
         })
@@ -204,6 +213,9 @@ pub(crate) struct CachedPrecompileMetrics {
     /// Precompile cache size. Uses the LRU cache length as the size metric.
     precompile_cache_size: metrics::Gauge,
 
+    /// Precompile cache collisions.
+    precompile_cache_collisions: metrics::Counter,
+
     /// Precompile execution errors.
     precompile_errors: metrics::Counter,
 }
@@ -215,6 +227,17 @@ impl CachedPrecompileMetrics {
     /// by `0x`.
     pub(crate) fn new_with_address(address: Address) -> Self {
         Self::new_with_labels(&[("address", format!("0x{address:02x}"))])
+    }
+}
+
+impl<S> fixed_cache::StatsHandler<Bytes, CacheEntry<S>> for CachedPrecompileMetrics {
+    fn on_collision(
+        &self,
+        _new_key: fixed_cache::AnyRef<'_>,
+        _existing_key: &Bytes,
+        _existing_value: &CacheEntry<S>,
+    ) {
+        self.precompile_cache_collisions.increment(1);
     }
 }
 
