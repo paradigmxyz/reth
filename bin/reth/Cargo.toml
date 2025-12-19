@@ -103,6 +103,7 @@ asm-keccak = [
     "reth-node-ethereum/asm-keccak",
 ]
 keccak-cache-global = [
+    "reth-node-core/keccak-cache-global",
     "reth-node-ethereum/keccak-cache-global",
 ]
 jemalloc = [

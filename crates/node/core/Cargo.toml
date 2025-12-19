@@ -80,7 +80,7 @@ tokio.workspace = true
 # Features for vergen to generate correct env vars
 jemalloc = ["reth-cli-util/jemalloc"]
 asm-keccak = ["alloy-primitives/asm-keccak"]
-# Feature to enable opentelemetry export
+keccak-cache-global = ["alloy-primitives/keccak-cache-global"]
 otlp = ["reth-tracing/otlp"]
 
 min-error-logs = ["tracing/release_max_level_error"]
