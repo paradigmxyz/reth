@@ -1046,6 +1046,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         info!(target: "reth::cli", "Verifying storage consistency.");
 
+        // First, heal any file-level (NippyJar) inconsistencies
+        self.check_file_consistency()?;
+
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: BlockNumber| {
             if let Some(target) = unwind_target.as_mut() {
@@ -1223,13 +1226,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
-    /// Heals file-level (NippyJar) inconsistencies for all static file segments.
+    /// Heals file-level (`NippyJar`) inconsistencies for all static file segments.
     ///
     /// This method ONLY handles recovery from interrupted file operations (partial writes,
     /// corrupted jars). It does NOT compare against database checkpoints or prune data.
     ///
     /// Call this before any operations that need static file data to be in a consistent state,
-    /// such as RocksDB consistency checks that need transaction data from static files.
+    /// such as `RocksDB` consistency checks that need transaction data from static files.
     ///
     /// For full consistency checking including database checkpoint comparison,
     /// use [`Self::check_consistency`] instead.
@@ -1239,8 +1242,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn check_file_consistency(&self) -> ProviderResult<()> {
         for segment in StaticFileSegment::iter() {
             if self.access.is_read_only() {
+                // Read-only mode: verify NippyJar file integrity without modifying
                 self.check_segment_consistency(segment)?;
             } else {
+                // Read-write mode: fetching the writer triggers automatic healing
+                // of any file-level inconsistencies (truncates partial writes, etc.)
                 self.latest_writer(segment)?;
             }
         }
