@@ -102,9 +102,6 @@ impl<T: SignedTransaction> SequenceManager<T> {
             // Ring buffer automatically evicts oldest entry when full
             let txs = std::mem::take(&mut self.pending_transactions);
             self.completed_cache.push((completed, txs));
-
-            // ensure cache is wiped on new flashblock
-            let _ = self.pending.take_cached_reads();
         }
 
         self.pending_transactions
