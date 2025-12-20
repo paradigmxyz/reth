@@ -82,8 +82,8 @@ pub fn validate_cancun_gas<B: Block>(block: &SealedBlock<B>) -> Result<(), Conse
     let total_blob_gas = block.body().blob_gas_used();
     if total_blob_gas != header_blob_gas_used {
         return Err(ConsensusError::BlobGasUsedDiff(GotExpected {
-            got: header_blob_gas_used,
-            expected: total_blob_gas,
+            got: total_blob_gas,
+            expected: header_blob_gas_used,
         }));
     }
     Ok(())
@@ -503,8 +503,8 @@ mod tests {
         assert_eq!(
             validate_block_pre_execution(&block, &chain_spec),
             Err(ConsensusError::BlobGasUsedDiff(GotExpected {
-                got: 1,
-                expected: expected_blob_gas_used
+                got: expected_blob_gas_used,
+                expected: 1
             }))
         );
     }
