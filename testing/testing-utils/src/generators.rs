@@ -1,7 +1,5 @@
 //! Generators for different data structures like block headers, block bodies and ranges of those.
 
-// TODO(rand): update ::random calls after rand_09 migration
-
 use alloy_consensus::{Header, SignableTransaction, Transaction as _, TxLegacy};
 use alloy_eips::{
     eip1898::BlockWithParent,
