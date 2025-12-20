@@ -1,5 +1,8 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
+use crate::providers::{history_info_from_shard, HistoryInfo};
+use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::{
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::{Compress, Decompress, Encode, Table},
     tables, DatabaseError,
 };
@@ -234,14 +237,23 @@ macro_rules! compress_to_buf_or_ref {
 
 /// `RocksDB` provider for auxiliary storage layer beside main database MDBX.
 #[derive(Debug)]
-pub struct RocksDBProvider(Arc<RocksDBProviderInner>);
+pub struct RocksDBProvider(pub(crate) Arc<RocksDBProviderInner>);
 
 /// Inner state for `RocksDB` provider.
-struct RocksDBProviderInner {
+pub(crate) struct RocksDBProviderInner {
     /// `RocksDB` database instance with transaction support.
-    db: TransactionDB,
+    pub(crate) db: TransactionDB,
     /// Metrics latency & operations.
-    metrics: Option<RocksDBMetrics>,
+    pub(crate) metrics: Option<RocksDBMetrics>,
+}
+
+impl RocksDBProviderInner {
+    /// Gets the column family handle for a table.
+    pub(crate) fn get_cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
+        self.db
+            .cf_handle(T::NAME)
+            .ok_or_else(|| DatabaseError::Other(format!("Column family '{}' not found", T::NAME)))
+    }
 }
 
 impl fmt::Debug for RocksDBProviderInner {
@@ -281,13 +293,10 @@ impl RocksDBProvider {
     /// Creates a new batch for atomic writes.
     ///
     /// Use [`Self::write_batch`] for closure-based atomic writes.
-    /// Use this method when the batch needs to be held by [`crate::EitherWriter`].
-    pub fn batch(&self) -> RocksDBBatch<'_> {
-        RocksDBBatch {
-            provider: self,
-            inner: WriteBatchWithTransaction::<true>::default(),
-            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
-        }
+    /// Use this method when the batch needs to be held by [`crate::EitherWriter`]
+    /// or stored in `DatabaseProvider`.
+    pub fn batch(&self) -> RocksDBBatch {
+        RocksDBBatch::new(self.0.clone())
     }
 
     /// Gets the column family handle for a table.
@@ -442,7 +451,7 @@ impl RocksDBProvider {
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
-        F: FnOnce(&mut RocksDBBatch<'_>) -> ProviderResult<()>,
+        F: FnOnce(&mut RocksDBBatch) -> ProviderResult<()>,
     {
         self.execute_with_operation_metric(RocksDBOperation::BatchWrite, "Batch", |this| {
             let mut batch_handle = this.batch();
@@ -471,17 +480,22 @@ impl RocksDBProvider {
 /// Unlike [`RocksTx`], this does NOT support read-your-writes. Use for write-only flows
 /// where you don't need to read back uncommitted data within the same operation
 /// (e.g., history index writes).
+///
+/// Note: `WriteBatch` operations are applied in order. If the same key is updated multiple times,
+/// the last update wins. Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
+///
+/// This type owns an `Arc<RocksDBProviderInner>` to allow storing it in `DatabaseProvider`
+/// without lifetime issues.
 #[must_use = "batch must be committed"]
-pub struct RocksDBBatch<'a> {
-    provider: &'a RocksDBProvider,
+pub struct RocksDBBatch {
+    provider: Arc<RocksDBProviderInner>,
     inner: WriteBatchWithTransaction<true>,
     buf: Vec<u8>,
 }
 
-impl fmt::Debug for RocksDBBatch<'_> {
+impl fmt::Debug for RocksDBBatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RocksDBBatch")
-            .field("provider", &self.provider)
             .field("batch", &"<WriteBatchWithTransaction>")
             // Number of operations in this batch
             .field("length", &self.inner.len())
@@ -492,7 +506,15 @@ impl fmt::Debug for RocksDBBatch<'_> {
     }
 }
 
-impl<'a> RocksDBBatch<'a> {
+impl RocksDBBatch {
+    /// Creates a new batch for the given provider.
+    pub(crate) fn new(provider: Arc<RocksDBProviderInner>) -> Self {
+        Self {
+            provider,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+        }
+    }
     /// Puts a value into the batch.
     pub fn put<T: Table>(&mut self, key: T::Key, value: &T::Value) -> ProviderResult<()> {
         let encoded_key = key.encode();
@@ -520,7 +542,7 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// This consumes the batch and writes all operations atomically to `RocksDB`.
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.0.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
+        self.provider.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
@@ -536,11 +558,6 @@ impl<'a> RocksDBBatch<'a> {
     /// Returns `true` if the batch contains no operations.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
-    }
-
-    /// Returns a reference to the underlying `RocksDB` provider.
-    pub const fn provider(&self) -> &RocksDBProvider {
-        self.provider
     }
 
     /// Consumes the batch and returns the underlying `WriteBatchWithTransaction`.
@@ -665,6 +682,107 @@ impl<'db> RocksTx<'db> {
         self.inner.rollback().map_err(|e| {
             ProviderError::Database(DatabaseError::Other(format!("rollback failed: {e}")))
         })
+    }
+
+    /// Lookup account history and return [`HistoryInfo`] directly.
+    ///
+    /// Uses the rank/select logic to efficiently find the first block >= target
+    /// where the account was modified.
+    pub fn account_history_info(
+        &self,
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        let key = ShardedKey::new(address, block_number);
+        let mut iter = self.iter_from::<tables::AccountsHistory>(key)?;
+
+        if let Some((found_key, value)) = iter.next().transpose()? {
+            if found_key.key != address {
+                // No shard for this address at or after target.
+                // With the u64::MAX last-shard invariant, this means no history exists.
+                // Match MDBX behavior: return NotYetWritten (or MaybeInPlainState if pruned).
+                if lowest_available_block_number.is_some() {
+                    return Ok(HistoryInfo::MaybeInPlainState);
+                }
+                return Ok(HistoryInfo::NotYetWritten);
+            }
+
+            // Found a matching shard - check for previous shard
+            let chunk = value;
+            let start = ShardedKey::new(address, 0);
+            let mut start_iter = self.iter_from::<tables::AccountsHistory>(start)?;
+            let has_prev = start_iter.next().transpose()?.is_some_and(|(k, _)| {
+                k.key == address && k.highest_block_number < found_key.highest_block_number
+            });
+
+            Ok(history_info_from_shard(
+                &chunk,
+                block_number,
+                has_prev,
+                lowest_available_block_number,
+            ))
+        } else {
+            // Iterator exhausted, no shards exist at or after target.
+            // With the u64::MAX last-shard invariant, this means no history exists.
+            // Match MDBX behavior: return NotYetWritten (or MaybeInPlainState if pruned).
+            if lowest_available_block_number.is_some() {
+                return Ok(HistoryInfo::MaybeInPlainState);
+            }
+            Ok(HistoryInfo::NotYetWritten)
+        }
+    }
+
+    /// Lookup storage history and return [`HistoryInfo`] directly.
+    ///
+    /// Uses the rank/select logic to efficiently find the first block >= target
+    /// where the storage slot was modified.
+    pub fn storage_history_info(
+        &self,
+        address: Address,
+        storage_key: B256,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        let key = StorageShardedKey::new(address, storage_key, block_number);
+        let mut iter = self.iter_from::<tables::StoragesHistory>(key)?;
+
+        if let Some((found_key, value)) = iter.next().transpose()? {
+            if found_key.address != address || found_key.sharded_key.key != storage_key {
+                // No shard for this address/key at or after target.
+                // With the u64::MAX last-shard invariant, this means no history exists.
+                // Match MDBX behavior: return NotYetWritten (or MaybeInPlainState if pruned).
+                if lowest_available_block_number.is_some() {
+                    return Ok(HistoryInfo::MaybeInPlainState);
+                }
+                return Ok(HistoryInfo::NotYetWritten);
+            }
+
+            // Found a matching shard - check for previous shard
+            let chunk = value;
+            let start = StorageShardedKey::new(address, storage_key, 0);
+            let mut start_iter = self.iter_from::<tables::StoragesHistory>(start)?;
+            let has_prev = start_iter.next().transpose()?.is_some_and(|(k, _)| {
+                k.address == address &&
+                    k.sharded_key.key == storage_key &&
+                    k.sharded_key.highest_block_number < found_key.sharded_key.highest_block_number
+            });
+
+            Ok(history_info_from_shard(
+                &chunk,
+                block_number,
+                has_prev,
+                lowest_available_block_number,
+            ))
+        } else {
+            // Iterator exhausted, no shards exist at or after target.
+            // With the u64::MAX last-shard invariant, this means no history exists.
+            // Match MDBX behavior: return NotYetWritten (or MaybeInPlainState if pruned).
+            if lowest_available_block_number.is_some() {
+                return Ok(HistoryInfo::MaybeInPlainState);
+            }
+            Ok(HistoryInfo::NotYetWritten)
+        }
     }
 }
 
