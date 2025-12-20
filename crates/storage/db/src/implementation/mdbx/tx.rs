@@ -460,10 +460,9 @@ mod tests {
         sleep(MAX_DURATION + Duration::from_millis(100));
 
         // Transaction has not timed out.
-        assert_eq!(
-            tx.get::<tables::Transactions>(0),
-            Err(DatabaseError::Open(reth_libmdbx::Error::NotFound.into()))
-        );
+        assert!(matches!(
+            tx.get::<tables::Transactions>(0).unwrap_err(),
+            DatabaseError::Open(err) if err == reth_libmdbx::Error::NotFound.into()));
         // Backtrace is not recorded.
         assert!(!tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
     }
@@ -485,10 +484,9 @@ mod tests {
         sleep(MAX_DURATION + Duration::from_millis(100));
 
         // Transaction has timed out.
-        assert_eq!(
-            tx.get::<tables::Transactions>(0),
-            Err(DatabaseError::Open(reth_libmdbx::Error::ReadTransactionTimeout.into()))
-        );
+        assert!(matches!(
+            tx.get::<tables::Transactions>(0).unwrap_err(),
+            DatabaseError::Open(err) if err == reth_libmdbx::Error::ReadTransactionTimeout.into()));
         // Backtrace is recorded.
         assert!(tx.metrics_handler.unwrap().backtrace_recorded.load(Ordering::Relaxed));
     }

@@ -2,15 +2,17 @@ use alloc::{
     boxed::Box,
     format,
     string::{String, ToString},
+    sync::Arc,
     vec::Vec,
 };
 use core::{
+    error::Error,
     fmt::{Debug, Display},
     str::FromStr,
 };
 
 /// Database error type.
-#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+#[derive(Clone, Debug, thiserror::Error)]
 pub enum DatabaseError {
     /// Failed to open the database.
     #[error("failed to open the database: {_0}")]
@@ -48,6 +50,9 @@ pub enum DatabaseError {
     /// Other unspecified error.
     #[error("{_0}")]
     Other(String),
+    /// Other unspecified error.
+    #[error(transparent)]
+    Custom(#[from] Arc<dyn Error + Send + Sync>),
 }
 
 /// Common error struct to propagate implementation-specific error information.
