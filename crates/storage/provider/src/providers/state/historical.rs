@@ -32,6 +32,78 @@ use reth_trie_db::{
 
 use std::fmt::Debug;
 
+/// Result of a history lookup for an account or storage slot.
+///
+/// Indicates where to find the historical value for a given key at a specific block.
+#[derive(Debug, Eq, PartialEq)]
+pub enum HistoryInfo {
+    /// The key is written to, but only after our block (not yet written at the target block).
+    NotYetWritten,
+    /// The chunk contains an entry for a write after our block at the given block number.
+    /// The value should be looked up in the changeset at this block.
+    InChangeset(u64),
+    /// The chunk does not contain an entry for a write after our block. This can only
+    /// happen if this is the last chunk, so we need to look in the plain state.
+    InPlainState,
+    /// The key may have been written, but due to pruning we may not have changesets and
+    /// history, so we need to make a plain state lookup.
+    MaybeInPlainState,
+}
+
+/// Computes [`HistoryInfo`] from a shard chunk using rank/select.
+///
+/// This is the core algorithm shared by both MDBX and RocksDB backends.
+/// It determines where to look for the value at a given block number based on the
+/// history index stored in a [`BlockNumberList`] (which wraps a `RoaringTreemap`).
+///
+/// # Arguments
+/// * `chunk` - The block number list from the shard
+/// * `block_number` - Target block to look up
+/// * `has_previous_shard` - Whether there's a shard before this one for the same key
+/// * `lowest_available` - Lowest block where history is available (pruning boundary)
+pub fn history_info_from_shard(
+    chunk: &BlockNumberList,
+    block_number: BlockNumber,
+    has_previous_shard: bool,
+    lowest_available: Option<BlockNumber>,
+) -> HistoryInfo {
+    // Get the rank of the first entry before or equal to our block.
+    let mut rank = chunk.rank(block_number);
+
+    // Adjust the rank, so that we have the rank of the first entry strictly before our
+    // block (not equal to it).
+    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+        rank -= 1;
+    }
+
+    let found_block = chunk.select(rank);
+
+    // If our block is before the first entry in the index chunk and this first entry
+    // doesn't equal to our block, it might be before the first write ever. To check, we
+    // look at the previous entry and check if the key is the same.
+    // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
+    // short-circuit) and when it passes we save a full seek into the changeset/plain state
+    // table.
+    if rank == 0 && found_block != Some(block_number) && !has_previous_shard {
+        if let (Some(_), Some(bn)) = (lowest_available, found_block) {
+            // The key may have been written, but due to pruning we may not have changesets
+            // and history, so we need to make a changeset lookup.
+            return HistoryInfo::InChangeset(bn);
+        }
+        // The key is written to, but only after our block.
+        return HistoryInfo::NotYetWritten;
+    }
+
+    if let Some(block_number) = found_block {
+        // The chunk contains an entry for a write after our block, return it.
+        HistoryInfo::InChangeset(block_number)
+    } else {
+        // The chunk does not contain an entry for a write after our block. This can only
+        // happen if this is the last chunk and so we need to look in the plain state.
+        HistoryInfo::InPlainState
+    }
+}
+
 /// State provider for a given block number which takes a tx reference.
 ///
 /// Historical state provider accesses the state at the start of the provided block number.
@@ -51,14 +123,6 @@ pub struct HistoricalStateProviderRef<'b, Provider> {
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub enum HistoryInfo {
-    NotYetWritten,
-    InChangeset(u64),
-    InPlainState,
-    MaybeInPlainState,
 }
 
 impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, Provider> {
@@ -166,48 +230,19 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
     {
         let mut cursor = self.tx().cursor_read::<T>()?;
 
-        // Lookup the history chunk in the history index. If they key does not appear in the
+        // Lookup the history chunk in the history index. If the key does not appear in the
         // index, the first chunk for the next key will be returned so we filter out chunks that
         // have a different key.
-        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1 .0) {
-            // Get the rank of the first entry before or equal to our block.
-            let mut rank = chunk.rank(self.block_number);
+        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1) {
+            // Check if there's a previous shard for the same key
+            let has_previous_shard = cursor.prev()?.is_some_and(|(key, _)| key_filter(&key));
 
-            // Adjust the rank, so that we have the rank of the first entry strictly before our
-            // block (not equal to it).
-            if rank.checked_sub(1).and_then(|rank| chunk.select(rank)) == Some(self.block_number) {
-                rank -= 1
-            };
-
-            let block_number = chunk.select(rank);
-
-            // If our block is before the first entry in the index chunk and this first entry
-            // doesn't equal to our block, it might be before the first write ever. To check, we
-            // look at the previous entry and check if the key is the same.
-            // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
-            // short-circuit) and when it passes we save a full seek into the changeset/plain state
-            // table.
-            if rank == 0 &&
-                block_number != Some(self.block_number) &&
-                !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key))
-            {
-                if let (Some(_), Some(block_number)) = (lowest_available_block_number, block_number)
-                {
-                    // The key may have been written, but due to pruning we may not have changesets
-                    // and history, so we need to make a changeset lookup.
-                    Ok(HistoryInfo::InChangeset(block_number))
-                } else {
-                    // The key is written to, but only after our block.
-                    Ok(HistoryInfo::NotYetWritten)
-                }
-            } else if let Some(block_number) = block_number {
-                // The chunk contains an entry for a write after our block, return it.
-                Ok(HistoryInfo::InChangeset(block_number))
-            } else {
-                // The chunk does not contain an entry for a write after our block. This can only
-                // happen if this is the last chunk and so we need to look in the plain state.
-                Ok(HistoryInfo::InPlainState)
-            }
+            Ok(history_info_from_shard(
+                &chunk,
+                self.block_number,
+                has_previous_shard,
+                lowest_available_block_number,
+            ))
         } else if lowest_available_block_number.is_some() {
             // The key may have been written, but due to pruning we may not have changesets and
             // history, so we need to make a plain state lookup.
