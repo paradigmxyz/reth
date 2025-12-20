@@ -3309,7 +3309,7 @@ mod tests {
                 crate::OriginalValuesKnown::No,
             )
             .unwrap();
-        provider_rw.insert_block(&data.blocks[0].0.clone()).unwrap();
+        provider_rw.insert_block(&data.blocks[0].0).unwrap();
         provider_rw.write_state(&data.blocks[0].1, crate::OriginalValuesKnown::No).unwrap();
         provider_rw.commit().unwrap();
 
@@ -3460,7 +3460,7 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(&data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
