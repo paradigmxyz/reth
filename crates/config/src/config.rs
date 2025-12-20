@@ -22,7 +22,8 @@ pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct Config {
     /// Configuration for each stage in the pipeline.
-    // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
+    ///
+    /// When adding or removing stages, see [`StageConfig`] documentation for required updates.
     pub stages: StageConfig,
     /// Configuration for pruning.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -102,6 +103,21 @@ impl Config {
 }
 
 /// Configuration for each stage in the pipeline.
+///
+/// # Adding or Removing Stages
+///
+/// When adding or removing a stage, the following locations must be updated:
+///
+/// 1. **This struct** - Add/remove the corresponding configuration field
+/// 2. **`reth_stages_types::StageId`** - Add/remove the stage ID variant in
+///    `crates/stages/types/src/id.rs`
+/// 3. **`reth_stages::sets`** - Update stage set builders in `crates/stages/stages/src/sets.rs` to
+///    use the new configuration
+/// 4. **Documentation** - Update `docs/crates/stages.md` with the new stage information
+/// 5. **Tests** - Add tests for the new stage configuration if applicable
+///
+/// The current design uses explicit fields for type safety and performance. While this requires
+/// manual updates, it provides compile-time guarantees and avoids runtime lookups.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "serde", serde(default))]
