@@ -51,7 +51,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, error, instrument, warn, Span};
+use tracing::{debug, debug_span, instrument, warn, Span};
 
 pub mod bal;
 mod configured_sparse_trie;
@@ -236,6 +236,34 @@ where
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
+        let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
+
+        // Handle BAL-based optimization if available
+        let prewarm_handle = if let Some(bal) = bal {
+            // When BAL is present, skip spawning prewarm tasks entirely and send BAL to multiproof
+            debug!(target: "engine::tree::payload_processor", "BAL present, skipping prewarm tasks");
+
+            // Send BAL message immediately to MultiProofTask
+            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(bal));
+
+            // Spawn minimal cache-only task without prewarming
+            self.spawn_caching_with(
+                env,
+                prewarm_rx,
+                transaction_count_hint,
+                provider_builder.clone(),
+                None, // Don't send proof targets when BAL is present
+            )
+        } else {
+            // Normal path: spawn with full prewarming
+            self.spawn_caching_with(
+                env,
+                prewarm_rx,
+                transaction_count_hint,
+                provider_builder.clone(),
+                Some(to_multi_proof.clone()),
+            )
+        };
 
         // We rely on the cursor factory to provide whatever DB overlay is necessary to see a
         // consistent view of the database, including the trie tables. Because of this there is no
@@ -257,42 +285,12 @@ where
             proof_handle.clone(),
             to_sparse_trie,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
+            to_multi_proof,
+            from_multi_proof,
         );
 
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
-
-        // Handle BAL-based optimization if available
-        let prewarm_handle = if let Some(bal) = bal {
-            // When BAL is present, skip spawning prewarm tasks entirely and send BAL to multiproof
-            debug!(target: "engine::tree::payload_processor", "BAL present, skipping prewarm tasks");
-
-            // Send BAL message immediately to MultiProofTask
-            if let Some(ref sender) = to_multi_proof &&
-                let Err(err) = sender.send(MultiProofMessage::BlockAccessList(bal))
-            {
-                // In this case state root validation will simply fail
-                error!(target: "engine::tree::payload_processor", ?err, "Failed to send BAL to MultiProofTask");
-            }
-
-            // Spawn minimal cache-only task without prewarming
-            self.spawn_caching_with(
-                env,
-                prewarm_rx,
-                transaction_count_hint,
-                provider_builder.clone(),
-                None, // Don't send proof targets when BAL is present
-            )
-        } else {
-            // Normal path: spawn with full prewarming
-            self.spawn_caching_with(
-                env,
-                prewarm_rx,
-                transaction_count_hint,
-                provider_builder.clone(),
-                to_multi_proof.clone(),
-            )
-        };
 
         // spawn multi-proof task
         let parent_span = span.clone();
