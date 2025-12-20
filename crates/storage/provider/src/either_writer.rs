@@ -44,7 +44,7 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
 // Helper types so constructors stay exported even when RocksDB feature is off.
 // Historical data tables use a write-only RocksDB batch (no read-your-writes needed).
 #[cfg(all(unix, feature = "rocksdb"))]
-type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
+type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch;
 #[cfg(not(all(unix, feature = "rocksdb")))]
 type RocksBatchArg<'a> = ();
 
@@ -62,7 +62,7 @@ pub enum EitherWriter<'a, CURSOR, N> {
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
     /// Write to `RocksDB` using a write-only batch (historical tables).
     #[cfg(all(unix, feature = "rocksdb"))]
-    RocksDB(RocksDBBatch<'a>),
+    RocksDB(RocksDBBatch),
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
