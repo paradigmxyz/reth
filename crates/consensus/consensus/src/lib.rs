@@ -404,9 +404,41 @@ pub enum ConsensusError {
         /// The maximum allowed RLP length.
         max_rlp_length: usize,
     },
+
+    /// Error when the hash of block access list is different from the expected hash.
+    #[error("Block header's BAL hash does not match the computed BAL hash.")]
+    InvalidBalHash,
+
+    /// Error when the block access list hash is missing.
+    #[error("block access list hash missing")]
+    BlockAccessListHashMissing,
+
+    /// Error when the block access list is different from the expected access list.
+    #[error("Block's access list is invalid.")]
+    InvalidBlockAccessList,
+
+    /// Error when the block access list is missing.
+    #[error("block access list missing")]
+    BlockAccessListMissing,
+
+    /// Error when the block access list hash is unexpected.
+    #[error("block access list hash unexpected")]
+    BlockAccessListHashUnexpected,
+
+    /// Error when the block access list contains an account change that is not present in the
+    /// computed access list.
+    #[error("Block BAL contains an account change that is not present in the computed BAL.")]
+    InvalidBalExtraAccount,
+
+    /// Error when the block access list is missing an account change that is present in the
+    /// computed access list.
+    #[error("Block BAL is missing an account change that is present in the computed BAL.")]
+    InvalidBalMissingAccount,
+
     /// EIP-7825: Transaction gas limit exceeds maximum allowed
     #[error(transparent)]
     TransactionGasLimitTooHigh(Box<TxGasLimitTooHighErr>),
+
     /// Other, likely an injected L2 error.
     #[error("{0}")]
     Other(String),

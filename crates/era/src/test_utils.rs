@@ -34,6 +34,7 @@ pub(crate) fn create_header() -> Header {
         excess_blob_gas: None,
         parent_beacon_block_root: None,
         requests_hash: None,
+        block_access_list_hash: None,
     }
 }
 
@@ -138,6 +139,7 @@ pub(crate) fn create_test_block_with_compressed_data(number: BlockNumber) -> Blo
         excess_blob_gas: None,
         parent_beacon_block_root: None,
         requests_hash: None,
+        block_access_list_hash: None,
     };
 
     // Create test body
@@ -145,6 +147,7 @@ pub(crate) fn create_test_block_with_compressed_data(number: BlockNumber) -> Blo
         transactions: vec![Bytes::from(vec![(number % 256) as u8; 10])],
         ommers: vec![],
         withdrawals: Some(Withdrawals(vec![])),
+        block_access_list: None,
     };
 
     // Create test receipt list with bloom

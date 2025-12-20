@@ -1031,10 +1031,12 @@ mod tests {
                         nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
+                        account_id: None,
                     },
                     storage,
                     status: AccountStatus::Touched,
                     transaction_id: 0,
+                    ..Default::default()
                 };
 
                 state_update.insert(address, account);

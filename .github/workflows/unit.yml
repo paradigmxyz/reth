@@ -4,9 +4,10 @@ name: unit
 
 on:
   pull_request:
+    branches: ["**"]
   merge_group:
   push:
-    branches: [main]
+    branches: ["**"]
 
 env:
   CARGO_TERM_COLOR: always

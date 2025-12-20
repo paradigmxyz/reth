@@ -518,6 +518,7 @@ mod tests {
             transactions: vec![],
             ommers: vec![],
             withdrawals: Some(Default::default()),
+            ..Default::default()
         };
         validate_body_against_header_op(&chainspec, &body, &header).unwrap();
 
@@ -542,6 +543,7 @@ mod tests {
             receipts: vec![],
             requests: Requests::default(),
             gas_used: GAS_USED,
+            block_access_list: None,
         };
         validate_block_post_execution(&header, &chainspec, &result).unwrap();
     }
@@ -563,6 +565,7 @@ mod tests {
             receipts: vec![],
             requests: Requests::default(),
             gas_used: GAS_USED,
+            block_access_list: None,
         };
         assert_eq!(
             validate_block_post_execution(&header, &chainspec, &result),

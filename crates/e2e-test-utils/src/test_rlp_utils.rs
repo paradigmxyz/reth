@@ -56,6 +56,7 @@ pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlo
             excess_blob_gas: None,
             parent_beacon_block_root: None,
             requests_hash: None,
+            block_access_list_hash: None,
         };
 
         // Set required fields based on chain spec
@@ -106,6 +107,7 @@ pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlo
             transactions: vec![],
             ommers: vec![],
             withdrawals: header.withdrawals_root.is_some().then(Withdrawals::default),
+            block_access_list: None,
         };
 
         // Create the block

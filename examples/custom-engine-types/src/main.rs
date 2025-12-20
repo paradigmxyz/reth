@@ -23,8 +23,8 @@ use alloy_primitives::{Address, B256};
 use alloy_rpc_types::{
     engine::{
         ExecutionData, ExecutionPayloadEnvelopeV2, ExecutionPayloadEnvelopeV3,
-        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadV1,
-        PayloadAttributes as EthPayloadAttributes, PayloadId,
+        ExecutionPayloadEnvelopeV4, ExecutionPayloadEnvelopeV5, ExecutionPayloadEnvelopeV6,
+        ExecutionPayloadV1, PayloadAttributes as EthPayloadAttributes, PayloadId,
     },
     Withdrawal,
 };
@@ -169,6 +169,7 @@ impl EngineTypes for CustomEngineTypes {
     type ExecutionPayloadEnvelopeV3 = ExecutionPayloadEnvelopeV3;
     type ExecutionPayloadEnvelopeV4 = ExecutionPayloadEnvelopeV4;
     type ExecutionPayloadEnvelopeV5 = ExecutionPayloadEnvelopeV5;
+    type ExecutionPayloadEnvelopeV6 = ExecutionPayloadEnvelopeV6;
 }
 
 /// Custom engine validator
