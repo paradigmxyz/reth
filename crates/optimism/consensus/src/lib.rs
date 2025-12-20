@@ -347,7 +347,7 @@ mod tests {
         assert!(pre_execution.is_err());
         assert_eq!(
             pre_execution.unwrap_err(),
-            ConsensusError::BlobGasUsedDiff(GotExpected { got: 10, expected: 0 })
+            ConsensusError::BlobGasUsedDiff(GotExpected { got: 0, expected: 10 })
         );
     }
 
