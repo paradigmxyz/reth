@@ -162,7 +162,7 @@ where
     fn next_hashed_entry(&mut self) -> Result<Option<(B256, H::Value)>, DatabaseError> {
         let next = self.hashed_cursor.next()?;
 
-        self.last_next_result = next.clone();
+        self.last_next_result = next;
 
         #[cfg(feature = "metrics")]
         {
