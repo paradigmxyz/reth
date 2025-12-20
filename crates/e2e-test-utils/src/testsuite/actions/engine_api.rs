@@ -131,7 +131,7 @@ where
             })?;
 
             // Convert block to ExecutionPayloadV3
-            let payload = block_to_payload_v3(block.clone());
+            let payload = block_to_payload_v3(&block);
 
             // Send the payload to the target node
             let target_engine = env.node_clients[self.node_idx].engine.http_client();
@@ -329,7 +329,7 @@ where
 }
 
 /// Helper function to convert a block to `ExecutionPayloadV3`
-fn block_to_payload_v3(block: Block) -> ExecutionPayloadV3 {
+fn block_to_payload_v3(block: &Block) -> ExecutionPayloadV3 {
     use alloy_primitives::U256;
 
     ExecutionPayloadV3 {
@@ -350,7 +350,7 @@ fn block_to_payload_v3(block: Block) -> ExecutionPayloadV3 {
                 block_hash: block.header.hash,
                 transactions: vec![], // No transactions needed for buffering tests
             },
-            withdrawals: block.withdrawals.unwrap_or_default().to_vec(),
+            withdrawals: block.withdrawals.clone().unwrap_or_default().to_vec(),
         },
         blob_gas_used: block.header.inner.blob_gas_used.unwrap_or(0),
         excess_blob_gas: block.header.inner.excess_blob_gas.unwrap_or(0),
