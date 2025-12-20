@@ -74,53 +74,6 @@ impl StaticFileAccess {
     }
 }
 
-/// Result of file-level consistency checks for static files.
-///
-/// This is an opaque token returned by [`StaticFileProvider::check_file_consistency`]
-/// that should be passed to [`StaticFileProvider::check_storage_consistency`].
-///
-/// Contains the healed state for each segment after file-level recovery,
-/// and any unwind target detected during file healing.
-#[derive(Debug, Default)]
-pub struct FileConsistencyResult {
-    /// Per-segment healed state (highest block and tx after file healing).
-    /// Internal use only - passed to `check_storage_consistency`.
-    segment_state: HashMap<StaticFileSegment, SegmentHealedState>,
-    /// Minimum unwind target detected during file healing, if any.
-    /// Callers can inspect this to check if file healing found issues.
-    unwind_target: Option<BlockNumber>,
-}
-
-impl FileConsistencyResult {
-    /// Returns the unwind target detected during file healing, if any.
-    pub const fn unwind_target(&self) -> Option<BlockNumber> {
-        self.unwind_target
-    }
-
-    /// Updates the unwind target to the minimum of current and new target.
-    fn update_unwind_target(&mut self, new_target: BlockNumber) {
-        update_unwind_target(&mut self.unwind_target, new_target);
-    }
-}
-
-/// Updates an optional unwind target to the minimum of current and new target.
-fn update_unwind_target(target: &mut Option<BlockNumber>, new_target: BlockNumber) {
-    if let Some(current) = target.as_mut() {
-        *current = (*current).min(new_target);
-    } else {
-        *target = Some(new_target);
-    }
-}
-
-/// Healed state for a single static file segment after file-level consistency checks.
-#[derive(Debug, Clone, Copy, Default)]
-struct SegmentHealedState {
-    /// Highest block number in the segment after healing.
-    highest_block: Option<BlockNumber>,
-    /// Highest transaction number in the segment after healing (for tx-based segments).
-    highest_tx: Option<TxNumber>,
-}
-
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
 ///
 /// "Static files" contain immutable chain history data, such as:
@@ -1039,16 +992,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Ensures that any broken invariants which cannot be healed on the spot return a pipeline
     /// target to unwind to.
     ///
-    /// This is a convenience method that combines [`Self::check_file_consistency`] and
-    /// [`Self::check_storage_consistency`] into a single call.
-    ///
-    /// **IMPORTANT**: If you need to perform `RocksDB` consistency checks between static file
-    /// checks, use the split methods instead:
-    /// 1. [`Self::check_file_consistency`] - heals file-level issues
-    /// 2. (perform `RocksDB` checks here while transaction data is still available)
-    /// 3. [`Self::check_storage_consistency`] - compares against MDBX checkpoints
-    ///
-    /// Two types of consistency checks are done:
+    /// Two types of consistency checks are done for:
     ///
     /// 1) When a static file fails to commit but the underlying data was changed.
     /// 2) When a static file was committed, but the required database transaction was not.
@@ -1080,76 +1024,56 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             + StorageSettingsCache,
         N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
     {
-        // Check and heal file-level consistency
-        let file_result = self.check_file_consistency(provider)?;
-
-        // Check storage consistency against MDBX checkpoints
-        self.check_storage_consistency(provider, &file_result)
-    }
-
-    /// Checks consistency of the latest static file segment and throws an error if at fault.
-    /// Read-only.
-    pub fn check_segment_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
-        debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency");
-        if let Some(latest_block) = self.get_highest_static_file_block(segment) {
-            let file_path = self
-                .directory()
-                .join(segment.filename(&self.find_fixed_range(segment, latest_block)));
-            debug!(target: "reth::providers::static_file", ?segment, ?file_path, latest_block, "Loading NippyJar for consistency check");
-
-            let jar = NippyJar::<SegmentHeader>::load(&file_path).map_err(ProviderError::other)?;
-            debug!(target: "reth::providers::static_file", ?segment, "NippyJar loaded, checking consistency");
-
-            NippyJarChecker::new(jar).check_consistency().map_err(ProviderError::other)?;
-            debug!(target: "reth::providers::static_file", ?segment, "NippyJar consistency check passed");
-        } else {
-            debug!(target: "reth::providers::static_file", ?segment, "No static file block found, skipping consistency check");
+        // OVM historical import is broken and does not work with this check. It's importing
+        // duplicated receipts resulting in having more receipts than the expected transaction
+        // range.
+        //
+        // If we detect an OVM import was done (block #1 <https://optimistic.etherscan.io/block/1>), skip it.
+        // More on [#11099](https://github.com/paradigmxyz/reth/pull/11099).
+        if provider.chain_spec().is_optimism() &&
+            reth_chainspec::Chain::optimism_mainnet() == provider.chain_spec().chain_id()
+        {
+            // check whether we have the first OVM block: <https://optimistic.etherscan.io/block/0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453>
+            const OVM_HEADER_1_HASH: B256 =
+                b256!("0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453");
+            if provider.block_number(OVM_HEADER_1_HASH)?.is_some() {
+                info!(target: "reth::cli",
+                    "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
+                );
+                return Ok(None)
+            }
         }
-        Ok(())
-    }
 
-    /// Checks file-level consistency for all static file segments.
-    ///
-    /// This handles recovery from interrupted commits or partial writes by healing the static
-    /// files. It does NOT compare against database checkpoints - use
-    /// [`Self::check_storage_consistency`] for that.
-    ///
-    /// File consistency is broken if:
-    /// - Appending data was interrupted before a config commit (data file will be truncated
-    ///   according to config)
-    /// - Pruning data was interrupted before a config commit (deleted data that should still exist)
-    ///
-    /// Returns healed state information for each segment that can be passed to
-    /// [`Self::check_storage_consistency`], along with an optional unwind target if file-level
-    /// healing detected issues that require unwinding.
-    ///
-    /// WARNING: No static file writer should be held before calling this function, otherwise it
-    /// will deadlock.
-    pub fn check_file_consistency<Provider>(
-        &self,
-        provider: &Provider,
-    ) -> ProviderResult<FileConsistencyResult>
-    where
-        Provider: DBProvider + BlockReader + ChainSpecProvider + StorageSettingsCache,
-        N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
-    {
-        let mut result = FileConsistencyResult::default();
+        info!(target: "reth::cli", "Verifying storage consistency.");
+
+        let mut unwind_target: Option<BlockNumber> = None;
+        let mut update_unwind_target = |new_target: BlockNumber| {
+            if let Some(target) = unwind_target.as_mut() {
+                *target = (*target).min(new_target);
+            } else {
+                unwind_target = Some(new_target);
+            }
+        };
 
         for segment in StaticFileSegment::iter() {
-            debug!(target: "reth::providers::static_file", ?segment, "Checking file consistency for segment");
-
+            debug!(target: "reth::providers::static_file", ?segment, "Checking consistency for segment");
             match segment {
                 StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
                 StaticFileSegment::Receipts => {
                     if EitherWriter::receipts_destination(provider).is_database() {
-                        debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts file consistency: receipts stored in database");
+                        // Old pruned nodes (including full node) do not store receipts as static
+                        // files.
+                        debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts consistency check: receipts stored in database");
                         continue
                     }
 
                     if NamedChain::Gnosis == provider.chain_spec().chain_id() ||
                         NamedChain::Chiado == provider.chain_spec().chain_id()
                     {
-                        debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts file consistency: broken historical import for gnosis/chiado");
+                        // Gnosis and Chiado's historical import is broken and does not work with
+                        // this check. They are importing receipts along
+                        // with importing headers/bodies.
+                        debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts consistency check: broken historical import for gnosis/chiado");
                         continue;
                     }
                 }
@@ -1163,13 +1087,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let initial_highest_block = self.get_highest_static_file_block(segment);
             debug!(target: "reth::providers::static_file", ?segment, ?initial_highest_block, "Initial highest block for segment");
 
-            // File consistency can be broken if a crash occurred between modifying files and
-            // committing the config:
+            //  File consistency is broken if:
             //
-            // * Append interrupted: file has more data than config indicates → truncate to config
-            // * Prune interrupted: file has less data than config indicates → unwind database
-
-            // Heal file-level inconsistencies
+            // * appending data was interrupted before a config commit, then data file will be
+            //   truncated according to the config.
+            //
+            // * pruning data was interrupted before a config commit, then we have deleted data that
+            //   we are expected to still have. We need to check the Database and unwind everything
+            //   accordingly.
             if self.access.is_read_only() {
                 debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency (read-only)");
                 self.check_segment_consistency(segment)?;
@@ -1179,7 +1104,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 self.latest_writer(segment)?;
             }
 
-            // Get updated highest block after healing
+            // Only applies to block-based static files. (Headers)
+            //
+            // The updated `highest_block` may have decreased if we healed from a pruning
+            // interruption.
             let mut highest_block = self.get_highest_static_file_block(segment);
             if initial_highest_block != highest_block {
                 info!(
@@ -1187,19 +1115,21 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     ?initial_highest_block,
                     unwind_target = highest_block,
                     ?segment,
-                    "File healing detected change, setting unwind target."
+                    "Setting unwind target."
                 );
-                result.update_unwind_target(highest_block.unwrap_or_default());
+                update_unwind_target(highest_block.unwrap_or_default());
             }
 
-            // For transaction-based segments, verify last transaction matches last block indices
+            // Only applies to transaction-based static files. (Receipts & Transactions)
+            //
+            // Make sure the last transaction matches the last block from its indices, since a heal
+            // from a pruning interruption might have decreased the number of transactions without
+            // being able to update the last block of the static file segment.
             let highest_tx = self.get_highest_static_file_tx(segment);
             debug!(target: "reth::providers::static_file", ?segment, ?highest_tx, ?highest_block, "Highest transaction for segment");
-
             if let Some(highest_tx) = highest_tx {
                 let mut last_block = highest_block.unwrap_or_default();
                 debug!(target: "reth::providers::static_file", ?segment, last_block, highest_tx, "Verifying last transaction matches last block indices");
-
                 loop {
                     if let Some(indices) = provider.block_body_indices(last_block)? {
                         debug!(target: "reth::providers::static_file", ?segment, last_block, last_tx_num = indices.last_tx_num(), highest_tx, "Found block body indices");
@@ -1227,67 +1157,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         "Setting unwind target."
                     );
                     highest_block = Some(last_block);
-                    result.update_unwind_target(last_block);
+                    update_unwind_target(last_block);
                 }
             }
-
-            // Store the healed state for this segment
-            result.segment_state.insert(segment, SegmentHealedState { highest_block, highest_tx });
-        }
-
-        Ok(result)
-    }
-
-    /// Checks storage consistency between static files and database checkpoints.
-    ///
-    /// This should be called AFTER [`Self::check_file_consistency`] and AFTER any `RocksDB`
-    /// consistency checks, because this method may prune static file data that `RocksDB` needs
-    /// to compute transaction hashes.
-    ///
-    /// For each static file segment:
-    /// - The corresponding database table should overlap or have continuity in keys
-    /// - Its highest block should match the stage checkpoint block number
-    ///
-    /// Returns a [`PipelineTarget::Unwind`] if healing is required.
-    ///
-    /// WARNING: No static file writer should be held before calling this function, otherwise it
-    /// will deadlock.
-    pub fn check_storage_consistency<Provider>(
-        &self,
-        provider: &Provider,
-        file_result: &FileConsistencyResult,
-    ) -> ProviderResult<Option<PipelineTarget>>
-    where
-        Provider: DBProvider
-            + BlockReader
-            + StageCheckpointReader
-            + ChainSpecProvider
-            + StorageSettingsCache,
-        N: NodePrimitives<Receipt: Value, BlockHeader: Value, SignedTx: Value>,
-    {
-        // OVM historical import check
-        if provider.chain_spec().is_optimism() &&
-            reth_chainspec::Chain::optimism_mainnet() == provider.chain_spec().chain_id()
-        {
-            const OVM_HEADER_1_HASH: B256 =
-                b256!("0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453");
-            if provider.block_number(OVM_HEADER_1_HASH)?.is_some() {
-                info!(target: "reth::cli",
-                    "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
-                );
-                return Ok(file_result.unwind_target.map(PipelineTarget::Unwind))
-            }
-        }
-
-        info!(target: "reth::cli", "Verifying storage consistency.");
-
-        let mut unwind_target = file_result.unwind_target;
-
-        for segment in StaticFileSegment::iter() {
-            // Skip segments not tracked in file consistency
-            let Some(state) = file_result.segment_state.get(&segment) else {
-                continue;
-            };
 
             debug!(target: "reth::providers::static_file", ?segment, "Ensuring invariants for segment");
             if let Some(unwind) = match segment {
@@ -1295,39 +1167,84 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     .ensure_invariants::<_, tables::Headers<N::BlockHeader>>(
                         provider,
                         segment,
-                        state.highest_block,
-                        state.highest_block,
+                        highest_block,
+                        highest_block,
                     )?,
                 StaticFileSegment::Transactions => self
                     .ensure_invariants::<_, tables::Transactions<N::SignedTx>>(
                         provider,
                         segment,
-                        state.highest_tx,
-                        state.highest_block,
+                        highest_tx,
+                        highest_block,
                     )?,
                 StaticFileSegment::Receipts => self
                     .ensure_invariants::<_, tables::Receipts<N::Receipt>>(
                         provider,
                         segment,
-                        state.highest_tx,
-                        state.highest_block,
+                        highest_tx,
+                        highest_block,
                     )?,
                 StaticFileSegment::TransactionSenders => self
                     .ensure_invariants::<_, tables::TransactionSenders>(
                         provider,
                         segment,
-                        state.highest_tx,
-                        state.highest_block,
+                        highest_tx,
+                        highest_block,
                     )?,
             } {
                 debug!(target: "reth::providers::static_file", ?segment, unwind_target=unwind, "Invariants check returned unwind target");
-                update_unwind_target(&mut unwind_target, unwind);
+                update_unwind_target(unwind);
             } else {
                 debug!(target: "reth::providers::static_file", ?segment, "Invariants check completed, no unwind needed");
             }
         }
 
         Ok(unwind_target.map(PipelineTarget::Unwind))
+    }
+
+    /// Checks consistency of the latest static file segment and throws an error if at fault.
+    /// Read-only.
+    pub fn check_segment_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {
+        debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency");
+        if let Some(latest_block) = self.get_highest_static_file_block(segment) {
+            let file_path = self
+                .directory()
+                .join(segment.filename(&self.find_fixed_range(segment, latest_block)));
+            debug!(target: "reth::providers::static_file", ?segment, ?file_path, latest_block, "Loading NippyJar for consistency check");
+
+            let jar = NippyJar::<SegmentHeader>::load(&file_path).map_err(ProviderError::other)?;
+            debug!(target: "reth::providers::static_file", ?segment, "NippyJar loaded, checking consistency");
+
+            NippyJarChecker::new(jar).check_consistency().map_err(ProviderError::other)?;
+            debug!(target: "reth::providers::static_file", ?segment, "NippyJar consistency check passed");
+        } else {
+            debug!(target: "reth::providers::static_file", ?segment, "No static file block found, skipping consistency check");
+        }
+        Ok(())
+    }
+
+    /// Heals file-level (NippyJar) inconsistencies for all static file segments.
+    ///
+    /// This method ONLY handles recovery from interrupted file operations (partial writes,
+    /// corrupted jars). It does NOT compare against database checkpoints or prune data.
+    ///
+    /// Call this before any operations that need static file data to be in a consistent state,
+    /// such as RocksDB consistency checks that need transaction data from static files.
+    ///
+    /// For full consistency checking including database checkpoint comparison,
+    /// use [`Self::check_consistency`] instead.
+    ///
+    /// WARNING: No static file writer should be held before calling this function, otherwise it
+    /// will deadlock.
+    pub fn check_file_consistency(&self) -> ProviderResult<()> {
+        for segment in StaticFileSegment::iter() {
+            if self.access.is_read_only() {
+                self.check_segment_consistency(segment)?;
+            } else {
+                self.latest_writer(segment)?;
+            }
+        }
+        Ok(())
     }
 
     /// Check invariants for each corresponding table and static file segment:

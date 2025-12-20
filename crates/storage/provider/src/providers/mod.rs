@@ -9,8 +9,8 @@ pub use database::*;
 
 mod static_file;
 pub use static_file::{
-    FileConsistencyResult, StaticFileAccess, StaticFileJarProvider, StaticFileProvider,
-    StaticFileProviderBuilder, StaticFileProviderRW, StaticFileProviderRWRefMut, StaticFileWriter,
+    StaticFileAccess, StaticFileJarProvider, StaticFileProvider, StaticFileProviderBuilder,
+    StaticFileProviderRW, StaticFileProviderRWRefMut, StaticFileWriter,
 };
 
 mod state;
