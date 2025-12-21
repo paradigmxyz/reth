@@ -765,7 +765,8 @@ impl<'db> RocksTx<'db> {
             let has_prev = start_iter.next().transpose()?.is_some_and(|(k, _)| {
                 k.address == address &&
                     k.sharded_key.key == storage_key &&
-                    k.sharded_key.highest_block_number < found_key.sharded_key.highest_block_number
+                    k.sharded_key.highest_block_number <
+                        found_key.sharded_key.highest_block_number
             });
 
             Ok(history_info_from_shard(
