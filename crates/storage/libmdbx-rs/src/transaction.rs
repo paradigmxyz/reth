@@ -173,7 +173,7 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the transaction manager's channel is closed (should not happen during normal 
+    /// Panics if the transaction manager's channel is closed (should not happen during normal
     /// operation).
     pub fn commit(self) -> Result<(bool, CommitLatency)> {
         let result = self.txn_execute(|txn| {
@@ -514,8 +514,8 @@ impl Transaction<RW> {
     ///
     /// # Panics
     ///
-    /// Panics if the transaction manager's channel is closed when creating the nested transaction.
-    /// This should not occur during normal operation.
+    /// Panics if the transaction manager's channel is closed when creating the nested
+    /// transaction. This should not occur during normal operation.
     pub fn begin_nested_txn(&mut self) -> Result<Self> {
         if self.inner.env.is_write_map() {
             return Err(Error::NestedTransactionsUnsupportedWithWriteMap)
