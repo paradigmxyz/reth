@@ -173,7 +173,8 @@ where
     ///
     /// # Panics
     ///
-    /// Panics if the transaction manager's channel is closed (should not happen during normal operation).
+    /// Panics if the transaction manager's channel is closed (should not happen during normal 
+    /// operation).
     pub fn commit(self) -> Result<(bool, CommitLatency)> {
         let result = self.txn_execute(|txn| {
             if K::IS_READ_ONLY {
