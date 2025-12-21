@@ -142,6 +142,12 @@ pub struct ArbBlockExecutionCtx {
     pub extra_data: alloy_primitives::bytes::Bytes,
     pub delayed_messages_read: u64,
     pub l1_block_number: u64,
+    /// Chain ID for scheduled transactions
+    pub chain_id: u64,
+    /// Block timestamp for scheduled transactions
+    pub block_timestamp: u64,
+    /// Base fee for scheduled transactions
+    pub basefee: U256,
 }
 
 pub struct ArbBlockExecutor<'a, Evm, CS, RB: alloy_evm::eth::receipt_builder::ReceiptBuilder> {
@@ -1210,6 +1216,66 @@ where
 
     fn evm(&self) -> &Self::Evm {
         self.inner.evm()
+    }
+}
+
+impl<'a, E, CS, RB, D> ArbBlockExecutor<'a, E, CS, RB>
+where
+    RB: alloy_evm::eth::receipt_builder::ReceiptBuilder<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt>,
+    D: RevmDatabase + core::fmt::Debug + 'a,
+    <D as RevmDatabase>::Error: Send + Sync + 'static,
+    E: reth_evm::Evm<DB = &'a mut revm::database::State<D>> + crate::arb_evm::ArbEvmExt,
+    E::Tx: Clone + alloy_evm::tx::FromRecoveredTx<reth_arbitrum_primitives::ArbTransactionSigned> + alloy_evm::tx::FromTxWithEncoded<reth_arbitrum_primitives::ArbTransactionSigned>,
+    for<'b> alloy_evm::eth::EthBlockExecutor<'b, E, alloy_evm::eth::spec::EthSpec, &'b RB>: alloy_evm::block::BlockExecutor<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt, Evm = E>,
+    <E as alloy_evm::Evm>::Tx: reth_evm::TransactionEnv,
+{
+    /// Get scheduled transactions (retry transactions) after a transaction execution.
+    /// This should be called after each transaction execution to collect any scheduled redeems.
+    /// Returns encoded transactions that should be executed as part of the same block.
+    pub fn get_scheduled_txes(&mut self) -> Vec<Vec<u8>> {
+        // Get the logs from the log sink (these are the logs from the last transaction)
+        let logs = crate::log_sink::take();
+        
+        if logs.is_empty() {
+            return Vec::new();
+        }
+        
+        // Get block context for scheduled_txes
+        let chain_id = self.exec_ctx.chain_id;
+        let block_timestamp = self.exec_ctx.block_timestamp;
+        let basefee = self.exec_ctx.basefee;
+        
+        tracing::info!(
+            target: "arb-scheduled",
+            logs_count = logs.len(),
+            chain_id = chain_id,
+            block_timestamp = block_timestamp,
+            basefee = %basefee,
+            "Checking for scheduled transactions"
+        );
+        
+        // Call scheduled_txes to get any scheduled retry transactions
+        let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
+        let state_db: &mut revm::database::State<D> = *db_ref;
+        
+        let scheduled = self.hooks.scheduled_txes(
+            state_db,
+            &self.tx_state,
+            &logs,
+            chain_id,
+            block_timestamp,
+            basefee,
+        );
+        
+        if !scheduled.is_empty() {
+            tracing::info!(
+                target: "arb-scheduled",
+                scheduled_count = scheduled.len(),
+                "Found scheduled transactions to execute"
+            );
+        }
+        
+        scheduled
     }
 }
 
