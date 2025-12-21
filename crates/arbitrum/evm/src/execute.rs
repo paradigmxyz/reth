@@ -1480,7 +1480,8 @@ impl ArbOsHooks for DefaultArbOsHooks {
         use arb_alloy_predeploys::ARB_RETRYABLE_TX;
         use alloy_primitives::keccak256;
         use crate::retryables::RetryableState;
-        use crate::storage::{Storage, arbos_state_subspace, RETRYABLES_SUBSPACE};
+        use crate::storage::Storage;
+        use crate::arbosstate::{arbos_state_subspace, RETRYABLES_SUBSPACE};
         
         let redeem_scheduled_event_id = keccak256("RedeemScheduled(bytes32,bytes32,uint64,uint64,address,uint256,uint256)");
         
