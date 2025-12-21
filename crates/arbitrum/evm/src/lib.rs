@@ -194,6 +194,9 @@ where
             extra_data: block.header().extra_data.clone().into(),
             delayed_messages_read,
             l1_block_number,
+            chain_id: self.chain_spec().chain_id() as u64,
+            block_timestamp: block.header().timestamp,
+            basefee: U256::from(block.header().base_fee_per_gas.unwrap_or_default()),
         })
     }
 
@@ -208,6 +211,9 @@ where
             extra_data: attributes.extra_data.into(),
             delayed_messages_read: attributes.delayed_messages_read,
             l1_block_number: attributes.l1_block_number,
+            chain_id: self.chain_spec().chain_id() as u64,
+            block_timestamp: attributes.timestamp,
+            basefee: attributes.basefee,
         })
     }
 
@@ -268,6 +274,9 @@ where
             extra_data: payload.payload.as_v1().extra_data.clone().into(),
             delayed_messages_read,
             l1_block_number,
+            chain_id: self.chain_spec().chain_id() as u64,
+            block_timestamp: payload.payload.timestamp(),
+            basefee: payload.payload.as_v1().base_fee_per_gas.try_into().unwrap_or_default(),
         })
     }
 
