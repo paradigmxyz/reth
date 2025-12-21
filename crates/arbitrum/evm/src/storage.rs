@@ -217,7 +217,16 @@ impl<D: Database> Storage<D> {
             let state = &mut *self.state;
             let arbos_addr = ARBOS_STATE_ADDRESS;
 
-            // First check bundle_state.state for any in-flight changes
+            // First check cache for in-flight changes (writes go to cache first)
+            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
+                if let Some(ref account) = cached_acc.account {
+                    if let Some(&value) = account.storage.get(&slot) {
+                        return Ok(B256::from(value));
+                    }
+                }
+            }
+
+            // Then check bundle_state.state for merged changes
             if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&slot) {
                     return Ok(B256::from(slot_entry.present_value));
@@ -260,7 +269,16 @@ impl<D: Database> Storage<D> {
             let arbos_addr = ARBOS_STATE_ADDRESS;
             let slot = U256::from_be_bytes(key.0);
 
-            // First check bundle_state.state for any in-flight changes
+            // First check cache for in-flight changes (writes go to cache first)
+            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
+                if let Some(ref account) = cached_acc.account {
+                    if let Some(&value) = account.storage.get(&slot) {
+                        return Ok(B256::from(value));
+                    }
+                }
+            }
+
+            // Then check bundle_state.state for merged changes
             if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&slot) {
                     return Ok(B256::from(slot_entry.present_value));
@@ -326,7 +344,17 @@ impl<D: Database> StorageBackedUint64<D> {
             let state = &mut *self.storage;
             let arbos_addr = ARBOS_STATE_ADDRESS;
 
-            // First check bundle_state.state for any in-flight changes
+            // First check cache for in-flight changes (writes go to cache first)
+            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
+                if let Some(ref account) = cached_acc.account {
+                    if let Some(&value) = account.storage.get(&self.slot) {
+                        let value_u64: u64 = value.try_into().unwrap_or(0);
+                        return Ok(value_u64);
+                    }
+                }
+            }
+
+            // Then check bundle_state.state for merged changes
             if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&self.slot) {
                     let value_u64: u64 = slot_entry.present_value.try_into().unwrap_or(0);
@@ -378,7 +406,16 @@ impl<D: Database> StorageBackedBigUint<D> {
             let state = &mut *self.storage;
             let arbos_addr = ARBOS_STATE_ADDRESS;
 
-            // First check bundle_state.state for any in-flight changes
+            // First check cache for in-flight changes (writes go to cache first)
+            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
+                if let Some(ref account) = cached_acc.account {
+                    if let Some(&value) = account.storage.get(&self.slot) {
+                        return Ok(value);
+                    }
+                }
+            }
+
+            // Then check bundle_state.state for merged changes
             if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&self.slot) {
                     return Ok(slot_entry.present_value);
@@ -427,7 +464,18 @@ impl<D: Database> StorageBackedAddress<D> {
             let state = &mut *self.storage;
             let arbos_addr = ARBOS_STATE_ADDRESS;
 
-            // First check bundle_state.state for any in-flight changes
+            // First check cache for in-flight changes (writes go to cache first)
+            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
+                if let Some(ref account) = cached_acc.account {
+                    if let Some(&value) = account.storage.get(&self.slot) {
+                        let bytes = value.to_be_bytes::<32>();
+                        let addr_bytes: [u8; 20] = bytes[12..32].try_into().unwrap();
+                        return Ok(Address::from(addr_bytes));
+                    }
+                }
+            }
+
+            // Then check bundle_state.state for merged changes
             if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
                 if let Some(slot_entry) = acc.storage.get(&self.slot) {
                     let bytes = slot_entry.present_value.to_be_bytes::<32>();
