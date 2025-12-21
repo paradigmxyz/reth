@@ -76,10 +76,6 @@ fn verify_and_compute_sender(
         return Err(StatelessValidationError::HomesteadSignatureNotNormalized);
     }
     let sig_hash = tx.signature_hash();
-    #[cfg(all(feature = "k256", feature = "secp256k1"))]
-    {
-        let _ = verify_and_compute_sender_unchecked_k256;
-    }
     #[cfg(feature = "secp256k1")]
     {
         verify_and_compute_sender_unchecked_secp256k1(vk, sig, sig_hash)
