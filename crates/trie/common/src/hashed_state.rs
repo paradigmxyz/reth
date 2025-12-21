@@ -64,14 +64,20 @@ impl HashedPostState {
         let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         for (address, (account, storage)) in hashed {
-            // CONSENSUS-CRITICAL: Only insert non-None and non-empty accounts to match go-ethereum's
-            // IntermediateRoot(deleteEmptyObjects=true) behavior for Arbitrum and other chains.
-            // Empty accounts (None or nonce=0, balance=0, no code) must not be included in the state trie.
+            // CONSENSUS-CRITICAL: Match go-ethereum's IntermediateRoot(deleteEmptyObjects=true) behavior.
+            // - Non-empty accounts (nonce>0 OR balance>0 OR has code): insert as Some(account)
+            // - Empty accounts (nonce=0, balance=0, no code): insert as None to mark for deletion
+            // - None accounts (info not loaded): skip entirely (no change to trie)
             if let Some(ref acc) = account {
-                if !acc.is_empty() {
+                if acc.is_empty() {
+                    // Empty account should be deleted from trie
+                    accounts.insert(address, None);
+                } else {
+                    // Non-empty account should be stored in trie
                     accounts.insert(address, account);
                 }
             }
+            // Note: if account is None (info not loaded), we don't insert anything
             if !storage.is_empty() {
                 storages.insert(address, storage);
             }
@@ -102,14 +108,20 @@ impl HashedPostState {
         let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         for (address, (account, storage)) in hashed {
-            // CONSENSUS-CRITICAL: Only insert non-None and non-empty accounts to match go-ethereum's
-            // IntermediateRoot(deleteEmptyObjects=true) behavior for Arbitrum and other chains.
-            // Empty accounts (None or nonce=0, balance=0, no code) must not be included in the state trie.
+            // CONSENSUS-CRITICAL: Match go-ethereum's IntermediateRoot(deleteEmptyObjects=true) behavior.
+            // - Non-empty accounts (nonce>0 OR balance>0 OR has code): insert as Some(account)
+            // - Empty accounts (nonce=0, balance=0, no code): insert as None to mark for deletion
+            // - None accounts (info not loaded): skip entirely (no change to trie)
             if let Some(ref acc) = account {
-                if !acc.is_empty() {
+                if acc.is_empty() {
+                    // Empty account should be deleted from trie
+                    accounts.insert(address, None);
+                } else {
+                    // Non-empty account should be stored in trie
                     accounts.insert(address, account);
                 }
             }
+            // Note: if account is None (info not loaded), we don't insert anything
             if !storage.is_empty() {
                 storages.insert(address, storage);
             }
