@@ -15,7 +15,7 @@ static ENGINE_DEFAULTS: OnceLock<DefaultEngineValues> = OnceLock::new();
 /// Default values for engine that can be customized
 ///
 /// Global defaults can be set via [`DefaultEngineValues::try_init`].
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct DefaultEngineValues {
     persistence_threshold: u64,
     memory_block_buffer_target: u64,
@@ -333,7 +333,7 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
-        } = DefaultEngineValues::get_global().clone();
+        } = *DefaultEngineValues::get_global();
         Self {
             persistence_threshold,
             memory_block_buffer_target,
