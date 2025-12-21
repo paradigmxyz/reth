@@ -170,6 +170,10 @@ where
     /// Commits the transaction.
     ///
     /// Any pending operations will be saved.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transaction manager's channel is closed (should not happen during normal operation).
     pub fn commit(self) -> Result<(bool, CommitLatency)> {
         let result = self.txn_execute(|txn| {
             if K::IS_READ_ONLY {
@@ -208,6 +212,11 @@ where
     }
 
     /// Gets the option flags for the given database in the transaction.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the database flags cannot be converted to the target integer type.
+    /// This should not occur on supported platforms.
     pub fn db_flags(&self, db: &Database) -> Result<DatabaseFlags> {
         let mut flags: c_uint = 0;
         unsafe {
@@ -321,6 +330,10 @@ impl<K> Drop for TransactionInner<K>
 where
     K: TransactionKind,
 {
+    /// # Panics
+    ///
+    /// Panics if the transaction manager's channel is closed during transaction abort,
+    /// or if the abort operation fails. This should not occur during normal operation.
     fn drop(&mut self) {
         // To be able to abort a timed out transaction, we need to renew it first.
         // Hence the usage of `txn_execute_renew_on_timeout` here.
@@ -497,6 +510,11 @@ impl Transaction<RO> {
 
 impl Transaction<RW> {
     /// Begins a new nested transaction inside of this transaction.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the transaction manager's channel is closed when creating the nested transaction.
+    /// This should not occur during normal operation.
     pub fn begin_nested_txn(&mut self) -> Result<Self> {
         if self.inner.env.is_write_map() {
             return Err(Error::NestedTransactionsUnsupportedWithWriteMap)
