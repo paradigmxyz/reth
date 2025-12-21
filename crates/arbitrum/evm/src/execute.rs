@@ -1470,15 +1470,17 @@ impl ArbOsHooks for DefaultArbOsHooks {
     
     fn scheduled_txes<D: Database>(
         &self,
-        _state_db: &mut revm::database::State<D>,
+        state_db: &mut revm::database::State<D>,
         _state: &ArbTxProcessorState,
         logs: &[alloy_primitives::Log],
-        _chain_id: u64,
-        _block_timestamp: u64,
-        _basefee: U256,
+        chain_id: u64,
+        block_timestamp: u64,
+        basefee: U256,
     ) -> Vec<Vec<u8>> {
         use arb_alloy_predeploys::ARB_RETRYABLE_TX;
         use alloy_primitives::keccak256;
+        use crate::retryables::RetryableState;
+        use crate::storage::{Storage, arbos_state_subspace, RETRYABLES_SUBSPACE};
         
         let redeem_scheduled_event_id = keccak256("RedeemScheduled(bytes32,bytes32,uint64,uint64,address,uint256,uint256)");
         
@@ -1491,8 +1493,104 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 continue;
             }
             
-            if topics.len() >= 3 {
-                tracing::debug!("Found RedeemScheduled event for ticket {:?}", topics[1]);
+            if topics.len() < 3 {
+                continue;
+            }
+            
+            // Parse event data:
+            // Topics: [event_id, ticket_id, retry_tx_hash]
+            // Data: [sequence_num (uint64), donated_gas (uint64), gas_donor (address), max_refund (uint256), submission_fee_refund (uint256)]
+            let ticket_id = topics[1];
+            let data = &log.data.data;
+            
+            if data.len() < 160 {
+                tracing::warn!("RedeemScheduled event data too short: {} bytes", data.len());
+                continue;
+            }
+            
+            // Parse event data (ABI encoded)
+            // uint64 sequence_num at offset 0 (padded to 32 bytes)
+            // uint64 donated_gas at offset 32 (padded to 32 bytes)
+            // address gas_donor at offset 64 (padded to 32 bytes)
+            // uint256 max_refund at offset 96
+            // uint256 submission_fee_refund at offset 128
+            let sequence_num = u64::from_be_bytes(data[24..32].try_into().unwrap_or([0u8; 8]));
+            let donated_gas = u64::from_be_bytes(data[56..64].try_into().unwrap_or([0u8; 8]));
+            let gas_donor = Address::from_slice(&data[76..96]);
+            let max_refund = U256::from_be_slice(&data[96..128]);
+            let submission_fee_refund = U256::from_be_slice(&data[128..160]);
+            
+            tracing::info!(
+                target: "arb-scheduled",
+                "Found RedeemScheduled event: ticket_id={:?} sequence_num={} donated_gas={} gas_donor={:?}",
+                ticket_id, sequence_num, donated_gas, gas_donor
+            );
+            
+            // Open the retryable from state
+            let retryable_storage = Storage::new(
+                state_db as *mut _,
+                arbos_state_subspace(RETRYABLES_SUBSPACE[0]),
+            );
+            let retryable_state = RetryableState::new(
+                state_db as *mut _,
+                retryable_storage.base_key,
+            );
+            
+            let ticket_id_struct = RetryableTicketId(ticket_id.0);
+            
+            if let Some(retryable) = retryable_state.open_retryable(
+                state_db as *mut _,
+                &ticket_id_struct,
+                block_timestamp,
+            ) {
+                // Get retryable data
+                let from = retryable.get_from().unwrap_or_default();
+                let to = retryable.get_to().unwrap_or_default();
+                let call_value = retryable.get_escrowed().unwrap_or_default();
+                
+                tracing::info!(
+                    target: "arb-scheduled",
+                    "Constructing retry tx: from={:?} to={:?} value={:?} gas={}",
+                    from, to, call_value, donated_gas
+                );
+                
+                // Construct the retry transaction
+                use arb_alloy_consensus::tx::ArbRetryTx;
+                let retry_tx = ArbRetryTx {
+                    chain_id: U256::from(chain_id),
+                    nonce: sequence_num,
+                    from,
+                    gas_fee_cap: basefee,
+                    gas: donated_gas,
+                    to: Some(to),
+                    value: call_value,
+                    data: Bytes::new(), // TODO: Get actual calldata from retryable storage
+                    ticket_id: B256::from(ticket_id.0),
+                    refund_to: gas_donor,
+                    max_refund,
+                    submission_fee_refund,
+                };
+                
+                // Encode the retry transaction as type 0x68 + RLP encoding
+                use alloy_rlp::Encodable;
+                let mut encoded = Vec::new();
+                encoded.push(0x68); // ArbRetryTx type byte
+                retry_tx.encode(&mut encoded);
+                
+                tracing::info!(
+                    target: "arb-scheduled",
+                    "Scheduled retry tx: encoded_len={} hash={:?}",
+                    encoded.len(),
+                    keccak256(&encoded)
+                );
+                
+                scheduled.push(encoded);
+            } else {
+                tracing::warn!(
+                    target: "arb-scheduled",
+                    "Could not open retryable for ticket_id={:?}",
+                    ticket_id
+                );
             }
         }
         
