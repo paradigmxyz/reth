@@ -6,7 +6,6 @@ use alloy_consensus::{
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Typed2718};
 use alloy_primitives::{Address, Bytes, ChainId, Signature, TxKind, B256, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable};
-use core::mem;
 use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, InMemorySize};
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
