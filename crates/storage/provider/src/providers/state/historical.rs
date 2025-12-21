@@ -52,7 +52,7 @@ pub enum HistoryInfo {
 
 /// Computes [`HistoryInfo`] from a shard chunk using rank/select.
 ///
-/// This is the core algorithm shared by both MDBX and RocksDB backends.
+/// This is the core algorithm shared by both MDBX and `RocksDB` backends.
 /// It determines where to look for the value at a given block number based on the
 /// history index stored in a [`BlockNumberList`] (which wraps a `RoaringTreemap`).
 ///
