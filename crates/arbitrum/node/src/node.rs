@@ -1106,7 +1106,8 @@ where
                     // After successful execution, check for scheduled transactions (retry txs)
                     // This matches Go behavior in block_processor.go where ScheduledTxes are
                     // collected after each transaction and added to the redeems queue
-                    let scheduled = builder.get_scheduled_txes();
+                    // Scheduled transactions are pushed to the sink by execute_transaction_with_commit_condition
+                    let scheduled = reth_arbitrum_evm::scheduled_tx_sink::take();
                     if !scheduled.is_empty() {
                         reth_tracing::tracing::info!(
                             target: "arb-reth::follower",
