@@ -53,9 +53,14 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.info.as_ref().map(Into::into);
+                // CONSENSUS-CRITICAL: Only include storage slots that actually changed.
+                // In go-ethereum, only dirtyStorage slots are written to the trie.
+                // Filter out slots where present_value == previous_or_original_value.
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    account.storage.iter()
+                        .filter(|(_, value)| value.present_value != value.previous_or_original_value)
+                        .map(|(slot, value)| (slot, &value.present_value)),
                 );
                 (hashed_address, (hashed_account, hashed_storage))
             })
@@ -97,9 +102,14 @@ impl HashedPostState {
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
                 let hashed_account = account.info.as_ref().map(Into::into);
+                // CONSENSUS-CRITICAL: Only include storage slots that actually changed.
+                // In go-ethereum, only dirtyStorage slots are written to the trie.
+                // Filter out slots where present_value == previous_or_original_value.
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    account.storage.iter()
+                        .filter(|(_, value)| value.present_value != value.previous_or_original_value)
+                        .map(|(slot, value)| (slot, &value.present_value)),
                 );
                 (hashed_address, (hashed_account, hashed_storage))
             })
