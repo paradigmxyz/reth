@@ -25,7 +25,7 @@ const NATIVE_TOKEN_ENABLED_FROM_TIME_OFFSET: u64 = 8;
 
 const L1_PRICING_SUBSPACE: &[u8] = &[0];
 const L2_PRICING_SUBSPACE: &[u8] = &[1];
-const RETRYABLES_SUBSPACE: &[u8] = &[2];
+pub const RETRYABLES_SUBSPACE: &[u8] = &[2];
 const ADDRESS_TABLE_SUBSPACE: &[u8] = &[3];
 const CHAIN_OWNER_SUBSPACE: &[u8] = &[4];
 const SEND_MERKLE_SUBSPACE: &[u8] = &[5];
