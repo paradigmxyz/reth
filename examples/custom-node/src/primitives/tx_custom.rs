@@ -75,17 +75,10 @@ impl TxPayment {
         super::tx::TxTypeCustom::Payment
     }
 
-    /// Calculates a heuristic for the in-memory size of the [TxPayment]
-    /// transaction.
+    /// Calculates a heuristic for the in-memory size of the [TxPayment] transaction.
     #[inline]
     pub fn size(&self) -> usize {
-        mem::size_of::<ChainId>() + // chain_id
-        mem::size_of::<u64>() + // nonce
-        mem::size_of::<u64>() + // gas_limit
-        mem::size_of::<u128>() + // max_fee_per_gas
-        mem::size_of::<u128>() + // max_priority_fee_per_gas
-        mem::size_of::<Address>() + // to
-        mem::size_of::<U256>() // value
+        size_of::<Self>()
     }
 }
 
