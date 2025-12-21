@@ -344,18 +344,20 @@ where
                 let original_refundable_value = refundable_value;
                 for item in &flattened_bundle {
                     if let Some(refund_percent) = item.refund_percent {
-                        // Get refund configurations
-                        let refund_configs = item.refund_configs.clone().unwrap_or_else(|| {
-                            vec![RefundConfig { address: item.tx.signer(), percent: 100 }]
-                        });
+                        // Only need the number of refund configs; default to one without allocating.
+                        let refund_configs_len = item
+                            .refund_configs
+                            .as_ref()
+                            .map(|configs| configs.len())
+                            .unwrap_or(1);
 
                         // Calculate payout transaction fee
                         let payout_tx_fee = U256::from(basefee) *
                             U256::from(SBUNDLE_PAYOUT_MAX_COST) *
-                            U256::from(refund_configs.len() as u64);
+                            U256::from(refund_configs_len as u64);
 
                         // Add gas used for payout transactions
-                        total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
+                        total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs_len as u64;
 
                         // Calculate allocated refundable value (payout value) based on ORIGINAL
                         // refundable value This ensures all refund_percent
@@ -470,9 +472,6 @@ pub enum EthSimBundleError {
     /// Thrown when max depth is reached
     #[error("max depth reached")]
     MaxDepth,
-    /// Thrown when a bundle is unmatched
-    #[error("unmatched bundle")]
-    UnmatchedBundle,
     /// Thrown when a bundle is too large
     #[error("bundle too large")]
     BundleTooLarge,
