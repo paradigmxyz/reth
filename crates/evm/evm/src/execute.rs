@@ -503,6 +503,29 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
+        // Debug: Log bundle_state contents AFTER merge_transitions
+        eprintln!(
+            "[STATE-ROOT-DEBUG] AFTER merge_transitions: bundle_state.state.len()={} transition_state_len={}",
+            db.bundle_state.state.len(),
+            db.transition_state.as_ref().map(|t| t.transitions.len()).unwrap_or(0)
+        );
+        // Log ALL accounts in bundle_state with their details
+        for (addr, acc) in db.bundle_state.state.iter() {
+            let nonce = acc.info.as_ref().map(|i| i.nonce).unwrap_or(0);
+            let balance = acc.info.as_ref().map(|i| i.balance).unwrap_or_default();
+            eprintln!(
+                "[STATE-ROOT-DEBUG] Account {:?}: status={:?} nonce={} balance={} storage_slots={}",
+                addr, acc.status, nonce, balance, acc.storage.len()
+            );
+            // Log first 5 storage slots for each account
+            for (slot, slot_val) in acc.storage.iter().take(5) {
+                eprintln!(
+                    "[STATE-ROOT-DEBUG]   Storage {:?}: present={:?} original={:?}",
+                    slot, slot_val.present_value, slot_val.previous_or_original_value
+                );
+            }
+        }
+
         // calculate the state root
         let hashed_state = state.hashed_post_state(&db.bundle_state);
         let (state_root, trie_updates) = state
