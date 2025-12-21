@@ -70,55 +70,91 @@ fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State
 
 /// Helper function to write storage for the ArbOS account.
 ///
-/// This writes DIRECTLY to bundle_state.state which is the approach that produces
-/// DETERMINISTIC state roots. The cache/transition mechanism was causing non-determinism
-/// because transitions interact with EVM execution in complex ways.
+/// CRITICAL FIX: This now uses the proper transition mechanism instead of writing
+/// directly to bundle_state.state. The previous approach was causing storage to be
+/// lost because merge_transitions() creates bundle_state from transition_state,
+/// NOT from the existing bundle_state.state.
 ///
-/// bundle_state.state persists throughout block execution and is used directly
-/// when computing the state root, so writes here are guaranteed to be included.
+/// The correct flow is:
+/// 1. Load account into cache
+/// 2. Modify cache entry with storage change
+/// 3. Create TransitionAccount with storage changes
+/// 4. Call apply_transition() to register the transition
 ///
-/// CRITICAL: After writing storage, we MUST update the account status to Changed,
-/// otherwise revm will skip this account when computing the state root (since
-/// Loaded status means "not modified").
+/// This ensures storage changes are properly tracked and persisted.
 fn write_arbos_storage<D: Database>(
     state: &mut revm::database::State<D>,
     slot: U256,
     value: U256,
 ) {
     use revm_database::AccountStatus;
-    use revm_state::EvmStorageSlot;
 
-    ensure_arbos_account_in_bundle(state);
+    // Step 1: Load the ArbOS account into cache
+    let _ = state.load_cache_account(ARBOS_STATE_ADDRESS);
 
-    // Get original value for proper tracking
-    let original_value = if let Some(acc) = state.bundle_state.state.get(&ARBOS_STATE_ADDRESS) {
-        if let Some(slot_entry) = acc.storage.get(&slot) {
-            slot_entry.previous_or_original_value
-        } else {
-            state.database.storage(ARBOS_STATE_ADDRESS, slot).unwrap_or(U256::ZERO)
+    // Step 2: Get original value from database for proper tracking
+    let original_value = state.database.storage(ARBOS_STATE_ADDRESS, slot).unwrap_or(U256::ZERO);
+
+    // Step 3: Modify the cache entry with the storage change
+    let (previous_info, previous_status, current_info, current_status) = {
+        let cached_acc = match state.cache.accounts.get_mut(&ARBOS_STATE_ADDRESS) {
+            Some(acc) => acc,
+            None => {
+                tracing::error!(
+                    target: "arb-storage",
+                    "[STORAGE-WRITE] ArbOS account not found in cache after load_cache_account!"
+                );
+                return;
+            }
+        };
+
+        let previous_status = cached_acc.status;
+        let previous_info = cached_acc.account.as_ref().map(|a| a.info.clone());
+
+        // Insert the storage slot into the cache account
+        // Cache storage uses plain U256 values (PlainStorage = HashMap<U256, U256>)
+        if let Some(ref mut account) = cached_acc.account {
+            account.storage.insert(slot, value);
         }
-    } else {
-        state.database.storage(ARBOS_STATE_ADDRESS, slot).unwrap_or(U256::ZERO)
+
+        // Update status to Changed
+        let had_no_nonce_and_code = previous_info
+            .as_ref()
+            .map(|info| info.has_no_code_and_nonce())
+            .unwrap_or_default();
+        cached_acc.status = cached_acc.status.on_changed(had_no_nonce_and_code);
+
+        let current_info = cached_acc.account.as_ref().map(|a| a.info.clone());
+        let current_status = cached_acc.status;
+
+        (previous_info, previous_status, current_info, current_status)
     };
 
-    // Write directly to bundle_state.state and update status to Changed
-    if let Some(acc) = state.bundle_state.state.get_mut(&ARBOS_STATE_ADDRESS) {
-        let status_before = acc.status;
-        acc.storage.insert(
-            slot,
-            EvmStorageSlot::new_changed(original_value, value, 0).into(),
-        );
-        // CRITICAL: Update status from Loaded to Changed so revm knows this account was modified
-        // and includes it in the state root computation.
-        if acc.status == AccountStatus::Loaded {
-            acc.status = AccountStatus::Changed;
-        }
-        tracing::warn!(
-            target: "arb-storage",
-            "[STORAGE-WRITE] write_arbos_storage: slot={:?} value={:?} original={:?} status_before={:?} status_after={:?} storage_count={}",
-            slot, value, original_value, status_before, acc.status, acc.storage.len()
-        );
-    }
+    // Step 4: Create and apply the transition with storage changes
+    // TransitionAccount.storage uses StorageWithOriginalValues = HashMap<U256, StorageSlot>
+    use revm_database::states::StorageSlot;
+    let mut storage_changes: revm_database::StorageWithOriginalValues = HashMap::default();
+    storage_changes.insert(
+        slot,
+        StorageSlot::new_changed(original_value, value),
+    );
+
+    let transition = revm::database::TransitionAccount {
+        info: current_info,
+        status: current_status,
+        previous_info,
+        previous_status,
+        storage: storage_changes,
+        storage_was_destroyed: false,
+    };
+
+    state.apply_transition(vec![(ARBOS_STATE_ADDRESS, transition)]);
+
+    tracing::warn!(
+        target: "arb-storage",
+        "[STORAGE-WRITE] write_arbos_storage: slot={:?} value={:?} original={:?} status={:?}",
+        slot, value, original_value, current_status
+    );
 }
 
 /// Logs the full ArbOS account state for debugging.
