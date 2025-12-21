@@ -43,7 +43,7 @@ use reth_revm::db::State;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::Address;
+use revm_primitives::{keccak256, Address};
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
@@ -203,6 +203,63 @@ where
         match input {
             BlockOrPayload::Payload(payload) => Ok(self.evm_config.evm_env_for_payload(payload)?),
             BlockOrPayload::Block(block) => Ok(self.evm_config.evm_env(block.header())?),
+        }
+    }
+
+    /// Warms the keccak cache by pre-computing hashes for transaction addresses.
+    #[instrument(level = "trace", target = "engine::tree::payload_validator", skip_all)]
+    fn warm_keccak_cache<T>(&self, input: &BlockOrPayload<T>)
+    where
+        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
+        V: PayloadValidator<T, Block = N::Block>,
+        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
+    {
+        use alloy_consensus::Transaction as _;
+        use alloy_evm::RecoveredTx;
+        use alloy_primitives::TxKind;
+        use rayon::iter::ParallelIterator;
+        use reth_primitives_traits::SignerRecoverable;
+
+        match input {
+            BlockOrPayload::Payload(payload) => {
+                // Get transaction bytes iterator and conversion function
+                if let Ok((txs, convert)) =
+                    self.evm_config.tx_iterator_for_payload(payload).map(|iter| iter.into())
+                {
+                    // Use parallel iterator to warm cache for all transactions
+                    use rayon::iter::IntoParallelIterator;
+                    txs.into_par_iter().for_each(|tx_bytes| {
+                        if let Ok(recovered_tx) = convert(tx_bytes) {
+                            // Warm cache for sender address
+                            let sender = recovered_tx.signer();
+                            let _ = keccak256(sender);
+
+                            // Unwrap to get the inner transaction for recipient
+                            let tx = recovered_tx.tx();
+
+                            // Warm cache for recipient address (skip contract creations)
+                            if let TxKind::Call(to) = tx.kind() {
+                                let _ = keccak256(to);
+                            }
+                        }
+                    });
+                }
+            }
+
+            BlockOrPayload::Block(block) => {
+                // For blocks, transactions are already decoded
+                for tx in block.body().transactions() {
+                    // Warm cache for sender address (skip if recovery fails)
+                    if let Ok(sender) = tx.recover_signer() {
+                        let _ = keccak256(sender);
+                    }
+
+                    // Warm cache for recipient address
+                    if let TxKind::Call(to) = tx.kind() {
+                        let _ = keccak256(to);
+                    }
+                }
+            }
         }
     }
 
@@ -400,6 +457,9 @@ where
             ?strategy,
             "Decided which state root algorithm to run"
         );
+
+        // Warm keccak cache before spawning parallel tasks
+        self.warm_keccak_cache(&input);
 
         // Get an iterator over the transactions in the payload
         let txs = self.tx_iterator_for(&input)?;
