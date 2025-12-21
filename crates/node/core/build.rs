@@ -43,10 +43,8 @@ let profile = out_dir
     .rsplit(std::path::MAIN_SEPARATOR)
     .nth(3)
     .unwrap_or_else(|| {
-        panic!(
-            "Failed to derive build profile from OUT_DIR: unexpected path layout: {out_dir}"
-        )
-    });
+        panic!("Failed to derive build profile from OUT_DIR: unexpected path layout: {out_dir}")
+    });    
 
     println!("cargo:rustc-env=RETH_BUILD_PROFILE={profile}");
 
