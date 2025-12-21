@@ -1,7 +1,7 @@
 
 use alloy_primitives::{BlockHash, B256, U64};
 use alloy_rpc_types_engine::{
-    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2, ExecutionPayloadV3,
+    ClientVersionV1, ExecutionPayloadBodiesV1, ExecutionPayloadInputV2,
     ForkchoiceState, ForkchoiceUpdated, PayloadId, PayloadStatus,
 };
 use jsonrpsee::proc_macros::rpc;
@@ -14,7 +14,7 @@ use reth_storage_api::{BlockReader, HeaderProvider, StateProviderFactory};
 use reth_transaction_pool::TransactionPool;
 use tracing::trace;
 
-use reth_arbitrum_payload::ArbExecutionData;
+use reth_arbitrum_payload::{ArbExecutionData, ArbExecutionPayloadV3};
 
 /// Supported Engine capabilities over the engine endpoint for Arbitrum.
 pub const ARB_ENGINE_CAPABILITIES: &[&str] = &[
@@ -39,7 +39,7 @@ pub trait ArbEngineApi<Engine: EngineTypes> {
     #[method(name = "newPayloadV3")]
     async fn new_payload_v3(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: ArbExecutionPayloadV3,
         versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus>;
@@ -146,12 +146,12 @@ where
 
     async fn new_payload_v3(
         &self,
-        payload: ExecutionPayloadV3,
+        payload: ArbExecutionPayloadV3,
         _versioned_hashes: Vec<B256>,
         parent_beacon_block_root: B256,
     ) -> RpcResult<PayloadStatus> {
-        trace!(target: "rpc::engine", "Serving engine_newPayloadV3");
-        let payload = ArbExecutionData::v3(payload, parent_beacon_block_root);
+        trace!(target: "rpc::engine", "Serving engine_newPayloadV3 with nonce={:?}", payload.nonce);
+        let payload = ArbExecutionData::v3_arb(payload, parent_beacon_block_root);
         Ok(self.inner.new_payload_v3_metered(payload).await?)
     }
 

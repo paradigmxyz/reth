@@ -106,11 +106,12 @@ where
             .with_state_root_fallback(true)
             .with_disable_parallel_sparse_trie(true)
             .with_legacy_state_root(true)
-            .with_persistence_threshold(0);
+            .with_persistence_threshold(0)
+            .with_skip_state_root_validation(true);
 
         tracing::info!(
             target: "arb-reth::engine",
-            "arb engine: building tree validator with legacy_state_root=true, state_root_fallback=true, parallel_sparse_trie=false, persistence_threshold=0"
+            "arb engine: building tree validator with legacy_state_root=true, state_root_fallback=true, parallel_sparse_trie=false, persistence_threshold=0, skip_state_root_validation=true (trust sequencer)"
         );
 
         tracing::info!(

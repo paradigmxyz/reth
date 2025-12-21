@@ -898,25 +898,27 @@ pub fn arbitrum_sepolia_spec() -> reth_chainspec::ChainSpec {
     ]);
 
     // Build spec from the baked genesis with proper allocations
-    // Parameters from Arbitrum Sepolia mainnet genesis block:
+    // Parameters from Arbitrum Sepolia mainnet genesis block (block 0):
     // - chain_id: 421614
     // - base_fee: 0x5f5e100 (100_000_000 = 0.1 gwei)
     // - timestamp: 0x0
     // - state_root: 0x8647a2ae10b316ca12fbd76327fe4d64d12cb0ec664a128b0d59df15d05391be
-    // - gas_limit: 0x1c9c380 (30_000_000)
-    // - extra_data: 0x (empty)
-    // - mix_hash: 0x0 (zeros for post-merge)
-    // - nonce: 0x0
+    // - gas_limit: 0x4000000000000 (1,125,899,906,842,624 - Arbitrum's very high gas limit)
+    // - extra_data: 32 bytes of zeros
+    // - mix_hash: 0x00000000000000000000000000000000000000000000000a0000000000000000
+    // - nonce: 0x1 (Arbitrum uses non-zero nonce)
     // - initial_l1_base_fee: 0xb2d05e00 (3 gwei)
+    //
+    // Expected genesis hash: 0x77194da4010e549a7028a9c3c51c3e277823be6ac7d138d0bb8a70197b5c004c
     let mut spec = sepolia_baked_genesis_from_header(
         421_614,
-        "0x5f5e100",  // base_fee
+        "0x5f5e100",  // base_fee (100 gwei)
         "0x0",        // timestamp
         "0x8647a2ae10b316ca12fbd76327fe4d64d12cb0ec664a128b0d59df15d05391be",  // state_root
-        "0x1c9c380",  // gas_limit
-        "0x",         // extra_data
-        "0x0000000000000000000000000000000000000000000000000000000000000000",  // mix_hash
-        "0x0",        // nonce
+        "0x4000000000000",  // gas_limit - Arbitrum's high limit
+        "0x0000000000000000000000000000000000000000000000000000000000000000",  // extra_data - 32 bytes zeros
+        "0x00000000000000000000000000000000000000000000000a0000000000000000",  // mix_hash - Arbitrum-specific
+        "0x1",        // nonce - Arbitrum uses 1 for genesis
         None,         // chain_config_bytes
         Some("0xb2d05e00"),  // initial_l1_base_fee
     ).expect("failed to build arbitrum sepolia chainspec");
