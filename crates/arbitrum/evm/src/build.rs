@@ -6,7 +6,7 @@ use core::marker::PhantomData;
 use std::sync::Mutex;
 use alloy_consensus::Transaction;
 use alloy_evm::{eth::EthEvmContext, precompiles::PrecompilesMap};
-use alloy_primitives::{Address, B256};
+use alloy_primitives::{Address, B256, U256};
 use reth_evm_ethereum::{EthEvmConfig};
 use crate::ArbEvmFactory;
 use crate::header;
@@ -1040,6 +1040,10 @@ where
             );
         }
 
+        // Check for and push any scheduled transactions (retry txs) to the sink
+        // This matches Go behavior where ScheduledTxes are collected after each tx
+        self.check_and_push_scheduled_txes();
+
         result
     }
 
@@ -1229,15 +1233,15 @@ where
     for<'b> alloy_evm::eth::EthBlockExecutor<'b, E, alloy_evm::eth::spec::EthSpec, &'b RB>: alloy_evm::block::BlockExecutor<Transaction = reth_arbitrum_primitives::ArbTransactionSigned, Receipt = reth_arbitrum_primitives::ArbReceipt, Evm = E>,
     <E as alloy_evm::Evm>::Tx: reth_evm::TransactionEnv,
 {
-    /// Get scheduled transactions (retry transactions) after a transaction execution.
+    /// Check for and push scheduled transactions (retry transactions) to the sink after a transaction execution.
     /// This should be called after each transaction execution to collect any scheduled redeems.
-    /// Returns encoded transactions that should be executed as part of the same block.
-    pub fn get_scheduled_txes(&mut self) -> Vec<Vec<u8>> {
+    /// The scheduled transactions can be retrieved from the sink using `scheduled_tx_sink::take()`.
+    fn check_and_push_scheduled_txes(&mut self) {
         // Get the logs from the log sink (these are the logs from the last transaction)
         let logs = crate::log_sink::take();
         
         if logs.is_empty() {
-            return Vec::new();
+            return;
         }
         
         // Get block context for scheduled_txes
@@ -1273,9 +1277,11 @@ where
                 scheduled_count = scheduled.len(),
                 "Found scheduled transactions to execute"
             );
+            // Push scheduled transactions to the sink for retrieval by node.rs
+            for tx in scheduled {
+                crate::scheduled_tx_sink::push(tx);
+            }
         }
-        
-        scheduled
     }
 }
 
