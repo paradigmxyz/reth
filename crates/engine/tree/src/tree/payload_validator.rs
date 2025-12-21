@@ -372,7 +372,26 @@ where
             )
             .into())
         };
-        let mut state_provider = ensure_ok!(provider_builder.build());
+        let mut state_provider = match provider_builder.build() {
+            Ok(provider) => provider,
+            Err(ProviderError::InsufficientChangesets { .. }) => {
+                // If we can't create a state provider due to insufficient changesets,
+                // this means we're trying to access state that was pruned or is on a different
+                // chain. This can happen during reorgs when we need to unwind first.
+                // Return an error that will cause the block to be buffered until the unwind
+                // completes through the pipeline.
+                let block = self.convert_to_block(input)?;
+                return Err(InsertBlockError::new(
+                    block,
+                    ProviderError::HeaderNotFound(parent_hash.into()).into(),
+                )
+                .into())
+            }
+            Err(e) => {
+                let block = self.convert_to_block(input)?;
+                return Err(InsertBlockError::new(block, e.into()).into())
+            }
+        };
         drop(_enter);
 
         // Fetch parent block. This goes to memory most of the time unless the parent block is
