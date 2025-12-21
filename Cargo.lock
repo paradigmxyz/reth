@@ -8525,6 +8525,7 @@ dependencies = [
  "reth-rpc-server-types",
  "reth-tracing",
  "tempfile",
+ "tokio",
  "tracing",
 ]
 
