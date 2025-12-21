@@ -212,6 +212,8 @@ pub struct ArbNextBlockEnvAttributes {
     pub blob_gas_price: Option<u128>,
     pub delayed_messages_read: u64,
     pub l1_block_number: u64,
+    /// Base fee for scheduled transactions
+    pub basefee: U256,
 }
 #[cfg(feature = "rpc")]
 impl<H: alloy_consensus::BlockHeader>
@@ -230,6 +232,7 @@ impl<H: alloy_consensus::BlockHeader>
             blob_gas_price: None,
             delayed_messages_read: 0,
             l1_block_number: 0,
+            basefee: U256::from(parent.base_fee_per_gas().unwrap_or_default()),
         }
     }
 }
@@ -262,6 +265,7 @@ where
             blob_gas_price: None,
             delayed_messages_read: 0,
             l1_block_number: 0,
+            basefee: U256::from(parent.base_fee_per_gas().unwrap_or_default()),
         })
     }
 }
