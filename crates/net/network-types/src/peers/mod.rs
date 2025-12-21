@@ -4,7 +4,7 @@ pub mod kind;
 pub mod reputation;
 pub mod state;
 
-pub use config::{ConnectionsConfig, PeersConfig};
+pub use config::{ConnectionsConfig, Discv5BootNode, PeersConfig};
 pub use reputation::{Reputation, ReputationChange, ReputationChangeKind, ReputationChangeWeights};
 
 use alloy_eip2124::ForkId;
