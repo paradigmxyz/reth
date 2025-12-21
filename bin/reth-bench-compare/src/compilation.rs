@@ -14,6 +14,7 @@ pub(crate) struct CompilationManager {
     output_dir: PathBuf,
     git_manager: GitManager,
     features: String,
+    enable_profiling: bool,
 }
 
 impl CompilationManager {
@@ -23,8 +24,9 @@ impl CompilationManager {
         output_dir: PathBuf,
         git_manager: GitManager,
         features: String,
+        enable_profiling: bool,
     ) -> Result<Self> {
-        Ok(Self { repo_root, output_dir, git_manager, features })
+        Ok(Self { repo_root, output_dir, git_manager, features, enable_profiling })
     }
 
     /// Detect if the RPC endpoint is an Optimism chain
@@ -100,9 +102,14 @@ impl CompilationManager {
         let mut cmd = Command::new("cargo");
         cmd.arg("build").arg("--profile").arg("profiling");
 
-        // Add features
-        cmd.arg("--features").arg(&self.features);
-        info!("Using features: {}", self.features);
+        // Append samply feature when profiling to enable tracing span markers
+        let features = if self.enable_profiling && !self.features.contains("samply") {
+            format!("{},samply", self.features)
+        } else {
+            self.features.clone()
+        };
+        cmd.arg("--features").arg(&features);
+        info!("Using features: {}", features);
 
         // Add bin-specific arguments for optimism
         if is_optimism {
