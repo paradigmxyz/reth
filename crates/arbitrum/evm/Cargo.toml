@@ -42,9 +42,10 @@ reth-payload-builder = { path = "../../payload/builder" }
 reth-evm-ethereum = { path = "../../ethereum/evm", default-features = false, features = ["std"] }
 
 # revm (workspace)
-revm.workspace = true
+revm = { workspace = true, features = ["optional_eip3607"] }
 revm-state.workspace = true
 revm-database.workspace = true
+revm-context = { workspace = true, features = ["optional_eip3607"] }
 
 # Compression
 brotli.workspace = true

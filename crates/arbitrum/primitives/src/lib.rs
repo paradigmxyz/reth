@@ -1252,13 +1252,21 @@ impl ConsensusTx for ArbTransactionSigned {
 
     fn effective_gas_price(&self, _base_fee: Option<u64>) -> u128 {
         match &self.transaction {
+            // Standard Ethereum types use their own gas pricing logic
             ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
+            ArbTypedTransaction::Eip2930(tx) => tx.gas_price.into(),
             ArbTypedTransaction::Eip1559(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
             ArbTypedTransaction::Eip4844(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
-            // For Arbitrum internal transactions and deposits, use basefee as effectiveGasPrice
-            // This matches the official Nitro implementation behavior
-            ArbTypedTransaction::Internal(_) | ArbTypedTransaction::Deposit(_) => _base_fee.unwrap_or(0) as u128,
-            _ => self.max_fee_per_gas(),
+            ArbTypedTransaction::Eip7702(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
+            // All Arbitrum-specific types (0x64-0x6A) return baseFee as effectiveGasPrice
+            // This matches the official Nitro implementation in go-ethereum/core/types/arb_types.go
+            // Each of these types has: if baseFee == nil { return GasFeeCap } else { return baseFee }
+            ArbTypedTransaction::Deposit(_) |
+            ArbTypedTransaction::Unsigned(_) |
+            ArbTypedTransaction::Contract(_) |
+            ArbTypedTransaction::Retry(_) |
+            ArbTypedTransaction::SubmitRetryable(_) |
+            ArbTypedTransaction::Internal(_) => _base_fee.unwrap_or(0) as u128,
         }
     }
 

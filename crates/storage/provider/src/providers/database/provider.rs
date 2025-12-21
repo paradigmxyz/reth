@@ -1864,6 +1864,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // write account to database.
         for (address, account) in changes.accounts {
             if let Some(account) = account {
+                // DEBUG: Log ArbOS account being written
+                let addr_str = format!("{:?}", address);
+                if addr_str.contains("A4B05") || addr_str.contains("a4b05") {
+                    eprintln!(
+                        "DEBUG write_state_changes: writing ArbOS to PlainAccountState addr={} nonce={}",
+                        address, account.nonce
+                    );
+                }
                 tracing::trace!(?address, "Updating plain state account");
                 accounts_cursor.upsert(address, &account.into())?;
             } else if accounts_cursor.seek_exact(address)?.is_some() {
@@ -1917,6 +1925,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
         for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
             if let Some(account) = account {
+                // DEBUG: Check if this could be ArbOS by nonce
+                if account.nonce == 1 {
+                    eprintln!(
+                        "DEBUG write_hashed_state: writing account with nonce=1 hashed_addr={} balance={}",
+                        hashed_address, account.balance
+                    );
+                }
                 hashed_accounts_cursor.upsert(hashed_address, &account)?;
             } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;

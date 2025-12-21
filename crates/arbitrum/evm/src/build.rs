@@ -276,6 +276,19 @@ where
         let is_deposit = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Deposit);
         let is_retry = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Retry);
         let is_submit_retryable = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable);
+        let is_contract = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Contract);
+
+        // CRITICAL: Skip EIP-3607 check for Arbitrum internal transaction types
+        // EIP-3607 rejects transactions from senders with deployed code.
+        // However, ArbOS precompiles (like ArbosActs at 0xa4b05) have code (0xfe)
+        // but must be able to send internal transactions.
+        // This matches Go Nitro's skipTransactionChecks() behavior in arb_types.go.
+        let should_skip_eip3607 = is_internal || is_deposit || is_retry || is_submit_retryable || is_contract;
+        if should_skip_eip3607 {
+            self.evm_mut().cfg_mut().disable_eip3607 = true;
+        } else {
+            self.evm_mut().cfg_mut().disable_eip3607 = false;
+        }
 
         // ITERATION 99: Capture sender balance BEFORE start_tx hook runs.
         //
@@ -1111,8 +1124,27 @@ where
             }
         }
 
+        // Log bundle_state before finish to see what we have
+        {
+            let evm = self.inner.evm_mut();
+            let (db_ref, _, _) = evm.components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+            crate::storage::log_arbos_bundle_state(state);
+        }
+
         // NOW call inner.finish() which will create bundle_state from the corrected transition_state
         let (mut evm, mut result) = self.inner.finish()?;
+
+        // Log bundle_state AFTER finish to see if it's still there
+        {
+            let (db_ref, _, _) = evm.components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+            tracing::warn!(
+                target: "arb-storage",
+                "[AFTER-FINISH] About to log bundle_state AFTER inner.finish()"
+            );
+            crate::storage::log_arbos_bundle_state(state);
+        }
 
         tracing::info!(
             target: "arb-reth::executor",

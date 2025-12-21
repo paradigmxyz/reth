@@ -99,9 +99,19 @@ use reth_trie_common::HashedStorage;
 
 pub fn load_sepolia_secure_alloc_hashed(
 ) -> Result<(BTreeMap<B256, Account>, BTreeMap<B256, HashedStorage>)> {
+    let (accounts_h, storages_h, _bytecodes) = load_sepolia_secure_alloc_hashed_with_bytecodes()?;
+    Ok((accounts_h, storages_h))
+}
+
+/// Load the embedded Sepolia genesis alloc with accounts, storage, and bytecodes.
+/// Returns (hashed_accounts, hashed_storage, bytecodes)
+/// The bytecodes map is keyed by code hash (B256) with value being the raw bytecode bytes.
+pub fn load_sepolia_secure_alloc_hashed_with_bytecodes(
+) -> Result<(BTreeMap<B256, Account>, BTreeMap<B256, HashedStorage>, BTreeMap<B256, Vec<u8>>)> {
     let parsed = decode_embedded_alloc_json()?;
     let mut accounts_h = BTreeMap::<B256, Account>::new();
     let mut storages_h = BTreeMap::<B256, HashedStorage>::new();
+    let mut bytecodes = BTreeMap::<B256, Vec<u8>>::new();
 
     let obj = parsed.get("secureAlloc").and_then(|v| v.as_object()).ok_or_else(|| {
         anyhow::anyhow!("secureAlloc not found in embedded artifact")
@@ -120,7 +130,10 @@ pub fn load_sepolia_secure_alloc_hashed(
 
         let code_bytes = v.get("code").and_then(|x| x.as_str()).map(|s| hex::decode(s.trim_start_matches("0x")).unwrap_or_default()).unwrap_or_default();
         let code_hash = if !code_bytes.is_empty() {
-            keccak256(&code_bytes)
+            let hash = keccak256(&code_bytes);
+            // Store the bytecode keyed by its hash
+            bytecodes.insert(hash, code_bytes);
+            hash
         } else if let Some(ch) = v.get("codeHash").and_then(|x| x.as_str()) {
             parse_b256_hex(ch)
         } else {
@@ -144,5 +157,5 @@ pub fn load_sepolia_secure_alloc_hashed(
         }
     }
 
-    Ok((accounts_h, storages_h))
+    Ok((accounts_h, storages_h, bytecodes))
 }

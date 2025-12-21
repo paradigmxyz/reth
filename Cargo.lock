@@ -7465,6 +7465,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-tracing",
  "revm",
+ "revm-context",
  "revm-context-interface",
  "revm-database",
  "revm-state",

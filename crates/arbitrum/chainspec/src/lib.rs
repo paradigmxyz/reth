@@ -719,16 +719,6 @@ pub fn sepolia_baked_genesis_from_header(
     genesis.number = Some(0);
 
     let mut alloc = BTreeMap::new();
-    // DISABLED: Don't use embedded allocation because it has incorrect code for 0x6e
-    // We need to use the code-generated allocation below which has empty code for 0x6e
-    // #[cfg(feature = "std")]
-    // {
-    //     if let Ok(embedded) = crate::embedded_alloc::load_sepolia_secure_alloc_accounts() {
-    //         if !embedded.is_empty() {
-    //             alloc = embedded;
-    //         }
-    //     }
-    // }
 
     let chain_cfg_bytes = chain_config_bytes.map(|b| alloy_primitives::Bytes::from(b.to_vec()));
 
@@ -736,6 +726,11 @@ pub fn sepolia_baked_genesis_from_header(
         .map(|h| parse_hex_quantity(h))
         .unwrap_or_else(|| U256::from(50_000_000_000u64));
 
+    // Build minimal allocation with known addresses.
+    // NOTE: The embedded data has secureAlloc (hashed addresses) but NOT alloc (plain addresses).
+    // This means RPC queries to unknown addresses will return defaults. The state root is still
+    // correct because it's computed from the hashed state (secureAlloc).
+    // For full RPC compatibility, a plain alloc file needs to be generated and embedded.
     if alloc.is_empty() {
         let arbos_storage = build_full_arbos_storage(chain_id, chain_cfg_bytes, initial_l1_price);
         if !arbos_storage.is_empty() {
@@ -773,7 +768,21 @@ pub fn sepolia_baked_genesis_from_header(
         }
     }
 
-    genesis.alloc = alloc;
+    eprintln!("DEBUG chainspec: alloc has {} entries BEFORE assignment to genesis.alloc", alloc.len());
+    genesis.alloc = alloc.clone();
+    eprintln!("DEBUG chainspec: genesis.alloc now has {} entries", genesis.alloc.len());
+
+    // DEBUG: Verify ArbOS is in alloc with correct nonce
+    if let Some(arbos_acct) = alloc.get(&ARBOS_ADDR) {
+        eprintln!(
+            "DEBUG chainspec: ArbOS account in genesis.alloc: nonce={:?} balance={} storage_len={}",
+            arbos_acct.nonce,
+            arbos_acct.balance,
+            arbos_acct.storage.as_ref().map(|s| s.len()).unwrap_or(0)
+        );
+    } else {
+        eprintln!("DEBUG chainspec: ArbOS account NOT in genesis.alloc!");
+    }
 
     let mut spec = reth_chainspec::ChainSpec::from_genesis(genesis.clone());
 
@@ -986,5 +995,59 @@ mod tests {
         assert_eq!(header.mix_hash, mix_bytes);
         let expected_nonce = alloy_primitives::B64::from(parse_hex_quantity(nonce_hex).to::<u64>().to_be_bytes());
         assert_eq!(header.nonce, expected_nonce);
+    }
+
+    #[test]
+    fn check_arbos_address_in_alloc() {
+        let (accounts_h, _) = embedded_alloc::load_sepolia_secure_alloc_hashed().expect("load");
+
+        // ArbosAddress = 0xa4b05
+        let arbos_addr = alloy_primitives::address!("00000000000000000000000000000000000a4b05");
+        let hashed = keccak256(arbos_addr);
+
+        eprintln!("ArbosAddress: {:?}", arbos_addr);
+        eprintln!("Hashed: {:?}", hashed);
+        eprintln!("Total accounts in alloc: {}", accounts_h.len());
+
+        if let Some(acct) = accounts_h.get(&hashed) {
+            eprintln!("Found ArbosAddress in alloc: nonce={}, code_hash={:?}", acct.nonce, acct.bytecode_hash);
+            // Check if it has the 0xfe code (keccak256(0xfe) = a specific hash)
+            let fe_code_hash = keccak256(&[0xfe]);
+            eprintln!("Expected code hash for 0xfe: {:?}", fe_code_hash);
+            assert_eq!(acct.bytecode_hash, Some(fe_code_hash), "ArbosAddress should have 0xfe code");
+        } else {
+            eprintln!("ArbosAddress NOT found in alloc!");
+            eprintln!("Listing all hashed addresses:");
+            for (h, a) in accounts_h.iter() {
+                eprintln!("  {:?}: nonce={} code_hash={:?}", h, a.nonce, a.bytecode_hash);
+            }
+            panic!("ArbosAddress (0xa4b05) not found in embedded alloc");
+        }
+    }
+
+    #[test]
+    fn check_arbos_storage_backing_in_alloc() {
+        let (accounts_h, _) = embedded_alloc::load_sepolia_secure_alloc_hashed().expect("load");
+
+        // ArbOS storage backing = 0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+        let arbos_storage_addr = alloy_primitives::address!("A4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+        let hashed = keccak256(arbos_storage_addr);
+
+        eprintln!("ArbOS Storage Backing: {:?}", arbos_storage_addr);
+        eprintln!("Hashed: {:?}", hashed);
+        eprintln!("Total accounts in alloc: {}", accounts_h.len());
+
+        eprintln!("\nAll accounts in alloc:");
+        for (h, a) in accounts_h.iter() {
+            eprintln!("  {:?}: nonce={} balance={} code_hash={:?}", h, a.nonce, a.balance, a.bytecode_hash);
+        }
+
+        if let Some(acct) = accounts_h.get(&hashed) {
+            eprintln!("\nFound ArbOS Storage Backing in alloc: nonce={}, balance={}", acct.nonce, acct.balance);
+            assert_eq!(acct.nonce, 1, "ArbOS storage backing should have nonce=1");
+        } else {
+            eprintln!("\nArbOS Storage Backing NOT found in alloc!");
+            panic!("ArbOS Storage Backing (0xA4B05FFF...) not found in embedded alloc");
+        }
     }
 }

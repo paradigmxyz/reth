@@ -504,7 +504,7 @@ revm-state = { version = "7.0.5", default-features = false }
 revm-primitives = { version = "20.2.1", default-features = false }
 revm-interpreter = { version = "25.0.3", default-features = false }
 revm-inspector = { version = "10.0.1", default-features = false }
-revm-context = { version = "9.1.0", default-features = false }
+revm-context = { version = "9.1.0", default-features = false, features = ["optional_eip3607"] }
 revm-context-interface = { version = "10.2.0", default-features = false }
 revm-database-interface = { version = "7.0.5", default-features = false }
 op-revm = { version = "10.1.0", default-features = false }

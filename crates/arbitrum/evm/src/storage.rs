@@ -28,29 +28,41 @@ fn storage_key_map(storage_key: &[u8], offset: u64) -> U256 {
 
 /// Ensures the ArbOS account exists in bundle_state.state.
 ///
-/// CRITICAL FOR DETERMINISM: We NEVER call state.basic() because that creates cache entries
-/// which can cause non-determinism between assembly and validation. The ArbOS account is
-/// a "fictional" account that doesn't receive real transactions, so we can safely create
-/// it with default values directly in bundle_state.state.
+/// CRITICAL FOR DETERMINISM: We use state.database.basic() instead of state.basic()
+/// because the latter creates cache entries that can cause non-determinism between
+/// assembly and validation. By reading directly from the database, we get the correct
+/// account info (including nonce=1 from genesis) without polluting the cache.
 fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State<D>) {
     use revm_database::{BundleAccount, AccountStatus};
     use revm_state::AccountInfo;
 
     if !state.bundle_state.state.contains_key(&ARBOS_STATE_ADDRESS) {
-        // NEVER call state.basic() here - it creates cache entries causing non-determinism!
-        // The ArbOS account is fictional and always has zero balance/nonce.
-        let info = Some(AccountInfo {
+        // Read the account info from the database directly to get the correct nonce.
+        // We use state.database.basic() instead of state.basic() to avoid creating
+        // cache entries that could cause non-determinism.
+        // The ArbOS storage backing account has nonce=1 in genesis.
+        let db_info = state.database.basic(ARBOS_STATE_ADDRESS).ok().flatten();
+
+        tracing::info!(
+            target: "arb-storage",
+            "ensure_arbos_account_in_bundle: db_info={:?}",
+            db_info.as_ref().map(|i| (i.nonce, i.balance, i.code_hash))
+        );
+
+        let info = db_info.map(|i| i.clone()).or_else(|| Some(AccountInfo {
             balance: U256::ZERO,
-            nonce: 0,
+            nonce: 1, // Default to 1 if not found, matching genesis state
             code_hash: alloy_primitives::keccak256([]),
             code: None,
-        });
+        }));
 
+        // Use Loaded status initially since we're just loading from DB.
+        // The status will be updated to Changed when we actually write storage.
         let acc = BundleAccount {
-            info,
+            info: info.clone(),
             storage: HashMap::default(),
-            original_info: None,
-            status: AccountStatus::Changed,
+            original_info: info, // Set original_info to track that this is from DB
+            status: AccountStatus::Loaded,
         };
         state.bundle_state.state.insert(ARBOS_STATE_ADDRESS, acc);
     }
@@ -64,11 +76,16 @@ fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State
 ///
 /// bundle_state.state persists throughout block execution and is used directly
 /// when computing the state root, so writes here are guaranteed to be included.
+///
+/// CRITICAL: After writing storage, we MUST update the account status to Changed,
+/// otherwise revm will skip this account when computing the state root (since
+/// Loaded status means "not modified").
 fn write_arbos_storage<D: Database>(
     state: &mut revm::database::State<D>,
     slot: U256,
     value: U256,
 ) {
+    use revm_database::AccountStatus;
     use revm_state::EvmStorageSlot;
 
     ensure_arbos_account_in_bundle(state);
@@ -84,11 +101,49 @@ fn write_arbos_storage<D: Database>(
         state.database.storage(ARBOS_STATE_ADDRESS, slot).unwrap_or(U256::ZERO)
     };
 
-    // Write directly to bundle_state.state
+    // Write directly to bundle_state.state and update status to Changed
     if let Some(acc) = state.bundle_state.state.get_mut(&ARBOS_STATE_ADDRESS) {
+        let status_before = acc.status;
         acc.storage.insert(
             slot,
             EvmStorageSlot::new_changed(original_value, value, 0).into(),
+        );
+        // CRITICAL: Update status from Loaded to Changed so revm knows this account was modified
+        // and includes it in the state root computation.
+        if acc.status == AccountStatus::Loaded {
+            acc.status = AccountStatus::Changed;
+        }
+        tracing::warn!(
+            target: "arb-storage",
+            "[STORAGE-WRITE] write_arbos_storage: slot={:?} value={:?} original={:?} status_before={:?} status_after={:?} storage_count={}",
+            slot, value, original_value, status_before, acc.status, acc.storage.len()
+        );
+    }
+}
+
+/// Logs the full ArbOS account state for debugging.
+/// Call this before state root computation to verify storage is being tracked.
+pub fn log_arbos_bundle_state<D: Database>(state: &revm::database::State<D>) {
+    if let Some(acc) = state.bundle_state.state.get(&ARBOS_STATE_ADDRESS) {
+        tracing::warn!(
+            target: "arb-storage",
+            "[ARBOS-BUNDLE] ArbOS account status={:?} info_present={} storage_slots={} nonce={}",
+            acc.status,
+            acc.info.is_some(),
+            acc.storage.len(),
+            acc.info.as_ref().map(|i| i.nonce).unwrap_or(0)
+        );
+        for (slot, slot_entry) in acc.storage.iter() {
+            tracing::warn!(
+                target: "arb-storage",
+                "[ARBOS-BUNDLE] slot={:?} present_value={:?} original={:?}",
+                slot, slot_entry.present_value, slot_entry.previous_or_original_value
+            );
+        }
+    } else {
+        tracing::warn!(
+            target: "arb-storage",
+            "[ARBOS-BUNDLE] ArbOS account NOT FOUND in bundle_state.state!"
         );
     }
 }
