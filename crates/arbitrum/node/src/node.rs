@@ -1074,7 +1074,13 @@ where
 
         reth_tracing::tracing::info!(target: "arb-reth::follower", tx_count = txs.len(), "follower: built tx list");
         use reth_primitives_traits::{Recovered, SignerRecoverable, SignedTransaction};
-        for tx in &txs {
+        
+        // Use a VecDeque to allow adding scheduled transactions (like retry txs) during execution
+        // This matches Go behavior where scheduled_txes are collected after each tx and processed
+        use std::collections::VecDeque;
+        let mut tx_queue: VecDeque<reth_arbitrum_primitives::ArbTransactionSigned> = txs.into_iter().collect();
+        
+        while let Some(tx) = tx_queue.pop_front() {
             let sender =
                 tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover signer"))?;
             let bal =
@@ -1096,7 +1102,41 @@ where
             // See nitro/arbos/block_processor.go lines 412-428
             let is_internal = tx.tx_type() == reth_arbitrum_primitives::ArbTxType::Internal;
             match builder.execute_transaction(recovered) {
-                Ok(_) => {}
+                Ok(_) => {
+                    // After successful execution, check for scheduled transactions (retry txs)
+                    // This matches Go behavior in block_processor.go where ScheduledTxes are
+                    // collected after each transaction and added to the redeems queue
+                    let scheduled = builder.get_scheduled_txes();
+                    if !scheduled.is_empty() {
+                        reth_tracing::tracing::info!(
+                            target: "arb-reth::follower",
+                            scheduled_count = scheduled.len(),
+                            "Found scheduled transactions after tx execution"
+                        );
+                        for encoded_tx in scheduled {
+                            // Decode the scheduled transaction and add to queue
+                            let mut slice = encoded_tx.as_slice();
+                            match reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut slice) {
+                                Ok(scheduled_tx) => {
+                                    reth_tracing::tracing::info!(
+                                        target: "arb-reth::follower",
+                                        scheduled_tx_hash = %scheduled_tx.tx_hash(),
+                                        scheduled_tx_type = ?scheduled_tx.tx_type(),
+                                        "Adding scheduled transaction to queue"
+                                    );
+                                    tx_queue.push_back(scheduled_tx);
+                                }
+                                Err(e) => {
+                                    reth_tracing::tracing::warn!(
+                                        target: "arb-reth::follower",
+                                        error = %e,
+                                        "Failed to decode scheduled transaction"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
                 Err(e) => {
                     if is_internal {
                         // Internal transactions must succeed - fail the block if they don't
