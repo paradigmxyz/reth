@@ -50,6 +50,7 @@ pub struct EraClient<Http> {
 
 impl<Http: HttpClient + Clone> EraClient<Http> {
     const CHECKSUMS: &'static str = "checksums.txt";
+    const MAX_DOWNLOAD_ATTEMPTS: usize = 3;
 
     /// Constructs [`EraClient`] using `client` to download from `url` into `folder`.
     pub fn new(client: Http, url: Url, folder: impl Into<Box<Path>>) -> Self {
@@ -76,9 +77,8 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 .file_name_to_number(file_name)
                 .ok_or_eyre("Cannot parse number from file name")?;
 
-            let mut tries = 1..3;
-            let mut actual_checksum: eyre::Result<_>;
-            loop {
+            let mut actual_checksum: eyre::Result<_> = Err(eyre!("No download attempts made"));
+            for attempt in 1..=Self::MAX_DOWNLOAD_ATTEMPTS {
                 actual_checksum = async {
                     let mut file = File::create(&path).await?;
                     let mut stream = client.get(url.clone()).await?;
@@ -93,15 +93,32 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 }
                 .await;
 
-                if actual_checksum.is_ok() || tries.next().is_none() {
+                if actual_checksum.is_ok() {
                     break;
+                }
+
+                // Remove partially downloaded file before retry
+                if attempt < Self::MAX_DOWNLOAD_ATTEMPTS {
+                    let _ = fs::remove_file(&path).await;
                 }
             }
 
+            // Check if download succeeded
+            let checksum = actual_checksum.map_err(|e| {
+                // Clean up failed download
+                let _ = reth_fs_util::remove_file(&path);
+                eyre!(
+                    "Failed to download {file_name} after {} attempts: {e}",
+                    Self::MAX_DOWNLOAD_ATTEMPTS
+                )
+            })?;
+
             if self.era_type == EraFileType::Era1 {
-                self.assert_checksum(number, actual_checksum?)
-                    .await
-                    .map_err(|e| eyre!("{e} for {file_name} at {}", path.display()))?;
+                self.assert_checksum(number, checksum).await.map_err(|e| {
+                    // Clean up file with invalid checksum
+                    let _ = reth_fs_util::remove_file(&path);
+                    eyre!("{e} for {file_name} at {}", path.display())
+                })?;
             }
         }
 
