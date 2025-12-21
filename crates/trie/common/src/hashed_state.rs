@@ -52,23 +52,37 @@ impl HashedPostState {
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
+                let hashed_account: Option<Account> = account.info.as_ref().map(Into::into);
                 // CONSENSUS-CRITICAL: Only include storage slots that actually changed.
                 // In go-ethereum, only dirtyStorage slots are written to the trie.
                 // Filter out slots where present_value == previous_or_original_value.
+                let changed_storage_count = account.storage.iter()
+                    .filter(|(_, value)| value.present_value != value.previous_or_original_value)
+                    .count();
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
                     account.storage.iter()
                         .filter(|(_, value)| value.present_value != value.previous_or_original_value)
                         .map(|(slot, value)| (slot, &value.present_value)),
                 );
-                (hashed_address, (hashed_account, hashed_storage))
+                
+                // DEBUG: Log accounts with storage changes but no info
+                if changed_storage_count > 0 && account.info.is_none() {
+                    eprintln!("[BUNDLE-STATE-DEBUG] Account {:?} has {} changed storage slots but info=None, original_info={:?}, status={:?}",
+                        address, changed_storage_count, account.original_info.is_some(), account.status);
+                }
+                
+                (hashed_address, (hashed_account, hashed_storage, *address, account.info.is_some(), account.original_info.clone(), account.status, changed_storage_count))
             })
-            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
+            .collect::<Vec<_>>();
 
         let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        for (address, (account, storage)) in hashed {
+        for (address, (account, storage, raw_address, info_present, original_info, status, changed_storage_count)) in hashed {
+            // DEBUG: Log all accounts in bundle state
+            eprintln!("[BUNDLE-STATE-DEBUG] Processing {:?}: info_present={}, original_info={:?}, status={:?}, changed_storage_count={}, storage_empty={}",
+                raw_address, info_present, original_info.is_some(), status, changed_storage_count, storage.is_empty());
+            
             // CONSENSUS-CRITICAL: Match go-ethereum's IntermediateRoot(deleteEmptyObjects=true) behavior.
             // - Non-empty accounts (nonce>0 OR balance>0 OR has code): insert as Some(account)
             // - Empty accounts (nonce=0, balance=0, no code): insert as None to mark for deletion
@@ -81,8 +95,24 @@ impl HashedPostState {
                     // Non-empty account should be stored in trie
                     accounts.insert(address, account);
                 }
+            } else if !storage.is_empty() {
+                // CRITICAL FIX: If account.info is None but we have storage changes,
+                // we need to include the account in the accounts map using original_info
+                // so that the trie leaf gets rebuilt with the new storage root.
+                if let Some(ref orig_info) = original_info {
+                    let orig_account: Account = orig_info.into();
+                    eprintln!("[BUNDLE-STATE-DEBUG] Using original_info for {:?}: nonce={}, balance={}", 
+                        raw_address, orig_account.nonce, orig_account.balance);
+                    if orig_account.is_empty() {
+                        accounts.insert(address, None);
+                    } else {
+                        accounts.insert(address, Some(orig_account));
+                    }
+                } else {
+                    eprintln!("[BUNDLE-STATE-DEBUG] WARNING: Account {:?} has storage changes but no info and no original_info!", raw_address);
+                }
             }
-            // Note: if account is None (info not loaded), we don't insert anything
+            // Note: if account is None (info not loaded) and no storage changes, we don't insert anything
             if !storage.is_empty() {
                 storages.insert(address, storage);
             }
@@ -101,23 +131,37 @@ impl HashedPostState {
             .into_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
+                let hashed_account: Option<Account> = account.info.as_ref().map(Into::into);
                 // CONSENSUS-CRITICAL: Only include storage slots that actually changed.
                 // In go-ethereum, only dirtyStorage slots are written to the trie.
                 // Filter out slots where present_value == previous_or_original_value.
+                let changed_storage_count = account.storage.iter()
+                    .filter(|(_, value)| value.present_value != value.previous_or_original_value)
+                    .count();
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
                     account.storage.iter()
                         .filter(|(_, value)| value.present_value != value.previous_or_original_value)
                         .map(|(slot, value)| (slot, &value.present_value)),
                 );
-                (hashed_address, (hashed_account, hashed_storage))
+                
+                // DEBUG: Log accounts with storage changes but no info
+                if changed_storage_count > 0 && account.info.is_none() {
+                    eprintln!("[BUNDLE-STATE-DEBUG] Account {:?} has {} changed storage slots but info=None, original_info={:?}, status={:?}",
+                        address, changed_storage_count, account.original_info.is_some(), account.status);
+                }
+                
+                (hashed_address, (hashed_account, hashed_storage, *address, account.info.is_some(), account.original_info.clone(), account.status, changed_storage_count))
             })
-            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
+            .collect::<Vec<_>>();
 
         let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        for (address, (account, storage)) in hashed {
+        for (address, (account, storage, raw_address, info_present, original_info, status, changed_storage_count)) in hashed {
+            // DEBUG: Log all accounts in bundle state
+            eprintln!("[BUNDLE-STATE-DEBUG] Processing {:?}: info_present={}, original_info={:?}, status={:?}, changed_storage_count={}, storage_empty={}",
+                raw_address, info_present, original_info.is_some(), status, changed_storage_count, storage.is_empty());
+            
             // CONSENSUS-CRITICAL: Match go-ethereum's IntermediateRoot(deleteEmptyObjects=true) behavior.
             // - Non-empty accounts (nonce>0 OR balance>0 OR has code): insert as Some(account)
             // - Empty accounts (nonce=0, balance=0, no code): insert as None to mark for deletion
@@ -130,8 +174,24 @@ impl HashedPostState {
                     // Non-empty account should be stored in trie
                     accounts.insert(address, account);
                 }
+            } else if !storage.is_empty() {
+                // CRITICAL FIX: If account.info is None but we have storage changes,
+                // we need to include the account in the accounts map using original_info
+                // so that the trie leaf gets rebuilt with the new storage root.
+                if let Some(ref orig_info) = original_info {
+                    let orig_account: Account = orig_info.into();
+                    eprintln!("[BUNDLE-STATE-DEBUG] Using original_info for {:?}: nonce={}, balance={}", 
+                        raw_address, orig_account.nonce, orig_account.balance);
+                    if orig_account.is_empty() {
+                        accounts.insert(address, None);
+                    } else {
+                        accounts.insert(address, Some(orig_account));
+                    }
+                } else {
+                    eprintln!("[BUNDLE-STATE-DEBUG] WARNING: Account {:?} has storage changes but no info and no original_info!", raw_address);
+                }
             }
-            // Note: if account is None (info not loaded), we don't insert anything
+            // Note: if account is None (info not loaded) and no storage changes, we don't insert anything
             if !storage.is_empty() {
                 storages.insert(address, storage);
             }
