@@ -290,8 +290,11 @@ impl<D: Database> RetryableState<D> {
         let from_storage = StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET);
         let _ = from_storage.set(Address::ZERO);
         
-        let to_storage = StorageBackedAddressOrNil::new(state, ticket_base_key, TO_OFFSET);
-        let _ = to_storage.set(None);
+        // CRITICAL: Go nitro uses ClearByUint64(toOffset) which sets to ZERO, not nil sentinel!
+        // StorageBackedAddressOrNil::set(None) would store 1<<255, which is WRONG for deletion.
+        // We must use StorageBackedBigUint to set the raw value to zero.
+        let to_storage = StorageBackedBigUint::new(state, ticket_base_key, TO_OFFSET);
+        let _ = to_storage.set(U256::ZERO);
         
         let callvalue_storage = StorageBackedBigUint::new(state, ticket_base_key, CALLVALUE_OFFSET);
         let _ = callvalue_storage.set(U256::ZERO);
