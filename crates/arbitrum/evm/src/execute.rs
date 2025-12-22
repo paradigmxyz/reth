@@ -1379,7 +1379,10 @@ impl ArbOsHooks for DefaultArbOsHooks {
                         // Go nitro: DeleteRetryable clears all fields including timeout
                         // This marks the retryable as fully redeemed and no longer valid
                         // Note: Go nitro does NOT call IncrementNumTries in EndTxHook
-                        // TODO: Implement full DeleteRetryable to clear all storage fields
+                        let _ = retryable_state.delete_retryable(
+                            state_db as *mut _,
+                            &ticket_id_struct,
+                        );
                     }
                 } else {
                     use arb_alloy_util::retryables::escrow_address_from_ticket;
@@ -1566,11 +1569,12 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 let from = retryable.get_from().unwrap_or_default();
                 let to = retryable.get_to().unwrap_or_default();
                 let call_value = retryable.get_callvalue().unwrap_or_default();
+                let calldata = retryable.get_calldata(state_db as *mut _);
                 
                 tracing::info!(
                     target: "arb-scheduled",
-                    "Constructing retry tx: from={:?} to={:?} value={:?} gas={}",
-                    from, to, call_value, donated_gas
+                    "Constructing retry tx: from={:?} to={:?} value={:?} gas={} calldata_len={}",
+                    from, to, call_value, donated_gas, calldata.len()
                 );
                 
                 // Construct the retry transaction
@@ -1583,7 +1587,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     gas: donated_gas,
                     to: Some(to),
                     value: call_value,
-                    data: Bytes::new(), // TODO: Get actual calldata from retryable storage
+                    data: calldata,
                     ticket_id: B256::from(ticket_id.0),
                     refund_to: gas_donor,
                     max_refund,

@@ -209,6 +209,108 @@ impl<D: Database> RetryableState<D> {
         ticket
     }
     
+    /// Get bytes from storage matching Go nitro's StorageBackedBytes.Get()
+    /// Go nitro stores: slot 0 = length, subsequent slots = data (RIGHT-aligned chunks)
+    pub fn get_bytes(state: *mut revm::database::State<D>, storage: &Storage<D>) -> Bytes {
+        // Read length from slot 0
+        let len_storage = StorageBackedUint64::new(state, storage.base_key, 0);
+        let len = len_storage.get().unwrap_or(0) as usize;
+        
+        if len == 0 {
+            return Bytes::new();
+        }
+        
+        let mut result = Vec::with_capacity(len);
+        let mut offset = 1u64;
+        let mut remaining = len;
+        
+        while remaining > 0 {
+            let slot_storage = StorageBackedBigUint::new(state, storage.base_key, offset);
+            let value = slot_storage.get().unwrap_or(U256::ZERO);
+            let bytes = value.to_be_bytes::<32>();
+            
+            if remaining >= 32 {
+                result.extend_from_slice(&bytes);
+                remaining -= 32;
+            } else {
+                // Last partial chunk - data is RIGHT-aligned (at the end of 32 bytes)
+                result.extend_from_slice(&bytes[32 - remaining..]);
+                remaining = 0;
+            }
+            offset += 1;
+        }
+        
+        Bytes::from(result)
+    }
+    
+    /// Clear bytes in storage matching Go nitro's StorageBackedBytes.ClearBytes()
+    fn clear_bytes(state: *mut revm::database::State<D>, storage: &Storage<D>) -> Result<(), ()> {
+        // Read length from slot 0
+        let len_storage = StorageBackedUint64::new(state, storage.base_key, 0);
+        let len = len_storage.get().unwrap_or(0) as usize;
+        
+        // Clear length
+        len_storage.set(0)?;
+        
+        // Clear all data slots
+        let num_slots = (len + 31) / 32;
+        for i in 0..num_slots {
+            let slot_storage = StorageBackedBigUint::new(state, storage.base_key, (i + 1) as u64);
+            slot_storage.set(U256::ZERO)?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Delete a retryable ticket matching Go nitro's DeleteRetryable exactly.
+    /// Go nitro clears: numTries, from, to, callvalue, beneficiary, timeout, timeoutWindowsLeft, calldata
+    /// Note: Go nitro also transfers escrow funds to beneficiary, but that's handled in end_tx
+    pub fn delete_retryable(
+        &self,
+        state: *mut revm::database::State<D>,
+        ticket_id: &RetryableTicketId,
+    ) -> Result<bool, ()> {
+        let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
+        let ticket_base_key = ticket_storage.base_key;
+        
+        // Check if retryable exists (timeout != 0)
+        let timeout_storage = StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET);
+        let timeout = timeout_storage.get().unwrap_or(0);
+        if timeout == 0 {
+            return Ok(false);
+        }
+        
+        tracing::info!(target: "arb-retryable", "DELETE_RETRYABLE: ticket_id={:?}", ticket_id);
+        
+        // Clear all fields (matching Go nitro's order)
+        // Go nitro ignores errors from ClearByUint64 and only checks ClearBytes error
+        let num_tries_storage = StorageBackedUint64::new(state, ticket_base_key, NUM_TRIES_OFFSET);
+        let _ = num_tries_storage.set(0);
+        
+        let from_storage = StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET);
+        let _ = from_storage.set(Address::ZERO);
+        
+        let to_storage = StorageBackedAddressOrNil::new(state, ticket_base_key, TO_OFFSET);
+        let _ = to_storage.set(None);
+        
+        let callvalue_storage = StorageBackedBigUint::new(state, ticket_base_key, CALLVALUE_OFFSET);
+        let _ = callvalue_storage.set(U256::ZERO);
+        
+        let beneficiary_storage = StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET);
+        let _ = beneficiary_storage.set(Address::ZERO);
+        
+        let _ = timeout_storage.set(0);
+        
+        let timeout_windows_left_storage = StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_WINDOWS_LEFT_OFFSET);
+        let _ = timeout_windows_left_storage.set(0);
+        
+        // Clear calldata bytes
+        let calldata_storage = ticket_storage.open_sub_storage(CALLDATA_KEY);
+        Self::clear_bytes(state, &calldata_storage)?;
+        
+        Ok(true)
+    }
+
     /// Set bytes in storage matching Go nitro's Storage.SetBytes
     /// Go nitro uses common.BytesToHash which RIGHT-aligns bytes (pads on the left)
     fn set_bytes(state: *mut revm::database::State<D>, storage: &Storage<D>, data: &[u8]) {
@@ -316,6 +418,13 @@ impl<D: Database> RetryableTicket<D> {
     /// Get num_tries
     pub fn num_tries(&self) -> u64 {
         self.num_tries.get().unwrap_or(0)
+    }
+    
+    /// Get calldata from nested substorage
+    /// Matches Go nitro's StorageBackedBytes.Get()
+    pub fn get_calldata(&self, state: *mut revm::database::State<D>) -> Bytes {
+        let calldata_storage = self.storage.open_sub_storage(CALLDATA_KEY);
+        RetryableState::get_bytes(state, &calldata_storage)
     }
 }
 
