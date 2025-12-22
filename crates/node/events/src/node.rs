@@ -6,6 +6,7 @@ use alloy_primitives::{BlockNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use futures::Stream;
 use reth_engine_primitives::{ConsensusEngineEvent, ForkchoiceStatus};
+use reth_ethereum_forks::{ForkCondition, Hardfork};
 use reth_network_api::PeersInfo;
 use reth_primitives_traits::{format_gas, format_gas_throughput, BlockBody, NodePrimitives};
 use reth_prune_types::PrunerEvent;
@@ -24,6 +25,27 @@ use tracing::{debug, info, warn};
 /// Interval of reporting node state.
 const INFO_MESSAGE_INTERVAL: Duration = Duration::from_secs(25);
 
+/// Information about a timestamp-based hardfork for tracking activation.
+#[derive(Debug, Clone)]
+pub struct HardforkInfo {
+    /// The name of the hardfork.
+    pub name: &'static str,
+    /// The activation timestamp for this hardfork.
+    pub timestamp: u64,
+}
+
+impl HardforkInfo {
+    /// Creates a new [`HardforkInfo`] from a hardfork and its condition.
+    ///
+    /// Returns `None` if the hardfork is not timestamp-based.
+    pub fn new(fork: &dyn Hardfork, condition: ForkCondition) -> Option<Self> {
+        match condition {
+            ForkCondition::Timestamp(ts) => Some(Self { name: fork.name(), timestamp: ts }),
+            _ => None,
+        }
+    }
+}
+
 /// The current high-level state of the node, including the node's database environment, network
 /// connections, current processing stage, and the latest block information. It provides
 /// methods to handle different types of events that affect the node's state, such as pipeline
@@ -41,14 +63,17 @@ struct NodeState {
     safe_block_hash: Option<B256>,
     /// Hash of finalized block last set by fork choice update
     finalized_block_hash: Option<B256>,
-    /// The time when we last logged a status message
+    /// The time when we last logged a status message.
     last_status_log_time: Option<u64>,
+    /// Pending timestamp-based hardforks sorted by activation timestamp.
+    pending_hardforks: Vec<HardforkInfo>,
 }
 
 impl NodeState {
-    const fn new(
+    fn new(
         peers_info: Option<Box<dyn PeersInfo>>,
         latest_block: Option<BlockNumber>,
+        pending_hardforks: Vec<HardforkInfo>,
     ) -> Self {
         Self {
             peers_info,
@@ -58,11 +83,31 @@ impl NodeState {
             safe_block_hash: None,
             finalized_block_hash: None,
             last_status_log_time: None,
+            pending_hardforks,
         }
     }
 
     fn num_connected_peers(&self) -> usize {
         self.peers_info.as_ref().map(|info| info.num_connected_peers()).unwrap_or_default()
+    }
+
+    /// Checks if any pending hardforks have activated based on current system time.
+    fn check_hardfork_activation(&mut self) {
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+
+        while let Some(fork) = self.pending_hardforks.first() {
+            if now >= fork.timestamp {
+                info!(
+                    target: "reth::cli",
+                    hardfork = %fork.name,
+                    activation_timestamp = fork.timestamp,
+                    "Hardfork activated"
+                );
+                self.pending_hardforks.remove(0);
+            } else {
+                break;
+            }
+        }
     }
 
     fn build_current_stage(
@@ -254,6 +299,8 @@ impl NodeState {
                 );
             }
             ConsensusEngineEvent::CanonicalChainCommitted(head, elapsed) => {
+                self.check_hardfork_activation();
+
                 self.latest_block = Some(head.number());
                 info!(number=head.number(), hash=?head.hash(), ?elapsed, "Canonical chain committed");
             }
@@ -364,14 +411,18 @@ pub enum NodeEvent<N: NodePrimitives> {
 
 /// Displays relevant information to the user from components of the node, and periodically
 /// displays the high-level status of the node.
+///
+/// If `hardforks` is provided, logs when hardforks are activated.
 pub async fn handle_events<E, N: NodePrimitives>(
     peers_info: Option<Box<dyn PeersInfo>>,
     latest_block_number: Option<BlockNumber>,
     events: E,
+    pending_hardforks: Option<Vec<HardforkInfo>>,
 ) where
     E: Stream<Item = NodeEvent<N>> + Unpin,
 {
-    let state = NodeState::new(peers_info, latest_block_number);
+    let pending_hardforks = pending_hardforks.unwrap_or_default();
+    let state = NodeState::new(peers_info, latest_block_number, pending_hardforks);
 
     let start = tokio::time::Instant::now() + Duration::from_secs(3);
     let mut info_interval = tokio::time::interval_at(start, INFO_MESSAGE_INTERVAL);

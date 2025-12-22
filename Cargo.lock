@@ -9359,6 +9359,7 @@ dependencies = [
  "humantime",
  "pin-project",
  "reth-engine-primitives",
+ "reth-ethereum-forks",
  "reth-network-api",
  "reth-primitives-traits",
  "reth-prune-types",
