@@ -268,6 +268,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reth_prune_types::PrunePurpose;
     use crate::test_utils::{
         stage_test_suite_ext, ExecuteStageTestRunner, StageTestRunner, StorageKind,
         TestRunnerError, TestStageDB, UnwindStageTestRunner,
