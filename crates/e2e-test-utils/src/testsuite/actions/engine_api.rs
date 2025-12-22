@@ -2,9 +2,7 @@
 
 use crate::testsuite::{Action, Environment};
 use alloy_primitives::B256;
-use alloy_rpc_types_engine::{
-    ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3, PayloadStatusEnum,
-};
+use alloy_rpc_types_engine::{ExecutionPayloadV3, PayloadStatusEnum};
 use alloy_rpc_types_eth::{Block, Header, Receipt, Transaction, TransactionRequest};
 use eyre::Result;
 use futures_util::future::BoxFuture;
@@ -131,7 +129,10 @@ where
             })?;
 
             // Convert block to ExecutionPayloadV3
-            let payload = block_to_payload_v3(&block);
+            let payload = ExecutionPayloadV3::from_block_unchecked(
+                block.hash(),
+                &block.map_transactions(|tx| tx.inner).into_consensus(),
+            );
 
             // Send the payload to the target node
             let target_engine = env.node_clients[self.node_idx].engine.http_client();
@@ -325,34 +326,5 @@ where
 
             Ok(())
         })
-    }
-}
-
-/// Helper function to convert a block to `ExecutionPayloadV3`
-fn block_to_payload_v3(block: &Block) -> ExecutionPayloadV3 {
-    use alloy_primitives::U256;
-
-    ExecutionPayloadV3 {
-        payload_inner: ExecutionPayloadV2 {
-            payload_inner: ExecutionPayloadV1 {
-                parent_hash: block.header.inner.parent_hash,
-                fee_recipient: block.header.inner.beneficiary,
-                state_root: block.header.inner.state_root,
-                receipts_root: block.header.inner.receipts_root,
-                logs_bloom: block.header.inner.logs_bloom,
-                prev_randao: block.header.inner.mix_hash,
-                block_number: block.header.inner.number,
-                gas_limit: block.header.inner.gas_limit,
-                gas_used: block.header.inner.gas_used,
-                timestamp: block.header.inner.timestamp,
-                extra_data: block.header.inner.extra_data.clone(),
-                base_fee_per_gas: U256::from(block.header.inner.base_fee_per_gas.unwrap_or(0)),
-                block_hash: block.header.hash,
-                transactions: vec![], // No transactions needed for buffering tests
-            },
-            withdrawals: block.withdrawals.clone().unwrap_or_default().to_vec(),
-        },
-        blob_gas_used: block.header.inner.blob_gas_used.unwrap_or(0),
-        excess_blob_gas: block.header.inner.excess_blob_gas.unwrap_or(0),
     }
 }
