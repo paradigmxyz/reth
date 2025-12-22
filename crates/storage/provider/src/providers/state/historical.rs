@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::macros::delegate_provider_impls, AccountReader, BlockHashReader,
-    ChangeSetReader, HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
+    AccountReader, BlockHashReader, ChangeSetReader, HashedPostStateProvider, ProviderError,
+    StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
@@ -397,7 +397,7 @@ impl<Provider: DBProvider + BlockNumReader> StateProofProvider
     }
 }
 
-impl<Provider: Sync> HashedPostStateProvider for HistoricalStateProviderRef<'_, Provider> {
+impl<Provider> HashedPostStateProvider for HistoricalStateProviderRef<'_, Provider> {
     fn hashed_post_state(&self, bundle_state: &revm_database::BundleState) -> HashedPostState {
         HashedPostState::from_bundle_state::<KeccakKeyHasher>(bundle_state.state())
     }
@@ -494,7 +494,7 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
 }
 
 // Delegates all provider impls to [HistoricalStateProviderRef]
-delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader]);
+reth_storage_api::macros::delegate_provider_impls!(HistoricalStateProvider<Provider> where [Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader]);
 
 /// Lowest blocks at which different parts of the state are available.
 /// They may be [Some] if pruning is enabled.
