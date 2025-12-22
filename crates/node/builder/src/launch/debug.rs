@@ -1,6 +1,6 @@
 use super::LaunchNode;
 use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
-use alloy_provider::Network;
+use alloy_provider::{network::AnyNetwork, Network};
 use async_trait::async_trait;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
@@ -61,8 +61,6 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
     /// RPC block type. Used by [`DebugConsensusClient`] to fetch blocks and submit them to the
     /// engine. This is intended to match the block format returned by the external RPC endpoint.
     type RpcBlock: Serialize + DeserializeOwned + 'static;
-    /// Network type used by the debug RPC client.
-    type RpcNetwork: Network;
 
     /// Converts an RPC block to a primitive block.
     ///
@@ -88,15 +86,13 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
     /// Converts network block response into the RPC block type.
     ///
     /// Override this to avoid serde round-trips when the response type already matches `RpcBlock`.
-    fn rpc_block_from_response(
-        response: <Self::RpcNetwork as Network>::BlockResponse,
-    ) -> Self::RpcBlock
+    fn rpc_block_from_response(response: <AnyNetwork as Network>::BlockResponse) -> Self::RpcBlock
     where
-        <Self::RpcNetwork as Network>::BlockResponse: Clone,
+        <AnyNetwork as Network>::BlockResponse: Clone,
     {
         // Fast path: when the response type already matches RpcBlock, avoid serialization.
         if std::any::TypeId::of::<Self::RpcBlock>() ==
-            std::any::TypeId::of::<<Self::RpcNetwork as Network>::BlockResponse>()
+            std::any::TypeId::of::<<AnyNetwork as Network>::BlockResponse>()
         {
             // SAFETY: TypeIds match, so downcast succeeds or we fall back to serde.
             if let Ok(block) =
@@ -127,10 +123,7 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
         Box::pin(async move {
             let config = ctx.config;
             if let Some(url) = config.debug.rpc_consensus_url.clone() {
-                let block_provider = RpcBlockProvider::<
-                    <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcNetwork,
-                    _,
-                >::new(url.as_str(), {
+                let block_provider = RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), {
                     let convert_rpc_block = ctx.convert_rpc.clone();
                     move |block_response| {
                         let rpc_block =
@@ -191,7 +184,7 @@ where
 }
 
 /// Future returning a dynamic block provider.
-pub(crate) type DebugBlockProviderFuture<'a, N> = Pin<
+pub type DebugBlockProviderFuture<'a, N> = Pin<
     Box<
         dyn Future<
                 Output = eyre::Result<DynBlockProviderHandle<BlockTy<<N as FullNodeTypes>::Types>>>,

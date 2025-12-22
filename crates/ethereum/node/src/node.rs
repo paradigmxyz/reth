@@ -4,9 +4,9 @@ pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
-use alloy_provider::Network;
 use alloy_rpc_types_engine::ExecutionData;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
+use reth_consensus_debug_client::{EtherscanBlockProvider, RpcBlockProvider};
 use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_engine_primitives::EngineTypes;
 use reth_ethereum_consensus::EthBeaconConsensus;
@@ -33,7 +33,8 @@ use reth_node_builder::{
         EngineValidatorBuilder, EthApiBuilder, EthApiCtx, Identity, PayloadValidatorBuilder,
         RethRpcAddOns, RpcAddOns, RpcHandle,
     },
-    BuilderContext, DebugNode, Node, NodeAdapter,
+    BuilderContext, DebugBlockProviderContext, DebugBlockProviderFuture, DebugNode,
+    DynBlockProviderHandle, Node, NodeAdapter,
 };
 use reth_payload_primitives::PayloadTypes;
 use reth_provider::{providers::ProviderFactoryBuilder, EthStorage};
@@ -410,15 +411,6 @@ where
 
 impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
-    type RpcNetwork = alloy_network::Ethereum;
-
-    fn rpc_block_from_response(
-        response: <Self::RpcNetwork as Network>::BlockResponse,
-    ) -> Self::RpcBlock {
-        // alloy's Ethereum network already defines BlockResponse = alloy_rpc_types_eth::Block,
-        // so we can return directly without any serde round-trip.
-        response
-    }
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
         rpc_block.into_consensus().convert_transactions()
@@ -428,6 +420,47 @@ impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
         chain_spec: &Self::ChainSpec,
     ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes> {
         LocalPayloadAttributesBuilder::new(Arc::new(chain_spec.clone()))
+    }
+
+    fn block_provider<'a>(
+        ctx: DebugBlockProviderContext<'a, N>,
+    ) -> DebugBlockProviderFuture<'a, N> {
+        Box::pin(async move {
+            let config = ctx.config;
+            if let Some(url) = config.debug.rpc_consensus_url.clone() {
+                let convert_rpc = ctx.convert_rpc.clone();
+                let block_provider =
+                    RpcBlockProvider::<Ethereum, _>::new(url.as_str(), move |block| {
+                        (convert_rpc)(block)
+                    })
+                    .await?;
+                return Ok(DynBlockProviderHandle::new(block_provider))
+            }
+
+            if let Some(maybe_custom_etherscan_url) = config.debug.etherscan.clone() {
+                let chain = config.chain.chain();
+                let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
+                    chain.etherscan_urls().map(|urls| urls.0.to_string()).ok_or_else(|| {
+                        eyre::eyre!("failed to get etherscan url for chain: {chain}")
+                    })
+                })?;
+
+                let convert_rpc = ctx.convert_rpc.clone();
+                let block_provider = EtherscanBlockProvider::new(
+                    etherscan_url,
+                    chain.etherscan_api_key().ok_or_else(|| {
+                        eyre::eyre!(
+                            "etherscan api key not found for rpc consensus client for chain: {chain}"
+                        )
+                    })?,
+                    chain.id(),
+                    move |block| (convert_rpc)(block),
+                );
+                return Ok(DynBlockProviderHandle::new(block_provider))
+            }
+
+            Err(eyre::eyre!("no debug consensus block provider configured"))
+        })
     }
 }
 

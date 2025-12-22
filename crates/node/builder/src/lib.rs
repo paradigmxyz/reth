@@ -32,8 +32,9 @@ pub use builder::{add_ons::AddOns, *};
 mod launch;
 pub use launch::{
     debug::{
-        DebugBlockProviderFactory, DebugNode, DebugNodeLauncher, DevMiningContext,
-        DevPayloadAttributesBuilderFactory, DynBlockProviderHandle, RpcConsensusConvert,
+        DebugBlockProviderContext, DebugBlockProviderFactory, DebugBlockProviderFuture, DebugNode,
+        DebugNodeLauncher, DevMiningContext, DevPayloadAttributesBuilderFactory,
+        DynBlockProviderHandle, RpcConsensusConvert,
     },
     engine::EngineNodeLauncher,
     *,

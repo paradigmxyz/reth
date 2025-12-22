@@ -267,7 +267,6 @@ where
     N: FullNodeComponents<Types = Self>,
 {
     type RpcBlock = alloy_rpc_types_eth::Block<op_alloy_consensus::OpTxEnvelope>;
-    type RpcNetwork = alloy_network::AnyNetwork;
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_node_api::BlockTy<Self> {
         rpc_block.into_consensus()
