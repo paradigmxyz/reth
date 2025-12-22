@@ -115,14 +115,6 @@ harness = false
 name = "state_root_task"
 harness = false
 
-[[bench]]
-name = "executed_block_clone"
-harness = false
-
-[[bench]]
-name = "state_provider_builder"
-harness = false
-
 [features]
 test-utils = [
     "reth-chain-state/test-utils",
