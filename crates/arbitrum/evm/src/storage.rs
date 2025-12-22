@@ -92,8 +92,50 @@ fn write_arbos_storage<D: Database>(
     // Step 1: Load the ArbOS account into cache
     let _ = state.load_cache_account(ARBOS_STATE_ADDRESS);
 
-    // Step 2: Get original value from database for proper tracking
+    // Step 2: Get the CURRENT value (including in-flight changes) and the ORIGINAL value from database.
+    // Go nitro's SetState checks: if prev == value { return prev } where prev is the current value.
+    // We need to check against the current value (cache/bundle_state), not just the database value.
+    
+    // First, get the current value from cache or bundle_state (in-flight changes)
+    let current_value = {
+        // Check cache first (most recent in-flight changes)
+        if let Some(cached_acc) = state.cache.accounts.get(&ARBOS_STATE_ADDRESS) {
+            if let Some(ref account) = cached_acc.account {
+                if let Some(&cached_value) = account.storage.get(&slot) {
+                    Some(cached_value)
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    }.or_else(|| {
+        // Then check bundle_state (merged changes from previous transactions)
+        if let Some(acc) = state.bundle_state.state.get(&ARBOS_STATE_ADDRESS) {
+            if let Some(slot_entry) = acc.storage.get(&slot) {
+                Some(slot_entry.present_value)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
+    });
+    
+    // Get original value from database for proper tracking in StorageSlot
     let original_value = state.database.storage(ARBOS_STATE_ADDRESS, slot).unwrap_or(U256::ZERO);
+    
+    // CRITICAL FIX: Skip no-op writes where value == current_value
+    // This matches Go nitro's SetState behavior which returns early if prev == value.
+    // We compare against current_value (including in-flight changes), not original_value.
+    // This prevents dirtying the state trie with unchanged slots.
+    let prev_value = current_value.unwrap_or(original_value);
+    if value == prev_value {
+        return;
+    }
 
     // Step 3: Modify the cache entry with the storage change
     let (previous_info, previous_status, current_info, current_status) = {
