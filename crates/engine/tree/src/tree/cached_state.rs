@@ -3,6 +3,7 @@ use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
 };
+use fixed_cache::Stats;
 use metrics::Gauge;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
@@ -16,7 +17,10 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use std::sync::Arc;
+use std::sync::{
+    atomic::{AtomicU64, Ordering},
+    Arc,
+};
 use tracing::{debug_span, instrument, trace};
 
 /// Type alias for the fixed-cache used for accounts and storage.
@@ -116,6 +120,113 @@ impl CachedStateMetrics {
         let zeroed = Self::default();
         zeroed.reset();
         zeroed
+    }
+}
+
+/// Metrics for fixed-cache internal stats (hits/misses/collisions tracked by the cache itself).
+#[derive(Metrics, Clone)]
+#[metrics(scope = "sync.caching.fixed_cache")]
+pub(crate) struct FixedCacheMetrics {
+    /// Code cache hits
+    code_hits: Gauge,
+
+    /// Code cache misses
+    code_misses: Gauge,
+
+    /// Code cache collisions
+    code_collisions: Gauge,
+
+    /// Storage cache hits
+    storage_hits: Gauge,
+
+    /// Storage cache misses
+    storage_misses: Gauge,
+
+    /// Storage cache collisions
+    storage_collisions: Gauge,
+
+    /// Account cache hits
+    account_hits: Gauge,
+
+    /// Account cache misses
+    account_misses: Gauge,
+
+    /// Account cache collisions
+    account_collisions: Gauge,
+}
+
+impl FixedCacheMetrics {
+    /// Returns a new zeroed-out instance of [`FixedCacheMetrics`].
+    pub(crate) fn zeroed() -> Self {
+        let zeroed = Self::default();
+        zeroed.reset();
+        zeroed
+    }
+
+    /// Sets all values to zero.
+    pub(crate) fn reset(&self) {
+        self.code_hits.set(0);
+        self.code_misses.set(0);
+        self.code_collisions.set(0);
+
+        self.storage_hits.set(0);
+        self.storage_misses.set(0);
+        self.storage_collisions.set(0);
+
+        self.account_hits.set(0);
+        self.account_misses.set(0);
+        self.account_collisions.set(0);
+    }
+}
+
+/// A generic stats handler for fixed-cache that tracks hits, misses, and collisions.
+#[derive(Debug)]
+pub(crate) struct CacheStatsHandler {
+    hits: AtomicU64,
+    misses: AtomicU64,
+    collisions: AtomicU64,
+}
+
+impl CacheStatsHandler {
+    /// Creates a new stats handler with all counters initialized to zero.
+    pub(crate) const fn new() -> Self {
+        Self { hits: AtomicU64::new(0), misses: AtomicU64::new(0), collisions: AtomicU64::new(0) }
+    }
+
+    /// Returns the number of cache hits.
+    pub(crate) fn hits(&self) -> u64 {
+        self.hits.load(Ordering::Relaxed)
+    }
+
+    /// Returns the number of cache misses.
+    pub(crate) fn misses(&self) -> u64 {
+        self.misses.load(Ordering::Relaxed)
+    }
+
+    /// Returns the number of cache collisions.
+    pub(crate) fn collisions(&self) -> u64 {
+        self.collisions.load(Ordering::Relaxed)
+    }
+
+    /// Resets all counters to zero.
+    pub(crate) fn reset(&self) {
+        self.hits.store(0, Ordering::Relaxed);
+        self.misses.store(0, Ordering::Relaxed);
+        self.collisions.store(0, Ordering::Relaxed);
+    }
+}
+
+impl<K, V> StatsHandler<K, V> for CacheStatsHandler {
+    fn on_hit(&self, _key: &K, _value: &V) {
+        self.hits.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn on_miss(&self, _key: AnyRef<'_>) {
+        self.misses.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn on_collision(&self, _new_key: AnyRef<'_>, _existing_key: &K, _existing_value: &V) {
+        self.collisions.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -333,6 +444,15 @@ pub(crate) struct ExecutionCache {
 
     /// Cache for basic account information (nonce, balance, code hash).
     account_cache: Arc<FixedCache<Address, Option<Account>, FbBuildHasher<20>>>,
+
+    /// Stats handler for the code cache.
+    code_stats: Arc<CacheStatsHandler>,
+
+    /// Stats handler for the storage cache.
+    storage_stats: Arc<CacheStatsHandler>,
+
+    /// Stats handler for the account cache.
+    account_stats: Arc<CacheStatsHandler>,
 }
 
 impl ExecutionCache {
@@ -475,6 +595,25 @@ impl ExecutionCache {
 
         Ok(())
     }
+
+    /// Updates the provided metrics with the current stats from the cache's stats handlers,
+    /// and resets the stats counters.
+    pub(crate) fn update_metrics(&self, metrics: &FixedCacheMetrics) {
+        metrics.code_hits.set(self.code_stats.hits() as f64);
+        metrics.code_misses.set(self.code_stats.misses() as f64);
+        metrics.code_collisions.set(self.code_stats.collisions() as f64);
+        self.code_stats.reset();
+
+        metrics.storage_hits.set(self.storage_stats.hits() as f64);
+        metrics.storage_misses.set(self.storage_stats.misses() as f64);
+        metrics.storage_collisions.set(self.storage_stats.collisions() as f64);
+        self.storage_stats.reset();
+
+        metrics.account_hits.set(self.account_stats.hits() as f64);
+        metrics.account_misses.set(self.account_stats.misses() as f64);
+        metrics.account_collisions.set(self.account_stats.collisions() as f64);
+        self.account_stats.reset();
+    }
 }
 
 /// A builder for [`ExecutionCache`].
@@ -493,19 +632,26 @@ pub(crate) struct ExecutionCacheBuilder {
 impl ExecutionCacheBuilder {
     /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
     pub(crate) fn build_caches(self, _total_cache_size: u64) -> ExecutionCache {
+        let code_stats = Arc::new(CacheStatsHandler::new());
+        let storage_stats = Arc::new(CacheStatsHandler::new());
+        let account_stats = Arc::new(CacheStatsHandler::new());
+
         ExecutionCache {
-            code_cache: Arc::new(FixedCache::new(
-                self.code_cache_entries,
-                FbBuildHasher::<32>::default(),
-            )),
-            storage_cache: Arc::new(FixedCache::new(
-                self.storage_cache_entries,
-                DefaultHashBuilder::default(),
-            )),
-            account_cache: Arc::new(FixedCache::new(
-                self.account_cache_entries,
-                FbBuildHasher::<20>::default(),
-            )),
+            code_cache: Arc::new(
+                FixedCache::new(self.code_cache_entries, FbBuildHasher::<32>::default())
+                    .with_stats(Some(Stats::new(Arc::clone(&code_stats)))),
+            ),
+            storage_cache: Arc::new(
+                FixedCache::new(self.storage_cache_entries, DefaultHashBuilder::default())
+                    .with_stats(Some(Stats::new(Arc::clone(&storage_stats)))),
+            ),
+            account_cache: Arc::new(
+                FixedCache::new(self.account_cache_entries, FbBuildHasher::<20>::default())
+                    .with_stats(Some(Stats::new(Arc::clone(&account_stats)))),
+            ),
+            code_stats,
+            storage_stats,
+            account_stats,
         }
     }
 }
@@ -534,6 +680,9 @@ pub(crate) struct SavedCache {
     /// Metrics for the cached state provider
     metrics: CachedStateMetrics,
 
+    /// Metrics for fixed-cache internal stats
+    fixed_cache_metrics: FixedCacheMetrics,
+
     /// A guard to track in-flight usage of this cache.
     /// The cache is considered available if the strong count is 1.
     usage_guard: Arc<()>,
@@ -541,8 +690,13 @@ pub(crate) struct SavedCache {
 
 impl SavedCache {
     /// Creates a new instance with the internals
-    pub(super) fn new(hash: B256, caches: ExecutionCache, metrics: CachedStateMetrics) -> Self {
-        Self { hash, caches, metrics, usage_guard: Arc::new(()) }
+    pub(super) fn new(
+        hash: B256,
+        caches: ExecutionCache,
+        metrics: CachedStateMetrics,
+        fixed_cache_metrics: FixedCacheMetrics,
+    ) -> Self {
+        Self { hash, caches, metrics, fixed_cache_metrics, usage_guard: Arc::new(()) }
     }
 
     /// Returns the hash for this cache
@@ -551,8 +705,8 @@ impl SavedCache {
     }
 
     /// Splits the cache into its caches and metrics, consuming it.
-    pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics) {
-        (self.caches, self.metrics)
+    pub(crate) fn split(self) -> (ExecutionCache, CachedStateMetrics, FixedCacheMetrics) {
+        (self.caches, self.metrics, self.fixed_cache_metrics)
     }
 
     /// Returns true if the cache is available for use (no other tasks are currently using it).
@@ -575,10 +729,9 @@ impl SavedCache {
         &self.metrics
     }
 
-    /// Updates the metrics for the [`ExecutionCache`].
-    pub(crate) const fn update_metrics(&self) {
-        // fixed-cache doesn't provide entry_count, so we can't track size accurately.
-        // We could track inserts manually if needed.
+    /// Updates the fixed-cache metrics from the stats handlers.
+    pub(crate) fn update_metrics(&self) {
+        self.caches.update_metrics(&self.fixed_cache_metrics);
     }
 }
 
@@ -663,7 +816,12 @@ mod tests {
     #[test]
     fn test_saved_cache_is_available() {
         let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
-        let cache = SavedCache::new(B256::ZERO, execution_cache, CachedStateMetrics::zeroed());
+        let cache = SavedCache::new(
+            B256::ZERO,
+            execution_cache,
+            CachedStateMetrics::zeroed(),
+            FixedCacheMetrics::zeroed(),
+        );
 
         assert!(cache.is_available(), "Cache should be available initially");
 
@@ -675,8 +833,12 @@ mod tests {
     #[test]
     fn test_saved_cache_multiple_references() {
         let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
-        let cache =
-            SavedCache::new(B256::from([2u8; 32]), execution_cache, CachedStateMetrics::zeroed());
+        let cache = SavedCache::new(
+            B256::from([2u8; 32]),
+            execution_cache,
+            CachedStateMetrics::zeroed(),
+            FixedCacheMetrics::zeroed(),
+        );
 
         let guard1 = cache.clone_guard_for_test();
         let guard2 = cache.clone_guard_for_test();
