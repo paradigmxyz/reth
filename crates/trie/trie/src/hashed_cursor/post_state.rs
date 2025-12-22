@@ -37,9 +37,25 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageCursor, DatabaseError> {
         let cursor = self.cursor_factory.hashed_storage_cursor(hashed_address)?;
+        let post_state_storage = self.post_state.as_ref().storages.get(&hashed_address);
+        
+        // DEBUG: Log wiped flag for ArbOS backing account
+        let arbos_backing_hashed = B256::from_slice(&[
+            0xb4, 0xd1, 0x4e, 0xc8, 0x9c, 0x20, 0x1c, 0x23, 0xaa, 0x60, 0xe2, 0x31, 0xe3, 0x99, 0x3b, 0x39,
+            0x66, 0xb3, 0x3f, 0xf1, 0xf5, 0x5d, 0x19, 0x8e, 0xc2, 0x59, 0x80, 0x95, 0x7a, 0xb3, 0x20, 0x65
+        ]);
+        if hashed_address == arbos_backing_hashed {
+            if let Some(storage) = post_state_storage {
+                eprintln!("[STORAGE-CURSOR-DEBUG] ArbOS backing account: post_state_storage.is_some=true, wiped={}, non_zero_slots={}, zero_slots={}",
+                    storage.wiped, storage.non_zero_valued_slots.len(), storage.zero_valued_slots.len());
+            } else {
+                eprintln!("[STORAGE-CURSOR-DEBUG] ArbOS backing account: post_state_storage.is_some=false (using DB only)");
+            }
+        }
+        
         Ok(HashedPostStateStorageCursor::new(
             cursor,
-            self.post_state.as_ref().storages.get(&hashed_address),
+            post_state_storage,
         ))
     }
 }

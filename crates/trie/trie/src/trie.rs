@@ -762,11 +762,14 @@ where
             // Only run for the first 5 computations to avoid excessive logging
             if test_id < 5 {
                 match compute_storage_root_full_enumeration(&self.hashed_cursor_factory, self.hashed_address) {
-                    Ok((full_root, full_slots, full_fingerprint)) => {
+                    Ok((full_root, full_slots, zero_valued_slots, full_fingerprint)) => {
                         let roots_match = root == full_root;
                         let fingerprints_match = fingerprint == full_fingerprint;
-                        eprintln!("[A/B-TEST] test_id={} SKIP_ROOT={:?} FULL_ROOT={:?} ROOTS_MATCH={} skip_slots={} full_slots={} FINGERPRINTS_MATCH={}",
-                            test_id, root, full_root, roots_match, stats.leaves_added(), full_slots, fingerprints_match);
+                        eprintln!("[A/B-TEST] test_id={} SKIP_ROOT={:?} FULL_ROOT={:?} ROOTS_MATCH={} skip_slots={} full_slots={} zero_valued_slots={} FINGERPRINTS_MATCH={}",
+                            test_id, root, full_root, roots_match, stats.leaves_added(), full_slots, zero_valued_slots, fingerprints_match);
+                        if zero_valued_slots > 0 {
+                            eprintln!("[A/B-TEST] test_id={} WARNING: {} zero-valued slots found! These should be deleted, not included in trie!", test_id, zero_valued_slots);
+                        }
                         if !roots_match {
                             eprintln!("[A/B-TEST] test_id={} MISMATCH DETECTED! Skip path and full enumeration produce different roots!", test_id);
                         }
@@ -799,19 +802,21 @@ static AB_TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 /// Computes storage root with full enumeration (no skipping) for A/B test comparison.
 /// This function iterates over all hashed storage slots directly from the cursor,
 /// without using the trie walker's skip optimization.
+/// Returns (root, total_slots, zero_valued_slots, fingerprint)
 pub fn compute_storage_root_full_enumeration<H: HashedCursorFactory>(
     hashed_cursor_factory: &H,
     hashed_address: B256,
-) -> Result<(B256, usize, B256), StorageRootError> {
+) -> Result<(B256, usize, usize, B256), StorageRootError> {
     let mut hashed_storage_cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
     
     // Check if storage is empty
     if hashed_storage_cursor.is_storage_empty()? {
-        return Ok((EMPTY_ROOT_HASH, 0, B256::ZERO));
+        return Ok((EMPTY_ROOT_HASH, 0, 0, B256::ZERO));
     }
     
     let mut hash_builder = HashBuilder::default();
     let mut slots_walked = 0usize;
+    let mut zero_valued_slots = 0usize;
     let mut fingerprint = B256::ZERO;
     
     // Seek to the beginning
@@ -819,6 +824,15 @@ pub fn compute_storage_root_full_enumeration<H: HashedCursorFactory>(
     
     while let Some((hashed_slot, value)) = current {
         slots_walked += 1;
+        
+        // Count zero-valued slots
+        if value.is_zero() {
+            zero_valued_slots += 1;
+            // Log first few zero-valued slots for debugging
+            if zero_valued_slots <= 5 {
+                eprintln!("[ZERO-VALUED-SLOT] hashed_slot={:?} value={:?}", hashed_slot, value);
+            }
+        }
         
         // Compute fingerprint
         let rlp_value = alloy_rlp::encode_fixed_size(&value);
@@ -836,7 +850,7 @@ pub fn compute_storage_root_full_enumeration<H: HashedCursorFactory>(
     }
     
     let root = hash_builder.root();
-    Ok((root, slots_walked, fingerprint))
+    Ok((root, slots_walked, zero_valued_slots, fingerprint))
 }
 
 /// Trie type for differentiating between various trie calculations.
