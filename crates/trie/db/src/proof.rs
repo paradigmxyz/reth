@@ -7,7 +7,7 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
-    StorageMultiProof, TrieInput,
+    StorageMultiProof, TrieInput, TrieInputSorted,
 };
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
@@ -149,4 +149,50 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
         .with_prefix_set_mut(prefix_set)
         .storage_multiproof(targets)
     }
+}
+
+/// Generates the storage proof for target slot based on [`TrieInputSorted`] with cached nodes.
+pub fn overlay_storage_proof_from_nodes<TX: DbTx>(
+    tx: &TX,
+    address: Address,
+    slot: B256,
+    input: TrieInputSorted,
+) -> Result<reth_trie::StorageProof, StateProofError> {
+    let prefix_set =
+        input.prefix_sets.storage_prefix_sets.get(&keccak256(address)).cloned().unwrap_or_default();
+
+    StorageProof::new(
+        InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), input.nodes.as_ref()),
+        HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(tx),
+            input.state.as_ref(),
+        ),
+        address,
+    )
+    .with_prefix_set_mut(prefix_set)
+    .storage_proof(slot)
+}
+
+/// Generates the storage multiproof for target slots based on [`TrieInputSorted`] with cached
+/// nodes.
+pub fn overlay_storage_multiproof_from_nodes<TX: DbTx>(
+    tx: &TX,
+    address: Address,
+    slots: &[B256],
+    input: TrieInputSorted,
+) -> Result<StorageMultiProof, StateProofError> {
+    let targets = slots.iter().map(keccak256).collect();
+    let prefix_set =
+        input.prefix_sets.storage_prefix_sets.get(&keccak256(address)).cloned().unwrap_or_default();
+
+    StorageProof::new(
+        InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), input.nodes.as_ref()),
+        HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(tx),
+            input.state.as_ref(),
+        ),
+        address,
+    )
+    .with_prefix_set_mut(prefix_set)
+    .storage_multiproof(targets)
 }

@@ -14,9 +14,12 @@ pub use hashed_cursor::{
     DatabaseHashedAccountCursor, DatabaseHashedCursorFactory, DatabaseHashedStorageCursor,
 };
 pub use prefix_set::PrefixSetLoader;
-pub use proof::{DatabaseProof, DatabaseStorageProof};
+pub use proof::{
+    overlay_storage_multiproof_from_nodes, overlay_storage_proof_from_nodes, DatabaseProof,
+    DatabaseStorageProof,
+};
 pub use state::{DatabaseHashedPostState, DatabaseStateRoot};
-pub use storage::{DatabaseHashedStorage, DatabaseStorageRoot};
+pub use storage::{overlay_root_from_nodes, DatabaseHashedStorage, DatabaseStorageRoot};
 pub use trie_cursor::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
 };

@@ -5,7 +5,8 @@ use reth_db_api::{
 };
 use reth_execution_errors::StorageRootError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
+    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
+    HashedPostState, HashedStorage, StorageRoot, TrieInputSorted,
 };
 
 #[cfg(feature = "metrics")]
@@ -94,4 +95,32 @@ impl<TX: DbTx> DatabaseHashedStorage<TX> for HashedStorage {
         }
         Ok(storage)
     }
+}
+
+/// Calculates the storage root for the given [`TrieInputSorted`] using cached intermediate nodes.
+pub fn overlay_root_from_nodes<TX: DbTx>(
+    tx: &TX,
+    address: Address,
+    input: TrieInputSorted,
+) -> Result<B256, StorageRootError> {
+    let prefix_set = input
+        .prefix_sets
+        .storage_prefix_sets
+        .get(&keccak256(address))
+        .cloned()
+        .unwrap_or_default()
+        .freeze();
+
+    StorageRoot::new(
+        InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), input.nodes.as_ref()),
+        HashedPostStateCursorFactory::new(
+            DatabaseHashedCursorFactory::new(tx),
+            input.state.as_ref(),
+        ),
+        address,
+        prefix_set,
+        #[cfg(feature = "metrics")]
+        TrieRootMetrics::new(reth_trie::TrieType::Storage),
+    )
+    .root()
 }
