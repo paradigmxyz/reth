@@ -1,4 +1,4 @@
-use super::{collect_history_indices, load_history_indices};
+use super::{collect_history_indices, load_history_indices, utils::maybe_save_prune_checkpoint};
 use crate::{StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
@@ -8,7 +8,7 @@ use reth_db_api::{
     transaction::DbTxMut,
 };
 use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
-use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
+use reth_prune_types::{PruneMode, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::fmt::Debug;
 use tracing::info;
@@ -60,34 +60,13 @@ where
         provider: &Provider,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if let Some((target_prunable_block, prune_mode)) = self
-            .prune_mode
-            .map(|mode| {
-                mode.prune_target_block(
-                    input.target(),
-                    PruneSegment::StorageHistory,
-                    PrunePurpose::User,
-                )
-            })
-            .transpose()?
-            .flatten() &&
-            target_prunable_block > input.checkpoint().block_number
-        {
-            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
-
-            // Save prune checkpoint only if we don't have one already.
-            // Otherwise, pruner may skip the unpruned range of blocks.
-            if provider.get_prune_checkpoint(PruneSegment::StorageHistory)?.is_none() {
-                provider.save_prune_checkpoint(
-                    PruneSegment::StorageHistory,
-                    PruneCheckpoint {
-                        block_number: Some(target_prunable_block),
-                        tx_number: None,
-                        prune_mode,
-                    },
-                )?;
-            }
-        }
+        maybe_save_prune_checkpoint(
+            provider,
+            self.prune_mode,
+            &mut input,
+            PruneSegment::StorageHistory,
+            |_, _| Ok(None),
+        )?;
 
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()))
