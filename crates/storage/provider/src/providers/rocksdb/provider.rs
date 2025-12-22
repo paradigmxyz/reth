@@ -669,14 +669,26 @@ impl<'db> RocksTx<'db> {
 
     /// Creates a raw iterator for bidirectional traversal of the specified table.
     ///
-    /// Unlike [`Self::iter_from`], raw iterators support `prev()` for backward navigation,
-    /// matching MDBX cursor semantics. Use this for history lookups where checking the
-    /// previous entry is needed.
-    fn raw_iterator_cf<T: Table>(
+    /// Unlike [`Self::iter_from`], raw iterators support `prev()` for backward navigation.
+    /// Use this for history lookups where checking the previous entry is needed.
+    pub fn raw_iterator_cf<T: Table>(
         &self,
     ) -> ProviderResult<DBRawIteratorWithThreadMode<'_, Transaction<'_, TransactionDB>>> {
         let cf = self.provider.get_cf_handle::<T>()?;
         Ok(self.inner.raw_iterator_cf(cf))
+    }
+
+    /// Raw iterators surface I/O errors via `status()`, not through `key()`/`value()`.
+    /// Call this after `seek`/`next`/`prev` before interpreting `valid()`.
+    fn raw_iter_status_ok(
+        iter: &DBRawIteratorWithThreadMode<'_, Transaction<'_, TransactionDB>>,
+    ) -> ProviderResult<()> {
+        iter.status().map_err(|e| {
+            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
     }
 
     /// Commits the transaction, persisting all changes.
@@ -698,7 +710,17 @@ impl<'db> RocksTx<'db> {
 
     /// Lookup account history and return [`HistoryInfo`] directly.
     ///
-    /// Uses a raw iterator with `prev()` for O(1) previous-shard detection,
+    /// This function finds the specific shard that contains the history for the given `block_number`.
+    ///
+    /// # How it works
+    /// 1. The history is sharded. Each key is `(Address, HighestBlockInShard)`.
+    /// 2. We `seek` to `(address, block_number)`.
+    ///    - Because keys are sorted by block number, this lands us on the shard with
+    ///      `HighestBlock >= block_number`.
+    ///    - This is the only shard that *could* contain our target block.
+    /// 3. We check if the found shard actually belongs to the requested address.
+    /// 4. We look backwards (`prev`) to see if there was a previous shard for this address.
+    ///    - This tells `find_changeset...` if we are at the very start of history or not.
     pub fn account_history_info(
         &self,
         address: Address,
@@ -712,13 +734,8 @@ impl<'db> RocksTx<'db> {
         let mut iter = self.raw_iterator_cf::<tables::AccountsHistory>()?;
         iter.seek::<&[u8]>(encoded_key.as_ref());
 
-        // Always check status after seek to catch I/O errors before checking valid()
-        iter.status().map_err(|e| {
-            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })?;
+        // Always check status after seek to catch I/O errors before checking valid().
+        Self::raw_iter_status_ok(&iter)?;
 
         if !iter.valid() {
             // Iterator exhausted, no shards exist at or after target.
@@ -754,17 +771,13 @@ impl<'db> RocksTx<'db> {
         let chunk = <tables::AccountsHistory as Table>::Value::decompress(value_bytes)
             .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
-        // O(1) check for previous shard using prev() - matches MDBX cursor.prev()
-        // We move the iterator back to check if there's a preceding shard for the same address.
-        // This is necessary because `find_changeset_block_from_index` needs to know if the
-        // current shard is part of a continuous history or the start of it.
+        // O(1) check for previous shard using prev()
+        // We move the iterator back to check if there is a PRECEDING shard for this SAME address.
+        // If one exists, it means the current shard is a continuation of history.
+        // If not (or if the prev key is for a different address), this is the first shard.
         iter.prev();
-        iter.status().map_err(|e| {
-            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })?;
+        // Raw iterators report errors via status(), so check after moving.
+        Self::raw_iter_status_ok(&iter)?;
         let has_prev = iter.valid() && {
             if let Some(prev_key_bytes) = iter.key() {
                 if let Ok(prev_key) = <ShardedKey<Address> as Decode>::decode(prev_key_bytes) {
@@ -788,8 +801,16 @@ impl<'db> RocksTx<'db> {
 
     /// Lookup storage history and return [`HistoryInfo`] directly.
     ///
-    /// Uses a raw iterator with `prev()` for O(1) previous-shard detection,
-
+    /// This function finds the specific shard that contains the history for the given `storage_key`
+    /// under `address` at `block_number`.
+    ///
+    /// # How it works
+    /// 1. The history is sharded. Each key is `(Address, StorageKey, HighestBlockInShard)`.
+    /// 2. We `seek` to `(address, storage_key, block_number)`.
+    ///    - Because keys are sorted by block number, this lands us on the shard with
+    ///      `HighestBlock >= block_number`.
+    /// 3. We check if the found shard actually belongs to the requested address AND storage key.
+    /// 4. We look backwards (`prev`) to see if there was a previous shard for this exact slot.
     pub fn storage_history_info(
         &self,
         address: Address,
@@ -804,13 +825,8 @@ impl<'db> RocksTx<'db> {
         let mut iter = self.raw_iterator_cf::<tables::StoragesHistory>()?;
         iter.seek::<&[u8]>(encoded_key.as_ref());
 
-        // Always check status after seek to catch I/O errors before checking valid()
-        iter.status().map_err(|e| {
-            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })?;
+        // Always check status after seek to catch I/O errors before checking valid().
+        Self::raw_iter_status_ok(&iter)?;
 
         if !iter.valid() {
             // Iterator exhausted, no shards exist at or after target.
@@ -838,7 +854,7 @@ impl<'db> RocksTx<'db> {
         if found_key.address != address || found_key.sharded_key.key != storage_key {
             // No shard for this address/key at or after target.
             if lowest_available_block_number.is_some() {
-               return Ok(HistoryInfo::MaybeInPlainState);
+                return Ok(HistoryInfo::MaybeInPlainState);
             }
             return Ok(HistoryInfo::NotYetWritten);
         }
@@ -846,17 +862,13 @@ impl<'db> RocksTx<'db> {
         let chunk = <tables::StoragesHistory as Table>::Value::decompress(value_bytes)
             .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
-        // O(1) check for previous shard using prev() - matches MDBX cursor.prev()
-        // We move the iterator back to check if there's a preceding shard for the same storage slot.
-        // This is necessary because `find_changeset_block_from_index` needs to know if the
-        // current shard is part of a continuous history or the start of it.
+        // O(1) check for previous shard using prev()
+        // We move the iterator back to check if there is a PRECEDING shard for this SAME
+        // storage slot (Address + StorageKey).
+        // If one exists, it means the current shard is a continuation of history.
         iter.prev();
-        iter.status().map_err(|e| {
-            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })?;
+        // Raw iterators report errors via status(), so check after moving.
+        Self::raw_iter_status_ok(&iter)?;
         let has_prev = iter.valid() && {
             if let Some(prev_key_bytes) = iter.key() {
                 if let Ok(prev_key) = <StorageShardedKey as Decode>::decode(prev_key_bytes) {
@@ -1390,42 +1402,25 @@ mod tests {
         let temp_dir = TempDir::new().unwrap();
         let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
 
-        let address = Address::from([0x42; 20]);
-        let tx = provider.tx();
-
-        // Query for an address with no history
-        let result = tx.account_history_info(address, 100, None).unwrap();
-        assert_eq!(result, HistoryInfo::NotYetWritten);
-
-        // With lowest_available_block_number set, should return MaybeInPlainState
-        let result = tx.account_history_info(address, 100, Some(50)).unwrap();
-        assert_eq!(result, HistoryInfo::MaybeInPlainState);
-
-        tx.rollback().unwrap();
-    }
-
-    #[test]
-    fn test_account_history_info_different_address() {
-        use crate::providers::HistoryInfo;
-
-        let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
         let address1 = Address::from([0x42; 20]);
         let address2 = Address::from([0x43; 20]);
 
-        // Only create history for address1
+        // Create history only for address1 to test cross-address isolation
         let chunk = IntegerList::new([100, 200, 300]).unwrap();
         let shard_key = ShardedKey::new(address1, u64::MAX);
         provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
 
         let tx = provider.tx();
 
-        // Query for address2 should return NotYetWritten
+        // Query for address2 (no history) should return NotYetWritten
         let result = tx.account_history_info(address2, 150, None).unwrap();
         assert_eq!(result, HistoryInfo::NotYetWritten);
 
-        // Query for address1 should find the history
+        // With lowest_available_block_number set, should return MaybeInPlainState
+        let result = tx.account_history_info(address2, 150, Some(50)).unwrap();
+        assert_eq!(result, HistoryInfo::MaybeInPlainState);
+
+        // Query for address1 should find the history (verifies isolation works both ways)
         let result = tx.account_history_info(address1, 150, None).unwrap();
         assert_eq!(result, HistoryInfo::InChangeset(200));
 
@@ -1456,68 +1451,7 @@ mod tests {
     }
 
     #[test]
-    fn test_storage_history_info_single_shard() {
-        use crate::providers::HistoryInfo;
-
-        let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
-        let address = Address::from([0x42; 20]);
-        let storage_key = B256::from([0x11; 32]);
-
-        // Create a single shard with blocks [100, 200, 300]
-        let chunk = IntegerList::new([100, 200, 300]).unwrap();
-        let shard_key = StorageShardedKey::new(address, storage_key, u64::MAX);
-        provider.put::<tables::StoragesHistory>(shard_key, &chunk).unwrap();
-
-        let tx = provider.tx();
-
-        // Query for block 150: should find block 200 in changeset
-        let result = tx.storage_history_info(address, storage_key, 150, None).unwrap();
-        assert_eq!(result, HistoryInfo::InChangeset(200));
-
-        // Query for block 50: should return NotYetWritten
-        let result = tx.storage_history_info(address, storage_key, 50, None).unwrap();
-        assert_eq!(result, HistoryInfo::NotYetWritten);
-
-        tx.rollback().unwrap();
-    }
-
-    #[test]
-    fn test_storage_history_info_multiple_shards() {
-        use crate::providers::HistoryInfo;
-
-        let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
-        let address = Address::from([0x42; 20]);
-        let storage_key = B256::from([0x11; 32]);
-
-        // Create two shards
-        let chunk1 = IntegerList::new([100, 200, 300]).unwrap();
-        let shard_key1 = StorageShardedKey::new(address, storage_key, 300);
-        provider.put::<tables::StoragesHistory>(shard_key1, &chunk1).unwrap();
-
-        let chunk2 = IntegerList::new([400, 500, 600]).unwrap();
-        let shard_key2 = StorageShardedKey::new(address, storage_key, u64::MAX);
-        provider.put::<tables::StoragesHistory>(shard_key2, &chunk2).unwrap();
-
-        let tx = provider.tx();
-
-        // Query for block 350: should find block 400 in second shard
-        // prev() should detect first shard exists
-        let result = tx.storage_history_info(address, storage_key, 350, None).unwrap();
-        assert_eq!(result, HistoryInfo::InChangeset(400));
-
-        // Query for block 150: should find block 200 in first shard
-        let result = tx.storage_history_info(address, storage_key, 150, None).unwrap();
-        assert_eq!(result, HistoryInfo::InChangeset(200));
-
-        tx.rollback().unwrap();
-    }
-
-    #[test]
-    fn test_storage_history_info_different_slot() {
+    fn test_storage_history_info() {
         use crate::providers::HistoryInfo;
 
         let temp_dir = TempDir::new().unwrap();
@@ -1527,20 +1461,34 @@ mod tests {
         let storage_key1 = B256::from([0x11; 32]);
         let storage_key2 = B256::from([0x22; 32]);
 
-        // Only create history for storage_key1
-        let chunk = IntegerList::new([100, 200, 300]).unwrap();
-        let shard_key = StorageShardedKey::new(address, storage_key1, u64::MAX);
-        provider.put::<tables::StoragesHistory>(shard_key, &chunk).unwrap();
+        // Create two shards for storage_key1 to test multi-shard behavior
+        let chunk1 = IntegerList::new([100, 200, 300]).unwrap();
+        let shard_key1 = StorageShardedKey::new(address, storage_key1, 300);
+        provider.put::<tables::StoragesHistory>(shard_key1, &chunk1).unwrap();
+
+        let chunk2 = IntegerList::new([400, 500, 600]).unwrap();
+        let shard_key2 = StorageShardedKey::new(address, storage_key1, u64::MAX);
+        provider.put::<tables::StoragesHistory>(shard_key2, &chunk2).unwrap();
 
         let tx = provider.tx();
 
-        // Query for storage_key2 should return NotYetWritten
-        let result = tx.storage_history_info(address, storage_key2, 150, None).unwrap();
-        assert_eq!(result, HistoryInfo::NotYetWritten);
-
-        // Query for storage_key1 should find the history
+        // Query for block 150: should find block 200 in first shard
         let result = tx.storage_history_info(address, storage_key1, 150, None).unwrap();
         assert_eq!(result, HistoryInfo::InChangeset(200));
+
+        // Query for block 50: should return NotYetWritten (before first entry)
+        let result = tx.storage_history_info(address, storage_key1, 50, None).unwrap();
+        assert_eq!(result, HistoryInfo::NotYetWritten);
+
+        // Query for block 350: should find block 400 in second shard
+        // prev() should detect first shard exists (tests has_prev)
+        let result = tx.storage_history_info(address, storage_key1, 350, None).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(400));
+
+        // Query for storage_key2 (no history) should return NotYetWritten
+        // Tests cross-slot isolation
+        let result = tx.storage_history_info(address, storage_key2, 150, None).unwrap();
+        assert_eq!(result, HistoryInfo::NotYetWritten);
 
         tx.rollback().unwrap();
     }
