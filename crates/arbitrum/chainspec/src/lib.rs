@@ -816,12 +816,32 @@ pub struct ArbChainSpec {
     pub chain_id: u64,
 }
 
+/// Arbitrum Sepolia hardfork timestamps from alloy-hardforks
+const ARBITRUM_SEPOLIA_SHANGHAI_TIMESTAMP: u64 = 1_706_634_000;
+const ARBITRUM_SEPOLIA_CANCUN_TIMESTAMP: u64 = 1_709_229_600;
+const ARBITRUM_SEPOLIA_PRAGUE_TIMESTAMP: u64 = 1_746_543_285;
+
+/// Returns the correct SpecId for a given timestamp on Arbitrum Sepolia.
+/// This is critical for EVM execution to use the correct gas rules (e.g., EIP-3860 initcode gas).
+fn arbitrum_sepolia_spec_id_by_timestamp(timestamp: u64) -> SpecId {
+    if timestamp >= ARBITRUM_SEPOLIA_PRAGUE_TIMESTAMP {
+        SpecId::PRAGUE
+    } else if timestamp >= ARBITRUM_SEPOLIA_CANCUN_TIMESTAMP {
+        SpecId::CANCUN
+    } else if timestamp >= ARBITRUM_SEPOLIA_SHANGHAI_TIMESTAMP {
+        SpecId::SHANGHAI
+    } else {
+        // Pre-Shanghai: use Paris (post-merge but pre-Shanghai)
+        SpecId::MERGE
+    }
+}
+
 impl ArbitrumChainSpec for ArbChainSpec {
     fn chain_id(&self) -> u64 {
         self.chain_id
     }
-    fn spec_id_by_timestamp(&self, _timestamp: u64) -> SpecId {
-        SpecId::CANCUN
+    fn spec_id_by_timestamp(&self, timestamp: u64) -> SpecId {
+        arbitrum_sepolia_spec_id_by_timestamp(timestamp)
     }
 }
 
@@ -829,8 +849,8 @@ impl ArbitrumChainSpec for reth_chainspec::ChainSpec {
     fn chain_id(&self) -> u64 {
         self.chain().id()
     }
-    fn spec_id_by_timestamp(&self, _timestamp: u64) -> SpecId {
-        SpecId::CANCUN
+    fn spec_id_by_timestamp(&self, timestamp: u64) -> SpecId {
+        arbitrum_sepolia_spec_id_by_timestamp(timestamp)
     }
 }
 
@@ -860,8 +880,13 @@ pub fn arbitrum_sepolia_spec() -> reth_chainspec::ChainSpec {
                 total_difficulty: U256::ZERO,
             },
         ),
-        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(0)),
-        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(0)),
+        // Use correct Arbitrum Sepolia hardfork timestamps from alloy-hardforks
+        // Shanghai: 1706634000 (Jan 30, 2024)
+        // Cancun: 1709229600 (Feb 29, 2024)
+        // Prague: 1746543285 (May 6, 2025)
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1_706_634_000)),
+        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1_709_229_600)),
+        (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1_746_543_285)),
     ]);
 
     // Build spec from the baked genesis with proper allocations
