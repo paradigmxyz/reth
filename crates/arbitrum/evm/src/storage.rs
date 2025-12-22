@@ -507,3 +507,95 @@ impl<D: Database> StorageBackedAddress<D> {
         }
     }
 }
+
+/// StorageBackedAddressOrNil matches Go nitro's StorageBackedAddressOrNil.
+/// It uses a special sentinel value (1 << 255) to represent nil addresses.
+/// This is used for the retryable `to` field which can be nil for contract creation.
+pub struct StorageBackedAddressOrNil<D> {
+    storage: *mut revm::database::State<D>,
+    slot: U256,
+}
+
+/// Go nitro's NilAddressRepresentation = common.BigToHash(new(big.Int).Lsh(big.NewInt(1), 255))
+/// This is 1 << 255 = 0x8000000000000000000000000000000000000000000000000000000000000000
+fn nil_address_representation() -> U256 {
+    U256::from(1u64) << 255
+}
+
+impl<D: Database> StorageBackedAddressOrNil<D> {
+    pub fn new(storage: *mut revm::database::State<D>, base_key: B256, offset: u64) -> Self {
+        let storage_key = if base_key == B256::ZERO {
+            &[] as &[u8]
+        } else {
+            base_key.as_slice()
+        };
+        let slot = storage_key_map(storage_key, offset);
+        Self { storage, slot }
+    }
+
+    pub fn get(&self) -> Result<Option<Address>, ()> {
+        unsafe {
+            let state = &mut *self.storage;
+            let arbos_addr = ARBOS_STATE_ADDRESS;
+            let nil_repr = nil_address_representation();
+
+            // First check cache for in-flight changes
+            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
+                if let Some(ref account) = cached_acc.account {
+                    if let Some(&value) = account.storage.get(&self.slot) {
+                        if value == nil_repr {
+                            return Ok(None);
+                        }
+                        let bytes = value.to_be_bytes::<32>();
+                        let addr_bytes: [u8; 20] = bytes[12..32].try_into().unwrap();
+                        return Ok(Some(Address::from(addr_bytes)));
+                    }
+                }
+            }
+
+            // Then check bundle_state.state for merged changes
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&self.slot) {
+                    if slot_entry.present_value == nil_repr {
+                        return Ok(None);
+                    }
+                    let bytes = slot_entry.present_value.to_be_bytes::<32>();
+                    let addr_bytes: [u8; 20] = bytes[12..32].try_into().unwrap();
+                    return Ok(Some(Address::from(addr_bytes)));
+                }
+            }
+
+            // Fall back to database
+            match state.database.storage(arbos_addr, self.slot) {
+                Ok(value) => {
+                    if value == nil_repr {
+                        return Ok(None);
+                    }
+                    let bytes = value.to_be_bytes::<32>();
+                    let addr_bytes: [u8; 20] = bytes[12..32].try_into().unwrap();
+                    Ok(Some(Address::from(addr_bytes)))
+                }
+                Err(_) => Err(()),
+            }
+        }
+    }
+
+    /// Set an address or nil. If value is None, stores the nil sentinel value.
+    /// If value is Some(addr), stores the address using BytesToHash encoding (right-aligned).
+    pub fn set(&self, value: Option<Address>) -> Result<(), ()> {
+        let value_u256 = match value {
+            None => nil_address_representation(),
+            Some(addr) => {
+                // Go nitro uses common.BytesToHash(val.Bytes()) which right-aligns the address
+                let mut value_bytes = [0u8; 32];
+                value_bytes[12..32].copy_from_slice(addr.as_slice());
+                U256::from_be_bytes(value_bytes)
+            }
+        };
+        unsafe {
+            let state = &mut *self.storage;
+            write_arbos_storage(state, self.slot, value_u256);
+            Ok(())
+        }
+    }
+}

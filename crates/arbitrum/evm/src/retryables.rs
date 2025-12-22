@@ -2,7 +2,7 @@
 
 use alloy_primitives::{keccak256, Address, Bytes, U256, B256};
 use revm::Database;
-use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress};
+use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress, StorageBackedAddressOrNil};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RetryableTicketId(pub [u8; 32]);
@@ -69,7 +69,7 @@ pub struct RetryableTicket<D> {
     // Fields matching Go nitro's Retryable struct exactly
     num_tries: StorageBackedUint64<D>,
     from: StorageBackedAddress<D>,
-    to: StorageBackedAddress<D>,
+    to: StorageBackedAddressOrNil<D>,  // Go nitro uses StorageBackedAddressOrNil for `to`
     callvalue: StorageBackedBigUint<D>,
     beneficiary: StorageBackedAddress<D>,
     timeout: StorageBackedUint64<D>,
@@ -170,7 +170,7 @@ impl<D: Database> RetryableState<D> {
             ticket_id,
             num_tries: StorageBackedUint64::new(state, ticket_base_key, NUM_TRIES_OFFSET),
             from: StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET),
-            to: StorageBackedAddress::new(state, ticket_base_key, TO_OFFSET),
+            to: StorageBackedAddressOrNil::new(state, ticket_base_key, TO_OFFSET),
             callvalue: StorageBackedBigUint::new(state, ticket_base_key, CALLVALUE_OFFSET),
             beneficiary: StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET),
             timeout: StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET),
@@ -182,7 +182,7 @@ impl<D: Database> RetryableState<D> {
         // Set fields matching Go nitro's CreateRetryable order:
         // ret.numTries.Set(0)
         // ret.from.Set(from)
-        // ret.to.Set(to)
+        // ret.to.Set(to)  -- Go nitro uses StorageBackedAddressOrNil, passes *common.Address
         // ret.callvalue.SetChecked(callvalue)
         // ret.beneficiary.Set(beneficiary)
         // ret.calldata.Set(calldata)  -- stored in nested substorage
@@ -190,7 +190,8 @@ impl<D: Database> RetryableState<D> {
         // ret.timeoutWindowsLeft.Set(0)
         let _ = ticket.num_tries.set(0);
         let _ = ticket.from.set(params.sender);
-        let _ = ticket.to.set(params.call_to);
+        // Go nitro passes *common.Address to Set(), so we wrap in Some() for non-nil addresses
+        let _ = ticket.to.set(Some(params.call_to));
         let _ = ticket.callvalue.set(params.callvalue);  // Go nitro stores the actual callvalue (retry_value)
         let _ = ticket.beneficiary.set(params.beneficiary);
         // Store calldata in nested substorage (matching Go nitro's StorageBackedBytes)
@@ -268,7 +269,7 @@ impl<D: Database> RetryableState<D> {
                 ticket_id: RetryableTicketId(ticket_id.0),
                 num_tries: StorageBackedUint64::new(state, ticket_base_key, NUM_TRIES_OFFSET),
                 from: StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET),
-                to: StorageBackedAddress::new(state, ticket_base_key, TO_OFFSET),
+                to: StorageBackedAddressOrNil::new(state, ticket_base_key, TO_OFFSET),
                 callvalue: StorageBackedBigUint::new(state, ticket_base_key, CALLVALUE_OFFSET),
                 beneficiary: StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET),
                 timeout: timeout_storage,
@@ -291,7 +292,9 @@ impl<D: Database> RetryableTicket<D> {
     }
 
     pub fn get_to(&self) -> Option<Address> {
-        self.to.get().ok()
+        // StorageBackedAddressOrNil.get() returns Result<Option<Address>, ()>
+        // We flatten this to Option<Address>
+        self.to.get().ok().flatten()
     }
     
     pub fn get_callvalue(&self) -> Option<U256> {
