@@ -705,10 +705,10 @@ where
                     
                     // Compute leaf-set fingerprint (XOR of keccak256(hashed_slot || rlp_value))
                     let rlp_value = alloy_rlp::encode_fixed_size(&value);
-                    let mut leaf_data = [0u8; 64];
-                    leaf_data[..32].copy_from_slice(hashed_slot.as_slice());
-                    leaf_data[32..32 + rlp_value.len()].copy_from_slice(rlp_value.as_ref());
-                    let leaf_hash = keccak256(&leaf_data[..32 + rlp_value.len()]);
+                    let mut leaf_data = Vec::with_capacity(32 + rlp_value.len());
+                    leaf_data.extend_from_slice(hashed_slot.as_slice());
+                    leaf_data.extend_from_slice(rlp_value.as_ref());
+                    let leaf_hash = keccak256(&leaf_data);
                     fingerprint = B256::from_slice(&fingerprint.iter().zip(leaf_hash.iter()).map(|(a, b)| a ^ b).collect::<Vec<_>>());
                     
                     hash_builder.add_leaf(
