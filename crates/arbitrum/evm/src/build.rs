@@ -1011,6 +1011,8 @@ where
                 gas_left: gas_left_for_end_tx,
                 gas_limit,
                 basefee: block_basefee,
+                // Use paid_gas_price for gas pool update check (matches Go's msg.GasPrice.Sign() > 0)
+                gas_price: paid_gas_price,
                 tx_type: tx_type_u8,
                 block_timestamp,
             };

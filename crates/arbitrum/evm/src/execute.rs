@@ -55,6 +55,10 @@ pub struct ArbEndTxContext {
     pub gas_left: u64,
     pub gas_limit: u64,
     pub basefee: U256,
+    /// The transaction's gas price (msg.GasPrice in Go).
+    /// Used for gas pool update check - only update if gas_price > 0.
+    /// This is different from basefee for certain tx types.
+    pub gas_price: U256,
     pub tx_type: u8,
     pub block_timestamp: u64,
 }
@@ -1441,8 +1445,10 @@ impl ArbOsHooks for DefaultArbOsHooks {
             }
         }
 
-        // Only update gas pool if basefee is positive (matches Go's check for msg.GasPrice.Sign() > 0)
-        if ctx.basefee > U256::ZERO {
+        // Only update gas pool if gas_price is positive (matches Go's check for msg.GasPrice.Sign() > 0)
+        // CRITICAL: Use gas_price, not basefee! In Go, this checks the message's gas price,
+        // which can be 0 for certain tx types (like internal txs) even when basefee is positive.
+        if ctx.gas_price > U256::ZERO {
             let compute_gas = if gas_used > state.poster_gas {
                 // Don't include posterGas in computeGas as it doesn't represent processing time
                 gas_used - state.poster_gas
@@ -1855,6 +1861,9 @@ mod tests {
             gas_left: 0,
             gas_limit: 1_000_000,
             basefee: U256::from(1_000u64),
+            gas_price: U256::from(1_000u64),
+            tx_type: 0x02,
+            block_timestamp: 0,
         };
         hooks.end_tx(&mut evm, &mut state, &ctx);
 
