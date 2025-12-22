@@ -1,9 +1,9 @@
 //! `Eth` Sim bundle implementation and helpers.
 
-use alloy_consensus::{transaction::TxHashRef, BlockHeader};
+use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_evm::{env::BlockEnvironment, overrides::apply_block_overrides};
-use alloy_primitives::U256;
+use alloy_primitives::{keccak256, B256, U256};
 use alloy_rpc_types_eth::BlockId;
 use alloy_rpc_types_mev::{
     BundleItem, Inclusion, MevSendBundle, Privacy, RefundConfig, SimBundleLogs, SimBundleOverrides,
@@ -24,7 +24,7 @@ use reth_transaction_pool::{PoolPooledTx, PoolTransaction, TransactionPool};
 use revm::{
     context::Block, context_interface::result::ResultAndState, DatabaseCommit, DatabaseRef,
 };
-use std::{sync::Arc, time::Duration};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 use tracing::trace;
 
 /// Maximum bundle depth
@@ -47,6 +47,9 @@ const SBUNDLE_PAYOUT_MAX_COST: u64 = 30_000;
 pub struct FlattenedBundleItem<T> {
     /// The signed transaction
     pub tx: Recovered<T>,
+    /// Hash of the raw transaction bytes (keccak256 of original bytes)
+    /// Used for matching logs with the original bundle structure
+    pub raw_tx_hash: B256,
     /// Whether the transaction is allowed to revert
     pub can_revert: bool,
     /// Item-level inclusion constraints
@@ -83,6 +86,41 @@ impl<Eth> EthSimBundle<Eth>
 where
     Eth: EthTransactions + LoadBlock + Call + 'static,
 {
+    /// Builds a hierarchical `SimBundleLogs` structure from a flat map of transaction logs,
+    /// preserving the original nested bundle structure.
+    ///
+    /// This function recursively traverses the original bundle structure and constructs
+    /// `SimBundleLogs` entries that maintain the parent-child relationship between bundles.
+    fn build_bundle_logs(
+        bundle: &MevSendBundle,
+        tx_logs_map: &HashMap<B256, Vec<alloy_rpc_types_eth::Log>>,
+    ) -> Vec<SimBundleLogs> {
+        let mut logs = Vec::new();
+
+        for item in &bundle.bundle_body {
+            match item {
+                BundleItem::Tx { tx, .. } => {
+                    // Compute the transaction hash from raw transaction bytes
+                    // The hash of an RLP-encoded signed transaction is its transaction hash
+                    let tx_hash = keccak256(tx);
+                    let tx_logs = tx_logs_map.get(&tx_hash).cloned();
+                    logs.push(SimBundleLogs { tx_logs, bundle_logs: None });
+                }
+                BundleItem::Bundle { bundle: nested_bundle } => {
+                    // Recursively build logs for nested bundle
+                    let nested_logs = Self::build_bundle_logs(nested_bundle, tx_logs_map);
+                    logs.push(SimBundleLogs { tx_logs: None, bundle_logs: Some(nested_logs) });
+                }
+                BundleItem::Hash { .. } => {
+                    // Hash-only items don't have logs
+                    logs.push(SimBundleLogs { tx_logs: None, bundle_logs: None });
+                }
+            }
+        }
+
+        logs
+    }
+
     /// Flattens a potentially nested bundle into a list of individual transactions in a
     /// `FlattenedBundleItem` with their associated metadata. This handles recursive bundle
     /// processing up to `MAX_NESTED_BUNDLE_DEPTH` and `MAX_BUNDLE_BODY_SIZE`, preserving
@@ -166,9 +204,13 @@ where
             // Process items in the current bundle
             while idx < body.len() {
                 match &body[idx] {
-                    BundleItem::Tx { tx, can_revert } => {
-                        let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(tx)?;
-                        let tx = tx.map(
+                    BundleItem::Tx { tx: raw_tx, can_revert } => {
+                        // Compute hash of raw transaction bytes for consistent log matching
+                        let raw_tx_hash = keccak256(raw_tx);
+
+                        let recovered_tx =
+                            recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(raw_tx)?;
+                        let tx = recovered_tx.map(
                             <Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus,
                         );
 
@@ -184,6 +226,7 @@ where
                         // Create FlattenedBundleItem with current inclusion, validity, and privacy
                         let flattened_item = FlattenedBundleItem {
                             tx,
+                            raw_tx_hash,
                             can_revert: *can_revert,
                             inclusion: inclusion.clone(),
                             validity: validity.clone(),
@@ -258,7 +301,8 @@ where
                 let mut total_gas_used = 0;
                 let mut total_profit = U256::ZERO;
                 let mut refundable_value = U256::ZERO;
-                let mut body_logs: Vec<SimBundleLogs> = Vec::new();
+                // Map from transaction hash to logs for building hierarchical log structure
+                let mut tx_logs_map: HashMap<B256, Vec<alloy_rpc_types_eth::Log>> = HashMap::new();
 
                 let mut evm = eth_api.evm_config().evm_with_env(db, evm_env);
                 let mut log_index = 0;
@@ -269,8 +313,8 @@ where
                     let max_block_number =
                         item.inclusion.max_block_number().unwrap_or(block_number);
 
-                    if current_block_number < block_number ||
-                        current_block_number > max_block_number
+                    if current_block_number < block_number
+                        || current_block_number > max_block_number
                     {
                         return Err(EthApiError::InvalidParams(
                             EthSimBundleError::InvalidInclusion.to_string(),
@@ -308,11 +352,11 @@ where
                     // Update coinbase balance before next tx
                     coinbase_balance_before_tx = coinbase_balance_after_tx;
 
-                    // Collect logs if requested
-                    // TODO: since we are looping over iteratively, we are not collecting bundle
-                    // logs. We should collect bundle logs when we are processing the bundle items.
+                    // Collect logs if requested - store in map keyed by raw transaction hash
+                    // Use raw_tx_hash for consistent matching with build_bundle_logs
                     if logs {
-                        let tx_logs = result
+                        let tx_hash = item.raw_tx_hash;
+                        let tx_logs: Vec<alloy_rpc_types_eth::Log> = result
                             .into_logs()
                             .into_iter()
                             .map(|inner| {
@@ -321,7 +365,7 @@ where
                                     block_hash: None,
                                     block_number: None,
                                     block_timestamp: None,
-                                    transaction_hash: Some(*item.tx.tx_hash()),
+                                    transaction_hash: Some(tx_hash),
                                     transaction_index: Some(tx_index as u64),
                                     log_index: Some(log_index),
                                     removed: false,
@@ -330,14 +374,16 @@ where
                                 full_log
                             })
                             .collect();
-                        let sim_bundle_logs =
-                            SimBundleLogs { tx_logs: Some(tx_logs), bundle_logs: None };
-                        body_logs.push(sim_bundle_logs);
+                        tx_logs_map.insert(tx_hash, tx_logs);
                     }
 
                     // Apply state changes
                     evm.db_mut().commit(state);
                 }
+
+                // Build hierarchical log structure that preserves the original bundle nesting
+                let body_logs =
+                    if logs { Self::build_bundle_logs(&request, &tx_logs_map) } else { vec![] };
 
                 // After processing all transactions, process refunds
                 // Store the original refundable value to calculate all payouts correctly
@@ -350,9 +396,9 @@ where
                         });
 
                         // Calculate payout transaction fee
-                        let payout_tx_fee = U256::from(basefee) *
-                            U256::from(SBUNDLE_PAYOUT_MAX_COST) *
-                            U256::from(refund_configs.len() as u64);
+                        let payout_tx_fee = U256::from(basefee)
+                            * U256::from(SBUNDLE_PAYOUT_MAX_COST)
+                            * U256::from(refund_configs.len() as u64);
 
                         // Add gas used for payout transactions
                         total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
@@ -360,8 +406,8 @@ where
                         // Calculate allocated refundable value (payout value) based on ORIGINAL
                         // refundable value This ensures all refund_percent
                         // values are calculated from the same base
-                        let payout_value = original_refundable_value * U256::from(refund_percent) /
-                            U256::from(100);
+                        let payout_value = original_refundable_value * U256::from(refund_percent)
+                            / U256::from(100);
 
                         if payout_tx_fee > payout_value {
                             return Err(EthApiError::InvalidParams(
@@ -494,4 +540,218 @@ pub enum EthSimBundleError {
     /// Thrown when a bundle simulation returns negative profit
     #[error("bundle simulation returned negative profit")]
     NegativeProfit,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use alloy_primitives::Bytes;
+    use alloy_rpc_types_eth::Log;
+    use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
+
+    /// Helper function to build bundle logs for testing (mirrors the actual implementation)
+    fn build_bundle_logs_test(
+        bundle: &MevSendBundle,
+        tx_logs_map: &HashMap<B256, Vec<Log>>,
+    ) -> Vec<SimBundleLogs> {
+        let mut logs = Vec::new();
+
+        for item in &bundle.bundle_body {
+            match item {
+                BundleItem::Tx { tx, .. } => {
+                    let tx_hash = keccak256(tx);
+                    let tx_logs = tx_logs_map.get(&tx_hash).cloned();
+                    logs.push(SimBundleLogs { tx_logs, bundle_logs: None });
+                }
+                BundleItem::Bundle { bundle: nested_bundle } => {
+                    let nested_logs = build_bundle_logs_test(nested_bundle, tx_logs_map);
+                    logs.push(SimBundleLogs { tx_logs: None, bundle_logs: Some(nested_logs) });
+                }
+                BundleItem::Hash { .. } => {
+                    logs.push(SimBundleLogs { tx_logs: None, bundle_logs: None });
+                }
+            }
+        }
+
+        logs
+    }
+
+    /// Creates a test bundle with the given transaction bytes
+    fn create_test_bundle(tx_bytes: Vec<Bytes>) -> MevSendBundle {
+        let body: Vec<BundleItem> =
+            tx_bytes.into_iter().map(|tx| BundleItem::Tx { tx, can_revert: false }).collect();
+
+        MevSendBundle {
+            bundle_body: body,
+            inclusion: Inclusion { block: 1, max_block: None },
+            validity: None,
+            privacy: None,
+            protocol_version: ProtocolVersion::V0_1,
+        }
+    }
+
+    /// Creates a nested bundle with inner transactions
+    fn create_nested_bundle(outer_tx: Bytes, inner_txs: Vec<Bytes>) -> MevSendBundle {
+        let inner_bundle = create_test_bundle(inner_txs);
+
+        MevSendBundle {
+            bundle_body: vec![
+                BundleItem::Tx { tx: outer_tx, can_revert: false },
+                BundleItem::Bundle { bundle: inner_bundle },
+            ],
+            inclusion: Inclusion { block: 1, max_block: None },
+            validity: None,
+            privacy: None,
+            protocol_version: ProtocolVersion::V0_1,
+        }
+    }
+
+    #[test]
+    fn test_build_bundle_logs_single_tx() {
+        // Create a simple transaction (just some bytes for testing)
+        let tx_bytes = Bytes::from(vec![0x01, 0x02, 0x03]);
+        let tx_hash = keccak256(&tx_bytes);
+
+        let bundle = create_test_bundle(vec![tx_bytes]);
+
+        // Create log map with one entry
+        let mut tx_logs_map = HashMap::new();
+        let test_log = Log::default();
+        tx_logs_map.insert(tx_hash, vec![test_log.clone()]);
+
+        let result = build_bundle_logs_test(&bundle, &tx_logs_map);
+
+        assert_eq!(result.len(), 1);
+        assert!(result[0].tx_logs.is_some());
+        assert!(result[0].bundle_logs.is_none());
+        assert_eq!(result[0].tx_logs.as_ref().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn test_build_bundle_logs_nested_bundle() {
+        // Create outer and inner transactions
+        let outer_tx = Bytes::from(vec![0x01, 0x02, 0x03]);
+        let inner_tx1 = Bytes::from(vec![0x04, 0x05, 0x06]);
+        let inner_tx2 = Bytes::from(vec![0x07, 0x08, 0x09]);
+
+        let outer_hash = keccak256(&outer_tx);
+        let inner_hash1 = keccak256(&inner_tx1);
+        let inner_hash2 = keccak256(&inner_tx2);
+
+        let bundle = create_nested_bundle(outer_tx, vec![inner_tx1, inner_tx2]);
+
+        // Create log map
+        let mut tx_logs_map = HashMap::new();
+        tx_logs_map.insert(outer_hash, vec![Log::default()]);
+        tx_logs_map.insert(inner_hash1, vec![Log::default()]);
+        tx_logs_map.insert(inner_hash2, vec![Log::default(), Log::default()]);
+
+        let result = build_bundle_logs_test(&bundle, &tx_logs_map);
+
+        // Should have 2 top-level entries: outer tx and nested bundle
+        assert_eq!(result.len(), 2);
+
+        // First entry: outer transaction logs
+        assert!(result[0].tx_logs.is_some());
+        assert!(result[0].bundle_logs.is_none());
+        assert_eq!(result[0].tx_logs.as_ref().unwrap().len(), 1);
+
+        // Second entry: nested bundle logs
+        assert!(result[1].tx_logs.is_none());
+        assert!(result[1].bundle_logs.is_some());
+
+        let nested_logs = result[1].bundle_logs.as_ref().unwrap();
+        assert_eq!(nested_logs.len(), 2);
+
+        // Inner tx1 logs
+        assert!(nested_logs[0].tx_logs.is_some());
+        assert_eq!(nested_logs[0].tx_logs.as_ref().unwrap().len(), 1);
+
+        // Inner tx2 logs
+        assert!(nested_logs[1].tx_logs.is_some());
+        assert_eq!(nested_logs[1].tx_logs.as_ref().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn test_build_bundle_logs_missing_logs() {
+        // Create a transaction but don't add its logs to the map
+        let tx_bytes = Bytes::from(vec![0x01, 0x02, 0x03]);
+        let bundle = create_test_bundle(vec![tx_bytes]);
+
+        // Empty log map
+        let tx_logs_map = HashMap::new();
+
+        let result = build_bundle_logs_test(&bundle, &tx_logs_map);
+
+        assert_eq!(result.len(), 1);
+        // tx_logs should be None when not found in map
+        assert!(result[0].tx_logs.is_none());
+        assert!(result[0].bundle_logs.is_none());
+    }
+
+    #[test]
+    fn test_build_bundle_logs_deeply_nested() {
+        // Create a deeply nested bundle structure:
+        // Bundle A
+        //   - tx1
+        //   - Bundle B
+        //       - tx2
+        //       - Bundle C
+        //           - tx3
+
+        let tx1 = Bytes::from(vec![0x01]);
+        let tx2 = Bytes::from(vec![0x02]);
+        let tx3 = Bytes::from(vec![0x03]);
+
+        let hash1 = keccak256(&tx1);
+        let hash2 = keccak256(&tx2);
+        let hash3 = keccak256(&tx3);
+
+        // Build from inside out
+        let bundle_c = create_test_bundle(vec![tx3.clone()]);
+        let bundle_b = MevSendBundle {
+            bundle_body: vec![
+                BundleItem::Tx { tx: tx2.clone(), can_revert: false },
+                BundleItem::Bundle { bundle: bundle_c },
+            ],
+            inclusion: Inclusion { block: 1, max_block: None },
+            validity: None,
+            privacy: None,
+            protocol_version: ProtocolVersion::V0_1,
+        };
+        let bundle_a = MevSendBundle {
+            bundle_body: vec![
+                BundleItem::Tx { tx: tx1.clone(), can_revert: false },
+                BundleItem::Bundle { bundle: bundle_b },
+            ],
+            inclusion: Inclusion { block: 1, max_block: None },
+            validity: None,
+            privacy: None,
+            protocol_version: ProtocolVersion::V0_1,
+        };
+
+        // Create log map
+        let mut tx_logs_map = HashMap::new();
+        tx_logs_map.insert(hash1, vec![Log::default()]);
+        tx_logs_map.insert(hash2, vec![Log::default()]);
+        tx_logs_map.insert(hash3, vec![Log::default()]);
+
+        let result = build_bundle_logs_test(&bundle_a, &tx_logs_map);
+
+        // Verify structure: [tx1_logs, bundle_b_logs]
+        assert_eq!(result.len(), 2);
+        assert!(result[0].tx_logs.is_some()); // tx1
+        assert!(result[1].bundle_logs.is_some()); // bundle_b
+
+        // bundle_b: [tx2_logs, bundle_c_logs]
+        let bundle_b_logs = result[1].bundle_logs.as_ref().unwrap();
+        assert_eq!(bundle_b_logs.len(), 2);
+        assert!(bundle_b_logs[0].tx_logs.is_some()); // tx2
+        assert!(bundle_b_logs[1].bundle_logs.is_some()); // bundle_c
+
+        // bundle_c: [tx3_logs]
+        let bundle_c_logs = bundle_b_logs[1].bundle_logs.as_ref().unwrap();
+        assert_eq!(bundle_c_logs.len(), 1);
+        assert!(bundle_c_logs[0].tx_logs.is_some()); // tx3
+    }
 }
