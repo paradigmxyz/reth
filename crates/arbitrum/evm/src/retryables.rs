@@ -108,6 +108,51 @@ impl<D: Database> TimeoutQueue<D> {
         Self { storage }
     }
     
+    /// Check if queue is empty (matching Go nitro's Queue.IsEmpty)
+    pub fn is_empty(&self, state: *mut revm::database::State<D>) -> bool {
+        let next_put_storage = StorageBackedUint64::new(state, self.storage.base_key, 0);
+        let next_get_storage = StorageBackedUint64::new(state, self.storage.base_key, 1);
+        let put = next_put_storage.get().unwrap_or(2);
+        let get = next_get_storage.get().unwrap_or(2);
+        put == get
+    }
+    
+    /// Peek at the front of the queue without removing (matching Go nitro's Queue.Peek)
+    /// Returns None if queue is empty
+    pub fn peek(&self, state: *mut revm::database::State<D>) -> Option<B256> {
+        if self.is_empty(state) {
+            return None;
+        }
+        let next_get_storage = StorageBackedUint64::new(state, self.storage.base_key, 1);
+        let next_get = next_get_storage.get().unwrap_or(2);
+        let slot_storage = StorageBackedBigUint::new(state, self.storage.base_key, next_get);
+        let value = slot_storage.get().unwrap_or(U256::ZERO);
+        Some(B256::from(value.to_be_bytes::<32>()))
+    }
+    
+    /// Get and remove from the front of the queue (matching Go nitro's Queue.Get)
+    /// Returns None if queue is empty
+    /// Go nitro: increments nextGetOffset, then swaps the slot value with zero
+    pub fn get(&self, state: *mut revm::database::State<D>) -> Result<Option<B256>, ()> {
+        if self.is_empty(state) {
+            return Ok(None);
+        }
+        
+        // Increment nextGetOffset
+        let next_get_storage = StorageBackedUint64::new(state, self.storage.base_key, 1);
+        let next_get = next_get_storage.get().unwrap_or(2);
+        next_get_storage.set(next_get + 1)?;
+        
+        // Swap the slot value with zero (Go nitro's Swap function)
+        let slot_storage = StorageBackedBigUint::new(state, self.storage.base_key, next_get);
+        let value = slot_storage.get().unwrap_or(U256::ZERO);
+        slot_storage.set(U256::ZERO)?;
+        
+        tracing::info!(target: "arb-retryable", "TIMEOUT_QUEUE_GET: slot={} value={:?}", next_get, B256::from(value.to_be_bytes::<32>()));
+        
+        Ok(Some(B256::from(value.to_be_bytes::<32>())))
+    }
+    
     /// Put a ticket ID into the queue (matching Go nitro's Queue.Put)
     pub fn put(&self, state: *mut revm::database::State<D>, ticket_id: B256) -> Result<(), ()> {
         // Get current nextPutOffset (slot 0)
@@ -139,13 +184,63 @@ impl<D: Database> RetryableState<D> {
         TimeoutQueue::new(queue_storage)
     }
     
+    /// Try to reap one retryable from the timeout queue (matching Go nitro's TryToReapOneRetryable)
+    /// 
+    /// Go nitro logic:
+    /// 1. Peek at the front of the timeout queue to get ticket ID
+    /// 2. If timeout == 0: retryable already deleted, call Queue.Get() to discard entry
+    /// 3. If timeout >= currentTimestamp: not expired yet, return
+    /// 4. If timeout < currentTimestamp: expired, call Queue.Get() to remove from queue
+    ///    - If windowsLeft == 0: delete the retryable
+    ///    - Otherwise: consume a window (extend timeout by one lifetime)
     pub fn try_to_reap_one_retryable(&self, current_time: u64, state: *mut revm::database::State<D>) -> Result<bool, ()> {
-        let timeout_storage = StorageBackedUint64::new(state, self.storage.base_key, 0);
-        let oldest_timeout = timeout_storage.get().unwrap_or(u64::MAX);
+        let queue = self.timeout_queue();
         
-        if oldest_timeout >= current_time {
+        // Peek at the front of the queue
+        let id = match queue.peek(state) {
+            Some(id) => id,
+            None => return Ok(false), // Queue is empty
+        };
+        
+        tracing::info!(target: "arb-retryable", "TRY_TO_REAP: peeked ticket_id={:?}", id);
+        
+        // Open the retryable's storage to check timeout
+        let retryable_storage = self.storage.open_sub_storage(&id.0);
+        let timeout_storage = StorageBackedUint64::new(state, retryable_storage.base_key, TIMEOUT_OFFSET);
+        let timeout = timeout_storage.get().unwrap_or(0);
+        
+        if timeout == 0 {
+            // The retryable has already been deleted, so discard the peeked entry
+            tracing::info!(target: "arb-retryable", "TRY_TO_REAP: retryable already deleted, discarding queue entry");
+            let _ = queue.get(state)?;
+            return Ok(true);
+        }
+        
+        // Check if expired
+        if timeout >= current_time {
+            // Not expired yet
             return Ok(false);
         }
+        
+        // Expired - remove from queue
+        let _ = queue.get(state)?;
+        
+        // Check windowsLeft
+        let windows_left_storage = StorageBackedUint64::new(state, retryable_storage.base_key, TIMEOUT_WINDOWS_LEFT_OFFSET);
+        let windows_left = windows_left_storage.get().unwrap_or(0);
+        
+        if windows_left == 0 {
+            // The retryable has expired, time to reap
+            tracing::info!(target: "arb-retryable", "TRY_TO_REAP: retryable expired, deleting");
+            let ticket_id = RetryableTicketId(id.0);
+            self.delete_retryable(state, &ticket_id)?;
+            return Ok(true);
+        }
+        
+        // Consume a window, delaying the timeout one lifetime period
+        tracing::info!(target: "arb-retryable", "TRY_TO_REAP: consuming window, extending timeout");
+        timeout_storage.set(timeout + RETRYABLE_LIFETIME_SECONDS)?;
+        windows_left_storage.set(windows_left - 1)?;
         
         Ok(true)
     }
