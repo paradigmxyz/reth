@@ -59,12 +59,25 @@ impl HashedPostState {
                 let changed_storage_count = account.storage.iter()
                     .filter(|(_, value)| value.present_value != value.previous_or_original_value)
                     .count();
+                // Count non-zero vs zero-valued slots
+                let non_zero_count = account.storage.iter()
+                    .filter(|(_, value)| value.present_value != value.previous_or_original_value && !value.present_value.is_zero())
+                    .count();
+                let zero_count = account.storage.iter()
+                    .filter(|(_, value)| value.present_value != value.previous_or_original_value && value.present_value.is_zero())
+                    .count();
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
                     account.storage.iter()
                         .filter(|(_, value)| value.present_value != value.previous_or_original_value)
                         .map(|(slot, value)| (slot, &value.present_value)),
                 );
+                
+                // DEBUG: Log accounts with storage changes
+                if changed_storage_count > 0 {
+                    eprintln!("[BUNDLE-STATE-STORAGE-DEBUG] Account {:?} storage: changed={}, non_zero={}, zero={}, status={:?}",
+                        address, changed_storage_count, non_zero_count, zero_count, account.status);
+                }
                 
                 // DEBUG: Log accounts with storage changes but no info
                 if changed_storage_count > 0 && account.info.is_none() {
@@ -507,10 +520,24 @@ impl HashedStorage {
         status: AccountStatus,
         storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
     ) -> Self {
-        Self::from_iter(
-            status.was_destroyed(),
-            storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
-        )
+        // DEBUG: Log the first few storage slot hashing operations
+        let mut count = 0;
+        let hashed_storage: Vec<(B256, U256)> = storage.into_iter().map(|(key, value)| {
+            let plain_key = B256::from(*key);
+            let hashed_key = keccak256(plain_key);
+            if count < 3 {
+                eprintln!("[FROM-PLAIN-STORAGE-DEBUG] slot {} plain_key={:?} -> hashed_key={:?} value={:?}",
+                    count, plain_key, hashed_key, value);
+            }
+            count += 1;
+            (hashed_key, *value)
+        }).collect();
+        
+        if count > 0 {
+            eprintln!("[FROM-PLAIN-STORAGE-DEBUG] Total {} slots hashed, wiped={}", count, status.was_destroyed());
+        }
+        
+        Self::from_iter(status.was_destroyed(), hashed_storage)
     }
 
     /// Construct [`PrefixSetMut`] from hashed storage.

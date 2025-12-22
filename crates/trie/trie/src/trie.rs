@@ -14,6 +14,7 @@ use crate::{
 };
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
+use core::str::FromStr;
 use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
@@ -425,6 +426,13 @@ impl StateRootContext {
                     self.trie_updates.insert_storage_updates(hashed_address, updates);
                 }
 
+                // DEBUG: Log storage root for ArbOS address (hashed)
+                // ArbOS address: 0xa4b05fffffffffffffffffffffffffffffffffff
+                // keccak256(ArbOS) = 0x3c79da47d8c2e5a8a5a5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5 (approx)
+                // We log all storage roots for debugging
+                eprintln!("[STORAGE-ROOT-DEBUG] hashed_address={:?} storage_root={:?} slots_walked={} account_nonce={} account_balance={}",
+                    hashed_address, storage_root, storage_slots_walked, account.nonce, account.balance);
+
                 // Encode the account with the computed storage root
                 self.account_rlp.clear();
                 let trie_account = account.into_trie_account(storage_root);
@@ -664,6 +672,13 @@ where
                 TrieElement::Leaf(hashed_slot, value) => {
                     tracker.inc_leaf();
                     hashed_entries_walked += 1;
+                    
+                    // DEBUG: Log storage slot being added to trie (first 10 slots per address)
+                    if hashed_entries_walked <= 10 {
+                        eprintln!("[STORAGE-SLOT-DEBUG] hashed_address={:?} slot_idx={} hashed_slot={:?} value={:?}",
+                            self.hashed_address, hashed_entries_walked, hashed_slot, value);
+                    }
+                    
                     hash_builder.add_leaf(
                         Nibbles::unpack(hashed_slot),
                         alloy_rlp::encode_fixed_size(&value).as_ref(),
@@ -703,6 +718,13 @@ where
 
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
+
+        // DEBUG: Log storage root for ArbOS backing account
+        let arbos_backing_hashed = B256::from_str("0xb4d14ec89c201c23aa60e231e3993b3966b33ff1f55d198ec25980957ab32065").unwrap();
+        if self.hashed_address == arbos_backing_hashed {
+            eprintln!("[STORAGE-ROOT-DEBUG] hashed_address={:?} storage_root={:?} slots_walked={} account_nonce={} account_balance={}",
+                self.hashed_address, root, stats.leaves_added(), 0, 0);
+        }
 
         trace!(
             target: "trie::storage_root",
