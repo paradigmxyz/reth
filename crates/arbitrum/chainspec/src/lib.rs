@@ -726,63 +726,22 @@ pub fn sepolia_baked_genesis_from_header(
         .map(|h| parse_hex_quantity(h))
         .unwrap_or_else(|| U256::from(50_000_000_000u64));
 
-    // Build minimal allocation with known addresses.
-    // NOTE: The embedded data has secureAlloc (hashed addresses) but NOT alloc (plain addresses).
-    // This means RPC queries to unknown addresses will return defaults. The state root is still
-    // correct because it's computed from the hashed state (secureAlloc).
-    // For full RPC compatibility, a plain alloc file needs to be generated and embedded.
-    if alloc.is_empty() {
-        let arbos_storage = build_full_arbos_storage(chain_id, chain_cfg_bytes, initial_l1_price);
-        if !arbos_storage.is_empty() {
-            let acct = GenesisAccount::default()
-                .with_nonce(Some(1))
-                .with_balance(U256::ZERO)
-                .with_code(Some(Bytes::default()))
-                .with_storage(Some(arbos_storage));
-            alloc.insert(ARBOS_ADDR, acct);
-        }
+    // IMPORTANT: For Arbitrum Sepolia, the official genesis at block 0 has EMPTY storage
+    // for all accounts. The ArbOS storage is populated during block execution, not at genesis.
+    // We do NOT include any storage in the genesis alloc - only accounts with code (precompiles).
+    //
+    // The state root is computed from the hashed state (secureAlloc) which contains accounts
+    // with code but NO storage at genesis block 0.
+    let _ = chain_cfg_bytes; // Suppress unused variable warning
+    let _ = initial_l1_price; // Suppress unused variable warning
+    
+    // NOTE: We intentionally do NOT add any accounts to the genesis alloc here.
+    // The genesis state is loaded from the embedded secureAlloc data which contains
+    // the correct accounts with code but NO storage.
+    // Adding accounts here would cause duplicate entries and incorrect state root.
 
-        for &b in &[0x64u8, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0xff] {
-            let mut a = [0u8; 20];
-            a[19] = b;
-            let addr = Address::from_slice(&a);
-            // All Arbitrum precompiles have 0xFE (INVALID opcode) as code
-            // SubmitRetryable transactions targeting 0x6e are handled in start_tx hook
-            // which sets end_tx_now=true, bypassing EVM execution entirely
-            let code = Bytes::from_static(&[0xfe]); // INVALID opcode for all predeploys
-            let acct = GenesisAccount::default()
-                .with_nonce(Some(0))
-                .with_balance(U256::ZERO)
-                .with_code(Some(code));
-            alloc.insert(addr, acct);
-        }
-        for &b in &[0x71u8, 0x72, 0x73, 0xc8, 0xc9] {
-            let mut a = [0u8; 20];
-            a[19] = b;
-            let addr = Address::from_slice(&a);
-            let acct = GenesisAccount::default()
-                .with_nonce(Some(0))
-                .with_balance(U256::ZERO)
-                .with_code(Some(Bytes::default()));
-            alloc.insert(addr, acct);
-        }
-    }
-
-    eprintln!("DEBUG chainspec: alloc has {} entries BEFORE assignment to genesis.alloc", alloc.len());
-    genesis.alloc = alloc.clone();
-    eprintln!("DEBUG chainspec: genesis.alloc now has {} entries", genesis.alloc.len());
-
-    // DEBUG: Verify ArbOS is in alloc with correct nonce
-    if let Some(arbos_acct) = alloc.get(&ARBOS_ADDR) {
-        eprintln!(
-            "DEBUG chainspec: ArbOS account in genesis.alloc: nonce={:?} balance={} storage_len={}",
-            arbos_acct.nonce,
-            arbos_acct.balance,
-            arbos_acct.storage.as_ref().map(|s| s.len()).unwrap_or(0)
-        );
-    } else {
-        eprintln!("DEBUG chainspec: ArbOS account NOT in genesis.alloc!");
-    }
+    // Genesis alloc is intentionally empty - state comes from secureAlloc
+    genesis.alloc = alloc;
 
     let mut spec = reth_chainspec::ChainSpec::from_genesis(genesis.clone());
 
