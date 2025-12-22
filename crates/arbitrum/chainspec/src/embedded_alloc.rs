@@ -157,10 +157,24 @@ pub fn load_sepolia_secure_alloc_hashed_with_bytecodes(
         }
     }
 
+    // Fix ArbOS account nonce to 1
+    // Go nitro's storage.go:73 sets: statedb.SetNonce(account, 1, tracing.NonceChangeUnspecified)
+    // This ensures Geth won't treat ArbOS as empty. The secureAlloc data has nonce=0, so we fix it here.
+    let arbos_hashed_addr = B256::from_slice(&hex::decode("b4d14ec89c201c23aa60e231e3993b3966b33ff1f55d198ec25980957ab32065").unwrap());
+    eprintln!("DEBUG embedded_alloc: accounts_h contains ArbOS: {}", accounts_h.contains_key(&arbos_hashed_addr));
+    if let Some(arbos_acct) = accounts_h.get_mut(&arbos_hashed_addr) {
+        eprintln!("DEBUG embedded_alloc: ArbOS account found, setting nonce from {} to 1", arbos_acct.nonce);
+        arbos_acct.nonce = 1;
+    } else {
+        eprintln!("DEBUG embedded_alloc: ArbOS account NOT found in secureAlloc, creating it with nonce=1");
+        // ArbOS account is not in secureAlloc, create it with nonce=1
+        let arbos_acct = Account { nonce: 1, balance: U256::ZERO, bytecode_hash: Some(KECCAK_EMPTY) };
+        accounts_h.insert(arbos_hashed_addr, arbos_acct);
+    }
+
     // Add missing TimeoutQueue slot 1 (nextGetOffset=2) to ArbOS storage
     // Go nitro's InitializeQueue sets both nextPutOffset and nextGetOffset to 2
     // The secureAlloc data is missing slot 1, so we add it here
-    let arbos_hashed_addr = B256::from_slice(&hex::decode("b4d14ec89c201c23aa60e231e3993b3966b33ff1f55d198ec25980957ab32065").unwrap());
     // TimeoutQueue slot 1 hashed key = keccak256(preimage_slot_1)
     // where preimage_slot_1 = 0x9e9ffd355c04cc0ffaba550b5b46d79f750513bcaf322e22daca18080c857a01
     let timeout_queue_slot1_hashed = B256::from_slice(&hex::decode("3685c8c6988ac7abfacfa36241f4ee3b2c9fd55a665e86b9bf8b4fa0130799ca").unwrap());
