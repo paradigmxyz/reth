@@ -496,6 +496,7 @@ impl DefaultArbOsHooks {
             beneficiary,
             call_to: retry_to.unwrap_or(Address::ZERO),
             call_data: retry_data.clone(),
+            callvalue: retry_value,  // The actual call value to store in the retryable
             l1_base_fee,
             submission_fee,
             max_submission_cost: max_submission_fee,
@@ -1077,6 +1078,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     beneficiary,
                     call_to: retry_to,
                     call_data: Bytes::from(retry_data.to_vec()),
+                    callvalue: retry_value,  // The actual call value to store in the retryable
                     l1_base_fee: ctx.l1_base_fee,
                     submission_fee: submission_fee_u256,
                     max_submission_cost: max_submission_fee,
