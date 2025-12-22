@@ -428,7 +428,13 @@ impl ValidatorTestHarness {
             &mut self.harness.tree.state,
             &self.harness.tree.canonical_in_memory_state,
         );
-        let result = self.validator.validate_block(block, ctx);
+        let provider_builder = self
+            .harness
+            .tree
+            .state_provider_builder(block.parent_hash())
+            .expect("state provider builder lookup failed")
+            .expect("missing parent state provider builder");
+        let result = self.validator.validate_block(block, ctx, provider_builder);
         self.metrics.record_validation(result.is_ok());
         result
     }

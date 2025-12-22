@@ -323,6 +323,7 @@ where
         &mut self,
         input: BlockOrPayload<T>,
         mut ctx: TreeCtx<'_, N>,
+        provider_builder: StateProviderBuilder<N, P>,
     ) -> ValidationOutcome<N, InsertPayloadError<N::Block>>
     where
         V: PayloadValidator<T, Block = N::Block>,
@@ -362,16 +363,6 @@ where
         trace!(target: "engine::tree::payload_validator", "Fetching block state provider");
         let _enter =
             debug_span!(target: "engine::tree::payload_validator", "state provider").entered();
-        let Some(provider_builder) =
-            ensure_ok!(self.state_provider_builder(parent_hash, ctx.state()))
-        else {
-            // this is pre-validated in the tree
-            return Err(InsertBlockError::new(
-                self.convert_to_block(input)?,
-                ProviderError::HeaderNotFound(parent_hash.into()).into(),
-            )
-            .into())
-        };
         let mut state_provider = ensure_ok!(provider_builder.build());
         drop(_enter);
 
@@ -876,37 +867,6 @@ where
         }
     }
 
-    /// Creates a `StateProviderBuilder` for the given parent hash.
-    ///
-    /// This method checks if the parent is in the tree state (in-memory) or persisted to disk,
-    /// and creates the appropriate provider builder.
-    fn state_provider_builder(
-        &self,
-        hash: B256,
-        state: &EngineApiTreeState<N>,
-    ) -> ProviderResult<Option<StateProviderBuilder<N, P>>> {
-        if let Some((historical, blocks)) = state.tree_state.blocks_by_hash(hash) {
-            debug!(target: "engine::tree::payload_validator", %hash, %historical, "found canonical state for block in memory, creating provider builder");
-            // the block leads back to the canonical chain
-            return Ok(Some(StateProviderBuilder::new(
-                self.provider.clone(),
-                historical,
-                Some(blocks),
-            )))
-        }
-
-        // Check if the block is persisted
-        if let Some(header) = self.provider.header(hash)? {
-            debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
-            // For persisted blocks, we create a builder that will fetch state directly from the
-            // database
-            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
-        }
-
-        debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
-        Ok(None)
-    }
-
     /// Determines the state root computation strategy based on configuration.
     ///
     /// Note: Use state root task only if prefix sets are empty, otherwise proof generation is
@@ -1129,6 +1089,19 @@ pub trait EngineValidator<
     N: NodePrimitives = <<Types as PayloadTypes>::BuiltPayload as BuiltPayload>::Primitives,
 >: Send + Sync + 'static
 {
+    /// State provider builder type used by the validator.
+    type ProviderBuilder;
+
+    /// Creates a `StateProviderBuilder` for the given parent hash.
+    ///
+    /// This method checks if the parent is in the tree state (in-memory) or persisted to disk,
+    /// and creates the appropriate provider builder.
+    fn provider_builder(
+        &self,
+        hash: B256,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<Option<Self::ProviderBuilder>>;
+
     /// Validates the payload attributes with respect to the header.
     ///
     /// By default, this enforces that the payload attributes timestamp is greater than the
@@ -1162,6 +1135,7 @@ pub trait EngineValidator<
         &mut self,
         payload: Types::ExecutionData,
         ctx: TreeCtx<'_, N>,
+        provider_builder: Self::ProviderBuilder,
     ) -> ValidationOutcome<N>;
 
     /// Validates a block downloaded from the network.
@@ -1169,6 +1143,7 @@ pub trait EngineValidator<
         &mut self,
         block: SealedBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
+        provider_builder: Self::ProviderBuilder,
     ) -> ValidationOutcome<N>;
 
     /// Hook called after an executed block is inserted directly into the tree.
@@ -1193,6 +1168,35 @@ where
     Evm: ConfigureEngineEvm<Types::ExecutionData, Primitives = N> + 'static,
     Types: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
 {
+    type ProviderBuilder = StateProviderBuilder<N, P>;
+
+    fn provider_builder(
+        &self,
+        hash: B256,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<Option<Self::ProviderBuilder>> {
+        if let Some((historical, blocks)) = state.tree_state.blocks_by_hash(hash) {
+            debug!(target: "engine::tree::payload_validator", %hash, %historical, "found canonical state for block in memory, creating provider builder");
+            // the block leads back to the canonical chain
+            return Ok(Some(StateProviderBuilder::new(
+                self.provider.clone(),
+                historical,
+                Some(blocks),
+            )))
+        }
+
+        // Check if the block is persisted
+        if let Some(header) = self.provider.header(hash)? {
+            debug!(target: "engine::tree::payload_validator", %hash, number = %header.number(), "found canonical state for block in database, creating provider builder");
+            // For persisted blocks, we create a builder that will fetch state directly from the
+            // database
+            return Ok(Some(StateProviderBuilder::new(self.provider.clone(), hash, None)))
+        }
+
+        debug!(target: "engine::tree::payload_validator", %hash, "no canonical state found for block");
+        Ok(None)
+    }
+
     fn validate_payload_attributes_against_header(
         &self,
         attr: &Types::PayloadAttributes,
@@ -1213,16 +1217,18 @@ where
         &mut self,
         payload: Types::ExecutionData,
         ctx: TreeCtx<'_, N>,
+        provider_builder: Self::ProviderBuilder,
     ) -> ValidationOutcome<N> {
-        self.validate_block_with_state(BlockOrPayload::Payload(payload), ctx)
+        self.validate_block_with_state(BlockOrPayload::Payload(payload), ctx, provider_builder)
     }
 
     fn validate_block(
         &mut self,
         block: SealedBlock<N::Block>,
         ctx: TreeCtx<'_, N>,
+        provider_builder: Self::ProviderBuilder,
     ) -> ValidationOutcome<N> {
-        self.validate_block_with_state(BlockOrPayload::Block(block), ctx)
+        self.validate_block_with_state(BlockOrPayload::Block(block), ctx, provider_builder)
     }
 
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {

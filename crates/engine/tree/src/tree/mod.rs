@@ -321,7 +321,7 @@ where
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T>,
+    V: EngineValidator<T, N>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]
@@ -2437,7 +2437,9 @@ where
         self.insert_block_or_payload(
             payload.block_with_parent(),
             payload,
-            |validator, payload, ctx| validator.validate_payload(payload, ctx),
+            |validator, payload, ctx, provider_builder| {
+                validator.validate_payload(payload, ctx, provider_builder)
+            },
             |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
         )
     }
@@ -2449,7 +2451,9 @@ where
         self.insert_block_or_payload(
             block.block_with_parent(),
             block,
-            |validator, block, ctx| validator.validate_block(block, ctx),
+            |validator, block, ctx, provider_builder| {
+                validator.validate_block(block, ctx, provider_builder)
+            },
             |_, block| Ok(block),
         )
     }
@@ -2475,7 +2479,12 @@ where
         &mut self,
         block_id: BlockWithParent,
         input: Input,
-        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ExecutedBlock<N>, Err>,
+        execute: impl FnOnce(
+            &mut V,
+            Input,
+            TreeCtx<'_, N>,
+            V::ProviderBuilder,
+        ) -> Result<ExecutedBlock<N>, Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
@@ -2500,7 +2509,7 @@ where
         };
 
         // Ensure that the parent state is available.
-        match self.state_provider_builder(block_id.parent) {
+        let provider_builder = match self.payload_validator.provider_builder(block_id.parent, &self.state) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
                 return Err(InsertBlockError::new(block, err.into()).into());
@@ -2524,8 +2533,8 @@ where
                     missing_ancestor,
                 }))
             }
-            Ok(Some(_)) => {}
-        }
+            Ok(Some(provider_builder)) => provider_builder,
+        };
 
         // determine whether we are on a fork chain by comparing the block number with the
         // canonical head. This is a simple check that is sufficient for the event emission below.
@@ -2537,7 +2546,7 @@ where
 
         let start = Instant::now();
 
-        let executed = execute(&mut self.payload_validator, input, ctx)?;
+        let executed = execute(&mut self.payload_validator, input, ctx, provider_builder)?;
 
         // if the parent is the canonical head, we can insert the block as the pending block
         if self.state.tree_state.canonical_block_hash() == executed.recovered_block().parent_hash()
