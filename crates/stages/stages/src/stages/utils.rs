@@ -297,8 +297,8 @@ where
     if let Some((target_prunable_block, prune_mode)) = prune_mode
         .map(|mode| mode.prune_target_block(input.target(), segment, PrunePurpose::User))
         .transpose()?
-        .flatten()
-        && target_prunable_block > input.checkpoint().block_number
+        .flatten() &&
+        target_prunable_block > input.checkpoint().block_number
     {
         input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
 
@@ -306,7 +306,11 @@ where
             let tx_number = get_tx_number(provider, target_prunable_block)?;
             provider.save_prune_checkpoint(
                 segment,
-                PruneCheckpoint { block_number: Some(target_prunable_block), tx_number, prune_mode },
+                PruneCheckpoint {
+                    block_number: Some(target_prunable_block),
+                    tx_number,
+                    prune_mode,
+                },
             )?;
         }
     }
