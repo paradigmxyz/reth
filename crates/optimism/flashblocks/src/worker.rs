@@ -127,7 +127,7 @@ where
                 Arc::new(execution_outcome),
                 ComputedTrieData::without_trie_input(
                     Arc::new(hashed_state.into_sorted()),
-                    Arc::new(trie_updates),
+                    Arc::new(trie_updates.into_sorted()),
                 ),
             ),
         );
