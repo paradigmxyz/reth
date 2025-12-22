@@ -9,7 +9,7 @@ use reth_trie_common::HashedPostStateSorted;
 
 /// `BlockExecution` Writer
 pub trait BlockExecutionWriter:
-    NodePrimitivesProvider<Primitives: NodePrimitives<Block = Self::Block>> + BlockWriter + Send + Sync
+    NodePrimitivesProvider<Primitives: NodePrimitives<Block = Self::Block>> + BlockWriter
 {
     /// Take all of the blocks above the provided number and their execution result
     ///
@@ -39,8 +39,8 @@ impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
 }
 
 /// Block Writer
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait BlockWriter: Send + Sync {
+#[auto_impl::auto_impl(&, Box)]
+pub trait BlockWriter {
     /// The body this writer can write.
     type Block: Block;
     /// The receipt type for [`ExecutionOutcome`].
