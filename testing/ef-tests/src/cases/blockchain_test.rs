@@ -249,7 +249,7 @@ fn run_case(
 
         // Insert the block into the database
         provider
-            .insert_block(&block)
+            .insert_block(block)
             .map_err(|err| Error::block_failed(block_number, Default::default(), err))?;
         // Commit static files, so we can query the headers for stateless execution below
         provider
