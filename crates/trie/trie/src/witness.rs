@@ -24,7 +24,7 @@ use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
     SerialSparseTrie, SparseStateTrie,
 };
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -95,8 +95,8 @@ impl<T, H> TrieWitness<T, H> {
 
 impl<T, H> TrieWitness<T, H>
 where
-    T: TrieCursorFactory + Clone + Send + Sync,
-    H: HashedCursorFactory + Clone + Send + Sync,
+    T: TrieCursorFactory + Clone,
+    H: HashedCursorFactory + Clone,
 {
     /// Compute the state transition witness for the trie. Gather all required nodes
     /// to apply `state` on top of the current trie state.
@@ -147,11 +147,7 @@ where
 
         let (tx, rx) = mpsc::channel();
         let blinded_provider_factory = WitnessTrieNodeProviderFactory::new(
-            ProofTrieNodeProviderFactory::new(
-                self.trie_cursor_factory,
-                self.hashed_cursor_factory,
-                Arc::new(self.prefix_sets),
-            ),
+            ProofTrieNodeProviderFactory::new(self.trie_cursor_factory, self.hashed_cursor_factory),
             tx,
         );
         let mut sparse_trie = SparseStateTrie::<SerialSparseTrie>::new();

@@ -2,7 +2,7 @@ use reth_db_api::{table::Value, transaction::DbTxMut};
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     BlockReader, ChainStateBlockReader, DBProvider, PruneCheckpointReader, PruneCheckpointWriter,
-    StaticFileProviderFactory,
+    StageCheckpointReader, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_prune::{
     PruneMode, PruneModes, PruneSegment, PrunerBuilder, SegmentOutput, SegmentOutputCheckpoint,
@@ -43,9 +43,10 @@ where
         + PruneCheckpointWriter
         + BlockReader
         + ChainStateBlockReader
+        + StageCheckpointReader
         + StaticFileProviderFactory<
             Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
-        >,
+        > + StorageSettingsCache,
 {
     fn id(&self) -> StageId {
         StageId::Prune
@@ -103,9 +104,18 @@ where
         // We cannot recover the data that was pruned in `execute`, so we just update the
         // checkpoints.
         let prune_checkpoints = provider.get_prune_checkpoints()?;
+        let unwind_to_last_tx =
+            provider.block_body_indices(input.unwind_to)?.map(|i| i.last_tx_num());
+
         for (segment, mut checkpoint) in prune_checkpoints {
-            checkpoint.block_number = Some(input.unwind_to);
-            provider.save_prune_checkpoint(segment, checkpoint)?;
+            // Only update the checkpoint if unwind_to is lower than the existing checkpoint.
+            if let Some(block) = checkpoint.block_number &&
+                input.unwind_to < block
+            {
+                checkpoint.block_number = Some(input.unwind_to);
+                checkpoint.tx_number = unwind_to_last_tx;
+                provider.save_prune_checkpoint(segment, checkpoint)?;
+            }
         }
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
     }
@@ -135,9 +145,10 @@ where
         + PruneCheckpointWriter
         + BlockReader
         + ChainStateBlockReader
+        + StageCheckpointReader
         + StaticFileProviderFactory<
             Primitives: NodePrimitives<SignedTx: Value, Receipt: Value, BlockHeader: Value>,
-        >,
+        > + StorageSettingsCache,
 {
     fn id(&self) -> StageId {
         StageId::PruneSenderRecovery

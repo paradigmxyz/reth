@@ -23,6 +23,7 @@ pub mod transaction;
 pub mod tx_forward;
 pub mod utils;
 
+pub use alloy_rpc_types_eth::FillTransaction;
 pub use builder::config::{EthConfig, EthFilterConfig};
 pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,

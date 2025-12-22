@@ -1,5 +1,5 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{BlockNumber, B256, U256};
+use alloy_primitives::{BlockNumber, B256};
 use alloy_rlp::Decodable;
 use reth_codecs::Compact;
 use reth_node_builder::NodePrimitives;
@@ -79,7 +79,7 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>,
 {
     provider_rw.insert_block(
-        SealedBlock::<<Provider::Primitives as NodePrimitives>::Block>::from_sealed_parts(
+        &SealedBlock::<<Provider::Primitives as NodePrimitives>::Block>::from_sealed_parts(
             header.clone(),
             Default::default(),
         )
@@ -133,7 +133,7 @@ where
             for block_num in 1..=target_height {
                 // TODO: should we fill with real parent_hash?
                 let header = header_factory(block_num);
-                writer.append_header(&header, U256::ZERO, &B256::ZERO)?;
+                writer.append_header(&header, &B256::ZERO)?;
             }
             Ok(())
         });

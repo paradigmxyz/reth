@@ -1,20 +1,34 @@
 use clap::Parser;
+use metrics::{self, Counter};
+use reth_chainspec::EthChainSpec;
+use reth_cli_util::parse_socket_address;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO},
     database::Database,
     tables,
     transaction::{DbTx, DbTxMut},
 };
-use reth_node_builder::NodeTypesWithDB;
-use reth_provider::{providers::ProviderNodeTypes, ProviderFactory, StageCheckpointReader};
+use reth_db_common::DbTool;
+use reth_node_core::version::version_metadata;
+use reth_node_metrics::{
+    chain::ChainSpecInfo,
+    hooks::Hooks,
+    server::{MetricServer, MetricServerConfig},
+    version::VersionInfo,
+};
+use reth_provider::{providers::ProviderNodeTypes, ChainSpecProvider, StageCheckpointReader};
 use reth_stages::StageId;
+use reth_tasks::TaskExecutor;
 use reth_trie::{
     verify::{Output, Verifier},
     Nibbles,
 };
 use reth_trie_common::{StorageTrieEntry, StoredNibbles, StoredNibblesSubKey};
 use reth_trie_db::{DatabaseHashedCursorFactory, DatabaseTrieCursorFactory};
-use std::time::{Duration, Instant};
+use std::{
+    net::SocketAddr,
+    time::{Duration, Instant},
+};
 use tracing::{info, warn};
 
 const PROGRESS_PERIOD: Duration = Duration::from_secs(5);
@@ -25,34 +39,83 @@ pub struct Command {
     /// Only show inconsistencies without making any repairs
     #[arg(long)]
     pub(crate) dry_run: bool,
+
+    /// Enable Prometheus metrics.
+    ///
+    /// The metrics will be served at the given interface and port.
+    #[arg(long = "metrics", value_name = "ADDR:PORT", value_parser = parse_socket_address)]
+    pub(crate) metrics: Option<SocketAddr>,
 }
 
 impl Command {
     /// Execute `db repair-trie` command
     pub fn execute<N: ProviderNodeTypes>(
         self,
-        provider_factory: ProviderFactory<N>,
+        tool: &DbTool<N>,
+        task_executor: TaskExecutor,
     ) -> eyre::Result<()> {
-        if self.dry_run {
-            verify_only(provider_factory)?
+        // Set up metrics server if requested
+        let _metrics_handle = if let Some(listen_addr) = self.metrics {
+            let chain_name = tool.provider_factory.chain_spec().chain().to_string();
+            let executor = task_executor.clone();
+
+            let handle = task_executor.spawn_critical("metrics server", async move {
+                let config = MetricServerConfig::new(
+                    listen_addr,
+                    VersionInfo {
+                        version: version_metadata().cargo_pkg_version.as_ref(),
+                        build_timestamp: version_metadata().vergen_build_timestamp.as_ref(),
+                        cargo_features: version_metadata().vergen_cargo_features.as_ref(),
+                        git_sha: version_metadata().vergen_git_sha.as_ref(),
+                        target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
+                        build_profile: version_metadata().build_profile_name.as_ref(),
+                    },
+                    ChainSpecInfo { name: chain_name },
+                    executor,
+                    Hooks::builder().build(),
+                );
+
+                // Spawn the metrics server
+                if let Err(e) = MetricServer::new(config).serve().await {
+                    tracing::error!("Metrics server error: {}", e);
+                }
+            });
+
+            Some(handle)
         } else {
-            verify_and_repair(provider_factory)?
+            None
+        };
+
+        if self.dry_run {
+            verify_only(tool)?
+        } else {
+            verify_and_repair(tool)?
         }
 
         Ok(())
     }
 }
 
-fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre::Result<()> {
+fn verify_only<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
+    // Log the database block tip from Finish stage checkpoint
+    let finish_checkpoint = tool
+        .provider_factory
+        .provider()?
+        .get_stage_checkpoint(StageId::Finish)?
+        .unwrap_or_default();
+    info!("Database block tip: {}", finish_checkpoint.block_number);
+
     // Get a database transaction directly from the database
-    let db = provider_factory.db_ref();
+    let db = tool.provider_factory.db_ref();
     let mut tx = db.tx()?;
     tx.disable_long_read_transaction_safety();
 
     // Create the verifier
     let hashed_cursor_factory = DatabaseHashedCursorFactory::new(&tx);
     let trie_cursor_factory = DatabaseTrieCursorFactory::new(&tx);
-    let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+
+    let metrics = RepairTrieMetrics::new();
 
     let mut inconsistent_nodes = 0;
     let start_time = Instant::now();
@@ -70,6 +133,21 @@ fn verify_only<N: NodeTypesWithDB>(provider_factory: ProviderFactory<N>) -> eyre
         } else {
             warn!("Inconsistency found: {output:?}");
             inconsistent_nodes += 1;
+
+            // Record metrics based on output type
+            match output {
+                Output::AccountExtra(_, _) |
+                Output::AccountWrong { .. } |
+                Output::AccountMissing(_, _) => {
+                    metrics.account_inconsistencies.increment(1);
+                }
+                Output::StorageExtra(_, _, _) |
+                Output::StorageWrong { .. } |
+                Output::StorageMissing(_, _, _) => {
+                    metrics.storage_inconsistencies.increment(1);
+                }
+                Output::Progress(_) => unreachable!(),
+            }
         }
     }
 
@@ -114,11 +192,13 @@ fn verify_checkpoints(provider: impl StageCheckpointReader) -> eyre::Result<()> 
     Ok(())
 }
 
-fn verify_and_repair<N: ProviderNodeTypes>(
-    provider_factory: ProviderFactory<N>,
-) -> eyre::Result<()> {
+fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()> {
     // Get a read-write database provider
-    let mut provider_rw = provider_factory.provider_rw()?;
+    let mut provider_rw = tool.provider_factory.provider_rw()?;
+
+    // Log the database block tip from Finish stage checkpoint
+    let finish_checkpoint = provider_rw.get_stage_checkpoint(StageId::Finish)?.unwrap_or_default();
+    info!("Database block tip: {}", finish_checkpoint.block_number);
 
     // Check that a pipeline sync isn't in progress.
     verify_checkpoints(provider_rw.as_ref())?;
@@ -136,7 +216,9 @@ fn verify_and_repair<N: ProviderNodeTypes>(
     let trie_cursor_factory = DatabaseTrieCursorFactory::new(tx);
 
     // Create the verifier
-    let verifier = Verifier::new(trie_cursor_factory, hashed_cursor_factory)?;
+    let verifier = Verifier::new(&trie_cursor_factory, hashed_cursor_factory)?;
+
+    let metrics = RepairTrieMetrics::new();
 
     let mut inconsistent_nodes = 0;
     let start_time = Instant::now();
@@ -149,6 +231,21 @@ fn verify_and_repair<N: ProviderNodeTypes>(
         if !matches!(output, Output::Progress(_)) {
             warn!("Inconsistency found, will repair: {output:?}");
             inconsistent_nodes += 1;
+
+            // Record metrics based on output type
+            match &output {
+                Output::AccountExtra(_, _) |
+                Output::AccountWrong { .. } |
+                Output::AccountMissing(_, _) => {
+                    metrics.account_inconsistencies.increment(1);
+                }
+                Output::StorageExtra(_, _, _) |
+                Output::StorageWrong { .. } |
+                Output::StorageMissing(_, _, _) => {
+                    metrics.storage_inconsistencies.increment(1);
+                }
+                Output::Progress(_) => {}
+            }
         }
 
         match output {
@@ -246,4 +343,26 @@ fn output_progress(last_account: Nibbles, start_time: Instant, inconsistent_node
         inconsistent_nodes,
         "Repairing trie tables",
     );
+}
+
+/// Metrics for tracking trie repair inconsistencies
+#[derive(Debug)]
+struct RepairTrieMetrics {
+    account_inconsistencies: Counter,
+    storage_inconsistencies: Counter,
+}
+
+impl RepairTrieMetrics {
+    fn new() -> Self {
+        Self {
+            account_inconsistencies: metrics::counter!(
+                "db.repair_trie.inconsistencies_found",
+                "type" => "account"
+            ),
+            storage_inconsistencies: metrics::counter!(
+                "db.repair_trie.inconsistencies_found",
+                "type" => "storage"
+            ),
+        }
+    }
 }

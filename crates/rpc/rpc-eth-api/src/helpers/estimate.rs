@@ -10,17 +10,23 @@ use futures::Future;
 use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
-use reth_revm::{database::StateProviderDatabase, db::CacheDB};
+use reth_revm::{
+    database::{EvmStateProvider, StateProviderDatabase},
+    db::State,
+};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
-    error::{api::FromEvmHalt, FromEvmError},
-    EthApiError, RevertError, RpcInvalidTransactionError,
+    error::{
+        api::{FromEvmHalt, FromRevert},
+        FromEvmError,
+    },
+    EthApiError, RpcInvalidTransactionError,
 };
 use reth_rpc_server_types::constants::gas_oracle::{CALL_STIPEND_GAS, ESTIMATE_GAS_ERROR_RATIO};
-use reth_storage_api::StateProvider;
 use revm::{
     context::Block,
     context_interface::{result::ExecutionResult, Transaction},
+    primitives::KECCAK_EMPTY,
 };
 use tracing::trace;
 
@@ -45,7 +51,7 @@ pub trait EstimateCall: Call {
         state_override: Option<StateOverride>,
     ) -> Result<U256, Self::Error>
     where
-        S: StateProvider,
+        S: EvmStateProvider,
     {
         // Disabled because eth_estimateGas is sometimes used with eoa senders
         // See <https://github.com/paradigmxyz/reth/issues/1959>
@@ -81,7 +87,7 @@ pub trait EstimateCall: Call {
             .unwrap_or(max_gas_limit);
 
         // Configure the evm env
-        let mut db = CacheDB::new(StateProviderDatabase::new(state));
+        let mut db = State::builder().with_database(StateProviderDatabase::new(state)).build();
 
         // Apply any state overrides if specified.
         if let Some(state_override) = state_override {
@@ -92,10 +98,14 @@ pub trait EstimateCall: Call {
 
         // Check if this is a basic transfer (no input data to account with no code)
         let is_basic_transfer = if tx_env.input().is_empty() &&
-            let TxKind::Call(to) = tx_env.kind() &&
-            let Ok(code) = db.db.account_code(&to)
+            let TxKind::Call(to) = tx_env.kind()
         {
-            code.map(|code| code.is_empty()).unwrap_or(true)
+            match db.database.basic_account(&to) {
+                Ok(Some(account)) => {
+                    account.bytecode_hash.is_none() || account.bytecode_hash == Some(KECCAK_EMPTY)
+                }
+                _ => true,
+            }
         } else {
             false
         };
@@ -175,7 +185,7 @@ pub trait EstimateCall: Call {
                     Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit)
                 } else {
                     // the transaction did revert
-                    Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
+                    Err(Self::Error::from_revert(output))
                 }
             }
         };
@@ -234,9 +244,8 @@ pub trait EstimateCall: Call {
             // An estimation error is allowed once the current gas limit range used in the binary
             // search is small enough (less than 1.5% of the highest gas limit)
             // <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/eth/gasestimator/gasestimator.go#L152
-            if (highest_gas_limit - lowest_gas_limit) as f64 / (highest_gas_limit as f64) <
-                ESTIMATE_GAS_ERROR_RATIO
-            {
+            let ratio = (highest_gas_limit - lowest_gas_limit) as f64 / (highest_gas_limit as f64);
+            if ratio < ESTIMATE_GAS_ERROR_RATIO {
                 break
             };
 
@@ -320,7 +329,7 @@ pub trait EstimateCall: Call {
             }
             ExecutionResult::Revert { output, .. } => {
                 // reverted again after bumping the limit
-                Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
+                Err(Self::Error::from_revert(output))
             }
             ExecutionResult::Halt { reason, .. } => {
                 Err(Self::Error::from_evm_halt(reason, req_gas_limit))

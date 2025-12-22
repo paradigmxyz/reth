@@ -4,6 +4,7 @@ use crate::{
     },
     providers::{
         database::{chain::ChainStorage, metrics},
+        rocksdb::RocksDBProvider,
         static_file::StaticFileWriter,
         NodeTypesForProvider, StaticFileProvider,
     },
@@ -13,9 +14,10 @@ use crate::{
     },
     AccountReader, BlockBodyWriter, BlockExecutionWriter, BlockHashReader, BlockNumReader,
     BlockReader, BlockWriter, BundleStateInit, ChainStateBlockReader, ChainStateBlockWriter,
-    DBProvider, HashingWriter, HeaderProvider, HeaderSyncGapProvider, HistoricalStateProvider,
-    HistoricalStateProviderRef, HistoryWriter, LatestStateProvider, LatestStateProviderRef,
-    OriginalValuesKnown, ProviderError, PruneCheckpointReader, PruneCheckpointWriter, RevertsInit,
+    DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
+    HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
+    LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
+    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, RocksDBProviderFactory,
     StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
     StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
     TransactionsProviderExt, TrieReader, TrieWriter,
@@ -28,18 +30,19 @@ use alloy_eips::BlockHashOrNumber;
 use alloy_primitives::{
     keccak256,
     map::{hash_map, B256Map, HashMap, HashSet},
-    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256, U256,
+    Address, BlockHash, BlockNumber, TxHash, TxNumber, B256,
 };
 use itertools::Itertools;
+use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
-use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, EthereumHardforks};
+use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
     models::{
         sharded_key, storage_sharded_key::StorageShardedKey, AccountBeforeTx, BlockNumberAddress,
-        BlockNumberHashedAddress, ShardedKey, StoredBlockBodyIndices,
+        BlockNumberHashedAddress, ShardedKey, StorageSettings, StoredBlockBodyIndices,
     },
     table::Table,
     tables,
@@ -57,8 +60,9 @@ use reth_prune_types::{
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    BlockBodyIndicesProvider, BlockBodyReader, NodePrimitivesProvider, StateProvider,
-    StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
+    NodePrimitivesProvider, StateProvider, StorageChangeSetReader, StorageSettingsCache,
+    TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
@@ -67,8 +71,7 @@ use reth_trie::{
         TrieCursorIter,
     },
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
-    BranchNodeCompact, HashedPostStateSorted, Nibbles, StoredNibbles, StoredNibblesSubKey,
-    TrieChangeSetsEntry,
+    HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
 };
 use reth_trie_db::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
@@ -80,7 +83,7 @@ use std::{
     cmp::Ordering,
     collections::{BTreeMap, BTreeSet},
     fmt::Debug,
-    ops::{Deref, DerefMut, Not, Range, RangeBounds, RangeFrom, RangeInclusive},
+    ops::{Deref, DerefMut, Range, RangeBounds, RangeFrom, RangeInclusive},
     sync::Arc,
 };
 use tracing::{debug, trace};
@@ -129,6 +132,13 @@ impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
     pub fn into_tx(self) -> <DB as Database>::TXMut {
         self.0.into_tx()
     }
+
+    /// Override the minimum pruning distance for testing purposes.
+    #[cfg(any(test, feature = "test-utils"))]
+    pub const fn with_minimum_pruning_distance(mut self, distance: u64) -> Self {
+        self.0.minimum_pruning_distance = distance;
+        self
+    }
 }
 
 impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
@@ -141,7 +151,6 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
 
 /// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
-#[derive(Debug)]
 pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Database transaction.
     tx: TX,
@@ -153,6 +162,31 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     prune_modes: PruneModes,
     /// Node storage handler.
     storage: Arc<N::Storage>,
+    /// Storage configuration settings for this node
+    storage_settings: Arc<RwLock<StorageSettings>>,
+    /// `RocksDB` provider
+    rocksdb_provider: RocksDBProvider,
+    /// Pending `RocksDB` batches to be committed at provider commit time.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
+    /// Minimum distance from tip required for pruning
+    minimum_pruning_distance: u64,
+}
+
+impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("DatabaseProvider");
+        s.field("tx", &self.tx)
+            .field("chain_spec", &self.chain_spec)
+            .field("static_file_provider", &self.static_file_provider)
+            .field("prune_modes", &self.prune_modes)
+            .field("storage", &self.storage)
+            .field("storage_settings", &self.storage_settings)
+            .field("rocksdb_provider", &self.rocksdb_provider);
+        #[cfg(all(unix, feature = "rocksdb"))]
+        s.field("pending_rocksdb_batches", &"<pending batches>");
+        s.field("minimum_pruning_distance", &self.minimum_pruning_distance).finish()
+    }
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -228,9 +262,29 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     fn static_file_provider(&self) -> StaticFileProvider<Self::Primitives> {
         self.static_file_provider.clone()
     }
+
+    fn get_static_file_writer(
+        &self,
+        block: BlockNumber,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<crate::providers::StaticFileProviderRWRefMut<'_, Self::Primitives>> {
+        self.static_file_provider.get_writer(block, segment)
+    }
 }
 
-impl<TX: Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
+impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
+    /// Returns the `RocksDB` provider.
+    fn rocksdb_provider(&self) -> RocksDBProvider {
+        self.rocksdb_provider.clone()
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn set_pending_rocksdb_batch(&self, batch: rocksdb::WriteBatchWithTransaction<true>) {
+        self.pending_rocksdb_batches.lock().push(batch);
+    }
+}
+
+impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
     for DatabaseProvider<TX, N>
 {
     type ChainSpec = N::ChainSpec;
@@ -248,8 +302,21 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
+        storage_settings: Arc<RwLock<StorageSettings>>,
+        rocksdb_provider: RocksDBProvider,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage }
+        Self {
+            tx,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            storage,
+            storage_settings,
+            rocksdb_provider,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
+            minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+        }
     }
 }
 
@@ -285,23 +352,21 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
         // Insert the blocks
-        for ExecutedBlock { recovered_block, execution_output, hashed_state, trie_updates } in
-            blocks
-        {
+        for block in blocks {
+            let trie_data = block.trie_data();
+            let ExecutedBlock { recovered_block, execution_output, .. } = block;
             let block_number = recovered_block.number();
-            self.insert_block(Arc::unwrap_or_clone(recovered_block))?;
+            self.insert_block(&recovered_block)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
             self.write_state(&execution_output, OriginalValuesKnown::No)?;
 
             // insert hashes and intermediate merkle nodes
-            self.write_hashed_state(&Arc::unwrap_or_clone(hashed_state).into_sorted())?;
+            self.write_hashed_state(&trie_data.hashed_state)?;
 
-            // sort trie updates and insert changesets
-            let trie_updates_sorted = (*trie_updates).clone().into_sorted();
-            self.write_trie_changesets(block_number, &trie_updates_sorted, None)?;
-            self.write_trie_updates_sorted(&trie_updates_sorted)?;
+            self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
+            self.write_trie_updates_sorted(&trie_data.trie_updates)?;
         }
 
         // update history indices
@@ -364,7 +429,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // iterate over block body and remove receipts
         self.remove::<tables::Receipts<ReceiptTy<N>>>(from_tx..)?;
 
-        if !self.prune_modes.has_receipts_pruning() {
+        if EitherWriter::receipts_destination(self).is_static_file() {
             let static_file_receipt_num =
                 self.static_file_provider.get_highest_static_file_tx(StaticFileSegment::Receipts);
 
@@ -494,8 +559,21 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         static_file_provider: StaticFileProvider<N::Primitives>,
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
+        storage_settings: Arc<RwLock<StorageSettings>>,
+        rocksdb_provider: RocksDBProvider,
     ) -> Self {
-        Self { tx, chain_spec, static_file_provider, prune_modes, storage }
+        Self {
+            tx,
+            chain_spec,
+            static_file_provider,
+            prune_modes,
+            storage,
+            storage_settings,
+            rocksdb_provider,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
+            minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+        }
     }
 
     /// Consume `DbTx` or `DbTxMut`.
@@ -643,17 +721,12 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         HF: Fn(RangeInclusive<BlockNumber>) -> ProviderResult<Vec<H>>,
         BF: Fn(H, BodyTy<N>, Vec<Address>) -> ProviderResult<B>,
     {
-        let mut senders_cursor = self.tx.cursor_read::<tables::TransactionSenders>()?;
-
         self.block_range(range, headers_range, |header, body, tx_range| {
             let senders = if tx_range.is_empty() {
                 Vec::new()
             } else {
-                // fetch senders from the senders table
-                let known_senders =
-                    senders_cursor
-                        .walk_range(tx_range.clone())?
-                        .collect::<Result<HashMap<_, _>, _>>()?;
+                let known_senders: HashMap<TxNumber, Address> =
+                    EitherReader::new_senders(self)?.senders_by_tx_range(tx_range.clone())?;
 
                 let mut senders = Vec::with_capacity(body.transactions().len());
                 for (tx_num, tx) in tx_range.zip(body.transactions()) {
@@ -971,26 +1044,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> HeaderProvider for DatabasePro
         self.static_file_provider.header_by_number(num)
     }
 
-    fn header_td(&self, block_hash: BlockHash) -> ProviderResult<Option<U256>> {
-        if let Some(num) = self.block_number(block_hash)? {
-            self.header_td_by_number(num)
-        } else {
-            Ok(None)
-        }
-    }
-
-    fn header_td_by_number(&self, number: BlockNumber) -> ProviderResult<Option<U256>> {
-        if self.chain_spec.is_paris_active_at_block(number) &&
-            let Some(td) = self.chain_spec.final_paris_total_difficulty()
-        {
-            // if this block is higher than the final paris(merge) block, return the final paris
-            // difficulty
-            return Ok(Some(td))
-        }
-
-        self.static_file_provider.header_td_by_number(number)
-    }
-
     fn headers_range(
         &self,
         range: impl RangeBounds<BlockNumber>,
@@ -1279,11 +1332,6 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         Ok(None)
     }
 
-    fn transaction_block(&self, id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        let mut cursor = self.tx.cursor_read::<tables::TransactionBlocks>()?;
-        Ok(cursor.seek(id)?.map(|(_, bn)| bn))
-    }
-
     fn transactions_by_block(
         &self,
         id: BlockHashOrNumber,
@@ -1331,11 +1379,19 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         range: impl RangeBounds<TxNumber>,
     ) -> ProviderResult<Vec<Address>> {
-        self.cursor_read_collect::<tables::TransactionSenders>(range)
+        if EitherWriterDestination::senders(self).is_static_file() {
+            self.static_file_provider.senders_by_tx_range(range)
+        } else {
+            self.cursor_read_collect::<tables::TransactionSenders>(range)
+        }
     }
 
     fn transaction_sender(&self, id: TxNumber) -> ProviderResult<Option<Address>> {
-        Ok(self.tx.get::<tables::TransactionSenders>(id)?)
+        if EitherWriterDestination::senders(self).is_static_file() {
+            self.static_file_provider.transaction_sender(id)
+        } else {
+            Ok(self.tx.get::<tables::TransactionSenders>(id)?)
+        }
     }
 }
 
@@ -1625,29 +1681,23 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             ));
         }
 
-        let has_receipts_pruning = self.prune_modes.has_receipts_pruning();
-
-        // Prepare receipts cursor if we are going to write receipts to the database
-        //
-        // We are writing to database if requested or if there's any kind of receipt pruning
-        // configured
-        let mut receipts_cursor = self.tx.cursor_write::<tables::Receipts<Self::Receipt>>()?;
-
-        // Prepare receipts static writer if we are going to write receipts to static files
-        //
-        // We are writing to static files if requested and if there's no receipt pruning configured
-        let mut receipts_static_writer = has_receipts_pruning
-            .not()
-            .then(|| self.static_file_provider.get_writer(first_block, StaticFileSegment::Receipts))
-            .transpose()?;
+        let mut receipts_writer = EitherWriter::new_receipts(self, first_block)?;
 
         let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
         let contract_log_pruner = self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
         // All receipts from the last 128 blocks are required for blockchain tree, even with
         // [`PruneSegment::ContractLogs`].
-        let prunable_receipts =
-            PruneMode::Distance(MINIMUM_PRUNING_DISTANCE).should_prune(first_block, tip);
+        //
+        // Receipts can only be skipped if we're dealing with legacy nodes that write them to
+        // Database, OR if receipts_in_static_files is enabled but no receipts exist in static
+        // files yet. Once receipts exist in static files, we must continue writing to maintain
+        // continuity and have no gaps.
+        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
+            self.static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none()) &&
+            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
 
         // Prepare set of addresses which logs should not be pruned.
         let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
@@ -1661,9 +1711,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             let block_number = first_block + idx as u64;
 
             // Increment block number for receipts static file writer
-            if let Some(writer) = receipts_static_writer.as_mut() {
-                writer.increment_block(block_number)?;
-            }
+            receipts_writer.increment_block(block_number)?;
 
             // Skip writing receipts if pruning configuration requires us to.
             if prunable_receipts &&
@@ -1690,11 +1738,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                     continue
                 }
 
-                if let Some(writer) = &mut receipts_static_writer {
-                    writer.append_receipt(receipt_idx, receipt)?;
-                }
-
-                receipts_cursor.append(receipt_idx, receipt)?;
+                receipts_writer.append_receipt(receipt_idx, receipt)?;
             }
         }
 
@@ -1837,10 +1881,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
-        for (hashed_address, account) in hashed_state.accounts().accounts_sorted() {
+        for (hashed_address, account) in hashed_state.accounts() {
             if let Some(account) = account {
-                hashed_accounts_cursor.upsert(hashed_address, &account)?;
-            } else if hashed_accounts_cursor.seek_exact(hashed_address)?.is_some() {
+                hashed_accounts_cursor.upsert(*hashed_address, account)?;
+            } else if hashed_accounts_cursor.seek_exact(*hashed_address)?.is_some() {
                 hashed_accounts_cursor.delete_current()?;
             }
         }
@@ -1854,8 +1898,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 hashed_storage_cursor.delete_current_duplicates()?;
             }
 
-            for (hashed_slot, value) in storage.storage_slots_sorted() {
-                let entry = StorageEntry { key: hashed_slot, value };
+            for (hashed_slot, value) in storage.storage_slots_ref() {
+                let entry = StorageEntry { key: *hashed_slot, value: *value };
+
                 if let Some(db_entry) =
                     hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
                     db_entry.key == entry.key
@@ -2119,7 +2164,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         let mut account_trie_cursor = tx.cursor_write::<tables::AccountsTrie>()?;
 
         // Process sorted account nodes
-        for (key, updated_node) in &trie_updates.account_nodes {
+        for (key, updated_node) in trie_updates.account_nodes_ref() {
             let nibbles = StoredNibbles(*key);
             match updated_node {
                 Some(node) => {
@@ -2165,17 +2210,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         // Wrap the cursor in DatabaseAccountTrieCursor
         let mut db_account_cursor = DatabaseAccountTrieCursor::new(curr_values_cursor);
 
-        // Static empty array for when updates_overlay is None
-        static EMPTY_ACCOUNT_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
-
-        // Get the overlay updates for account trie, or use an empty array
-        let account_overlay_updates = updates_overlay
-            .map(|overlay| overlay.account_nodes_ref())
-            .unwrap_or(&EMPTY_ACCOUNT_UPDATES);
+        // Create empty TrieUpdatesSorted for when updates_overlay is None
+        let empty_updates = TrieUpdatesSorted::default();
+        let overlay = updates_overlay.unwrap_or(&empty_updates);
 
         // Wrap the cursor in InMemoryTrieCursor with the overlay
         let mut in_memory_account_cursor =
-            InMemoryTrieCursor::new(Some(&mut db_account_cursor), account_overlay_updates);
+            InMemoryTrieCursor::new_account(&mut db_account_cursor, overlay);
 
         for (path, _) in trie_updates.account_nodes_ref() {
             num_entries += 1;
@@ -2186,7 +2227,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
             )?;
         }
 
-        let mut storage_updates = trie_updates.storage_tries.iter().collect::<Vec<_>>();
+        let mut storage_updates = trie_updates.storage_tries_ref().iter().collect::<Vec<_>>();
         storage_updates.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
         num_entries += self.write_storage_trie_changesets(
@@ -2236,7 +2277,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         let tx = self.tx_ref();
 
         // Read account trie changes directly into a Vec - data is already sorted by nibbles
-        // within each block, and we want the oldest (first) version of each node
+        // within each block, and we want the oldest (first) version of each node sorted by path.
         let mut account_nodes = Vec::new();
         let mut seen_account_keys = HashSet::new();
         let mut accounts_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
@@ -2249,8 +2290,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
             }
         }
 
+        account_nodes.sort_by_key(|(path, _)| *path);
+
         // Read storage trie changes - data is sorted by (block, hashed_address, nibbles)
-        // Keep track of seen (address, nibbles) pairs to only keep the oldest version
+        // Keep track of seen (address, nibbles) pairs to only keep the oldest version per address,
+        // sorted by path.
         let mut storage_tries = B256Map::<Vec<_>>::default();
         let mut seen_storage_keys = HashSet::new();
         let mut storages_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
@@ -2273,12 +2317,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         // Convert to StorageTrieUpdatesSorted
         let storage_tries = storage_tries
             .into_iter()
-            .map(|(address, nodes)| {
+            .map(|(address, mut nodes)| {
+                nodes.sort_by_key(|(path, _)| *path);
                 (address, StorageTrieUpdatesSorted { storage_nodes: nodes, is_deleted: false })
             })
             .collect();
 
-        Ok(TrieUpdatesSorted { account_nodes, storage_tries })
+        Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
     }
 
     fn get_block_trie_updates(
@@ -2296,7 +2341,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
 
         // Step 3: Collect all account trie nodes that changed in the target block
-        let mut trie_updates = TrieUpdatesSorted::default();
+        let mut account_nodes = Vec::new();
 
         // Walk through all account trie changes for this block
         let mut accounts_trie_cursor = tx.cursor_dup_read::<tables::AccountsTrieChangeSets>()?;
@@ -2306,10 +2351,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
             let (_, TrieChangeSetsEntry { nibbles, .. }) = entry?;
             // Look up the current value of this trie node using the overlay cursor
             let node_value = account_cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
-            trie_updates.account_nodes.push((nibbles.0, node_value));
+            account_nodes.push((nibbles.0, node_value));
         }
 
         // Step 4: Collect all storage trie nodes that changed in the target block
+        let mut storage_tries = B256Map::default();
         let mut storages_trie_cursor = tx.cursor_dup_read::<tables::StoragesTrieChangeSets>()?;
         let storage_range_start = BlockNumberHashedAddress((block_number, B256::ZERO));
         let storage_range_end = BlockNumberHashedAddress((block_number + 1, B256::ZERO));
@@ -2333,8 +2379,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
             let cursor =
                 storage_cursor.as_mut().expect("storage_cursor was just initialized above");
             let node_value = cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
-            trie_updates
-                .storage_tries
+            storage_tries
                 .entry(hashed_address)
                 .or_insert_with(|| StorageTrieUpdatesSorted {
                     storage_nodes: Vec::new(),
@@ -2344,7 +2389,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
                 .push((nibbles.0, node_value));
         }
 
-        Ok(trie_updates)
+        Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
     }
 }
 
@@ -2409,8 +2454,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
             B256::default(), // Will be set per iteration
         );
 
-        // Static empty array for when updates_overlay is None
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+        // Create empty TrieUpdatesSorted for when updates_overlay is None
+        let empty_updates = TrieUpdatesSorted::default();
 
         for (hashed_address, storage_trie_updates) in storage_tries {
             let changeset_key = BlockNumberHashedAddress((block_number, *hashed_address));
@@ -2419,15 +2464,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
             changed_curr_values_cursor =
                 DatabaseStorageTrieCursor::new(changed_curr_values_cursor.cursor, *hashed_address);
 
-            // Get the overlay updates for this storage trie, or use an empty array
-            let overlay_updates = updates_overlay
-                .and_then(|overlay| overlay.storage_tries.get(hashed_address))
-                .map(|updates| updates.storage_nodes_ref())
-                .unwrap_or(&EMPTY_UPDATES);
+            // Get the overlay updates, or use empty updates
+            let overlay = updates_overlay.unwrap_or(&empty_updates);
 
             // Wrap the cursor in InMemoryTrieCursor with the overlay
-            let mut in_memory_changed_cursor =
-                InMemoryTrieCursor::new(Some(&mut changed_curr_values_cursor), overlay_updates);
+            let mut in_memory_changed_cursor = InMemoryTrieCursor::new_storage(
+                &mut changed_curr_values_cursor,
+                overlay,
+                *hashed_address,
+            );
 
             // Create an iterator which produces the current values of all updated paths, or None if
             // they are currently unset.
@@ -2443,8 +2488,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
                     DatabaseStorageTrieCursor::new(wiped_nodes_cursor.cursor, *hashed_address);
 
                 // Wrap the wiped nodes cursor in InMemoryTrieCursor with the overlay
-                let mut in_memory_wiped_cursor =
-                    InMemoryTrieCursor::new(Some(&mut wiped_nodes_cursor), overlay_updates);
+                let mut in_memory_wiped_cursor = InMemoryTrieCursor::new_storage(
+                    &mut wiped_nodes_cursor,
+                    overlay,
+                    *hashed_address,
+                );
 
                 let all_nodes = TrieCursorIter::new(&mut in_memory_wiped_cursor);
 
@@ -2808,7 +2856,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// tables:
     /// * [`StaticFileSegment::Headers`]
     /// * [`tables::HeaderNumbers`]
-    /// * [`tables::HeaderTerminalDifficulties`]
     /// * [`tables::BlockBodyIndices`]
     ///
     /// If there are transactions in the block, the following static file segments and tables will
@@ -2820,62 +2867,55 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// If withdrawals are not empty, this will modify
     /// [`BlockWithdrawals`](tables::BlockWithdrawals).
     ///
-    /// If the provider has __not__ configured full sender pruning, this will modify
-    /// [`TransactionSenders`](tables::TransactionSenders).
+    /// If the provider has __not__ configured full sender pruning, this will modify either:
+    /// * [`StaticFileSegment::TransactionSenders`] if senders are written to static files
+    /// * [`tables::TransactionSenders`] if senders are written to the database
     ///
     /// If the provider has __not__ configured full transaction lookup pruning, this will modify
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
     fn insert_block(
         &self,
-        block: RecoveredBlock<Self::Block>,
+        block: &RecoveredBlock<Self::Block>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number();
+        let tx_count = block.body().transaction_count() as u64;
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
-        // total difficulty
-        let ttd = if block_number == 0 {
-            block.header().difficulty()
-        } else {
-            let parent_block_number = block_number - 1;
-            let parent_ttd = self.header_td_by_number(parent_block_number)?.unwrap_or_default();
-            durations_recorder.record_relative(metrics::Action::GetParentTD);
-            parent_ttd + block.header().difficulty()
-        };
-
         self.static_file_provider
             .get_writer(block_number, StaticFileSegment::Headers)?
-            .append_header(block.header(), ttd, &block.hash())?;
+            .append_header(block.header(), &block.hash())?;
 
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);
 
-        let mut next_tx_num = self
+        let first_tx_num = self
             .tx
             .cursor_read::<tables::TransactionBlocks>()?
             .last()?
             .map(|(n, _)| n + 1)
             .unwrap_or_default();
         durations_recorder.record_relative(metrics::Action::GetNextTxNum);
-        let first_tx_num = next_tx_num;
 
-        let tx_count = block.body().transaction_count() as u64;
+        let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
 
-        // Ensures we have all the senders for the block's transactions.
-        for (transaction, sender) in block.body().transactions_iter().zip(block.senders_iter()) {
-            let hash = transaction.tx_hash();
-
-            if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
-                self.tx.put::<tables::TransactionSenders>(next_tx_num, *sender)?;
-            }
-
-            if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
-                self.tx.put::<tables::TransactionHashNumbers>(*hash, next_tx_num)?;
-            }
-            next_tx_num += 1;
+        if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
+            let mut senders_writer = EitherWriter::new_senders(self, block.number())?;
+            senders_writer.increment_block(block.number())?;
+            senders_writer
+                .append_senders(tx_nums_iter.clone().zip(block.senders_iter().copied()))?;
+            durations_recorder.record_relative(metrics::Action::InsertTransactionSenders);
         }
 
-        self.append_block_bodies(vec![(block_number, Some(block.into_body()))])?;
+        if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
+            for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
+                let hash = transaction.tx_hash();
+                self.tx.put::<tables::TransactionHashNumbers>(*hash, tx_num)?;
+            }
+            durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
+        }
+
+        self.append_block_bodies(vec![(block_number, Some(block.body()))])?;
 
         debug!(
             target: "providers::db",
@@ -2889,7 +2929,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
     fn append_block_bodies(
         &self,
-        bodies: Vec<(BlockNumber, Option<BodyTy<N>>)>,
+        bodies: Vec<(BlockNumber, Option<&BodyTy<N>>)>,
     ) -> ProviderResult<()> {
         let Some(from_block) = bodies.first().map(|(block, _)| *block) else { return Ok(()) };
 
@@ -2940,8 +2980,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     }
 
     fn remove_blocks_above(&self, block: BlockNumber) -> ProviderResult<()> {
+        let last_block_number = self.last_block_number()?;
         // Clean up HeaderNumbers for blocks being removed, we must clear all indexes from MDBX.
-        for hash in self.canonical_hashes_range(block + 1, self.last_block_number()? + 1)? {
+        for hash in self.canonical_hashes_range(block + 1, last_block_number + 1)? {
             self.tx.delete::<tables::HeaderNumbers>(hash, None)?;
         }
 
@@ -2983,7 +3024,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             }
         }
 
-        self.remove::<tables::TransactionSenders>(unwind_tx_from..)?;
+        EitherWriter::new_senders(self, last_block_number)?.prune_senders(unwind_tx_from, block)?;
 
         self.remove_bodies_above(block)?;
 
@@ -3040,7 +3081,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         // Insert the blocks
         for block in blocks {
-            self.insert_block(block)?;
+            self.insert_block(&block)?;
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 
@@ -3073,10 +3114,13 @@ impl<TX: DbTx + 'static, N: NodeTypes> PruneCheckpointReader for DatabaseProvide
     }
 
     fn get_prune_checkpoints(&self) -> ProviderResult<Vec<(PruneSegment, PruneCheckpoint)>> {
-        Ok(self
-            .tx
-            .cursor_read::<tables::PruneCheckpoints>()?
-            .walk(None)?
+        Ok(PruneSegment::variants()
+            .filter_map(|segment| {
+                self.tx
+                    .get::<tables::PruneCheckpoints>(segment)
+                    .transpose()
+                    .map(|chk| chk.map(|chk| (segment, chk)))
+            })
             .collect::<Result<_, _>>()?)
     }
 }
@@ -3161,7 +3205,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         self.prune_modes_ref()
     }
 
-    /// Commit database transaction and static files.
+    /// Commit database transaction, static files, and pending `RocksDB` batches.
     fn commit(self) -> ProviderResult<bool> {
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just
@@ -3169,13 +3213,53 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         // checkpoints on the next start-up.
         if self.static_file_provider.has_unwind_queued() {
             self.tx.commit()?;
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+                for batch in batches {
+                    self.rocksdb_provider.commit_batch(batch)?;
+                }
+            }
+
             self.static_file_provider.commit()?;
         } else {
             self.static_file_provider.commit()?;
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+                for batch in batches {
+                    self.rocksdb_provider.commit_batch(batch)?;
+                }
+            }
+
             self.tx.commit()?;
         }
 
         Ok(true)
+    }
+}
+
+impl<TX: DbTx, N: NodeTypes> MetadataProvider for DatabaseProvider<TX, N> {
+    fn get_metadata(&self, key: &str) -> ProviderResult<Option<Vec<u8>>> {
+        self.tx.get::<tables::Metadata>(key.to_string()).map_err(Into::into)
+    }
+}
+
+impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
+    fn write_metadata(&self, key: &str, value: Vec<u8>) -> ProviderResult<()> {
+        self.tx.put::<tables::Metadata>(key.to_string(), value).map_err(Into::into)
+    }
+}
+
+impl<TX: Send, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
+    fn cached_storage_settings(&self) -> StorageSettings {
+        *self.storage_settings.read()
+    }
+
+    fn set_storage_settings_cache(&self, settings: StorageSettings) {
+        *self.storage_settings.write() = settings;
     }
 }
 
@@ -3186,7 +3270,9 @@ mod tests {
         test_utils::{blocks::BlockchainTestData, create_test_provider_factory},
         BlockWriter,
     };
+    use reth_ethereum_primitives::Receipt;
     use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use reth_trie::Nibbles;
 
     #[test]
     fn test_receipts_by_block_range_empty_range() {
@@ -3216,14 +3302,14 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
             )
             .unwrap();
-        provider_rw.insert_block(data.blocks[0].0.clone()).unwrap();
+        provider_rw.insert_block(&data.blocks[0].0).unwrap();
         provider_rw.write_state(&data.blocks[0].1, crate::OriginalValuesKnown::No).unwrap();
         provider_rw.commit().unwrap();
 
@@ -3242,7 +3328,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3250,7 +3336,7 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3272,7 +3358,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3282,7 +3368,7 @@ mod tests {
 
         // insert blocks 1-3 with receipts
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3303,7 +3389,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3311,7 +3397,7 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3347,7 +3433,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         for block in blocks {
-            provider_rw.insert_block(block.try_recover().unwrap()).unwrap();
+            provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -3366,7 +3452,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3374,7 +3460,7 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3516,7 +3602,7 @@ mod tests {
         storage_tries.insert(storage_address1, storage_trie1);
         storage_tries.insert(storage_address2, storage_trie2);
 
-        let trie_updates = TrieUpdatesSorted { account_nodes, storage_tries };
+        let trie_updates = TrieUpdatesSorted::new(account_nodes, storage_tries);
 
         // Write the changesets
         let num_written =
@@ -3732,10 +3818,7 @@ mod tests {
         overlay_storage_tries.insert(storage_address1, overlay_storage_trie1);
         overlay_storage_tries.insert(storage_address2, overlay_storage_trie2);
 
-        let overlay = TrieUpdatesSorted {
-            account_nodes: overlay_account_nodes,
-            storage_tries: overlay_storage_tries,
-        };
+        let overlay = TrieUpdatesSorted::new(overlay_account_nodes, overlay_storage_tries);
 
         // Normal storage trie: one Some (update) and one None (new)
         let storage_trie1 = StorageTrieUpdatesSorted {
@@ -3762,7 +3845,7 @@ mod tests {
         storage_tries.insert(storage_address1, storage_trie1);
         storage_tries.insert(storage_address2, storage_trie2);
 
-        let trie_updates = TrieUpdatesSorted { account_nodes, storage_tries };
+        let trie_updates = TrieUpdatesSorted::new(account_nodes, storage_tries);
 
         // Write the changesets WITH OVERLAY
         let num_written =
@@ -4328,7 +4411,7 @@ mod tests {
         storage_tries.insert(storage_address1, storage_trie1);
         storage_tries.insert(storage_address2, storage_trie2);
 
-        let trie_updates = TrieUpdatesSorted { account_nodes, storage_tries };
+        let trie_updates = TrieUpdatesSorted::new(account_nodes, storage_tries);
 
         // Write the sorted trie updates
         let num_entries = provider_rw.write_trie_updates_sorted(&trie_updates).unwrap();
@@ -4592,11 +4675,11 @@ mod tests {
         let result = provider.get_block_trie_updates(target_block).unwrap();
 
         // Verify account trie updates
-        assert_eq!(result.account_nodes.len(), 2, "Should have 2 account trie updates");
+        assert_eq!(result.account_nodes_ref().len(), 2, "Should have 2 account trie updates");
 
         // Check nibbles1 - should have the current value (node1)
         let nibbles1_update = result
-            .account_nodes
+            .account_nodes_ref()
             .iter()
             .find(|(n, _)| n == &account_nibbles1)
             .expect("Should find nibbles1");
@@ -4609,7 +4692,7 @@ mod tests {
 
         // Check nibbles2 - should have the current value (node2)
         let nibbles2_update = result
-            .account_nodes
+            .account_nodes_ref()
             .iter()
             .find(|(n, _)| n == &account_nibbles2)
             .expect("Should find nibbles2");
@@ -4622,14 +4705,14 @@ mod tests {
 
         // nibbles3 should NOT be in the result (it was changed in next_block, not target_block)
         assert!(
-            !result.account_nodes.iter().any(|(n, _)| n == &account_nibbles3),
+            !result.account_nodes_ref().iter().any(|(n, _)| n == &account_nibbles3),
             "nibbles3 should not be in target_block updates"
         );
 
         // Verify storage trie updates
-        assert_eq!(result.storage_tries.len(), 1, "Should have 1 storage trie");
+        assert_eq!(result.storage_tries_ref().len(), 1, "Should have 1 storage trie");
         let storage_updates = result
-            .storage_tries
+            .storage_tries_ref()
             .get(&storage_address1)
             .expect("Should have storage updates for address1");
 
@@ -4664,5 +4747,143 @@ mod tests {
             storage_node2.state_mask,
             "storage_nibbles2 should have the value that was created and will be deleted"
         );
+    }
+
+    #[test]
+    fn test_prunable_receipts_logic() {
+        let insert_blocks =
+            |provider_rw: &DatabaseProviderRW<_, _>, tip_block: u64, tx_count: u8| {
+                let mut rng = generators::rng();
+                for block_num in 0..=tip_block {
+                    let block = random_block(
+                        &mut rng,
+                        block_num,
+                        BlockParams { tx_count: Some(tx_count), ..Default::default() },
+                    );
+                    provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
+                }
+            };
+
+        let write_receipts = |provider_rw: DatabaseProviderRW<_, _>, block: u64| {
+            let outcome = ExecutionOutcome {
+                first_block: block,
+                receipts: vec![vec![Receipt {
+                    tx_type: Default::default(),
+                    success: true,
+                    cumulative_gas_used: block, // identifier to assert against
+                    logs: vec![],
+                }]],
+                ..Default::default()
+            };
+            provider_rw.write_state(&outcome, crate::OriginalValuesKnown::No).unwrap();
+            provider_rw.commit().unwrap();
+        };
+
+        // Legacy mode (receipts in DB) - should be prunable
+        {
+            let factory = create_test_provider_factory();
+            let storage_settings = StorageSettings::legacy();
+            factory.set_storage_settings_cache(storage_settings);
+            let factory = factory.with_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Before(100)),
+                ..Default::default()
+            });
+
+            let tip_block = 200u64;
+            let first_block = 1u64;
+
+            // create chain
+            let provider_rw = factory.provider_rw().unwrap();
+            insert_blocks(&provider_rw, tip_block, 1);
+            provider_rw.commit().unwrap();
+
+            write_receipts(
+                factory.provider_rw().unwrap().with_minimum_pruning_distance(100),
+                first_block,
+            );
+            write_receipts(
+                factory.provider_rw().unwrap().with_minimum_pruning_distance(100),
+                tip_block - 1,
+            );
+
+            let provider = factory.provider().unwrap();
+
+            for (block, num_receipts) in [(0, 0), (tip_block - 1, 1)] {
+                assert!(provider
+                    .receipts_by_block(block.into())
+                    .unwrap()
+                    .is_some_and(|r| r.len() == num_receipts));
+            }
+        }
+
+        // Static files mode
+        {
+            let factory = create_test_provider_factory();
+            let storage_settings = StorageSettings::legacy().with_receipts_in_static_files(true);
+            factory.set_storage_settings_cache(storage_settings);
+            let factory = factory.with_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Before(2)),
+                ..Default::default()
+            });
+
+            let tip_block = 200u64;
+
+            // create chain
+            let provider_rw = factory.provider_rw().unwrap();
+            insert_blocks(&provider_rw, tip_block, 1);
+            provider_rw.commit().unwrap();
+
+            // Attempt to write receipts for block 0 and 1 (should be skipped)
+            write_receipts(factory.provider_rw().unwrap().with_minimum_pruning_distance(100), 0);
+            write_receipts(factory.provider_rw().unwrap().with_minimum_pruning_distance(100), 1);
+
+            assert!(factory
+                .static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none(),);
+            assert!(factory
+                .static_file_provider()
+                .get_highest_static_file_block(StaticFileSegment::Receipts)
+                .is_some_and(|b| b == 1),);
+
+            // Since we have prune mode Before(2), the next receipt (block 2) should be written to
+            // static files.
+            write_receipts(factory.provider_rw().unwrap().with_minimum_pruning_distance(100), 2);
+            assert!(factory
+                .static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_some_and(|num| num == 2),);
+
+            // After having a receipt already in static files, attempt to skip the next receipt by
+            // changing the prune mode. It should NOT skip it and should still write the receipt,
+            // since static files do not support gaps.
+            let factory = factory.with_prune_modes(PruneModes {
+                receipts: Some(PruneMode::Before(100)),
+                ..Default::default()
+            });
+            let provider_rw = factory.provider_rw().unwrap().with_minimum_pruning_distance(1);
+            assert!(PruneMode::Distance(1).should_prune(3, tip_block));
+            write_receipts(provider_rw, 3);
+
+            // Ensure we can only fetch the 2 last receipts.
+            //
+            // Test setup only has 1 tx per block and each receipt has its cumulative_gas_used set
+            // to the block number it belongs to easily identify and assert.
+            let provider = factory.provider().unwrap();
+            assert!(EitherWriter::receipts_destination(&provider).is_static_file());
+            for (num, num_receipts) in [(0, 0), (1, 0), (2, 1), (3, 1)] {
+                assert!(provider
+                    .receipts_by_block(num.into())
+                    .unwrap()
+                    .is_some_and(|r| r.len() == num_receipts));
+
+                let receipt = provider.receipt(num).unwrap();
+                if num_receipts > 0 {
+                    assert!(receipt.is_some_and(|r| r.cumulative_gas_used == num));
+                } else {
+                    assert!(receipt.is_none());
+                }
+            }
+        }
     }
 }

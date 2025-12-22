@@ -1,10 +1,10 @@
 //! Configured sparse trie enum for switching between serial and parallel implementations.
 
 use alloy_primitives::B256;
-use reth_trie::{Nibbles, TrieNode};
+use reth_trie::{Nibbles, ProofTrieNode, TrieMasks, TrieNode};
 use reth_trie_sparse::{
     errors::SparseTrieResult, provider::TrieNodeProvider, LeafLookup, LeafLookupError,
-    RevealedSparseNode, SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates, TrieMasks,
+    SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates,
 };
 use reth_trie_sparse_parallel::ParallelSparseTrie;
 use std::borrow::Cow;
@@ -83,7 +83,7 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         }
     }
 
-    fn reveal_nodes(&mut self, nodes: Vec<RevealedSparseNode>) -> SparseTrieResult<()> {
+    fn reveal_nodes(&mut self, nodes: Vec<ProofTrieNode>) -> SparseTrieResult<()> {
         match self {
             Self::Serial(trie) => trie.reveal_nodes(nodes),
             Self::Parallel(trie) => trie.reveal_nodes(nodes),
@@ -172,18 +172,17 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
             Self::Parallel(trie) => trie.updates_ref(),
         }
     }
-
-    fn node_capacity(&self) -> usize {
+    fn shrink_nodes_to(&mut self, size: usize) {
         match self {
-            Self::Serial(trie) => trie.node_capacity(),
-            Self::Parallel(trie) => trie.node_capacity(),
+            Self::Serial(trie) => trie.shrink_nodes_to(size),
+            Self::Parallel(trie) => trie.shrink_nodes_to(size),
         }
     }
 
-    fn value_capacity(&self) -> usize {
+    fn shrink_values_to(&mut self, size: usize) {
         match self {
-            Self::Serial(trie) => trie.value_capacity(),
-            Self::Parallel(trie) => trie.value_capacity(),
+            Self::Serial(trie) => trie.shrink_values_to(size),
+            Self::Parallel(trie) => trie.shrink_values_to(size),
         }
     }
 }

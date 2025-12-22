@@ -3,7 +3,7 @@ use alloy_genesis::ChainConfig;
 use alloy_json_rpc::RpcObject;
 use alloy_primitives::{Address, Bytes, B256};
 use alloy_rpc_types_debug::ExecutionWitness;
-use alloy_rpc_types_eth::{Block, Bundle, StateContext};
+use alloy_rpc_types_eth::{Bundle, StateContext};
 use alloy_rpc_types_trace::geth::{
     BlockTraceResult, GethDebugTracingCallOptions, GethDebugTracingOptions, GethTrace, TraceResult,
 };
@@ -38,7 +38,7 @@ pub trait DebugApi<TxReq: RpcObject> {
 
     /// Returns an array of recent bad blocks that the client has seen on the network.
     #[method(name = "getBadBlocks")]
-    async fn bad_blocks(&self) -> RpcResult<Vec<Block>>;
+    async fn bad_blocks(&self) -> RpcResult<Vec<serde_json::Value>>;
 
     /// Returns the structured logs created during the execution of EVM between two blocks
     /// (excluding start) as a JSON object.
@@ -222,7 +222,7 @@ pub trait DebugApi<TxReq: RpcObject> {
 
     /// Returns the raw value of a key stored in the database.
     #[method(name = "dbGet")]
-    async fn debug_db_get(&self, key: String) -> RpcResult<()>;
+    async fn debug_db_get(&self, key: String) -> RpcResult<Option<Bytes>>;
 
     /// Retrieves the state that corresponds to the block number and returns a list of accounts
     /// (including storage and code).

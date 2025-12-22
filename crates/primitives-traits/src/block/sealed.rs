@@ -179,7 +179,7 @@ impl<B: Block> SealedBlock<B> {
 
     /// Recovers all senders from the transactions in the block.
     ///
-    /// Returns `None` if any of the transactions fail to recover the sender.
+    /// Returns an error if any of the transactions fail to recover the sender.
     pub fn senders(&self) -> Result<Vec<Address>, RecoveryError> {
         self.body().recover_signers()
     }

@@ -1,4 +1,5 @@
 use alloc::vec::Vec;
+use core::cmp::Ordering;
 
 /// Helper function to extend a sorted vector with another sorted vector.
 /// Values from `other` take precedence for duplicate keys.
@@ -11,7 +12,7 @@ use alloc::vec::Vec;
 /// 5. Appending and re-sorting only if new items were added
 pub(crate) fn extend_sorted_vec<K, V>(target: &mut Vec<(K, V)>, other: &[(K, V)])
 where
-    K: Clone + Ord + core::hash::Hash + Eq,
+    K: Clone + Ord,
     V: Clone,
 {
     if other.is_empty() {
@@ -24,7 +25,6 @@ where
     // Iterate through target and update/collect items from other
     for target_item in target.iter_mut() {
         while let Some(other_item) = other_iter.peek() {
-            use core::cmp::Ordering;
             match other_item.0.cmp(&target_item.0) {
                 Ordering::Less => {
                     // Other item comes before current target item, collect it
@@ -49,5 +49,18 @@ where
         target.extend(to_insert);
         target.extend(other_iter.cloned());
         target.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_extend_sorted_vec() {
+        let mut target = vec![(1, "a"), (3, "c")];
+        let other = vec![(2, "b"), (3, "c_new")];
+        extend_sorted_vec(&mut target, &other);
+        assert_eq!(target, vec![(1, "a"), (2, "b"), (3, "c_new")]);
     }
 }

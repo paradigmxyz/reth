@@ -6,7 +6,7 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_trie::{
-    trie_cursor::{TrieCursor, TrieCursorFactory},
+    trie_cursor::{TrieCursor, TrieCursorFactory, TrieStorageCursor},
     updates::StorageTrieUpdatesSorted,
     BranchNodeCompact, Nibbles, StorageTrieEntry, StoredNibbles, StoredNibblesSubKey,
 };
@@ -26,18 +26,24 @@ impl<TX> TrieCursorFactory for DatabaseTrieCursorFactory<&TX>
 where
     TX: DbTx,
 {
-    type AccountTrieCursor = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>;
-    type StorageTrieCursor =
-        DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>;
+    type AccountTrieCursor<'a>
+        = DatabaseAccountTrieCursor<<TX as DbTx>::Cursor<tables::AccountsTrie>>
+    where
+        Self: 'a;
 
-    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor, DatabaseError> {
+    type StorageTrieCursor<'a>
+        = DatabaseStorageTrieCursor<<TX as DbTx>::DupCursor<tables::StoragesTrie>>
+    where
+        Self: 'a;
+
+    fn account_trie_cursor(&self) -> Result<Self::AccountTrieCursor<'_>, DatabaseError> {
         Ok(DatabaseAccountTrieCursor::new(self.0.cursor_read::<tables::AccountsTrie>()?))
     }
 
     fn storage_trie_cursor(
         &self,
         hashed_address: B256,
-    ) -> Result<Self::StorageTrieCursor, DatabaseError> {
+    ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         Ok(DatabaseStorageTrieCursor::new(
             self.0.cursor_dup_read::<tables::StoragesTrie>()?,
             hashed_address,
@@ -84,6 +90,10 @@ where
     /// Retrieves the current key in the cursor.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.0.current()?.map(|(k, _)| k.0))
+    }
+
+    fn reset(&mut self) {
+        // No-op for database cursors
     }
 }
 
@@ -183,6 +193,19 @@ where
     /// Retrieves the current value in the storage trie cursor.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.cursor.current()?.map(|(_, v)| v.nibbles.0))
+    }
+
+    fn reset(&mut self) {
+        // No-op for database cursors
+    }
+}
+
+impl<C> TrieStorageCursor for DatabaseStorageTrieCursor<C>
+where
+    C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send + Sync,
+{
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.hashed_address = hashed_address;
     }
 }
 

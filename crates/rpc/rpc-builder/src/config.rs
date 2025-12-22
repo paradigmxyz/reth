@@ -94,6 +94,7 @@ impl RethRpcServerConfig for RpcServerArgs {
     fn eth_config(&self) -> EthConfig {
         EthConfig::default()
             .max_tracing_requests(self.rpc_max_tracing_requests)
+            .max_blocking_io_requests(self.rpc_max_blocking_io_requests)
             .max_trace_filter_blocks(self.rpc_max_trace_filter_blocks)
             .max_blocks_per_filter(self.rpc_max_blocks_per_filter.unwrap_or_max())
             .max_logs_per_response(self.rpc_max_logs_per_response.unwrap_or_max() as usize)
@@ -105,6 +106,7 @@ impl RethRpcServerConfig for RpcServerArgs {
             .proof_permits(self.rpc_proof_permits)
             .pending_block_kind(self.rpc_pending_block)
             .raw_tx_forwarder(self.rpc_forwarder.clone())
+            .rpc_evm_memory_limit(self.rpc_evm_memory_limit)
     }
 
     fn flashbots_config(&self) -> ValidationApiConfig {
@@ -137,7 +139,7 @@ impl RethRpcServerConfig for RpcServerArgs {
 
     fn transport_rpc_module_config(&self) -> TransportRpcModuleConfig {
         let mut config = TransportRpcModuleConfig::default()
-            .with_config(RpcModuleConfig::new(self.eth_config(), self.flashbots_config()));
+            .with_config(RpcModuleConfig::new(self.eth_config()));
 
         if self.http {
             config = config.with_http(
@@ -186,6 +188,13 @@ impl RethRpcServerConfig for RpcServerArgs {
             warn!(
                 target: "reth::cli",
                 "The --http.api flag is set but --http is not enabled. HTTP RPC API will not be exposed."
+            );
+        }
+
+        if self.ws_api.is_some() && !self.ws {
+            warn!(
+                target: "reth::cli",
+                "The --ws.api flag is set but --ws is not enabled. WS RPC API will not be exposed."
             );
         }
 

@@ -85,7 +85,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         evm_config: impl ConfigureEvm<Primitives = N::Primitives> + 'static,
     ) -> Result<Pipeline<N>, eyre::Error> {
         let stage_conf = &config.stages;
-        let prune_modes = config.prune.clone().map(|prune| prune.segments).unwrap_or_default();
+        let prune_modes = config.prune.segments.clone();
 
         let (tip_tx, tip_rx) = watch::channel(B256::ZERO);
 

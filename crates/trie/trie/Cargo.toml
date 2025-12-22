@@ -42,6 +42,7 @@ metrics = { workspace = true, optional = true }
 
 # `test-utils` feature
 triehash = { workspace = true, optional = true }
+parking_lot = { workspace = true, optional = true }
 
 [dev-dependencies]
 # reth
@@ -63,6 +64,7 @@ parking_lot.workspace = true
 pretty_assertions.workspace = true
 proptest-arbitrary-interop.workspace = true
 proptest.workspace = true
+rand.workspace = true
 
 [features]
 metrics = ["reth-metrics", "dep:metrics"]
@@ -83,9 +85,11 @@ serde = [
     "revm-state/serde",
     "parking_lot/serde",
     "reth-ethereum-primitives/serde",
+    "rand/serde",
 ]
 test-utils = [
     "triehash",
+    "parking_lot",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
@@ -99,5 +103,10 @@ harness = false
 
 [[bench]]
 name = "trie_root"
+required-features = ["test-utils"]
+harness = false
+
+[[bench]]
+name = "proof_v2"
 required-features = ["test-utils"]
 harness = false

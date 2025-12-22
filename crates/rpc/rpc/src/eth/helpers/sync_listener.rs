@@ -26,10 +26,10 @@ impl<N, St> SyncListener<N, St> {
     }
 }
 
-impl<N, St, Out> Future for SyncListener<N, St>
+impl<N, St> Future for SyncListener<N, St>
 where
     N: NetworkInfo,
-    St: Stream<Item = Out> + Unpin,
+    St: Stream + Unpin,
 {
     type Output = ();
 

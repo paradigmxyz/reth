@@ -5,6 +5,7 @@ use alloy_rpc_types_eth::{
 };
 use alloy_serde::JsonStorageKey;
 use jsonrpsee::core::RpcResult as Result;
+use reth_primitives_traits::TxTy;
 use reth_rpc_api::{EngineEthApiServer, EthApiServer};
 use reth_rpc_convert::RpcTxReq;
 /// Re-export for convenience
@@ -49,6 +50,7 @@ where
             RpcBlock<Eth::NetworkTypes>,
             RpcReceipt<Eth::NetworkTypes>,
             RpcHeader<Eth::NetworkTypes>,
+            TxTy<Eth::Primitives>,
         > + FullEthApiTypes,
     EthFilter: EngineEthFilter,
 {

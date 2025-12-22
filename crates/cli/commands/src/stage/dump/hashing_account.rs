@@ -6,7 +6,7 @@ use reth_db_api::{database::Database, table::TableImporter, tables};
 use reth_db_common::DbTool;
 use reth_node_core::dirs::{ChainPath, DataDirPath};
 use reth_provider::{
-    providers::{ProviderNodeTypes, StaticFileProvider},
+    providers::{ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     DatabaseProviderFactory, ProviderFactory,
 };
 use reth_stages::{stages::AccountHashingStage, Stage, StageCheckpoint, UnwindInput};
@@ -39,7 +39,8 @@ pub(crate) async fn dump_hashing_account_stage<N: ProviderNodeTypes<DB = Arc<Dat
                 Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
-            ),
+                RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+            )?,
             to,
             from,
         )?;

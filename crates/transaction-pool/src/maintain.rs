@@ -10,8 +10,8 @@ use crate::{
 };
 use alloy_consensus::{transaction::TxHashRef, BlockHeader, Typed2718};
 use alloy_eips::{BlockNumberOrTag, Decodable2718, Encodable2718};
-use alloy_primitives::{Address, BlockHash, BlockNumber};
-use alloy_rlp::{Bytes, Encodable};
+use alloy_primitives::{Address, BlockHash, BlockNumber, Bytes};
+use alloy_rlp::Encodable;
 use futures_util::{
     future::{BoxFuture, Fuse, FusedFuture},
     FutureExt, Stream, StreamExt,
@@ -269,17 +269,26 @@ pub async fn maintain_transaction_pool<N, Client, P, St, Tasks>(
                 }
             }
             _ = stale_eviction_interval.tick() => {
-                let stale_txs: Vec<_> = pool
-                    .queued_transactions()
+                let queued = pool
+                    .queued_transactions();
+                let mut stale_blobs = Vec::new();
+                let now = std::time::Instant::now();
+                let stale_txs: Vec<_> = queued
                     .into_iter()
                     .filter(|tx| {
                         // filter stale transactions based on config
-                        (tx.origin.is_external() || config.no_local_exemptions) && tx.timestamp.elapsed() > config.max_tx_lifetime
+                        (tx.origin.is_external() || config.no_local_exemptions) && now - tx.timestamp > config.max_tx_lifetime
                     })
-                    .map(|tx| *tx.hash())
+                    .map(|tx| {
+                        if tx.is_eip4844() {
+                            stale_blobs.push(*tx.hash());
+                        }
+                        *tx.hash()
+                    })
                     .collect();
                 debug!(target: "txpool", count=%stale_txs.len(), "removing stale transactions");
                 pool.remove_transactions(stale_txs);
+                pool.delete_blobs(stale_blobs);
             }
         }
         // handle the result of the account reload

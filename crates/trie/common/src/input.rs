@@ -1,4 +1,9 @@
-use crate::{prefix_set::TriePrefixSetsMut, updates::TrieUpdates, HashedPostState};
+use crate::{
+    prefix_set::TriePrefixSetsMut,
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted,
+};
+use alloc::sync::Arc;
 
 /// Inputs for trie-related computations.
 #[derive(Default, Debug, Clone)]
@@ -41,10 +46,21 @@ impl TrieInput {
         input
     }
 
+    /// Create new trie input from the provided sorted blocks, from oldest to newest.
+    /// Converts sorted types to unsorted for aggregation.
+    pub fn from_blocks_sorted<'a>(
+        blocks: impl IntoIterator<Item = (&'a HashedPostStateSorted, &'a TrieUpdatesSorted)>,
+    ) -> Self {
+        let mut input = Self::default();
+        for (hashed_state, trie_updates) in blocks {
+            // Extend directly from sorted types, avoiding intermediate HashMap allocations
+            input.nodes.extend_from_sorted(trie_updates);
+            input.state.extend_from_sorted(hashed_state);
+        }
+        input
+    }
+
     /// Extend the trie input with the provided blocks, from oldest to newest.
-    ///
-    /// For blocks with missing trie updates, the trie input will be extended with prefix sets
-    /// constructed from the state of this block and the state itself, **without** trie updates.
     pub fn extend_with_blocks<'a>(
         &mut self,
         blocks: impl IntoIterator<Item = (&'a HashedPostState, &'a TrieUpdates)>,
@@ -119,3 +135,40 @@ impl TrieInput {
         self
     }
 }
+
+/// Sorted variant of [`TrieInput`] for efficient proof generation.
+///
+/// This type holds sorted versions of trie data structures, which eliminates the need
+/// for expensive sorting operations during multiproof generation.
+#[derive(Default, Debug, Clone)]
+pub struct TrieInputSorted {
+    /// Sorted cached in-memory intermediate trie nodes.
+    pub nodes: Arc<TrieUpdatesSorted>,
+    /// Sorted in-memory overlay hashed state.
+    pub state: Arc<HashedPostStateSorted>,
+    /// Prefix sets for computation.
+    pub prefix_sets: TriePrefixSetsMut,
+}
+
+impl TrieInputSorted {
+    /// Create new sorted trie input.
+    pub const fn new(
+        nodes: Arc<TrieUpdatesSorted>,
+        state: Arc<HashedPostStateSorted>,
+        prefix_sets: TriePrefixSetsMut,
+    ) -> Self {
+        Self { nodes, state, prefix_sets }
+    }
+
+    /// Create from unsorted [`TrieInput`] by sorting.
+    pub fn from_unsorted(input: TrieInput) -> Self {
+        Self {
+            nodes: Arc::new(input.nodes.into_sorted()),
+            state: Arc::new(input.state.into_sorted()),
+            prefix_sets: input.prefix_sets,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {}

@@ -1,4 +1,5 @@
-use super::{BranchNodeCompact, Nibbles, StoredNibblesSubKey};
+use super::{BranchNodeCompact, StoredNibblesSubKey};
+use reth_primitives_traits::ValueWithSubKey;
 
 /// Account storage trie node.
 ///
@@ -10,6 +11,14 @@ pub struct StorageTrieEntry {
     pub nibbles: StoredNibblesSubKey,
     /// Encoded node.
     pub node: BranchNodeCompact,
+}
+
+impl ValueWithSubKey for StorageTrieEntry {
+    type SubKey = StoredNibblesSubKey;
+
+    fn get_subkey(&self) -> Self::SubKey {
+        self.nibbles.clone()
+    }
 }
 
 // NOTE: Removing reth_codec and manually encode subkey
@@ -46,6 +55,14 @@ pub struct TrieChangeSetsEntry {
     pub node: Option<BranchNodeCompact>,
 }
 
+impl ValueWithSubKey for TrieChangeSetsEntry {
+    type SubKey = StoredNibblesSubKey;
+
+    fn get_subkey(&self) -> Self::SubKey {
+        self.nibbles.clone()
+    }
+}
+
 #[cfg(any(test, feature = "reth-codec"))]
 impl reth_codecs::Compact for TrieChangeSetsEntry {
     fn to_compact<B>(&self, buf: &mut B) -> usize
@@ -61,7 +78,7 @@ impl reth_codecs::Compact for TrieChangeSetsEntry {
         if len == 0 {
             // Return an empty entry without trying to parse anything
             return (
-                Self { nibbles: StoredNibblesSubKey::from(Nibbles::default()), node: None },
+                Self { nibbles: StoredNibblesSubKey::from(super::Nibbles::default()), node: None },
                 buf,
             )
         }

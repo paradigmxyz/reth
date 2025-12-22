@@ -1,7 +1,7 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::SparseTrieInterface,
-    RevealedSparseNode, SerialSparseTrie, SparseTrie, TrieMasks,
+    SerialSparseTrie, SparseTrie,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -15,8 +15,9 @@ use reth_primitives_traits::Account;
 use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, RlpNode, StorageMultiProof,
-    TrieAccount, TrieMask, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, ProofTrieNode, RlpNode,
+    StorageMultiProof, TrieAccount, TrieMask, TrieMasks, TrieNode, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use tracing::{instrument, trace};
 
@@ -41,6 +42,32 @@ where
         trie.storage.clear();
         trie.account_rlp_buf.clear();
         Self(trie)
+    }
+
+    /// Shrink the cleared sparse trie's capacity to the given node and value size.
+    /// This helps reduce memory usage when the trie has excess capacity.
+    /// The capacity is distributed equally across the account trie and all storage tries.
+    pub fn shrink_to(&mut self, node_size: usize, value_size: usize) {
+        // Count total number of storage tries (active + cleared + default)
+        let storage_tries_count = self.0.storage.tries.len() + self.0.storage.cleared_tries.len();
+
+        // Total tries = 1 account trie + all storage tries
+        let total_tries = 1 + storage_tries_count;
+
+        // Distribute capacity equally among all tries
+        let node_size_per_trie = node_size / total_tries;
+        let value_size_per_trie = value_size / total_tries;
+
+        // Shrink the account trie
+        self.0.state.shrink_nodes_to(node_size_per_trie);
+        self.0.state.shrink_values_to(value_size_per_trie);
+
+        // Give storage tries the remaining capacity after account trie allocation
+        let storage_node_size = node_size.saturating_sub(node_size_per_trie);
+        let storage_value_size = value_size.saturating_sub(value_size_per_trie);
+
+        // Shrink all storage tries (they will redistribute internally)
+        self.0.storage.shrink_to(storage_node_size, storage_value_size);
     }
 
     /// Returns the cleared [`SparseStateTrie`], consuming this instance.
@@ -249,13 +276,12 @@ where
         {
             use rayon::iter::{ParallelBridge, ParallelIterator};
 
-            let (tx, rx) = std::sync::mpsc::channel();
             let retain_updates = self.retain_updates;
 
             // Process all storage trie revealings in parallel, having first removed the
             // `reveal_nodes` tracking and `SparseTrie`s for each account from their HashMaps.
             // These will be returned after processing.
-            storages
+            let results: Vec<_> = storages
                 .into_iter()
                 .map(|(account, storage_subtree)| {
                     let revealed_nodes = self.storage.take_or_create_revealed_paths(&account);
@@ -274,14 +300,12 @@ where
 
                     (account, revealed_nodes, trie, result)
                 })
-                .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
-
-            drop(tx);
+                .collect();
 
             // Return `revealed_nodes` and `SparseTrie` for each account, incrementing metrics and
             // returning the last error seen if any.
             let mut any_err = Ok(());
-            for (account, revealed_nodes, trie, result) in rx {
+            for (account, revealed_nodes, trie, result) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 if let Ok(_metric_values) = result {
@@ -585,17 +609,9 @@ where
         &mut self,
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<B256> {
-        // record revealed node metrics and capacity metrics
+        // record revealed node metrics
         #[cfg(feature = "metrics")]
-        {
-            self.metrics.record();
-            self.metrics.set_node_capacity(self.node_capacity());
-            self.metrics.set_value_capacity(self.value_capacity());
-            self.metrics.set_storage_trie_metrics(
-                self.storage.cleared_tries.len(),
-                self.storage.tries.len(),
-            );
-        }
+        self.metrics.record();
 
         Ok(self.revealed_trie_mut(provider_factory)?.root())
     }
@@ -606,17 +622,9 @@ where
         &mut self,
         provider_factory: impl TrieNodeProviderFactory,
     ) -> SparseStateTrieResult<(B256, TrieUpdates)> {
-        // record revealed node metrics and capacity metrics
+        // record revealed node metrics
         #[cfg(feature = "metrics")]
-        {
-            self.metrics.record();
-            self.metrics.set_node_capacity(self.node_capacity());
-            self.metrics.set_value_capacity(self.value_capacity());
-            self.metrics.set_storage_trie_metrics(
-                self.storage.cleared_tries.len(),
-                self.storage.tries.len(),
-            );
-        }
+        self.metrics.record();
 
         let storage_tries = self.storage_trie_updates();
         let revealed = self.revealed_trie_mut(provider_factory)?;
@@ -705,7 +713,7 @@ where
     ///
     /// Returns false if the new account info and storage trie are empty, indicating the account
     /// leaf should be removed.
-    #[instrument(target = "trie::sparse", skip_all)]
+    #[instrument(level = "trace", target = "trie::sparse", skip_all)]
     pub fn update_account(
         &mut self,
         address: B256,
@@ -821,16 +829,6 @@ where
         storage_trie.remove_leaf(slot, provider)?;
         Ok(())
     }
-
-    /// The sum of the account trie's node capacity and the storage tries' node capacity
-    pub fn node_capacity(&self) -> usize {
-        self.state.node_capacity() + self.storage.total_node_capacity()
-    }
-
-    /// The sum of the account trie's value capacity and the storage tries' value capacity
-    pub fn value_capacity(&self) -> usize {
-        self.state.value_capacity() + self.storage.total_value_capacity()
-    }
 }
 
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
@@ -859,6 +857,31 @@ impl<S: SparseTrieInterface> StorageTries<S> {
             set.clear();
             set
         }));
+    }
+
+    /// Shrinks the capacity of all storage tries (active, cleared, and default) to the given sizes.
+    /// The capacity is distributed equally among all tries that have allocations.
+    fn shrink_to(&mut self, node_size: usize, value_size: usize) {
+        // Count total number of tries with capacity (active + cleared + default)
+        let active_count = self.tries.len();
+        let cleared_count = self.cleared_tries.len();
+        let total_tries = 1 + active_count + cleared_count;
+
+        // Distribute capacity equally among all tries
+        let node_size_per_trie = node_size / total_tries;
+        let value_size_per_trie = value_size / total_tries;
+
+        // Shrink active storage tries
+        for trie in self.tries.values_mut() {
+            trie.shrink_nodes_to(node_size_per_trie);
+            trie.shrink_values_to(value_size_per_trie);
+        }
+
+        // Shrink cleared storage tries
+        for trie in &mut self.cleared_tries {
+            trie.shrink_nodes_to(node_size_per_trie);
+            trie.shrink_values_to(value_size_per_trie);
+        }
     }
 }
 
@@ -906,46 +929,6 @@ impl<S: SparseTrieInterface + Clone> StorageTries<S> {
             .remove(account)
             .unwrap_or_else(|| self.cleared_revealed_paths.pop().unwrap_or_default())
     }
-
-    /// Sums the total node capacity in `cleared_tries`
-    fn total_cleared_tries_node_capacity(&self) -> usize {
-        self.cleared_tries.iter().map(|trie| trie.node_capacity()).sum()
-    }
-
-    /// Sums the total value capacity in `cleared_tries`
-    fn total_cleared_tries_value_capacity(&self) -> usize {
-        self.cleared_tries.iter().map(|trie| trie.value_capacity()).sum()
-    }
-
-    /// Calculates the sum of the active storage trie node capacity, ie the tries in `tries`
-    fn total_active_tries_node_capacity(&self) -> usize {
-        self.tries.values().map(|trie| trie.node_capacity()).sum()
-    }
-
-    /// Calculates the sum of the active storage trie value capacity, ie the tries in `tries`
-    fn total_active_tries_value_capacity(&self) -> usize {
-        self.tries.values().map(|trie| trie.value_capacity()).sum()
-    }
-
-    /// Calculates the sum of active and cleared storage trie node capacity, i.e. the sum of
-    /// * [`StorageTries::total_active_tries_node_capacity`], and
-    /// * [`StorageTries::total_cleared_tries_node_capacity`]
-    /// * the default trie's node capacity
-    fn total_node_capacity(&self) -> usize {
-        self.total_active_tries_node_capacity() +
-            self.total_cleared_tries_node_capacity() +
-            self.default_trie.node_capacity()
-    }
-
-    /// Calculates the sum of active and cleared storage trie value capacity, i.e. the sum of
-    /// * [`StorageTries::total_active_tries_value_capacity`], and
-    /// * [`StorageTries::total_cleared_tries_value_capacity`], and
-    /// * the default trie's value capacity
-    fn total_value_capacity(&self) -> usize {
-        self.total_active_tries_value_capacity() +
-            self.total_cleared_tries_value_capacity() +
-            self.default_trie.value_capacity()
-    }
 }
 
 #[derive(Debug, PartialEq, Eq, Default)]
@@ -960,9 +943,9 @@ struct ProofNodesMetricValues {
 #[derive(Debug, PartialEq, Eq)]
 struct FilterMappedProofNodes {
     /// Root node which was pulled out of the original node set to be handled specially.
-    root_node: Option<RevealedSparseNode>,
+    root_node: Option<ProofTrieNode>,
     /// Filtered, decoded and unsorted proof nodes. Root node is removed.
-    nodes: Vec<RevealedSparseNode>,
+    nodes: Vec<ProofTrieNode>,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
     new_nodes: usize,
@@ -970,7 +953,7 @@ struct FilterMappedProofNodes {
     metric_values: ProofNodesMetricValues,
 }
 
-/// Filters the decoded nodes that are already revealed, maps them to `RevealedSparseNodes`,
+/// Filters the decoded nodes that are already revealed, maps them to `SparseTrieNode`s,
 /// separates the root node if present, and returns additional information about the number of
 /// total, skipped, and new nodes.
 fn filter_map_revealed_nodes(
@@ -1021,7 +1004,7 @@ fn filter_map_revealed_nodes(
             _ => TrieMasks::none(),
         };
 
-        let node = RevealedSparseNode { path, node: proof_node, masks };
+        let node = ProofTrieNode { path, node: proof_node, masks };
 
         if is_root {
             // Perform sanity check.
@@ -1397,12 +1380,12 @@ mod tests {
         assert_eq!(
             decoded,
             FilterMappedProofNodes {
-                root_node: Some(RevealedSparseNode {
+                root_node: Some(ProofTrieNode {
                     path: Nibbles::default(),
                     node: branch,
                     masks: TrieMasks::none(),
                 }),
-                nodes: vec![RevealedSparseNode {
+                nodes: vec![ProofTrieNode {
                     path: Nibbles::from_nibbles([0x1]),
                     node: leaf,
                     masks: TrieMasks::none(),

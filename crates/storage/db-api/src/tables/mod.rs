@@ -94,7 +94,10 @@ pub trait TableViewer<R> {
     /// Operate on the dupsort table in a generic way.
     ///
     /// By default, the `view` function is invoked unless overridden.
-    fn view_dupsort<T: DupSort>(&self) -> Result<R, Self::Error> {
+    fn view_dupsort<T: DupSort>(&self) -> Result<R, Self::Error>
+    where
+        T::Value: reth_primitives_traits::ValueWithSubKey<SubKey = T::SubKey>,
+    {
         self.view::<T>()
     }
 }
@@ -308,7 +311,8 @@ tables! {
         type Value = HeaderHash;
     }
 
-    /// Stores the total difficulty from a block header.
+    /// Stores the total difficulty from block headers.
+    /// Note: Deprecated.
     table HeaderTerminalDifficulties {
         type Key = BlockNumber;
         type Value = CompactU256;
@@ -538,6 +542,13 @@ tables! {
     table ChainState {
         type Key = ChainStateKey;
         type Value = BlockNumber;
+    }
+
+    /// Stores generic node metadata as key-value pairs.
+    /// Can store feature flags, configuration markers, and other node-specific data.
+    table Metadata {
+        type Key = String;
+        type Value = Vec<u8>;
     }
 }
 

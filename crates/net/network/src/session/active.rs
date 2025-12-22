@@ -25,10 +25,10 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
-    message::{EthBroadcastMessage, MessageError, RequestPair},
+    message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{message::RequestPair, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::RequestError;
@@ -237,16 +237,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::NewPooledTransactionHashes68(msg) => {
-                if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
-                    return OnIncomingMessageOutcome::BadMessage {
-                        error: EthStreamError::TransactionHashesInvalidLenOfFields {
-                            hashes_len: msg.hashes.len(),
-                            types_len: msg.types.len(),
-                            sizes_len: msg.sizes.len(),
-                        },
-                        message: EthMessage::NewPooledTransactionHashes68(msg),
-                    }
-                }
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::GetBlockHeaders(req) => {
@@ -280,11 +270,17 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     on_request!(req, Receipts, GetReceipts)
                 }
             }
+            EthMessage::GetReceipts70(req) => {
+                on_request!(req, Receipts70, GetReceipts70)
+            }
             EthMessage::Receipts(resp) => {
                 on_response!(resp, GetReceipts)
             }
             EthMessage::Receipts69(resp) => {
                 on_response!(resp, GetReceipts69)
+            }
+            EthMessage::Receipts70(resp) => {
+                on_response!(resp, GetReceipts70)
             }
             EthMessage::BlockRangeUpdate(msg) => {
                 // Validate that earliest <= latest according to the spec
@@ -321,9 +317,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle an internal peer request that will be sent to the remote.
     fn on_internal_peer_request(&mut self, request: PeerRequest<N>, deadline: Instant) {
         let request_id = self.next_id();
-
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let msg = request.create_request_message(request_id);
+        let msg = request.create_request_message(request_id).map_versioned(self.conn.version());
+
         self.queued_outgoing.push_back(msg.into());
         let req = InflightRequest {
             request: RequestState::Waiting(request),

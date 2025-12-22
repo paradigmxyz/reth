@@ -5,9 +5,11 @@ use jsonrpsee::{
     server::middleware::rpc::RpcServiceT,
     types::Request,
 };
+use reth_ethereum_primitives::TransactionSigned;
 use reth_rpc_builder::{RpcServerConfig, TransportRpcModuleConfig};
 use reth_rpc_eth_api::EthApiClient;
 use reth_rpc_server_types::RpcModuleSelection;
+use reth_tokio_util::EventSender;
 use std::{
     future::Future,
     sync::{
@@ -72,8 +74,11 @@ where
 async fn test_rpc_middleware() {
     let builder = test_rpc_builder();
     let eth_api = builder.bootstrap_eth_api();
-    let modules =
-        builder.build(TransportRpcModuleConfig::set_http(RpcModuleSelection::All), eth_api);
+    let modules = builder.build(
+        TransportRpcModuleConfig::set_http(RpcModuleSelection::All),
+        eth_api,
+        EventSender::new(1),
+    );
 
     let mylayer = MyMiddlewareLayer::default();
 
@@ -85,7 +90,7 @@ async fn test_rpc_middleware() {
         .unwrap();
 
     let client = handle.http_client().unwrap();
-    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header>::protocol_version(
+    EthApiClient::<TransactionRequest, Transaction, Block, Receipt, Header, TransactionSigned>::protocol_version(
         &client,
     )
     .await

@@ -29,6 +29,52 @@ async fn txpool_listener_by_hash() {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn txpool_listener_pending_promotions_propagate_only() {
+    let txpool =
+        TestPoolBuilder::default().with_validator(MockTransactionValidator::no_propagate_local());
+    let mut mock_tx_factory = MockTransactionFactory::default();
+
+    // Create two transactions from the same sender with nonces 0 (local, non-propagatable) and 1
+    let mut tx_local = mock_tx_factory.create_eip1559();
+    let mut tx_external = mock_tx_factory.create_eip1559();
+
+    // Ensure same sender
+    let sender = *tx_local.transaction.get_sender();
+    tx_external.transaction.set_sender(sender);
+
+    // Set explicit nonces to create a nonce gap scenario
+    tx_local.transaction.set_nonce(0);
+    tx_external.transaction.set_nonce(1);
+
+    let hash_local = *tx_local.transaction.hash();
+    let hash_external = *tx_external.transaction.hash();
+
+    // Listeners: propagate-only and all
+    let mut listener_network = txpool.pending_transactions_listener();
+    let mut listener_all = txpool.pending_transactions_listener_for(TransactionListenerKind::All);
+
+    // Insert the higher-nonce external tx first; it should be queued due to nonce gap
+    let res =
+        txpool.add_transaction(TransactionOrigin::External, tx_external.transaction.clone()).await;
+    assert!(res.is_ok());
+
+    // Now insert the local tx with nonce 0; it becomes pending and should promote the external tx
+    let res = txpool.add_transaction(TransactionOrigin::Local, tx_local.transaction.clone()).await;
+    assert!(res.is_ok());
+
+    // All-listener should receive both pending hashes in order: inserted local first, then promoted
+    // external
+    let inserted_all_first = listener_all.recv().await.unwrap();
+    let inserted_all_second = listener_all.recv().await.unwrap();
+    assert_eq!(inserted_all_first, hash_local);
+    assert_eq!(inserted_all_second, hash_external);
+
+    // Propagate-only listener should receive only the external tx (local is non-propagatable)
+    let inserted_network = listener_network.recv().await.unwrap();
+    assert_eq!(inserted_network, hash_external);
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn txpool_listener_replace_event() {
     let txpool = TestPoolBuilder::default();
     let mut mock_tx_factory = MockTransactionFactory::default();
@@ -82,7 +128,7 @@ async fn txpool_listener_queued_event() {
     assert_matches!(events.next().await, Some(TransactionEvent::Queued));
 
     // The listener of all should receive queued event as well.
-    assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Queued(hash)) if hash == *transaction.get_hash());
+    assert_matches!(all_tx_events.next().await, Some(FullTransactionEvent::Queued(hash,_ )) if hash == *transaction.get_hash());
 }
 
 #[tokio::test(flavor = "multi_thread")]

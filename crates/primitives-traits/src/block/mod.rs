@@ -50,17 +50,9 @@ pub mod serde_bincode_compat {
 }
 
 /// Helper trait that unifies all behaviour required by block to support full node operations.
-pub trait FullBlock:
-    Block<Header: FullBlockHeader, Body: FullBlockBody> + alloy_rlp::Encodable + alloy_rlp::Decodable
-{
-}
+pub trait FullBlock: Block<Header: FullBlockHeader, Body: FullBlockBody> {}
 
-impl<T> FullBlock for T where
-    T: Block<Header: FullBlockHeader, Body: FullBlockBody>
-        + alloy_rlp::Encodable
-        + alloy_rlp::Decodable
-{
-}
+impl<T> FullBlock for T where T: Block<Header: FullBlockHeader, Body: FullBlockBody> {}
 
 /// Helper trait to access [`BlockBody::Transaction`] given a [`Block`].
 pub type BlockTx<B> = <<B as Block>::Body as BlockBody>::Transaction;
