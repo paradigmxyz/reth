@@ -157,5 +157,20 @@ pub fn load_sepolia_secure_alloc_hashed_with_bytecodes(
         }
     }
 
+    // Add missing TimeoutQueue slot 1 (nextGetOffset=2) to ArbOS storage
+    // Go nitro's InitializeQueue sets both nextPutOffset and nextGetOffset to 2
+    // The secureAlloc data is missing slot 1, so we add it here
+    let arbos_hashed_addr = B256::from_slice(&hex::decode("b4d14ec89c201c23aa60e231e3993b3966b33ff1f55d198ec25980957ab32065").unwrap());
+    // TimeoutQueue slot 1 hashed key = keccak256(preimage_slot_1)
+    // where preimage_slot_1 = 0x9e9ffd355c04cc0ffaba550b5b46d79f750513bcaf322e22daca18080c857a01
+    let timeout_queue_slot1_hashed = B256::from_slice(&hex::decode("3685c8c6988ac7abfacfa36241f4ee3b2c9fd55a665e86b9bf8b4fa0130799ca").unwrap());
+    
+    if let Some(arbos_storage) = storages_h.get_mut(&arbos_hashed_addr) {
+        // Add the missing slot to existing storage
+        let mut entries: BTreeMap<B256, U256> = arbos_storage.storage.iter().map(|(k, v)| (*k, *v)).collect();
+        entries.insert(timeout_queue_slot1_hashed, U256::from(2));
+        *arbos_storage = HashedStorage::from_iter(false, entries.into_iter());
+    }
+
     Ok((accounts_h, storages_h, bytecodes))
 }
