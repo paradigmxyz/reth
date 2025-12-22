@@ -18,7 +18,10 @@ use reth_stages_api::{
 use reth_storage_errors::provider::ProviderResult;
 use std::{
     fmt::Debug,
-    sync::mpsc::{self, Receiver},
+    sync::{
+        mpsc::{self, Receiver},
+        LazyLock,
+    },
 };
 use tracing::*;
 
@@ -27,6 +30,9 @@ const MAXIMUM_CHANNELS: usize = 10_000;
 
 /// Maximum number of storage entries to hash per rayon worker job.
 const WORKER_CHUNK_SIZE: usize = 100;
+
+/// Keccak256 hash of the zero address.
+static HASHED_ZERO_ADDRESS: LazyLock<B256> = LazyLock::new(|| keccak256(Address::ZERO));
 
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
@@ -102,8 +108,7 @@ where
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
                     // Cache hashed address since PlainStorageState is sorted by address
-                    let (mut last_addr, mut hashed_addr) =
-                        (Address::ZERO, keccak256(Address::ZERO));
+                    let (mut last_addr, mut hashed_addr) = (Address::ZERO, *HASHED_ZERO_ADDRESS);
                     for (address, slot) in chunk {
                         if address != last_addr {
                             last_addr = address;
