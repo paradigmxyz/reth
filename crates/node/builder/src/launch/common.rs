@@ -506,8 +506,22 @@ where
         // inconsistencies are found, unwind to the first block that's consistent across all
         // storage layers.
         //
-        // Static file check runs first since RocksDB pruning logic may depend on static file data.
-        // We compute a combined unwind target from both checks and run a single unwind pass.
+        // The ordering is critical:
+        // 1. Static file consistency (file-level) - heals interrupted writes without pruning data
+        // 2. RocksDB consistency - needs static file data to compute tx hashes for pruning
+        // 3. Static file consistency (checkpoint-level) - compares with MDBX, may prune data
+        //
+        // We compute a combined unwind target from checks and run a single unwind pass.
+
+        // Step 1: Heal any file-level inconsistencies (interrupted writes, partial commits)
+        // This does NOT prune data, so RocksDB can still access transaction data.
+        factory.static_file_provider().check_file_consistency()?;
+
+        // Step 2: RocksDB consistency check - uses static file data for tx hash lookups
+        let rocksdb_unwind =
+            factory.rocksdb_provider().check_consistency(&factory.database_provider_ro()?)?;
+
+        // Step 3: Static file checkpoint consistency - compares with MDBX, may prune data
         let static_file_unwind = factory
             .static_file_provider()
             .check_consistency(&factory.provider()?)?
@@ -515,11 +529,6 @@ where
                 PipelineTarget::Unwind(block) => block,
                 PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
             });
-
-        // RocksDB consistency check - runs after static files since it may use static file data
-        // for pruning transaction hashes.
-        let rocksdb_unwind =
-            factory.rocksdb_provider().check_consistency(&factory.database_provider_ro()?)?;
 
         // Combine unwind targets - take the minimum (most conservative) if both exist
         let unwind_target = match (static_file_unwind, rocksdb_unwind) {
