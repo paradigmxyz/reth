@@ -2,7 +2,7 @@
 
 use crate::{
     error::ECIESErrorImpl,
-    mac::{HeaderBytes, MAC},
+    mac::MAC,
     util::{hmac_sha256, sha256},
     ECIESError,
 };
@@ -312,7 +312,6 @@ impl ECIES {
 
     /// Create a new ECIES client with the given static secret key and remote peer ID.
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
-        // TODO(rand): use rng for nonce
         let mut rng = rng();
         let nonce = B256::random();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
@@ -639,7 +638,6 @@ impl ECIES {
         header[..3].copy_from_slice(&buf[..3]);
         header[3..6].copy_from_slice(&[194, 128, 128]);
 
-        let mut header = HeaderBytes::from(header);
         self.egress_aes.as_mut().unwrap().apply_keystream(&mut header);
         self.egress_mac.as_mut().unwrap().update_header(&header);
         let tag = self.egress_mac.as_mut().unwrap().digest();
@@ -660,7 +658,7 @@ impl ECIES {
         }
 
         let (header_bytes, mac_bytes) = split_at_mut(data, 16)?;
-        let header = HeaderBytes::from_mut_slice(header_bytes);
+        let header: &mut [u8; 16] = header_bytes.try_into().unwrap();
         let mac = B128::from_slice(&mac_bytes[..16]);
 
         self.ingress_mac.as_mut().unwrap().update_header(header);
@@ -670,11 +668,11 @@ impl ECIES {
         }
 
         self.ingress_aes.as_mut().unwrap().apply_keystream(header);
-        if header.as_slice().len() < 3 {
+        if header.len() < 3 {
             return Err(ECIESErrorImpl::InvalidHeader.into())
         }
 
-        let body_size = usize::try_from(header.as_slice().read_uint::<BigEndian>(3)?)?;
+        let body_size = usize::try_from((&header[..]).read_uint::<BigEndian>(3)?)?;
 
         self.body_size = Some(body_size);
 

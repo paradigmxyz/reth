@@ -1,8 +1,6 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{
-    constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, Transaction, EMPTY_OMMER_ROOT_HASH,
-};
+use alloy_consensus::{BlockHeader as _, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
 use reth_consensus::{ConsensusError, TxGasLimitTooHighErr};
@@ -225,13 +223,9 @@ where
 /// Validates that the EIP-4844 header fields exist and conform to the spec. This ensures that:
 ///
 ///  * `blob_gas_used` exists as a header field
-///  * `excess_blob_gas` exists as a header field
 ///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
-///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
 ///  * `blob_gas_used` doesn't exceed the max allowed blob gas based on the given params
-///
-/// Note: This does not enforce any restrictions on `blob_gas_used`
 pub fn validate_4844_header_standalone<H: BlockHeader>(
     header: &H,
     blob_params: BlobParams,
@@ -264,9 +258,12 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
 /// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
 /// This must be 32 bytes or fewer; formally Hx.
 #[inline]
-pub fn validate_header_extra_data<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
+pub fn validate_header_extra_data<H: BlockHeader>(
+    header: &H,
+    max_size: usize,
+) -> Result<(), ConsensusError> {
     let extra_data_len = header.extra_data().len();
-    if extra_data_len > MAXIMUM_EXTRA_DATA_SIZE {
+    if extra_data_len > max_size {
         Err(ConsensusError::ExtraDataExceedsMax { len: extra_data_len })
     } else {
         Ok(())
@@ -282,18 +279,26 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
     header: &H,
     parent: &SealedHeader<H>,
 ) -> Result<(), ConsensusError> {
-    // Parent number is consistent.
-    if parent.number() + 1 != header.number() {
-        return Err(ConsensusError::ParentBlockNumberMismatch {
-            parent_block_number: parent.number(),
-            block_number: header.number(),
-        })
-    }
-
     if parent.hash() != header.parent_hash() {
         return Err(ConsensusError::ParentHashMismatch(
             GotExpected { got: header.parent_hash(), expected: parent.hash() }.into(),
         ))
+    }
+
+    let Some(parent_number) = parent.number().checked_add(1) else {
+        // parent block already reached the maximum
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number(),
+            block_number: u64::MAX,
+        })
+    };
+
+    // Parent number is consistent.
+    if parent_number != header.number() {
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number(),
+            block_number: header.number(),
+        })
     }
 
     Ok(())
@@ -330,7 +335,7 @@ pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + Ethere
     Ok(())
 }
 
-/// Validates the timestamp against the parent to make sure it is in the past.
+/// Validates that the block timestamp is greater than the parent block timestamp.
 #[inline]
 pub fn validate_against_parent_timestamp<H: BlockHeader>(
     header: &H,
@@ -502,5 +507,22 @@ mod tests {
                 expected: expected_blob_gas_used
             }))
         );
+    }
+
+    #[test]
+    fn validate_header_extra_data_with_custom_limit() {
+        // Test with default 32 bytes - should pass
+        let header_32 = Header { extra_data: Bytes::from(vec![0; 32]), ..Default::default() };
+        assert!(validate_header_extra_data(&header_32, 32).is_ok());
+
+        // Test exceeding default - should fail
+        let header_33 = Header { extra_data: Bytes::from(vec![0; 33]), ..Default::default() };
+        assert_eq!(
+            validate_header_extra_data(&header_33, 32),
+            Err(ConsensusError::ExtraDataExceedsMax { len: 33 })
+        );
+
+        // Test with custom larger limit - should pass
+        assert!(validate_header_extra_data(&header_33, 64).is_ok());
     }
 }

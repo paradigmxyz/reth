@@ -4,17 +4,18 @@
 
 use std::{sync::Arc, time::Instant};
 
-use crate::block::BlockAndReceipts;
-use alloy_consensus::BlockHeader;
+use crate::{block::BlockAndReceipts, utils::calculate_gas_used_and_next_log_index};
+use alloy_consensus::{BlockHeader, TxReceipt};
 use alloy_eips::{BlockId, BlockNumberOrTag};
-use alloy_primitives::{BlockHash, B256};
+use alloy_primitives::{BlockHash, TxHash, B256};
 use derive_more::Constructor;
 use reth_chain_state::{BlockState, ExecutedBlock};
 use reth_ethereum_primitives::Receipt;
 use reth_evm::{ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
-    Block, BlockTy, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
+    Block, BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock, SealedHeader,
 };
+use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcTypes};
 
 /// Configured [`reth_evm::EvmEnv`] for a pending block.
 #[derive(Debug, Clone, Constructor)]
@@ -128,6 +129,52 @@ impl<N: NodePrimitives> PendingBlock<N> {
     /// Returns a hash of the parent block for this `executed_block`.
     pub fn parent_hash(&self) -> BlockHash {
         self.executed_block.recovered_block().parent_hash()
+    }
+
+    /// Finds a transaction by hash and returns it along with its corresponding receipt.
+    ///
+    /// Returns `None` if the transaction is not found in this block.
+    pub fn find_transaction_and_receipt_by_hash(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<(IndexedTx<'_, N::Block>, &N::Receipt)> {
+        let indexed_tx = self.executed_block.recovered_block().find_indexed(tx_hash)?;
+        let receipt = self.receipts.get(indexed_tx.index())?;
+        Some((indexed_tx, receipt))
+    }
+
+    /// Returns the rpc transaction receipt for the given transaction hash if it exists.
+    ///
+    /// This uses the given converter to turn [`Self::find_transaction_and_receipt_by_hash`] into
+    /// the rpc format.
+    pub fn find_and_convert_transaction_receipt<C>(
+        &self,
+        tx_hash: TxHash,
+        converter: &C,
+    ) -> Option<Result<<C::Network as RpcTypes>::Receipt, C::Error>>
+    where
+        C: RpcConvert<Primitives = N>,
+    {
+        let (tx, receipt) = self.find_transaction_and_receipt_by_hash(tx_hash)?;
+        let meta = tx.meta();
+        let all_receipts = &self.receipts;
+
+        let (gas_used, next_log_index) =
+            calculate_gas_used_and_next_log_index(meta.index, all_receipts);
+
+        converter
+            .convert_receipts_with_block(
+                vec![ConvertReceiptInput {
+                    tx: tx.recovered_tx(),
+                    gas_used: receipt.cumulative_gas_used() - gas_used,
+                    receipt: receipt.clone(),
+                    next_log_index,
+                    meta,
+                }],
+                self.executed_block.sealed_block(),
+            )
+            .map(|mut receipts| receipts.pop())
+            .transpose()
     }
 }
 

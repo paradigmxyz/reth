@@ -78,7 +78,7 @@ impl StaticFileTargets {
 }
 
 /// Each static file has a fixed number of blocks. This gives out the range where the requested
-/// block is positioned. Used for segment filename.
+/// block is positioned, according to the specified number of blocks per static file.
 pub const fn find_fixed_range(
     block: BlockNumber,
     blocks_per_static_file: u64,

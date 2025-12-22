@@ -6,13 +6,17 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockNumber, B256, U256};
 use eyre::{eyre, Result};
 use reth_era::{
-    e2s_types::IndexEntry,
-    era1_file::Era1Writer,
-    era1_types::{BlockIndex, Era1Id},
-    era_file_ops::{EraFileId, StreamWriter},
-    execution_types::{
-        Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
-        TotalDifficulty, MAX_BLOCKS_PER_ERA1,
+    common::file_ops::{EraFileId, StreamWriter},
+    e2s::types::IndexEntry,
+    era1::{
+        file::Era1Writer,
+        types::{
+            execution::{
+                Accumulator, BlockTuple, CompressedBody, CompressedHeader, CompressedReceipts,
+                TotalDifficulty, MAX_BLOCKS_PER_ERA1,
+            },
+            group::{BlockIndex, Era1Id},
+        },
     },
 };
 use reth_fs_util as fs;
@@ -146,6 +150,12 @@ where
         let era1_id = Era1Id::new(&config.network, start_block, block_count as u32)
             .with_hash(historical_root);
 
+        let era1_id = if config.max_blocks_per_file == MAX_BLOCKS_PER_ERA1 as u64 {
+            era1_id
+        } else {
+            era1_id.with_era_count()
+        };
+
         debug!("Final file name {}", era1_id.to_file_name());
         let file_path = config.dir.join(era1_id.to_file_name());
         let file = std::fs::File::create(&file_path)?;
@@ -215,12 +225,12 @@ where
             writer.write_accumulator(&accumulator)?;
             writer.write_block_index(&block_index)?;
             writer.flush()?;
-            created_files.push(file_path.clone());
 
             info!(
                 target: "era::history::export",
                 "Wrote ERA1 file: {file_path:?} with {blocks_written} blocks"
             );
+            created_files.push(file_path);
         }
     }
 
@@ -306,7 +316,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::ExportConfig;
-    use reth_era::execution_types::MAX_BLOCKS_PER_ERA1;
+    use reth_era::era1::types::execution::MAX_BLOCKS_PER_ERA1;
     use tempfile::tempdir;
 
     #[test]

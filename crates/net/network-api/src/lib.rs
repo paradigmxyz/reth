@@ -112,11 +112,15 @@ pub trait PeersInfo: Send + Sync {
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Peers: PeersInfo {
     /// Adds a peer to the peer set with TCP `SocketAddr`.
+    ///
+    /// If the peer already exists, then this will update its tracked info.
     fn add_peer(&self, peer: PeerId, tcp_addr: SocketAddr) {
         self.add_peer_kind(peer, PeerKind::Static, tcp_addr, None);
     }
 
     /// Adds a peer to the peer set with TCP and UDP `SocketAddr`.
+    ///
+    /// If the peer already exists, then this will update its tracked info.
     fn add_peer_with_udp(&self, peer: PeerId, tcp_addr: SocketAddr, udp_addr: SocketAddr) {
         self.add_peer_kind(peer, PeerKind::Static, tcp_addr, Some(udp_addr));
     }
@@ -137,6 +141,8 @@ pub trait Peers: PeersInfo {
     }
 
     /// Adds a peer to the known peer set, with the given kind.
+    ///
+    /// If the peer already exists, then this will update its tracked info.
     fn add_peer_kind(
         &self,
         peer: PeerId,

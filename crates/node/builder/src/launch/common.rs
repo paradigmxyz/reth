@@ -34,16 +34,15 @@ use crate::{
     hooks::OnComponentInitializedHook,
     BuilderContext, ExExLauncher, NodeAdapter, PrimitivesTy,
 };
-use alloy_consensus::BlockHeader as _;
 use alloy_eips::eip2124::Head;
 use alloy_primitives::{BlockNumber, B256};
 use eyre::Context;
 use rayon::ThreadPoolBuilder;
-use reth_chainspec::{Chain, EthChainSpec, EthereumHardfork, EthereumHardforks};
+use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_db_common::init::{init_genesis, InitStorageError};
+use reth_db_common::init::{init_genesis_with_settings, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
@@ -66,9 +65,9 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, BlockNumReader, BlockReaderIdExt, ProviderError, ProviderFactory,
-    ProviderResult, StageCheckpointReader, StaticFileProviderFactory,
+    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
+    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
+    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -166,11 +165,14 @@ impl LaunchContext {
         // Update the config with the command line arguments
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;
 
+        // Merge static file CLI arguments with config file, giving priority to CLI
+        toml_config.static_files = config.static_files.merge_with_config(toml_config.static_files);
+
         Ok(toml_config)
     }
 
     /// Save prune config to the toml file if node is a full node or has custom pruning CLI
-    /// arguments.
+    /// arguments. Also migrates deprecated prune config values to new defaults.
     fn save_pruning_config<ChainSpec>(
         reth_config: &mut reth_config::Config,
         config: &NodeConfig<ChainSpec>,
@@ -179,15 +181,22 @@ impl LaunchContext {
     where
         ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
     {
+        let mut should_save = reth_config.prune.segments.migrate();
+
         if let Some(prune_config) = config.prune_config() {
             if reth_config.prune != prune_config {
                 reth_config.set_prune_config(prune_config);
-                info!(target: "reth::cli", "Saving prune config to toml file");
-                reth_config.save(config_path.as_ref())?;
+                should_save = true;
             }
         } else if !reth_config.prune.is_default() {
             warn!(target: "reth::cli", "Pruning configuration is present in the config file, but no CLI arguments are provided. Using config from file.");
         }
+
+        if should_save {
+            info!(target: "reth::cli", "Saving prune config to toml file");
+            reth_config.save(config_path.as_ref())?;
+        }
+
         Ok(())
     }
 
@@ -406,14 +415,13 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
-        let toml_config = self.toml_config().prune.clone();
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
             // No CLI config is set, use the toml config.
-            return toml_config;
+            return self.toml_config().prune.clone();
         };
 
         // Otherwise, use the CLI configuration and merge with toml config.
-        node_prune_config.merge(toml_config);
+        node_prune_config.merge(self.toml_config().prune.clone());
         node_prune_config
     }
 
@@ -466,21 +474,37 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
+        // Validate static files configuration
+        let static_files_config = &self.toml_config().static_files;
+        static_files_config.validate()?;
+
+        // Apply per-segment blocks_per_file configuration
+        let static_file_provider =
+            StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
+                .with_metrics()
+                .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
+                .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
+                .build()?;
+
+        // Initialize RocksDB provider with metrics, statistics, and default tables
+        let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
+            .with_default_tables()
+            .with_metrics()
+            .with_statistics()
+            .build()?;
+
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
-            StaticFileProvider::read_write(self.data_dir().static_files())?,
-        )
-        .with_prune_modes(self.prune_modes())
-        .with_static_files_metrics();
-
-        let has_receipt_pruning = self.toml_config().prune.has_receipts_pruning();
+            static_file_provider,
+            rocksdb_provider,
+        )?
+        .with_prune_modes(self.prune_modes());
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
-        if let Some(unwind_target) = factory
-            .static_file_provider()
-            .check_consistency(&factory.provider()?, has_receipt_pruning)?
+        if let Some(unwind_target) =
+            factory.static_file_provider().check_consistency(&factory.provider()?)?
         {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
@@ -583,7 +607,6 @@ where
 
         let listen_addr = self.node_config().metrics.prometheus;
         if let Some(addr) = listen_addr {
-            info!(target: "reth::cli", "Starting metrics endpoint at {}", addr);
             let config = MetricServerConfig::new(
                 addr,
                 VersionInfo {
@@ -620,13 +643,19 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis(self.provider_factory())?;
+        init_genesis_with_settings(
+            self.provider_factory(),
+            self.node_config().static_files.to_settings(),
+        )?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        init_genesis(self.provider_factory())
+        init_genesis_with_settings(
+            self.provider_factory(),
+            self.node_config().static_files.to_settings(),
+        )
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the
@@ -909,28 +938,44 @@ where
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
     pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
+        // We skip the era stage if it's not enabled
+        let era_enabled = self.era_import_source().is_some();
+        let mut all_stages =
+            StageId::ALL.into_iter().filter(|id| era_enabled || id != &StageId::Era);
+
+        // Get the expected first stage based on config.
+        let first_stage = all_stages.next().expect("there must be at least one stage");
+
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
             .blockchain_db()
-            .get_stage_checkpoint(*StageId::ALL.first().unwrap())?
+            .get_stage_checkpoint(first_stage)?
             .unwrap_or_default()
             .block_number;
 
-        // Skip the first stage as we've already retrieved it and comparing all other checkpoints
-        // against it.
-        for stage_id in StageId::ALL.iter().skip(1) {
+        // Compare all other stages against the first
+        for stage_id in all_stages {
             let stage_checkpoint = self
                 .blockchain_db()
-                .get_stage_checkpoint(*stage_id)?
+                .get_stage_checkpoint(stage_id)?
                 .unwrap_or_default()
                 .block_number;
 
             // If the checkpoint of any stage is less than the checkpoint of the first stage,
             // retrieve and return the block hash of the latest header and use it as the target.
+            debug!(
+                target: "consensus::engine",
+                first_stage_id = %first_stage,
+                first_stage_checkpoint,
+                stage_id = %stage_id,
+                stage_checkpoint = stage_checkpoint,
+                "Checking stage against first stage",
+            );
             if stage_checkpoint < first_stage_checkpoint {
                 debug!(
                     target: "consensus::engine",
+                    first_stage_id = %first_stage,
                     first_stage_checkpoint,
                     inconsistent_stage_id = %stage_id,
                     inconsistent_stage_checkpoint = stage_checkpoint,
@@ -943,40 +988,6 @@ where
         self.ensure_chain_specific_db_checks()?;
 
         Ok(None)
-    }
-
-    /// Expire the pre-merge transactions if the node is configured to do so and the chain has a
-    /// merge block.
-    ///
-    /// If the node is configured to prune pre-merge transactions and it has synced past the merge
-    /// block, it will delete the pre-merge transaction static files if they still exist.
-    pub fn expire_pre_merge_transactions(&self) -> eyre::Result<()>
-    where
-        T: FullNodeTypes<Provider: StaticFileProviderFactory>,
-    {
-        if self.node_config().pruning.bodies_pre_merge &&
-            let Some(merge_block) = self
-                .chain_spec()
-                .ethereum_fork_activation(EthereumHardfork::Paris)
-                .block_number()
-        {
-            // Ensure we only expire transactions after we synced past the merge block.
-            let Some(latest) = self.blockchain_db().latest_header()? else { return Ok(()) };
-            if latest.number() > merge_block {
-                let provider = self.blockchain_db().static_file_provider();
-                if provider
-                    .get_lowest_transaction_static_file_block()
-                    .is_some_and(|lowest| lowest < merge_block)
-                {
-                    info!(target: "reth::cli", merge_block, "Expiring pre-merge transactions");
-                    provider.delete_transactions_below(merge_block)?;
-                } else {
-                    debug!(target: "reth::cli", merge_block, "No pre-merge transactions to expire");
-                }
-            }
-        }
-
-        Ok(())
     }
 
     /// Returns the metrics sender.
@@ -1207,7 +1218,6 @@ mod tests {
                     storage_history_before: None,
                     bodies_pre_merge: false,
                     bodies_distance: None,
-                    #[expect(deprecated)]
                     receipts_log_filter: None,
                     bodies_before: None,
                 },

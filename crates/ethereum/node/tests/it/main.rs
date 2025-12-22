@@ -2,5 +2,6 @@
 
 mod builder;
 mod exex;
+mod testing;
 
 const fn main() {}

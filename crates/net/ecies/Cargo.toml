@@ -25,9 +25,6 @@ pin-project.workspace = true
 
 tracing = { workspace = true, features = ["attributes"] }
 
-# HeaderBytes
-generic-array.workspace = true
-typenum.workspace = true
 byteorder.workspace = true
 
 # crypto
@@ -42,3 +39,6 @@ aes.workspace = true
 hmac.workspace = true
 block-padding.workspace = true
 cipher = { workspace = true, features = ["block-padding"] }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["net", "rt", "macros"] }
