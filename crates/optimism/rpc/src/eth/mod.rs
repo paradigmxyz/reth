@@ -530,8 +530,7 @@ where
                 ctx.components.evm_config().clone(),
                 ctx.components.provider().clone(),
                 ctx.components.task_executor().clone(),
-                // enable state root calculation if flashblock_consensus is enabled.
-                flashblock_consensus,
+                ctx.engine_handle.clone(),
             );
 
             let flashblocks_sequence = service.block_sequence_broadcaster().clone();

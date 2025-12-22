@@ -6,8 +6,10 @@ use alloy_primitives::B256;
 use futures_util::{FutureExt, Stream, StreamExt};
 use metrics::{Gauge, Histogram};
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
+use reth_engine_primitives::ConsensusEngineHandle;
 use reth_evm::ConfigureEvm;
 use reth_metrics::Metrics;
+use reth_payload_primitives::PayloadTypes;
 use reth_primitives_traits::{AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy};
 use reth_revm::cached::CachedReads;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
@@ -20,6 +22,7 @@ use tracing::*;
 /// [`FlashBlock`]s.
 #[derive(Debug)]
 pub struct FlashBlockService<
+    P: PayloadTypes,
     N: NodePrimitives,
     S,
     EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
@@ -39,15 +42,17 @@ pub struct FlashBlockService<
     /// Currently running block build job with start time and result receiver.
     job: Option<BuildJob<N>>,
     /// Manages flashblock sequences with caching and intelligent build selection.
-    sequences: SequenceManager<N::SignedTx>,
+    sequences: SequenceManager<P, N::SignedTx>,
 
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
 }
 
-impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
+impl<P, N, S, EvmConfig, Provider> FlashBlockService<P, N, S, EvmConfig, Provider>
 where
+    P: PayloadTypes,
     N: NodePrimitives,
+    P::BuiltPayload: reth_payload_primitives::BuiltPayload<Primitives = N>,
     S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
     EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>
         + Clone
@@ -68,7 +73,7 @@ where
         evm_config: EvmConfig,
         provider: Provider,
         spawner: TaskExecutor,
-        compute_state_root: bool,
+        engine_handle: ConsensusEngineHandle<P>,
     ) -> Self {
         let (in_progress_tx, _) = watch::channel(None);
         let (received_flashblocks_tx, _) = tokio::sync::broadcast::channel(128);
@@ -79,7 +84,7 @@ where
             builder: FlashBlockBuilder::new(evm_config, provider),
             spawner,
             job: None,
-            sequences: SequenceManager::new(compute_state_root),
+            sequences: SequenceManager::new(engine_handle),
             metrics: FlashBlockServiceMetrics::default(),
         }
     }

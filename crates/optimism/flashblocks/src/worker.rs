@@ -104,11 +104,12 @@ where
         }
 
         // if the real state root should be computed
-        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
+        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates } =
             if args.compute_state_root {
-                trace!(target: "flashblocks", "Computing block state root");
+                trace!(target: "flashblocks", "Computing block state root with trie updates");
                 builder.finish(&state_provider)?
             } else {
+                trace!(target: "flashblocks", "Building block without state root computation");
                 builder.finish(NoopProvider::default())?
             };
 
@@ -126,7 +127,7 @@ where
                 Arc::new(execution_outcome),
                 ComputedTrieData::without_trie_input(
                     Arc::new(hashed_state.into_sorted()),
-                    Arc::default(),
+                    Arc::new(trie_updates),
                 ),
             ),
         );

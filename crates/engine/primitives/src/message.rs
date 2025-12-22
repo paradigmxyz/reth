@@ -12,9 +12,10 @@ use core::{
     task::{ready, Context, Poll},
 };
 use futures::{future::Either, FutureExt, TryFutureExt};
+use reth_chain_state::ExecutedBlock;
 use reth_errors::RethResult;
 use reth_payload_builder_primitives::PayloadBuilderError;
-use reth_payload_primitives::{EngineApiMessageVersion, PayloadTypes};
+use reth_payload_primitives::{BuiltPayload, EngineApiMessageVersion, PayloadTypes};
 use tokio::sync::{mpsc::UnboundedSender, oneshot};
 
 /// Type alias for backwards compat
@@ -164,6 +165,11 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
+    /// Message to insert a locally built executed block into the engine state tree.
+    InsertExecutedBlock {
+        /// The executed block to insert.
+        block: ExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
+    },
 }
 
 impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
@@ -185,6 +191,14 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     f,
                     "ForkchoiceUpdated {{ state: {state:?}, has_payload_attributes: {} }}",
                     payload_attrs.is_some()
+                )
+            }
+            Self::InsertExecutedBlock { block } => {
+                let num_hash = block.recovered_block().num_hash();
+                write!(
+                    f,
+                    "InsertExecutedBlock(number: {}, hash: {})",
+                    num_hash.number, num_hash.hash,
                 )
             }
         }
@@ -256,5 +270,13 @@ where
             version,
         });
         rx
+    }
+
+    /// Sends a message to insert the executed block into the engine state tree.
+    pub fn send_insert_executed_block(
+        &self,
+        block: ExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
+    ) {
+        let _ = self.to_engine.send(BeaconEngineMessage::InsertExecutedBlock { block });
     }
 }

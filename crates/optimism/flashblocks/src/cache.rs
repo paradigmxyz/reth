@@ -10,6 +10,9 @@ use crate::{
 };
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::B256;
+use reth_chain_state::ExecutedBlock;
+use reth_engine_primitives::ConsensusEngineHandle;
+use reth_payload_primitives::{BuiltPayload, PayloadTypes};
 use reth_primitives_traits::{NodePrimitives, Recovered, SignedTransaction};
 use reth_revm::cached::CachedReads;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
@@ -29,7 +32,7 @@ pub(crate) const FLASHBLOCK_BLOCK_TIME: u64 = 200;
 /// - Finding the best sequence to build based on local chain tip
 /// - Broadcasting completed sequences to subscribers
 #[derive(Debug)]
-pub(crate) struct SequenceManager<T: SignedTransaction> {
+pub(crate) struct SequenceManager<P: PayloadTypes, T: SignedTransaction> {
     /// Current pending sequence being built up from incoming flashblocks
     pending: FlashBlockPendingSequence,
     /// Cached recovered transactions for the pending sequence
@@ -39,20 +42,23 @@ pub(crate) struct SequenceManager<T: SignedTransaction> {
     completed_cache: AllocRingBuffer<(FlashBlockCompleteSequence, Vec<WithEncoded<Recovered<T>>>)>,
     /// Broadcast channel for completed sequences
     block_broadcaster: broadcast::Sender<FlashBlockCompleteSequence>,
-    /// Whether to compute state roots when building blocks
-    compute_state_root: bool,
+    /// Handle to consensus engine.
+    engine_handle: ConsensusEngineHandle<P>,
 }
 
-impl<T: SignedTransaction> SequenceManager<T> {
+impl<P: PayloadTypes, T: SignedTransaction, N: NodePrimitives> SequenceManager<P, T>
+where
+    P::BuiltPayload: BuiltPayload<Primitives = N>,
+{
     /// Creates a new sequence manager.
-    pub(crate) fn new(compute_state_root: bool) -> Self {
+    pub(crate) fn new(engine_handle: ConsensusEngineHandle<P>) -> Self {
         let (block_broadcaster, _) = broadcast::channel(128);
         Self {
             pending: FlashBlockPendingSequence::new(),
             pending_transactions: Vec::new(),
             completed_cache: AllocRingBuffer::new(CACHE_SIZE),
             block_broadcaster,
-            compute_state_root,
+            engine_handle,
         }
     }
 
@@ -181,8 +187,7 @@ impl<T: SignedTransaction> SequenceManager<T> {
         // chain progression.
         let block_time_ms = (base.timestamp - local_tip_timestamp) * 1000;
         let expected_final_flashblock = block_time_ms / FLASHBLOCK_BLOCK_TIME;
-        let compute_state_root = self.compute_state_root &&
-            last_flashblock.diff.state_root.is_zero() &&
+        let compute_state_root = last_flashblock.diff.state_root.is_zero() &&
             last_flashblock.index >= expected_final_flashblock.saturating_sub(1);
 
         trace!(
@@ -191,7 +196,6 @@ impl<T: SignedTransaction> SequenceManager<T> {
             source = source_name,
             flashblock_index = last_flashblock.index,
             expected_final_flashblock,
-            compute_state_root_enabled = self.compute_state_root,
             state_root_is_zero = last_flashblock.diff.state_root.is_zero(),
             will_compute_state_root = compute_state_root,
             "Building from flashblock sequence"
@@ -212,7 +216,7 @@ impl<T: SignedTransaction> SequenceManager<T> {
     /// Updates execution outcome and cached reads. For cached sequences (already broadcast
     /// once during finalize), this broadcasts again with the computed `state_root`, allowing
     /// the consensus client to submit via `engine_newPayload`.
-    pub(crate) fn on_build_complete<N: NodePrimitives>(
+    pub(crate) fn on_build_complete(
         &mut self,
         parent_hash: B256,
         result: Option<(PendingFlashBlock<N>, CachedReads)>,
@@ -225,6 +229,11 @@ impl<T: SignedTransaction> SequenceManager<T> {
         let execution_outcome = computed_block.computed_state_root().map(|state_root| {
             SequenceExecutionOutcome { block_hash: computed_block.block().hash(), state_root }
         });
+
+        // Submit executed block with trie updates to engine state tree
+        if computed_block.has_computed_state_root {
+            self.submit_executed_block(computed_block.pending.executed_block);
+        }
 
         // Update pending sequence with execution results
         if self.pending.payload_base().is_some_and(|base| base.parent_hash == parent_hash) {
@@ -261,6 +270,19 @@ impl<T: SignedTransaction> SequenceManager<T> {
             }
         }
     }
+
+    /// Submit the `ExecutedBlock` to pre-warm the engine state tree. Note that executed blocks
+    /// require proper trie updates to avoid corrupting the engine's trie input computation.
+    pub(crate) fn submit_executed_block(&self, executed_block: ExecutedBlock<N>) {
+        let num_hash = executed_block.recovered_block().num_hash();
+        self.engine_handle.send_insert_executed_block(executed_block);
+        debug!(
+            target: "flashblocks",
+            block_number = num_hash.number,
+            block_hash = %num_hash.hash,
+            "Submitted executed flashblocks sequence to engine"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -269,16 +291,23 @@ mod tests {
     use crate::test_utils::TestFlashBlockFactory;
     use alloy_primitives::B256;
     use op_alloy_consensus::OpTxEnvelope;
+    use reth_optimism_payload_builder::OpPayloadTypes;
 
     #[test]
     fn test_sequence_manager_new() {
-        let manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         assert_eq!(manager.pending().count(), 0);
     }
 
     #[test]
     fn test_insert_flashblock_creates_pending_sequence() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let factory = TestFlashBlockFactory::new();
 
         let fb0 = factory.flashblock_at(0).build();
@@ -290,7 +319,10 @@ mod tests {
 
     #[test]
     fn test_insert_flashblock_caches_completed_sequence() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let factory = TestFlashBlockFactory::new();
 
         // Build first sequence
@@ -314,7 +346,10 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_returns_none_when_empty() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let local_tip_hash = B256::random();
         let local_tip_timestamp = 1000;
 
@@ -324,7 +359,10 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_matches_pending_parent() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let factory = TestFlashBlockFactory::new();
 
         let fb0 = factory.flashblock_at(0).build();
@@ -340,7 +378,10 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_returns_none_when_parent_mismatch() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let factory = TestFlashBlockFactory::new();
 
         let fb0 = factory.flashblock_at(0).build();
@@ -354,7 +395,10 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_prefers_pending_over_cached() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let factory = TestFlashBlockFactory::new();
 
         // Create and finalize first sequence
@@ -373,7 +417,10 @@ mod tests {
 
     #[test]
     fn test_next_buildable_args_finds_cached_sequence() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let factory = TestFlashBlockFactory::new();
 
         // Build and cache first sequence
@@ -396,7 +443,10 @@ mod tests {
 
     #[test]
     fn test_compute_state_root_logic_near_expected_final() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let block_time = 2u64;
         let factory = TestFlashBlockFactory::new().with_block_time(block_time);
 
@@ -420,7 +470,10 @@ mod tests {
 
     #[test]
     fn test_no_compute_state_root_when_provided_by_sequencer() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let block_time = 2u64;
         let factory = TestFlashBlockFactory::new().with_block_time(block_time);
 
@@ -437,7 +490,10 @@ mod tests {
 
     #[test]
     fn test_no_compute_state_root_when_disabled() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(false);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let block_time = 2u64;
         let factory = TestFlashBlockFactory::new().with_block_time(block_time);
 
@@ -461,7 +517,10 @@ mod tests {
 
     #[test]
     fn test_cache_ring_buffer_evicts_oldest() {
-        let mut manager: SequenceManager<OpTxEnvelope> = SequenceManager::new(true);
+        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
+        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
+        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
+            SequenceManager::new(engine_handle);
         let factory = TestFlashBlockFactory::new();
 
         // Fill cache with 4 sequences (cache size is 3, so oldest should be evicted)
