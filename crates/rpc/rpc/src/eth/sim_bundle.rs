@@ -549,13 +549,11 @@ mod tests {
     use alloy_rpc_types_eth::Log;
     use alloy_rpc_types_mev::{Inclusion, ProtocolVersion};
 
-    /// Helper function to build bundle logs for testing (mirrors the actual implementation)
     fn build_bundle_logs_test(
         bundle: &MevSendBundle,
         tx_logs_map: &HashMap<B256, Vec<Log>>,
     ) -> Vec<SimBundleLogs> {
         let mut logs = Vec::new();
-
         for item in &bundle.bundle_body {
             match item {
                 BundleItem::Tx { tx, .. } => {
@@ -572,15 +570,12 @@ mod tests {
                 }
             }
         }
-
         logs
     }
 
-    /// Creates a test bundle with the given transaction bytes
     fn create_test_bundle(tx_bytes: Vec<Bytes>) -> MevSendBundle {
         let body: Vec<BundleItem> =
             tx_bytes.into_iter().map(|tx| BundleItem::Tx { tx, can_revert: false }).collect();
-
         MevSendBundle {
             bundle_body: body,
             inclusion: Inclusion { block: 1, max_block: None },
@@ -590,10 +585,8 @@ mod tests {
         }
     }
 
-    /// Creates a nested bundle with inner transactions
     fn create_nested_bundle(outer_tx: Bytes, inner_txs: Vec<Bytes>) -> MevSendBundle {
         let inner_bundle = create_test_bundle(inner_txs);
-
         MevSendBundle {
             bundle_body: vec![
                 BundleItem::Tx { tx: outer_tx, can_revert: false },
@@ -608,16 +601,12 @@ mod tests {
 
     #[test]
     fn test_build_bundle_logs_single_tx() {
-        // Create a simple transaction (just some bytes for testing)
         let tx_bytes = Bytes::from(vec![0x01, 0x02, 0x03]);
         let tx_hash = keccak256(&tx_bytes);
-
         let bundle = create_test_bundle(vec![tx_bytes]);
 
-        // Create log map with one entry
         let mut tx_logs_map = HashMap::new();
-        let test_log = Log::default();
-        tx_logs_map.insert(tx_hash, vec![test_log.clone()]);
+        tx_logs_map.insert(tx_hash, vec![Log::default()]);
 
         let result = build_bundle_logs_test(&bundle, &tx_logs_map);
 
@@ -629,7 +618,6 @@ mod tests {
 
     #[test]
     fn test_build_bundle_logs_nested_bundle() {
-        // Create outer and inner transactions
         let outer_tx = Bytes::from(vec![0x01, 0x02, 0x03]);
         let inner_tx1 = Bytes::from(vec![0x04, 0x05, 0x06]);
         let inner_tx2 = Bytes::from(vec![0x07, 0x08, 0x09]);
@@ -640,7 +628,6 @@ mod tests {
 
         let bundle = create_nested_bundle(outer_tx, vec![inner_tx1, inner_tx2]);
 
-        // Create log map
         let mut tx_logs_map = HashMap::new();
         tx_logs_map.insert(outer_hash, vec![Log::default()]);
         tx_logs_map.insert(inner_hash1, vec![Log::default()]);
@@ -648,57 +635,37 @@ mod tests {
 
         let result = build_bundle_logs_test(&bundle, &tx_logs_map);
 
-        // Should have 2 top-level entries: outer tx and nested bundle
         assert_eq!(result.len(), 2);
-
-        // First entry: outer transaction logs
         assert!(result[0].tx_logs.is_some());
         assert!(result[0].bundle_logs.is_none());
         assert_eq!(result[0].tx_logs.as_ref().unwrap().len(), 1);
 
-        // Second entry: nested bundle logs
         assert!(result[1].tx_logs.is_none());
         assert!(result[1].bundle_logs.is_some());
 
         let nested_logs = result[1].bundle_logs.as_ref().unwrap();
         assert_eq!(nested_logs.len(), 2);
-
-        // Inner tx1 logs
         assert!(nested_logs[0].tx_logs.is_some());
         assert_eq!(nested_logs[0].tx_logs.as_ref().unwrap().len(), 1);
-
-        // Inner tx2 logs
         assert!(nested_logs[1].tx_logs.is_some());
         assert_eq!(nested_logs[1].tx_logs.as_ref().unwrap().len(), 2);
     }
 
     #[test]
     fn test_build_bundle_logs_missing_logs() {
-        // Create a transaction but don't add its logs to the map
         let tx_bytes = Bytes::from(vec![0x01, 0x02, 0x03]);
         let bundle = create_test_bundle(vec![tx_bytes]);
-
-        // Empty log map
         let tx_logs_map = HashMap::new();
 
         let result = build_bundle_logs_test(&bundle, &tx_logs_map);
 
         assert_eq!(result.len(), 1);
-        // tx_logs should be None when not found in map
         assert!(result[0].tx_logs.is_none());
         assert!(result[0].bundle_logs.is_none());
     }
 
     #[test]
     fn test_build_bundle_logs_deeply_nested() {
-        // Create a deeply nested bundle structure:
-        // Bundle A
-        //   - tx1
-        //   - Bundle B
-        //       - tx2
-        //       - Bundle C
-        //           - tx3
-
         let tx1 = Bytes::from(vec![0x01]);
         let tx2 = Bytes::from(vec![0x02]);
         let tx3 = Bytes::from(vec![0x03]);
@@ -707,7 +674,6 @@ mod tests {
         let hash2 = keccak256(&tx2);
         let hash3 = keccak256(&tx3);
 
-        // Build from inside out
         let bundle_c = create_test_bundle(vec![tx3.clone()]);
         let bundle_b = MevSendBundle {
             bundle_body: vec![
@@ -730,7 +696,6 @@ mod tests {
             protocol_version: ProtocolVersion::V0_1,
         };
 
-        // Create log map
         let mut tx_logs_map = HashMap::new();
         tx_logs_map.insert(hash1, vec![Log::default()]);
         tx_logs_map.insert(hash2, vec![Log::default()]);
@@ -738,20 +703,17 @@ mod tests {
 
         let result = build_bundle_logs_test(&bundle_a, &tx_logs_map);
 
-        // Verify structure: [tx1_logs, bundle_b_logs]
         assert_eq!(result.len(), 2);
-        assert!(result[0].tx_logs.is_some()); // tx1
-        assert!(result[1].bundle_logs.is_some()); // bundle_b
+        assert!(result[0].tx_logs.is_some());
+        assert!(result[1].bundle_logs.is_some());
 
-        // bundle_b: [tx2_logs, bundle_c_logs]
         let bundle_b_logs = result[1].bundle_logs.as_ref().unwrap();
         assert_eq!(bundle_b_logs.len(), 2);
-        assert!(bundle_b_logs[0].tx_logs.is_some()); // tx2
-        assert!(bundle_b_logs[1].bundle_logs.is_some()); // bundle_c
+        assert!(bundle_b_logs[0].tx_logs.is_some());
+        assert!(bundle_b_logs[1].bundle_logs.is_some());
 
-        // bundle_c: [tx3_logs]
         let bundle_c_logs = bundle_b_logs[1].bundle_logs.as_ref().unwrap();
         assert_eq!(bundle_c_logs.len(), 1);
-        assert!(bundle_c_logs[0].tx_logs.is_some()); // tx3
+        assert!(bundle_c_logs[0].tx_logs.is_some());
     }
 }
