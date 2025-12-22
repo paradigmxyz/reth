@@ -127,18 +127,21 @@ The following tables describe RPC methods available in the full node.
 
 #### `debug` namespace
 
-| RPC                        | Note                                                       |
-| -------------------------- | ---------------------------------------------------------- |
-| `debug_getRawBlock`        |                                                            |
-| `debug_getRawHeader`       |                                                            |
-| `debug_getRawReceipts`     | Only for the last 10064 blocks and Beacon Deposit Contract |
-| `debug_getRawTransaction`  |                                                            |
-| `debug_traceBlock`         | Only for the last 10064 blocks                             |
-| `debug_traceBlockByHash`   | Only for the last 10064 blocks                             |
-| `debug_traceBlockByNumber` | Only for the last 10064 blocks                             |
-| `debug_traceCall`          | Only for the last 10064 blocks                             |
-| `debug_traceCallMany`      | Only for the last 10064 blocks                             |
-| `debug_traceTransaction`   | Only for the last 10064 blocks                             |
+| RPC                                 | Note                                                       |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `debug_executionWitness`            | Only for the last 10064 blocks                             |
+| `debug_executionWitnessByBlockHash` | Only for the last 10064 blocks                             |
+| `debug_getBadBlocks`                |                                                            |
+| `debug_getRawBlock`                 |                                                            |
+| `debug_getRawHeader`                |                                                            |
+| `debug_getRawReceipts`              | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `debug_getRawTransaction`           |                                                            |
+| `debug_traceBlock`                  | Only for the last 10064 blocks                             |
+| `debug_traceBlockByHash`            | Only for the last 10064 blocks                             |
+| `debug_traceBlockByNumber`          | Only for the last 10064 blocks                             |
+| `debug_traceCall`                   | Only for the last 10064 blocks                             |
+| `debug_traceCallMany`               | Only for the last 10064 blocks                             |
+| `debug_traceTransaction`            | Only for the last 10064 blocks                             |
 
 #### `eth` namespace
 
@@ -230,18 +233,21 @@ The following tables describe the requirements for prune segments, per RPC metho
 
 #### `debug` namespace
 
-| RPC / Segment              | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
-| -------------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
-| `debug_getRawBlock`        | ✅              | ✅                 | ✅       | ✅              | ✅              |
-| `debug_getRawHeader`       | ✅              | ✅                 | ✅       | ✅              | ✅              |
-| `debug_getRawReceipts`     | ✅              | ✅                 | ❌       | ✅              | ✅              |
-| `debug_getRawTransaction`  | ✅              | ❌                 | ✅       | ✅              | ✅              |
-| `debug_traceBlock`         | ✅              | ✅                 | ✅       | ❌              | ❌              |
-| `debug_traceBlockByHash`   | ✅              | ✅                 | ✅       | ❌              | ❌              |
-| `debug_traceBlockByNumber` | ✅              | ✅                 | ✅       | ❌              | ❌              |
-| `debug_traceCall`          | ✅              | ✅                 | ✅       | ❌              | ❌              |
-| `debug_traceCallMany`      | ✅              | ✅                 | ✅       | ❌              | ❌              |
-| `debug_traceTransaction`   | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| RPC / Segment                       | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| ----------------------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
+| `debug_executionWitness`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_executionWitnessByBlockHash` | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_getBadBlocks`                | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_getRawBlock`                 | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_getRawHeader`                | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_getRawReceipts`              | ✅              | ✅                 | ❌       | ✅              | ✅              |
+| `debug_getRawTransaction`           | ✅              | ❌                 | ✅       | ✅              | ✅              |
+| `debug_traceBlock`                  | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceBlockByHash`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceBlockByNumber`          | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceCall`                   | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceCallMany`               | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceTransaction`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
 
 #### `eth` namespace
 
