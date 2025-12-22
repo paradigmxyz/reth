@@ -1046,7 +1046,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         info!(target: "reth::cli", "Verifying storage consistency.");
 
-        // First, heal any file-level (NippyJar) inconsistencies
+        // Capture initial highest block for all segments before healing, so we can detect
+        // if healing from a pruning interruption decreased the highest block.
+        let initial_highest_blocks: HashMap<StaticFileSegment, Option<BlockNumber>> =
+            StaticFileSegment::iter()
+                .map(|seg| (seg, self.get_highest_static_file_block(seg)))
+                .collect();
+
+        // Heal any file-level (NippyJar) inconsistencies
         self.check_file_consistency()?;
 
         let mut unwind_target: Option<BlockNumber> = None;
@@ -1087,30 +1094,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
             }
 
-            let initial_highest_block = self.get_highest_static_file_block(segment);
-            debug!(target: "reth::providers::static_file", ?segment, ?initial_highest_block, "Initial highest block for segment");
+            // Get the pre-healing highest block (captured before check_file_consistency)
+            let initial_highest_block = initial_highest_blocks.get(&segment).copied().flatten();
 
-            //  File consistency is broken if:
-            //
-            // * appending data was interrupted before a config commit, then data file will be
-            //   truncated according to the config.
-            //
-            // * pruning data was interrupted before a config commit, then we have deleted data that
-            //   we are expected to still have. We need to check the Database and unwind everything
-            //   accordingly.
-            if self.access.is_read_only() {
-                debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency (read-only)");
-                self.check_segment_consistency(segment)?;
-            } else {
-                debug!(target: "reth::providers::static_file", ?segment, "Fetching latest writer which might heal any potential inconsistency");
-                // Fetching the writer will attempt to heal any file level inconsistency.
-                self.latest_writer(segment)?;
-            }
-
-            // Only applies to block-based static files. (Headers)
-            //
-            // The updated `highest_block` may have decreased if we healed from a pruning
-            // interruption.
+            // Get the post-healing highest block
+            // The highest_block may have decreased if we healed from a pruning interruption.
             let mut highest_block = self.get_highest_static_file_block(segment);
             if initial_highest_block != highest_block {
                 info!(
@@ -1242,11 +1230,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn check_file_consistency(&self) -> ProviderResult<()> {
         for segment in StaticFileSegment::iter() {
             if self.access.is_read_only() {
-                // Read-only mode: verify NippyJar file integrity without modifying
+                debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency (read-only)");
                 self.check_segment_consistency(segment)?;
             } else {
-                // Read-write mode: fetching the writer triggers automatic healing
-                // of any file-level inconsistencies (truncates partial writes, etc.)
+                debug!(target: "reth::providers::static_file", ?segment, "Fetching latest writer which might heal any potential inconsistency");
                 self.latest_writer(segment)?;
             }
         }
