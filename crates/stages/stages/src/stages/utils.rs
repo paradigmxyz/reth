@@ -10,10 +10,11 @@ use reth_db_api::{
 };
 use reth_etl::Collector;
 use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
-    StaticFileProviderFactory,
+    providers::StaticFileProvider, BlockReader, DBProvider, ProviderError, PruneCheckpointReader,
+    PruneCheckpointWriter, StaticFileProviderFactory,
 };
-use reth_stages_api::StageError;
+use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
+use reth_stages_api::{ExecInput, StageCheckpoint, StageError};
 use reth_static_file_types::StaticFileSegment;
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
@@ -282,3 +283,33 @@ where
         segment,
     })
 }
+
+pub(crate) fn maybe_save_prune_checkpoint<Provider>(
+    provider: &Provider,
+    prune_mode: Option<PruneMode>,
+    input: &mut ExecInput,
+    segment: PruneSegment,
+    get_tx_number: impl FnOnce(&Provider, BlockNumber) -> Result<Option<TxNumber>, StageError>,
+) -> Result<(), StageError>
+where
+    Provider: PruneCheckpointReader + PruneCheckpointWriter,
+{
+    if let Some((target_prunable_block, prune_mode)) = prune_mode
+        .map(|mode| mode.prune_target_block(input.target(), segment, PrunePurpose::User))
+        .transpose()?
+        .flatten()
+        && target_prunable_block > input.checkpoint().block_number
+    {
+        input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+
+        if provider.get_prune_checkpoint(segment)?.is_none() {
+            let tx_number = get_tx_number(provider, target_prunable_block)?;
+            provider.save_prune_checkpoint(
+                segment,
+                PruneCheckpoint { block_number: Some(target_prunable_block), tx_number, prune_mode },
+            )?;
+        }
+    }
+    Ok(())
+}
+
