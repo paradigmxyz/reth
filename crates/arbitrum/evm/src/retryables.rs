@@ -110,9 +110,12 @@ impl<D: Database> RetryableState<D> {
         let escrowed = submission_fee.min(params.max_submission_cost);
 
         let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
-        let ticket_base_key = B256::from(keccak256(&ticket_id.0));
+        // CRITICAL FIX: The ticket_base_key must be computed as keccak256(parent_storage_key + ticket_id)
+        // NOT just keccak256(ticket_id). This matches Go nitro's OpenSubStorage behavior.
+        // The ticket_storage.base_key already has the correct value from open_sub_storage.
+        let ticket_base_key = ticket_storage.base_key;
         
-        tracing::info!(target: "arb-retryable", "CREATE: ticket_id={:?} base_key={:?}", ticket_id, ticket_base_key);
+        tracing::info!(target: "arb-retryable", "CREATE: ticket_id={:?} base_key={:?} parent_key={:?}", ticket_id, ticket_base_key, self.storage.base_key);
 
         let ticket = RetryableTicket {
             storage: ticket_storage,
@@ -152,16 +155,17 @@ impl<D: Database> RetryableState<D> {
         ticket_id: &RetryableTicketId,
         current_time: u64,
     ) -> Option<RetryableTicket<D>> {
-        let ticket_base_key = B256::from(keccak256(&ticket_id.0));
+        // CRITICAL FIX: The ticket_base_key must be computed as keccak256(parent_storage_key + ticket_id)
+        // NOT just keccak256(ticket_id). This matches Go nitro's OpenSubStorage behavior.
+        let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
+        let ticket_base_key = ticket_storage.base_key;
         let timeout_storage = StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET);
         
-        tracing::info!(target: "arb-retryable", "OPEN: ticket_id={:?} base_key={:?}", ticket_id, ticket_base_key);
+        tracing::info!(target: "arb-retryable", "OPEN: ticket_id={:?} base_key={:?} parent_key={:?}", ticket_id, ticket_base_key, self.storage.base_key);
         tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: ticket_id={:?} current_time={}", ticket_id, current_time);
         if let Ok(timeout) = timeout_storage.get() {
             tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: found timeout={} current_time={} valid={}", timeout, current_time, timeout > current_time);
             if timeout > current_time {
-                let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
-                
                 return Some(RetryableTicket {
                     storage: ticket_storage,
                     ticket_id: RetryableTicketId(ticket_id.0),
