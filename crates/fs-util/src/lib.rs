@@ -322,8 +322,9 @@ where
     #[cfg(windows)]
     use std::os::windows::fs::OpenOptionsExt;
 
-    let mut tmp_path = file_path.to_path_buf();
-    tmp_path.set_extension("tmp");
+    let mut tmp_path = file_path.as_os_str().to_os_string();
+    tmp_path.push(".tmp");
+    let tmp_path = PathBuf::from(tmp_path);
 
     // Write to the temporary file
     let mut file =
