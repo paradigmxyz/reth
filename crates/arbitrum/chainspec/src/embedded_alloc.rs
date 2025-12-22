@@ -165,17 +165,25 @@ pub fn load_sepolia_secure_alloc_hashed_with_bytecodes(
     // where preimage_slot_1 = 0x9e9ffd355c04cc0ffaba550b5b46d79f750513bcaf322e22daca18080c857a01
     let timeout_queue_slot1_hashed = B256::from_slice(&hex::decode("3685c8c6988ac7abfacfa36241f4ee3b2c9fd55a665e86b9bf8b4fa0130799ca").unwrap());
     
+    // DEBUG: Log before adding the slot
+    eprintln!("DEBUG embedded_alloc: Adding TimeoutQueue slot 1 to ArbOS storage");
+    eprintln!("DEBUG embedded_alloc: ArbOS hashed addr: {:?}", arbos_hashed_addr);
+    eprintln!("DEBUG embedded_alloc: storages_h contains ArbOS: {}", storages_h.contains_key(&arbos_hashed_addr));
+    
     if let Some(arbos_storage) = storages_h.get_mut(&arbos_hashed_addr) {
         // Add the missing slot to existing storage
+        eprintln!("DEBUG embedded_alloc: ArbOS storage exists, adding to existing storage");
         let mut entries: BTreeMap<B256, U256> = arbos_storage.storage.iter().map(|(k, v)| (*k, *v)).collect();
         entries.insert(timeout_queue_slot1_hashed, U256::from(2));
         *arbos_storage = HashedStorage::from_iter(false, entries.into_iter());
     } else {
         // ArbOS storage doesn't exist in secureAlloc, create it with just the TimeoutQueue slot 1
+        eprintln!("DEBUG embedded_alloc: ArbOS storage does NOT exist, creating new storage entry");
         let mut entries: BTreeMap<B256, U256> = BTreeMap::new();
         entries.insert(timeout_queue_slot1_hashed, U256::from(2));
         let storage = HashedStorage::from_iter(false, entries.into_iter());
         storages_h.insert(arbos_hashed_addr, storage);
+        eprintln!("DEBUG embedded_alloc: storages_h now has {} entries", storages_h.len());
     }
 
     Ok((accounts_h, storages_h, bytecodes))

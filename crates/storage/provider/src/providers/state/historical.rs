@@ -247,7 +247,17 @@ impl<Provider: DBProvider + BlockNumReader + ChangeSetReader> AccountReader
     /// Get basic account information.
     fn basic_account(&self, address: &Address) -> ProviderResult<Option<Account>> {
         match self.account_history_lookup(*address)? {
-            HistoryInfo::NotYetWritten => Ok(None),
+            HistoryInfo::NotYetWritten => {
+                // For genesis block (block 0), fall back to PlainAccountState
+                // because genesis accounts are not tracked in history tables.
+                // This is necessary for Arbitrum Sepolia where genesis state is
+                // loaded from secureAlloc and not delivered via L1 messages.
+                if self.block_number == 0 {
+                    Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
+                } else {
+                    Ok(None)
+                }
+            }
             HistoryInfo::InChangeset(changeset_block_number) => {
                 // Use ChangeSetReader trait method to get the account from changesets
                 self.provider
@@ -404,7 +414,23 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
         storage_key: StorageKey,
     ) -> ProviderResult<Option<StorageValue>> {
         match self.storage_history_lookup(address, storage_key)? {
-            HistoryInfo::NotYetWritten => Ok(None),
+            HistoryInfo::NotYetWritten => {
+                // For genesis block (block 0), fall back to PlainStorageState
+                // because genesis storage is not tracked in history tables.
+                // This is necessary for Arbitrum Sepolia where genesis state is
+                // loaded from secureAlloc and not delivered via L1 messages.
+                if self.block_number == 0 {
+                    Ok(self
+                        .tx()
+                        .cursor_dup_read::<tables::PlainStorageState>()?
+                        .seek_by_key_subkey(address, storage_key)?
+                        .filter(|entry| entry.key == storage_key)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO)))
+                } else {
+                    Ok(None)
+                }
+            }
             HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
                 self.tx()
                     .cursor_dup_read::<tables::StorageChangeSets>()?
