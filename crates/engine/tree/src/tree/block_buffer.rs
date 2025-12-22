@@ -75,11 +75,12 @@ impl<B: Block> BlockBuffer<B> {
         self.earliest_blocks.entry(block.number()).or_default().insert(hash);
         entry.insert(block);
 
-        // Evict oldest block if capacity is reached
-        if self.block_queue.len() >= self.max_blocks &&
-            let Some(evicted_hash) = self.block_queue.pop_front()
-        {
-            self.remove_block(&evicted_hash);
+        // Add block to FIFO queue and handle eviction if needed
+        if self.block_queue.len() >= self.max_blocks {
+            // Evict oldest block if limit is hit
+            if let Some(evicted_hash) = self.block_queue.pop_front() {
+                self.remove_block(&evicted_hash);
+            }
         }
         self.block_queue.push_back(hash);
         self.metrics.blocks.set(self.blocks.len() as f64);
