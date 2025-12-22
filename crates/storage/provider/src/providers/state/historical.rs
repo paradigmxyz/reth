@@ -259,14 +259,21 @@ impl<Provider: DBProvider + BlockNumReader + ChangeSetReader> AccountReader
                 }
             }
             HistoryInfo::InChangeset(changeset_block_number) => {
-                // Use ChangeSetReader trait method to get the account from changesets
-                self.provider
-                    .get_account_before_block(changeset_block_number, *address)?
-                    .ok_or(ProviderError::AccountChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address: *address,
-                    })
-                    .map(|account_before| account_before.info)
+                // For genesis block (block 0), there are no changesets - fall back to PlainAccountState.
+                // This is necessary for Arbitrum Sepolia where genesis state is loaded from secureAlloc
+                // and not delivered via L1 messages.
+                if changeset_block_number == 0 {
+                    Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
+                } else {
+                    // Use ChangeSetReader trait method to get the account from changesets
+                    self.provider
+                        .get_account_before_block(changeset_block_number, *address)?
+                        .ok_or(ProviderError::AccountChangesetNotFound {
+                            block_number: changeset_block_number,
+                            address: *address,
+                        })
+                        .map(|account_before| account_before.info)
+                }
             }
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => {
                 Ok(self.tx().get_by_encoded_key::<tables::PlainAccountState>(address)?)
@@ -431,18 +438,33 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader> 
                     Ok(None)
                 }
             }
-            HistoryInfo::InChangeset(changeset_block_number) => Ok(Some(
-                self.tx()
-                    .cursor_dup_read::<tables::StorageChangeSets>()?
-                    .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
-                    .filter(|entry| entry.key == storage_key)
-                    .ok_or_else(|| ProviderError::StorageChangesetNotFound {
-                        block_number: changeset_block_number,
-                        address,
-                        storage_key: Box::new(storage_key),
-                    })?
-                    .value,
-            )),
+            HistoryInfo::InChangeset(changeset_block_number) => {
+                // For genesis block (block 0), there are no changesets - fall back to PlainStorageState.
+                // This is necessary for Arbitrum Sepolia where genesis state is loaded from secureAlloc
+                // and not delivered via L1 messages.
+                if changeset_block_number == 0 {
+                    Ok(self
+                        .tx()
+                        .cursor_dup_read::<tables::PlainStorageState>()?
+                        .seek_by_key_subkey(address, storage_key)?
+                        .filter(|entry| entry.key == storage_key)
+                        .map(|entry| entry.value)
+                        .or(Some(StorageValue::ZERO)))
+                } else {
+                    Ok(Some(
+                        self.tx()
+                            .cursor_dup_read::<tables::StorageChangeSets>()?
+                            .seek_by_key_subkey((changeset_block_number, address).into(), storage_key)?
+                            .filter(|entry| entry.key == storage_key)
+                            .ok_or_else(|| ProviderError::StorageChangesetNotFound {
+                                block_number: changeset_block_number,
+                                address,
+                                storage_key: Box::new(storage_key),
+                            })?
+                            .value,
+                    ))
+                }
+            }
             HistoryInfo::InPlainState | HistoryInfo::MaybeInPlainState => Ok(self
                 .tx()
                 .cursor_dup_read::<tables::PlainStorageState>()?
