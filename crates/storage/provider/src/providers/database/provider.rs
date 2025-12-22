@@ -210,8 +210,8 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     ) -> ProviderResult<Box<dyn StateProvider + 'a>> {
         let mut block_number =
             self.block_number(block_hash)?.ok_or(ProviderError::BlockHashNotFound(block_hash))?;
-        if block_number == self.best_block_number().unwrap_or_default()
-            && block_number == self.last_block_number().unwrap_or_default()
+        if block_number == self.best_block_number().unwrap_or_default() &&
+            block_number == self.last_block_number().unwrap_or_default()
         {
             return Ok(Box::new(LatestStateProviderRef::new(self)));
         }
@@ -1127,8 +1127,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
     /// If the header is found, but the transactions either do not exist, or are not indexed, this
     /// will return None.
     fn block(&self, id: BlockHashOrNumber) -> ProviderResult<Option<Self::Block>> {
-        if let Some(number) = self.convert_hash_or_number(id)?
-            && let Some(header) = self.header_by_number(number)?
+        if let Some(number) = self.convert_hash_or_number(id)? &&
+            let Some(header) = self.header_by_number(number)?
         {
             // If the body indices are not found, this means that the transactions either do not
             // exist in the database yet, or they do exit but are not indexed.
@@ -1302,10 +1302,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         tx_hash: TxHash,
     ) -> ProviderResult<Option<(Self::Transaction, TransactionMeta)>> {
-        if let Some(transaction_id) = self.transaction_id(tx_hash)?
-            && let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)?
-            && let Some(block_number) = self.block_by_transaction_id(transaction_id)?
-            && let Some(sealed_header) = self.sealed_header(block_number)?
+        if let Some(transaction_id) = self.transaction_id(tx_hash)? &&
+            let Some(transaction) = self.transaction_by_id_unhashed(transaction_id)? &&
+            let Some(block_number) = self.block_by_transaction_id(transaction_id)? &&
+            let Some(sealed_header) = self.sealed_header(block_number)?
         {
             let (header, block_hash) = sealed_header.split();
             if let Some(block_body) = self.block_body_indices(block_number)? {
@@ -1336,8 +1336,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
         &self,
         id: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Transaction>>> {
-        if let Some(block_number) = self.convert_hash_or_number(id)?
-            && let Some(body) = self.block_body_indices(block_number)?
+        if let Some(block_number) = self.convert_hash_or_number(id)? &&
+            let Some(body) = self.block_body_indices(block_number)?
         {
             let tx_range = body.tx_num_range();
             return if tx_range.is_empty() {
@@ -1419,8 +1419,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         &self,
         block: BlockHashOrNumber,
     ) -> ProviderResult<Option<Vec<Self::Receipt>>> {
-        if let Some(number) = self.convert_hash_or_number(block)?
-            && let Some(body) = self.block_body_indices(number)?
+        if let Some(number) = self.convert_hash_or_number(block)? &&
+            let Some(body) = self.block_body_indices(number)?
         {
             let tx_range = body.tx_num_range();
             return if tx_range.is_empty() {
@@ -1693,12 +1693,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // Database, OR if receipts_in_static_files is enabled but no receipts exist in static
         // files yet. Once receipts exist in static files, we must continue writing to maintain
         // continuity and have no gaps.
-        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database()
-            || self
-                .static_file_provider()
+        let prunable_receipts = (EitherWriter::receipts_destination(self).is_database() ||
+            self.static_file_provider()
                 .get_highest_static_file_tx(StaticFileSegment::Receipts)
-                .is_none())
-            && PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
+                .is_none()) &&
+            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_block, tip);
 
         // Prepare set of addresses which logs should not be pruned.
         let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
@@ -1715,9 +1714,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             receipts_writer.increment_block(block_number)?;
 
             // Skip writing receipts if pruning configuration requires us to.
-            if prunable_receipts
-                && self
-                    .prune_modes
+            if prunable_receipts &&
+                self.prune_modes
                     .receipts
                     .is_some_and(|mode| mode.should_prune(block_number, tip))
             {
@@ -1733,9 +1731,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 let receipt_idx = first_tx_index + idx as u64;
                 // Skip writing receipt if log filter is active and it does not have any logs to
                 // retain
-                if prunable_receipts
-                    && has_contract_log_filter
-                    && !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
+                if prunable_receipts &&
+                    has_contract_log_filter &&
+                    !receipt.logs().iter().any(|log| allowed_addresses.contains(&log.address))
                 {
                     continue;
                 }
@@ -1865,8 +1863,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 
             for entry in storage {
                 tracing::trace!(?address, ?entry.key, "Updating plain state storage");
-                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)?
-                    && db_entry.key == entry.key
+                if let Some(db_entry) = storages_cursor.seek_by_key_subkey(address, entry.key)? &&
+                    db_entry.key == entry.key
                 {
                     storages_cursor.delete_current()?;
                 }
@@ -1904,8 +1902,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
                 let entry = StorageEntry { key: *hashed_slot, value: *value };
 
                 if let Some(db_entry) =
-                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)?
-                    && db_entry.key == entry.key
+                    hashed_storage_cursor.seek_by_key_subkey(*hashed_address, entry.key)? &&
+                    db_entry.key == entry.key
                 {
                     hashed_storage_cursor.delete_current()?;
                 }
@@ -2745,8 +2743,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
                 StorageShardedKey::last(address, storage_key),
                 rem_index,
                 |storage_sharded_key| {
-                    storage_sharded_key.address == address
-                        && storage_sharded_key.sharded_key.key == storage_key
+                    storage_sharded_key.address == address &&
+                        storage_sharded_key.sharded_key.key == storage_key
                 },
             )?;
 
