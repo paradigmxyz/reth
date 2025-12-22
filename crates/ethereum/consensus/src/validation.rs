@@ -87,9 +87,7 @@ fn verify_receipts<R: Receipt>(
         logs_bloom,
         expected_receipts_root,
         expected_logs_bloom,
-    )?;
-
-    Ok(())
+    )
 }
 
 /// Compare the calculated receipts root with the expected receipts root, also compare

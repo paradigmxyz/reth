@@ -224,6 +224,12 @@ impl Tracer for RethTracer {
             None
         };
 
+        #[cfg(feature = "samply")]
+        layers.add_layer(
+            tracing_samply::SamplyLayer::new()
+                .map_err(|e| eyre::eyre!("Failed to create samply layer: {}", e))?,
+        );
+
         // The error is returned if the global default subscriber is already set,
         // so it's safe to ignore it
         let _ = tracing_subscriber::registry().with(layers.into_inner()).try_init();

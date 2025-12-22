@@ -30,7 +30,7 @@ pub trait DbTxUnwindExt: DbTxMut {
         let mut deleted = 0;
 
         while let Some(Ok((entry_key, _))) = reverse_walker.next() {
-            if selector(entry_key.clone()) <= key {
+            if selector(entry_key) <= key {
                 break
             }
             reverse_walker.delete_current()?;

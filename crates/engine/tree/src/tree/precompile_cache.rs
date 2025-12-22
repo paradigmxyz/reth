@@ -2,6 +2,7 @@
 
 use alloy_primitives::Bytes;
 use dashmap::DashMap;
+use moka::policy::EvictionPolicy;
 use reth_evm::precompiles::{DynPrecompile, Precompile, PrecompileInput};
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult};
 use revm_primitives::Address;
@@ -49,6 +50,7 @@ where
         Self(
             moka::sync::CacheBuilder::new(MAX_CACHE_SIZE as u64)
                 .initial_capacity(MAX_CACHE_SIZE as usize)
+                .eviction_policy(EvictionPolicy::lru())
                 .build_with_hasher(Default::default()),
         )
     }

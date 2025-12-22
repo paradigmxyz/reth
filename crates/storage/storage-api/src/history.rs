@@ -7,8 +7,8 @@ use reth_primitives_traits::StorageEntry;
 use reth_storage_errors::provider::ProviderResult;
 
 /// History Writer
-#[auto_impl(&, Arc, Box)]
-pub trait HistoryWriter: Send + Sync {
+#[auto_impl(&, Box)]
+pub trait HistoryWriter: Send {
     /// Unwind and clear account history indices.
     ///
     /// Returns number of changesets walked.

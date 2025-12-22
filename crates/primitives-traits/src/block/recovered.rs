@@ -472,7 +472,7 @@ impl<B: Block + Default> Default for RecoveredBlock<B> {
 impl<B: Block> InMemorySize for RecoveredBlock<B> {
     #[inline]
     fn size(&self) -> usize {
-        self.block.size() + self.senders.len() * core::mem::size_of::<Address>()
+        self.block.size() + self.senders.capacity() * core::mem::size_of::<Address>()
     }
 }
 

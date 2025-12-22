@@ -5,7 +5,7 @@ use reth_consensus::ConsensusError;
 use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
     ChainStateBlockReader, DBProvider, HeaderProvider, ProviderError, PruneCheckpointReader,
-    PruneCheckpointWriter, StageCheckpointReader, TrieWriter,
+    PruneCheckpointWriter, StageCheckpointReader, StageCheckpointWriter, TrieWriter,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneSegment, MERKLE_CHANGESETS_RETENTION_BLOCKS,
@@ -300,6 +300,7 @@ where
         + DBProvider
         + HeaderProvider
         + ChainStateBlockReader
+        + StageCheckpointWriter
         + PruneCheckpointReader
         + PruneCheckpointWriter,
 {
@@ -402,6 +403,34 @@ where
         computed_range.end = input.unwind_to + 1;
         if computed_range.start > computed_range.end {
             computed_range.start = computed_range.end;
+        }
+
+        // If we've unwound so far that there are no longer enough trie changesets available then
+        // simply clear them and the checkpoints, so that on next pipeline startup they will be
+        // regenerated.
+        //
+        // We don't do this check if the target block is not greater than the retention threshold
+        // (which happens near genesis), as in that case would could still have all possible
+        // changesets even if the total count doesn't meet the threshold.
+        debug!(
+            target: "sync::stages::merkle_changesets",
+            ?computed_range,
+            retention_blocks=?self.retention_blocks,
+            "Checking if computed range is over retention threshold",
+        );
+        if input.unwind_to > self.retention_blocks &&
+            computed_range.end - computed_range.start < self.retention_blocks
+        {
+            debug!(
+                target: "sync::stages::merkle_changesets",
+                ?computed_range,
+                retention_blocks=?self.retention_blocks,
+                "Clearing checkpoints completely",
+            );
+            provider.clear_trie_changesets()?;
+            provider
+                .save_stage_checkpoint(StageId::MerkleChangeSets, StageCheckpoint::default())?;
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::default() })
         }
 
         // `computed_range.end` is exclusive

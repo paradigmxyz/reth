@@ -61,8 +61,6 @@ pub use alloy_evm::{
     *,
 };
 
-pub use alloy_evm::block::state_changes as state_change;
-
 /// A complete configuration of EVM for Reth.
 ///
 /// This trait encapsulates complete configuration required for transaction execution and block

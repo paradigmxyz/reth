@@ -238,7 +238,7 @@ pub struct UnwindOutput {
 ///
 /// Stages receive [`DBProvider`](reth_provider::DBProvider).
 #[auto_impl::auto_impl(Box)]
-pub trait Stage<Provider>: Send + Sync {
+pub trait Stage<Provider>: Send {
     /// Get the ID of the stage.
     ///
     /// Stage IDs must be unique.

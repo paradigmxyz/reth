@@ -218,7 +218,7 @@ fn run_case(
     .unwrap();
 
     provider
-        .insert_block(genesis_block.clone())
+        .insert_block(&genesis_block)
         .map_err(|err| Error::block_failed(0, Default::default(), err))?;
 
     // Increment block number for receipts static file
@@ -249,7 +249,7 @@ fn run_case(
 
         // Insert the block into the database
         provider
-            .insert_block(block.clone())
+            .insert_block(block)
             .map_err(|err| Error::block_failed(block_number, Default::default(), err))?;
         // Commit static files, so we can query the headers for stateless execution below
         provider

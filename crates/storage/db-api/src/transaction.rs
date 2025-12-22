@@ -12,7 +12,7 @@ pub type CursorTy<TX, T> = <TX as DbTx>::Cursor<T>;
 pub type CursorMutTy<TX, T> = <TX as DbTxMut>::CursorMut<T>;
 
 /// Read only transaction
-pub trait DbTx: Debug + Send + Sync {
+pub trait DbTx: Debug + Send {
     /// Cursor type for this read-only transaction
     type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
     /// `DupCursor` type for this read-only transaction
@@ -43,7 +43,7 @@ pub trait DbTx: Debug + Send + Sync {
 }
 
 /// Read write transaction that allows writing to database
-pub trait DbTxMut: Send + Sync {
+pub trait DbTxMut: Send {
     /// Read-Write Cursor type
     type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
     /// Read-Write `DupCursor` type

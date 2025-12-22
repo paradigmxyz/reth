@@ -83,6 +83,7 @@ reth-rpc-eth-types.workspace = true
 reth-stages-types.workspace = true
 
 alloy-network.workspace = true
+alloy-op-hardforks.workspace = true
 futures.workspace = true
 op-alloy-network.workspace = true
 
@@ -96,6 +97,7 @@ asm-keccak = [
 ]
 keccak-cache-global = [
     "alloy-primitives/keccak-cache-global",
+    "reth-node-core/keccak-cache-global",
     "reth-optimism-node/keccak-cache-global",
 ]
 js-tracer = [

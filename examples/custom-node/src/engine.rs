@@ -70,6 +70,10 @@ impl ExecutionPayload for CustomExecutionData {
     fn gas_used(&self) -> u64 {
         self.inner.gas_used()
     }
+
+    fn transaction_count(&self) -> usize {
+        self.inner.payload.as_v1().transactions.len()
+    }
 }
 
 impl TryFrom<&reth_optimism_flashblocks::FlashBlockCompleteSequence> for CustomExecutionData {

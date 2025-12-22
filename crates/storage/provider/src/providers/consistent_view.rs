@@ -103,7 +103,7 @@ mod tests {
 
         // insert the block
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(genesis_block).unwrap();
+        provider_rw.insert_block(&genesis_block).unwrap();
         provider_rw.commit().unwrap();
 
         // create a consistent view provider and check that a ro provider can be made
@@ -121,7 +121,7 @@ mod tests {
 
         // insert the block
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(recovered_block).unwrap();
+        provider_rw.insert_block(&recovered_block).unwrap();
         provider_rw.commit().unwrap();
 
         // ensure successful creation of a read-only provider, based on this new db state.
@@ -136,7 +136,7 @@ mod tests {
 
         // insert the block
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(recovered_block).unwrap();
+        provider_rw.insert_block(&recovered_block).unwrap();
         provider_rw.commit().unwrap();
 
         // check that creation of a read-only provider still works
@@ -156,7 +156,7 @@ mod tests {
 
         // insert the block
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(genesis_block).unwrap();
+        provider_rw.insert_block(&genesis_block).unwrap();
         provider_rw.commit().unwrap();
 
         // create a consistent view provider and check that a ro provider can be made
@@ -174,7 +174,7 @@ mod tests {
 
         // insert the block
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(recovered_block).unwrap();
+        provider_rw.insert_block(&recovered_block).unwrap();
         provider_rw.commit().unwrap();
 
         // create a second consistent view provider and check that a ro provider can be made
@@ -208,7 +208,7 @@ mod tests {
 
         // reinsert the block at the same height, but with a different hash
         let provider_rw = provider_factory.provider_rw().unwrap();
-        provider_rw.insert_block(recovered_block).unwrap();
+        provider_rw.insert_block(&recovered_block).unwrap();
         provider_rw.commit().unwrap();
 
         // ensure unsuccessful creation of a read-only provider, based on this new db state.

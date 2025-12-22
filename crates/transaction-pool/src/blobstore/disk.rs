@@ -151,6 +151,9 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
+        if txs.is_empty() {
+            return Ok(())
+        }
         let txs = self.inner.retain_existing(txs)?;
         self.inner.txs_to_delete.write().extend(txs);
         Ok(())

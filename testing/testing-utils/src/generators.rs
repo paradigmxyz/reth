@@ -441,7 +441,6 @@ pub fn random_contract_account_range<R: Rng>(
     let mut accounts = Vec::with_capacity(acc_range.end.saturating_sub(acc_range.start) as usize);
     for _ in acc_range {
         let (address, eoa_account) = random_eoa_account(rng);
-        // todo: can a non-eoa account have a nonce > 0?
         let account = Account { bytecode_hash: Some(B256::random()), ..eoa_account };
         accounts.push((address, account))
     }

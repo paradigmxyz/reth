@@ -127,18 +127,21 @@ The following tables describe RPC methods available in the full node.
 
 #### `debug` namespace
 
-| RPC                        | Note                                                       |
-| -------------------------- | ---------------------------------------------------------- |
-| `debug_getRawBlock`        |                                                            |
-| `debug_getRawHeader`       |                                                            |
-| `debug_getRawReceipts`     | Only for the last 10064 blocks and Beacon Deposit Contract |
-| `debug_getRawTransaction`  |                                                            |
-| `debug_traceBlock`         | Only for the last 10064 blocks                             |
-| `debug_traceBlockByHash`   | Only for the last 10064 blocks                             |
-| `debug_traceBlockByNumber` | Only for the last 10064 blocks                             |
-| `debug_traceCall`          | Only for the last 10064 blocks                             |
-| `debug_traceCallMany`      | Only for the last 10064 blocks                             |
-| `debug_traceTransaction`   | Only for the last 10064 blocks                             |
+| RPC                                 | Note                                                       |
+| ----------------------------------- | ---------------------------------------------------------- |
+| `debug_executionWitness`            | Only for the last 10064 blocks                             |
+| `debug_executionWitnessByBlockHash` | Only for the last 10064 blocks                             |
+| `debug_getBadBlocks`                |                                                            |
+| `debug_getRawBlock`                 |                                                            |
+| `debug_getRawHeader`                |                                                            |
+| `debug_getRawReceipts`              | Only for the last 10064 blocks and Beacon Deposit Contract |
+| `debug_getRawTransaction`           |                                                            |
+| `debug_traceBlock`                  | Only for the last 10064 blocks                             |
+| `debug_traceBlockByHash`            | Only for the last 10064 blocks                             |
+| `debug_traceBlockByNumber`          | Only for the last 10064 blocks                             |
+| `debug_traceCall`                   | Only for the last 10064 blocks                             |
+| `debug_traceCallMany`               | Only for the last 10064 blocks                             |
+| `debug_traceTransaction`            | Only for the last 10064 blocks                             |
 
 #### `eth` namespace
 
@@ -201,13 +204,16 @@ The following tables describe RPC methods available in the full node.
 | RPC / Segment                   | Note                           |
 | ------------------------------- | ------------------------------ |
 | `trace_block`                   | Only for the last 10064 blocks |
+| `trace_blockOpcodeGas`          | Only for the last 10064 blocks |
 | `trace_call`                    | Only for the last 10064 blocks |
 | `trace_callMany`                | Only for the last 10064 blocks |
+| `trace_filter`                  | Only for the last 10064 blocks |
 | `trace_get`                     | Only for the last 10064 blocks |
 | `trace_rawTransaction`          | Only for the last 10064 blocks |
 | `trace_replayBlockTransactions` | Only for the last 10064 blocks |
 | `trace_replayTransaction`       | Only for the last 10064 blocks |
 | `trace_transaction`             | Only for the last 10064 blocks |
+| `trace_transactionOpcodeGas`    | Only for the last 10064 blocks |
 
 #### `txpool` namespace
 
@@ -227,18 +233,21 @@ The following tables describe the requirements for prune segments, per RPC metho
 
 #### `debug` namespace
 
-| RPC / Segment              | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
-| -------------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
-| `debug_getRawBlock`        | ✅              | ✅                 | ✅       | ✅              | ✅              |
-| `debug_getRawHeader`       | ✅              | ✅                 | ✅       | ✅              | ✅              |
-| `debug_getRawReceipts`     | ✅              | ✅                 | ❌       | ✅              | ✅              |
-| `debug_getRawTransaction`  | ✅              | ❌                 | ✅       | ✅              | ✅              |
-| `debug_traceBlock`         | ✅              | ✅                 | ✅       | ❌              | ❌              |
-| `debug_traceBlockByHash`   | ✅              | ✅                 | ✅       | ❌              | ❌              |
-| `debug_traceBlockByNumber` | ✅              | ✅                 | ✅       | ❌              | ❌              |
-| `debug_traceCall`          | ✅              | ✅                 | ✅       | ❌              | ❌              |
-| `debug_traceCallMany`      | ✅              | ✅                 | ✅       | ❌              | ❌              |
-| `debug_traceTransaction`   | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| RPC / Segment                       | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
+| ----------------------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
+| `debug_executionWitness`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_executionWitnessByBlockHash` | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_getBadBlocks`                | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_getRawBlock`                 | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_getRawHeader`                | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_getRawReceipts`              | ✅              | ✅                 | ❌       | ✅              | ✅              |
+| `debug_getRawTransaction`           | ✅              | ❌                 | ✅       | ✅              | ✅              |
+| `debug_traceBlock`                  | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceBlockByHash`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceBlockByNumber`          | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceCall`                   | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceCallMany`               | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `debug_traceTransaction`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
 
 #### `eth` namespace
 
@@ -301,13 +310,16 @@ The following tables describe the requirements for prune segments, per RPC metho
 | RPC / Segment                   | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 | ------------------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
 | `trace_block`                   | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `trace_blockOpcodeGas`          | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `trace_call`                    | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `trace_callMany`                | ✅              | ✅                 | ✅       | ❌              | ❌              |
+| `trace_filter`                  | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `trace_get`                     | ✅              | ❌                 | ✅       | ❌              | ❌              |
 | `trace_rawTransaction`          | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `trace_replayBlockTransactions` | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `trace_replayTransaction`       | ✅              | ❌                 | ✅       | ❌              | ❌              |
 | `trace_transaction`             | ✅              | ❌                 | ✅       | ❌              | ❌              |
+| `trace_transactionOpcodeGas`    | ✅              | ❌                 | ✅       | ❌              | ❌              |
 
 #### `txpool` namespace
 

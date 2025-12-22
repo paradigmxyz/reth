@@ -463,7 +463,9 @@ mod tests {
             let provider = factory.database_provider_rw().unwrap();
             let mut tx_count = 0u64;
             for block in &blocks {
-                provider.insert_block(block.clone().try_recover().expect("recover block")).unwrap();
+                provider
+                    .insert_block(&block.clone().try_recover().expect("recover block"))
+                    .unwrap();
                 for tx in &block.body().transactions {
                     let hash = tx.trie_hash();
                     tx_hashes.push(hash);
@@ -603,7 +605,9 @@ mod tests {
             let provider = factory.database_provider_rw().unwrap();
             let mut tx_count = 0u64;
             for block in &blocks {
-                provider.insert_block(block.clone().try_recover().expect("recover block")).unwrap();
+                provider
+                    .insert_block(&block.clone().try_recover().expect("recover block"))
+                    .unwrap();
                 for tx in &block.body().transactions {
                     let hash = tx.trie_hash();
                     rocksdb.put::<tables::TransactionHashNumbers>(hash, &tx_count).unwrap();
@@ -667,7 +671,9 @@ mod tests {
             let provider = factory.database_provider_rw().unwrap();
             // Insert ALL blocks (0-5) to write transactions to static files
             for block in &blocks {
-                provider.insert_block(block.clone().try_recover().expect("recover block")).unwrap();
+                provider
+                    .insert_block(&block.clone().try_recover().expect("recover block"))
+                    .unwrap();
                 for tx in &block.body().transactions {
                     let hash = tx.trie_hash();
                     tx_hashes.push(hash);
@@ -831,7 +837,9 @@ mod tests {
             let provider = factory.database_provider_rw().unwrap();
 
             for block in &blocks {
-                provider.insert_block(block.clone().try_recover().expect("recover block")).unwrap();
+                provider
+                    .insert_block(&block.clone().try_recover().expect("recover block"))
+                    .unwrap();
 
                 // Store transaction hash -> tx_number mappings in RocksDB
                 for tx in &block.body().transactions {

@@ -14,8 +14,8 @@ use reth_trie_common::HashedPostState;
 use revm_database::BundleState;
 
 /// This just receives state, or [`ExecutionOutcome`], from the provider
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait StateReader: Send + Sync {
+#[auto_impl::auto_impl(&, Box)]
+pub trait StateReader: Send {
     /// Receipt type in [`ExecutionOutcome`].
     type Receipt: Send + Sync;
 
@@ -27,10 +27,10 @@ pub trait StateReader: Send + Sync {
 }
 
 /// Type alias of boxed [`StateProvider`].
-pub type StateProviderBox = Box<dyn StateProvider>;
+pub type StateProviderBox = Box<dyn StateProvider + Send + 'static>;
 
 /// An abstraction for a type that provides state data.
-#[auto_impl(&, Arc, Box)]
+#[auto_impl(&, Box)]
 pub trait StateProvider:
     BlockHashReader
     + AccountReader
@@ -39,8 +39,6 @@ pub trait StateProvider:
     + StorageRootProvider
     + StateProofProvider
     + HashedPostStateProvider
-    + Send
-    + Sync
 {
     /// Get storage of given account.
     fn storage(
@@ -97,15 +95,15 @@ pub trait AccountInfoReader: AccountReader + BytecodeReader {}
 impl<T: AccountReader + BytecodeReader> AccountInfoReader for T {}
 
 /// Trait that provides the hashed state from various sources.
-#[auto_impl(&, Arc, Box)]
-pub trait HashedPostStateProvider: Send + Sync {
+#[auto_impl(&, Box)]
+pub trait HashedPostStateProvider {
     /// Returns the `HashedPostState` of the provided [`BundleState`].
     fn hashed_post_state(&self, bundle_state: &BundleState) -> HashedPostState;
 }
 
 /// Trait for reading bytecode associated with a given code hash.
-#[auto_impl(&, Arc, Box)]
-pub trait BytecodeReader: Send + Sync {
+#[auto_impl(&, Box)]
+pub trait BytecodeReader {
     /// Get account code by its hash
     fn bytecode_by_hash(&self, code_hash: &B256) -> ProviderResult<Option<Bytecode>>;
 }
@@ -142,8 +140,8 @@ pub trait TryIntoHistoricalStateProvider {
 /// This affects tracing, or replaying blocks, which will need to be executed on top of the state of
 /// the parent block. For example, in order to trace block `n`, the state after block `n - 1` needs
 /// to be used, since block `n` was executed on its parent block's state.
-#[auto_impl(&, Arc, Box)]
-pub trait StateProviderFactory: BlockIdReader + Send + Sync {
+#[auto_impl(&, Box, Arc)]
+pub trait StateProviderFactory: BlockIdReader + Send {
     /// Storage provider for latest block.
     fn latest(&self) -> ProviderResult<StateProviderBox>;
 
