@@ -4,6 +4,7 @@ pub use crate::{payload::EthereumPayloadBuilder, EthereumEngineValidator};
 use crate::{EthEngineTypes, EthEvmConfig};
 use alloy_eips::{eip7840::BlobParams, merge::EPOCH_SLOTS};
 use alloy_network::Ethereum;
+use alloy_provider::Network;
 use alloy_rpc_types_engine::ExecutionData;
 use reth_chainspec::{ChainSpec, EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_local::LocalPayloadAttributesBuilder;
@@ -409,6 +410,15 @@ where
 
 impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for EthereumNode {
     type RpcBlock = alloy_rpc_types_eth::Block;
+    type RpcNetwork = alloy_network::Ethereum;
+
+    fn rpc_block_from_response(
+        response: <Self::RpcNetwork as Network>::BlockResponse,
+    ) -> Self::RpcBlock {
+        // alloy's Ethereum network already defines BlockResponse = alloy_rpc_types_eth::Block,
+        // so we can return directly without any serde round-trip.
+        response
+    }
 
     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> reth_ethereum_primitives::Block {
         rpc_block.into_consensus().convert_transactions()

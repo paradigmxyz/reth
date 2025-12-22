@@ -33,7 +33,7 @@ mod launch;
 pub use launch::{
     debug::{
         DebugBlockProviderFactory, DebugNode, DebugNodeLauncher, DevMiningContext,
-        DevPayloadAttributesBuilderFactory, DynBlockProviderHandle, RpcConsensusJsonConvert,
+        DevPayloadAttributesBuilderFactory, DynBlockProviderHandle, RpcConsensusConvert,
     },
     engine::EngineNodeLauncher,
     *,

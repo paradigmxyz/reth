@@ -1,6 +1,6 @@
 use super::LaunchNode;
 use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
-use alloy_provider::network::AnyNetwork;
+use alloy_provider::Network;
 use async_trait::async_trait;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_chainspec::EthChainSpec;
@@ -15,8 +15,8 @@ use reth_node_api::{
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives_traits::Block;
-use serde_json::Value;
 use std::{
+    any::Any,
     future::{Future, IntoFuture},
     pin::Pin,
     sync::Arc,
@@ -61,6 +61,8 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
     /// RPC block type. Used by [`DebugConsensusClient`] to fetch blocks and submit them to the
     /// engine. This is intended to match the block format returned by the external RPC endpoint.
     type RpcBlock: Serialize + DeserializeOwned + 'static;
+    /// Network type used by the debug RPC client.
+    type RpcNetwork: Network;
 
     /// Converts an RPC block to a primitive block.
     ///
@@ -83,13 +85,36 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
         chain_spec: &Self::ChainSpec,
     ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes, HeaderTy<Self>>;
 
-    /// Default JSON-to-primitive block converter used by the debug consensus client.
-    fn default_json_convert() -> RpcConsensusJsonConvert<N> {
-        Arc::new(|json: Value| {
-            let rpc_block: Self::RpcBlock =
-                serde_json::from_value(json).expect("Block deserialization cannot fail");
-            Self::rpc_to_primitive_block(rpc_block)
-        })
+    /// Converts network block response into the RPC block type.
+    ///
+    /// Override this to avoid serde round-trips when the response type already matches `RpcBlock`.
+    fn rpc_block_from_response(
+        response: <Self::RpcNetwork as Network>::BlockResponse,
+    ) -> Self::RpcBlock
+    where
+        <Self::RpcNetwork as Network>::BlockResponse: Clone,
+    {
+        // Fast path: when the response type already matches RpcBlock, avoid serialization.
+        if std::any::TypeId::of::<Self::RpcBlock>() ==
+            std::any::TypeId::of::<<Self::RpcNetwork as Network>::BlockResponse>()
+        {
+            // SAFETY: TypeIds match, so downcast succeeds or we fall back to serde.
+            if let Ok(block) =
+                (Box::new(response.clone()) as Box<dyn Any>).downcast::<Self::RpcBlock>()
+            {
+                return *block;
+            }
+        }
+
+        // Fallback: deserialize via JSON when types differ.
+        let json =
+            serde_json::to_value(response).expect("Block serialization cannot fail for debug");
+        serde_json::from_value(json).expect("Block deserialization cannot fail for debug")
+    }
+
+    /// Default RPC-block-to-primitive converter used by the debug consensus client.
+    fn default_rpc_convert() -> RpcConsensusConvert<N> {
+        Arc::new(|rpc_block: Self::RpcBlock| Self::rpc_to_primitive_block(rpc_block))
     }
 
     /// Constructs a block provider for the debug consensus client.
@@ -102,12 +127,15 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
         Box::pin(async move {
             let config = ctx.config;
             if let Some(url) = config.debug.rpc_consensus_url.clone() {
-                let block_provider = RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), {
-                    let convert_json = ctx.convert_json.clone();
+                let block_provider = RpcBlockProvider::<
+                    <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcNetwork,
+                    _,
+                >::new(url.as_str(), {
+                    let convert_rpc_block = ctx.convert_rpc.clone();
                     move |block_response| {
-                        let json = serde_json::to_value(block_response)
-                            .expect("Block serialization cannot fail");
-                        convert_json(json)
+                        let rpc_block =
+                            <N::Types as DebugNode<N>>::rpc_block_from_response(block_response);
+                        convert_rpc_block(rpc_block)
                     }
                 })
                 .await?;
@@ -140,17 +168,26 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
     }
 }
 
-/// Converts a JSON value into the node's primitive block representation.
-pub type RpcConsensusJsonConvert<N> =
-    Arc<dyn Fn(Value) -> BlockTy<<N as FullNodeTypes>::Types> + Send + Sync + 'static>;
+/// Converts an RPC block into the node's primitive block representation.
+pub type RpcConsensusConvert<N> = Arc<
+    dyn Fn(
+            <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock,
+        ) -> BlockTy<<N as FullNodeTypes>::Types>
+        + Send
+        + Sync
+        + 'static,
+>;
 
 /// Context passed to construct a debug block provider.
 #[allow(missing_debug_implementations)]
-pub struct DebugBlockProviderContext<'a, N: FullNodeComponents> {
+pub struct DebugBlockProviderContext<'a, N>
+where
+    N: FullNodeComponents<Types: DebugNode<N>>,
+{
     /// Node configuration for accessing debug settings.
     pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
     /// Converter used to map RPC responses into primitive blocks.
-    pub convert_json: RpcConsensusJsonConvert<N>,
+    pub convert_rpc: RpcConsensusConvert<N>,
 }
 
 /// Future returning a dynamic block provider.
@@ -309,7 +346,7 @@ where
     inner: L,
     target: Target,
     dev_builder_config: Option<DevBuilderConfig<N>>,
-    rpc_consensus_convert_json: Option<RpcConsensusJsonConvert<N>>,
+    rpc_consensus_convert: Option<RpcConsensusConvert<N>>,
     debug_block_provider_factory: Option<DebugBlockProviderFactory<N, AddOns>>,
 }
 
@@ -327,7 +364,7 @@ where
             inner: self.inner,
             target: self.target,
             dev_builder_config: Some(DevBuilderConfig::Builder(Box::new(builder))),
-            rpc_consensus_convert_json: self.rpc_consensus_convert_json,
+            rpc_consensus_convert: self.rpc_consensus_convert,
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
     }
@@ -340,21 +377,26 @@ where
             inner: self.inner,
             target: self.target,
             dev_builder_config: Some(DevBuilderConfig::DefaultWithMap(Box::new(f))),
-            rpc_consensus_convert_json: self.rpc_consensus_convert_json,
+            rpc_consensus_convert: self.rpc_consensus_convert,
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
     }
 
-    /// Overrides the RPC block JSON-to-primitive conversion used by the debug RPC consensus client.
-    pub fn with_rpc_consensus_convert_json(
+    /// Overrides the RPC block-to-primitive conversion used by the debug RPC consensus client.
+    pub fn with_rpc_consensus_convert(
         self,
-        convert: impl Fn(Value) -> BlockTy<<N as FullNodeTypes>::Types> + Send + Sync + 'static,
+        convert: impl Fn(
+                <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock,
+            ) -> BlockTy<<N as FullNodeTypes>::Types>
+            + Send
+            + Sync
+            + 'static,
     ) -> Self {
         Self {
             inner: self.inner,
             target: self.target,
             dev_builder_config: self.dev_builder_config,
-            rpc_consensus_convert_json: Some(Arc::new(convert)),
+            rpc_consensus_convert: Some(Arc::new(convert)),
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
     }
@@ -368,7 +410,7 @@ where
             inner: self.inner,
             target: self.target,
             dev_builder_config: Some(DevBuilderConfig::Factory(factory)),
-            rpc_consensus_convert_json: self.rpc_consensus_convert_json,
+            rpc_consensus_convert: self.rpc_consensus_convert,
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
     }
@@ -382,7 +424,7 @@ where
             inner: self.inner,
             target: self.target,
             dev_builder_config: self.dev_builder_config,
-            rpc_consensus_convert_json: self.rpc_consensus_convert_json,
+            rpc_consensus_convert: self.rpc_consensus_convert,
             debug_block_provider_factory: Some(factory),
         }
     }
@@ -401,7 +443,7 @@ where
             inner,
             target,
             dev_builder_config,
-            rpc_consensus_convert_json,
+            rpc_consensus_convert,
             debug_block_provider_factory,
         } = self;
 
@@ -412,13 +454,13 @@ where
             let provider = block_provider_factory(config, &handle)?;
             spawn_consensus_client(&handle, provider);
         } else if debug_block_provider_configured(config) {
-            let convert_json = rpc_consensus_convert_json
-                .unwrap_or_else(<N as FullNodeTypes>::Types::default_json_convert);
+            let convert_rpc = rpc_consensus_convert
+                .unwrap_or_else(<N as FullNodeTypes>::Types::default_rpc_convert);
 
             let block_provider =
                 <N as FullNodeTypes>::Types::block_provider(DebugBlockProviderContext {
                     config,
-                    convert_json,
+                    convert_rpc,
                 })
                 .await?;
 
@@ -512,7 +554,7 @@ where
             inner: self.inner,
             target,
             dev_builder_config: None,
-            rpc_consensus_convert_json: None,
+            rpc_consensus_convert: None,
             debug_block_provider_factory: None,
         }
     }

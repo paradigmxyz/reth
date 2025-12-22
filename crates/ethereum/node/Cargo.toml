@@ -43,6 +43,7 @@ alloy-eips.workspace = true
 alloy-network.workspace = true
 alloy-rpc-types-eth.workspace = true
 alloy-rpc-types-engine.workspace = true
+alloy-provider = { version = "1.1.3", features = ["reqwest", "debug-api"], default-features = false }
 
 # async
 tokio.workspace = true
