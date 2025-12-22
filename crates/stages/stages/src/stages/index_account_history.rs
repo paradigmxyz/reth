@@ -2,7 +2,12 @@ use super::{collect_history_indices, load_history_indices};
 use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{models::ShardedKey, table::Decode, tables, transaction::DbTxMut};
-use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::EitherWriter;
+use reth_provider::{
+    DBProvider, HistoryWriter, NodePrimitivesProvider, PruneCheckpointReader,
+    PruneCheckpointWriter, RocksDBProviderFactory, StorageSettingsCache,
+};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
@@ -43,8 +48,13 @@ impl Default for IndexAccountHistoryStage {
 
 impl<Provider> Stage<Provider> for IndexAccountHistoryStage
 where
-    Provider:
-        DBProvider<Tx: DbTxMut> + HistoryWriter + PruneCheckpointReader + PruneCheckpointWriter,
+    Provider: DBProvider<Tx: DbTxMut>
+        + HistoryWriter
+        + PruneCheckpointReader
+        + PruneCheckpointWriter
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -110,15 +120,47 @@ where
                 &self.etl_config,
             )?;
 
-        info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::AccountsHistory, _>(
-            provider,
-            collector,
-            first_sync,
-            ShardedKey::new,
-            ShardedKey::<Address>::decode_owned,
-            |key| key.key,
-        )?;
+        // Check if RocksDB is enabled for account history
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let use_rocksdb = provider.cached_storage_settings().account_history_in_rocksdb;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let use_rocksdb = false;
+
+        info!(target: "sync::stages::index_account_history::exec", ?use_rocksdb, "Loading indices into database");
+
+        if use_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                // Create RocksDB batch
+                let rocksdb = provider.rocksdb_provider();
+                let rocksdb_batch = rocksdb.batch();
+
+                // Create writer that routes to RocksDB
+                let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
+
+                // Load indices using the RocksDB path
+                super::load_account_history_indices_via_writer(
+                    &mut writer,
+                    collector,
+                    first_sync,
+                )?;
+
+                // Extract and register RocksDB batch for commit at provider level
+                if let Some(batch) = writer.into_raw_rocksdb_batch() {
+                    provider.set_pending_rocksdb_batch(batch);
+                }
+            }
+        } else {
+            // Keep existing MDBX path unchanged
+            load_history_indices::<_, tables::AccountsHistory, _>(
+                provider,
+                collector,
+                first_sync,
+                ShardedKey::new,
+                ShardedKey::<Address>::decode_owned,
+                |key| key.key,
+            )?;
+        }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
@@ -630,6 +672,69 @@ mod tests {
             let table = self.db.table::<tables::AccountsHistory>().unwrap();
             assert!(table.is_empty());
             Ok(())
+        }
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    mod rocksdb_tests {
+        use super::*;
+        use reth_provider::RocksDBProviderFactory;
+        use reth_storage_api::StorageSettings;
+
+        #[tokio::test]
+        async fn execute_writes_account_history_to_rocksdb_when_enabled() {
+            let db = TestStageDB::default();
+
+            // Enable RocksDB for account history
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_account_history_in_rocksdb(true),
+            );
+
+            // setup
+            partial_setup(&db);
+
+            // run
+            run(&db, MAX_BLOCK, None);
+
+            // Verify MDBX table is empty (data should be in RocksDB)
+            let mdbx_count = db.table::<tables::AccountsHistory>().unwrap().len();
+            assert_eq!(
+                mdbx_count, 0,
+                "MDBX AccountsHistory should be empty when RocksDB is enabled"
+            );
+
+            // Verify RocksDB has the data
+            let rocksdb = db.factory.rocksdb_provider();
+            let result = rocksdb.get::<tables::AccountsHistory>(shard(u64::MAX)).unwrap();
+            assert!(result.is_some(), "Account history should exist in RocksDB");
+
+            // Verify the block numbers are correct
+            let list = result.unwrap();
+            let blocks: Vec<u64> = list.iter().collect();
+            assert!(!blocks.is_empty(), "Block list should not be empty");
+        }
+
+        #[tokio::test]
+        async fn execute_writes_to_mdbx_when_rocksdb_disabled() {
+            let db = TestStageDB::default();
+
+            // Ensure RocksDB is disabled for account history (default)
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_account_history_in_rocksdb(false),
+            );
+
+            // setup
+            partial_setup(&db);
+
+            // run
+            run(&db, MAX_BLOCK, None);
+
+            // Verify MDBX table has data
+            let mdbx_count = db.table::<tables::AccountsHistory>().unwrap().len();
+            assert!(
+                mdbx_count > 0,
+                "MDBX AccountsHistory should have data when RocksDB is disabled"
+            );
         }
     }
 }
