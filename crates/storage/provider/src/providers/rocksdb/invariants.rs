@@ -56,15 +56,15 @@ impl RocksDBProvider {
         let mut unwind_target: Option<BlockNumber> = None;
 
         // Check TransactionHashNumbers if stored in RocksDB
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
-            let Some(target) = self.check_transaction_hash_numbers(provider)?
+        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb
+            && let Some(target) = self.check_transaction_hash_numbers(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }
 
         // Check StoragesHistory if stored in RocksDB
-        if provider.cached_storage_settings().storages_history_in_rocksdb &&
-            let Some(target) = self.check_storages_history(provider)?
+        if provider.cached_storage_settings().storages_history_in_rocksdb
+            && let Some(target) = self.check_storages_history(provider)?
         {
             unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
         }

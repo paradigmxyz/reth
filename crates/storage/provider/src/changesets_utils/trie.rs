@@ -43,20 +43,20 @@ where
     fn next(&mut self) -> Option<Self::Item> {
         let Some(curr_path) = self.paths.next() else {
             // If there are no more paths then there is no further possible output.
-            return None
+            return None;
         };
 
         // If the path is ahead of the cursor then seek the cursor forward to catch up. The cursor
         // will seek either to `curr_path` or beyond it.
-        if self.cursor_current.as_ref().is_some_and(|(cursor_path, _)| curr_path > *cursor_path) &&
-            let Err(err) = self.seek_cursor(curr_path)
+        if self.cursor_current.as_ref().is_some_and(|(cursor_path, _)| curr_path > *cursor_path)
+            && let Err(err) = self.seek_cursor(curr_path)
         {
-            return Some(Err(err))
+            return Some(Err(err));
         }
 
         // If there is a path but the cursor is empty then that path has no node.
         if self.cursor_current.is_none() {
-            return Some(Ok((curr_path, None)))
+            return Some(Ok((curr_path, None)));
         }
 
         let (cursor_path, cursor_node) =
