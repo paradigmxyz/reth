@@ -95,6 +95,7 @@ fn verify_and_compute_sender(
     }
 }
 #[cfg(feature = "k256")]
+#[allow(dead_code)]
 fn verify_and_compute_sender_unchecked_k256(
     vk: &UncompressedPublicKey,
     sig: &Signature,
