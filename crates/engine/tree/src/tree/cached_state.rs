@@ -3,7 +3,7 @@ use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
 };
-use fixed_cache::Stats;
+use fixed_cache::{AnyRef, Stats, StatsHandler};
 use metrics::Gauge;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
