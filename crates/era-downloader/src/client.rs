@@ -98,8 +98,11 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                 }
             }
 
+            // Ensure download succeeded for all file types
+            let actual_checksum = actual_checksum?;
+
             if self.era_type == EraFileType::Era1 {
-                self.assert_checksum(number, actual_checksum?)
+                self.assert_checksum(number, actual_checksum)
                     .await
                     .map_err(|e| eyre!("{e} for {file_name} at {}", path.display()))?;
             }
