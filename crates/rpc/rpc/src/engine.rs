@@ -133,7 +133,12 @@ where
 
     /// Handler for `eth_getLogs`
     async fn logs(&self, filter: Filter) -> Result<Vec<Log>> {
-        self.eth_filter.logs(filter, QueryLimits::no_limits()).instrument(engine_span!()).await
+        let (logs, _) = self
+            .eth_filter
+            .logs(filter, QueryLimits::no_limits())
+            .instrument(engine_span!())
+            .await?;
+        Ok(logs)
     }
 
     /// Handler for `eth_getProof`
