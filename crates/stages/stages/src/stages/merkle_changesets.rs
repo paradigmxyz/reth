@@ -408,13 +408,19 @@ where
         // If we've unwound so far that there are no longer enough trie changesets available then
         // simply clear them and the checkpoints, so that on next pipeline startup they will be
         // regenerated.
+        //
+        // We don't do this check if the target block is not greater than the retention threshold
+        // (which happens near genesis), as in that case would could still have all possible
+        // changesets even if the total count doesn't meet the threshold.
         debug!(
             target: "sync::stages::merkle_changesets",
             ?computed_range,
             retention_blocks=?self.retention_blocks,
             "Checking if computed range is over retention threshold",
         );
-        if computed_range.end - computed_range.start < self.retention_blocks {
+        if input.unwind_to > self.retention_blocks &&
+            computed_range.end - computed_range.start < self.retention_blocks
+        {
             debug!(
                 target: "sync::stages::merkle_changesets",
                 ?computed_range,
