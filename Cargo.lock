@@ -3947,11 +3947,12 @@ dependencies = [
 
 [[package]]
 name = "fixed-cache"
-version = "0.1.1"
+version = "0.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e0b787b8055e984fefc8a6a0709fc800d374dcb2794017799c0f245c75322d4"
+checksum = "ba59b6c98ba422a13f17ee1305c995cb5742bba7997f5b4d9af61b2ff0ffb213"
 dependencies = [
  "equivalent",
+ "typeid",
 ]
 
 [[package]]
@@ -13122,6 +13123,12 @@ dependencies = [
  "thiserror 2.0.17",
  "utf-8",
 ]
+
+[[package]]
+name = "typeid"
+version = "1.0.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc7d623258602320d5c55d1bc22793b57daff0ec7efc270ea7d55ce1d5f5471c"
 
 [[package]]
 name = "typenum"

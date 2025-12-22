@@ -4,7 +4,7 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
         CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
-        SavedCache,
+        FixedCacheMetrics, SavedCache,
     },
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmTaskEvent},
@@ -470,7 +470,12 @@ where
         } else {
             debug!("creating new execution cache on cache miss");
             let cache = ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size);
-            SavedCache::new(parent_hash, cache, CachedStateMetrics::zeroed())
+            SavedCache::new(
+                parent_hash,
+                cache,
+                CachedStateMetrics::zeroed(),
+                FixedCacheMetrics::zeroed(),
+            )
         }
     }
 
@@ -561,18 +566,22 @@ where
             }
 
             // Take existing cache (if any) or create fresh caches
-            let (caches, cache_metrics) = match cached.take() {
-                Some(existing) => {
-                    existing.split()
-                }
+            let (caches, cache_metrics, fixed_cache_metrics) = match cached.take() {
+                Some(existing) => existing.split(),
                 None => (
                     ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size),
                     CachedStateMetrics::zeroed(),
+                    FixedCacheMetrics::zeroed(),
                 ),
             };
 
             // Insert the block's bundle state into cache
-            let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics);
+            let new_cache = SavedCache::new(
+                block_with_parent.block.hash,
+                caches,
+                cache_metrics,
+                fixed_cache_metrics,
+            );
             if new_cache.cache().insert_state(bundle_state).is_err() {
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
@@ -835,7 +844,7 @@ where
 mod tests {
     use super::ExecutionCache;
     use crate::tree::{
-        cached_state::{CachedStateMetrics, ExecutionCacheBuilder, SavedCache},
+        cached_state::{CachedStateMetrics, ExecutionCacheBuilder, FixedCacheMetrics, SavedCache},
         payload_processor::{
             evm_state_to_hashed_post_state, executor::WorkloadExecutor, PayloadProcessor,
         },
@@ -865,7 +874,12 @@ mod tests {
 
     fn make_saved_cache(hash: B256) -> SavedCache {
         let execution_cache = ExecutionCacheBuilder::default().build_caches(1_000);
-        SavedCache::new(hash, execution_cache, CachedStateMetrics::zeroed())
+        SavedCache::new(
+            hash,
+            execution_cache,
+            CachedStateMetrics::zeroed(),
+            FixedCacheMetrics::zeroed(),
+        )
     }
 
     #[test]
