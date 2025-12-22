@@ -170,6 +170,12 @@ pub fn load_sepolia_secure_alloc_hashed_with_bytecodes(
         let mut entries: BTreeMap<B256, U256> = arbos_storage.storage.iter().map(|(k, v)| (*k, *v)).collect();
         entries.insert(timeout_queue_slot1_hashed, U256::from(2));
         *arbos_storage = HashedStorage::from_iter(false, entries.into_iter());
+    } else {
+        // ArbOS storage doesn't exist in secureAlloc, create it with just the TimeoutQueue slot 1
+        let mut entries: BTreeMap<B256, U256> = BTreeMap::new();
+        entries.insert(timeout_queue_slot1_hashed, U256::from(2));
+        let storage = HashedStorage::from_iter(false, entries.into_iter());
+        storages_h.insert(arbos_hashed_addr, storage);
     }
 
     Ok((accounts_h, storages_h, bytecodes))
