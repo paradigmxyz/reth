@@ -1,3 +1,4 @@
+use super::utils::maybe_save_prune_checkpoint;
 use alloy_eips::eip2718::Encodable2718;
 use alloy_primitives::{TxHash, TxNumber};
 use num_traits::Zero;
@@ -79,39 +80,19 @@ where
         provider: &Provider,
         mut input: ExecInput,
     ) -> Result<ExecOutput, StageError> {
-        if let Some((target_prunable_block, prune_mode)) = self
-            .prune_mode
-            .map(|mode| {
-                mode.prune_target_block(
-                    input.target(),
-                    PruneSegment::TransactionLookup,
-                    PrunePurpose::User,
-                )
-            })
-            .transpose()?
-            .flatten() &&
-            target_prunable_block > input.checkpoint().block_number
-        {
-            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
-
-            // Save prune checkpoint only if we don't have one already.
-            // Otherwise, pruner may skip the unpruned range of blocks.
-            if provider.get_prune_checkpoint(PruneSegment::TransactionLookup)?.is_none() {
-                let target_prunable_tx_number = provider
-                    .block_body_indices(target_prunable_block)?
-                    .ok_or(ProviderError::BlockBodyIndicesNotFound(target_prunable_block))?
+        maybe_save_prune_checkpoint(
+            provider,
+            self.prune_mode,
+            &mut input,
+            PruneSegment::TransactionLookup,
+            |provider, target_block| {
+                let tx_num = provider
+                    .block_body_indices(target_block)?
+                    .ok_or(ProviderError::BlockBodyIndicesNotFound(target_block))?
                     .last_tx_num();
-
-                provider.save_prune_checkpoint(
-                    PruneSegment::TransactionLookup,
-                    PruneCheckpoint {
-                        block_number: Some(target_prunable_block),
-                        tx_number: Some(target_prunable_tx_number),
-                        prune_mode,
-                    },
-                )?;
-            }
-        }
+                Ok(Some(tx_num))
+            },
+        )?;
         if input.target_reached() {
             return Ok(ExecOutput::done(input.checkpoint()));
         }
