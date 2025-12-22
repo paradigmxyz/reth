@@ -1054,7 +1054,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 .collect();
 
         // Heal any file-level (NippyJar) inconsistencies
-        self.check_file_consistency()?;
+        self.check_file_consistency(provider)?;
 
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: BlockNumber| {
@@ -1096,6 +1096,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
             // Get the pre-healing highest block (captured before check_file_consistency)
             let initial_highest_block = initial_highest_blocks.get(&segment).copied().flatten();
+            debug!(target: "reth::providers::static_file", ?segment, ?initial_highest_block, "Initial highest block for segment");
 
             // Get the post-healing highest block
             // The highest_block may have decreased if we healed from a pruning interruption.
@@ -1214,10 +1215,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
-    /// Heals file-level (`NippyJar`) inconsistencies for all static file segments.
+    /// Heals file-level (`NippyJar`) inconsistencies for static file segments.
     ///
     /// This method ONLY handles recovery from interrupted file operations (partial writes,
     /// corrupted jars). It does NOT compare against database checkpoints or prune data.
+    ///
+    /// Segments configured to stay in the database (e.g., receipts or transaction senders on
+    /// certain node configurations) are skipped to avoid creating unwanted static files.
     ///
     /// Call this before any operations that need static file data to be in a consistent state,
     /// such as `RocksDB` consistency checks that need transaction data from static files.
@@ -1227,8 +1231,28 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// WARNING: No static file writer should be held before calling this function, otherwise it
     /// will deadlock.
-    pub fn check_file_consistency(&self) -> ProviderResult<()> {
+    pub fn check_file_consistency<Provider>(&self, provider: &Provider) -> ProviderResult<()>
+    where
+        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
+    {
         for segment in StaticFileSegment::iter() {
+            // Skip segments configured to stay in the database
+            match segment {
+                StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
+                StaticFileSegment::Receipts => {
+                    if EitherWriter::receipts_destination(provider).is_database() {
+                        debug!(target: "reth::providers::static_file", ?segment, "Skipping file consistency: receipts stored in database");
+                        continue
+                    }
+                }
+                StaticFileSegment::TransactionSenders => {
+                    if EitherWriterDestination::senders(provider).is_database() {
+                        debug!(target: "reth::providers::static_file", ?segment, "Skipping file consistency: senders stored in database");
+                        continue
+                    }
+                }
+            }
+
             if self.access.is_read_only() {
                 debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency (read-only)");
                 self.check_segment_consistency(segment)?;
