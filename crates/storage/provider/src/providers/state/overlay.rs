@@ -214,8 +214,8 @@ where
 
         // If block_hash is provided, collect reverts
         let (trie_updates, hashed_post_state) = if let Some(from_block) =
-            self.get_requested_block_number(provider)?
-            && self.reverts_required(provider, db_tip_block, from_block)?
+            self.get_requested_block_number(provider)? &&
+            self.reverts_required(provider, db_tip_block, from_block)?
         {
             // Collect trie reverts
             let mut trie_reverts = {

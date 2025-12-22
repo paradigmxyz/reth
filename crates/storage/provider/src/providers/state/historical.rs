@@ -130,8 +130,8 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
 
     /// Retrieve revert hashed state for this history provider.
     fn revert_state(&self) -> ProviderResult<HashedPostStateSorted> {
-        if !self.lowest_available_blocks.is_account_history_available(self.block_number)
-            || !self.lowest_available_blocks.is_storage_history_available(self.block_number)
+        if !self.lowest_available_blocks.is_account_history_available(self.block_number) ||
+            !self.lowest_available_blocks.is_storage_history_available(self.block_number)
         {
             return Err(ProviderError::StateAtBlockPruned(self.block_number));
         }
