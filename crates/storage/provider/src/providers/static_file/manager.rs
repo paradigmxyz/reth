@@ -1046,16 +1046,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         info!(target: "reth::cli", "Verifying storage consistency.");
 
-        // Capture initial highest block for all segments before healing, so we can detect
-        // if healing from a pruning interruption decreased the highest block.
-        let initial_highest_blocks: HashMap<StaticFileSegment, Option<BlockNumber>> =
-            StaticFileSegment::iter()
-                .map(|seg| (seg, self.get_highest_static_file_block(seg)))
-                .collect();
-
-        // Heal any file-level (NippyJar) inconsistencies
-        self.check_file_consistency(provider)?;
-
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: BlockNumber| {
             if let Some(target) = unwind_target.as_mut() {
@@ -1094,13 +1084,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
             }
 
-            // Get the pre-healing highest block (captured before check_file_consistency)
-            let initial_highest_block = initial_highest_blocks.get(&segment).copied().flatten();
-            debug!(target: "reth::providers::static_file", ?segment, ?initial_highest_block, "Initial highest block for segment");
+            // Heal file-level inconsistencies and get before/after highest block
+            let (initial_highest_block, mut highest_block) = self.heal_segment(segment)?;
 
-            // Get the post-healing highest block
-            // The highest_block may have decreased if we healed from a pruning interruption.
-            let mut highest_block = self.get_highest_static_file_block(segment);
+            // Only applies to block-based static files. (Headers)
+            //
+            // The updated `highest_block` may have decreased if we healed from a pruning
+            // interruption.
             if initial_highest_block != highest_block {
                 info!(
                     target: "reth::providers::static_file",
@@ -1215,60 +1205,42 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
-    fn should_skip_file_consistency<Provider>(
-        provider: &Provider,
+    /// Heals file-level (`NippyJar`) inconsistencies for a single static file segment.
+    ///
+    /// Returns the highest block before and after healing, which can be used to detect
+    /// if healing from a pruning interruption decreased the highest block.
+    ///
+    /// File consistency is broken if:
+    ///
+    /// * appending data was interrupted before a config commit, then data file will be truncated
+    ///   according to the config.
+    ///
+    /// * pruning data was interrupted before a config commit, then we have deleted data that we are
+    ///   expected to still have. We need to check the Database and unwind everything accordingly.
+    fn heal_segment(
+        &self,
         segment: StaticFileSegment,
-    ) -> bool
-    where
-        Provider: ChainSpecProvider + StorageSettingsCache,
-    {
-        match segment {
-            StaticFileSegment::Headers | StaticFileSegment::Transactions => false,
-            StaticFileSegment::Receipts => {
-                EitherWriter::receipts_destination(provider).is_database()
-            }
-            StaticFileSegment::TransactionSenders => {
-                EitherWriterDestination::senders(provider).is_database()
-            }
-        }
-    }
+    ) -> ProviderResult<(Option<BlockNumber>, Option<BlockNumber>)> {
+        let initial_highest_block = self.get_highest_static_file_block(segment);
+        debug!(target: "reth::providers::static_file", ?segment, ?initial_highest_block, "Initial highest block for segment");
 
-    /// Heals file-level (`NippyJar`) inconsistencies for static file segments.
-    ///
-    /// This method ONLY handles recovery from interrupted file operations (partial writes,
-    /// corrupted jars). It does NOT compare against database checkpoints or prune data.
-    ///
-    /// Segments configured to stay in the database (e.g., receipts or transaction senders on
-    /// certain node configurations) are skipped to avoid creating unwanted static files.
-    ///
-    /// Call this before any operations that need static file data to be in a consistent state,
-    /// such as `RocksDB` consistency checks that need transaction data from static files.
-    ///
-    /// For full consistency checking including database checkpoint comparison,
-    /// use [`Self::check_consistency`] instead.
-    ///
-    /// WARNING: No static file writer should be held before calling this function, otherwise it
-    /// will deadlock.
-    pub fn check_file_consistency<Provider>(&self, provider: &Provider) -> ProviderResult<()>
-    where
-        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
-    {
-        for segment in StaticFileSegment::iter() {
-            // Skip segments configured to stay in the database
-            if Self::should_skip_file_consistency(provider, segment) {
-                debug!(target: "reth::providers::static_file", ?segment, "Skipping file consistency: segment stored in database");
-                continue
-            }
-
-            if self.access.is_read_only() {
-                debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency (read-only)");
-                self.check_segment_consistency(segment)?;
-            } else {
-                debug!(target: "reth::providers::static_file", ?segment, "Fetching latest writer which might heal any potential inconsistency");
-                self.latest_writer(segment)?;
-            }
+        if self.access.is_read_only() {
+            // Read-only mode: cannot modify files, so just validate consistency and error if
+            // broken.
+            debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency (read-only)");
+            self.check_segment_consistency(segment)?;
+        } else {
+            // Writable mode: fetching the writer will automatically heal any file-level
+            // inconsistency by truncating data to match the last committed config.
+            debug!(target: "reth::providers::static_file", ?segment, "Fetching latest writer which might heal any potential inconsistency");
+            self.latest_writer(segment)?;
         }
-        Ok(())
+
+        // The updated `highest_block` may have decreased if we healed from a pruning
+        // interruption.
+        let highest_block = self.get_highest_static_file_block(segment);
+
+        Ok((initial_highest_block, highest_block))
     }
 
     /// Check invariants for each corresponding table and static file segment:
