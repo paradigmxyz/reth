@@ -13,6 +13,7 @@ pub struct RetryableCreateParams {
     pub beneficiary: Address,
     pub call_to: Address,
     pub call_data: Bytes,
+    pub callvalue: U256,  // The actual call value to store (retry_value in SubmitRetryable)
     pub l1_base_fee: U256,
     pub submission_fee: U256,
     pub max_submission_cost: U256,
@@ -88,12 +89,54 @@ const TIMEOUT_WINDOWS_LEFT_OFFSET: u64 = 6;
 // Calldata is stored in a nested substorage with this key
 const CALLDATA_KEY: &[u8] = &[1];
 
+// TimeoutQueue subspace key (Go nitro uses []byte{0} for the queue within retryables subspace)
+const TIMEOUT_QUEUE_KEY: &[u8] = &[0];
+
 pub const RETRYABLE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60;
+
+/// TimeoutQueue matching Go nitro's storage/queue.go
+/// Stores:
+/// - Slot 0: nextPutOffset (starts at 2)
+/// - Slot 1: nextGetOffset (starts at 2)
+/// - Slot 2+: queue entries (ticket IDs)
+pub struct TimeoutQueue<D> {
+    storage: Storage<D>,
+}
+
+impl<D: Database> TimeoutQueue<D> {
+    pub fn new(storage: Storage<D>) -> Self {
+        Self { storage }
+    }
+    
+    /// Put a ticket ID into the queue (matching Go nitro's Queue.Put)
+    pub fn put(&self, state: *mut revm::database::State<D>, ticket_id: B256) -> Result<(), ()> {
+        // Get current nextPutOffset (slot 0)
+        let next_put_storage = StorageBackedUint64::new(state, self.storage.base_key, 0);
+        let next_put = next_put_storage.get().unwrap_or(2); // Default to 2 if not initialized
+        
+        // Increment nextPutOffset
+        next_put_storage.set(next_put + 1)?;
+        
+        // Store the ticket ID at slot (next_put)
+        let slot_storage = StorageBackedBigUint::new(state, self.storage.base_key, next_put);
+        slot_storage.set(U256::from_be_bytes(ticket_id.0))?;
+        
+        tracing::info!(target: "arb-retryable", "TIMEOUT_QUEUE_PUT: ticket_id={:?} slot={}", ticket_id, next_put);
+        
+        Ok(())
+    }
+}
 
 impl<D: Database> RetryableState<D> {
     pub fn new(state: *mut revm::database::State<D>, base_key: B256) -> Self {
         let storage = Storage::new(state, base_key);
         Self { storage }
+    }
+    
+    /// Get the TimeoutQueue for this retryable state
+    fn timeout_queue(&self) -> TimeoutQueue<D> {
+        let queue_storage = self.storage.open_sub_storage(TIMEOUT_QUEUE_KEY);
+        TimeoutQueue::new(queue_storage)
     }
     
     pub fn try_to_reap_one_retryable(&self, current_time: u64, state: *mut revm::database::State<D>) -> Result<bool, ()> {
@@ -148,7 +191,7 @@ impl<D: Database> RetryableState<D> {
         let _ = ticket.num_tries.set(0);
         let _ = ticket.from.set(params.sender);
         let _ = ticket.to.set(params.call_to);
-        let _ = ticket.callvalue.set(params.submission_fee);  // Go nitro stores callvalue, not submission_fee
+        let _ = ticket.callvalue.set(params.callvalue);  // Go nitro stores the actual callvalue (retry_value)
         let _ = ticket.beneficiary.set(params.beneficiary);
         // Store calldata in nested substorage (matching Go nitro's StorageBackedBytes)
         let calldata_storage = ticket_storage.open_sub_storage(CALLDATA_KEY);
@@ -158,30 +201,43 @@ impl<D: Database> RetryableState<D> {
         
         tracing::info!(target: "arb-retryable", "CREATE_RETRYABLE: ticket_id={:?} timeout={}", ticket_id, timeout);
 
-        // TODO: Insert into TimeoutQueue (rs.TimeoutQueue.Put(id))
-        // For now, we skip the queue as it's not critical for state root matching
+        // Insert into TimeoutQueue (rs.TimeoutQueue.Put(id))
+        let queue = self.timeout_queue();
+        let _ = queue.put(state, B256::from(ticket_id.0));
 
         ticket
     }
     
     /// Set bytes in storage matching Go nitro's Storage.SetBytes
+    /// Go nitro uses common.BytesToHash which RIGHT-aligns bytes (pads on the left)
     fn set_bytes(state: *mut revm::database::State<D>, storage: &Storage<D>, data: &[u8]) {
         // Go nitro's SetBytes stores:
         // - Slot 0: length of data
-        // - Subsequent slots: data packed into 32-byte chunks
+        // - Subsequent slots: data packed into 32-byte chunks, RIGHT-aligned (padded on left)
         let len = data.len();
         let len_storage = StorageBackedUint64::new(state, storage.base_key, 0);
         let _ = len_storage.set(len as u64);
         
-        // Store data in 32-byte chunks
+        // Store data in 32-byte chunks, RIGHT-aligned like Go's common.BytesToHash
         let mut offset = 1u64;
-        for chunk in data.chunks(32) {
+        let mut remaining = data;
+        while remaining.len() >= 32 {
+            // Full 32-byte chunk - no padding needed
+            let chunk: [u8; 32] = remaining[..32].try_into().unwrap();
+            let value = U256::from_be_bytes(chunk);
+            let slot_storage = StorageBackedBigUint::new(state, storage.base_key, offset);
+            let _ = slot_storage.set(value);
+            remaining = &remaining[32..];
+            offset += 1;
+        }
+        // Handle the last partial chunk (if any) - RIGHT-align (pad on left)
+        if !remaining.is_empty() {
             let mut padded = [0u8; 32];
-            padded[..chunk.len()].copy_from_slice(chunk);
+            // Go's BytesToHash right-aligns: bytes go at the END of the 32-byte array
+            padded[32 - remaining.len()..].copy_from_slice(remaining);
             let value = U256::from_be_bytes(padded);
             let slot_storage = StorageBackedBigUint::new(state, storage.base_key, offset);
             let _ = slot_storage.set(value);
-            offset += 1;
         }
     }
 
