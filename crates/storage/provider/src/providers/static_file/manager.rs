@@ -1215,6 +1215,24 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
+    fn should_skip_file_consistency<Provider>(
+        provider: &Provider,
+        segment: StaticFileSegment,
+    ) -> bool
+    where
+        Provider: ChainSpecProvider + StorageSettingsCache,
+    {
+        match segment {
+            StaticFileSegment::Headers | StaticFileSegment::Transactions => false,
+            StaticFileSegment::Receipts => {
+                EitherWriter::receipts_destination(provider).is_database()
+            }
+            StaticFileSegment::TransactionSenders => {
+                EitherWriterDestination::senders(provider).is_database()
+            }
+        }
+    }
+
     /// Heals file-level (`NippyJar`) inconsistencies for static file segments.
     ///
     /// This method ONLY handles recovery from interrupted file operations (partial writes,
@@ -1237,20 +1255,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     {
         for segment in StaticFileSegment::iter() {
             // Skip segments configured to stay in the database
-            match segment {
-                StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
-                StaticFileSegment::Receipts => {
-                    if EitherWriter::receipts_destination(provider).is_database() {
-                        debug!(target: "reth::providers::static_file", ?segment, "Skipping file consistency: receipts stored in database");
-                        continue
-                    }
-                }
-                StaticFileSegment::TransactionSenders => {
-                    if EitherWriterDestination::senders(provider).is_database() {
-                        debug!(target: "reth::providers::static_file", ?segment, "Skipping file consistency: senders stored in database");
-                        continue
-                    }
-                }
+            if Self::should_skip_file_consistency(provider, segment) {
+                debug!(target: "reth::providers::static_file", ?segment, "Skipping file consistency: segment stored in database");
+                continue
             }
 
             if self.access.is_read_only() {
