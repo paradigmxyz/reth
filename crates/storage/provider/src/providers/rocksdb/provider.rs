@@ -710,17 +710,15 @@ impl<'db> RocksTx<'db> {
 
     /// Lookup account history and return [`HistoryInfo`] directly.
     ///
-    /// This function finds the specific shard that contains the history for the given `block_number`.
+    /// This function finds the specific shard that contains the history for the given
+    /// `block_number`.
     ///
     /// # How it works
-    /// 1. The history is sharded. Each key is `(Address, HighestBlockInShard)`.
-    /// 2. We `seek` to `(address, block_number)`.
-    ///    - Because keys are sorted by block number, this lands us on the shard with
-    ///      `HighestBlock >= block_number`.
-    ///    - This is the only shard that *could* contain our target block.
-    /// 3. We check if the found shard actually belongs to the requested address.
-    /// 4. We look backwards (`prev`) to see if there was a previous shard for this address.
-    ///    - This tells `find_changeset...` if we are at the very start of history or not.
+    ///
+    /// 1. The history is sharded by `(Address, HighestBlockInShard)`.
+    /// 2. Seek to `(address, block_number)` finds the shard with `HighestBlock >= block_number`.
+    /// 3. Check if the shard belongs to the requested address.
+    /// 4. Look backwards with `prev()` to detect if a previous shard exists.
     pub fn account_history_info(
         &self,
         address: Address,
@@ -805,12 +803,11 @@ impl<'db> RocksTx<'db> {
     /// under `address` at `block_number`.
     ///
     /// # How it works
-    /// 1. The history is sharded. Each key is `(Address, StorageKey, HighestBlockInShard)`.
-    /// 2. We `seek` to `(address, storage_key, block_number)`.
-    ///    - Because keys are sorted by block number, this lands us on the shard with
-    ///      `HighestBlock >= block_number`.
-    /// 3. We check if the found shard actually belongs to the requested address AND storage key.
-    /// 4. We look backwards (`prev`) to see if there was a previous shard for this exact slot.
+    ///
+    /// 1. The history is sharded by `(Address, StorageKey, HighestBlockInShard)`.
+    /// 2. Seek to the key finds the shard with `HighestBlock >= block_number`.
+    /// 3. Check if the shard belongs to the requested address AND storage key.
+    /// 4. Look backwards with `prev()` to detect if a previous shard exists.
     pub fn storage_history_info(
         &self,
         address: Address,
