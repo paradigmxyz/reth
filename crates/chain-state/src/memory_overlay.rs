@@ -149,11 +149,13 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
 }
 
 impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_, N> {
+    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
         let merged = self.merged_hashed_storage(address, storage);
         self.historical.storage_root(address, merged)
     }
 
+    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_proof(
         &self,
         address: Address,
@@ -164,6 +166,7 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
         self.historical.storage_proof(address, slot, merged)
     }
 
+    // TODO: Currently this does not reuse available in-memory trie nodes.
     fn storage_multiproof(
         &self,
         address: Address,

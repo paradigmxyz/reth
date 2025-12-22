@@ -3,7 +3,6 @@ use crate::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted,
 };
-
 use alloc::sync::Arc;
 
 /// Inputs for trie-related computations.
