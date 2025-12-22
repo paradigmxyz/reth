@@ -265,11 +265,6 @@ where
             )
         };
 
-        // We rely on the cursor factory to provide whatever DB overlay is necessary to see a
-        // consistent view of the database, including the trie tables. Because of this there is no
-        // need for an overarching prefix set to invalidate any section of the trie tables, and so
-        // we use an empty prefix set.
-
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
         let storage_worker_count = config.storage_worker_count();
