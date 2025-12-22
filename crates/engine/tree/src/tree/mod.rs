@@ -2501,7 +2501,6 @@ where
             _ => {}
         };
 
-        // Get the state provider builder for the parent block.
         let provider_builder = match self.state_provider_builder(block_id.parent) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
@@ -2529,7 +2528,8 @@ where
             Ok(Some(builder)) => builder,
         };
 
-        // Build the state provider. The builder is cloned because it's also needed for parallel tasks.
+        // Build the state provider. The builder is cloned because it's also needed for parallel
+        // tasks.
         let state_provider = match provider_builder.clone().build() {
             Ok(provider) => provider,
             Err(err) => {
