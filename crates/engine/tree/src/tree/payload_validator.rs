@@ -1182,7 +1182,7 @@ pub trait EngineValidator<
 >: Send + Sync + 'static
 {
     /// The provider type used for state lookups.
-    type Provider: Send + Sync;
+    type Provider;
 
     /// Validates the payload attributes with respect to the header.
     ///
