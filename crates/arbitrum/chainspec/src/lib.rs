@@ -657,7 +657,15 @@ pub fn build_full_arbos_storage(
 
     storage.insert(map_slot(&l1_space, be_u64(L1_PER_BATCH_GAS_COST_OFFSET)), be_u64(100_000));
 
-    let _retryables = subspace(&root_key, RETRYABLES_SUBSPACE);
+    // Initialize retryables subspace with TimeoutQueue
+    // Go nitro's InitializeQueue sets both nextPutOffset and nextGetOffset to 2
+    let retryables_space = subspace(&root_key, RETRYABLES_SUBSPACE);
+    let timeout_queue_space = subspace_bytes(&retryables_space, &[0u8]); // TimeoutQueue key is [0]
+    // TimeoutQueue slot 0 = nextPutOffset = 2
+    storage.insert(map_slot(&timeout_queue_space, be_u64(0)), be_u64(2));
+    // TimeoutQueue slot 1 = nextGetOffset = 2
+    storage.insert(map_slot(&timeout_queue_space, be_u64(1)), be_u64(2));
+
     let _addr_table = subspace(&root_key, ADDRESS_TABLE_SUBSPACE);
     let _send_merkle = subspace(&root_key, SEND_MERKLE_SUBSPACE);
     let _blockhashes = subspace(&root_key, BLOCKHASHES_SUBSPACE);
