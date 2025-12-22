@@ -9,9 +9,10 @@ use reth_db_api::{
     BlockNumberList, DatabaseError,
 };
 use reth_etl::Collector;
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::EitherWriter;
 use reth_provider::{
-    providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
-    StaticFileProviderFactory,
+    providers::StaticFileProvider, BlockReader, DBProvider, ProviderError, StaticFileProviderFactory,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
@@ -245,6 +246,198 @@ impl LoadMode {
     const fn is_flush(&self) -> bool {
         matches!(self, Self::Flush)
     }
+}
+
+/// Load storage history indices through an [`EitherWriter`] which routes writes to either
+/// database or `RocksDB`.
+///
+/// This is similar to [`load_history_indices`] but uses `EitherWriter` for flexible storage
+/// backend routing. The sharding logic is identical: indices are grouped by partial keys,
+/// shards are created when reaching `NUM_OF_INDICES_IN_SHARD`, and the last shard uses
+/// `u64::MAX` as the highest block number sentinel.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub(crate) fn load_storage_history_indices_via_writer<CURSOR, N>(
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+    mut collector: reth_etl::Collector<
+        reth_db_api::models::storage_sharded_key::StorageShardedKey,
+        BlockNumberList,
+    >,
+    append_only: bool,
+) -> Result<(), StageError>
+where
+    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
+        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+    N: reth_primitives_traits::NodePrimitives,
+{
+    use reth_db_api::{
+        models::storage_sharded_key::StorageShardedKey,
+        table::Decode,
+    };
+
+    type PartialKey = (alloy_primitives::Address, alloy_primitives::B256);
+
+    let mut current_partial = PartialKey::default();
+    let mut current_list = Vec::<u64>::new();
+
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let sharded_key = StorageShardedKey::decode_owned(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_storage_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices via EitherWriter");
+        }
+
+        let partial_key: PartialKey = (sharded_key.address, sharded_key.sharded_key.key);
+
+        if current_partial != partial_key {
+            flush_storage_shards(writer, current_partial, &mut current_list, append_only, true)?;
+            current_partial = partial_key;
+            current_list.clear();
+        }
+
+        current_list.extend(new_list.iter());
+        flush_storage_shards(writer, current_partial, &mut current_list, append_only, false)?;
+    }
+
+    flush_storage_shards(writer, current_partial, &mut current_list, append_only, true)?;
+
+    Ok(())
+}
+
+#[cfg(all(unix, feature = "rocksdb"))]
+fn flush_storage_shards<CURSOR, N>(
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+    partial_key: (alloy_primitives::Address, alloy_primitives::B256),
+    list: &mut Vec<BlockNumber>,
+    append_only: bool,
+    flush: bool,
+) -> Result<(), StageError>
+where
+    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
+        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+    N: reth_primitives_traits::NodePrimitives,
+{
+    use reth_db_api::models::storage_sharded_key::StorageShardedKey;
+
+    if list.len() > NUM_OF_INDICES_IN_SHARD || flush {
+        let chunks = list
+            .chunks(NUM_OF_INDICES_IN_SHARD)
+            .map(|c| c.to_vec())
+            .collect::<Vec<Vec<u64>>>();
+
+        let mut iter = chunks.into_iter().peekable();
+        while let Some(chunk) = iter.next() {
+            let mut highest = *chunk.last().expect("at least one index");
+
+            if !flush && iter.peek().is_none() {
+                *list = chunk;
+            } else {
+                if iter.peek().is_none() {
+                    highest = u64::MAX;
+                }
+                let key = StorageShardedKey::new(partial_key.0, partial_key.1, highest);
+                let value = BlockNumberList::new_pre_sorted(chunk);
+                writer.put_storage_history(key, &value, append_only)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Load account history indices through an [`EitherWriter`] which routes writes to either
+/// database or `RocksDB`.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub(crate) fn load_account_history_indices_via_writer<CURSOR, N>(
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+    mut collector: reth_etl::Collector<
+        reth_db_api::models::ShardedKey<alloy_primitives::Address>,
+        BlockNumberList,
+    >,
+    append_only: bool,
+) -> Result<(), StageError>
+where
+    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
+        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
+    N: reth_primitives_traits::NodePrimitives,
+{
+    use reth_db_api::{models::ShardedKey, table::Decode};
+
+    let mut current_partial = alloy_primitives::Address::default();
+    let mut current_list = Vec::<u64>::new();
+
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let sharded_key = ShardedKey::<alloy_primitives::Address>::decode_owned(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_account_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices via EitherWriter");
+        }
+
+        let partial_key = sharded_key.key;
+
+        if current_partial != partial_key {
+            flush_account_shards(writer, current_partial, &mut current_list, append_only, true)?;
+            current_partial = partial_key;
+            current_list.clear();
+        }
+
+        current_list.extend(new_list.iter());
+        flush_account_shards(writer, current_partial, &mut current_list, append_only, false)?;
+    }
+
+    flush_account_shards(writer, current_partial, &mut current_list, append_only, true)?;
+
+    Ok(())
+}
+
+#[cfg(all(unix, feature = "rocksdb"))]
+fn flush_account_shards<CURSOR, N>(
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+    partial_key: alloy_primitives::Address,
+    list: &mut Vec<BlockNumber>,
+    append_only: bool,
+    flush: bool,
+) -> Result<(), StageError>
+where
+    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
+        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
+    N: reth_primitives_traits::NodePrimitives,
+{
+    use reth_db_api::models::ShardedKey;
+
+    if list.len() > NUM_OF_INDICES_IN_SHARD || flush {
+        let chunks = list
+            .chunks(NUM_OF_INDICES_IN_SHARD)
+            .map(|c| c.to_vec())
+            .collect::<Vec<Vec<u64>>>();
+
+        let mut iter = chunks.into_iter().peekable();
+        while let Some(chunk) = iter.next() {
+            let mut highest = *chunk.last().expect("at least one index");
+
+            if !flush && iter.peek().is_none() {
+                *list = chunk;
+            } else {
+                if iter.peek().is_none() {
+                    highest = u64::MAX;
+                }
+                let key = ShardedKey::new(partial_key, highest);
+                let value = BlockNumberList::new_pre_sorted(chunk);
+                writer.put_account_history(key, &value, append_only)?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Called when database is ahead of static files. Attempts to find the first block we are missing

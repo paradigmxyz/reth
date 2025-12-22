@@ -7,7 +7,12 @@ use reth_db_api::{
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::EitherWriter;
+use reth_provider::{
+    DBProvider, HistoryWriter, NodePrimitivesProvider, PruneCheckpointReader,
+    PruneCheckpointWriter, RocksDBProviderFactory, StorageSettingsCache,
+};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::fmt::Debug;
@@ -46,8 +51,13 @@ impl Default for IndexStorageHistoryStage {
 
 impl<Provider> Stage<Provider> for IndexStorageHistoryStage
 where
-    Provider:
-        DBProvider<Tx: DbTxMut> + PruneCheckpointWriter + HistoryWriter + PruneCheckpointReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointWriter
+        + HistoryWriter
+        + PruneCheckpointReader
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -115,17 +125,50 @@ where
                 &self.etl_config,
             )?;
 
-        info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::StoragesHistory, _>(
-            provider,
-            collector,
-            first_sync,
-            |AddressStorageKey((address, storage_key)), highest_block_number| {
-                StorageShardedKey::new(address, storage_key, highest_block_number)
-            },
-            StorageShardedKey::decode_owned,
-            |key| AddressStorageKey((key.address, key.sharded_key.key)),
-        )?;
+        // Check if RocksDB is enabled for storage history
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let use_rocksdb = false;
+
+        info!(target: "sync::stages::index_storage_history::exec", ?use_rocksdb, "Loading indices into database");
+
+        if use_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                // Create RocksDB batch
+                let rocksdb = provider.rocksdb_provider();
+                let rocksdb_batch = rocksdb.batch();
+
+                // Create writer that routes to RocksDB
+                let mut writer =
+                    EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+
+                // Load indices using the RocksDB path
+                super::load_storage_history_indices_via_writer(
+                    &mut writer,
+                    collector,
+                    first_sync,
+                )?;
+
+                // Extract and register RocksDB batch for commit at provider level
+                if let Some(batch) = writer.into_raw_rocksdb_batch() {
+                    provider.set_pending_rocksdb_batch(batch);
+                }
+            }
+        } else {
+            // Keep existing MDBX path unchanged
+            load_history_indices::<_, tables::StoragesHistory, _>(
+                provider,
+                collector,
+                first_sync,
+                |AddressStorageKey((address, storage_key)), highest_block_number| {
+                    StorageShardedKey::new(address, storage_key, highest_block_number)
+                },
+                StorageShardedKey::decode_owned,
+                |key| AddressStorageKey((key.address, key.sharded_key.key)),
+            )?;
+        }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
@@ -661,6 +704,70 @@ mod tests {
             let table = self.db.table::<tables::StoragesHistory>().unwrap();
             assert!(table.is_empty());
             Ok(())
+        }
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    mod rocksdb_tests {
+        use super::*;
+        use reth_provider::RocksDBProviderFactory;
+        use reth_storage_api::StorageSettings;
+
+        #[tokio::test]
+        async fn execute_writes_storage_history_to_rocksdb_when_enabled() {
+            let db = TestStageDB::default();
+
+            // Enable RocksDB for storage history
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+            );
+
+            // setup
+            partial_setup(&db);
+
+            // run
+            run(&db, MAX_BLOCK, None);
+
+            // Verify MDBX table is empty (data should be in RocksDB)
+            let mdbx_count = db.table::<tables::StoragesHistory>().unwrap().len();
+            assert_eq!(
+                mdbx_count, 0,
+                "MDBX StoragesHistory should be empty when RocksDB is enabled"
+            );
+
+            // Verify RocksDB has the data
+            let rocksdb = db.factory.rocksdb_provider();
+            let result =
+                rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap();
+            assert!(result.is_some(), "Storage history should exist in RocksDB");
+
+            // Verify the block numbers are correct
+            let list = result.unwrap();
+            let blocks: Vec<u64> = list.iter().collect();
+            assert!(!blocks.is_empty(), "Block list should not be empty");
+        }
+
+        #[tokio::test]
+        async fn execute_writes_to_mdbx_when_rocksdb_disabled() {
+            let db = TestStageDB::default();
+
+            // Ensure RocksDB is disabled for storage history (default)
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_storages_history_in_rocksdb(false),
+            );
+
+            // setup
+            partial_setup(&db);
+
+            // run
+            run(&db, MAX_BLOCK, None);
+
+            // Verify MDBX table has data
+            let mdbx_count = db.table::<tables::StoragesHistory>().unwrap().len();
+            assert!(
+                mdbx_count > 0,
+                "MDBX StoragesHistory should have data when RocksDB is disabled"
+            );
         }
     }
 }
