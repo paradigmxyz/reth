@@ -15,7 +15,7 @@ use reth_provider::{
     RocksDBProviderFactory, StaticFileProviderFactory, StatsReader, StorageSettingsCache,
     TransactionsProvider, TransactionsProviderExt,
 };
-use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
+use reth_prune_types::{PruneMode, PruneSegment};
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
     UnwindInput, UnwindOutput,
