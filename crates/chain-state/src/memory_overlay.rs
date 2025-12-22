@@ -60,6 +60,13 @@ impl<'a, N: NodePrimitives> MemoryOverlayStateProviderRef<'a, N> {
             )
         })
     }
+
+    fn merged_hashed_storage(&self, address: Address, storage: HashedStorage) -> HashedStorage {
+        let state = &self.trie_input().state;
+        let mut hashed = state.storages.get(&keccak256(address)).cloned().unwrap_or_default();
+        hashed.extend(&storage);
+        hashed
+    }
 }
 
 impl<N: NodePrimitives> BlockHashReader for MemoryOverlayStateProviderRef<'_, N> {
@@ -143,19 +150,8 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
 
 impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_, N> {
     fn storage_root(&self, address: Address, storage: HashedStorage) -> ProviderResult<B256> {
-        self.storage_root_from_nodes(
-            address,
-            TrieInput::from_hashed_storage(keccak256(address), storage),
-        )
-    }
-
-    fn storage_root_from_nodes(
-        &self,
-        address: Address,
-        mut input: TrieInput,
-    ) -> ProviderResult<B256> {
-        input.prepend_self(self.trie_input().clone());
-        self.historical.storage_root_from_nodes(address, input)
+        let merged = self.merged_hashed_storage(address, storage);
+        self.historical.storage_root(address, merged)
     }
 
     fn storage_proof(
@@ -164,21 +160,8 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
         slot: B256,
         storage: HashedStorage,
     ) -> ProviderResult<StorageProof> {
-        self.storage_proof_from_nodes(
-            address,
-            slot,
-            TrieInput::from_hashed_storage(keccak256(address), storage),
-        )
-    }
-
-    fn storage_proof_from_nodes(
-        &self,
-        address: Address,
-        slot: B256,
-        mut input: TrieInput,
-    ) -> ProviderResult<StorageProof> {
-        input.prepend_self(self.trie_input().clone());
-        self.historical.storage_proof_from_nodes(address, slot, input)
+        let merged = self.merged_hashed_storage(address, storage);
+        self.historical.storage_proof(address, slot, merged)
     }
 
     fn storage_multiproof(
@@ -187,21 +170,8 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
         slots: &[B256],
         storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
-        self.storage_multiproof_from_nodes(
-            address,
-            slots,
-            TrieInput::from_hashed_storage(keccak256(address), storage),
-        )
-    }
-
-    fn storage_multiproof_from_nodes(
-        &self,
-        address: Address,
-        slots: &[B256],
-        mut input: TrieInput,
-    ) -> ProviderResult<StorageMultiProof> {
-        input.prepend_self(self.trie_input().clone());
-        self.historical.storage_multiproof_from_nodes(address, slots, input)
+        let merged = self.merged_hashed_storage(address, storage);
+        self.historical.storage_multiproof(address, slots, merged)
     }
 }
 

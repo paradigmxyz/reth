@@ -47,10 +47,6 @@ pub trait StorageRootProvider: Send + Sync {
     fn storage_root(&self, address: Address, hashed_storage: HashedStorage)
         -> ProviderResult<B256>;
 
-    /// Returns the storage root of the `HashedStorage` for target address on top of the current
-    /// state, with the provided trie input which may contain cached intermediate nodes.
-    fn storage_root_from_nodes(&self, address: Address, input: TrieInput) -> ProviderResult<B256>;
-
     /// Returns the storage proof of the `HashedStorage` for target slot on top of the current
     /// state.
     fn storage_proof(
@@ -60,30 +56,12 @@ pub trait StorageRootProvider: Send + Sync {
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageProof>;
 
-    /// Returns the storage proof of the `HashedStorage` for target slot on top of the current
-    /// state, with the provided trie input which may contain cached intermediate nodes.
-    fn storage_proof_from_nodes(
-        &self,
-        address: Address,
-        slot: B256,
-        input: TrieInput,
-    ) -> ProviderResult<StorageProof>;
-
     /// Returns the storage multiproof for target slots.
     fn storage_multiproof(
         &self,
         address: Address,
         slots: &[B256],
         hashed_storage: HashedStorage,
-    ) -> ProviderResult<StorageMultiProof>;
-
-    /// Returns the storage multiproof for target slots, with the provided trie input which may
-    /// contain cached intermediate nodes.
-    fn storage_multiproof_from_nodes(
-        &self,
-        address: Address,
-        slots: &[B256],
-        input: TrieInput,
     ) -> ProviderResult<StorageMultiProof>;
 }
 

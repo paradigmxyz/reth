@@ -1,11 +1,10 @@
 use crate::{
     prefix_set::TriePrefixSetsMut,
     updates::{TrieUpdates, TrieUpdatesSorted},
-    HashedPostState, HashedPostStateSorted, HashedStorage,
+    HashedPostState, HashedPostStateSorted,
 };
 
 use alloc::sync::Arc;
-use alloy_primitives::B256;
 
 /// Inputs for trie-related computations.
 #[derive(Default, Debug, Clone)]
@@ -36,12 +35,6 @@ impl TrieInput {
     pub fn from_state(state: HashedPostState) -> Self {
         let prefix_sets = state.construct_prefix_sets();
         Self { nodes: TrieUpdates::default(), state, prefix_sets }
-    }
-
-    /// Create new trie input from a single address's hashed storage. The prefix sets will be
-    /// constructed and set automatically.
-    pub fn from_hashed_storage(hashed_address: B256, storage: HashedStorage) -> Self {
-        Self::from_state(HashedPostState::from_hashed_storage(hashed_address, storage))
     }
 
     /// Create new trie input from the provided blocks, from oldest to newest. See the documentation

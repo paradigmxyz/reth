@@ -248,10 +248,6 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
         self.state_provider.storage_root(address, hashed_storage)
     }
 
-    fn storage_root_from_nodes(&self, address: Address, input: TrieInput) -> ProviderResult<B256> {
-        self.state_provider.storage_root_from_nodes(address, input)
-    }
-
     fn storage_proof(
         &self,
         address: Address,
@@ -259,15 +255,6 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageProof> {
         self.state_provider.storage_proof(address, slot, hashed_storage)
-    }
-
-    fn storage_proof_from_nodes(
-        &self,
-        address: Address,
-        slot: B256,
-        input: TrieInput,
-    ) -> ProviderResult<StorageProof> {
-        self.state_provider.storage_proof_from_nodes(address, slot, input)
     }
 
     /// Generate a storage multiproof for multiple storage slots.
@@ -289,15 +276,6 @@ impl<S: StorageRootProvider> StorageRootProvider for CachedStateProvider<S> {
         hashed_storage: HashedStorage,
     ) -> ProviderResult<StorageMultiProof> {
         self.state_provider.storage_multiproof(address, slots, hashed_storage)
-    }
-
-    fn storage_multiproof_from_nodes(
-        &self,
-        address: Address,
-        slots: &[B256],
-        input: TrieInput,
-    ) -> ProviderResult<StorageMultiProof> {
-        self.state_provider.storage_multiproof_from_nodes(address, slots, input)
     }
 }
 

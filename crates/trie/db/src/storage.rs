@@ -5,8 +5,7 @@ use reth_db_api::{
 };
 use reth_execution_errors::StorageRootError;
 use reth_trie::{
-    hashed_cursor::HashedPostStateCursorFactory, trie_cursor::InMemoryTrieCursorFactory,
-    HashedPostState, HashedStorage, StorageRoot, TrieInputSorted,
+    hashed_cursor::HashedPostStateCursorFactory, HashedPostState, HashedStorage, StorageRoot,
 };
 
 #[cfg(feature = "metrics")]
@@ -25,14 +24,6 @@ pub trait DatabaseStorageRoot<'a, TX> {
         tx: &'a TX,
         address: Address,
         hashed_storage: HashedStorage,
-    ) -> Result<B256, StorageRootError>;
-
-    /// Calculates the storage root for this [`HashedStorage`] using cached intermediate nodes
-    /// from [`TrieInputSorted`].
-    fn overlay_root_from_nodes(
-        tx: &'a TX,
-        address: Address,
-        input: TrieInputSorted,
     ) -> Result<B256, StorageRootError>;
 }
 
@@ -79,36 +70,6 @@ impl<'a, TX: DbTx> DatabaseStorageRoot<'a, TX>
         StorageRoot::new(
             DatabaseTrieCursorFactory::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
-            address,
-            prefix_set,
-            #[cfg(feature = "metrics")]
-            TrieRootMetrics::new(reth_trie::TrieType::Storage),
-        )
-        .root()
-    }
-
-    fn overlay_root_from_nodes(
-        tx: &'a TX,
-        address: Address,
-        input: TrieInputSorted,
-    ) -> Result<B256, StorageRootError> {
-        let prefix_set = input
-            .prefix_sets
-            .storage_prefix_sets
-            .get(&keccak256(address))
-            .cloned()
-            .unwrap_or_default()
-            .freeze();
-
-        StorageRoot::new(
-            InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(tx),
-                input.nodes.as_ref(),
-            ),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(tx),
-                input.state.as_ref(),
-            ),
             address,
             prefix_set,
             #[cfg(feature = "metrics")]

@@ -7,7 +7,7 @@ use reth_trie::{
     proof::{Proof, StorageProof},
     trie_cursor::InMemoryTrieCursorFactory,
     AccountProof, HashedPostStateSorted, HashedStorage, MultiProof, MultiProofTargets,
-    StorageMultiProof, TrieInput, TrieInputSorted,
+    StorageMultiProof, TrieInput,
 };
 
 /// Extends [`Proof`] with operations specific for working with a database transaction.
@@ -87,29 +87,12 @@ pub trait DatabaseStorageProof<'a, TX> {
         storage: HashedStorage,
     ) -> Result<reth_trie::StorageProof, StateProofError>;
 
-    /// Generates the storage proof for target slot based on [`TrieInputSorted`] with cached nodes.
-    fn overlay_storage_proof_from_nodes(
-        tx: &'a TX,
-        address: Address,
-        slot: B256,
-        input: TrieInputSorted,
-    ) -> Result<reth_trie::StorageProof, StateProofError>;
-
     /// Generates the storage multiproof for target slots based on [`HashedStorage`].
     fn overlay_storage_multiproof(
         tx: &'a TX,
         address: Address,
         slots: &[B256],
         storage: HashedStorage,
-    ) -> Result<StorageMultiProof, StateProofError>;
-
-    /// Generates the storage multiproof for target slots based on [`TrieInputSorted`] with cached
-    /// nodes.
-    fn overlay_storage_multiproof_from_nodes(
-        tx: &'a TX,
-        address: Address,
-        slots: &[B256],
-        input: TrieInputSorted,
     ) -> Result<StorageMultiProof, StateProofError>;
 }
 
@@ -145,34 +128,6 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
         .storage_proof(slot)
     }
 
-    fn overlay_storage_proof_from_nodes(
-        tx: &'a TX,
-        address: Address,
-        slot: B256,
-        input: TrieInputSorted,
-    ) -> Result<reth_trie::StorageProof, StateProofError> {
-        let prefix_set = input
-            .prefix_sets
-            .storage_prefix_sets
-            .get(&keccak256(address))
-            .cloned()
-            .unwrap_or_default();
-
-        StorageProof::new(
-            InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(tx),
-                input.nodes.as_ref(),
-            ),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(tx),
-                input.state.as_ref(),
-            ),
-            address,
-        )
-        .with_prefix_set_mut(prefix_set)
-        .storage_proof(slot)
-    }
-
     fn overlay_storage_multiproof(
         tx: &'a TX,
         address: Address,
@@ -189,35 +144,6 @@ impl<'a, TX: DbTx> DatabaseStorageProof<'a, TX>
         StorageProof::new(
             DatabaseTrieCursorFactory::new(tx),
             HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
-            address,
-        )
-        .with_prefix_set_mut(prefix_set)
-        .storage_multiproof(targets)
-    }
-
-    fn overlay_storage_multiproof_from_nodes(
-        tx: &'a TX,
-        address: Address,
-        slots: &[B256],
-        input: TrieInputSorted,
-    ) -> Result<StorageMultiProof, StateProofError> {
-        let targets = slots.iter().map(keccak256).collect();
-        let prefix_set = input
-            .prefix_sets
-            .storage_prefix_sets
-            .get(&keccak256(address))
-            .cloned()
-            .unwrap_or_default();
-
-        StorageProof::new(
-            InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(tx),
-                input.nodes.as_ref(),
-            ),
-            HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(tx),
-                input.state.as_ref(),
-            ),
             address,
         )
         .with_prefix_set_mut(prefix_set)

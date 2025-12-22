@@ -51,11 +51,8 @@ macro_rules! delegate_provider_impls {
             }
             StorageRootProvider $(where [$($generics)*])? {
                 fn storage_root(&self, address: alloy_primitives::Address, storage: reth_trie::HashedStorage) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::B256>;
-                fn storage_root_from_nodes(&self, address: alloy_primitives::Address, input: reth_trie::TrieInput) -> reth_storage_errors::provider::ProviderResult<alloy_primitives::B256>;
                 fn storage_proof(&self, address: alloy_primitives::Address, slot: alloy_primitives::B256, storage: reth_trie::HashedStorage) -> reth_storage_errors::provider::ProviderResult<reth_trie::StorageProof>;
-                fn storage_proof_from_nodes(&self, address: alloy_primitives::Address, slot: alloy_primitives::B256, input: reth_trie::TrieInput) -> reth_storage_errors::provider::ProviderResult<reth_trie::StorageProof>;
                 fn storage_multiproof(&self, address: alloy_primitives::Address, slots: &[alloy_primitives::B256], storage: reth_trie::HashedStorage) -> reth_storage_errors::provider::ProviderResult<reth_trie::StorageMultiProof>;
-                fn storage_multiproof_from_nodes(&self, address: alloy_primitives::Address, slots: &[alloy_primitives::B256], storage: reth_trie::TrieInput) -> reth_storage_errors::provider::ProviderResult<reth_trie::StorageMultiProof>;
             }
             StateProofProvider $(where [$($generics)*])? {
                 fn proof(&self, input: reth_trie::TrieInput, address: alloy_primitives::Address, slots: &[alloy_primitives::B256]) -> reth_storage_errors::provider::ProviderResult<reth_trie::AccountProof>;

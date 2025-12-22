@@ -339,20 +339,6 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
-    fn storage_root_from_nodes(
-        &self,
-        address: Address,
-        mut input: TrieInput,
-    ) -> ProviderResult<B256> {
-        input.prepend(self.revert_state()?.into());
-        StorageRoot::overlay_root_from_nodes(
-            self.tx(),
-            address,
-            TrieInputSorted::from_unsorted(input),
-        )
-        .map_err(|err| ProviderError::Database(err.into()))
-    }
-
     fn storage_proof(
         &self,
         address: Address,
@@ -365,22 +351,6 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
             .map_err(ProviderError::from)
     }
 
-    fn storage_proof_from_nodes(
-        &self,
-        address: Address,
-        slot: B256,
-        mut input: TrieInput,
-    ) -> ProviderResult<reth_trie::StorageProof> {
-        input.prepend(self.revert_state()?.into());
-        StorageProof::overlay_storage_proof_from_nodes(
-            self.tx(),
-            address,
-            slot,
-            TrieInputSorted::from_unsorted(input),
-        )
-        .map_err(ProviderError::from)
-    }
-
     fn storage_multiproof(
         &self,
         address: Address,
@@ -391,22 +361,6 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
         revert_storage.extend(&hashed_storage);
         StorageProof::overlay_storage_multiproof(self.tx(), address, slots, revert_storage)
             .map_err(ProviderError::from)
-    }
-
-    fn storage_multiproof_from_nodes(
-        &self,
-        address: Address,
-        slots: &[B256],
-        mut input: TrieInput,
-    ) -> ProviderResult<StorageMultiProof> {
-        input.prepend(self.revert_state()?.into());
-        StorageProof::overlay_storage_multiproof_from_nodes(
-            self.tx(),
-            address,
-            slots,
-            TrieInputSorted::from_unsorted(input),
-        )
-        .map_err(ProviderError::from)
     }
 }
 

@@ -431,14 +431,6 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
         Ok(B256::default())
     }
 
-    fn storage_root_from_nodes(
-        &self,
-        _address: Address,
-        _input: TrieInput,
-    ) -> ProviderResult<B256> {
-        Ok(B256::default())
-    }
-
     fn storage_proof(
         &self,
         _address: Address,
@@ -448,29 +440,11 @@ impl<C: Send + Sync, N: NodePrimitives> StorageRootProvider for NoopProvider<C, 
         Ok(StorageProof::new(slot))
     }
 
-    fn storage_proof_from_nodes(
-        &self,
-        _address: Address,
-        slot: B256,
-        _input: TrieInput,
-    ) -> ProviderResult<StorageProof> {
-        Ok(StorageProof::new(slot))
-    }
-
     fn storage_multiproof(
         &self,
         _address: Address,
         _slots: &[B256],
         _hashed_storage: HashedStorage,
-    ) -> ProviderResult<StorageMultiProof> {
-        Ok(StorageMultiProof::empty())
-    }
-
-    fn storage_multiproof_from_nodes(
-        &self,
-        _address: Address,
-        _slots: &[B256],
-        _input: TrieInput,
     ) -> ProviderResult<StorageMultiProof> {
         Ok(StorageMultiProof::empty())
     }

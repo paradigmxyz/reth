@@ -801,14 +801,6 @@ where
         Ok(EMPTY_ROOT_HASH)
     }
 
-    fn storage_root_from_nodes(
-        &self,
-        _address: Address,
-        _input: TrieInput,
-    ) -> ProviderResult<B256> {
-        Ok(EMPTY_ROOT_HASH)
-    }
-
     fn storage_proof(
         &self,
         _address: Address,
@@ -818,29 +810,11 @@ where
         Ok(StorageProof::new(slot))
     }
 
-    fn storage_proof_from_nodes(
-        &self,
-        _address: Address,
-        slot: B256,
-        _input: TrieInput,
-    ) -> ProviderResult<StorageProof> {
-        Ok(StorageProof::new(slot))
-    }
-
     fn storage_multiproof(
         &self,
         _address: Address,
         _slots: &[B256],
         _hashed_storage: HashedStorage,
-    ) -> ProviderResult<StorageMultiProof> {
-        Ok(StorageMultiProof::empty())
-    }
-
-    fn storage_multiproof_from_nodes(
-        &self,
-        _address: Address,
-        _slots: &[B256],
-        _input: TrieInput,
     ) -> ProviderResult<StorageMultiProof> {
         Ok(StorageMultiProof::empty())
     }
