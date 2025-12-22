@@ -1,5 +1,5 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
-use crate::providers::{history_info_from_shard, HistoryInfo};
+use crate::providers::{find_changeset_block_from_index, HistoryInfo};
 use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
@@ -716,7 +716,7 @@ impl<'db> RocksTx<'db> {
                 k.key == address && k.highest_block_number < found_key.highest_block_number
             });
 
-            Ok(history_info_from_shard(
+            Ok(find_changeset_block_from_index(
                 &chunk,
                 block_number,
                 has_prev,
@@ -763,13 +763,13 @@ impl<'db> RocksTx<'db> {
             let start = StorageShardedKey::new(address, storage_key, 0);
             let mut start_iter = self.iter_from::<tables::StoragesHistory>(start)?;
             let has_prev = start_iter.next().transpose()?.is_some_and(|(k, _)| {
-                k.address == address &&
-                    k.sharded_key.key == storage_key &&
-                    k.sharded_key.highest_block_number <
-                        found_key.sharded_key.highest_block_number
+                k.address == address
+                    && k.sharded_key.key == storage_key
+                    && k.sharded_key.highest_block_number
+                        < found_key.sharded_key.highest_block_number
             });
 
-            Ok(history_info_from_shard(
+            Ok(find_changeset_block_from_index(
                 &chunk,
                 block_number,
                 has_prev,
