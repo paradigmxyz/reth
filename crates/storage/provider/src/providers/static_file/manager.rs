@@ -151,6 +151,23 @@ impl<N: NodePrimitives> StaticFileProviderBuilder<N> {
         self
     }
 
+    /// Sets the genesis block number for the [`StaticFileProvider`].
+    ///
+    /// This configures the genesis block number, which is used to determine the starting point
+    /// for block indexing and querying operations.
+    ///
+    /// # Arguments
+    ///
+    /// * `genesis_block_number` - The block number of the genesis block.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Self` to allow method chaining.
+    pub const fn with_genesis_block_number(mut self, genesis_block_number: u64) -> Self {
+        self.inner.genesis_block_number = genesis_block_number;
+        self
+    }
+
     /// Builds the final [`StaticFileProvider`] and initializes the index.
     pub fn build(self) -> ProviderResult<StaticFileProvider<N>> {
         let provider = StaticFileProvider(Arc::new(self.inner));
@@ -308,6 +325,8 @@ pub struct StaticFileProviderInner<N> {
     blocks_per_file: HashMap<StaticFileSegment, u64>,
     /// Write lock for when access is [`StaticFileAccess::RW`].
     _lock_file: Option<StorageLock>,
+    /// Genesis block number, default is 0;
+    genesis_block_number: u64,
 }
 
 impl<N: NodePrimitives> StaticFileProviderInner<N> {
@@ -334,6 +353,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             access,
             blocks_per_file,
             _lock_file,
+            genesis_block_number: 0,
         };
 
         Ok(provider)
@@ -408,6 +428,11 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
                 .map(|index| &index.expected_block_ranges_by_max_block),
             block,
         )
+    }
+
+    /// Get genesis block number
+    pub const fn genesis_block_number(&self) -> u64 {
+        self.genesis_block_number
     }
 }
 
@@ -1059,31 +1084,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
             }
 
-            let initial_highest_block = self.get_highest_static_file_block(segment);
-            debug!(target: "reth::providers::static_file", ?segment, ?initial_highest_block, "Initial highest block for segment");
-
-            //  File consistency is broken if:
-            //
-            // * appending data was interrupted before a config commit, then data file will be
-            //   truncated according to the config.
-            //
-            // * pruning data was interrupted before a config commit, then we have deleted data that
-            //   we are expected to still have. We need to check the Database and unwind everything
-            //   accordingly.
-            if self.access.is_read_only() {
-                debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency (read-only)");
-                self.check_segment_consistency(segment)?;
-            } else {
-                debug!(target: "reth::providers::static_file", ?segment, "Fetching latest writer which might heal any potential inconsistency");
-                // Fetching the writer will attempt to heal any file level inconsistency.
-                self.latest_writer(segment)?;
-            }
+            // Heal file-level inconsistencies and get before/after highest block
+            let (initial_highest_block, mut highest_block) = self.maybe_heal_segment(segment)?;
 
             // Only applies to block-based static files. (Headers)
             //
             // The updated `highest_block` may have decreased if we healed from a pruning
             // interruption.
-            let mut highest_block = self.get_highest_static_file_block(segment);
             if initial_highest_block != highest_block {
                 info!(
                     target: "reth::providers::static_file",
@@ -1196,6 +1203,47 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             debug!(target: "reth::providers::static_file", ?segment, "No static file block found, skipping consistency check");
         }
         Ok(())
+    }
+
+    /// Attempts to heal file-level (`NippyJar`) inconsistencies for a single static file segment.
+    ///
+    /// Returns the highest block before and after healing, which can be used to detect
+    /// if healing from a pruning interruption decreased the highest block.
+    ///
+    /// File consistency is broken if:
+    ///
+    /// * appending data was interrupted before a config commit, then data file will be truncated
+    ///   according to the config.
+    ///
+    /// * pruning data was interrupted before a config commit, then we have deleted data that we are
+    ///   expected to still have. We need to check the Database and unwind everything accordingly.
+    ///
+    /// **Note:** In read-only mode, this will return an error if a consistency issue is detected,
+    /// since healing requires write access.
+    fn maybe_heal_segment(
+        &self,
+        segment: StaticFileSegment,
+    ) -> ProviderResult<(Option<BlockNumber>, Option<BlockNumber>)> {
+        let initial_highest_block = self.get_highest_static_file_block(segment);
+        debug!(target: "reth::providers::static_file", ?segment, ?initial_highest_block, "Initial highest block for segment");
+
+        if self.access.is_read_only() {
+            // Read-only mode: cannot modify files, so just validate consistency and error if
+            // broken.
+            debug!(target: "reth::providers::static_file", ?segment, "Checking segment consistency (read-only)");
+            self.check_segment_consistency(segment)?;
+        } else {
+            // Writable mode: fetching the writer will automatically heal any file-level
+            // inconsistency by truncating data to match the last committed config.
+            debug!(target: "reth::providers::static_file", ?segment, "Fetching latest writer which might heal any potential inconsistency");
+            self.latest_writer(segment)?;
+        }
+
+        // The updated `highest_block` may have decreased if we healed from a pruning
+        // interruption.
+        let highest_block = self.get_highest_static_file_block(segment);
+
+        Ok((initial_highest_block, highest_block))
     }
 
     /// Check invariants for each corresponding table and static file segment:
@@ -1726,7 +1774,11 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         &self,
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
-        self.get_writer(self.get_highest_static_file_block(segment).unwrap_or_default(), segment)
+        let genesis_number = self.0.as_ref().genesis_block_number();
+        self.get_writer(
+            self.get_highest_static_file_block(segment).unwrap_or(genesis_number),
+            segment,
+        )
     }
 
     fn commit(&self) -> ProviderResult<()> {

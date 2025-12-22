@@ -119,6 +119,11 @@ impl RocksDBBuilder {
         self
     }
 
+    /// Registers the default tables used by reth for `RocksDB` storage (stub implementation).
+    pub const fn with_default_tables(self) -> Self {
+        self
+    }
+
     /// Enables metrics (stub implementation).
     pub const fn with_metrics(self) -> Self {
         self

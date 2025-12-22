@@ -19,8 +19,11 @@ pub trait PayloadTransactions {
         ctx: (),
     ) -> Option<Self::Transaction>;
 
-    /// Exclude descendants of the transaction with given sender and nonce from the iterator,
-    /// because this transaction won't be included in the block.
+    /// Marks the transaction identified by `sender` and `nonce` as invalid for this iterator.
+    ///
+    /// Implementations must ensure that subsequent transactions returned from this iterator do not
+    /// depend on this transaction. For example, they may choose to stop yielding any further
+    /// transactions from this sender in the current iteration.
     fn mark_invalid(&mut self, sender: Address, nonce: u64);
 }
 
@@ -46,6 +49,9 @@ impl<T> PayloadTransactions for NoopPayloadTransactions<T> {
 
 /// Wrapper struct that allows to convert `BestTransactions` (used in tx pool) to
 /// `PayloadTransactions` (used in block composition).
+///
+/// Note: `mark_invalid` for this type filters out all further transactions from the given sender
+/// in the current iteration, mirroring the semantics of `BestTransactions::mark_invalid`.
 #[derive(Debug)]
 pub struct BestPayloadTransactions<T, I>
 where

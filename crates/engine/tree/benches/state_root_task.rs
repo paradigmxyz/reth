@@ -241,6 +241,7 @@ fn bench_state_root(c: &mut Criterion) {
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
                                 OverlayStateProviderFactory::new(provider),
                                 &TreeConfig::default(),
+                                None,
                             );
 
                             let mut state_hook = handle.state_hook();

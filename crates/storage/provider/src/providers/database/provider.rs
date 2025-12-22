@@ -151,7 +151,6 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
 
 /// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
-#[derive(Debug)]
 pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Database transaction.
     tx: TX,
@@ -167,8 +166,27 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// Pending `RocksDB` batches to be committed at provider commit time.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
+}
+
+impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("DatabaseProvider");
+        s.field("tx", &self.tx)
+            .field("chain_spec", &self.chain_spec)
+            .field("static_file_provider", &self.static_file_provider)
+            .field("prune_modes", &self.prune_modes)
+            .field("storage", &self.storage)
+            .field("storage_settings", &self.storage_settings)
+            .field("rocksdb_provider", &self.rocksdb_provider);
+        #[cfg(all(unix, feature = "rocksdb"))]
+        s.field("pending_rocksdb_batches", &"<pending batches>");
+        s.field("minimum_pruning_distance", &self.minimum_pruning_distance).finish()
+    }
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -259,9 +277,14 @@ impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
     fn rocksdb_provider(&self) -> RocksDBProvider {
         self.rocksdb_provider.clone()
     }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn set_pending_rocksdb_batch(&self, batch: rocksdb::WriteBatchWithTransaction<true>) {
+        self.pending_rocksdb_batches.lock().push(batch);
+    }
 }
 
-impl<TX: Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
+impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
     for DatabaseProvider<TX, N>
 {
     type ChainSpec = N::ChainSpec;
@@ -290,6 +313,8 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
     }
@@ -545,6 +570,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
     }
@@ -3178,7 +3205,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         self.prune_modes_ref()
     }
 
-    /// Commit database transaction and static files.
+    /// Commit database transaction, static files, and pending `RocksDB` batches.
     fn commit(self) -> ProviderResult<bool> {
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just
@@ -3186,9 +3213,27 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         // checkpoints on the next start-up.
         if self.static_file_provider.has_unwind_queued() {
             self.tx.commit()?;
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+                for batch in batches {
+                    self.rocksdb_provider.commit_batch(batch)?;
+                }
+            }
+
             self.static_file_provider.commit()?;
         } else {
             self.static_file_provider.commit()?;
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+                for batch in batches {
+                    self.rocksdb_provider.commit_batch(batch)?;
+                }
+            }
+
             self.tx.commit()?;
         }
 
@@ -3208,7 +3253,7 @@ impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: Send + Sync, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
+impl<TX: Send, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
     fn cached_storage_settings(&self) -> StorageSettings {
         *self.storage_settings.read()
     }

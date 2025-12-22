@@ -116,7 +116,7 @@ where
 /// these stages that this work has already been done. Otherwise, there might be some conflict with
 /// database integrity.
 pub fn save_stage_checkpoints<P>(
-    provider: &P,
+    provider: P,
     from: BlockNumber,
     to: BlockNumber,
     processed: u64,

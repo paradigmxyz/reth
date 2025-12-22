@@ -483,10 +483,12 @@ where
             StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
                 .with_metrics()
                 .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
+                .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
-        // Initialize RocksDB provider with metrics and statistics enabled
+        // Initialize RocksDB provider with metrics, statistics, and default tables
         let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
+            .with_default_tables()
             .with_metrics()
             .with_statistics()
             .build()?;
@@ -936,28 +938,44 @@ where
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
     pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
+        // We skip the era stage if it's not enabled
+        let era_enabled = self.era_import_source().is_some();
+        let mut all_stages =
+            StageId::ALL.into_iter().filter(|id| era_enabled || id != &StageId::Era);
+
+        // Get the expected first stage based on config.
+        let first_stage = all_stages.next().expect("there must be at least one stage");
+
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
             .blockchain_db()
-            .get_stage_checkpoint(*StageId::ALL.first().unwrap())?
+            .get_stage_checkpoint(first_stage)?
             .unwrap_or_default()
             .block_number;
 
-        // Skip the first stage as we've already retrieved it and comparing all other checkpoints
-        // against it.
-        for stage_id in StageId::ALL.iter().skip(1) {
+        // Compare all other stages against the first
+        for stage_id in all_stages {
             let stage_checkpoint = self
                 .blockchain_db()
-                .get_stage_checkpoint(*stage_id)?
+                .get_stage_checkpoint(stage_id)?
                 .unwrap_or_default()
                 .block_number;
 
             // If the checkpoint of any stage is less than the checkpoint of the first stage,
             // retrieve and return the block hash of the latest header and use it as the target.
+            debug!(
+                target: "consensus::engine",
+                first_stage_id = %first_stage,
+                first_stage_checkpoint,
+                stage_id = %stage_id,
+                stage_checkpoint = stage_checkpoint,
+                "Checking stage against first stage",
+            );
             if stage_checkpoint < first_stage_checkpoint {
                 debug!(
                     target: "consensus::engine",
+                    first_stage_id = %first_stage,
                     first_stage_checkpoint,
                     inconsistent_stage_id = %stage_id,
                     inconsistent_stage_checkpoint = stage_checkpoint,

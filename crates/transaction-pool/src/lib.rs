@@ -751,6 +751,13 @@ where
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
         self.pool.blob_store().get_by_versioned_hashes_v2(versioned_hashes)
     }
+
+    fn get_blobs_for_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        self.pool.blob_store().get_by_versioned_hashes_v3(versioned_hashes)
+    }
 }
 
 impl<V, T, S> TransactionPoolExt for Pool<V, T, S>

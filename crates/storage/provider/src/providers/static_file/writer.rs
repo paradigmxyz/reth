@@ -363,8 +363,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             .as_ref()
             .map(|block_range| block_range.end())
             .or_else(|| {
-                (self.writer.user_header().expected_block_start() > 0)
-                    .then(|| self.writer.user_header().expected_block_start() - 1)
+                (self.writer.user_header().expected_block_start() >
+                    self.reader().genesis_block_number())
+                .then(|| self.writer.user_header().expected_block_start() - 1)
             });
 
         self.reader().update_index(self.writer.user_header().segment(), segment_max_block)
@@ -629,6 +630,37 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
         self.increment_block(header.number())?;
+
+        self.append_column(header)?;
+        self.append_column(CompactU256::from(total_difficulty))?;
+        self.append_column(hash)?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::Headers,
+                StaticFileProviderOperation::Append,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Appends header to static file without calling `increment_block`.
+    /// This is useful for genesis blocks with non-zero block numbers.
+    pub fn append_header_direct(
+        &mut self,
+        header: &N::BlockHeader,
+        total_difficulty: U256,
+        hash: &BlockHash,
+    ) -> ProviderResult<()>
+    where
+        N::BlockHeader: Compact,
+    {
+        let start = Instant::now();
+        self.ensure_no_queued_prune()?;
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Headers);
 
         self.append_column(header)?;
         self.append_column(CompactU256::from(total_difficulty))?;

@@ -638,6 +638,15 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError>;
+
+    /// Return the [`BlobAndProofV2`]s for a list of blob versioned hashes.
+    ///
+    /// The response is always the same length as the request. Missing or older-version blobs are
+    /// returned as `None` elements.
+    fn get_blobs_for_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError>;
 }
 
 /// Extension for [`TransactionPool`] trait that allows to set the current block info.
@@ -699,12 +708,12 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
 
     /// Returns an iterator over all pending [`Recovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.pending.iter().map(|tx| tx.transaction.clone_into_consensus())
     }
 
     /// Returns an iterator over all queued [`Recovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.queued.iter().map(|tx| tx.transaction.clone_into_consensus())
     }
 
     /// Returns an iterator over all transactions, both pending and queued.
@@ -712,7 +721,7 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
         self.pending
             .iter()
             .chain(self.queued.iter())
-            .map(|tx| tx.transaction.clone().into_consensus())
+            .map(|tx| tx.transaction.clone_into_consensus())
     }
 }
 
