@@ -881,13 +881,16 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 let ticket_id_struct = crate::retryables::RetryableTicketId(ticket_id.0);
                 let current_time = ctx.block_timestamp;
                 
-                if let Some(retryable) = retryable_state.open_retryable(
+                // Go nitro: OpenRetryable checks if retryable exists (timeout > 0 && timeout >= currentTime)
+                // Note: Go nitro does NOT call IncrementNumTries here for ArbitrumRetryTx
+                // IncrementNumTries is only called in:
+                // 1. StartTxHook for ArbitrumSubmitRetryableTx (when creating the retryable)
+                // 2. The Redeem precompile (when someone explicitly calls redeem())
+                if retryable_state.open_retryable(
                     state_db as *mut _,
                     &ticket_id_struct,
                     current_time,
-                ) {
-                    let _ = retryable.increment_tries();
-                } else {
+                ).is_none() {
                     return StartTxHookResult {
                         end_tx_now: true,
                         gas_used: 0,
@@ -1373,9 +1376,10 @@ impl ArbOsHooks for DefaultArbOsHooks {
                             }
                         }
                         
-                        // Go nitro: DeleteRetryable clears all fields
-                        // For now, we just increment tries to mark it as redeemed
-                        let _ = retryable.increment_tries();
+                        // Go nitro: DeleteRetryable clears all fields including timeout
+                        // This marks the retryable as fully redeemed and no longer valid
+                        // Note: Go nitro does NOT call IncrementNumTries in EndTxHook
+                        // TODO: Implement full DeleteRetryable to clear all storage fields
                     }
                 } else {
                     use arb_alloy_util::retryables::escrow_address_from_ticket;
