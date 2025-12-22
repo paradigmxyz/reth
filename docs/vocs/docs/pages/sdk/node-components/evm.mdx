@@ -49,6 +49,12 @@ Block builders construct new blocks for proposal:
 - Order and execute transactions
 - Seal the block with a header (state root)
 
+### Payload Building (Engine API)
+Payload building is used when the execution layer works together with a consensus client over the Engine API:
+- The consensus layer provides attributes for the next block (timestamp, fee recipient, randomness, gas limit, withdrawals, beacon block root).
+- The EVM component derives the next block environment from these attributes and the parent header.
+- A block builder executes selected transactions in this environment and hands the results to a block assembler to produce a block candidate.
+
 ## Next Steps
 
 - Learn about [RPC](/sdk/node-components/rpc) server integration
