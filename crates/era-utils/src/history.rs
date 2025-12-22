@@ -309,7 +309,7 @@ where
         writer.append_header(&header, &hash)?;
 
         // Write bodies to database.
-        provider.append_block_bodies(vec![(header.number(), Some(body))])?;
+        provider.append_block_bodies(vec![(header.number(), Some(&body))])?;
 
         hash_collector.insert(hash, number)?;
     }

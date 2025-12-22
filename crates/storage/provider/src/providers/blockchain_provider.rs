@@ -875,7 +875,7 @@ mod tests {
         // Insert blocks into the database
         for block in &database_blocks {
             provider_rw.insert_block(
-                block.clone().try_recover().expect("failed to seal block with senders"),
+                &block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
 
@@ -1005,9 +1005,10 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_block(
-                block.clone().try_recover().expect("failed to seal block with senders"),
+                &block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
+
         provider_rw.commit()?;
 
         // Create a new provider
@@ -1103,7 +1104,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_block(
-                block.clone().try_recover().expect("failed to seal block with senders"),
+                &block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;
@@ -1320,7 +1321,7 @@ mod tests {
 
         // Insert and commit the block.
         let provider_rw = factory.provider_rw()?;
-        provider_rw.insert_block(block_1)?;
+        provider_rw.insert_block(&block_1)?;
         provider_rw.commit()?;
 
         let provider = BlockchainProvider::new(factory)?;
