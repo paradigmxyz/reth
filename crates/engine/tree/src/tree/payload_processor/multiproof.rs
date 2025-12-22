@@ -594,8 +594,9 @@ impl MultiProofTask {
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
         chunk_size: Option<usize>,
+        tx: CrossbeamSender<MultiProofMessage>,
+        rx: CrossbeamReceiver<MultiProofMessage>,
     ) -> Self {
-        let (tx, rx) = unbounded();
         let (proof_result_tx, proof_result_rx) = unbounded();
         let metrics = MultiProofTaskMetrics::default();
 
@@ -1531,8 +1532,9 @@ mod tests {
         let task_ctx = ProofTaskCtx::new(overlay_factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
 
-        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1))
+        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1), tx, rx)
     }
 
     #[test]
