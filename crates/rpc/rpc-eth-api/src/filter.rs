@@ -3,6 +3,7 @@
 use alloy_json_rpc::RpcObject;
 use alloy_rpc_types_eth::{Filter, FilterChanges, FilterId, Log, PendingTransactionFilterKind};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_rpc_eth_types::logs_utils::Cursor;
 use std::future::Future;
 
 /// Rpc Interface for poll-based ethereum filter API.
@@ -39,6 +40,14 @@ pub trait EthFilterApi<T: RpcObject> {
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
+
+    /// Returns logs matching given filter object, alongside a cursor for pagination.
+    #[method(name = "getLogsWithCursor")]
+    async fn logs_with_cursor(
+        &self,
+        filter: Filter,
+        cursor: Option<Cursor>,
+    ) -> RpcResult<(Vec<Log>, Option<Cursor>)>;
 }
 
 /// Limits for logs queries
@@ -65,5 +74,5 @@ pub trait EngineEthFilter: Send + Sync + 'static {
         &self,
         filter: Filter,
         limits: QueryLimits,
-    ) -> impl Future<Output = RpcResult<Vec<Log>>> + Send;
+    ) -> impl Future<Output = RpcResult<(Vec<Log>, Option<Cursor>)>> + Send;
 }
