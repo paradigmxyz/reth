@@ -176,6 +176,13 @@ impl<D: Database> L2PricingState<D> {
         
         let mut base_fee = min_base_fee;
         
+        // Defensive check: if speed_limit or inertia is 0, skip the pricing update
+        // This can happen if the L2 pricing state is not initialized yet
+        if speed_limit == 0 || inertia == 0 {
+            tracing::warn!(target: "arb-l2pricing", "Skipping pricing update: speed_limit={} inertia={}", speed_limit, inertia);
+            return Ok(());
+        }
+        
         let tolerance_limit = tolerance.saturating_mul(speed_limit);
         if backlog > tolerance_limit {
             let excess = backlog.saturating_sub(tolerance_limit);
