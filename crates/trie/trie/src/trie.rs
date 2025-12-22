@@ -663,6 +663,13 @@ where
         };
 
         let mut hashed_entries_walked = 0;
+        let mut prev_hashed_slot: Option<B256> = None;
+        let mut fingerprint = B256::ZERO;
+        let mut first_key: Option<B256> = None;
+        let mut last_key: Option<B256> = None;
+        let mut duplicate_count = 0u64;
+        let arbos_backing_hashed = B256::from_str("0xb4d14ec89c201c23aa60e231e3993b3966b33ff1f55d198ec25980957ab32065").unwrap();
+        
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
@@ -673,15 +680,40 @@ where
                     tracker.inc_leaf();
                     hashed_entries_walked += 1;
                     
-                    // DEBUG: Log storage slot being added to trie (first 10 slots per address)
-                    if hashed_entries_walked <= 10 {
-                        eprintln!("[STORAGE-SLOT-DEBUG] hashed_address={:?} slot_idx={} hashed_slot={:?} value={:?}",
-                            self.hashed_address, hashed_entries_walked, hashed_slot, value);
+                    // Track first and last keys
+                    if first_key.is_none() {
+                        first_key = Some(hashed_slot);
                     }
+                    last_key = Some(hashed_slot);
+                    
+                    // INVARIANT CHECK: Verify monotonic key order (no duplicates)
+                    if let Some(prev) = prev_hashed_slot {
+                        if hashed_slot <= prev {
+                            if hashed_slot == prev {
+                                duplicate_count += 1;
+                                if self.hashed_address == arbos_backing_hashed {
+                                    eprintln!("[STORAGE-TRIE-ERROR] DUPLICATE KEY! hashed_address={:?} slot_idx={} hashed_slot={:?}",
+                                        self.hashed_address, hashed_entries_walked, hashed_slot);
+                                }
+                            } else if self.hashed_address == arbos_backing_hashed {
+                                eprintln!("[STORAGE-TRIE-ERROR] NON-MONOTONIC KEY! hashed_address={:?} slot_idx={} prev={:?} curr={:?}",
+                                    self.hashed_address, hashed_entries_walked, prev, hashed_slot);
+                            }
+                        }
+                    }
+                    prev_hashed_slot = Some(hashed_slot);
+                    
+                    // Compute leaf-set fingerprint (XOR of keccak256(hashed_slot || rlp_value))
+                    let rlp_value = alloy_rlp::encode_fixed_size(&value);
+                    let mut leaf_data = [0u8; 64];
+                    leaf_data[..32].copy_from_slice(hashed_slot.as_slice());
+                    leaf_data[32..32 + rlp_value.len()].copy_from_slice(rlp_value.as_ref());
+                    let leaf_hash = keccak256(&leaf_data[..32 + rlp_value.len()]);
+                    fingerprint = B256::from_slice(&fingerprint.iter().zip(leaf_hash.iter()).map(|(a, b)| a ^ b).collect::<Vec<_>>());
                     
                     hash_builder.add_leaf(
                         Nibbles::unpack(hashed_slot),
-                        alloy_rlp::encode_fixed_size(&value).as_ref(),
+                        rlp_value.as_ref(),
                     );
 
                     // Check if we need to return intermediate progress
@@ -719,11 +751,10 @@ where
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
 
-        // DEBUG: Log storage root for ArbOS backing account
-        let arbos_backing_hashed = B256::from_str("0xb4d14ec89c201c23aa60e231e3993b3966b33ff1f55d198ec25980957ab32065").unwrap();
+        // DEBUG: Log storage root and fingerprint for ArbOS backing account
         if self.hashed_address == arbos_backing_hashed {
-            eprintln!("[STORAGE-ROOT-DEBUG] hashed_address={:?} storage_root={:?} slots_walked={} account_nonce={} account_balance={}",
-                self.hashed_address, root, stats.leaves_added(), 0, 0);
+            eprintln!("[STORAGE-ROOT-SUMMARY] hashed_address={:?} storage_root={:?} slots_walked={} fingerprint={:?} first_key={:?} last_key={:?} duplicates={}",
+                self.hashed_address, root, stats.leaves_added(), fingerprint, first_key, last_key, duplicate_count);
         }
 
         trace!(
