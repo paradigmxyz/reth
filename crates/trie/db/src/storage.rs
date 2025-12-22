@@ -98,7 +98,7 @@ impl<TX: DbTx> DatabaseHashedStorage<TX> for HashedStorage {
 }
 
 /// Calculates the storage root for the given [`TrieInputSorted`] using cached intermediate nodes.
-pub fn overlay_root_from_nodes<TX: DbTx>(
+pub fn overlay_storage_root_from_nodes<TX: DbTx>(
     tx: &TX,
     address: Address,
     input: TrieInputSorted,

@@ -19,7 +19,7 @@ pub use proof::{
     DatabaseStorageProof,
 };
 pub use state::{DatabaseHashedPostState, DatabaseStateRoot};
-pub use storage::{overlay_root_from_nodes, DatabaseHashedStorage, DatabaseStorageRoot};
+pub use storage::{overlay_storage_root_from_nodes, DatabaseHashedStorage, DatabaseStorageRoot};
 pub use trie_cursor::{
     DatabaseAccountTrieCursor, DatabaseStorageTrieCursor, DatabaseTrieCursorFactory,
 };

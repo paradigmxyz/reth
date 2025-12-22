@@ -9,7 +9,7 @@ use reth_storage_api::{
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
-    MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
+    MultiProofTargets, StorageMultiProof, TrieInput,
 };
 use revm_database::BundleState;
 use std::sync::OnceLock;
@@ -159,7 +159,7 @@ impl<N: NodePrimitives> StorageRootProvider for MemoryOverlayStateProviderRef<'_
         address: Address,
         slot: B256,
         storage: HashedStorage,
-    ) -> ProviderResult<StorageProof> {
+    ) -> ProviderResult<reth_trie::StorageProof> {
         let merged = self.merged_hashed_storage(address, storage);
         self.historical.storage_proof(address, slot, merged)
     }
