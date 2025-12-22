@@ -1085,7 +1085,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
 
             // Heal file-level inconsistencies and get before/after highest block
-            let (initial_highest_block, mut highest_block) = self.heal_segment(segment)?;
+            let (initial_highest_block, mut highest_block) = self.maybe_heal_segment(segment)?;
 
             // Only applies to block-based static files. (Headers)
             //
@@ -1205,7 +1205,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
-    /// Heals file-level (`NippyJar`) inconsistencies for a single static file segment.
+    /// Attempts to heal file-level (`NippyJar`) inconsistencies for a single static file segment.
     ///
     /// Returns the highest block before and after healing, which can be used to detect
     /// if healing from a pruning interruption decreased the highest block.
@@ -1217,7 +1217,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// * pruning data was interrupted before a config commit, then we have deleted data that we are
     ///   expected to still have. We need to check the Database and unwind everything accordingly.
-    fn heal_segment(
+    ///
+    /// **Note:** In read-only mode, this will return an error if a consistency issue is detected,
+    /// since healing requires write access.
+    fn maybe_heal_segment(
         &self,
         segment: StaticFileSegment,
     ) -> ProviderResult<(Option<BlockNumber>, Option<BlockNumber>)> {
