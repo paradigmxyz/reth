@@ -503,10 +503,14 @@ impl DefaultArbOsHooks {
             gas_price_bid: gas_fee_cap,
         };
 
-        use crate::retryables::{RetryableState, DefaultRetryables};
-        use alloy_primitives::B256;
+        use crate::retryables::RetryableState;
         
-        let retryable_state = RetryableState::new(state_db as *mut _, B256::ZERO);
+        // Use the correct retryable subspace key (subspace 2) - same as other places in the code
+        let retryable_storage = crate::storage::Storage::new(
+            state_db as *mut _,
+            crate::arbosstate::arbos_state_subspace(2),
+        );
+        let retryable_state = RetryableState::new(state_db as *mut _, retryable_storage.base_key);
         let _ticket = retryable_state.create_retryable(state_db as *mut _, ticket_id, params, block_timestamp);
         
         Ok(())
@@ -1363,7 +1367,9 @@ impl ArbOsHooks for DefaultArbOsHooks {
                             }
                         }
                         
-                        let _ = retryable.deactivate();
+                        // Go nitro: DeleteRetryable clears all fields
+                        // For now, we just increment tries to mark it as redeemed
+                        let _ = retryable.increment_tries();
                     }
                 } else {
                     use arb_alloy_util::retryables::escrow_address_from_ticket;
@@ -1547,7 +1553,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 // Get retryable data
                 let from = retryable.get_from().unwrap_or_default();
                 let to = retryable.get_to().unwrap_or_default();
-                let call_value = retryable.get_escrowed().unwrap_or_default();
+                let call_value = retryable.get_callvalue().unwrap_or_default();
                 
                 tracing::info!(
                     target: "arb-scheduled",
