@@ -763,10 +763,10 @@ impl<'db> RocksTx<'db> {
             let start = StorageShardedKey::new(address, storage_key, 0);
             let mut start_iter = self.iter_from::<tables::StoragesHistory>(start)?;
             let has_prev = start_iter.next().transpose()?.is_some_and(|(k, _)| {
-                k.address == address
-                    && k.sharded_key.key == storage_key
-                    && k.sharded_key.highest_block_number
-                        < found_key.sharded_key.highest_block_number
+                k.address == address &&
+                    k.sharded_key.key == storage_key &&
+                    k.sharded_key.highest_block_number <
+                        found_key.sharded_key.highest_block_number
             });
 
             Ok(find_changeset_block_from_index(
