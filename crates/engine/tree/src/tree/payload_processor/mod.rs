@@ -51,7 +51,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, error, instrument, warn, Span};
+use tracing::{debug, debug_span, instrument, warn, Span};
 
 pub mod bal;
 mod configured_sparse_trie;
@@ -236,31 +236,7 @@ where
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
-
-        // We rely on the cursor factory to provide whatever DB overlay is necessary to see a
-        // consistent view of the database, including the trie tables. Because of this there is no
-        // need for an overarching prefix set to invalidate any section of the trie tables, and so
-        // we use an empty prefix set.
-
-        // Create and spawn the storage proof task
-        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
-        let storage_worker_count = config.storage_worker_count();
-        let account_worker_count = config.account_worker_count();
-        let proof_handle = ProofWorkerHandle::new(
-            self.executor.handle().clone(),
-            task_ctx,
-            storage_worker_count,
-            account_worker_count,
-        );
-
-        let multi_proof_task = MultiProofTask::new(
-            proof_handle.clone(),
-            to_sparse_trie,
-            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
-        );
-
-        // wire the multiproof task to the prewarm task
-        let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
+        let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
 
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
@@ -268,12 +244,7 @@ where
             debug!(target: "engine::tree::payload_processor", "BAL present, skipping prewarm tasks");
 
             // Send BAL message immediately to MultiProofTask
-            if let Some(ref sender) = to_multi_proof &&
-                let Err(err) = sender.send(MultiProofMessage::BlockAccessList(bal))
-            {
-                // In this case state root validation will simply fail
-                error!(target: "engine::tree::payload_processor", ?err, "Failed to send BAL to MultiProofTask");
-            }
+            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(bal));
 
             // Spawn minimal cache-only task without prewarming
             self.spawn_caching_with(
@@ -290,9 +261,31 @@ where
                 prewarm_rx,
                 transaction_count_hint,
                 provider_builder.clone(),
-                to_multi_proof.clone(),
+                Some(to_multi_proof.clone()),
             )
         };
+
+        // Create and spawn the storage proof task
+        let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
+        let storage_worker_count = config.storage_worker_count();
+        let account_worker_count = config.account_worker_count();
+        let proof_handle = ProofWorkerHandle::new(
+            self.executor.handle().clone(),
+            task_ctx,
+            storage_worker_count,
+            account_worker_count,
+        );
+
+        let multi_proof_task = MultiProofTask::new(
+            proof_handle.clone(),
+            to_sparse_trie,
+            config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
+            to_multi_proof,
+            from_multi_proof,
+        );
+
+        // wire the multiproof task to the prewarm task
+        let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
         // spawn multi-proof task
         let parent_span = span.clone();
