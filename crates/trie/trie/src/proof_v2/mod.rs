@@ -11,7 +11,7 @@ use crate::{
     hashed_cursor::{HashedCursor, HashedStorageCursor},
     trie_cursor::{depth_first, TrieCursor, TrieStorageCursor},
 };
-use alloy_primitives::{B256, U256};
+use alloy_primitives::{keccak256, B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
@@ -1353,6 +1353,29 @@ where
 
         // Use the static StorageValueEncoder and pass it to proof_inner
         self.proof_inner(&STORAGE_VALUE_ENCODER, targets)
+    }
+
+    /// Computes the root hash from a set of proof nodes.
+    ///
+    /// Returns `None` if there is no root node (partial proof), otherwise returns the hash of the
+    /// root node.
+    pub fn compute_root_hash(
+        &mut self,
+        proof_nodes: &[ProofTrieNode],
+    ) -> Result<Option<B256>, StateProofError> {
+        // Find the root node (node at empty path)
+        let root_node = proof_nodes.iter().find(|node| node.path.is_empty());
+
+        let Some(root) = root_node else {
+            return Ok(None);
+        };
+
+        // Compute the hash of the root node
+        self.rlp_encode_buf.clear();
+        root.node.encode(&mut self.rlp_encode_buf);
+        let root_hash = keccak256(&self.rlp_encode_buf);
+
+        Ok(Some(root_hash))
     }
 }
 

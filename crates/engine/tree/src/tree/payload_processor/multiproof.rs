@@ -283,6 +283,8 @@ pub struct MultiproofManager {
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
+    /// Whether to use V2 storage proofs
+    v2_proofs_enabled: bool,
 }
 
 impl MultiproofManager {
@@ -296,11 +298,14 @@ impl MultiproofManager {
         metrics.max_storage_workers.set(proof_worker_handle.total_storage_workers() as f64);
         metrics.max_account_workers.set(proof_worker_handle.total_account_workers() as f64);
 
+        let v2_proofs_enabled = proof_worker_handle.v2_proofs_enabled();
+
         Self {
             metrics,
             proof_worker_handle,
             missed_leaves_storage_roots: Default::default(),
             proof_result_tx,
+            v2_proofs_enabled,
         }
     }
 
@@ -380,6 +385,7 @@ impl MultiproofManager {
                 hashed_state_update,
                 start,
             ),
+            v2_proofs_enabled: self.v2_proofs_enabled,
         };
 
         if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(input) {
@@ -1222,7 +1228,7 @@ impl MultiProofTask {
 
                                     let update = SparseTrieUpdate {
                                         state: proof_result.state,
-                                        multiproof: proof_result_data.into_multiproof(),
+                                        multiproof: proof_result_data.proof,
                                     };
 
                                     if let Some(combined_update) =
@@ -1529,7 +1535,7 @@ mod tests {
         let rt_handle = get_test_runtime_handle();
         let overlay_factory = OverlayStateProviderFactory::new(factory);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
+        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
 
         MultiProofTask::new(proof_handle, to_sparse_trie, Some(1))
