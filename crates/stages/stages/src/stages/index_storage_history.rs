@@ -7,7 +7,12 @@ use reth_db_api::{
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::EitherWriter;
+use reth_provider::{
+    DBProvider, HistoryWriter, NodePrimitivesProvider, PruneCheckpointReader,
+    PruneCheckpointWriter, RocksDBProviderFactory, StorageSettingsCache,
+};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::fmt::Debug;
@@ -46,8 +51,13 @@ impl Default for IndexStorageHistoryStage {
 
 impl<Provider> Stage<Provider> for IndexStorageHistoryStage
 where
-    Provider:
-        DBProvider<Tx: DbTxMut> + PruneCheckpointWriter + HistoryWriter + PruneCheckpointReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointWriter
+        + HistoryWriter
+        + PruneCheckpointReader
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -115,17 +125,58 @@ where
                 &self.etl_config,
             )?;
 
-        info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::StoragesHistory, _>(
-            provider,
-            collector,
-            first_sync,
-            |AddressStorageKey((address, storage_key)), highest_block_number| {
-                StorageShardedKey::new(address, storage_key, highest_block_number)
-            },
-            StorageShardedKey::decode_owned,
-            |key| AddressStorageKey((key.address, key.sharded_key.key)),
-        )?;
+        // Check if RocksDB is enabled for storage history
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let use_rocksdb = false;
+
+        info!(target: "sync::stages::index_storage_history::exec", ?use_rocksdb, "Loading indices into database");
+
+        if use_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                // Create RocksDB batch
+                let rocksdb = provider.rocksdb_provider();
+                let mut rocksdb_batch = rocksdb.batch();
+
+                if first_sync {
+                    super::clear_rocksdb_table::<tables::StoragesHistory>(
+                        &rocksdb,
+                        &mut rocksdb_batch,
+                    )?;
+                }
+
+                // Create writer that routes to RocksDB
+                let mut writer =
+                    EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+
+                // Load indices using the RocksDB path
+                super::load_storage_history_indices_via_writer(
+                    &mut writer,
+                    collector,
+                    first_sync,
+                    provider,
+                )?;
+
+                // Extract and register RocksDB batch for commit at provider level
+                if let Some(batch) = writer.into_raw_rocksdb_batch() {
+                    provider.set_pending_rocksdb_batch(batch);
+                }
+            }
+        } else {
+            // Keep existing MDBX path unchanged
+            load_history_indices::<_, tables::StoragesHistory, _>(
+                provider,
+                collector,
+                first_sync,
+                |AddressStorageKey((address, storage_key)), highest_block_number| {
+                    StorageShardedKey::new(address, storage_key, highest_block_number)
+                },
+                StorageShardedKey::decode_owned,
+                |key| AddressStorageKey((key.address, key.sharded_key.key)),
+            )?;
+        }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
@@ -661,6 +712,178 @@ mod tests {
             let table = self.db.table::<tables::StoragesHistory>().unwrap();
             assert!(table.is_empty());
             Ok(())
+        }
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    mod rocksdb_tests {
+        use super::*;
+        use reth_provider::RocksDBProviderFactory;
+        use reth_storage_api::StorageSettings;
+
+        #[tokio::test]
+        async fn execute_writes_storage_history_to_rocksdb_when_enabled() {
+            let db = TestStageDB::default();
+
+            // Enable RocksDB for storage history
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+            );
+
+            // setup
+            partial_setup(&db);
+
+            // run
+            run(&db, MAX_BLOCK, None);
+
+            // Verify MDBX table is empty (data should be in RocksDB)
+            let mdbx_count = db.table::<tables::StoragesHistory>().unwrap().len();
+            assert_eq!(
+                mdbx_count, 0,
+                "MDBX StoragesHistory should be empty when RocksDB is enabled"
+            );
+
+            // Verify RocksDB has the data
+            let rocksdb = db.factory.rocksdb_provider();
+            let result =
+                rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap();
+            assert!(result.is_some(), "Storage history should exist in RocksDB");
+
+            // Verify the block numbers are correct
+            let list = result.unwrap();
+            let blocks: Vec<u64> = list.iter().collect();
+            assert!(!blocks.is_empty(), "Block list should not be empty");
+        }
+
+        #[tokio::test]
+        async fn first_sync_clears_stale_rocksdb_storage_history() {
+            let db = TestStageDB::default();
+
+            // Enable RocksDB for storage history
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+            );
+
+            // Seed RocksDB with a stale entry for a different address/storage key
+            let rocksdb = db.factory.rocksdb_provider();
+            let stale_address = address!("0x0000000000000000000000000000000000000002");
+            let stale_storage_key =
+                b256!("0x0000000000000000000000000000000000000000000000000000000000000002");
+            let stale_key = StorageShardedKey {
+                address: stale_address,
+                sharded_key: ShardedKey { key: stale_storage_key, highest_block_number: u64::MAX },
+            };
+            rocksdb.put::<tables::StoragesHistory>(stale_key, &list(&[999])).unwrap();
+
+            // setup
+            partial_setup(&db);
+
+            // run (first sync)
+            run(&db, MAX_BLOCK, None);
+
+            // Verify stale entry is removed
+            let rocksdb = db.factory.rocksdb_provider();
+            let stale = rocksdb.get::<tables::StoragesHistory>(stale_key).unwrap();
+            assert!(stale.is_none(), "Stale RocksDB storage history should be cleared on first sync");
+        }
+
+        #[tokio::test]
+        async fn execute_writes_to_mdbx_when_rocksdb_disabled() {
+            let db = TestStageDB::default();
+
+            // Ensure RocksDB is disabled for storage history (default)
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_storages_history_in_rocksdb(false),
+            );
+
+            // setup
+            partial_setup(&db);
+
+            // run
+            run(&db, MAX_BLOCK, None);
+
+            // Verify MDBX table has data
+            let mdbx_count = db.table::<tables::StoragesHistory>().unwrap().len();
+            assert!(
+                mdbx_count > 0,
+                "MDBX StoragesHistory should have data when RocksDB is disabled"
+            );
+        }
+
+        /// Test incremental sync with RocksDB: run stage twice and verify indices are merged.
+        #[tokio::test]
+        async fn incremental_sync_merges_indices_in_rocksdb() {
+            let db = TestStageDB::default();
+
+            // Enable RocksDB for storage history
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+            );
+
+            // First run: setup changesets for blocks 0-5 and index them
+            let first_run_end: u64 = 5;
+            db.commit(|tx| {
+                for block in 0..=first_run_end {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                    tx.put::<tables::StorageChangeSets>(
+                        block_number_address(block),
+                        storage(STORAGE_KEY),
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            // Run stage for first batch (first_sync = true since checkpoint is 0)
+            run(&db, first_run_end, None);
+
+            // Verify first run wrote to RocksDB
+            let rocksdb = db.factory.rocksdb_provider();
+            let first_result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap();
+            assert!(first_result.is_some(), "First run should write to RocksDB");
+            let first_blocks: Vec<u64> = first_result.unwrap().iter().collect();
+            assert_eq!(first_blocks.len(), (first_run_end + 1) as usize, "First run should have blocks 0-5");
+
+            // Second run: add changesets for blocks 6-10
+            let second_run_end: u64 = 10;
+            db.commit(|tx| {
+                for block in (first_run_end + 1)..=second_run_end {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                    tx.put::<tables::StorageChangeSets>(
+                        block_number_address(block),
+                        storage(STORAGE_KEY),
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+
+            // Run stage for second batch (first_sync = false since checkpoint > 0)
+            run(&db, second_run_end, Some(first_run_end));
+
+            // Verify second run merged indices in RocksDB
+            let rocksdb = db.factory.rocksdb_provider();
+            let merged_result = rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap();
+            assert!(merged_result.is_some(), "Second run should have data in RocksDB");
+            let merged_blocks: Vec<u64> = merged_result.unwrap().iter().collect();
+
+            // Should contain all blocks from 0 to 10
+            let expected_blocks: Vec<u64> = (0..=second_run_end).collect();
+            assert_eq!(
+                merged_blocks, expected_blocks,
+                "Incremental sync should merge all indices: expected {:?}, got {:?}",
+                expected_blocks, merged_blocks
+            );
+
+            // Verify MDBX table is still empty
+            let mdbx_count = db.table::<tables::StoragesHistory>().unwrap().len();
+            assert_eq!(mdbx_count, 0, "MDBX should remain empty when RocksDB is enabled");
         }
     }
 }

@@ -364,13 +364,24 @@ where
     CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
 {
     /// Puts a storage history entry.
+    ///
+    /// When `append_only` is true, uses `cursor.append()` which is significantly faster
+    /// but requires entries to be inserted in order and the table to be empty.
+    /// When false, uses `cursor.upsert()` which handles arbitrary insertion order.
     pub fn put_storage_history(
         &mut self,
         key: StorageShardedKey,
         value: &BlockNumberList,
+        append_only: bool,
     ) -> ProviderResult<()> {
         match self {
-            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::Database(cursor) => {
+                if append_only {
+                    Ok(cursor.append(key, value)?)
+                } else {
+                    Ok(cursor.upsert(key, value)?)
+                }
+            }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
@@ -398,13 +409,24 @@ where
     CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
 {
     /// Puts an account history entry.
+    ///
+    /// When `append_only` is true, uses `cursor.append()` which is significantly faster
+    /// but requires entries to be inserted in order and the table to be empty.
+    /// When false, uses `cursor.upsert()` which handles arbitrary insertion order.
     pub fn put_account_history(
         &mut self,
         key: ShardedKey<Address>,
         value: &BlockNumberList,
+        append_only: bool,
     ) -> ProviderResult<()> {
         match self {
-            Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
+            Self::Database(cursor) => {
+                if append_only {
+                    Ok(cursor.append(key, value)?)
+                } else {
+                    Ok(cursor.upsert(key, value)?)
+                }
+            }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
