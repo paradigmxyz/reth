@@ -1375,7 +1375,7 @@ where
         // Compute the hash of the root node
         self.rlp_encode_buf.clear();
         root.node.encode(&mut self.rlp_encode_buf);
-        let root_hash = alloy_primitives::keccak256(&self.rlp_encode_buf);
+        let root_hash = keccak256(&self.rlp_encode_buf);
 
         Ok(Some(root_hash))
     }
