@@ -52,6 +52,7 @@ reth-codec = [
 test-utils = [
     "arbitrary",
     "reth-codecs?/test-utils",
+    "reth-prune-types/test-utils",
     "reth-trie-common/test-utils",
 ]
 arbitrary = [
@@ -59,6 +60,7 @@ arbitrary = [
     "dep:arbitrary",
     "alloy-primitives/arbitrary",
     "reth-codecs?/arbitrary",
+    "reth-prune-types/arbitrary",
     "reth-trie-common/arbitrary",
 ]
 serde = [
@@ -67,5 +69,6 @@ serde = [
     "bytes?/serde",
     "rand/serde",
     "reth-codecs?/serde",
+    "reth-prune-types/serde",
     "reth-trie-common/serde",
 ]
