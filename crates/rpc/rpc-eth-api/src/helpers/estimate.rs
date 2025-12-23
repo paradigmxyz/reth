@@ -97,8 +97,8 @@ pub trait EstimateCall: Call {
         let mut tx_env = self.create_txn_env(&evm_env, request, &mut db)?;
 
         // Check if this is a basic transfer (no input data to account with no code)
-        let is_basic_transfer = if tx_env.input().is_empty()
-            && let TxKind::Call(to) = tx_env.kind()
+        let is_basic_transfer = if tx_env.input().is_empty() &&
+            let TxKind::Call(to) = tx_env.kind()
         {
             match db.database.basic_account(&to) {
                 Ok(Some(account)) => {
@@ -136,8 +136,8 @@ pub trait EstimateCall: Call {
             min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
 
             // Reuse the same EVM instance
-            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err)
-                && res.result.is_success()
+            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) &&
+                res.result.is_success()
             {
                 return Ok(U256::from(MIN_TRANSACTION_GAS));
             }
@@ -152,8 +152,8 @@ pub trait EstimateCall: Call {
             // retry the transaction with the block's gas limit to determine if
             // the failure was due to insufficient gas.
             Err(err)
-                if err.is_gas_too_high()
-                    && (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
+                if err.is_gas_too_high() &&
+                    (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
                 return Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit);
             }
