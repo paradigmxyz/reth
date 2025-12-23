@@ -292,6 +292,18 @@ impl RocksDBProvider {
                         "StoragesHistory ahead of checkpoint, pruning excess data"
                     );
                     self.prune_storages_history_above(checkpoint)?;
+                    return Ok(None);
+                }
+
+                // If RocksDB is behind the checkpoint, request an unwind to rebuild.
+                if max_highest_block < checkpoint {
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        rocks_highest = max_highest_block,
+                        checkpoint,
+                        "StoragesHistory behind checkpoint, unwind needed"
+                    );
+                    return Ok(Some(max_highest_block));
                 }
 
                 Ok(None)
@@ -397,6 +409,18 @@ impl RocksDBProvider {
                         "AccountsHistory ahead of checkpoint, pruning excess data"
                     );
                     self.prune_accounts_history_above(checkpoint)?;
+                    return Ok(None);
+                }
+
+                // If RocksDB is behind the checkpoint, request an unwind to rebuild.
+                if max_highest_block < checkpoint {
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        rocks_highest = max_highest_block,
+                        checkpoint,
+                        "AccountsHistory behind checkpoint, unwind needed"
+                    );
+                    return Ok(Some(max_highest_block));
                 }
 
                 Ok(None)
@@ -701,6 +725,44 @@ mod tests {
         assert!(
             rocksdb.last::<tables::StoragesHistory>().unwrap().is_none(),
             "RocksDB should be empty after pruning"
+        );
+    }
+
+    #[test]
+    fn test_check_consistency_storages_history_behind_checkpoint_needs_unwind() {
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+
+        // Insert data into RocksDB with highest_block_number below checkpoint
+        let key_block_50 = StorageShardedKey::new(Address::ZERO, B256::ZERO, 50);
+        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
+        rocksdb.put::<tables::StoragesHistory>(key_block_50, &block_list).unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        // Set checkpoint to block 100
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // RocksDB only has data up to block 50, but checkpoint says block 100 was processed
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(
+            result,
+            Some(50),
+            "Should require unwind to block 50 to rebuild StoragesHistory"
         );
     }
 
@@ -1055,6 +1117,46 @@ mod tests {
         assert!(
             rocksdb.get::<tables::AccountsHistory>(key_block_max).unwrap().is_some(),
             "Entry with highest_block=u64::MAX (sentinel) should remain"
+        );
+    }
+
+    #[test]
+    fn test_check_consistency_accounts_history_behind_checkpoint_needs_unwind() {
+        use reth_db_api::models::ShardedKey;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+
+        // Insert data into RocksDB with highest_block_number below checkpoint
+        let key_block_50 = ShardedKey::new(Address::ZERO, 50);
+        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30, 50]);
+        rocksdb.put::<tables::AccountsHistory>(key_block_50, &block_list).unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        // Set checkpoint to block 100
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // RocksDB only has data up to block 50, but checkpoint says block 100 was processed
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(
+            result,
+            Some(50),
+            "Should require unwind to block 50 to rebuild AccountsHistory"
         );
     }
 

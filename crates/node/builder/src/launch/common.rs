@@ -516,7 +516,7 @@ where
         // Step 1: Heal file-level inconsistencies (no pruning)
         let file_unwind = factory.static_file_provider().check_file_consistency()?;
 
-        // Step 2: RocksDB consistency check (needs SF tx data)
+        // Step 2: RocksDB consistency check (needs static files tx data)
         let rocksdb_unwind =
             factory.rocksdb_provider().check_consistency(&factory.database_provider_ro()?)?;
 
