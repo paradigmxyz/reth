@@ -499,6 +499,13 @@ where
             panic!("compute_v2_storage_proof only accepts StorageProofInput::V2")
         };
 
+        // If targets is empty it means the caller only wants the root hash. The V2 proof calculator
+        // will do nothing given no targets, so instead we give it a fake target so it always
+        // returns at least the root.
+        if targets.is_empty() {
+            targets.push(proof_v2::Target::new(B256::ZERO));
+        }
+
         let span = debug_span!(
             target: "trie::proof_task",
             "V2 Storage proof calculation",
@@ -1446,14 +1453,20 @@ where
 
                         // Extract storage proof from the result
                         debug_assert_eq!(
-                            proof_result.hashed_address, hashed_address,
+                            proof_msg.hashed_address, hashed_address,
                             "storage worker must return same address"
                         );
                         let proof_result = proof_msg.result?;
-                        let root =
-                            proof_result.root().expect("Partial proofs are not yet supported");
+                        let Some(root) = proof_result.root() else {
+                            trace!(
+                                target: "trie::proof_task",
+                                ?proof_result,
+                                "Received proof_result without root",
+                            );
+                            panic!("Partial proofs are not yet supported");
+                        };
                         let proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
-                            .expect("Partial proofs are not yet supported");
+                            .expect("Partial proofs are not yet supported (into)");
                         collected_decoded_storages.insert(hashed_address, proof);
                         root
                     }
@@ -1569,8 +1582,7 @@ fn dispatch_storage_proofs(
         // Create computation input based on V2 flag
         let input = if use_v2_proofs {
             // Convert target slots to V2 targets
-            let v2_targets: Vec<proof_v2::Target> =
-                target_slots.iter().map(|slot| proof_v2::Target::new(*slot)).collect();
+            let v2_targets = target_slots.iter().copied().map(Into::into).collect();
             StorageProofInput::new(*hashed_address, v2_targets)
         } else {
             let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
