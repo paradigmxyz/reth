@@ -2583,12 +2583,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<HashMap<B256, BTreeSet<B256>>> {
         // Aggregate all block changesets and make list of accounts that have been changed.
-        let mut hashed_storages = changesets
-            .into_iter()
-            .map(|(BlockNumberAddress((_, address)), storage_entry)| {
-                (keccak256(address), keccak256(storage_entry.key), storage_entry.value)
-            })
-            .collect::<Vec<_>>();
+        // Cache hashed address since StorageChangeSets is sorted by (block_number, address).
+        // Within each block, consecutive entries with the same address can reuse the cached hash.
+        let mut last_addr: Option<Address> = None;
+        let mut hashed_addr = B256::ZERO;
+        let mut hashed_storages = Vec::with_capacity(changesets.size_hint().0);
+
+        for (BlockNumberAddress((_, address)), storage_entry) in changesets {
+            if last_addr != Some(address) {
+                last_addr = Some(address);
+                hashed_addr = keccak256(address);
+            }
+            hashed_storages.push((hashed_addr, keccak256(storage_entry.key), storage_entry.value));
+        }
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
 
         // Apply values to HashedState, and remove the account if it's None.
