@@ -48,7 +48,7 @@ use tracing::info;
 /// # Example
 ///
 /// ```ignore
-/// impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for MyNode {
+/// impl<N: FullNodeComponents> DebugNode<N> for MyNode {
 ///     type RpcBlock = alloy_rpc_types_eth::Block;
 ///
 ///     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> BlockTy<Self> {
@@ -57,7 +57,7 @@ use tracing::info;
 ///     }
 /// }
 /// ```
-pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
+pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     /// RPC block type. Used by [`DebugConsensusClient`] to fetch blocks and submit them to the
     /// engine. This is intended to match the block format returned by the external RPC endpoint.
     type RpcBlock: Serialize + DeserializeOwned + 'static;
@@ -105,7 +105,10 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
     }
 
     /// Default RPC-block-to-primitive converter used by the debug consensus client.
-    fn default_rpc_convert() -> RpcConsensusConvert<N> {
+    fn default_rpc_convert() -> RpcConsensusConvert<N>
+    where
+        N: FullNodeComponents<Types = Self>,
+    {
         Arc::new(|rpc_block: Self::RpcBlock| Self::rpc_to_primitive_block(rpc_block))
     }
 
@@ -115,7 +118,10 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
     /// falling back to an error if none are configured.
     fn block_provider<'a>(
         ctx: DebugBlockProviderContext<'a, N>,
-    ) -> DebugBlockProviderFuture<'a, N> {
+    ) -> DebugBlockProviderFuture<'a, N>
+    where
+        N: FullNodeComponents<Types = Self>,
+    {
         Box::pin(async move {
             let config = ctx.config;
             if let Some(url) = config.debug.rpc_consensus_url.clone() {
