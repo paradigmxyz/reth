@@ -536,8 +536,8 @@ fn needs_prev_shard_check(rank: u64, found_block: Option<u64>, block_number: Blo
 ///
 /// # Arguments
 /// * `found_block` - The block number from the shard lookup
-/// * `is_before_first_write` - True if the target block is before the first write to this key.
-///   This should be computed as: `rank == 0 && found_block != Some(block_number) && !has_previous_shard`
+/// * `is_before_first_write` - True if the target block is before the first write to this key. This
+///   should be computed as: `rank == 0 && found_block != Some(block_number) && !has_previous_shard`
 ///   where `has_previous_shard` comes from a lazy `cursor.prev()` check.
 /// * `lowest_available` - Lowest block where history is available (pruning boundary)
 pub const fn find_changeset_block_from_index(

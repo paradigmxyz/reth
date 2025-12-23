@@ -769,30 +769,45 @@ impl<'db> RocksTx<'db> {
         let chunk = <tables::AccountsHistory as Table>::Value::decompress(value_bytes)
             .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
-        // O(1) check for previous shard using prev()
-        // We move the iterator back to check if there is a PRECEDING shard for this SAME address.
-        // If one exists, it means the current shard is a continuation of history.
-        // If not (or if the prev key is for a different address), this is the first shard.
-        iter.prev();
-        // Raw iterators report errors via status(), so check after moving.
-        Self::raw_iter_status_ok(&iter)?;
-        let has_prev = iter.valid() && {
-            if let Some(prev_key_bytes) = iter.key() {
-                if let Ok(prev_key) = <ShardedKey<Address> as Decode>::decode(prev_key_bytes) {
-                    // It is a previous shard only if it belongs to the same address
-                    prev_key.key == address
+        let rank = chunk.rank(block_number);
+        let found_block = chunk.select(rank);
+
+        // Lazy O(1) check for previous shard using prev().
+        // Only called when needed (when rank == 0 and found_block != block_number).
+        let mut has_previous_shard = || -> ProviderResult<bool> {
+            // Move iterator back to check if there is a PRECEDING shard for this SAME address.
+            // If one exists, it means the current shard is a continuation of history.
+            // If not (or if the prev key is for a different address), this is the first shard.
+            iter.prev();
+            // Raw iterators report errors via status(), so check after moving.
+            Self::raw_iter_status_ok(&iter)?;
+            let has_prev = iter.valid() && {
+                if let Some(prev_key_bytes) = iter.key() {
+                    if let Ok(prev_key) = <ShardedKey<Address> as Decode>::decode(prev_key_bytes) {
+                        // It is a previous shard only if it belongs to the same address
+                        prev_key.key == address
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
-            } else {
-                false
-            }
+            };
+            Ok(has_prev)
         };
 
+        // If our block is before the first entry in the index chunk and this first entry
+        // doesn't equal to our block, it might be before the first write ever. To check, we
+        // look at the previous entry and check if the key is the same.
+        // This check is worth it, the `iter.prev()` check is rarely triggered (the if will
+        // short-circuit) and when it passes we save a full seek into the changeset/plain state
+        // table.
+        let is_before_first_write =
+            rank == 0 && found_block != Some(block_number) && !has_previous_shard()?;
+
         Ok(find_changeset_block_from_index(
-            &chunk,
-            block_number,
-            has_prev,
+            found_block,
+            is_before_first_write,
             lowest_available_block_number,
         ))
     }
@@ -859,30 +874,45 @@ impl<'db> RocksTx<'db> {
         let chunk = <tables::StoragesHistory as Table>::Value::decompress(value_bytes)
             .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
-        // O(1) check for previous shard using prev()
-        // We move the iterator back to check if there is a PRECEDING shard for this SAME
-        // storage slot (Address + StorageKey).
-        // If one exists, it means the current shard is a continuation of history.
-        iter.prev();
-        // Raw iterators report errors via status(), so check after moving.
-        Self::raw_iter_status_ok(&iter)?;
-        let has_prev = iter.valid() && {
-            if let Some(prev_key_bytes) = iter.key() {
-                if let Ok(prev_key) = <StorageShardedKey as Decode>::decode(prev_key_bytes) {
-                    // It is a previous shard only if it belongs to the same storage slot
-                    prev_key.address == address && prev_key.sharded_key.key == storage_key
+        let rank = chunk.rank(block_number);
+        let found_block = chunk.select(rank);
+
+        // Lazy O(1) check for previous shard using prev().
+        // Only called when needed (when rank == 0 and found_block != block_number).
+        let mut has_previous_shard = || -> ProviderResult<bool> {
+            // Move iterator back to check if there is a PRECEDING shard for this SAME
+            // storage slot (Address + StorageKey).
+            // If one exists, it means the current shard is a continuation of history.
+            iter.prev();
+            // Raw iterators report errors via status(), so check after moving.
+            Self::raw_iter_status_ok(&iter)?;
+            let has_prev = iter.valid() && {
+                if let Some(prev_key_bytes) = iter.key() {
+                    if let Ok(prev_key) = <StorageShardedKey as Decode>::decode(prev_key_bytes) {
+                        // It is a previous shard only if it belongs to the same storage slot
+                        prev_key.address == address && prev_key.sharded_key.key == storage_key
+                    } else {
+                        false
+                    }
                 } else {
                     false
                 }
-            } else {
-                false
-            }
+            };
+            Ok(has_prev)
         };
 
+        // If our block is before the first entry in the index chunk and this first entry
+        // doesn't equal to our block, it might be before the first write ever. To check, we
+        // look at the previous entry and check if the key is the same.
+        // This check is worth it, the `iter.prev()` check is rarely triggered (the if will
+        // short-circuit) and when it passes we save a full seek into the changeset/plain state
+        // table.
+        let is_before_first_write =
+            rank == 0 && found_block != Some(block_number) && !has_previous_shard()?;
+
         Ok(find_changeset_block_from_index(
-            &chunk,
-            block_number,
-            has_prev,
+            found_block,
+            is_before_first_write,
             lowest_available_block_number,
         ))
     }
