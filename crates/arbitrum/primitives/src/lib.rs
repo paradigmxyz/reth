@@ -53,7 +53,22 @@ impl alloy_consensus::Typed2718 for ArbReceipt {
         matches!(self, ArbReceipt::Legacy(_))
     }
     fn ty(&self) -> u8 {
-        self.tx_type().as_u8()
+        // Return the correct EIP-2718 type byte for receipt encoding.
+        // Standard Ethereum types use their standard type bytes (0x00, 0x01, 0x02, 0x03).
+        // Arbitrum-specific types use their Arbitrum type bytes (0x64-0x6A, 0x78).
+        // This matches Go nitro's Receipts.EncodeIndex behavior in go-ethereum/core/types/receipt.go
+        match self {
+            ArbReceipt::Legacy(_) => 0x00,      // LegacyTxType
+            ArbReceipt::Eip2930(_) => 0x01,     // AccessListTxType
+            ArbReceipt::Eip1559(_) => 0x02,     // DynamicFeeTxType
+            ArbReceipt::Eip7702(_) => 0x04,     // SetCodeTxType
+            ArbReceipt::Deposit(_) => 0x64,     // ArbitrumDepositTxType
+            ArbReceipt::Unsigned(_) => 0x65,    // ArbitrumUnsignedTxType
+            ArbReceipt::Contract(_) => 0x66,    // ArbitrumContractTxType
+            ArbReceipt::Retry(_) => 0x68,       // ArbitrumRetryTxType
+            ArbReceipt::SubmitRetryable(_) => 0x69, // ArbitrumSubmitRetryableTxType
+            ArbReceipt::Internal(_) => 0x6A,    // ArbitrumInternalTxType
+        }
     }
 }
 
@@ -284,7 +299,7 @@ impl alloy_eips::Encodable2718 for ArbReceipt {
 
     fn encode_2718(&self, out: &mut dyn alloy_rlp::bytes::BufMut) {
         if !matches!(self, ArbReceipt::Legacy(_)) {
-            out.put_u8(self.tx_type().as_u8());
+            out.put_u8(self.ty());
         }
         self.rlp_header_inner_without_bloom().encode(out);
         self.rlp_encode_fields_without_bloom(out);
