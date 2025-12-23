@@ -370,6 +370,8 @@ impl EngineNodeLauncher {
             let _ = exit.send(res);
         }));
 
+        let engine_events_for_ethstats = engine_events.new_listener();
+
         let full_node = FullNode {
             evm_config: ctx.components().evm_config().clone(),
             pool: ctx.components().pool().clone(),
@@ -390,7 +392,7 @@ impl EngineNodeLauncher {
         // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;
 
-        ctx.spawn_ethstats().await?;
+        ctx.spawn_ethstats_with_optional_engine_events(Some(engine_events_for_ethstats)).await?;
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(
