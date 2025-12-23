@@ -9250,7 +9250,6 @@ dependencies = [
  "jsonrpsee-core",
  "rand 0.9.2",
  "reth-chainspec",
- "reth-consensus-debug-client",
  "reth-db",
  "reth-e2e-test-utils",
  "reth-engine-local",
