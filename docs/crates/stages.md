@@ -22,6 +22,27 @@ The `stages` lib plays a central role in syncing the node, maintaining state, up
 
 When the node is first started, a new `Pipeline` is initialized and all of the stages are added into `Pipeline.stages`. Then, the `Pipeline::run` function is called, which starts the pipeline, executing all of the stages continuously in an infinite loop. This process syncs the chain, keeping everything up to date with the chain tip.
 
+```mermaid
+graph TD
+    Start((Start)) --> Era[EraStage (Optional)]
+    Era --> Header[HeaderStage]
+    Header --> Body[BodyStage]
+    Body --> Sender[SenderRecoveryStage]
+    Sender --> Exec[ExecutionStage]
+    Exec --> PruneSender[PruneSenderRecoveryStage]
+    PruneSender --> MerkleUnwind[MerkleStage (Unwind)]
+    MerkleUnwind --> AccountHash[AccountHashingStage]
+    AccountHash --> StorageHash[StorageHashingStage]
+    StorageHash --> MerkleExec[MerkleStage (Execute)]
+    MerkleExec --> MerkleChange[MerkleChangeSets]
+    MerkleChange --> TxLookup[TransactionLookupStage]
+    TxLookup --> StorageHist[IndexStorageHistoryStage]
+    StorageHist --> AccountHist[IndexAccountHistoryStage]
+    AccountHist --> Prune[PruneStage]
+    Prune --> Finish[FinishStage]
+    Finish --> Start
+```
+
 Each stage within the pipeline implements the `Stage` trait which provides function interfaces to get the stage id, execute the stage and unwind the changes to the database if there was an issue during the stage execution.
 
 To get a better idea of what is happening at each part of the pipeline, let's walk through what is going on under the hood when a stage is executed, starting with `EraStage`.
