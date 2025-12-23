@@ -70,42 +70,49 @@ pub struct RethTracer {
     stdout: LayerInfo,
     journald: Option<String>,
     file: Option<(LayerInfo, FileInfo)>,
+    samply: Option<LayerInfo>,
 }
 
 impl RethTracer {
-    ///  Constructs a new `Tracer` with default settings.
+    /// Constructs a new `Tracer` with default settings.
     ///
-    ///  Initializes with default stdout layer configuration.
-    ///  Journald and file layers are not set by default.
+    /// Initializes with default stdout layer configuration.
+    /// Journald and file layers are not set by default.
     pub fn new() -> Self {
-        Self { stdout: LayerInfo::default(), journald: None, file: None }
+        Self { stdout: LayerInfo::default(), journald: None, file: None, samply: None }
     }
 
-    ///  Sets a custom configuration for the stdout layer.
+    /// Sets a custom configuration for the stdout layer.
     ///
-    ///  # Arguments
-    ///  * `config` - The `LayerInfo` to use for the stdout layer.
+    /// # Arguments
+    /// * `config` - The `LayerInfo` to use for the stdout layer.
     pub fn with_stdout(mut self, config: LayerInfo) -> Self {
         self.stdout = config;
         self
     }
 
-    ///  Sets the journald layer filter.
+    /// Sets the journald layer filter.
     ///
-    ///  # Arguments
-    ///  * `filter` - The `filter` to use for the journald layer.
+    /// # Arguments
+    /// * `filter` - The `filter` to use for the journald layer.
     pub fn with_journald(mut self, filter: String) -> Self {
         self.journald = Some(filter);
         self
     }
 
-    ///  Sets the file layer configuration and associated file info.
+    /// Sets the file layer configuration and associated file info.
     ///
     ///  # Arguments
-    ///  * `config` - The `LayerInfo` to use for the file layer.
-    ///  * `file_info` - The `FileInfo` containing details about the log file.
+    /// * `config` - The `LayerInfo` to use for the file layer.
+    /// * `file_info` - The `FileInfo` containing details about the log file.
     pub fn with_file(mut self, config: LayerInfo, file_info: FileInfo) -> Self {
         self.file = Some((config, file_info));
+        self
+    }
+
+    /// Enables or disables the samply layer.
+    pub fn with_samply(mut self, config: LayerInfo) -> Self {
+        self.samply = Some(config);
         self
     }
 }
@@ -224,11 +231,9 @@ impl Tracer for RethTracer {
             None
         };
 
-        #[cfg(feature = "samply")]
-        layers.add_layer(
-            tracing_samply::SamplyLayer::new()
-                .map_err(|e| eyre::eyre!("Failed to create samply layer: {}", e))?,
-        );
+        if let Some(config) = self.samply {
+            layers.samply(config)?;
+        }
 
         // The error is returned if the global default subscriber is already set,
         // so it's safe to ignore it

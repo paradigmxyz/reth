@@ -87,10 +87,6 @@ otlp = [
     "reth-ethereum-cli/otlp",
     "reth-node-core/otlp",
 ]
-samply = [
-    "reth-ethereum-cli/samply",
-    "reth-node-core/samply",
-]
 js-tracer = [
     "reth-node-builder/js-tracer",
     "reth-node-ethereum/js-tracer",
