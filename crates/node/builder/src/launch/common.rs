@@ -507,7 +507,7 @@ where
         // storage layers.
         //
         // The ordering is critical:
-        // 1. File healing - heals NippyJar inconsistencies without pruning data
+        // 1. File healing - heals NippyJar inconsistencies without pruning datae
         // 2. RocksDB check - needs static file tx data for hash lookups
         // 3. Static file checkpoint check - compares with MDBX, may prune data
         //
@@ -589,9 +589,9 @@ where
                     let _ = tx.send(result);
                 }),
             );
-            rx.await?.inspect_err(
-                |err| error!(target: "reth::cli", %unwind_target, %err, "failed to run unwind"),
-            )?;
+            rx.await?.inspect_err(|err| {
+                error!(target: "reth::cli", %unwind_target, %err, "failed to run unwind")
+            })?;
         }
 
         Ok(factory)
