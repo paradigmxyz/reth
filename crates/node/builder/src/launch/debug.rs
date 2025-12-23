@@ -116,9 +116,7 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     ///
     /// Default implementation wires either RPC or Etherscan provider based on debug config,
     /// falling back to an error if none are configured.
-    fn block_provider<'a>(
-        ctx: DebugBlockProviderContext<'a, N>,
-    ) -> DebugBlockProviderFuture<'a, N>
+    fn block_provider<'a>(ctx: DebugBlockProviderContext<'a, N>) -> DebugBlockProviderFuture<'a, N>
     where
         N: FullNodeComponents<Types = Self>,
     {
