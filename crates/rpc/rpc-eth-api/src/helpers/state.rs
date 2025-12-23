@@ -1,5 +1,5 @@
-//! Loads a pending block from database. Helper trait for `eth_` block, transaction, call and trace
-//! RPC methods.
+//! Loads state from database. Helper trait for `eth_` block, transaction, call and trace
+//! RPC methods related to state (accounts, storage, proofs).
 
 use super::{EthApiSpec, LoadPendingBlock, SpawnBlocking};
 use crate::{EthApiTypes, FromEthApiError, RpcNodeCore, RpcNodeCoreExt};
