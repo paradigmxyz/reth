@@ -1060,18 +1060,7 @@ where
     }
 
     /// Spawns the [`EthStatsService`] service if configured.
-    pub async fn spawn_ethstats(&self) -> eyre::Result<()> {
-        self.spawn_ethstats_with_optional_engine_events(
-            None::<futures::stream::Empty<reth_engine_primitives::ConsensusEngineEvent<_>>>,
-        )
-        .await
-    }
-
-    /// Spawns the [`EthStatsService`] service if configured, with optional engine events.
-    pub async fn spawn_ethstats_with_optional_engine_events<E>(
-        &self,
-        engine_events: Option<E>,
-    ) -> eyre::Result<()>
+    pub async fn spawn_ethstats<E>(&self, engine_events: Option<E>) -> eyre::Result<()>
     where
         E: Stream<
                 Item = reth_engine_primitives::ConsensusEngineEvent<
@@ -1093,18 +1082,18 @@ where
 
         // If engine events are provided, spawn listener for new payload reporting
         if let Some(engine_events) = engine_events {
-            let ethstats_clone = ethstats.clone();
+            let ethstats_for_events = ethstats.clone();
             let task_executor = self.task_executor().clone();
-            task_executor.spawn_critical(
-                "ethstats engine events listener",
-                Box::pin(async move {
-                    let mut events_stream = engine_events;
-                    while let Some(event) = StreamExt::next(&mut events_stream).await {
-                        use reth_engine_primitives::ConsensusEngineEvent;
-                        if let ConsensusEngineEvent::ForkBlockAdded(executed, duration) = event {
+            task_executor.spawn(Box::pin(async move {
+                let mut events_stream = engine_events;
+                while let Some(event) = events_stream.next().await {
+                    use reth_engine_primitives::ConsensusEngineEvent;
+                    match event {
+                        ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
+                        ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {
                             let block_hash = executed.recovered_block.num_hash().hash;
                             let block_number = executed.recovered_block.num_hash().number;
-                            if let Err(e) = ethstats_clone
+                            if let Err(e) = ethstats_for_events
                                 .report_new_payload(block_hash, block_number, duration)
                                 .await
                             {
@@ -1114,9 +1103,12 @@ where
                                 );
                             }
                         }
+                        _ => {
+                            // Ignore other event types for ethstats reporting
+                        }
                     }
-                }),
-            );
+                }
+            }));
         }
 
         // Spawn main ethstats service
