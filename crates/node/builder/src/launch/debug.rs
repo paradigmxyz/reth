@@ -13,7 +13,6 @@ use reth_node_api::{
 };
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
-use reth_primitives_traits::Block;
 use std::{
     any::Any,
     future::{Future, IntoFuture},
@@ -131,7 +130,8 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
                     }
                 })
                 .await?;
-                return Ok(DynBlockProviderHandle::new(block_provider))
+                let block_provider: DynBlockProvider<N> = Arc::new(block_provider);
+                return Ok(block_provider)
             }
 
             if let Some(maybe_custom_etherscan_url) = config.debug.etherscan.clone() {
@@ -152,7 +152,8 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
                     chain.id(),
                     Self::rpc_to_primitive_block,
                 );
-                return Ok(DynBlockProviderHandle::new(block_provider))
+                let block_provider: DynBlockProvider<N> = Arc::new(block_provider);
+                return Ok(block_provider)
             }
 
             Err(eyre::eyre!("no debug consensus block provider configured"))
@@ -182,15 +183,39 @@ where
     pub convert_rpc: RpcConsensusConvert<N>,
 }
 
+type DynBlockProvider<N> =
+    Arc<dyn BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + Send + Sync + 'static>;
+
+#[derive(Clone)]
+struct ArcBlockProvider<N: FullNodeComponents> {
+    inner: DynBlockProvider<N>,
+}
+
+impl<N: FullNodeComponents> ArcBlockProvider<N> {
+    fn new(inner: DynBlockProvider<N>) -> Self {
+        Self { inner }
+    }
+}
+
+#[async_trait]
+impl<N> BlockProvider for ArcBlockProvider<N>
+where
+    N: FullNodeComponents,
+{
+    type Block = BlockTy<<N as FullNodeTypes>::Types>;
+
+    async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
+        self.inner.subscribe_blocks(tx).await;
+    }
+
+    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
+        self.inner.get_block(block_number).await
+    }
+}
+
 /// Future returning a dynamic block provider.
-pub(crate) type DebugBlockProviderFuture<'a, N> = Pin<
-    Box<
-        dyn Future<
-                Output = eyre::Result<DynBlockProviderHandle<BlockTy<<N as FullNodeTypes>::Types>>>,
-            > + Send
-            + 'a,
-    >,
->;
+pub(crate) type DebugBlockProviderFuture<'a, N> =
+    Pin<Box<dyn Future<Output = eyre::Result<DynBlockProvider<N>>> + Send + 'a>>;
 
 /// Returns true if debug consensus block provider is configured via RPC or Etherscan flags.
 const fn debug_block_provider_configured<ChainSpec>(config: &NodeConfig<ChainSpec>) -> bool {
@@ -225,40 +250,12 @@ pub(crate) type DevPayloadAttributesBuilderFactory<N> = Box<
         + 'static,
 >;
 
-/// Convenience handle for using a dynamic block provider where [`BlockProvider`] is expected.
-#[derive(Clone)]
-#[expect(missing_debug_implementations)]
-pub struct DynBlockProviderHandle<B: Block + 'static>(Arc<dyn BlockProvider<Block = B>>);
-
-impl<B: Block + 'static> DynBlockProviderHandle<B> {
-    /// Wraps any [`BlockProvider`] as a dynamic provider handle.
-    pub fn new<P>(provider: P) -> Self
-    where
-        P: BlockProvider<Block = B> + Send + Sync + 'static,
-    {
-        Self(Arc::new(provider))
-    }
-}
-
-#[async_trait]
-impl<B: Block + 'static> BlockProvider for DynBlockProviderHandle<B> {
-    type Block = B;
-
-    async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
-        self.0.subscribe_blocks(tx).await
-    }
-
-    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
-        self.0.get_block(block_number).await
-    }
-}
-
 /// Factory for producing a custom debug block provider.
 pub(crate) type DebugBlockProviderFactory<N, AddOns> = Box<
     dyn Fn(
             &NodeConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
             &NodeHandle<N, AddOns>,
-        ) -> eyre::Result<DynBlockProviderHandle<BlockTy<<N as FullNodeTypes>::Types>>>
+        ) -> eyre::Result<DynBlockProvider<N>>
         + Send
         + Sync
         + 'static,
@@ -271,16 +268,14 @@ type PayloadAttrMapper<N> = Box<
         + 'static,
 >;
 
-fn spawn_consensus_client<N, AddOns>(
-    handle: &NodeHandle<N, AddOns>,
-    provider: DynBlockProviderHandle<BlockTy<<N as FullNodeTypes>::Types>>,
-) where
+fn spawn_consensus_client<N, AddOns>(handle: &NodeHandle<N, AddOns>, provider: DynBlockProvider<N>)
+where
     N: FullNodeComponents<Types: DebugNode<N>>,
     AddOns: RethRpcAddOns<N>,
 {
     let client = DebugConsensusClient::new(
         handle.node.add_ons_handle.beacon_engine_handle.clone(),
-        provider,
+        ArcBlockProvider::<N>::new(provider),
     );
     handle
         .node
@@ -426,7 +421,7 @@ where
         self,
         provider: impl BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + 'static,
     ) -> Self {
-        let handle = DynBlockProviderHandle::new(provider);
+        let handle: DynBlockProvider<N> = Arc::new(provider);
         self.with_debug_block_provider_factory(Box::new(move |_, _| Ok(handle.clone())))
     }
 
