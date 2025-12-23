@@ -3,7 +3,6 @@ use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
 use alloy_provider::{network::AnyNetwork, Network};
 use async_trait::async_trait;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
-use reth_chainspec::EthChainSpec;
 use reth_consensus_debug_client::{
     BlockProvider, DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider,
 };
@@ -136,7 +135,7 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
             }
 
             if let Some(maybe_custom_etherscan_url) = config.debug.etherscan.clone() {
-                let chain = config.chain.chain();
+                let chain = reth_chainspec::EthChainSpec::chain(config.chain.as_ref());
                 let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
                     chain.etherscan_urls().map(|urls| urls.0.to_string()).ok_or_else(|| {
                         eyre::eyre!("failed to get etherscan url for chain: {chain}")
