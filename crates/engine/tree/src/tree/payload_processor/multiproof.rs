@@ -625,6 +625,11 @@ impl MultiProofTask {
         }
     }
 
+    /// Returns a sender that can be used to send arbitrary [`MultiProofMessage`]s to this task.
+    pub(super) fn state_root_message_sender(&self) -> CrossbeamSender<MultiProofMessage> {
+        self.tx.clone()
+    }
+
     /// Handles request for proof prefetch.
     ///
     /// Returns how many multiproof tasks were dispatched for the prefetch request.
