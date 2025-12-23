@@ -66,8 +66,9 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
+    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -501,20 +502,61 @@ where
         )?
         .with_prune_modes(self.prune_modes());
 
-        // Check for consistency between database and static files. If it fails, it unwinds to
-        // the first block that's consistent between database and static files.
-        if let Some(unwind_target) =
-            factory.static_file_provider().check_consistency(&factory.provider()?)?
-        {
+        // Check for consistency between database, static files, and RocksDB. If any
+        // inconsistencies are found, unwind to the first block that's consistent across all
+        // storage layers.
+        //
+        // The ordering is critical:
+        // 1. File healing - heals NippyJar inconsistencies without pruning data
+        // 2. RocksDB check - needs static file tx data for hash lookups
+        // 3. Static file checkpoint check - compares with MDBX, may prune data
+        //
+        // We compute a combined unwind target from all checks and run a single unwind pass.
+
+        // Step 1: Heal file-level inconsistencies (no pruning)
+        let file_unwind = factory.static_file_provider().check_file_consistency()?;
+
+        // Step 2: RocksDB consistency check (needs static files tx data)
+        let rocksdb_unwind =
+            factory.rocksdb_provider().check_consistency(&factory.database_provider_ro()?)?;
+
+        // Step 3: Static file checkpoint consistency (may prune)
+        let static_file_unwind = factory
+            .static_file_provider()
+            .check_consistency(&factory.provider()?)?
+            .map(|target| match target {
+                PipelineTarget::Unwind(block) => block,
+                PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
+            });
+
+        // Combine all unwind targets - take the minimum (most conservative)
+        let unwind_target =
+            [file_unwind, rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
+
+        if let Some(unwind_block) = unwind_target {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
-            // instead.
+            // instead. Unwinding to 0 would leave MDBX with a huge free list size.
+            let inconsistency_source = match (file_unwind, rocksdb_unwind, static_file_unwind) {
+                (Some(_), Some(_), Some(_)) => {
+                    "static file healing, RocksDB <> database, and static file <> database"
+                }
+                (Some(_), Some(_), None) => "static file healing and RocksDB <> database",
+                (Some(_), None, Some(_)) => "static file healing and static file <> database",
+                (None, Some(_), Some(_)) => "RocksDB <> database and static file <> database",
+                (Some(_), None, None) => "static file healing",
+                (None, Some(_), None) => "RocksDB <> database",
+                (None, None, Some(_)) => "static file <> database",
+                (None, None, None) => unreachable!(),
+            };
             assert_ne!(
-                unwind_target,
-                PipelineTarget::Unwind(0),
-                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
+                unwind_block,
+                0,
+                "A {inconsistency_source} inconsistency was found that would trigger an unwind to block 0"
             );
 
-            info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
+            let unwind_target = PipelineTarget::Unwind(unwind_block);
+
+            info!(target: "reth::cli", %unwind_target, %inconsistency_source, "Executing unwind after consistency check.");
 
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
@@ -548,7 +590,7 @@ where
                 }),
             );
             rx.await?.inspect_err(|err| {
-                error!(target: "reth::cli", unwind_target = %unwind_target, %err, "failed to run unwind")
+                error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
             })?;
         }
 

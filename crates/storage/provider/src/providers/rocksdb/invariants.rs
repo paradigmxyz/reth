@@ -155,6 +155,16 @@ impl RocksDBProvider {
                     "MDBX empty but static files have data, pruning all TransactionHashNumbers"
                 );
                 self.prune_transaction_hash_numbers_in_range(provider, 0..=highest_tx)?;
+
+                // If checkpoint claims progress but MDBX is empty, that's an inconsistency
+                if checkpoint > 0 {
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        checkpoint,
+                        "Checkpoint set but MDBX has no transactions, unwind needed"
+                    );
+                    return Ok(Some(0));
+                }
             }
             (None, None) => {
                 // Both MDBX and static files are empty.
@@ -275,6 +285,18 @@ impl RocksDBProvider {
                         "StoragesHistory ahead of checkpoint, pruning excess data"
                     );
                     self.prune_storages_history_above(checkpoint)?;
+                    return Ok(None);
+                }
+
+                // If RocksDB is behind the checkpoint, request an unwind to rebuild.
+                if max_highest_block < checkpoint {
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        rocks_highest = max_highest_block,
+                        checkpoint,
+                        "StoragesHistory behind checkpoint, unwind needed"
+                    );
+                    return Ok(Some(max_highest_block));
                 }
 
                 Ok(None)
