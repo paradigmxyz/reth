@@ -59,6 +59,73 @@ impl DiskFileBlobStore {
     fn clear_cache(&self) {
         self.inner.blob_cache.lock().clear()
     }
+
+    /// Look up EIP-7594 blobs by their versioned hashes.
+    ///
+    /// This returns a result vector with the **same length and order** as the input
+    /// `versioned_hashes`. Each element is `Some(BlobAndProofV2)` if the blob is available, or
+    /// `None` if it is missing or an older sidecar version.
+    ///
+    /// The lookup first scans the in-memory cache and, if not all blobs are found, falls back to
+    /// reading candidate sidecars from disk using the `versioned_hash -> tx_hash` index.
+    fn get_by_versioned_hashes_eip7594(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        // we must return the blobs in order but we don't necessarily find them in the requested
+        // order
+        let mut result = vec![None; versioned_hashes.len()];
+
+        // first scan all cached full sidecars
+        for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
+            if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
+                for (hash_idx, match_result) in
+                    blob_sidecar.match_versioned_hashes(versioned_hashes)
+                {
+                    result[hash_idx] = Some(match_result);
+                }
+            }
+
+            // return early if all blobs are found.
+            if result.iter().all(|blob| blob.is_some()) {
+                return Ok(result);
+            }
+        }
+
+        // not all versioned hashes were found, try to look up a matching tx
+        let mut missing_tx_hashes = Vec::new();
+
+        {
+            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
+            for (idx, _) in
+                result.iter().enumerate().filter(|(_, blob_and_proof)| blob_and_proof.is_none())
+            {
+                // this is safe because the result vec has the same len
+                let versioned_hash = versioned_hashes[idx];
+                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
+                    missing_tx_hashes.push(tx_hash);
+                }
+            }
+        }
+
+        // if we have missing blobs, try to read them from disk and try again
+        if !missing_tx_hashes.is_empty() {
+            let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
+            for (_, blob_sidecar) in blobs_from_disk {
+                if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
+                    for (hash_idx, match_result) in
+                        blob_sidecar.match_versioned_hashes(versioned_hashes)
+                    {
+                        if result[hash_idx].is_none() {
+                            result[hash_idx] = Some(match_result);
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(result)
+    }
 }
 
 impl BlobStore for DiskFileBlobStore {
@@ -84,6 +151,9 @@ impl BlobStore for DiskFileBlobStore {
     }
 
     fn delete_all(&self, txs: Vec<B256>) -> Result<(), BlobStoreError> {
+        if txs.is_empty() {
+            return Ok(())
+        }
         let txs = self.inner.retain_existing(txs)?;
         self.inner.txs_to_delete.write().extend(txs);
         Ok(())
@@ -205,58 +275,7 @@ impl BlobStore for DiskFileBlobStore {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
-        // we must return the blobs in order but we don't necessarily find them in the requested
-        // order
-        let mut result = vec![None; versioned_hashes.len()];
-
-        // first scan all cached full sidecars
-        for (_tx_hash, blob_sidecar) in self.inner.blob_cache.lock().iter() {
-            if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                for (hash_idx, match_result) in
-                    blob_sidecar.match_versioned_hashes(versioned_hashes)
-                {
-                    result[hash_idx] = Some(match_result);
-                }
-            }
-
-            // return early if all blobs are found.
-            if result.iter().all(|blob| blob.is_some()) {
-                // got all blobs, can return early
-                return Ok(Some(result.into_iter().map(Option::unwrap).collect()))
-            }
-        }
-
-        // not all versioned hashes were found, try to look up a matching tx
-        let mut missing_tx_hashes = Vec::new();
-
-        {
-            let mut versioned_to_txhashes = self.inner.versioned_hashes_to_txhash.lock();
-            for (idx, _) in
-                result.iter().enumerate().filter(|(_, blob_and_proof)| blob_and_proof.is_none())
-            {
-                // this is safe because the result vec has the same len
-                let versioned_hash = versioned_hashes[idx];
-                if let Some(tx_hash) = versioned_to_txhashes.get(&versioned_hash).copied() {
-                    missing_tx_hashes.push(tx_hash);
-                }
-            }
-        }
-
-        // if we have missing blobs, try to read them from disk and try again
-        if !missing_tx_hashes.is_empty() {
-            let blobs_from_disk = self.inner.read_many_decoded(missing_tx_hashes);
-            for (_, blob_sidecar) in blobs_from_disk {
-                if let Some(blob_sidecar) = blob_sidecar.as_eip7594() {
-                    for (hash_idx, match_result) in
-                        blob_sidecar.match_versioned_hashes(versioned_hashes)
-                    {
-                        if result[hash_idx].is_none() {
-                            result[hash_idx] = Some(match_result);
-                        }
-                    }
-                }
-            }
-        }
+        let result = self.get_by_versioned_hashes_eip7594(versioned_hashes)?;
 
         // only return the blobs if we found all requested versioned hashes
         if result.iter().all(|blob| blob.is_some()) {
@@ -264,6 +283,13 @@ impl BlobStore for DiskFileBlobStore {
         } else {
             Ok(None)
         }
+    }
+
+    fn get_by_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        self.get_by_versioned_hashes_eip7594(versioned_hashes)
     }
 
     fn data_size_hint(&self) -> Option<usize> {
@@ -656,7 +682,12 @@ pub enum OpenDiskFileBlobStore {
 #[cfg(test)]
 mod tests {
     use alloy_consensus::BlobTransactionSidecar;
-    use alloy_eips::eip7594::BlobTransactionSidecarVariant;
+    use alloy_eips::{
+        eip4844::{kzg_to_versioned_hash, Blob, BlobAndProofV2, Bytes48},
+        eip7594::{
+            BlobTransactionSidecarEip7594, BlobTransactionSidecarVariant, CELLS_PER_EXT_BLOB,
+        },
+    };
 
     use super::*;
     use std::sync::atomic::Ordering;
@@ -680,6 +711,20 @@ mod tests {
                 (tx, blob)
             })
             .collect()
+    }
+
+    fn eip7594_single_blob_sidecar() -> (BlobTransactionSidecarVariant, B256, BlobAndProofV2) {
+        let blob = Blob::default();
+        let commitment = Bytes48::default();
+        let cell_proofs = vec![Bytes48::default(); CELLS_PER_EXT_BLOB];
+
+        let versioned_hash = kzg_to_versioned_hash(commitment.as_slice());
+
+        let expected =
+            BlobAndProofV2 { blob: Box::new(Blob::default()), proofs: cell_proofs.clone() };
+        let sidecar = BlobTransactionSidecarEip7594::new(vec![blob], vec![commitment], cell_proofs);
+
+        (BlobTransactionSidecarVariant::Eip7594(sidecar), versioned_hash, expected)
     }
 
     #[test]
@@ -850,5 +895,34 @@ mod tests {
         let stat = store.cleanup();
         assert_eq!(stat.delete_succeed, 3);
         assert_eq!(stat.delete_failed, 0);
+    }
+
+    #[test]
+    fn disk_get_blobs_v3_returns_partial_results() {
+        let (store, _dir) = tmp_store();
+
+        let (sidecar, versioned_hash, expected) = eip7594_single_blob_sidecar();
+        store.insert(TxHash::random(), sidecar).unwrap();
+
+        assert_ne!(versioned_hash, B256::ZERO);
+
+        let request = vec![versioned_hash, B256::ZERO];
+        let v2 = store.get_by_versioned_hashes_v2(&request).unwrap();
+        assert!(v2.is_none(), "v2 must return null if any requested blob is missing");
+
+        let v3 = store.get_by_versioned_hashes_v3(&request).unwrap();
+        assert_eq!(v3, vec![Some(expected), None]);
+    }
+
+    #[test]
+    fn disk_get_blobs_v3_can_fallback_to_disk() {
+        let (store, _dir) = tmp_store();
+
+        let (sidecar, versioned_hash, expected) = eip7594_single_blob_sidecar();
+        store.insert(TxHash::random(), sidecar).unwrap();
+        store.clear_cache();
+
+        let v3 = store.get_by_versioned_hashes_v3(&[versioned_hash]).unwrap();
+        assert_eq!(v3, vec![Some(expected)]);
     }
 }

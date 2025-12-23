@@ -118,7 +118,7 @@ where
                     "Successfully connected to EthStats server at {}", self.credentials.host
                 );
                 let conn: ConnWrapper = ConnWrapper::new(ws_stream);
-                *self.conn.write().await = Some(conn.clone());
+                *self.conn.write().await = Some(conn);
                 self.login().await?;
                 Ok(())
             }
@@ -208,7 +208,7 @@ where
                 active: true,
                 syncing: self.network.is_syncing(),
                 peers: self.network.num_connected_peers() as u64,
-                gas_price: 0, // TODO
+                gas_price: self.pool.block_info().pending_basefee,
                 uptime: 100,
             },
         };

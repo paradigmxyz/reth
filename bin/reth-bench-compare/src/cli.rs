@@ -329,6 +329,7 @@ pub(crate) async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
         output_dir.clone(),
         git_manager.clone(),
         args.features.clone(),
+        args.profile,
     )?;
     // Initialize node manager
     let mut node_manager = NodeManager::new(&args);
@@ -506,8 +507,8 @@ async fn run_warmup_phase(
     // Build additional args with conditional --debug.startup-sync-state-idle flag
     let additional_args = args.build_additional_args("warmup", args.baseline_args.as_ref());
 
-    // Start reth node for warmup
-    let mut node_process =
+    // Start reth node for warmup (command is not stored for warmup phase)
+    let (mut node_process, _warmup_command) =
         node_manager.start_node(&binary_path, warmup_ref, "warmup", &additional_args).await?;
 
     // Wait for node to be ready and get its current tip
@@ -607,8 +608,8 @@ async fn run_benchmark_workflow(
         // Build additional args with conditional --debug.startup-sync-state-idle flag
         let additional_args = args.build_additional_args(ref_type, base_args_str);
 
-        // Start reth node
-        let mut node_process =
+        // Start reth node and capture the command for reporting
+        let (mut node_process, reth_command) =
             node_manager.start_node(&binary_path, git_ref, ref_type, &additional_args).await?;
 
         // Wait for node to be ready and get its current tip (wherever it is)
@@ -645,8 +646,9 @@ async fn run_benchmark_workflow(
         // Store results for comparison
         comparison_generator.add_ref_results(ref_type, &output_dir)?;
 
-        // Set the benchmark run timestamps
+        // Set the benchmark run timestamps and reth command
         comparison_generator.set_ref_timestamps(ref_type, benchmark_start, benchmark_end)?;
+        comparison_generator.set_ref_command(ref_type, reth_command)?;
 
         info!("Completed {} reference benchmark", ref_type);
     }

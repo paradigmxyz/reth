@@ -3,6 +3,7 @@ use crate::{BranchNodeCompact, Nibbles};
 use alloy_primitives::B256;
 use reth_storage_errors::db::DatabaseError;
 use std::time::{Duration, Instant};
+use tracing::debug_span;
 
 #[cfg(feature = "metrics")]
 use crate::TrieType;
@@ -103,6 +104,20 @@ impl TrieCursorMetricsCache {
         self.seek_count += other.seek_count;
         self.seek_exact_count += other.seek_exact_count;
         self.total_duration += other.total_duration;
+    }
+
+    /// Record the span for metrics.
+    pub fn record_span(&self, name: &'static str) {
+        let _span = debug_span!(
+            target: "trie::trie_cursor",
+            "Trie cursor metrics",
+            name,
+            next_count = self.next_count,
+            seek_count = self.seek_count,
+            seek_exact_count = self.seek_exact_count,
+            total_duration = self.total_duration.as_secs_f64(),
+        )
+        .entered();
     }
 }
 

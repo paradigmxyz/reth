@@ -176,9 +176,13 @@ The second parameter is an array of one or more trace types (`vmTrace`, `trace`,
 
 The third and optional parameter is a block number, block hash, or a block tag (`latest`, `finalized`, `safe`, `earliest`, `pending`).
 
-| Client | Method invocation                                              |
-| ------ | -------------------------------------------------------------- |
-| RPC    | `{"method": "trace_callMany", "params": [trace[], block]}` |
+The fourth and optional parameter is a `stateOverrides` object that temporarily overrides account state used for the trace (balances, nonces, code, storage).
+
+The fifth and optional parameter is a `blockOverrides` object that temporarily overrides block fields used for the trace (for example `timestamp`, `baseFee`, `number`).
+
+| Client | Method invocation                                                                    |
+| ------ | ------------------------------------------------------------------------------------ |
+| RPC    | `{"method": "trace_call", "params": [tx, trace[], block, stateOverrides, blockOverrides]}` |
 
 ### Example
 
@@ -222,7 +226,7 @@ The second and optional parameter is a block number, block hash, or a block tag 
 
 | Client | Method invocation                                          |
 | ------ | ---------------------------------------------------------- |
-| RPC    | `{"method": "trace_callMany", "params": [trace[], block]}` |
+| RPC    | `{"method": "trace_callMany", "params": [[[tx, type[]], ...], block]}` |
 
 ### Example
 
@@ -502,7 +506,7 @@ Returns trace at given position.
 
 | Client | Method invocation                                        |
 | ------ | -------------------------------------------------------- |
-| RPC    | `{"method": "trace_get", "params": [tx_hash,indices[]]}` |
+| RPC    | `{"method": "trace_get", "params": [tx_hash, indices[]]}` |
 
 ### Example
 
@@ -521,13 +525,13 @@ Returns trace at given position.
             "value": "0x0"
         },
         "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
-            "blockNumber": 3068185,
-            "result": {
+        "blockNumber": 3068185,
+        "result": {
             "gasUsed": "0x183",
             "output": "0x0000000000000000000000000000000000000000000000000000000000000001"
         },
         "subtraces": 0,
-            "traceAddress": [
+        "traceAddress": [
             0
         ],
         "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
@@ -577,5 +581,60 @@ Returns all traces of given transaction
             "type": "call"
         }
     ]
+}
+```
+
+## `trace_transactionOpcodeGas`
+
+Returns opcode gas usage aggregated per opcode for a single transaction in no particular order.
+
+| Client | Method invocation                                                     |
+| ------ | --------------------------------------------------------------------- |
+| RPC    | `{"method": "trace_transactionOpcodeGas", "params": [tx_hash]}` |
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"trace_transactionOpcodeGas","params":["0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3"]}
+{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+    "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
+    "opcodeGas": [
+      { "opcode": "PUSH1", "count": 10, "gasUsed": 30 },
+      { "opcode": "CALL", "count": 1, "gasUsed": 700 }
+    ]
+  }
+}
+```
+
+## `trace_blockOpcodeGas`
+
+Returns opcode gas usage aggregated per opcode for every transaction in a block.
+
+| Client | Method invocation                                                |
+| ------ | ---------------------------------------------------------------- |
+| RPC    | `{"method": "trace_blockOpcodeGas", "params": [block]}` |
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"trace_blockOpcodeGas","params":["latest"]}
+{
+  "id": 1,
+  "jsonrpc": "2.0",
+  "result": {
+    "blockHash": "0x7eb25504e4c202cf3d62fd585d3e238f592c780cca82dacb2ed3cb5b38883add",
+    "blockNumber": 3068185,
+    "transactions": [
+      {
+        "transactionHash": "0x17104ac9d3312d8c136b7f44d4b8b47852618065ebfa534bd2d3b5ef218ca1f3",
+        "opcodeGas": [
+          { "opcode": "PUSH1", "count": 10, "gasUsed": 30 }
+        ]
+      }
+    ]
+  }
 }
 ```

@@ -223,13 +223,9 @@ where
 /// Validates that the EIP-4844 header fields exist and conform to the spec. This ensures that:
 ///
 ///  * `blob_gas_used` exists as a header field
-///  * `excess_blob_gas` exists as a header field
 ///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
-///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
 ///  * `blob_gas_used` doesn't exceed the max allowed blob gas based on the given params
-///
-/// Note: This does not enforce any restrictions on `blob_gas_used`
 pub fn validate_4844_header_standalone<H: BlockHeader>(
     header: &H,
     blob_params: BlobParams,
@@ -283,18 +279,26 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
     header: &H,
     parent: &SealedHeader<H>,
 ) -> Result<(), ConsensusError> {
-    // Parent number is consistent.
-    if parent.number() + 1 != header.number() {
-        return Err(ConsensusError::ParentBlockNumberMismatch {
-            parent_block_number: parent.number(),
-            block_number: header.number(),
-        })
-    }
-
     if parent.hash() != header.parent_hash() {
         return Err(ConsensusError::ParentHashMismatch(
             GotExpected { got: header.parent_hash(), expected: parent.hash() }.into(),
         ))
+    }
+
+    let Some(parent_number) = parent.number().checked_add(1) else {
+        // parent block already reached the maximum
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number(),
+            block_number: u64::MAX,
+        })
+    };
+
+    // Parent number is consistent.
+    if parent_number != header.number() {
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number(),
+            block_number: header.number(),
+        })
     }
 
     Ok(())
@@ -331,7 +335,7 @@ pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + Ethere
     Ok(())
 }
 
-/// Validates the timestamp against the parent to make sure it is in the past.
+/// Validates that the block timestamp is greater than the parent block timestamp.
 #[inline]
 pub fn validate_against_parent_timestamp<H: BlockHeader>(
     header: &H,

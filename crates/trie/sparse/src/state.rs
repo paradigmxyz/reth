@@ -1,7 +1,7 @@
 use crate::{
     provider::{TrieNodeProvider, TrieNodeProviderFactory},
     traits::SparseTrieInterface,
-    RevealedSparseNode, SerialSparseTrie, SparseTrie, TrieMasks,
+    SerialSparseTrie, SparseTrie,
 };
 use alloc::{collections::VecDeque, vec::Vec};
 use alloy_primitives::{
@@ -15,8 +15,9 @@ use reth_primitives_traits::Account;
 use reth_trie_common::{
     proof::ProofNodes,
     updates::{StorageTrieUpdates, TrieUpdates},
-    DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, RlpNode, StorageMultiProof,
-    TrieAccount, TrieMask, TrieNode, EMPTY_ROOT_HASH, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, DecodedStorageMultiProof, MultiProof, Nibbles, ProofTrieNode, RlpNode,
+    StorageMultiProof, TrieAccount, TrieMask, TrieMasks, TrieNode, EMPTY_ROOT_HASH,
+    TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use tracing::{instrument, trace};
 
@@ -275,13 +276,12 @@ where
         {
             use rayon::iter::{ParallelBridge, ParallelIterator};
 
-            let (tx, rx) = std::sync::mpsc::channel();
             let retain_updates = self.retain_updates;
 
             // Process all storage trie revealings in parallel, having first removed the
             // `reveal_nodes` tracking and `SparseTrie`s for each account from their HashMaps.
             // These will be returned after processing.
-            storages
+            let results: Vec<_> = storages
                 .into_iter()
                 .map(|(account, storage_subtree)| {
                     let revealed_nodes = self.storage.take_or_create_revealed_paths(&account);
@@ -300,14 +300,12 @@ where
 
                     (account, revealed_nodes, trie, result)
                 })
-                .for_each_init(|| tx.clone(), |tx, result| tx.send(result).unwrap());
-
-            drop(tx);
+                .collect();
 
             // Return `revealed_nodes` and `SparseTrie` for each account, incrementing metrics and
             // returning the last error seen if any.
             let mut any_err = Ok(());
-            for (account, revealed_nodes, trie, result) in rx {
+            for (account, revealed_nodes, trie, result) in results {
                 self.storage.revealed_paths.insert(account, revealed_nodes);
                 self.storage.tries.insert(account, trie);
                 if let Ok(_metric_values) = result {
@@ -945,9 +943,9 @@ struct ProofNodesMetricValues {
 #[derive(Debug, PartialEq, Eq)]
 struct FilterMappedProofNodes {
     /// Root node which was pulled out of the original node set to be handled specially.
-    root_node: Option<RevealedSparseNode>,
+    root_node: Option<ProofTrieNode>,
     /// Filtered, decoded and unsorted proof nodes. Root node is removed.
-    nodes: Vec<RevealedSparseNode>,
+    nodes: Vec<ProofTrieNode>,
     /// Number of new nodes that will be revealed. This includes all children of branch nodes, even
     /// if they are not in the proof.
     new_nodes: usize,
@@ -955,7 +953,7 @@ struct FilterMappedProofNodes {
     metric_values: ProofNodesMetricValues,
 }
 
-/// Filters the decoded nodes that are already revealed, maps them to `RevealedSparseNodes`,
+/// Filters the decoded nodes that are already revealed, maps them to `SparseTrieNode`s,
 /// separates the root node if present, and returns additional information about the number of
 /// total, skipped, and new nodes.
 fn filter_map_revealed_nodes(
@@ -1006,7 +1004,7 @@ fn filter_map_revealed_nodes(
             _ => TrieMasks::none(),
         };
 
-        let node = RevealedSparseNode { path, node: proof_node, masks };
+        let node = ProofTrieNode { path, node: proof_node, masks };
 
         if is_root {
             // Perform sanity check.
@@ -1382,12 +1380,12 @@ mod tests {
         assert_eq!(
             decoded,
             FilterMappedProofNodes {
-                root_node: Some(RevealedSparseNode {
+                root_node: Some(ProofTrieNode {
                     path: Nibbles::default(),
                     node: branch,
                     masks: TrieMasks::none(),
                 }),
-                nodes: vec![RevealedSparseNode {
+                nodes: vec![ProofTrieNode {
                     path: Nibbles::from_nibbles([0x1]),
                     node: leaf,
                     masks: TrieMasks::none(),

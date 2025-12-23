@@ -1041,10 +1041,10 @@ mod tests {
         assert_eq!(writer.rows(), 0);
         assert_eq!(writer.max_row_size(), 0);
         assert_eq!(File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
-        // Only the byte that indicates how many bytes per offset should be left
+        // Offset size byte (1) + final offset (8) = 9 bytes
         assert_eq!(
             File::open(writer.offsets_path()).unwrap().metadata().unwrap().len() as usize,
-            1
+            9
         );
         writer.commit().unwrap();
         assert!(!writer.is_dirty());

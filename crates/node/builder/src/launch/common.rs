@@ -65,7 +65,7 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
+    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
     StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
 };
@@ -172,7 +172,7 @@ impl LaunchContext {
     }
 
     /// Save prune config to the toml file if node is a full node or has custom pruning CLI
-    /// arguments.
+    /// arguments. Also migrates deprecated prune config values to new defaults.
     fn save_pruning_config<ChainSpec>(
         reth_config: &mut reth_config::Config,
         config: &NodeConfig<ChainSpec>,
@@ -181,15 +181,22 @@ impl LaunchContext {
     where
         ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
     {
+        let mut should_save = reth_config.prune.segments.migrate();
+
         if let Some(prune_config) = config.prune_config() {
             if reth_config.prune != prune_config {
                 reth_config.set_prune_config(prune_config);
-                info!(target: "reth::cli", "Saving prune config to toml file");
-                reth_config.save(config_path.as_ref())?;
+                should_save = true;
             }
         } else if !reth_config.prune.is_default() {
             warn!(target: "reth::cli", "Pruning configuration is present in the config file, but no CLI arguments are provided. Using config from file.");
         }
+
+        if should_save {
+            info!(target: "reth::cli", "Saving prune config to toml file");
+            reth_config.save(config_path.as_ref())?;
+        }
+
         Ok(())
     }
 
@@ -476,11 +483,23 @@ where
             StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
                 .with_metrics()
                 .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
+                .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
-        let factory =
-            ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
-                .with_prune_modes(self.prune_modes());
+        // Initialize RocksDB provider with metrics, statistics, and default tables
+        let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
+            .with_default_tables()
+            .with_metrics()
+            .with_statistics()
+            .build()?;
+
+        let factory = ProviderFactory::new(
+            self.right().clone(),
+            self.chain_spec(),
+            static_file_provider,
+            rocksdb_provider,
+        )?
+        .with_prune_modes(self.prune_modes());
 
         // Check for consistency between database and static files. If it fails, it unwinds to
         // the first block that's consistent between database and static files.
@@ -919,28 +938,44 @@ where
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
     pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
+        // We skip the era stage if it's not enabled
+        let era_enabled = self.era_import_source().is_some();
+        let mut all_stages =
+            StageId::ALL.into_iter().filter(|id| era_enabled || id != &StageId::Era);
+
+        // Get the expected first stage based on config.
+        let first_stage = all_stages.next().expect("there must be at least one stage");
+
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
             .blockchain_db()
-            .get_stage_checkpoint(*StageId::ALL.first().unwrap())?
+            .get_stage_checkpoint(first_stage)?
             .unwrap_or_default()
             .block_number;
 
-        // Skip the first stage as we've already retrieved it and comparing all other checkpoints
-        // against it.
-        for stage_id in StageId::ALL.iter().skip(1) {
+        // Compare all other stages against the first
+        for stage_id in all_stages {
             let stage_checkpoint = self
                 .blockchain_db()
-                .get_stage_checkpoint(*stage_id)?
+                .get_stage_checkpoint(stage_id)?
                 .unwrap_or_default()
                 .block_number;
 
             // If the checkpoint of any stage is less than the checkpoint of the first stage,
             // retrieve and return the block hash of the latest header and use it as the target.
+            debug!(
+                target: "consensus::engine",
+                first_stage_id = %first_stage,
+                first_stage_checkpoint,
+                stage_id = %stage_id,
+                stage_checkpoint = stage_checkpoint,
+                "Checking stage against first stage",
+            );
             if stage_checkpoint < first_stage_checkpoint {
                 debug!(
                     target: "consensus::engine",
+                    first_stage_id = %first_stage,
                     first_stage_checkpoint,
                     inconsistent_stage_id = %stage_id,
                     inconsistent_stage_checkpoint = stage_checkpoint,
