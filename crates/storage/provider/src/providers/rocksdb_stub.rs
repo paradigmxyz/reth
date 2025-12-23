@@ -86,12 +86,12 @@ impl RocksDBProvider {
     }
 
     /// Gets the first key-value pair from a table (stub implementation).
-    pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+    pub const fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         Ok(None)
     }
 
     /// Gets the last key-value pair from a table (stub implementation).
-    pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+    pub const fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         Ok(None)
     }
 
