@@ -30,7 +30,7 @@ const WORKER_CHUNK_SIZE: usize = 100;
 
 /// Keccak256 hash of the zero address.
 const HASHED_ZERO_ADDRESS: B256 =
-    b256!("5380c7b7ae81a58eb98d9c78de4a1fd7fd9535fc953ed2be602daaa41767312a");
+    b256!("0x5380c7b7ae81a58eb98d9c78de4a1fd7fd9535fc953ed2be602daaa41767312a");
 
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
