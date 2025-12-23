@@ -1184,6 +1184,44 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(unwind_target.map(PipelineTarget::Unwind))
     }
 
+    /// Heals file-level (`NippyJar`) inconsistencies for all static file segments.
+    ///
+    /// This should be called BEFORE any checks that depend on static file data (e.g., `RocksDB`
+    /// consistency checks that need transaction data), as it ensures files are in a consistent
+    /// state without pruning any data.
+    ///
+    /// Unlike [`Self::check_consistency`], this method:
+    /// - Does NOT compare with database checkpoints
+    /// - Does NOT prune data
+    /// - Applies to ALL segments unconditionally
+    ///
+    /// Returns an unwind target if file healing detected a decrease in the highest block
+    /// (indicating a pruning interruption that needs a database unwind).
+    pub fn check_file_consistency(&self) -> ProviderResult<Option<BlockNumber>> {
+        info!(target: "reth::cli", "Healing static file inconsistencies.");
+
+        let mut unwind_target: Option<BlockNumber> = None;
+
+        for segment in StaticFileSegment::iter() {
+            let (initial_highest_block, highest_block) = self.maybe_heal_segment(segment)?;
+
+            if initial_highest_block != highest_block {
+                // Healing decreased highest block - need unwind
+                info!(
+                    target: "reth::providers::static_file",
+                    ?segment,
+                    ?initial_highest_block,
+                    ?highest_block,
+                    "File healing changed highest block, unwind needed"
+                );
+                let target = highest_block.unwrap_or_default();
+                unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
+            }
+        }
+
+        Ok(unwind_target)
+    }
+
     /// Checks consistency of the latest static file segment and throws an error if at fault.
     /// Read-only.
     pub fn check_segment_consistency(&self, segment: StaticFileSegment) -> ProviderResult<()> {

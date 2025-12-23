@@ -506,9 +506,21 @@ where
         // inconsistencies are found, unwind to the first block that's consistent across all
         // storage layers.
         //
-        // Static file check runs first since it heals file-level inconsistencies and RocksDB
-        // consistency check may depend on static file data for tx hash lookups.
-        // We compute a combined unwind target from both checks and run a single unwind pass.
+        // The ordering is critical:
+        // 1. File healing - heals NippyJar inconsistencies without pruning data
+        // 2. RocksDB check - needs static file tx data for hash lookups
+        // 3. Static file checkpoint check - compares with MDBX, may prune data
+        //
+        // We compute a combined unwind target from all checks and run a single unwind pass.
+
+        // Step 1: Heal file-level inconsistencies (no pruning)
+        let file_unwind = factory.static_file_provider().check_file_consistency()?;
+
+        // Step 2: RocksDB consistency check (needs SF tx data)
+        let rocksdb_unwind =
+            factory.rocksdb_provider().check_consistency(&factory.database_provider_ro()?)?;
+
+        // Step 3: Static file checkpoint consistency (may prune)
         let static_file_unwind = factory
             .static_file_provider()
             .check_consistency(&factory.provider()?)?
@@ -517,25 +529,24 @@ where
                 PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
             });
 
-        // RocksDB consistency check
-        let rocksdb_unwind =
-            factory.rocksdb_provider().check_consistency(&factory.database_provider_ro()?)?;
-
-        // Combine unwind targets - take the minimum (most conservative) if both exist
-        let unwind_target = match (static_file_unwind, rocksdb_unwind) {
-            (None, None) => None,
-            (Some(a), None) | (None, Some(a)) => Some(a),
-            (Some(a), Some(b)) => Some(a.min(b)),
-        };
+        // Combine all unwind targets - take the minimum (most conservative)
+        let unwind_target =
+            [file_unwind, rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
 
         if let Some(unwind_block) = unwind_target {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead. Unwinding to 0 would leave MDBX with a huge free list size.
-            let inconsistency_source = match (static_file_unwind, rocksdb_unwind) {
-                (Some(_), Some(_)) => "static file <> database and RocksDB <> database",
-                (Some(_), None) => "static file <> database",
-                (None, Some(_)) => "RocksDB <> database",
-                (None, None) => unreachable!(),
+            let inconsistency_source = match (file_unwind, rocksdb_unwind, static_file_unwind) {
+                (Some(_), Some(_), Some(_)) => {
+                    "static file healing, RocksDB <> database, and static file <> database"
+                }
+                (Some(_), Some(_), None) => "static file healing and RocksDB <> database",
+                (Some(_), None, Some(_)) => "static file healing and static file <> database",
+                (None, Some(_), Some(_)) => "RocksDB <> database and static file <> database",
+                (Some(_), None, None) => "static file healing",
+                (None, Some(_), None) => "RocksDB <> database",
+                (None, None, Some(_)) => "static file <> database",
+                (None, None, None) => unreachable!(),
             };
             assert_ne!(
                 unwind_block,
