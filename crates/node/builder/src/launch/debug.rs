@@ -47,7 +47,7 @@ use tracing::info;
 /// # Example
 ///
 /// ```ignore
-/// impl<N: FullNodeComponents> DebugNode<N> for MyNode {
+/// impl<N: FullNodeComponents<Types = Self>> DebugNode<N> for MyNode {
 ///     type RpcBlock = alloy_rpc_types_eth::Block;
 ///
 ///     fn rpc_to_primitive_block(rpc_block: Self::RpcBlock) -> BlockTy<Self> {
