@@ -15,7 +15,12 @@ use reth_node_api::{
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives_traits::Block;
-use std::{future::{Future, IntoFuture}, pin::Pin, sync::Arc};
+use std::{
+    any::Any,
+    future::{Future, IntoFuture},
+    pin::Pin,
+    sync::Arc,
+};
 use tokio::sync::mpsc::Sender;
 use tracing::info;
 
@@ -86,8 +91,11 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
         if std::any::TypeId::of::<Self::RpcBlock>() ==
             std::any::TypeId::of::<<AnyNetwork as Network>::BlockResponse>()
         {
-            // SAFETY: TypeIds match, so the types are identical.
-            return unsafe { std::mem::transmute::<_, Self::RpcBlock>(response) };
+            let boxed: Box<dyn Any> = Box::new(response);
+            let block = boxed
+                .downcast::<Self::RpcBlock>()
+                .expect("TypeId matches RpcBlock; downcast cannot fail");
+            return *block;
         }
 
         // Fallback: deserialize via JSON when types differ.
