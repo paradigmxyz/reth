@@ -637,30 +637,37 @@ where
         // use the nonce from the transaction itself, not override it.
 
 
-        // Nonce restoration logic for special transaction types
-        //
-        // In Go nitro (state_transition.go line 659), the sender's nonce is incremented
-        // for ALL non-contract-creation transactions, including internal transactions.
-        // The skipNonceChecks() method only skips VALIDATION, not the increment.
-        //
-        // - Internal (0x6a): DO NOT restore nonce - it SHOULD increment like Go does
+        // ITERATION 80: Nonce restoration logic
+        // - Internal (0x6a): ALWAYS restore to 0 (ArbOS should never have nonce > 0)
         // - Retry (0x68): Restore to current_nonce (prevents increment for THIS tx)
         // - SubmitRetryable (0x69): NO RESTORATION - it SHOULD increment nonce!
         //
-        // Key insight: Internal transactions from ArbOS (0xa4b05) should have their
-        // nonce incremented. The previous logic incorrectly restored it to 0, causing
-        // state root mismatches at block 11 (first block with internal transaction).
-        let pre_exec_nonce = if is_retry {
+        // Key insight from official chain: After Block 1 with SubmitRetryable + Retry,
+        // the sender (0xb8787d8f...) has nonce=1, meaning:
+        // - SubmitRetryable DID increment nonce from 0 to 1
+        // - Retry did NOT increment nonce (stayed at 1)
+        //
+        // Previous iterations incorrectly restored SubmitRetryable nonce to 0,
+        // which caused state root mismatches starting from Block 1.
+        let pre_exec_nonce = if is_internal {
             tracing::info!(
                 target: "reth::evm::execute",
                 sender = ?sender,
                 current_nonce = current_nonce,
-                "Retry tx - will restore nonce to current_nonce"
+                "[req-1] ITER80: Internal tx - will restore nonce to 0"
+            );
+            Some(0)
+        } else if is_retry {
+            tracing::info!(
+                target: "reth::evm::execute",
+                sender = ?sender,
+                current_nonce = current_nonce,
+                "[req-1] ITER80: Retry tx - will restore nonce to current_nonce"
             );
             Some(current_nonce)
         } else {
-            // Internal, SubmitRetryable, and all other tx types: NO nonce restoration
-            // They should increment nonce normally, matching Go nitro behavior
+            // SubmitRetryable and all other tx types: NO nonce restoration
+            // They should increment nonce normally
             None
         };
 
