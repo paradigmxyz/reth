@@ -38,7 +38,7 @@ pub use reth_engine_primitives::{
 };
 
 /// Default size of cross-block cache in megabytes.
-pub const DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB: u64 = 4 * 1024;
+pub const DEFAULT_CROSS_BLOCK_CACHE_SIZE_MB: usize = 4 * 1024;
 
 /// This includes all necessary configuration to launch the node.
 /// The individual configuration options can be overwritten before launching the node.
