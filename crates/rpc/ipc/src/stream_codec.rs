@@ -113,7 +113,11 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 is_escaped = byte == b'\\' && !is_escaped && in_str;
 
                 if depth == 0 && idx != start_idx && idx - start_idx + 1 > whitespaces {
-                    let bts = buf.split_to(idx + 1);
+                    // Discard any leading whitespace before the JSON start
+                    if start_idx > 0 {
+                        let _ = buf.split_to(start_idx);
+                    }
+                    let bts = buf.split_to(idx + 1 - start_idx);
                     return match String::from_utf8(bts.into()) {
                         Ok(val) => Ok(Some(val)),
                         Err(_) => Ok(None),
@@ -210,14 +214,13 @@ mod tests {
             .decode(&mut buf)
             .expect("There should be no error in first 2nd test")
             .expect("There should be a request in 2nd whitespace test");
-        // TODO: maybe actually trim it out
-        assert_eq!(request2, "\n\n\n\n{ test: 2 }");
+        assert_eq!(request2, "{ test: 2 }");
 
         let request3 = codec
             .decode(&mut buf)
             .expect("There should be no error in first 3rd test")
             .expect("There should be a request in 3rd whitespace test");
-        assert_eq!(request3, "\n\r{\n test: 3 }");
+        assert_eq!(request3, "{\n test: 3 }");
 
         let request4 = codec.decode(&mut buf).expect("There should be no error in first 4th test");
         assert!(
@@ -254,8 +257,7 @@ mod tests {
 
     #[test]
     fn huge() {
-        let request = r#"
-		{
+        let request = r#"{
 			"jsonrpc":"2.0",
 			"method":"say_hello",
 			"params": [
