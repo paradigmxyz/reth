@@ -16,7 +16,7 @@ pub use static_file::{
 mod state;
 pub use state::{
     historical::{
-        history_info_from_shard, HistoricalStateProvider, HistoricalStateProviderRef, HistoryInfo,
+        find_changeset_block_from_index, HistoricalStateProvider, HistoricalStateProviderRef, HistoryInfo,
         LowestAvailableBlocks,
     },
     latest::{LatestStateProvider, LatestStateProviderRef},

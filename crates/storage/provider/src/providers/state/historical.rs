@@ -61,7 +61,7 @@ pub enum HistoryInfo {
 /// * `block_number` - Target block to look up
 /// * `has_previous_shard` - Whether there's a shard before this one for the same key
 /// * `lowest_available` - Lowest block where history is available (pruning boundary)
-pub fn history_info_from_shard(
+pub fn find_changeset_block_from_index(
     chunk: &BlockNumberList,
     block_number: BlockNumber,
     has_previous_shard: bool,
@@ -237,7 +237,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             // Check if there's a previous shard for the same key
             let has_previous_shard = cursor.prev()?.is_some_and(|(key, _)| key_filter(&key));
 
-            Ok(history_info_from_shard(
+            Ok(find_changeset_block_from_index(
                 &chunk,
                 self.block_number,
                 has_previous_shard,
