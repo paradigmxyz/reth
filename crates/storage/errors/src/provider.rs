@@ -201,7 +201,7 @@ impl From<RecoveryError> for ProviderError {
 
 impl From<ProviderError> for EvmDatabaseError<ProviderError> {
     fn from(error: ProviderError) -> Self {
-        EvmDatabaseError::Database(error)
+        Self::Database(error)
     }
 }
 
