@@ -24,7 +24,7 @@ pub struct DefaultEngineValues {
     prewarming_disabled: bool,
     parallel_sparse_trie_disabled: bool,
     state_provider_metrics: bool,
-    cross_block_cache_size: u64,
+    cross_block_cache_size: usize,
     state_root_task_compare_updates: bool,
     accept_execution_requests_hash: bool,
     multiproof_chunking_enabled: bool,
@@ -93,7 +93,7 @@ impl DefaultEngineValues {
     }
 
     /// Set the default cross-block cache size in MB
-    pub const fn with_cross_block_cache_size(mut self, v: u64) -> Self {
+    pub const fn with_cross_block_cache_size(mut self, v: usize) -> Self {
         self.cross_block_cache_size = v;
         self
     }
@@ -254,7 +254,7 @@ pub struct EngineArgs {
 
     /// Configure the size of cross-block cache in megabytes
     #[arg(long = "engine.cross-block-cache-size", default_value_t = DefaultEngineValues::get_global().cross_block_cache_size)]
-    pub cross_block_cache_size: u64,
+    pub cross_block_cache_size: usize,
 
     /// Enable comparing trie updates from the state root task to the trie updates from the regular
     /// state root calculation.

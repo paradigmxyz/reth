@@ -17,14 +17,55 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use revm_primitives::eip7907::MAX_CODE_SIZE;
+use std::{
+    mem::size_of,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 use tracing::{debug_span, instrument, trace};
 
+/// Alignment in bytes for entries in the fixed-cache.
+///
+/// Each bucket in `fixed-cache` is aligned to 128 bytes (cache line) due to
+/// `#[repr(C, align(128))]` on the internal `Bucket` struct.
+const FIXED_CACHE_ALIGNMENT: usize = 128;
+
+/// Overhead per entry in the fixed-cache (the `AtomicUsize` tag field).
+const FIXED_CACHE_ENTRY_OVERHEAD: usize = size_of::<usize>();
+
+/// Calculates the actual size of a fixed-cache entry for a given key-value pair.
+///
+/// The entry size is `overhead + size_of::<K>() + size_of::<V>()`, rounded up to the
+/// next multiple of [`FIXED_CACHE_ALIGNMENT`] (128 bytes).
+const fn fixed_cache_entry_size<K, V>() -> usize {
+    fixed_cache_key_size_with_value::<K>(size_of::<V>())
+}
+
+/// Calculates the actual size of a fixed-cache entry for a given key-value pair.
+///
+/// The entry size is `overhead + size_of::<K>() + size_of::<V>()`, rounded up to the
+/// next multiple of [`FIXED_CACHE_ALIGNMENT`] (128 bytes).
+const fn fixed_cache_key_size_with_value<K>(value: usize) -> usize {
+    let raw_size = FIXED_CACHE_ENTRY_OVERHEAD + size_of::<K>() + value;
+    // Round up to next multiple of alignment
+    raw_size.div_ceil(FIXED_CACHE_ALIGNMENT) * FIXED_CACHE_ALIGNMENT
+}
+
+/// Size in bytes of a single code cache entry.
+const CODE_CACHE_ENTRY_SIZE: usize = fixed_cache_key_size_with_value::<Address>(MAX_CODE_SIZE);
+
+/// Size in bytes of a single storage cache entry.
+const STORAGE_CACHE_ENTRY_SIZE: usize =
+    fixed_cache_entry_size::<(Address, StorageKey), StorageValue>();
+
+/// Size in bytes of a single account cache entry.
+const ACCOUNT_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<Address, Option<Account>>();
+
 /// Type alias for the fixed-cache used for accounts and storage.
-pub(crate) type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H>;
+type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H>;
 
 /// A wrapper of a state provider and a shared cache.
 pub(crate) struct CachedStateProvider<S> {
@@ -449,6 +490,57 @@ pub(crate) struct ExecutionCache {
 }
 
 impl ExecutionCache {
+    /// Converts a byte size to number of cache entries, rounding down to a power of two.
+    ///
+    /// Fixed-cache requires power-of-two sizes for efficient indexing.
+    pub(crate) const fn bytes_to_entries(size_bytes: usize, entry_size: usize) -> usize {
+        let entries = size_bytes / entry_size;
+        // Round down to nearest power of two
+        if entries == 0 {
+            1
+        } else {
+            1 << (usize::BITS - 1 - entries.leading_zeros())
+        }
+    }
+
+    /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
+    pub(crate) fn new(total_cache_size: usize) -> Self {
+        let storage_cache_size = (total_cache_size * 8888) / 10000; // 88.88% of total
+        let account_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
+        let code_cache_size = (total_cache_size * 556) / 10000; // 5.56% of total
+
+        let code_stats = Arc::new(CacheStatsHandler::new());
+        let storage_stats = Arc::new(CacheStatsHandler::new());
+        let account_stats = Arc::new(CacheStatsHandler::new());
+
+        Self {
+            code_cache: Arc::new(
+                FixedCache::new(
+                    Self::bytes_to_entries(code_cache_size, CODE_CACHE_ENTRY_SIZE),
+                    FbBuildHasher::<32>::default(),
+                )
+                .with_stats(Some(Stats::new(code_stats.clone()))),
+            ),
+            storage_cache: Arc::new(
+                FixedCache::new(
+                    Self::bytes_to_entries(storage_cache_size, STORAGE_CACHE_ENTRY_SIZE),
+                    DefaultHashBuilder::default(),
+                )
+                .with_stats(Some(Stats::new(storage_stats.clone()))),
+            ),
+            account_cache: Arc::new(
+                FixedCache::new(
+                    Self::bytes_to_entries(account_cache_size, ACCOUNT_CACHE_ENTRY_SIZE),
+                    FbBuildHasher::<20>::default(),
+                )
+                .with_stats(Some(Stats::new(account_stats.clone()))),
+            ),
+            code_stats,
+            storage_stats,
+            account_stats,
+        }
+    }
+
     /// Gets code from cache, or inserts using the provided function.
     pub(crate) fn get_or_try_insert_code_with<E>(
         &self,
@@ -551,7 +643,7 @@ impl ExecutionCache {
 
             // If the account was destroyed, invalidate from the account / storage caches
             if account.was_destroyed() {
-                // For account cache, we insert None to indicate destroyed
+                // Invalidate the account cache entry if destroyed
                 self.account_cache.insert(*addr, None);
                 continue
             }
@@ -594,57 +686,6 @@ impl ExecutionCache {
         metrics.account_misses.set(self.account_stats.misses() as f64);
         metrics.account_collisions.set(self.account_stats.collisions() as f64);
         self.account_stats.reset();
-    }
-}
-
-/// A builder for [`ExecutionCache`].
-#[derive(Debug)]
-pub(crate) struct ExecutionCacheBuilder {
-    /// Code cache entries
-    code_cache_entries: usize,
-
-    /// Storage cache entries
-    storage_cache_entries: usize,
-
-    /// Account cache entries
-    account_cache_entries: usize,
-}
-
-impl ExecutionCacheBuilder {
-    /// Build an [`ExecutionCache`] struct, so that execution caches can be easily cloned.
-    pub(crate) fn build_caches(self, _total_cache_size: u64) -> ExecutionCache {
-        let code_stats = Arc::new(CacheStatsHandler::new());
-        let storage_stats = Arc::new(CacheStatsHandler::new());
-        let account_stats = Arc::new(CacheStatsHandler::new());
-
-        ExecutionCache {
-            code_cache: Arc::new(
-                FixedCache::new(self.code_cache_entries, FbBuildHasher::<32>::default())
-                    .with_stats(Some(Stats::new(Arc::clone(&code_stats)))),
-            ),
-            storage_cache: Arc::new(
-                FixedCache::new(self.storage_cache_entries, DefaultHashBuilder::default())
-                    .with_stats(Some(Stats::new(Arc::clone(&storage_stats)))),
-            ),
-            account_cache: Arc::new(
-                FixedCache::new(self.account_cache_entries, FbBuildHasher::<20>::default())
-                    .with_stats(Some(Stats::new(Arc::clone(&account_stats)))),
-            ),
-            code_stats,
-            storage_stats,
-            account_stats,
-        }
-    }
-}
-
-impl Default for ExecutionCacheBuilder {
-    fn default() -> Self {
-        // Fixed-cache requires power-of-two sizes
-        Self {
-            code_cache_entries: 64 * 1024,
-            storage_cache_entries: 64 * 1024,
-            account_cache_entries: 64 * 1024,
-        }
     }
 }
 
@@ -738,7 +779,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCache::new(1000);
         let state_provider =
             CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
@@ -758,7 +799,7 @@ mod tests {
         let provider = MockEthProvider::default();
         provider.extend_accounts(vec![(address, account)]);
 
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCache::new(1000);
         let state_provider =
             CachedStateProvider::new(provider, caches, CachedStateMetrics::zeroed());
 
@@ -773,7 +814,7 @@ mod tests {
         let storage_key = StorageKey::random();
         let storage_value = U256::from(1);
 
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCache::new(1000);
         caches.insert_storage(address, storage_key, Some(storage_value));
 
         let result = caches
@@ -786,7 +827,7 @@ mod tests {
         let address = Address::random();
         let storage_key = StorageKey::random();
 
-        let caches = ExecutionCacheBuilder::default().build_caches(1000);
+        let caches = ExecutionCache::new(1000);
         caches.insert_storage(address, storage_key, None);
 
         let result = caches
@@ -796,7 +837,7 @@ mod tests {
 
     #[test]
     fn test_saved_cache_is_available() {
-        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let execution_cache = ExecutionCache::new(1000);
         let cache = SavedCache::new(
             B256::ZERO,
             execution_cache,
@@ -813,7 +854,7 @@ mod tests {
 
     #[test]
     fn test_saved_cache_multiple_references() {
-        let execution_cache = ExecutionCacheBuilder::default().build_caches(1000);
+        let execution_cache = ExecutionCache::new(1000);
         let cache = SavedCache::new(
             B256::from([2u8; 32]),
             execution_cache,
