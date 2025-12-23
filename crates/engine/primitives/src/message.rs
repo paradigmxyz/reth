@@ -165,9 +165,9 @@ pub enum BeaconEngineMessage<Payload: PayloadTypes> {
         /// The sender for returning forkchoice updated result.
         tx: oneshot::Sender<RethResult<OnForkChoiceUpdated>>,
     },
-    /// Message to insert a locally built executed block into the engine state tree.
-    InsertExecutedBlock {
-        /// The executed block to insert.
+    /// Message to insert a locally built flashblocks sequence into the engine state tree.
+    FlashblocksSequence {
+        /// The executed flashblocks sequence to insert.
         block: ExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
     },
 }
@@ -193,7 +193,7 @@ impl<Payload: PayloadTypes> Display for BeaconEngineMessage<Payload> {
                     payload_attrs.is_some()
                 )
             }
-            Self::InsertExecutedBlock { block } => {
+            Self::FlashblocksSequence { block } => {
                 let num_hash = block.recovered_block().num_hash();
                 write!(
                     f,
@@ -272,11 +272,11 @@ where
         rx
     }
 
-    /// Sends a message to insert the executed block into the engine state tree.
-    pub fn send_insert_executed_block(
+    /// Sends a message to insert the executed flashblocks sequence into the engine state tree.
+    pub fn send_executed_flashblocks_sequence(
         &self,
         block: ExecutedBlock<<Payload::BuiltPayload as BuiltPayload>::Primitives>,
     ) {
-        let _ = self.to_engine.send(BeaconEngineMessage::InsertExecutedBlock { block });
+        let _ = self.to_engine.send(BeaconEngineMessage::FlashblocksSequence { block });
     }
 }

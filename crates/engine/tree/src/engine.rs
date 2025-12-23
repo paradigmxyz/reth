@@ -266,7 +266,7 @@ where
 {
     fn from(msg: BeaconEngineMessage<T>) -> Self {
         match msg {
-            BeaconEngineMessage::InsertExecutedBlock { block } => Self::InsertExecutedBlock(block),
+            BeaconEngineMessage::FlashblocksSequence { block } => Self::InsertExecutedBlock(block),
             _ => Self::Beacon(msg),
         }
     }

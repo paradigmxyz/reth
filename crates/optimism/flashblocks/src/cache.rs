@@ -275,7 +275,7 @@ where
     /// require proper trie updates to avoid corrupting the engine's trie input computation.
     pub(crate) fn submit_executed_block(&self, executed_block: ExecutedBlock<N>) {
         let num_hash = executed_block.recovered_block().num_hash();
-        self.engine_handle.send_insert_executed_block(executed_block);
+        self.engine_handle.send_executed_flashblocks_sequence(executed_block);
         debug!(
             target: "flashblocks",
             block_number = num_hash.number,
