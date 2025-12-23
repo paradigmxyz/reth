@@ -3,11 +3,11 @@
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
-        CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
-        SavedCache,
+        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache,
+        ExecutionCacheBuilder, SavedCache,
     },
     payload_processor::{
-        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmTaskEvent},
+        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
     },
     sparse_trie::SparseTrieTask,
@@ -230,6 +230,8 @@ where
             + Send
             + 'static,
     {
+        let parent_hash = env.parent_hash;
+
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx, transaction_count_hint) =
             self.spawn_tx_iterator(transactions);
@@ -240,28 +242,30 @@ where
 
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
-            // When BAL is present, skip spawning prewarm tasks entirely and send BAL to multiproof
-            debug!(target: "engine::tree::payload_processor", "BAL present, skipping prewarm tasks");
+            // When BAL is present, use BAL prewarming and send BAL to multiproof
+            debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
 
             // Send BAL message immediately to MultiProofTask
-            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(bal));
+            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(Arc::clone(&bal)));
 
-            // Spawn minimal cache-only task without prewarming
+            // Spawn with BAL prewarming
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
                 transaction_count_hint,
                 provider_builder.clone(),
                 None, // Don't send proof targets when BAL is present
+                Some(bal),
             )
         } else {
-            // Normal path: spawn with full prewarming
+            // Normal path: spawn with transaction prewarming
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
                 transaction_count_hint,
                 provider_builder.clone(),
                 Some(to_multi_proof.clone()),
+                None,
             )
         };
 
@@ -289,11 +293,17 @@ where
 
         // spawn multi-proof task
         let parent_span = span.clone();
-        self.executor.spawn_blocking(move || {
-            let _enter = parent_span.entered();
-            // Build a state provider for the multiproof task
-            let provider = provider_builder.build().expect("failed to build provider");
-            multi_proof_task.run(provider);
+        self.executor.spawn_blocking({
+            let saved_cache = self.cache_for(parent_hash);
+            let cache = saved_cache.cache().clone();
+            let cache_metrics = saved_cache.metrics().clone();
+            move || {
+                let _enter = parent_span.entered();
+                // Build a state provider for the multiproof task
+                let provider = provider_builder.build().expect("failed to build provider");
+                let provider = CachedStateProvider::new(provider, cache, cache_metrics);
+                multi_proof_task.run(provider);
+            }
         });
 
         // wire the sparse trie to the state root response receiver
@@ -320,13 +330,14 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
+        bal: Option<Arc<BlockAccessList>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
         let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None);
+            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -400,6 +411,7 @@ where
         transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        bal: Option<Arc<BlockAccessList>>,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -444,7 +456,12 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking(move || {
-                prewarm_task.run(transactions, to_prewarm_task);
+                let mode = if let Some(bal) = bal {
+                    PrewarmMode::BlockAccessList(bal)
+                } else {
+                    PrewarmMode::Transactions(transactions)
+                };
+                prewarm_task.run(mode, to_prewarm_task);
             });
         }
 
