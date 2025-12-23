@@ -14,6 +14,54 @@ use tokio::sync::mpsc::{
 };
 use tokio_util::sync::{PollSendError, PollSender};
 
+/// Implements common receiver methods for metered receiver types.
+macro_rules! impl_metered_receiver {
+    ($receiver_type:ty) => {
+        impl<T> $receiver_type {
+            /// Receives the next value for this receiver.
+            pub async fn recv(&mut self) -> Option<T> {
+                let msg = self.receiver.recv().await;
+                if msg.is_some() {
+                    self.metrics.messages_received_total.increment(1);
+                }
+                msg
+            }
+
+            /// Tries to receive the next value for this receiver.
+            pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
+                let msg = self.receiver.try_recv()?;
+                self.metrics.messages_received_total.increment(1);
+                Ok(msg)
+            }
+
+            /// Closes the receiving half of a channel without dropping it.
+            pub fn close(&mut self) {
+                self.receiver.close();
+            }
+
+            /// Polls to receive the next message on this channel.
+            pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
+                let msg = ready!(self.receiver.poll_recv(cx));
+                if msg.is_some() {
+                    self.metrics.messages_received_total.increment(1);
+                }
+                Poll::Ready(msg)
+            }
+        }
+
+        impl<T> Stream for $receiver_type {
+            type Item = T;
+
+            fn poll_next(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+            ) -> Poll<Option<Self::Item>> {
+                self.poll_recv(cx)
+            }
+        }
+    };
+}
+
 /// Wrapper around [`mpsc::unbounded_channel`] that returns a new unbounded metered channel.
 pub fn metered_unbounded_channel<T>(
     scope: &'static str,
@@ -79,7 +127,7 @@ pub struct UnboundedMeteredReceiver<T> {
     metrics: MeteredReceiverMetrics,
 }
 
-// === impl MeteredReceiver ===
+// === impl UnboundedMeteredReceiver ===
 
 impl<T> UnboundedMeteredReceiver<T> {
     /// Creates a new [`UnboundedMeteredReceiver`] wrapping around the provided
@@ -87,45 +135,9 @@ impl<T> UnboundedMeteredReceiver<T> {
     pub fn new(receiver: mpsc::UnboundedReceiver<T>, scope: &'static str) -> Self {
         Self { receiver, metrics: MeteredReceiverMetrics::new(scope) }
     }
-
-    /// Receives the next value for this receiver.
-    pub async fn recv(&mut self) -> Option<T> {
-        let msg = self.receiver.recv().await;
-        if msg.is_some() {
-            self.metrics.messages_received_total.increment(1);
-        }
-        msg
-    }
-
-    /// Tries to receive the next value for this receiver.
-    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
-        let msg = self.receiver.try_recv()?;
-        self.metrics.messages_received_total.increment(1);
-        Ok(msg)
-    }
-
-    /// Closes the receiving half of a channel without dropping it.
-    pub fn close(&mut self) {
-        self.receiver.close();
-    }
-
-    /// Polls to receive the next message on this channel.
-    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
-        let msg = ready!(self.receiver.poll_recv(cx));
-        if msg.is_some() {
-            self.metrics.messages_received_total.increment(1);
-        }
-        Poll::Ready(msg)
-    }
 }
 
-impl<T> Stream for UnboundedMeteredReceiver<T> {
-    type Item = T;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.poll_recv(cx)
-    }
-}
+impl_metered_receiver!(UnboundedMeteredReceiver<T>);
 
 /// A wrapper type around [Sender](mpsc::Sender) that updates metrics on send.
 #[derive(Debug)]
@@ -279,45 +291,9 @@ impl<T> MeteredReceiver<T> {
     pub fn new(receiver: mpsc::Receiver<T>, scope: &'static str) -> Self {
         Self { receiver, metrics: MeteredReceiverMetrics::new(scope) }
     }
-
-    /// Receives the next value for this receiver.
-    pub async fn recv(&mut self) -> Option<T> {
-        let msg = self.receiver.recv().await;
-        if msg.is_some() {
-            self.metrics.messages_received_total.increment(1);
-        }
-        msg
-    }
-
-    /// Tries to receive the next value for this receiver.
-    pub fn try_recv(&mut self) -> Result<T, TryRecvError> {
-        let msg = self.receiver.try_recv()?;
-        self.metrics.messages_received_total.increment(1);
-        Ok(msg)
-    }
-
-    /// Closes the receiving half of a channel without dropping it.
-    pub fn close(&mut self) {
-        self.receiver.close();
-    }
-
-    /// Polls to receive the next message on this channel.
-    pub fn poll_recv(&mut self, cx: &mut Context<'_>) -> Poll<Option<T>> {
-        let msg = ready!(self.receiver.poll_recv(cx));
-        if msg.is_some() {
-            self.metrics.messages_received_total.increment(1);
-        }
-        Poll::Ready(msg)
-    }
 }
 
-impl<T> Stream for MeteredReceiver<T> {
-    type Item = T;
-
-    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.poll_recv(cx)
-    }
-}
+impl_metered_receiver!(MeteredReceiver<T>);
 
 /// Throughput metrics for [`MeteredSender`]
 #[derive(Clone, Metrics)]
