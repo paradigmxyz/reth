@@ -502,7 +502,7 @@ where
         )?
         .with_prune_modes(self.prune_modes());
 
-        // Check for consistency between database, static files, and RocksDB. If any
+        // Check for consistency between MDBX, static files, and RocksDB. If any
         // inconsistencies are found, unwind to the first block that's consistent across all
         // storage layers.
         //
@@ -538,14 +538,14 @@ where
             // instead. Unwinding to 0 would leave MDBX with a huge free list size.
             let inconsistency_source = match (file_unwind, rocksdb_unwind, static_file_unwind) {
                 (Some(_), Some(_), Some(_)) => {
-                    "static file healing, RocksDB <> database, and static file <> database"
+                    "static file healing, RocksDB <> MDBX, and static file <> MDBX"
                 }
-                (Some(_), Some(_), None) => "static file healing and RocksDB <> database",
-                (Some(_), None, Some(_)) => "static file healing and static file <> database",
-                (None, Some(_), Some(_)) => "RocksDB <> database and static file <> database",
+                (Some(_), Some(_), None) => "static file healing and RocksDB <> MDBX",
+                (Some(_), None, Some(_)) => "static file healing and static file <> MDBX",
+                (None, Some(_), Some(_)) => "RocksDB <> MDBX and static file <> MDBX",
                 (Some(_), None, None) => "static file healing",
-                (None, Some(_), None) => "RocksDB <> database",
-                (None, None, Some(_)) => "static file <> database",
+                (None, Some(_), None) => "RocksDB <> MDBX",
+                (None, None, Some(_)) => "static file <> MDBX",
                 (None, None, None) => unreachable!(),
             };
             assert_ne!(
