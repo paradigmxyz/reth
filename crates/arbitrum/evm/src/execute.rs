@@ -61,6 +61,8 @@ pub struct ArbEndTxContext {
     pub gas_price: U256,
     pub tx_type: u8,
     pub block_timestamp: u64,
+    /// The sender of the transaction (needed to burn poster_gas refund).
+    pub sender: Address,
 }
 
 pub struct StartTxHookResult {
@@ -1297,15 +1299,29 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 tracing::error!("Tx refunds gas after computation - impossible");
                 return;
             }
-            let gas_used = ctx.gas_limit.saturating_sub(ctx.gas_left);
-            
+            // CRITICAL: In Go, gasLeft is already reduced by posterGas (via GasChargingHook line 480).
+            // In Rust, we don't modify revm's gas accounting, so ctx.gas_left is NOT reduced.
+            // We must adjust for this difference to match Go's behavior.
+            let gas_left_adjusted = ctx.gas_left.saturating_sub(state.poster_gas);
+            let gas_used = ctx.gas_limit.saturating_sub(gas_left_adjusted);
+
             if let Some(retry_data) = &state.current_retry_data {
                 let effective_base_fee = retry_data.gas_fee_cap;
 
                 // Undo revm's gas refund to the sender - ArbOS handles refunds through fee accounts
-                let gas_refund = effective_base_fee.saturating_mul(U256::from(ctx.gas_left));
+                // Use gas_left_adjusted (not ctx.gas_left) to match Go's gasLeft which is reduced by posterGas
+                let gas_refund = effective_base_fee.saturating_mul(U256::from(gas_left_adjusted));
                 if gas_refund > U256::ZERO {
                     let _ = Self::burn_balance(state_db, retry_data.from, gas_refund);
+                }
+
+                // CRITICAL: Since revm refunded ctx.gas_left (not adjusted), we need to burn the extra.
+                // The extra refund is: (ctx.gas_left - gas_left_adjusted) * effective_gas_price = posterGas * effective_base_fee
+                if state.poster_gas > 0 {
+                    let poster_gas_extra_refund = effective_base_fee.saturating_mul(U256::from(state.poster_gas));
+                    if poster_gas_extra_refund > U256::ZERO {
+                        let _ = Self::burn_balance(state_db, retry_data.from, poster_gas_extra_refund);
+                    }
                 }
                 
                 let mut max_refund = retry_data.max_refund;
@@ -1325,7 +1341,8 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 let mut network_refund = gas_refund;
                 if state.arbos_version >= 11 && !state.infra_fee_account.is_zero() {
                     let infra_fee = state.min_base_fee.min(effective_base_fee);
-                    let infra_refund = infra_fee.saturating_mul(U256::from(ctx.gas_left));
+                    // Use gas_left_adjusted to match Go's gasLeft (which is reduced by posterGas)
+                    let infra_refund = infra_fee.saturating_mul(U256::from(gas_left_adjusted));
                     let infra_refund_taken = Self::take_funds(&mut network_refund, infra_refund);
                     
                     if infra_refund_taken > U256::ZERO {
@@ -1402,8 +1419,36 @@ impl ArbOsHooks for DefaultArbOsHooks {
             tracing::error!("Tx refunds gas after computation - impossible");
             return;
         }
-        let gas_used = ctx.gas_limit.saturating_sub(ctx.gas_left);
-        
+        // CRITICAL FIX: Include poster_gas in gas_used to match Go's behavior.
+        // In Go's GasChargingHook, posterGas is subtracted from gasRemaining (line 480 of tx_processor.go):
+        //   *gasRemaining -= gasNeededToStartEVM
+        // So when EndTxHook calculates gasUsed = gasLimit - gasLeft, it automatically includes posterGas.
+        //
+        // In Rust, we don't modify the EVM's gas accounting, so gas_left only reflects compute gas.
+        // We must add poster_gas here to get the correct total gas used (compute + L1 data cost).
+        let evm_gas_used = ctx.gas_limit.saturating_sub(ctx.gas_left);
+        let gas_used = evm_gas_used.saturating_add(state.poster_gas);
+
+        // CRITICAL: Burn the extra refund that revm incorrectly gave to the sender.
+        // Since we didn't consume poster_gas from the EVM's gasRemaining, revm's reimburse_caller
+        // refunded sender for poster_gas * effective_gas_price that they should have paid.
+        // We must burn this amount to charge the correct fee.
+        //
+        // This mirrors what's done for Retry transactions at line 1306-1308.
+        if state.poster_gas > 0 {
+            let poster_gas_refund = ctx.basefee.saturating_mul(U256::from(state.poster_gas));
+            if poster_gas_refund > U256::ZERO {
+                let _ = Self::burn_balance(state_db, ctx.sender, poster_gas_refund);
+                tracing::debug!(
+                    target: "arb-reth::end_tx",
+                    sender = ?ctx.sender,
+                    poster_gas = state.poster_gas,
+                    poster_gas_refund = %poster_gas_refund,
+                    "Burned extra refund for L1 data cost (poster_gas)"
+                );
+            }
+        }
+
         let total_cost = ctx.basefee.saturating_mul(U256::from(gas_used));
         
         let mut compute_cost = total_cost.saturating_sub(state.poster_fee);
@@ -1872,6 +1917,7 @@ mod tests {
             gas_price: U256::from(1_000u64),
             tx_type: 0x02,
             block_timestamp: 0,
+            sender: Address::ZERO,
         };
         hooks.end_tx(&mut evm, &mut state, &ctx);
 

@@ -820,12 +820,19 @@ where
         // For early-terminated transactions (end_tx_now=true), the state was already
         // modified in start_tx hook, but we still execute through EVM to build receipt.
         // Note: All predeploys have 0xFE code, but early-terminated txs bypass EVM execution.
+        // Capture poster_gas before the closure to use inside
+        let poster_gas_for_closure = self.tx_state.poster_gas;
+
         let result = self.inner.execute_transaction_with_commit_condition(wrapped, |exec_result| {
             let evm_gas = exec_result.gas_used();
             let actual_gas = hook_gas_override.unwrap_or(evm_gas);
+
+            // CRITICAL: Add poster_gas (L1 data cost) to the gas used
+            // This matches Go's behavior where gasUsed includes both compute gas AND L1 data gas
+            let total_gas_with_l1 = actual_gas.saturating_add(poster_gas_for_closure);
+
             // Internal transactions (type 0x6a) don't contribute to cumulative gas
-            // Use actual_gas (which includes hook overrides) not evm_gas for cumulative calculation
-            let gas_to_add = if is_internal { 0u64 } else { actual_gas };
+            let gas_to_add = if is_internal { 0u64 } else { total_gas_with_l1 };
             let new_cumulative = self.cumulative_gas_used + gas_to_add;
 
             // ITERATION 116: Store the gas used for end_tx hook
@@ -836,17 +843,20 @@ where
                 tx_hash = ?tx_hash,
                 evm_gas = evm_gas,
                 actual_gas = actual_gas,
+                poster_gas = poster_gas_for_closure,
+                total_gas_with_l1 = total_gas_with_l1,
                 gas_to_add = gas_to_add,
                 current_cumulative = self.cumulative_gas_used,
                 new_cumulative = new_cumulative,
                 is_internal = is_internal,
                 is_override = hook_gas_override.is_some(),
                 end_tx_now = start_hook_result.end_tx_now,
-                "Storing cumulative gas before receipt creation"
+                "Storing cumulative gas before receipt creation (including L1 data cost)"
             );
 
             // For internal txs, store 0 as the gas used in receipt
-            let gas_for_receipt = if is_internal { 0u64 } else { actual_gas };
+            // For other txs, include L1 data cost in gas_for_receipt
+            let gas_for_receipt = if is_internal { 0u64 } else { total_gas_with_l1 };
             crate::set_early_tx_gas(tx_hash, gas_for_receipt, new_cumulative);
 
             f(exec_result)
@@ -858,9 +868,16 @@ where
 
         if let Ok(Some(evm_gas)) = result {
             // Internal transactions don't contribute to cumulative gas
-            let gas_to_add = if is_internal { 0u64 } else { evm_gas };
             let actual_gas = hook_gas_override.unwrap_or(evm_gas);
-            let final_gas_to_add = if is_internal { 0u64 } else { actual_gas };
+
+            // CRITICAL: Add poster_gas (L1 data cost) to the gas used
+            // This matches Go's behavior where gasUsed includes both compute gas AND L1 data gas
+            // See: nitro/arbos/tx_processor.go GasChargingHook which subtracts posterGas from gasRemaining
+            //      and nitro/go-ethereum/core/state_transition.go gasUsed() = initialGas - gasRemaining
+            let poster_gas = self.tx_state.poster_gas;
+            let total_gas_with_l1 = actual_gas.saturating_add(poster_gas);
+
+            let final_gas_to_add = if is_internal { 0u64 } else { total_gas_with_l1 };
             self.cumulative_gas_used += final_gas_to_add;
 
             tracing::info!(
@@ -868,9 +885,11 @@ where
                 tx_hash = ?tx_hash,
                 is_internal = is_internal,
                 evm_gas = evm_gas,
+                poster_gas = poster_gas,
+                total_gas_with_l1 = total_gas_with_l1,
                 final_gas_to_add = final_gas_to_add,
                 new_cumulative = self.cumulative_gas_used,
-                "Updated cumulative gas after transaction"
+                "Updated cumulative gas after transaction (including L1 data cost)"
             );
         }
 
@@ -1021,6 +1040,7 @@ where
                 gas_price: paid_gas_price,
                 tx_type: tx_type_u8,
                 block_timestamp,
+                sender,
             };
             tracing::info!(
                 target: "arb-reth::end_tx_debug",
