@@ -765,18 +765,23 @@ where
             );
         }
 
-        // ITERATION 102 DISABLED: Skip balance validation for user transactions
+        // ITERATION 103: RESTORED balance validation for user transactions
         //
-        // When skip_state_root_validation=true is enabled (trust sequencer mode), we should
-        // not validate balances because our computed state may diverge from the real state.
-        // The sequencer has already validated these transactions before including them in blocks.
+        // User transactions (Legacy, EIP-2930, EIP-1559, etc.) from DELAYED inbox messages
+        // are NOT validated by the sequencer - they are submitted directly to L1 by users.
+        // We MUST validate their balance and reject if insufficient.
         //
-        // Original behavior: Return an error if sender_balance < (gas_cost + tx_value)
-        // New behavior: Just log the discrepancy and continue execution
+        // The Go implementation in block_processor.go applies transactions and if they fail
+        // validation (including insufficient balance), it reverts the state and continues
+        // to the next transaction. We match that behavior by returning an error here,
+        // which causes node.rs to skip the transaction.
         //
-        // Note: The EVM will still enforce balance checks unless disable_balance_check=true
-        // is set in the EVM config. Since we set disable_balance_check=true for user transactions
-        // when running in trust mode, the EVM will not reject the transaction.
+        // Key insight: Sequencer-submitted transactions (from batch data) ARE validated by
+        // the sequencer. But delayed inbox transactions ARE NOT - they go directly to L1.
+        // We cannot distinguish between these two sources at this layer, but by enabling
+        // balance validation for ALL user transactions, we correctly handle both:
+        // - Sequencer-validated txs: will always have sufficient balance (no rejection)
+        // - Delayed inbox txs: may have insufficient balance (correctly rejected)
         let is_user_tx = !is_internal && !is_deposit && !is_submit_retryable && !is_retry;
         if is_user_tx {
             let sender_balance_result = self.inner.evm_mut().db_mut().basic(sender);
@@ -786,9 +791,7 @@ where
             let total_cost = gas_cost.saturating_add(tx_value);
 
             if sender_balance < total_cost {
-                // In trust sequencer mode, we only log the discrepancy and continue
-                // This is because our computed state may be wrong, but the sequencer's state is correct
-                tracing::debug!(
+                tracing::warn!(
                     target: "arb-reth::balance-check",
                     tx_hash = ?tx_hash,
                     sender = ?sender,
@@ -797,9 +800,12 @@ where
                     tx_value = %tx_value,
                     total_cost = %total_cost,
                     tx_type = ?tx.tx().tx_type(),
-                    "⚠️ [ITER102] Balance mismatch detected but continuing (trust sequencer mode)"
+                    "⚠️ [ITER103] Rejecting user tx with insufficient balance (matching Go behavior)"
                 );
-                // REMOVED: No longer return an error - trust the sequencer
+                return Err(BlockExecutionError::msg(format!(
+                    "insufficient funds for gas * price + value: address {} have {} want {}",
+                    sender, sender_balance, total_cost
+                )));
             }
         }
 
