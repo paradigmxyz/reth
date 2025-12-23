@@ -32,6 +32,8 @@ pub enum ConsensusEngineEvent<N: NodePrimitives = EthPrimitives> {
     CanonicalChainCommitted(Box<SealedHeader<N::BlockHeader>>, Duration),
     /// The consensus engine processed an invalid block.
     InvalidBlock(Box<SealedBlock<N::Block>>),
+    /// Latest persisted block with its number and hash.
+    LatestPersistedBlock(BlockNumHash),
 }
 
 impl<N: NodePrimitives> ConsensusEngineEvent<N> {
@@ -72,6 +74,9 @@ where
             }
             Self::BlockReceived(num_hash) => {
                 write!(f, "BlockReceived({num_hash:?})")
+            }
+            Self::LatestPersistedBlock(block) => {
+                write!(f, "LatestPersistedBlock({block:?})")
             }
         }
     }

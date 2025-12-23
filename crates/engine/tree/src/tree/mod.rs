@@ -1343,6 +1343,13 @@ where
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
         self.on_new_persisted_block()?;
+
+        // Emit event for latest persisted block
+        self.emit_event(ConsensusEngineEvent::LatestPersistedBlock(BlockNumHash {
+            number: last_persisted_block_number,
+            hash: last_persisted_block_hash,
+        }));
+
         Ok(())
     }
 

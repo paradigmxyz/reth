@@ -267,6 +267,9 @@ impl NodeState {
             ConsensusEngineEvent::BlockReceived(num_hash) => {
                 info!(number=num_hash.number, hash=?num_hash.hash, "Received block from consensus engine");
             }
+            ConsensusEngineEvent::LatestPersistedBlock(num_hash) => {
+                info!(number=num_hash.number, hash=?num_hash.hash, "Latest persisted block");
+            }
         }
     }
 

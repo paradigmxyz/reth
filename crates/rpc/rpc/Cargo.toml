@@ -42,6 +42,7 @@ reth-ethereum-primitives.workspace = true
 reth-ethereum-engine-primitives.workspace = true
 reth-node-api.workspace = true
 reth-trie-common.workspace = true
+reth-tokio-util.workspace = true
 
 # ethereum
 alloy-evm = { workspace = true, features = ["overrides"] }
