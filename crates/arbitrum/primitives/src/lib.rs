@@ -1251,13 +1251,28 @@ impl ConsensusTx for ArbTransactionSigned {
     }
 
     fn effective_gas_price(&self, _base_fee: Option<u64>) -> u128 {
+        // CRITICAL FIX: On Arbitrum (ArbOS version != 9), DropTip() returns true for ALL transactions.
+        // This means the effective gas price is ALWAYS baseFee, not the calculated EIP-1559 price.
+        // See go-ethereum/core/state_transition.go lines 574-578:
+        //   if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice.Cmp(st.evm.Context.BaseFee) > 0 {
+        //       st.msg.GasPrice = st.evm.Context.BaseFee
+        //       st.msg.GasTipCap = common.Big0
+        //   }
+        // And arbos/tx_processor.go lines 756-759:
+        //   func (p *TxProcessor) DropTip() bool {
+        //       version := p.state.ArbOSVersion()
+        //       return version != params.ArbosVersion_9 || p.delayedInbox
+        //   }
+        // Since Arbitrum Sepolia uses ArbOS version > 9, DropTip() is always true.
         match &self.transaction {
-            // Standard Ethereum types use their own gas pricing logic
+            // Legacy and EIP-2930 use their gas_price directly (no tip to drop)
             ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
             ArbTypedTransaction::Eip2930(tx) => tx.gas_price.into(),
-            ArbTypedTransaction::Eip1559(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
-            ArbTypedTransaction::Eip4844(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
-            ArbTypedTransaction::Eip7702(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
+            // EIP-1559, EIP-4844, EIP-7702: DropTip applies - return baseFee
+            // This matches Go nitro behavior where tips are dropped for all tx types
+            ArbTypedTransaction::Eip1559(_) |
+            ArbTypedTransaction::Eip4844(_) |
+            ArbTypedTransaction::Eip7702(_) => _base_fee.unwrap_or(0) as u128,
             // All Arbitrum-specific types (0x64-0x6A) return baseFee as effectiveGasPrice
             // This matches the official Nitro implementation in go-ethereum/core/types/arb_types.go
             // Each of these types has: if baseFee == nil { return GasFeeCap } else { return baseFee }
