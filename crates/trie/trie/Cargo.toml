@@ -110,8 +110,3 @@ harness = false
 name = "proof_v2"
 required-features = ["test-utils"]
 harness = false
-
-[[bench]]
-name = "multiproof_allocs"
-required-features = ["test-utils"]
-harness = false
