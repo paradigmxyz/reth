@@ -590,7 +590,7 @@ where
                 }),
             );
             rx.await?.inspect_err(|err| {
-                error!(target: "reth::cli", %unwind_target, %err, "failed to run unwind")
+                error!(target: "reth::cli", unwind_target=%unwind_target, %err, "failed to run unwind")
             })?;
         }
 
