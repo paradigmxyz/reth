@@ -141,6 +141,7 @@ impl ProofWorkerHandle {
             target: "trie::proof_task",
             storage_worker_count,
             account_worker_count,
+            ?v2_proofs_enabled,
             "Spawning proof worker pools"
         );
 
