@@ -162,13 +162,13 @@ where
                 #[cfg(all(unix, feature = "rocksdb"))]
                 let rocksdb = provider.rocksdb_provider();
                 #[cfg(all(unix, feature = "rocksdb"))]
-                let rocksdb_batch = rocksdb.batch();
+                let mut rocksdb_batch = rocksdb.batch();
                 #[cfg(not(all(unix, feature = "rocksdb")))]
-                let rocksdb_batch = ();
+                let mut rocksdb_batch = ();
 
                 // Create writer that routes to either MDBX or RocksDB based on settings
                 let mut writer =
-                    EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
+                    EitherWriter::new_transaction_hash_numbers(provider, &mut rocksdb_batch)?;
 
                 for (index, hash_to_number) in hash_collector.iter()?.enumerate() {
                     let (hash_bytes, number_bytes) = hash_to_number?;
@@ -186,11 +186,13 @@ where
                     let tx_num = TxNumber::decompress(&number_bytes)?;
                     writer.put_transaction_hash_number(hash, tx_num, append_only)?;
                 }
+                // Drop writer to release mutable borrow
+                drop(writer);
 
-                // Extract and register RocksDB batch for commit at provider level
+                // Register RocksDB batch for commit at provider level
                 #[cfg(all(unix, feature = "rocksdb"))]
-                if let Some(batch) = writer.into_raw_rocksdb_batch() {
-                    provider.set_pending_rocksdb_batch(batch);
+                if !rocksdb_batch.is_empty() {
+                    provider.set_pending_rocksdb_batch(rocksdb_batch.into_inner());
                 }
 
                 trace!(target: "sync::stages::transaction_lookup",
@@ -221,12 +223,12 @@ where
         #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb = provider.rocksdb_provider();
         #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_batch = rocksdb.batch();
+        let mut rocksdb_batch = rocksdb.batch();
         #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocksdb_batch = ();
+        let mut rocksdb_batch = ();
 
         // Create writer that routes to either MDBX or RocksDB based on settings
-        let mut writer = EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
+        let mut writer = EitherWriter::new_transaction_hash_numbers(provider, &mut rocksdb_batch)?;
 
         let static_file_provider = provider.static_file_provider();
         let rev_walker = provider
@@ -247,11 +249,13 @@ where
                 }
             }
         }
+        // Drop writer to release mutable borrow
+        drop(writer);
 
-        // Extract and register RocksDB batch for commit at provider level
+        // Register RocksDB batch for commit at provider level
         #[cfg(all(unix, feature = "rocksdb"))]
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
-            provider.set_pending_rocksdb_batch(batch);
+        if !rocksdb_batch.is_empty() {
+            provider.set_pending_rocksdb_batch(rocksdb_batch.into_inner());
         }
 
         Ok(UnwindOutput {
