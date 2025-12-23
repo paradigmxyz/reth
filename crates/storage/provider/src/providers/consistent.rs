@@ -26,7 +26,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
-    StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::updates::TrieUpdatesSorted;
@@ -596,9 +596,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     pub(crate) fn into_state_provider_at_block_hash(
         self,
         block_hash: BlockHash,
-    ) -> ProviderResult<Box<dyn StateProvider>> {
+    ) -> ProviderResult<StateProviderBox> {
         let Self { storage_provider, head_block, .. } = self;
-        let into_history_at_block_hash = |block_hash| -> ProviderResult<Box<dyn StateProvider>> {
+        let into_history_at_block_hash = |block_hash| -> ProviderResult<StateProviderBox> {
             let block_number = storage_provider
                 .block_number(block_hash)?
                 .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
@@ -1566,7 +1566,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_block(
-                block.clone().try_recover().expect("failed to seal block with senders"),
+                &block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;
@@ -1677,7 +1677,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_block(
-                block.clone().try_recover().expect("failed to seal block with senders"),
+                &block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;

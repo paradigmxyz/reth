@@ -3,7 +3,7 @@ use reth_primitives_traits::{BlockHeader, SealedHeader};
 use reth_storage_errors::provider::ProviderResult;
 
 /// Provider for getting the local tip header for sync gap calculation.
-pub trait HeaderSyncGapProvider: Send + Sync {
+pub trait HeaderSyncGapProvider: Send {
     /// The header type.
     type Header: BlockHeader;
 

@@ -5,7 +5,7 @@ use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
+use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{BundleState, State},
@@ -114,7 +114,7 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 
 /// Extracts execution data including codes, preimages, and hashed state from database
 fn collect_execution_data(
-    mut db: State<StateProviderDatabase<Box<dyn StateProvider>>>,
+    mut db: State<StateProviderDatabase<StateProviderBox>>,
 ) -> eyre::Result<CollectionResult> {
     let bundle_state = db.take_bundle();
     let mut codes = BTreeMap::new();
@@ -530,9 +530,7 @@ mod tests {
         // Create a State with StateProviderTest
         let state_provider = StateProviderTest::default();
         let mut state = State::builder()
-            .with_database(StateProviderDatabase::new(
-                Box::new(state_provider) as Box<dyn StateProvider>
-            ))
+            .with_database(StateProviderDatabase::new(Box::new(state_provider) as StateProviderBox))
             .with_bundle_update()
             .build();
 

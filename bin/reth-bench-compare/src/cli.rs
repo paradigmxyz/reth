@@ -329,6 +329,7 @@ pub(crate) async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
         output_dir.clone(),
         git_manager.clone(),
         args.features.clone(),
+        args.profile,
     )?;
     // Initialize node manager
     let mut node_manager = NodeManager::new(&args);

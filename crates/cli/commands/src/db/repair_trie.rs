@@ -301,8 +301,8 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     if inconsistent_nodes == 0 {
         info!("No inconsistencies found");
     } else {
-        info!("Repaired {} inconsistencies, committing changes", inconsistent_nodes);
         provider_rw.commit()?;
+        info!("Repaired {} inconsistencies and committed changes", inconsistent_nodes);
     }
 
     Ok(())
