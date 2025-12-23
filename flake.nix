@@ -35,7 +35,7 @@
         cargoTOML = builtins.fromTOML (builtins.readFile ./Cargo.toml);
         packageVersion = cargoTOML.workspace.package.version;
 
-        rustStable = fenix.packages.${system}.stable.withComponents [
+        rustStable = fenix.packages.${system}.latest.withComponents [
           "cargo" "rustc" "rust-src" "clippy"
         ];
 

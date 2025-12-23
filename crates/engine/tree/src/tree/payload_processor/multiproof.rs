@@ -625,11 +625,6 @@ impl MultiProofTask {
         }
     }
 
-    /// Returns a sender that can be used to send arbitrary [`MultiProofMessage`]s to this task.
-    pub(super) fn state_root_message_sender(&self) -> CrossbeamSender<MultiProofMessage> {
-        self.tx.clone()
-    }
-
     /// Handles request for proof prefetch.
     ///
     /// Returns how many multiproof tasks were dispatched for the prefetch request.
@@ -1996,7 +1991,7 @@ mod tests {
         let mut targets3 = MultiProofTargets::default();
         targets3.insert(addr3, HashSet::default());
 
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(targets1)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(targets2)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(targets3)).unwrap();
@@ -2072,7 +2067,7 @@ mod tests {
 
         let source = StateChangeSource::Transaction(0);
 
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::StateUpdate(source.into(), update1.clone())).unwrap();
         tx.send(MultiProofMessage::StateUpdate(source.into(), update2.clone())).unwrap();
 
@@ -2136,7 +2131,7 @@ mod tests {
         let source_b = StateChangeSource::Transaction(2);
 
         // Queue: A1 (immediate dispatch), B1 (batched), A2 (should become pending)
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::StateUpdate(source_a.into(), create_state_update(addr_a1, 100)))
             .unwrap();
         tx.send(MultiProofMessage::StateUpdate(source_b.into(), create_state_update(addr_b1, 200)))
@@ -2258,7 +2253,7 @@ mod tests {
         let source = StateChangeSource::PreBlock(StateChangePreBlockSource::BeaconRootContract);
 
         // Queue: first update dispatched immediately, next two should not merge
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr1, 100)))
             .unwrap();
         tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr2, 200)))
@@ -2401,7 +2396,7 @@ mod tests {
         let source = StateChangeSource::Transaction(42);
 
         // Queue: [PrefetchProofs1, PrefetchProofs2, StateUpdate1, StateUpdate2, PrefetchProofs3]
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(targets1)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(targets2)).unwrap();
         tx.send(MultiProofMessage::StateUpdate(source.into(), state_update1)).unwrap();
@@ -2502,7 +2497,7 @@ mod tests {
 
         let source = StateChangeSource::Transaction(99);
 
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch1)).unwrap();
         tx.send(MultiProofMessage::StateUpdate(source.into(), state_update)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch2.clone())).unwrap();
@@ -2598,7 +2593,7 @@ mod tests {
         let source = StateChangeSource::Transaction(42);
 
         // Queue: [Prefetch1, State1, State2, State3, Prefetch2]
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch1.clone())).unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),

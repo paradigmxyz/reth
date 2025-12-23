@@ -1664,8 +1664,9 @@ impl StorageProofInput {
     /// Returns the targetted hashed address.
     pub const fn hashed_address(&self) -> B256 {
         match self {
-            Self::Legacy { hashed_address, .. } => *hashed_address,
-            Self::V2 { hashed_address, .. } => *hashed_address,
+            Self::Legacy { hashed_address, .. } | Self::V2 { hashed_address, .. } => {
+                *hashed_address
+            }
         }
     }
 }
