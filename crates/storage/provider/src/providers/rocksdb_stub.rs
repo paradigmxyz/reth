@@ -96,8 +96,11 @@ impl RocksDBProvider {
     }
 
     /// Creates an iterator for the specified table (stub implementation).
+    ///
+    /// Returns an empty iterator. This is consistent with `first()` and `last()` returning
+    /// `Ok(None)` - the stub behaves as if the database is empty rather than unavailable.
     pub const fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
-        Err(UnsupportedProvider)
+        Ok(RocksDBIter { _marker: std::marker::PhantomData })
     }
 
     /// Check consistency of `RocksDB` tables (stub implementation).
@@ -263,4 +266,12 @@ impl RocksTx {
 #[derive(Debug)]
 pub struct RocksTxIter<'a, T> {
     _marker: std::marker::PhantomData<(&'a (), T)>,
+}
+
+impl<T: Table> Iterator for RocksTxIter<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
+    }
 }
