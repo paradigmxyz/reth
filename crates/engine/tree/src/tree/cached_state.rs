@@ -425,21 +425,14 @@ impl<S: HashedPostStateProvider> HashedPostStateProvider for CachedStateProvider
 ///
 /// ## Storage Invalidation
 ///
-/// When an account is destroyed (SELFDESTRUCT), all its storage must be invalidated.
-/// This is handled using timestamps:
-/// - Each storage entry stores the timestamp when it was inserted
-/// - Each account tracks when it was last wiped (destroyed)
-/// - On lookup, if the entry's timestamp <= wipe timestamp, the entry is stale
-///
 /// Since EIP-6780, SELFDESTRUCT only works within the same transaction where the
-/// contract was created, so we only need to track wiped accounts for the current block.
-/// The wipe map is cleared after each block execution via [`Self::clear_wiped_accounts`].
+/// contract was created, so we don't need to handle clearing the storage.
 #[derive(Debug, Clone)]
 pub(crate) struct ExecutionCache {
     /// Cache for contract bytecode, keyed by code hash.
     code_cache: Arc<FixedCache<B256, Option<Bytecode>, FbBuildHasher<32>>>,
 
-    /// Flat storage cache: maps `(Address, StorageKey)` to timestamped storage value.
+    /// Flat storage cache: maps `(Address, StorageKey)` to storage value.
     storage_cache: Arc<FixedCache<(Address, StorageKey), StorageValue>>,
 
     /// Cache for basic account information (nonce, balance, code hash).
@@ -502,7 +495,7 @@ impl ExecutionCache {
         Ok(if miss { CachedStatus::NotCached(result) } else { CachedStatus::Cached(result) })
     }
 
-    /// Insert storage value into cache with current timestamp.
+    /// Insert storage value into cache.
     pub(crate) fn insert_storage(
         &self,
         address: Address,
@@ -510,16 +503,6 @@ impl ExecutionCache {
         value: Option<StorageValue>,
     ) {
         self.storage_cache.insert((address, key), value.unwrap_or_default());
-    }
-
-    /// Insert multiple storage values into cache for a single account.
-    pub(crate) fn insert_storage_bulk<I>(&self, address: Address, storage_entries: I)
-    where
-        I: IntoIterator<Item = (StorageKey, Option<StorageValue>)>,
-    {
-        for (key, value) in storage_entries {
-            self.insert_storage(address, key, value)
-        }
     }
 
     /// Inserts the post-execution state changes into the cache.
@@ -582,11 +565,9 @@ impl ExecutionCache {
             };
 
             // Now we iterate over all storage and make updates to the cached storage values
-            let storage_entries = account
-                .storage
-                .iter()
-                .map(|(storage_key, slot)| ((*storage_key).into(), Some(slot.present_value)));
-            self.insert_storage_bulk(*addr, storage_entries);
+            for (key, slot) in &account.storage {
+                self.insert_storage(*addr, (*key).into(), Some(slot.present_value));
+            }
 
             // Insert will update if present, so we just use the new account info as the new value
             // for the account cache
