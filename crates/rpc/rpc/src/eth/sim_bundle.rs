@@ -62,6 +62,10 @@ pub struct FlattenedBundleItem<T> {
     pub refund_percent: Option<u64>,
     /// Optional refund configs for the bundle item
     pub refund_configs: Option<Vec<RefundConfig>>,
+    /// Path from root bundle to this item, represented as indices at each nesting level.
+    /// For example, `[0, 2]` means this item is at `bundle.bundle_body[0].bundle.bundle_body[2]`.
+    /// An empty path means this item is at the root level.
+    pub bundle_path: Vec<usize>,
 }
 
 /// `Eth` sim bundle implementation.
@@ -89,36 +93,60 @@ where
     /// Builds a hierarchical `SimBundleLogs` structure from a flat map of transaction logs,
     /// preserving the original nested bundle structure.
     ///
-    /// This function recursively traverses the original bundle structure and constructs
-    /// `SimBundleLogs` entries that maintain the parent-child relationship between bundles.
+    /// This function iteratively traverses the original bundle structure using a stack
+    /// and constructs `SimBundleLogs` entries that maintain the parent-child relationship.
     fn build_bundle_logs(
         bundle: &MevSendBundle,
         tx_logs_map: &HashMap<B256, Vec<alloy_rpc_types_eth::Log>>,
     ) -> Vec<SimBundleLogs> {
-        let mut logs = Vec::new();
+        // Stack item: (bundle, item_index, accumulated_logs)
+        // We process bundles iteratively, building logs from leaves up
+        let mut stack: Vec<(&MevSendBundle, usize, Vec<SimBundleLogs>)> = Vec::new();
+        stack.push((bundle, 0, Vec::new()));
 
-        for item in &bundle.bundle_body {
-            match item {
-                BundleItem::Tx { tx, .. } => {
-                    // Compute the transaction hash from raw transaction bytes
-                    // The hash of an RLP-encoded signed transaction is its transaction hash
-                    let tx_hash = keccak256(tx);
-                    let tx_logs = tx_logs_map.get(&tx_hash).cloned();
-                    logs.push(SimBundleLogs { tx_logs, bundle_logs: None });
+        // Final result - will be set when root bundle processing completes
+        let mut final_result: Vec<SimBundleLogs> = Vec::new();
+
+        while let Some((current_bundle, idx, mut current_logs)) = stack.pop() {
+            let body = &current_bundle.bundle_body;
+
+            if idx < body.len() {
+                match &body[idx] {
+                    BundleItem::Tx { tx, .. } => {
+                        let tx_hash = keccak256(tx);
+                        let tx_logs = tx_logs_map.get(&tx_hash).cloned();
+                        current_logs.push(SimBundleLogs { tx_logs, bundle_logs: None });
+                        // Continue with next item
+                        stack.push((current_bundle, idx + 1, current_logs));
+                    }
+                    BundleItem::Bundle { bundle: nested_bundle } => {
+                        // Save current state to resume after nested bundle is processed
+                        stack.push((current_bundle, idx + 1, current_logs));
+                        // Start processing nested bundle
+                        stack.push((nested_bundle, 0, Vec::new()));
+                    }
+                    BundleItem::Hash { .. } => {
+                        current_logs.push(SimBundleLogs { tx_logs: None, bundle_logs: None });
+                        // Continue with next item
+                        stack.push((current_bundle, idx + 1, current_logs));
+                    }
                 }
-                BundleItem::Bundle { bundle: nested_bundle } => {
-                    // Recursively build logs for nested bundle
-                    let nested_logs = Self::build_bundle_logs(nested_bundle, tx_logs_map);
-                    logs.push(SimBundleLogs { tx_logs: None, bundle_logs: Some(nested_logs) });
-                }
-                BundleItem::Hash { .. } => {
-                    // Hash-only items don't have logs
-                    logs.push(SimBundleLogs { tx_logs: None, bundle_logs: None });
+            } else {
+                // Finished processing this bundle
+                // Check if there's a parent waiting on the stack
+                if let Some((parent_bundle, parent_idx, mut parent_logs)) = stack.pop() {
+                    // Add this bundle's logs as nested bundle_logs in parent
+                    parent_logs.push(SimBundleLogs { tx_logs: None, bundle_logs: Some(current_logs) });
+                    // Put parent back on stack to continue processing
+                    stack.push((parent_bundle, parent_idx, parent_logs));
+                } else {
+                    // This is the root bundle, we're done
+                    final_result = current_logs;
                 }
             }
         }
 
-        logs
+        final_result
     }
 
     /// Flattens a potentially nested bundle into a list of individual transactions in a
@@ -131,13 +159,13 @@ where
     ) -> Result<Vec<FlattenedBundleItem<ProviderTx<Eth::Provider>>>, EthApiError> {
         let mut items = Vec::new();
 
-        // Stack for processing bundles
-        let mut stack = Vec::new();
+        // Stack for processing bundles: (bundle, index, depth, parent_path)
+        let mut stack: Vec<(&MevSendBundle, usize, usize, Vec<usize>)> = Vec::new();
 
-        // Start with initial bundle, index 0, and depth 1
-        stack.push((request, 0, 1));
+        // Start with initial bundle, index 0, depth 1, and empty path
+        stack.push((request, 0, 1, Vec::new()));
 
-        while let Some((current_bundle, mut idx, depth)) = stack.pop() {
+        while let Some((current_bundle, mut idx, depth, parent_path)) = stack.pop() {
             // Check max depth
             if depth > MAX_NESTED_BUNDLE_DEPTH {
                 return Err(EthApiError::InvalidParams(EthSimBundleError::MaxDepth.to_string()));
@@ -223,6 +251,10 @@ where
                         let refund_configs =
                             validity.as_ref().and_then(|v| v.refund_config.clone());
 
+                        // Build the full path for this item
+                        let mut bundle_path = parent_path.clone();
+                        bundle_path.push(idx);
+
                         // Create FlattenedBundleItem with current inclusion, validity, and privacy
                         let flattened_item = FlattenedBundleItem {
                             tx,
@@ -233,6 +265,7 @@ where
                             privacy: privacy.clone(),
                             refund_percent,
                             refund_configs,
+                            bundle_path,
                         };
 
                         // Add to items
@@ -241,11 +274,15 @@ where
                         idx += 1;
                     }
                     BundleItem::Bundle { bundle } => {
+                        // Build path for nested bundle
+                        let mut nested_path = parent_path.clone();
+                        nested_path.push(idx);
+
                         // Push the current bundle and next index onto the stack to resume later
-                        stack.push((current_bundle, idx + 1, depth));
+                        stack.push((current_bundle, idx + 1, depth, parent_path.clone()));
 
                         // process the nested bundle next
-                        stack.push((bundle, 0, depth + 1));
+                        stack.push((bundle, 0, depth + 1, nested_path));
                         break;
                     }
                     BundleItem::Hash { hash: _ } => {
@@ -313,9 +350,7 @@ where
                     let max_block_number =
                         item.inclusion.max_block_number().unwrap_or(block_number);
 
-                    if current_block_number < block_number
-                        || current_block_number > max_block_number
-                    {
+                    if current_block_number < block_number || current_block_number > max_block_number {
                         return Err(EthApiError::InvalidParams(
                             EthSimBundleError::InvalidInclusion.to_string(),
                         )
@@ -396,9 +431,7 @@ where
                         });
 
                         // Calculate payout transaction fee
-                        let payout_tx_fee = U256::from(basefee)
-                            * U256::from(SBUNDLE_PAYOUT_MAX_COST)
-                            * U256::from(refund_configs.len() as u64);
+                        let payout_tx_fee = U256::from(basefee) * U256::from(SBUNDLE_PAYOUT_MAX_COST) * U256::from(refund_configs.len() as u64);
 
                         // Add gas used for payout transactions
                         total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
@@ -406,8 +439,7 @@ where
                         // Calculate allocated refundable value (payout value) based on ORIGINAL
                         // refundable value This ensures all refund_percent
                         // values are calculated from the same base
-                        let payout_value = original_refundable_value * U256::from(refund_percent)
-                            / U256::from(100);
+                        let payout_value = original_refundable_value * U256::from(refund_percent) / U256::from(100);
 
                         if payout_tx_fee > payout_value {
                             return Err(EthApiError::InvalidParams(
@@ -553,24 +585,39 @@ mod tests {
         bundle: &MevSendBundle,
         tx_logs_map: &HashMap<B256, Vec<Log>>,
     ) -> Vec<SimBundleLogs> {
-        let mut logs = Vec::new();
-        for item in &bundle.bundle_body {
-            match item {
-                BundleItem::Tx { tx, .. } => {
-                    let tx_hash = keccak256(tx);
-                    let tx_logs = tx_logs_map.get(&tx_hash).cloned();
-                    logs.push(SimBundleLogs { tx_logs, bundle_logs: None });
+        let mut stack: Vec<(&MevSendBundle, usize, Vec<SimBundleLogs>)> = Vec::new();
+        stack.push((bundle, 0, Vec::new()));
+        let mut final_result: Vec<SimBundleLogs> = Vec::new();
+
+        while let Some((current_bundle, idx, mut current_logs)) = stack.pop() {
+            let body = &current_bundle.bundle_body;
+            if idx < body.len() {
+                match &body[idx] {
+                    BundleItem::Tx { tx, .. } => {
+                        let tx_hash = keccak256(tx);
+                        let tx_logs = tx_logs_map.get(&tx_hash).cloned();
+                        current_logs.push(SimBundleLogs { tx_logs, bundle_logs: None });
+                        stack.push((current_bundle, idx + 1, current_logs));
+                    }
+                    BundleItem::Bundle { bundle: nested_bundle } => {
+                        stack.push((current_bundle, idx + 1, current_logs));
+                        stack.push((nested_bundle, 0, Vec::new()));
+                    }
+                    BundleItem::Hash { .. } => {
+                        current_logs.push(SimBundleLogs { tx_logs: None, bundle_logs: None });
+                        stack.push((current_bundle, idx + 1, current_logs));
+                    }
                 }
-                BundleItem::Bundle { bundle: nested_bundle } => {
-                    let nested_logs = build_bundle_logs_test(nested_bundle, tx_logs_map);
-                    logs.push(SimBundleLogs { tx_logs: None, bundle_logs: Some(nested_logs) });
-                }
-                BundleItem::Hash { .. } => {
-                    logs.push(SimBundleLogs { tx_logs: None, bundle_logs: None });
+            } else {
+                if let Some((parent_bundle, parent_idx, mut parent_logs)) = stack.pop() {
+                    parent_logs.push(SimBundleLogs { tx_logs: None, bundle_logs: Some(current_logs) });
+                    stack.push((parent_bundle, parent_idx, parent_logs));
+                } else {
+                    final_result = current_logs;
                 }
             }
         }
-        logs
+        final_result
     }
 
     fn create_test_bundle(tx_bytes: Vec<Bytes>) -> MevSendBundle {
