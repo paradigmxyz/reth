@@ -1,4 +1,4 @@
-use crate::common::EnvironmentArgs;
+use crate::common::{CliNodeTypes, EnvironmentArgs};
 use clap::Parser;
 use eyre::Result;
 use lz4::Decoder;
@@ -130,7 +130,10 @@ pub struct DownloadCommand<C: ChainSpecParser> {
 }
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> DownloadCommand<C> {
-    pub async fn execute<N>(self) -> Result<()> {
+    pub async fn execute<N>(self) -> Result<()>
+    where
+        N: CliNodeTypes<ChainSpec = C::ChainSpec>,
+    {
         let data_dir = self.env.datadir.resolve_datadir(self.env.chain.chain());
         fs::create_dir_all(&data_dir)?;
 
