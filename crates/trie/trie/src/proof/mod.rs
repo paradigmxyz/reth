@@ -133,9 +133,10 @@ where
             .with_proof_retainer(retainer)
             .with_updates(self.collect_branch_node_masks);
 
-        // Lazily populate storage multiproofs only for accounts that are actual proof targets.
+        // Initialize all storage multiproofs as empty.
+        // Storage multiproofs for non-empty tries will be overwritten if necessary.
         let mut storages: B256Map<_> =
-            B256Map::with_capacity_and_hasher(targets.len(), Default::default());
+            targets.keys().map(|key| (*key, StorageMultiProof::empty())).collect();
         let mut account_rlp = Vec::with_capacity(TRIE_ACCOUNT_RLP_MAX_SIZE);
         let mut account_node_iter = TrieNodeIter::state_trie(walker, hashed_account_cursor);
         while let Some(account_node) = account_node_iter.try_next()? {
