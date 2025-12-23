@@ -15,12 +15,7 @@ use reth_node_api::{
 use reth_node_core::node_config::NodeConfig;
 use reth_payload_builder::PayloadBuilderHandle;
 use reth_primitives_traits::Block;
-use std::{
-    any::Any,
-    future::{Future, IntoFuture},
-    pin::Pin,
-    sync::Arc,
-};
+use std::{future::{Future, IntoFuture}, pin::Pin, sync::Arc};
 use tokio::sync::mpsc::Sender;
 use tracing::info;
 
@@ -86,20 +81,13 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
     /// Converts network block response into the RPC block type.
     ///
     /// Override this to avoid serde round-trips when the response type already matches `RpcBlock`.
-    fn rpc_block_from_response(response: <AnyNetwork as Network>::BlockResponse) -> Self::RpcBlock
-    where
-        <AnyNetwork as Network>::BlockResponse: Clone,
-    {
+    fn rpc_block_from_response(response: <AnyNetwork as Network>::BlockResponse) -> Self::RpcBlock {
         // Fast path: when the response type already matches RpcBlock, avoid serialization.
         if std::any::TypeId::of::<Self::RpcBlock>() ==
             std::any::TypeId::of::<<AnyNetwork as Network>::BlockResponse>()
         {
-            // SAFETY: TypeIds match, so downcast succeeds or we fall back to serde.
-            if let Ok(block) =
-                (Box::new(response.clone()) as Box<dyn Any>).downcast::<Self::RpcBlock>()
-            {
-                return *block;
-            }
+            // SAFETY: TypeIds match, so the types are identical.
+            return unsafe { std::mem::transmute::<_, Self::RpcBlock>(response) };
         }
 
         // Fallback: deserialize via JSON when types differ.
@@ -162,7 +150,7 @@ pub trait DebugNode<N: FullNodeComponents<Types = Self>>: Node<N> {
 }
 
 /// Converts an RPC block into the node's primitive block representation.
-pub type RpcConsensusConvert<N> = Arc<
+pub(crate) type RpcConsensusConvert<N> = Arc<
     dyn Fn(
             <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock,
         ) -> BlockTy<<N as FullNodeTypes>::Types>
@@ -184,7 +172,7 @@ where
 }
 
 /// Future returning a dynamic block provider.
-pub type DebugBlockProviderFuture<'a, N> = Pin<
+pub(crate) type DebugBlockProviderFuture<'a, N> = Pin<
     Box<
         dyn Future<
                 Output = eyre::Result<DynBlockProviderHandle<BlockTy<<N as FullNodeTypes>::Types>>>,
@@ -213,7 +201,7 @@ pub struct DevMiningContext<'a, N: FullNodeComponents> {
 }
 
 /// Factory for producing a payload attributes builder in dev mode with access to runtime context.
-pub type DevPayloadAttributesBuilderFactory<N> = Box<
+pub(crate) type DevPayloadAttributesBuilderFactory<N> = Box<
     dyn for<'a> FnOnce(
             DevMiningContext<'a, N>,
         ) -> Box<
@@ -255,7 +243,7 @@ impl<B: Block + 'static> BlockProvider for DynBlockProviderHandle<B> {
 }
 
 /// Factory for producing a custom debug block provider.
-pub type DebugBlockProviderFactory<N, AddOns> = Box<
+pub(crate) type DebugBlockProviderFactory<N, AddOns> = Box<
     dyn Fn(
             &NodeConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
             &NodeHandle<N, AddOns>,
