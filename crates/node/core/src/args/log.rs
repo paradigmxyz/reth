@@ -70,7 +70,7 @@ pub struct LogArgs {
         long = "log.samply.filter",
         value_name = "FILTER",
         global = true,
-        default_value = "info"
+        default_value = "debug"
     )]
     pub samply_filter: String,
 
