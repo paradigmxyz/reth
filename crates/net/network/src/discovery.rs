@@ -158,7 +158,8 @@ impl Discovery {
             discv4.set_eip868_rlp(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
         }
         if let Some(discv5) = &self.discv5 {
-            discv5.encode_and_set_eip868_in_local_enr(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
+            discv5
+                .encode_and_set_eip868_in_local_enr(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
         }
     }
 
