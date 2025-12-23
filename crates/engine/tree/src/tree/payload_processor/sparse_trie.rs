@@ -2,7 +2,7 @@
 
 use crate::tree::payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate};
 use alloy_primitives::B256;
-use rayon::iter::{ParallelBridge, ParallelIterator};
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
 use reth_trie::{updates::TrieUpdates, Nibbles};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
@@ -170,7 +170,8 @@ where
         .storages
         .into_iter()
         .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
-        .par_bridge()
+        .collect::<Vec<_>>()
+        .into_par_iter()
         .map(|(address, storage, storage_trie)| {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: span.clone(), "storage trie", ?address)
