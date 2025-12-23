@@ -209,17 +209,17 @@ pub fn validate_withdrawals_presence<T: EthereumHardforks>(
 /// This method is meant to be used with either a `payloadAttributes` field or a full payload, with
 /// the `engine_forkchoiceUpdated` and `engine_newPayload` methods respectively.
 ///
-/// After Cancun, the `parentBeaconBlockRoot` field must be [Some].
-/// Before Cancun, the `parentBeaconBlockRoot` field must be [None].
+/// For Engine API message versions V1 and V2, the `parentBeaconBlockRoot` field is not supported
+/// and must be [None]. If it is present, this will return
+/// [`VersionSpecificValidationError::ParentBeaconBlockRootNotSupportedBeforeV3`].
 ///
-/// If the engine API message version is V1 or V2, and the timestamp is post-Cancun, then this will
-/// return [`EngineObjectValidationError::UnsupportedFork`].
+/// For Engine API message versions V3 and later, the `parentBeaconBlockRoot` field is required and
+/// must be [Some]. If it is missing, this will return
+/// [`VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun`].
 ///
-/// If the timestamp is before the Cancun fork and the engine API message version is V3, then this
-/// will return [`EngineObjectValidationError::UnsupportedFork`].
-///
-/// If the engine API message version is V3, but the `parentBeaconBlockRoot` is [None], then
-/// this will return [`VersionSpecificValidationError::NoParentBeaconBlockRootPostCancun`].
+/// Fork-specific timestamp validation (which may return
+/// [`EngineObjectValidationError::UnsupportedFork`]) is handled by
+/// [`validate_payload_timestamp`].
 ///
 /// This implements the following Engine API spec rules:
 ///
