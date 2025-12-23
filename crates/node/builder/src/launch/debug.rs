@@ -172,7 +172,7 @@ pub(crate) type RpcConsensusConvert<N> = Arc<
 >;
 
 /// Context passed to construct a debug block provider.
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct DebugBlockProviderContext<'a, N>
 where
     N: FullNodeComponents<Types: DebugNode<N>>,
@@ -228,7 +228,7 @@ pub(crate) type DevPayloadAttributesBuilderFactory<N> = Box<
 
 /// Convenience handle for using a dynamic block provider where [`BlockProvider`] is expected.
 #[derive(Clone)]
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct DynBlockProviderHandle<B: Block + 'static>(Arc<dyn BlockProvider<Block = B>>);
 
 impl<B: Block + 'static> DynBlockProviderHandle<B> {
