@@ -45,7 +45,7 @@ pub const DEFAULT_PREWARM_MAX_CONCURRENCY: usize = 16;
 const DEFAULT_BLOCK_BUFFER_LIMIT: u32 = EPOCH_SLOTS as u32 * 2;
 const DEFAULT_MAX_INVALID_HEADER_CACHE_LENGTH: u32 = 256;
 const DEFAULT_MAX_EXECUTE_BLOCK_BATCH_SIZE: usize = 4;
-const DEFAULT_CROSS_BLOCK_CACHE_SIZE: u64 = 4 * 1024 * 1024 * 1024;
+const DEFAULT_CROSS_BLOCK_CACHE_SIZE: usize = 4 * 1024 * 1024 * 1024;
 
 /// Determines if the host has enough parallelism to run the payload processor.
 ///
@@ -100,7 +100,7 @@ pub struct TreeConfig {
     /// Whether to enable state provider metrics.
     state_provider_metrics: bool,
     /// Cross-block cache size in bytes.
-    cross_block_cache_size: u64,
+    cross_block_cache_size: usize,
     /// Whether the host has enough parallelism to run state root task.
     has_enough_parallelism: bool,
     /// Whether multiproof task should chunk proof targets.
@@ -185,7 +185,7 @@ impl TreeConfig {
         disable_prewarming: bool,
         disable_parallel_sparse_trie: bool,
         state_provider_metrics: bool,
-        cross_block_cache_size: u64,
+        cross_block_cache_size: usize,
         has_enough_parallelism: bool,
         multiproof_chunking_enabled: bool,
         multiproof_chunk_size: usize,
@@ -300,7 +300,7 @@ impl TreeConfig {
     }
 
     /// Returns the cross-block cache size.
-    pub const fn cross_block_cache_size(&self) -> u64 {
+    pub const fn cross_block_cache_size(&self) -> usize {
         self.cross_block_cache_size
     }
 
@@ -403,7 +403,7 @@ impl TreeConfig {
     }
 
     /// Setter for cross block cache size.
-    pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: u64) -> Self {
+    pub const fn with_cross_block_cache_size(mut self, cross_block_cache_size: usize) -> Self {
         self.cross_block_cache_size = cross_block_cache_size;
         self
     }
