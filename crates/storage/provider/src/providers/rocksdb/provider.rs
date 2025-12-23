@@ -296,7 +296,7 @@ impl RocksDBProvider {
     /// Use this method when the batch needs to be held by [`crate::EitherWriter`]
     /// or stored in `DatabaseProvider`.
     pub fn batch(&self) -> RocksDBBatch {
-        RocksDBBatch::new(self.0.clone())
+        RocksDBBatch::new(self.clone())
     }
 
     /// Gets the column family handle for a table.
@@ -484,11 +484,11 @@ impl RocksDBProvider {
 /// Note: `WriteBatch` operations are applied in order. If the same key is updated multiple times,
 /// the last update wins. Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
 ///
-/// This type owns an `Arc<RocksDBProviderInner>` to allow storing it in `DatabaseProvider`
+/// This type owns a `RocksDBProvider` to allow storing it in `DatabaseProvider`
 /// without lifetime issues.
 #[must_use = "batch must be committed"]
 pub struct RocksDBBatch {
-    provider: Arc<RocksDBProviderInner>,
+    provider: RocksDBProvider,
     inner: WriteBatchWithTransaction<true>,
     buf: Vec<u8>,
 }
@@ -508,7 +508,7 @@ impl fmt::Debug for RocksDBBatch {
 
 impl RocksDBBatch {
     /// Creates a new batch for the given provider.
-    pub(crate) fn new(provider: Arc<RocksDBProviderInner>) -> Self {
+    pub(crate) fn new(provider: RocksDBProvider) -> Self {
         Self {
             provider,
             inner: WriteBatchWithTransaction::<true>::default(),
@@ -528,13 +528,13 @@ impl RocksDBBatch {
         value: &T::Value,
     ) -> ProviderResult<()> {
         let value_bytes = compress_to_buf_or_ref!(self.buf, value).unwrap_or(&self.buf);
-        self.inner.put_cf(self.provider.get_cf_handle::<T>()?, key, value_bytes);
+        self.inner.put_cf(self.provider.0.get_cf_handle::<T>()?, key, value_bytes);
         Ok(())
     }
 
     /// Deletes a value from the batch.
     pub fn delete<T: Table>(&mut self, key: T::Key) -> ProviderResult<()> {
-        self.inner.delete_cf(self.provider.get_cf_handle::<T>()?, key.encode().as_ref());
+        self.inner.delete_cf(self.provider.0.get_cf_handle::<T>()?, key.encode().as_ref());
         Ok(())
     }
 
@@ -542,7 +542,7 @@ impl RocksDBBatch {
     ///
     /// This consumes the batch and writes all operations atomically to `RocksDB`.
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
+        self.provider.0.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
             ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
                 message: e.to_string().into(),
                 code: -1,
