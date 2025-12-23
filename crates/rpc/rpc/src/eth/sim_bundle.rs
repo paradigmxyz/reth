@@ -63,8 +63,7 @@ pub struct FlattenedBundleItem<T> {
     /// Optional refund configs for the bundle item
     pub refund_configs: Option<Vec<RefundConfig>>,
     /// Path from root bundle to this item, represented as indices at each nesting level.
-    /// For example, `[0, 2]` means this item is at `bundle.bundle_body[0].bundle.bundle_body[2]`.
-    /// An empty path means this item is at the root level.
+    /// For example, `[1, 0]` means `bundle.bundle_body[1].bundle.bundle_body[0]`.
     pub bundle_path: Vec<usize>,
 }
 
@@ -251,7 +250,6 @@ where
                         let refund_configs =
                             validity.as_ref().and_then(|v| v.refund_config.clone());
 
-                        // Build the full path for this item
                         let mut bundle_path = parent_path.clone();
                         bundle_path.push(idx);
 
@@ -268,13 +266,10 @@ where
                             bundle_path,
                         };
 
-                        // Add to items
                         items.push(flattened_item);
-
                         idx += 1;
                     }
                     BundleItem::Bundle { bundle } => {
-                        // Build path for nested bundle
                         let mut nested_path = parent_path.clone();
                         nested_path.push(idx);
 
@@ -387,8 +382,7 @@ where
                     // Update coinbase balance before next tx
                     coinbase_balance_before_tx = coinbase_balance_after_tx;
 
-                    // Collect logs if requested - store in map keyed by raw transaction hash
-                    // Use raw_tx_hash for consistent matching with build_bundle_logs
+                    // Collect logs in map keyed by raw_tx_hash for hierarchical structure reconstruction
                     if logs {
                         let tx_hash = item.raw_tx_hash;
                         let tx_logs: Vec<alloy_rpc_types_eth::Log> = result
@@ -425,7 +419,6 @@ where
                 let original_refundable_value = refundable_value;
                 for item in &flattened_bundle {
                     if let Some(refund_percent) = item.refund_percent {
-                        // Get refund configurations
                         let refund_configs = item.refund_configs.clone().unwrap_or_else(|| {
                             vec![RefundConfig { address: item.tx.signer(), percent: 100 }]
                         });
@@ -436,9 +429,7 @@ where
                         // Add gas used for payout transactions
                         total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
 
-                        // Calculate allocated refundable value (payout value) based on ORIGINAL
-                        // refundable value This ensures all refund_percent
-                        // values are calculated from the same base
+                        // Calculate payout value based on ORIGINAL refundable value
                         let payout_value = original_refundable_value * U256::from(refund_percent) / U256::from(100);
 
                         if payout_tx_fee > payout_value {
