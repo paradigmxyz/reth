@@ -102,18 +102,9 @@ impl CompilationManager {
         let mut cmd = Command::new("cargo");
         cmd.arg("build").arg("--profile").arg("profiling");
 
-        // Append samply feature when profiling to enable tracing span markers.
-        // NOTE: The `samply` feature must exist in the branch being compiled. If comparing
-        // against an older branch that predates the samply integration, compilation will fail
-        // or markers won't appear. In that case, omit --profile or ensure both branches
-        // include the samply feature support.
-        let features = if self.enable_profiling && !self.features.contains("samply") {
-            format!("{},samply", self.features)
-        } else {
-            self.features.clone()
-        };
-        cmd.arg("--features").arg(&features);
-        info!("Using features: {}", features);
+        let features = &self.features;
+        cmd.arg("--features").arg(features);
+        info!("Using features: {features}");
 
         // Add bin-specific arguments for optimism
         if is_optimism {
