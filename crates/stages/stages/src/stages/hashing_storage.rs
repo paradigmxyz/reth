@@ -1,4 +1,4 @@
-use alloy_primitives::{bytes::BufMut, keccak256, Address, B256};
+use alloy_primitives::{b256, bytes::BufMut, keccak256, Address, B256};
 use itertools::Itertools;
 use reth_config::config::{EtlConfig, HashingConfig};
 use reth_db_api::{
@@ -27,6 +27,10 @@ const MAXIMUM_CHANNELS: usize = 10_000;
 
 /// Maximum number of storage entries to hash per rayon worker job.
 const WORKER_CHUNK_SIZE: usize = 100;
+
+/// Keccak256 hash of the zero address.
+const HASHED_ZERO_ADDRESS: B256 =
+    b256!("0x5380c7b7ae81a58eb98d9c78de4a1fd7fd9535fc953ed2be602daaa41767312a");
 
 /// Storage hashing stage hashes plain storage.
 /// This is preparation before generating intermediate hashes and calculating Merkle tree root.
@@ -102,8 +106,7 @@ where
                 // Spawn the hashing task onto the global rayon pool
                 rayon::spawn(move || {
                     // Cache hashed address since PlainStorageState is sorted by address
-                    let (mut last_addr, mut hashed_addr) =
-                        (Address::ZERO, keccak256(Address::ZERO));
+                    let (mut last_addr, mut hashed_addr) = (Address::ZERO, HASHED_ZERO_ADDRESS);
                     for (address, slot) in chunk {
                         if address != last_addr {
                             last_addr = address;
