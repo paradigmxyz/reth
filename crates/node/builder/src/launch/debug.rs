@@ -12,7 +12,6 @@ use reth_node_api::{
     PayloadAttributesBuilder, PayloadTypes,
 };
 use reth_node_core::node_config::NodeConfig;
-use reth_payload_builder::PayloadBuilderHandle;
 use std::{
     any::Any,
     future::{Future, IntoFuture},
@@ -222,34 +221,6 @@ const fn debug_block_provider_configured<ChainSpec>(config: &NodeConfig<ChainSpe
     config.debug.rpc_consensus_url.is_some() || config.debug.etherscan.is_some()
 }
 
-/// Context for building dev-mode payload attributes after the node has launched.
-#[derive(Clone, Debug)]
-pub struct DevMiningContext<'a, N: FullNodeComponents> {
-    /// Chain specification of the node.
-    pub chain_spec: Arc<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
-    /// Provider handle for accessing blockchain state.
-    pub provider: &'a N::Provider,
-    /// Transaction pool handle.
-    pub pool: &'a N::Pool,
-    /// Payload builder handle.
-    pub payload_builder_handle:
-        &'a PayloadBuilderHandle<<<N as FullNodeTypes>::Types as NodeTypes>::Payload>,
-}
-
-/// Factory for producing a payload attributes builder in dev mode with access to runtime context.
-pub(crate) type DevPayloadAttributesBuilderFactory<N> = Box<
-    dyn for<'a> FnOnce(
-            DevMiningContext<'a, N>,
-        ) -> Box<
-            dyn PayloadAttributesBuilder<
-                PayloadAttrTy<<N as FullNodeTypes>::Types>,
-                HeaderTy<<N as FullNodeTypes>::Types>,
-            >,
-        > + Send
-        + Sync
-        + 'static,
->;
-
 /// Factory for producing a custom debug block provider.
 pub(crate) type DebugBlockProviderFactory<N, AddOns> = Box<
     dyn Fn(
@@ -281,13 +252,6 @@ where
         .node
         .task_executor
         .spawn_critical("debug consensus client", async move { client.run().await });
-}
-
-/// Dev payload builder configuration.
-enum DevBuilderConfig<N: FullNodeComponents> {
-    Factory(DevPayloadAttributesBuilderFactory<N>),
-    Builder(Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>),
-    DefaultWithMap(PayloadAttrMapper<N>),
 }
 
 /// Node launcher with support for launching various debugging utilities.
@@ -324,7 +288,7 @@ impl<L> DebugNodeLauncher<L> {
 }
 
 /// Future for the [`DebugNodeLauncher`].
-#[expect(missing_debug_implementations)]
+#[expect(missing_debug_implementations, clippy::type_complexity)]
 pub struct DebugNodeLauncherFuture<L, Target, N, AddOns>
 where
     N: FullNodeComponents<Types: DebugNode<N>>,
@@ -332,7 +296,9 @@ where
 {
     inner: L,
     target: Target,
-    dev_builder_config: Option<DevBuilderConfig<N>>,
+    local_payload_attributes_builder:
+        Option<Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>>,
+    map_attributes: Option<PayloadAttrMapper<N>>,
     rpc_consensus_convert: Option<RpcConsensusConvert<N>>,
     debug_block_provider_factory: Option<DebugBlockProviderFactory<N, AddOns>>,
 }
@@ -350,7 +316,8 @@ where
         Self {
             inner: self.inner,
             target: self.target,
-            dev_builder_config: Some(DevBuilderConfig::Builder(Box::new(builder))),
+            local_payload_attributes_builder: Some(Box::new(builder)),
+            map_attributes: None,
             rpc_consensus_convert: self.rpc_consensus_convert,
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
@@ -363,7 +330,8 @@ where
         Self {
             inner: self.inner,
             target: self.target,
-            dev_builder_config: Some(DevBuilderConfig::DefaultWithMap(Box::new(f))),
+            local_payload_attributes_builder: None,
+            map_attributes: Some(Box::new(f)),
             rpc_consensus_convert: self.rpc_consensus_convert,
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
@@ -382,22 +350,9 @@ where
         Self {
             inner: self.inner,
             target: self.target,
-            dev_builder_config: self.dev_builder_config,
+            local_payload_attributes_builder: self.local_payload_attributes_builder,
+            map_attributes: self.map_attributes,
             rpc_consensus_convert: Some(Arc::new(convert)),
-            debug_block_provider_factory: self.debug_block_provider_factory,
-        }
-    }
-
-    /// Provides a factory to build payload attributes for dev mining using runtime context.
-    pub fn with_dev_payload_attributes_builder_factory(
-        self,
-        factory: DevPayloadAttributesBuilderFactory<N>,
-    ) -> Self {
-        Self {
-            inner: self.inner,
-            target: self.target,
-            dev_builder_config: Some(DevBuilderConfig::Factory(factory)),
-            rpc_consensus_convert: self.rpc_consensus_convert,
             debug_block_provider_factory: self.debug_block_provider_factory,
         }
     }
@@ -410,7 +365,8 @@ where
         Self {
             inner: self.inner,
             target: self.target,
-            dev_builder_config: self.dev_builder_config,
+            local_payload_attributes_builder: self.local_payload_attributes_builder,
+            map_attributes: self.map_attributes,
             rpc_consensus_convert: self.rpc_consensus_convert,
             debug_block_provider_factory: Some(factory),
         }
@@ -429,7 +385,8 @@ where
         let Self {
             inner,
             target,
-            dev_builder_config,
+            local_payload_attributes_builder,
+            map_attributes,
             rpc_consensus_convert,
             debug_block_provider_factory,
         } = self;
@@ -470,27 +427,16 @@ where
                     PayloadAttrTy<<N as FullNodeTypes>::Types>,
                     HeaderTy<<N as FullNodeTypes>::Types>,
                 >,
-            > = match dev_builder_config {
-                Some(DevBuilderConfig::Factory(f)) => {
-                    let ctx = DevMiningContext {
-                        chain_spec: chain_spec.clone(),
-                        provider: &blockchain_db,
-                        pool: &pool,
-                        payload_builder_handle: &payload_builder_handle,
-                    };
-                    f(ctx)
-                }
-                Some(DevBuilderConfig::Builder(b)) => b,
-                Some(DevBuilderConfig::DefaultWithMap(map)) => {
-                    let local =
-                        <N as FullNodeTypes>::Types::local_payload_attributes_builder(&chain_spec);
-                    Box::new(move |parent| map(local.build(&parent)))
-                }
-                None => {
-                    let local =
-                        <N as FullNodeTypes>::Types::local_payload_attributes_builder(&chain_spec);
-                    Box::new(local)
-                }
+            > = if let Some(builder) = local_payload_attributes_builder {
+                builder
+            } else if let Some(map) = map_attributes {
+                let local =
+                    <N as FullNodeTypes>::Types::local_payload_attributes_builder(&chain_spec);
+                Box::new(move |parent| map(local.build(&parent)))
+            } else {
+                let local =
+                    <N as FullNodeTypes>::Types::local_payload_attributes_builder(&chain_spec);
+                Box::new(local)
             };
 
             let dev_mining_mode = handle.node.config.dev_mining_mode(pool);
@@ -540,7 +486,8 @@ where
         DebugNodeLauncherFuture {
             inner: self.inner,
             target,
-            dev_builder_config: None,
+            local_payload_attributes_builder: None,
+            map_attributes: None,
             rpc_consensus_convert: None,
             debug_block_provider_factory: None,
         }
