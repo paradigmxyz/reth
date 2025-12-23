@@ -23,13 +23,14 @@ use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
+use reth_chainspec::EthereumHardforks;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
     ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
     TxEnvFor,
 };
 use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{HeaderTy, NodePrimitives};
 use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
@@ -42,6 +43,7 @@ use reth_trie_sparse::{
     ClearedSparseStateTrie, SparseStateTrie, SparseTrie,
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
+use revm_primitives::hardfork::SpecId;
 use std::{
     collections::BTreeMap,
     sync::{
@@ -102,7 +104,7 @@ type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
 
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
-pub struct PayloadProcessor<Evm>
+pub struct PayloadProcessor<Evm, C>
 where
     Evm: ConfigureEvm,
 {
@@ -118,6 +120,7 @@ where
     disable_transaction_prewarming: bool,
     /// Whether state cache should be disable
     disable_state_cache: bool,
+    chain_spec: Arc<C>,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
     /// Whether precompile cache should be disabled.
@@ -137,7 +140,7 @@ where
     prewarm_max_concurrency: usize,
 }
 
-impl<N, Evm> PayloadProcessor<Evm>
+impl<N, Evm, C> PayloadProcessor<Evm, C>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N>,
@@ -153,6 +156,7 @@ where
         evm_config: Evm,
         config: &TreeConfig,
         precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
+        chain_spec: Arc<C>,
     ) -> Self {
         Self {
             executor,
@@ -160,6 +164,7 @@ where
             trie_metrics: Default::default(),
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
+            chain_spec,
             evm_config,
             disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
@@ -171,10 +176,11 @@ where
     }
 }
 
-impl<N, Evm> PayloadProcessor<Evm>
+impl<N, Evm, C> PayloadProcessor<Evm, C>
 where
     N: NodePrimitives,
     Evm: ConfigureEvm<Primitives = N> + 'static,
+    C: EthereumHardforks,
 {
     /// Spawns all background tasks and returns a handle connected to the tasks.
     ///
@@ -540,6 +546,7 @@ where
     /// hitting the database, maintaining performance consistency.
     pub(crate) fn on_inserted_executed_block(
         &self,
+        header: &HeaderTy<N>,
         block_with_parent: BlockWithParent,
         bundle_state: &BundleState,
     ) {
@@ -566,7 +573,7 @@ where
 
             // Insert the block's bundle state into cache
             let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics);
-            if new_cache.cache().insert_state(bundle_state).is_err() {
+            if new_cache.cache().insert_state(bundle_state, &alloy_evm::spec(&self.chain_spec, header)).is_err() {
                 *cached = None;
                 debug!(target: "engine::caching", "cleared execution cache on update error");
                 return;
@@ -809,6 +816,8 @@ pub struct ExecutionEnv<Evm: ConfigureEvm> {
     pub hash: B256,
     /// Hash of the parent block.
     pub parent_hash: B256,
+    /// Spec id associated with the EVM for the block being executed.
+    pub spec_id: SpecId,
 }
 
 impl<Evm: ConfigureEvm> Default for ExecutionEnv<Evm>
@@ -820,6 +829,7 @@ where
             evm_env: Default::default(),
             hash: Default::default(),
             parent_hash: Default::default(),
+            spec_id: Default::default(),
         }
     }
 }
@@ -835,10 +845,11 @@ mod tests {
         precompile_cache::PrecompileCacheMap,
         StateProviderBuilder, TreeConfig,
     };
+    use alloy_consensus::Header;
     use alloy_eips::eip1898::{BlockNumHash, BlockWithParent};
     use alloy_evm::block::StateChangeSource;
     use rand::Rng;
-    use reth_chainspec::ChainSpec;
+    use reth_chainspec::{ChainSpec, MAINNET};
     use reth_db_common::init::init_genesis;
     use reth_ethereum_primitives::TransactionSigned;
     use reth_evm::OnStateHook;
@@ -934,13 +945,14 @@ mod tests {
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            MAINNET.clone(),
         );
 
-        let parent_hash = B256::from([1u8; 32]);
-        let block_hash = B256::from([10u8; 32]);
+        let header = Header::default();
+        let block_hash = header.hash_slow();
         let block_with_parent = BlockWithParent {
-            block: BlockNumHash { hash: block_hash, number: 1 },
-            parent: parent_hash,
+            block: BlockNumHash { hash: block_hash, number: header.number },
+            parent: header.parent_hash,
         };
         let bundle_state = BundleState::default();
 
@@ -948,7 +960,7 @@ mod tests {
         assert!(payload_processor.execution_cache.get_cache_for(block_hash).is_none());
 
         // Update cache with inserted block
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+        payload_processor.on_inserted_executed_block(&header, block_with_parent, &bundle_state);
 
         // Cache should now exist for the block hash
         let cached = payload_processor.execution_cache.get_cache_for(block_hash);
@@ -963,24 +975,27 @@ mod tests {
             EthEvmConfig::new(Arc::new(ChainSpec::default())),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            MAINNET.clone(),
         );
 
         // Setup: populate cache with block 1
-        let block1_hash = B256::from([1u8; 32]);
+        let header1 = Header { number: 1, ..Default::default() };
+        let block1_hash = header1.hash_slow();
         payload_processor
             .execution_cache
             .update_with_guard(|slot| *slot = Some(make_saved_cache(block1_hash)));
 
         // Try to insert block 3 with wrong parent (should skip and keep block 1's cache)
-        let wrong_parent = B256::from([99u8; 32]);
-        let block3_hash = B256::from([3u8; 32]);
+        let header3 =
+            Header { parent_hash: B256::from([99u8; 32]), number: 3, ..Default::default() };
+        let block3_hash = header3.hash_slow();
         let block_with_parent = BlockWithParent {
-            block: BlockNumHash { hash: block3_hash, number: 3 },
-            parent: wrong_parent,
+            block: BlockNumHash { hash: block3_hash, number: header3.number },
+            parent: header3.parent_hash,
         };
         let bundle_state = BundleState::default();
 
-        payload_processor.on_inserted_executed_block(block_with_parent, &bundle_state);
+        payload_processor.on_inserted_executed_block(&header3, block_with_parent, &bundle_state);
 
         // Cache should still be for block 1 (unchanged)
         let cached = payload_processor.execution_cache.get_cache_for(block1_hash);
@@ -1096,6 +1111,7 @@ mod tests {
             EthEvmConfig::new(factory.chain_spec()),
             &TreeConfig::default(),
             PrecompileCacheMap::default(),
+            MAINNET.clone(),
         );
 
         let provider_factory = BlockchainProvider::new(factory).unwrap();

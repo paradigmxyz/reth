@@ -14,9 +14,10 @@ use alloy_consensus::transaction::Either;
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip1898::BlockWithParent, NumHash};
 use alloy_evm::Evm;
-use alloy_primitives::B256;
+use alloy_primitives::{BlockTimestamp, B256};
 use rayon::prelude::*;
 use reth_chain_state::{CanonicalInMemoryState, DeferredTrieData, ExecutedBlock};
+use reth_chainspec::EthereumHardforks;
 use reth_consensus::{ConsensusError, FullConsensus};
 use reth_engine_primitives::{
     ConfigureEngineEvm, ExecutableTxIterator, ExecutionPayload, InvalidBlockHook, PayloadValidator,
@@ -34,7 +35,7 @@ use reth_primitives_traits::{
     SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader, ChainSpecProvider,
     DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome, HashedPostStateProvider,
     ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
     StateProviderFactory, StateReader, TrieReader,
@@ -108,6 +109,7 @@ impl<'a, N: NodePrimitives> TreeCtx<'a, N> {
 pub struct BasicEngineValidator<P, Evm, V>
 where
     Evm: ConfigureEvm,
+    P: ChainSpecProvider<ChainSpec: EthereumHardforks>,
 {
     /// Provider for database access.
     provider: P,
@@ -118,7 +120,7 @@ where
     /// Configuration for the tree.
     config: TreeConfig,
     /// Payload processor for state root computation.
-    payload_processor: PayloadProcessor<Evm>,
+    payload_processor: PayloadProcessor<Evm, P::ChainSpec>,
     /// Precompile cache map.
     precompile_cache_map: PrecompileCacheMap<SpecFor<Evm>>,
     /// Precompile cache metrics.
@@ -141,6 +143,7 @@ where
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + Clone
         + 'static,
     Evm: ConfigureEvm<Primitives = N> + 'static,
@@ -161,6 +164,7 @@ where
             evm_config.clone(),
             &config,
             precompile_cache_map.clone(),
+            provider.chain_spec(),
         );
         Self {
             provider,
@@ -390,7 +394,14 @@ where
             .in_scope(|| self.evm_env_for(&input))
             .map_err(NewPayloadError::other)?;
 
-        let env = ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash() };
+        let spec_id = alloy_evm::spec_by_timestamp_and_block_number(
+            &provider_builder.provider_factory.chain_spec(),
+            input.timestamp(),
+            input.num_hash().number,
+        );
+
+        let env =
+            ExecutionEnv { evm_env, hash: input.hash(), parent_hash: input.parent_hash(), spec_id };
 
         // Plan the strategy used for state root computation.
         let strategy = self.plan_state_root_computation();
@@ -1185,6 +1196,7 @@ where
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
+        + ChainSpecProvider<ChainSpec: EthereumHardforks>
         + Clone
         + 'static,
     N: NodePrimitives,
@@ -1226,6 +1238,7 @@ where
 
     fn on_inserted_executed_block(&self, block: ExecutedBlock<N>) {
         self.payload_processor.on_inserted_executed_block(
+            block.recovered_block.header(),
             block.recovered_block.block_with_parent(),
             block.execution_output.state(),
         );
@@ -1255,6 +1268,14 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
         match self {
             Self::Payload(payload) => payload.num_hash(),
             Self::Block(block) => block.num_hash(),
+        }
+    }
+
+    /// Returns the timestamp of the block.
+    pub fn timestamp(&self) -> BlockTimestamp {
+        match self {
+            Self::Payload(payload) => payload.timestamp(),
+            Self::Block(block) => block.timestamp(),
         }
     }
 
