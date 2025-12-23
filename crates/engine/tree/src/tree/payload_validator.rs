@@ -206,64 +206,10 @@ where
         }
     }
 
-    /// Warms the keccak cache by pre-computing hashes for transaction addresses.
-    #[instrument(level = "trace", target = "engine::tree::payload_validator", skip_all)]
-    fn warm_keccak_cache<T>(&self, input: &BlockOrPayload<T>)
-    where
-        T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-        V: PayloadValidator<T, Block = N::Block>,
-        Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
-    {
-        use alloy_consensus::Transaction as _;
-        use alloy_evm::RecoveredTx;
-        use alloy_primitives::TxKind;
-        use rayon::iter::ParallelIterator;
-        use reth_primitives_traits::SignerRecoverable;
-
-        match input {
-            BlockOrPayload::Payload(payload) => {
-                // Get transaction bytes iterator and conversion function
-                if let Ok((txs, convert)) =
-                    self.evm_config.tx_iterator_for_payload(payload).map(|iter| iter.into())
-                {
-                    // Use parallel iterator to warm cache for all transactions
-                    use rayon::iter::IntoParallelIterator;
-                    txs.into_par_iter().for_each(|tx_bytes| {
-                        if let Ok(recovered_tx) = convert(tx_bytes) {
-                            // Warm cache for sender address
-                            let sender = recovered_tx.signer();
-                            let _ = keccak256(sender);
-
-                            // Unwrap to get the inner transaction for recipient
-                            let tx = recovered_tx.tx();
-
-                            // Warm cache for recipient address (skip contract creations)
-                            if let TxKind::Call(to) = tx.kind() {
-                                let _ = keccak256(to);
-                            }
-                        }
-                    });
-                }
-            }
-
-            BlockOrPayload::Block(block) => {
-                // For blocks, transactions are already decoded
-                for tx in block.body().transactions() {
-                    // Warm cache for sender address (skip if recovery fails)
-                    if let Ok(sender) = tx.recover_signer() {
-                        let _ = keccak256(sender);
-                    }
-
-                    // Warm cache for recipient address
-                    if let TxKind::Call(to) = tx.kind() {
-                        let _ = keccak256(to);
-                    }
-                }
-            }
-        }
-    }
-
     /// Returns [`ExecutableTxIterator`] for the given payload or block.
+    ///
+    /// The returned iterator warms the keccak cache as transactions are decoded/recovered,
+    /// avoiding duplicate work.
     pub fn tx_iterator_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &'a self,
         input: &'a BlockOrPayload<T>,
@@ -272,6 +218,10 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        use alloy_consensus::Transaction as _;
+        use alloy_evm::RecoveredTx;
+        use alloy_primitives::TxKind;
+
         match input {
             BlockOrPayload::Payload(payload) => {
                 let (iter, convert) = self
@@ -281,9 +231,23 @@ where
                     .into();
 
                 let iter = Either::Left(iter.into_par_iter().map(Either::Left));
+
+                // Wrap the convert function to warm keccak cache as transactions are recovered
                 let convert = move |tx| {
                     let Either::Left(tx) = tx else { unreachable!() };
-                    convert(tx).map(Either::Left).map_err(Either::Left)
+                    convert(tx)
+                        .map(|recovered_tx| {
+                            // Warm cache for sender address
+                            let _ = keccak256(recovered_tx.signer());
+
+                            // Warm cache for recipient address (skip contract creations)
+                            if let TxKind::Call(to) = recovered_tx.tx().kind() {
+                                let _ = keccak256(to);
+                            }
+
+                            Either::Left(recovered_tx)
+                        })
+                        .map_err(Either::Left)
                 };
 
                 // Box the closure to satisfy the `Fn` bound both here and in the branch below
@@ -293,9 +257,23 @@ where
                 let iter = Either::Right(
                     block.body().clone_transactions().into_par_iter().map(Either::Right),
                 );
+
+                // Wrap the convert function to warm keccak cache as transactions are recovered
                 let convert = move |tx: Either<_, N::SignedTx>| {
                     let Either::Right(tx) = tx else { unreachable!() };
-                    tx.try_into_recovered().map(Either::Right).map_err(Either::Right)
+                    tx.try_into_recovered()
+                        .map(|recovered_tx| {
+                            // Warm cache for sender address
+                            let _ = keccak256(recovered_tx.signer());
+
+                            // Warm cache for recipient address (skip contract creations)
+                            if let TxKind::Call(to) = recovered_tx.inner().kind() {
+                                let _ = keccak256(to);
+                            }
+
+                            Either::Right(recovered_tx)
+                        })
+                        .map_err(Either::Right)
                 };
 
                 Ok((iter, Box::new(convert)))
@@ -458,10 +436,8 @@ where
             "Decided which state root algorithm to run"
         );
 
-        // Warm keccak cache before spawning parallel tasks
-        self.warm_keccak_cache(&input);
-
-        // Get an iterator over the transactions in the payload
+        // Get an iterator over the transactions in the payload.
+        // Note: The keccak cache is warmed automatically as transactions are decoded/recovered
         let txs = self.tx_iterator_for(&input)?;
 
         // Extract the BAL, if valid and available
