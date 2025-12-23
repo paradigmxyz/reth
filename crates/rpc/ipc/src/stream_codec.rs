@@ -113,7 +113,6 @@ impl tokio_util::codec::Decoder for StreamCodec {
                 is_escaped = byte == b'\\' && !is_escaped && in_str;
 
                 if depth == 0 && idx != start_idx && idx - start_idx + 1 > whitespaces {
-                    // Discard any leading whitespace before the JSON start
                     if start_idx > 0 {
                         let _ = buf.split_to(start_idx);
                     }
