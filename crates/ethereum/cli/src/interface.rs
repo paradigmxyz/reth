@@ -76,7 +76,10 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
     ///
     /// This method is used to prepare the CLI for execution by wrapping it in a
     /// [`CliApp`] that can be further configured before running.
-    pub fn configure(self) -> CliApp<C, Ext, Rpc> {
+    pub fn configure(self) -> CliApp<C, Ext, Rpc>
+    where
+        C: ChainSpecParser<ChainSpec = ChainSpec>,
+    {
         CliApp::new(self)
     }
 
