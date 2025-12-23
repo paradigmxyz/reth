@@ -330,7 +330,7 @@ impl<L> DebugNodeLauncher<L> {
 }
 
 /// Future for the [`DebugNodeLauncher`].
-#[allow(missing_debug_implementations)]
+#[expect(missing_debug_implementations)]
 pub struct DebugNodeLauncherFuture<L, Target, N, AddOns>
 where
     N: FullNodeComponents<Types: DebugNode<N>>,
