@@ -26,6 +26,7 @@ derive_more.workspace = true
 thiserror.workspace = true
 
 revm-database-interface.workspace = true
+revm-state.workspace = true
 
 [features]
 default = ["std"]

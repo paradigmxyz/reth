@@ -377,8 +377,8 @@ where
                     let _ = execute_tx.send(tx);
                     next_for_execution += 1;
 
-                    while let Some(entry) = queue.first_entry() &&
-                        *entry.key() == next_for_execution
+                    while let Some(entry) = queue.first_entry()
+                        && *entry.key() == next_for_execution
                     {
                         let _ = execute_tx.send(entry.remove());
                         next_for_execution += 1;
@@ -1024,7 +1024,9 @@ mod tests {
                         nonce: rng.random::<u64>(),
                         code_hash: KECCAK_EMPTY,
                         code: Some(Default::default()),
+                        account_id: None,
                     },
+                    original_info: Box::new(AccountInfo::default()),
                     storage,
                     status: AccountStatus::Touched,
                     transaction_id: 0,

@@ -230,7 +230,7 @@ where
 
         let spec = revm_spec_by_timestamp_after_bedrock(self.chain_spec(), timestamp);
 
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec_and_mainnet_gas_params(spec);
 
         let blob_excess_gas_and_price = spec
             .into_eth_spec()
@@ -361,7 +361,7 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         // Create a custom configuration environment with a chain ID of 111
-        let cfg = CfgEnv::new().with_chain_id(111).with_spec(OpSpecId::default());
+        let cfg = CfgEnv::new().with_chain_id(111).with_spec_and_mainnet_gas_params(OpSpecId::default());
 
         let evm_env = EvmEnv { cfg_env: cfg.clone(), ..Default::default() };
 
@@ -400,7 +400,7 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env =
-            EvmEnv { cfg_env: CfgEnv::new().with_spec(OpSpecId::ECOTONE), ..Default::default() };
+            EvmEnv { cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(OpSpecId::ECOTONE), ..Default::default() };
 
         let evm = evm_config.evm_with_env(db, evm_env.clone());
 
@@ -426,7 +426,7 @@ mod tests {
         let evm_config = test_evm_config();
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
-        let cfg = CfgEnv::new().with_chain_id(111).with_spec(OpSpecId::default());
+        let cfg = CfgEnv::new().with_chain_id(111).with_spec_and_mainnet_gas_params(OpSpecId::default());
         let block = BlockEnv::default();
         let evm_env = EvmEnv { block_env: block, cfg_env: cfg.clone() };
 
@@ -463,7 +463,7 @@ mod tests {
         let db = CacheDB::<EmptyDBTyped<ProviderError>>::default();
 
         let evm_env =
-            EvmEnv { cfg_env: CfgEnv::new().with_spec(OpSpecId::ECOTONE), ..Default::default() };
+            EvmEnv { cfg_env: CfgEnv::new().with_spec_and_mainnet_gas_params(OpSpecId::ECOTONE), ..Default::default() };
 
         let evm = evm_config.evm_with_env_and_inspector(db, evm_env.clone(), NoOpInspector {});
 

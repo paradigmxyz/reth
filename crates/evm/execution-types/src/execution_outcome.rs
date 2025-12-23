@@ -208,11 +208,11 @@ impl<T> ExecutionOutcome<T> {
     /// Transform block number to the index of block.
     pub const fn block_number_to_index(&self, block_number: BlockNumber) -> Option<usize> {
         if self.first_block > block_number {
-            return None
+            return None;
         }
         let index = block_number - self.first_block;
         if index >= self.receipts.len() as u64 {
-            return None
+            return None;
         }
         Some(index as usize)
     }
@@ -301,7 +301,7 @@ impl<T> ExecutionOutcome<T> {
         T: Clone,
     {
         if at == self.first_block {
-            return (None, self)
+            return (None, self);
         }
 
         let (mut lower_state, mut higher_state) = (self.clone(), self);
@@ -929,10 +929,20 @@ mod tests {
         let address3 = Address::random();
 
         // Set up account info with some changes
-        let account_info1 =
-            AccountInfo { nonce: 1, balance: U256::from(100), code_hash: B256::ZERO, code: None };
-        let account_info2 =
-            AccountInfo { nonce: 2, balance: U256::from(200), code_hash: B256::ZERO, code: None };
+        let account_info1 = AccountInfo {
+            nonce: 1,
+            balance: U256::from(100),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
+        let account_info2 = AccountInfo {
+            nonce: 2,
+            balance: U256::from(200),
+            code_hash: B256::ZERO,
+            code: None,
+            account_id: None,
+        };
 
         // Set up the bundle state with these accounts
         let mut bundle_state = BundleState::default();

@@ -47,9 +47,9 @@ impl Account {
     /// After `SpuriousDragon` empty account is defined as account with nonce == 0 && balance == 0
     /// && bytecode = None (or hash is [`KECCAK_EMPTY`]).
     pub fn is_empty(&self) -> bool {
-        self.nonce == 0 &&
-            self.balance.is_zero() &&
-            self.bytecode_hash.is_none_or(|hash| hash == KECCAK_EMPTY)
+        self.nonce == 0
+            && self.balance.is_zero()
+            && self.bytecode_hash.is_none_or(|hash| hash == KECCAK_EMPTY)
     }
 
     /// Returns an account bytecode's hash.
@@ -238,12 +238,15 @@ impl From<Account> for AccountInfo {
             nonce: reth_acc.nonce,
             code_hash: reth_acc.bytecode_hash.unwrap_or(KECCAK_EMPTY),
             code: None,
+            account_id: None,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
     use alloy_primitives::{hex_literal::hex, B256, U256};
     use reth_codecs::Compact;
@@ -304,11 +307,12 @@ mod tests {
         assert_eq!(len, 17);
 
         let mut buf = vec![];
-        let bytecode = Bytecode(RevmBytecode::LegacyAnalyzed(LegacyAnalyzedBytecode::new(
-            Bytes::from(&hex!("ff00")),
-            2,
-            JumpTable::from_slice(&[0], 2),
-        )));
+        let bytecode =
+            Bytecode(RevmBytecode::LegacyAnalyzed(Arc::new(LegacyAnalyzedBytecode::new(
+                Bytes::from(&hex!("ff00")),
+                2,
+                JumpTable::from_slice(&[0], 2),
+            ))));
         let len = bytecode.to_compact(&mut buf);
         assert_eq!(len, 16);
 
