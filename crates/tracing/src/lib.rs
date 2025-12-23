@@ -110,7 +110,7 @@ impl RethTracer {
         self
     }
 
-    /// Enables or disables the samply layer.
+    /// Sets the samply layer configuration.
     pub fn with_samply(mut self, config: LayerInfo) -> Self {
         self.samply = Some(config);
         self
