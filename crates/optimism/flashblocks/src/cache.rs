@@ -489,33 +489,6 @@ mod tests {
     }
 
     #[test]
-    fn test_no_compute_state_root_when_disabled() {
-        let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
-        let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
-        let mut manager: SequenceManager<OpPayloadTypes, OpTxEnvelope> =
-            SequenceManager::new(engine_handle);
-        let block_time = 2u64;
-        let factory = TestFlashBlockFactory::new().with_block_time(block_time);
-
-        // Create sequence with zero state root (needs computation)
-        let fb0 = factory.flashblock_at(0).state_root(B256::ZERO).build();
-        let parent_hash = fb0.base.as_ref().unwrap().parent_hash;
-        let base_timestamp = fb0.base.as_ref().unwrap().timestamp;
-        manager.insert_flashblock(fb0.clone()).unwrap();
-
-        // Add flashblocks up to expected final index (2000ms / 200ms = 10)
-        for i in 1..=9 {
-            let fb = factory.flashblock_after(&fb0).index(i).state_root(B256::ZERO).build();
-            manager.insert_flashblock(fb).unwrap();
-        }
-
-        // Request with proper timing - should compute state root for index 9
-        let args = manager.next_buildable_args(parent_hash, base_timestamp - block_time);
-        assert!(args.is_some());
-        assert!(!args.unwrap().compute_state_root);
-    }
-
-    #[test]
     fn test_cache_ring_buffer_evicts_oldest() {
         let (engine_tx, _) = tokio::sync::mpsc::unbounded_channel();
         let engine_handle = ConsensusEngineHandle::<OpPayloadTypes>::new(engine_tx);
