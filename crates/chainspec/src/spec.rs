@@ -970,7 +970,7 @@ impl<H: BlockHeader> EthereumHardforks for ChainSpec<H> {
 
 /// A trait for reading the current chainspec.
 #[auto_impl::auto_impl(&, Arc)]
-pub trait ChainSpecProvider: Debug + Send + Sync {
+pub trait ChainSpecProvider: Debug + Send {
     /// The chain spec type.
     type ChainSpec: EthChainSpec + 'static;
 

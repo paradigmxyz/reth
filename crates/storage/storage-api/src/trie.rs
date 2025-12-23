@@ -9,7 +9,7 @@ use reth_trie_common::{
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
-pub trait StateRootProvider: Send + Sync {
+pub trait StateRootProvider {
     /// Returns the state root of the `BundleState` on top of the current state.
     ///
     /// # Note
@@ -40,8 +40,8 @@ pub trait StateRootProvider: Send + Sync {
 }
 
 /// A type that can compute the storage root for a given account.
-#[auto_impl::auto_impl(&, Box, Arc)]
-pub trait StorageRootProvider: Send + Sync {
+#[auto_impl::auto_impl(&, Box)]
+pub trait StorageRootProvider {
     /// Returns the storage root of the `HashedStorage` for target address on top of the current
     /// state.
     fn storage_root(&self, address: Address, hashed_storage: HashedStorage)
@@ -66,8 +66,8 @@ pub trait StorageRootProvider: Send + Sync {
 }
 
 /// A type that can generate state proof on top of a given post state.
-#[auto_impl::auto_impl(&, Box, Arc)]
-pub trait StateProofProvider: Send + Sync {
+#[auto_impl::auto_impl(&, Box)]
+pub trait StateProofProvider {
     /// Get account and storage proofs of target keys in the `HashedPostState`
     /// on top of the current state.
     fn proof(
@@ -90,8 +90,8 @@ pub trait StateProofProvider: Send + Sync {
 }
 
 /// Trie Reader
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait TrieReader: Send + Sync {
+#[auto_impl::auto_impl(&, Box)]
+pub trait TrieReader: Send {
     /// Returns the [`TrieUpdatesSorted`] for reverting the trie database to its state prior to the
     /// given block and onwards having been processed.
     fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted>;
@@ -104,8 +104,8 @@ pub trait TrieReader: Send + Sync {
 }
 
 /// Trie Writer
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait TrieWriter: Send + Sync {
+#[auto_impl::auto_impl(&, Box)]
+pub trait TrieWriter: Send {
     /// Writes trie updates to the database.
     ///
     /// Returns the number of entries modified.
@@ -146,8 +146,8 @@ pub trait TrieWriter: Send + Sync {
 }
 
 /// Storage Trie Writer
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait StorageTrieWriter: Send + Sync {
+#[auto_impl::auto_impl(&, Box)]
+pub trait StorageTrieWriter: Send {
     /// Writes storage trie updates from the given storage trie map with already sorted updates.
     ///
     /// Expects the storage trie updates to already be sorted by the hashed address key.

@@ -5,11 +5,7 @@ use crate::tree::{
 };
 use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
-use alloy_primitives::{
-    keccak256,
-    map::{B256Set, HashSet},
-    B256,
-};
+use alloy_primitives::{keccak256, map::HashSet, B256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use dashmap::DashMap;
 use derive_more::derive::Deref;
@@ -25,7 +21,6 @@ use reth_trie_parallel::{
     proof::ParallelProof,
     proof_task::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
-        StorageProofInput,
     },
 };
 use std::{collections::BTreeMap, mem, ops::DerefMut, sync::Arc, time::Instant};
@@ -238,74 +233,6 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     hashed_state
 }
 
-/// A pending multiproof task, either [`StorageMultiproofInput`] or [`MultiproofInput`].
-#[derive(Debug)]
-enum PendingMultiproofTask {
-    /// A storage multiproof task input.
-    Storage(StorageMultiproofInput),
-    /// A regular multiproof task input.
-    Regular(MultiproofInput),
-}
-
-impl PendingMultiproofTask {
-    /// Returns the proof sequence number of the task.
-    const fn proof_sequence_number(&self) -> u64 {
-        match self {
-            Self::Storage(input) => input.proof_sequence_number,
-            Self::Regular(input) => input.proof_sequence_number,
-        }
-    }
-
-    /// Returns whether or not the proof targets are empty.
-    fn proof_targets_is_empty(&self) -> bool {
-        match self {
-            Self::Storage(input) => input.proof_targets.is_empty(),
-            Self::Regular(input) => input.proof_targets.is_empty(),
-        }
-    }
-
-    /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
-    fn send_empty_proof(self) {
-        match self {
-            Self::Storage(input) => input.send_empty_proof(),
-            Self::Regular(input) => input.send_empty_proof(),
-        }
-    }
-}
-
-impl From<StorageMultiproofInput> for PendingMultiproofTask {
-    fn from(input: StorageMultiproofInput) -> Self {
-        Self::Storage(input)
-    }
-}
-
-impl From<MultiproofInput> for PendingMultiproofTask {
-    fn from(input: MultiproofInput) -> Self {
-        Self::Regular(input)
-    }
-}
-
-/// Input parameters for dispatching a dedicated storage multiproof calculation.
-#[derive(Debug)]
-struct StorageMultiproofInput {
-    hashed_state_update: HashedPostState,
-    hashed_address: B256,
-    proof_targets: B256Set,
-    proof_sequence_number: u64,
-    state_root_message_sender: CrossbeamSender<MultiProofMessage>,
-    multi_added_removed_keys: Arc<MultiAddedRemovedKeys>,
-}
-
-impl StorageMultiproofInput {
-    /// Destroys the input and sends a [`MultiProofMessage::EmptyProof`] message to the sender.
-    fn send_empty_proof(self) {
-        let _ = self.state_root_message_sender.send(MultiProofMessage::EmptyProof {
-            sequence_number: self.proof_sequence_number,
-            state: self.hashed_state_update,
-        });
-    }
-}
-
 /// Input parameters for dispatching a multiproof calculation.
 #[derive(Debug)]
 struct MultiproofInput {
@@ -380,91 +307,18 @@ impl MultiproofManager {
     }
 
     /// Dispatches a new multiproof calculation to worker pools.
-    fn dispatch(&self, input: PendingMultiproofTask) {
+    fn dispatch(&self, input: MultiproofInput) {
         // If there are no proof targets, we can just send an empty multiproof back immediately
-        if input.proof_targets_is_empty() {
+        if input.proof_targets.is_empty() {
             trace!(
-                sequence_number = input.proof_sequence_number(),
+                sequence_number = input.proof_sequence_number,
                 "No proof targets, sending empty multiproof back immediately"
             );
             input.send_empty_proof();
             return;
         }
 
-        match input {
-            PendingMultiproofTask::Storage(storage_input) => {
-                self.dispatch_storage_proof(storage_input);
-            }
-            PendingMultiproofTask::Regular(multiproof_input) => {
-                self.dispatch_multiproof(multiproof_input);
-            }
-        }
-    }
-
-    /// Dispatches a single storage proof calculation to worker pool.
-    fn dispatch_storage_proof(&self, storage_multiproof_input: StorageMultiproofInput) {
-        let StorageMultiproofInput {
-            hashed_state_update,
-            hashed_address,
-            proof_targets,
-            proof_sequence_number,
-            multi_added_removed_keys,
-            state_root_message_sender: _,
-        } = storage_multiproof_input;
-
-        let storage_targets = proof_targets.len();
-
-        trace!(
-            target: "engine::tree::payload_processor::multiproof",
-            proof_sequence_number,
-            ?proof_targets,
-            storage_targets,
-            "Dispatching storage proof to workers"
-        );
-
-        let start = Instant::now();
-
-        // Create prefix set from targets
-        let prefix_set = reth_trie::prefix_set::PrefixSetMut::from(
-            proof_targets.iter().map(reth_trie::Nibbles::unpack),
-        );
-        let prefix_set = prefix_set.freeze();
-
-        // Build computation input (data only)
-        let input = StorageProofInput::new(
-            hashed_address,
-            prefix_set,
-            proof_targets,
-            true, // with_branch_node_masks
-            Some(multi_added_removed_keys),
-        );
-
-        // Dispatch to storage worker
-        if let Err(e) = self.proof_worker_handle.dispatch_storage_proof(
-            input,
-            ProofResultContext::new(
-                self.proof_result_tx.clone(),
-                proof_sequence_number,
-                hashed_state_update,
-                start,
-            ),
-        ) {
-            error!(target: "engine::tree::payload_processor::multiproof", ?e, "Failed to dispatch storage proof");
-            return;
-        }
-
-        self.metrics
-            .active_storage_workers_histogram
-            .record(self.proof_worker_handle.active_storage_workers() as f64);
-        self.metrics
-            .active_account_workers_histogram
-            .record(self.proof_worker_handle.active_account_workers() as f64);
-        self.metrics
-            .pending_storage_multiproofs_histogram
-            .record(self.proof_worker_handle.pending_storage_tasks() as f64);
-        self.metrics
-            .pending_account_multiproofs_histogram
-            .record(self.proof_worker_handle.pending_account_tasks() as f64);
+        self.dispatch_multiproof(input);
     }
 
     /// Signals that a multiproof calculation has finished.
@@ -742,8 +596,9 @@ impl MultiProofTask {
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
         chunk_size: Option<usize>,
+        tx: CrossbeamSender<MultiProofMessage>,
+        rx: CrossbeamReceiver<MultiProofMessage>,
     ) -> Self {
-        let (tx, rx) = unbounded();
         let (proof_result_tx, proof_result_rx) = unbounded();
         let metrics = MultiProofTaskMetrics::default();
 
@@ -811,17 +666,14 @@ impl MultiProofTask {
             available_storage_workers,
             MultiProofTargets::chunks,
             |proof_targets| {
-                self.multiproof_manager.dispatch(
-                    MultiproofInput {
-                        source: None,
-                        hashed_state_update: Default::default(),
-                        proof_targets,
-                        proof_sequence_number: self.proof_sequencer.next_sequence(),
-                        state_root_message_sender: self.tx.clone(),
-                        multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
-                    }
-                    .into(),
-                );
+                self.multiproof_manager.dispatch(MultiproofInput {
+                    source: None,
+                    hashed_state_update: Default::default(),
+                    proof_targets,
+                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    state_root_message_sender: self.tx.clone(),
+                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                });
             },
         );
         self.metrics.prefetch_proof_chunks_histogram.record(num_chunks as f64);
@@ -969,17 +821,14 @@ impl MultiProofTask {
                 );
                 spawned_proof_targets.extend_ref(&proof_targets);
 
-                self.multiproof_manager.dispatch(
-                    MultiproofInput {
-                        source: Some(source),
-                        hashed_state_update,
-                        proof_targets,
-                        proof_sequence_number: self.proof_sequencer.next_sequence(),
-                        state_root_message_sender: self.tx.clone(),
-                        multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
-                    }
-                    .into(),
-                );
+                self.multiproof_manager.dispatch(MultiproofInput {
+                    source: Some(source),
+                    hashed_state_update,
+                    proof_targets,
+                    proof_sequence_number: self.proof_sequencer.next_sequence(),
+                    state_root_message_sender: self.tx.clone(),
+                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                });
             },
         );
         self.metrics
@@ -1686,8 +1535,9 @@ mod tests {
         let task_ctx = ProofTaskCtx::new(overlay_factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
 
-        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1))
+        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1), tx, rx)
     }
 
     fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>

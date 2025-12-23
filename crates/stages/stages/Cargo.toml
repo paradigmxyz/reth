@@ -75,6 +75,7 @@ reth-network-p2p = { workspace = true, features = ["test-utils"] }
 reth-downloaders.workspace = true
 reth-static-file.workspace = true
 reth-stages-api = { workspace = true, features = ["test-utils"] }
+reth-storage-api.workspace = true
 reth-testing-utils.workspace = true
 reth-trie = { workspace = true, features = ["test-utils"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
@@ -116,6 +117,7 @@ test-utils = [
     "reth-ethereum-primitives?/test-utils",
     "reth-evm-ethereum/test-utils",
 ]
+rocksdb = ["reth-provider/rocksdb"]
 
 [[bench]]
 name = "criterion"
