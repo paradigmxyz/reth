@@ -1,2 +1,0 @@
-DBG write_bytes: len=581 last_idx=19 slot=0x696e3678057072f0c8dba2395c9474f6a52565714cff46262e4548533b097713 val=0x0000000000000000000000000000000000000000000000000000006b223a307d
-[2m2025-11-26T08:43:50.828687Z[0m [31mERROR[0m [2mnitro_node::service[0m[2m:[0m inbox_reader task failed: error sending request for url (http://localhost:8545/)
