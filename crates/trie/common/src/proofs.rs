@@ -1,7 +1,7 @@
 //! Merkle trie proofs.
 
 use crate::{Nibbles, TrieAccount};
-use alloc::{borrow::Cow, vec::Vec};
+use alloc::vec::Vec;
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
@@ -67,17 +67,23 @@ impl MultiProofTargets {
 
     /// Extend multi proof targets with contents of other.
     pub fn extend(&mut self, other: Self) {
-        self.extend_inner(Cow::Owned(other));
+        let Self(other) = other;
+        for (hashed_address, hashed_slots) in other {
+            match self.entry(hashed_address) {
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend(hashed_slots);
+                }
+                hash_map::Entry::Vacant(entry) => {
+                    entry.insert(hashed_slots);
+                }
+            }
+        }
     }
 
     /// Extend multi proof targets with contents of other.
     ///
     /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
     pub fn extend_ref(&mut self, other: &Self) {
-        self.extend_inner(Cow::Borrowed(other));
-    }
-
-    fn extend_inner(&mut self, other: Cow<'_, Self>) {
         for (hashed_address, hashed_slots) in other.iter() {
             self.entry(*hashed_address).or_default().extend(hashed_slots);
         }
