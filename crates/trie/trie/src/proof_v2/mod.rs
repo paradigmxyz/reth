@@ -1359,6 +1359,8 @@ where
     ///
     /// Returns `None` if there is no root node (partial proof), otherwise returns the hash of the
     /// root node.
+    ///
+    /// This method reuses the internal RLP encode buffer for efficiency.
     pub fn compute_root_hash(
         &mut self,
         proof_nodes: &[ProofTrieNode],
@@ -1373,7 +1375,7 @@ where
         // Compute the hash of the root node
         self.rlp_encode_buf.clear();
         root.node.encode(&mut self.rlp_encode_buf);
-        let root_hash = keccak256(&self.rlp_encode_buf);
+        let root_hash = alloy_primitives::keccak256(&self.rlp_encode_buf);
 
         Ok(Some(root_hash))
     }
