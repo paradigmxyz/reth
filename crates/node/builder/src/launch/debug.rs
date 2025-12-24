@@ -282,10 +282,9 @@ impl<L> DebugNodeLauncher<L> {
 
 /// Future for the [`DebugNodeLauncher`].
 #[expect(missing_debug_implementations, clippy::type_complexity)]
-pub struct DebugNodeLauncherFuture<L, Target, N, AddOns>
+pub struct DebugNodeLauncherFuture<L, Target, N>
 where
     N: FullNodeComponents<Types: DebugNode<N>>,
-    AddOns: RethRpcAddOns<N>,
 {
     inner: L,
     target: Target,
@@ -295,10 +294,9 @@ where
     rpc_consensus_convert: Option<RpcConsensusConvert<N>>,
     debug_consensus_client:
         Option<Box<dyn BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + Send + Sync>>,
-    phantom: std::marker::PhantomData<AddOns>,
 }
 
-impl<L, Target, N, AddOns> DebugNodeLauncherFuture<L, Target, N, AddOns>
+impl<L, Target, N, AddOns> DebugNodeLauncherFuture<L, Target, N>
 where
     N: FullNodeComponents<Types: DebugNode<N>>,
     AddOns: RethRpcAddOns<N>,
@@ -315,7 +313,6 @@ where
             map_attributes: None,
             rpc_consensus_convert: self.rpc_consensus_convert,
             debug_consensus_client: self.debug_consensus_client,
-            phantom: self.phantom,
         }
     }
 
@@ -330,7 +327,6 @@ where
             map_attributes: Some(Box::new(f)),
             rpc_consensus_convert: self.rpc_consensus_convert,
             debug_consensus_client: self.debug_consensus_client,
-            phantom: self.phantom,
         }
     }
 
@@ -351,7 +347,6 @@ where
             map_attributes: self.map_attributes,
             rpc_consensus_convert: Some(Arc::new(convert)),
             debug_consensus_client: self.debug_consensus_client,
-            phantom: self.phantom,
         }
     }
 
@@ -367,7 +362,6 @@ where
             map_attributes: self.map_attributes,
             rpc_consensus_convert: self.rpc_consensus_convert,
             debug_consensus_client: Some(Box::new(provider)),
-            phantom: self.phantom,
         }
     }
 
@@ -388,7 +382,6 @@ where
             map_attributes,
             rpc_consensus_convert,
             debug_consensus_client,
-            phantom: _,
         } = self;
 
         let handle = inner.launch_node(target).await?;
@@ -457,7 +450,7 @@ where
     }
 }
 
-impl<L, Target, N, AddOns> IntoFuture for DebugNodeLauncherFuture<L, Target, N, AddOns>
+impl<L, Target, N, AddOns> IntoFuture for DebugNodeLauncherFuture<L, Target, N>
 where
     Target: Send + 'static,
     N: FullNodeComponents<Types: DebugNode<N>>,
@@ -480,7 +473,7 @@ where
     L: LaunchNode<Target, Node = NodeHandle<N, AddOns>> + 'static,
 {
     type Node = NodeHandle<N, AddOns>;
-    type Future = DebugNodeLauncherFuture<L, Target, N, AddOns>;
+    type Future = DebugNodeLauncherFuture<L, Target, N>;
 
     fn launch_node(self, target: Target) -> Self::Future {
         DebugNodeLauncherFuture {
@@ -490,7 +483,6 @@ where
             map_attributes: None,
             rpc_consensus_convert: None,
             debug_consensus_client: None,
-            phantom: std::marker::PhantomData,
         }
     }
 }
