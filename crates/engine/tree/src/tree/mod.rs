@@ -1424,10 +1424,31 @@ where
                                     if let Some(last_valid) =
                                         self.state.forkchoice_state_tracker.last_valid_state()
                                     {
+                                        let head = self
+                                            .sealed_header_by_hash(last_valid.head_block_hash)
+                                            .ok()
+                                            .flatten()
+                                            .map(|header| header.number())
+                                            .unwrap_or(0);
+
+                                        let safe = self
+                                            .sealed_header_by_hash(last_valid.safe_block_hash)
+                                            .ok()
+                                            .flatten()
+                                            .map(|header| header.number())
+                                            .unwrap_or(0);
+
+                                        let finalized = self
+                                            .sealed_header_by_hash(last_valid.finalized_block_hash)
+                                            .ok()
+                                            .flatten()
+                                            .map(|header| header.number())
+                                            .unwrap_or(0);
+
                                         self.metrics
                                             .engine
                                             .forkchoice_updated
-                                            .set_last_valid(&last_valid);
+                                            .set_last_valid(head, safe, finalized);
                                     }
 
                                     // emit an event about the handled FCU
