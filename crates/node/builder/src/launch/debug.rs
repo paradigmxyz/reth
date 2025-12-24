@@ -351,7 +351,14 @@ where
     }
 
     /// Provides an already constructed block provider for the debug consensus client.
-    pub fn with_debug_block_client(
+    ///
+    /// ```ignore
+    /// let handle = builder
+    ///     .launch_with_debug_capabilities()
+    ///     .with_debug_consensus(provider)
+    ///     .await?;
+    /// ```
+    pub fn with_debug_consensus(
         self,
         provider: impl BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + 'static,
     ) -> Self {
@@ -363,15 +370,6 @@ where
             rpc_consensus_convert: self.rpc_consensus_convert,
             debug_consensus_client: Some(Box::new(provider)),
         }
-    }
-
-    /// Alias for [`Self::with_debug_block_client`], for API symmetry with
-    /// `launch_with_debug_capabilities().with_debug_consensus(...)`.
-    pub fn with_debug_consensus(
-        self,
-        provider: impl BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + 'static,
-    ) -> Self {
-        self.with_debug_block_client(provider)
     }
 
     async fn launch_node(self) -> eyre::Result<NodeHandle<N, AddOns>> {
