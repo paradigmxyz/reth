@@ -55,8 +55,11 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
                 tx.value = alloy_primitives::U256::ZERO;
                 tx.gas_price = 0;
             }
+            // CRITICAL FIX: EIP-1559, EIP-2930, EIP-4844, EIP-7702 transactions MUST have their
+            // value set for ETH transfers to work. Previously this was incorrectly set to ZERO,
+            // which caused value transfers to not execute (e.g., block 507's 0.01 ETH transfer).
             _ => {
-                tx.value = alloy_primitives::U256::ZERO;
+                tx.value = signed.value();
                 tx.gas_price = signed.max_fee_per_gas();
             }
         }
