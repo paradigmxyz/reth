@@ -145,6 +145,10 @@ where
     trace!(target: "engine::root::sparse", "Updating sparse trie");
     let started_at = Instant::now();
 
+    // Extract the set of accounts that should be retained even if empty (zombie accounts).
+    // This is used by Arbitrum's zombie account mechanism in pre-Stylus ArbOS versions.
+    let retain_empty_accounts = std::mem::take(&mut state.retain_empty_accounts);
+
     // Reveal new accounts and storage slots.
     trie.reveal_decoded_multiproof(multiproof)?;
     let reveal_multiproof_elapsed = started_at.elapsed();
@@ -232,13 +236,23 @@ where
                 account.unwrap_or_default(),
                 blinded_provider_factory,
             )? {
-                removed_accounts.push(address);
+                // Only remove the account if it's not in the retain set (zombie accounts).
+                if !retain_empty_accounts.contains(&address) {
+                    removed_accounts.push(address);
+                } else {
+                    trace!(target: "engine::root::sparse", ?address, "Retaining empty zombie account");
+                }
             }
         } else if trie.is_account_revealed(address) {
             // Otherwise, if the account is revealed, only update its storage root.
             trace!(target: "engine::root::sparse", ?address, "Updating account storage root");
             if !trie.update_account_storage_root(address, blinded_provider_factory)? {
-                removed_accounts.push(address);
+                // Only remove the account if it's not in the retain set (zombie accounts).
+                if !retain_empty_accounts.contains(&address) {
+                    removed_accounts.push(address);
+                } else {
+                    trace!(target: "engine::root::sparse", ?address, "Retaining empty zombie account");
+                }
             }
         }
     }
@@ -247,7 +261,12 @@ where
     for (address, account) in state.accounts {
         trace!(target: "engine::root::sparse", ?address, "Updating account");
         if !trie.update_account(address, account.unwrap_or_default(), blinded_provider_factory)? {
-            removed_accounts.push(address);
+            // Only remove the account if it's not in the retain set (zombie accounts).
+            if !retain_empty_accounts.contains(&address) {
+                removed_accounts.push(address);
+            } else {
+                trace!(target: "engine::root::sparse", ?address, "Retaining empty zombie account");
+            }
         }
     }
 

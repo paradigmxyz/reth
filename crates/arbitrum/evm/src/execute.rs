@@ -299,13 +299,60 @@ impl DefaultArbOsHooks {
     where
         D: revm::Database,
     {
-        if amount.is_zero() {
-            return Ok(());
-        }
+        Self::transfer_balance_with_zombie_tracking(state, from, to, amount, None)
+    }
 
-        // Load accounts into cache
+    /// Transfer balance with optional zombie account tracking.
+    /// 
+    /// This implements Go nitro's TransferBalance behavior including the CreateZombieIfDeleted
+    /// mechanism for pre-Stylus ArbOS versions. When `tx_state` is provided and ArbOS version
+    /// is less than 30 (Stylus), zero-value transfers will check if the `from` account was
+    /// previously deleted and resurrect it as a zombie if so.
+    /// 
+    /// The zombie mechanism is critical for retryable transactions where:
+    /// 1. In tx1 (submit retryable), the escrow account is created and then deleted as empty
+    /// 2. In tx2 (retry), a zero-value transfer from escrow triggers CreateZombieIfDeleted
+    /// 3. The zombie entry prevents the account from being pruned in the trie
+    pub fn transfer_balance_with_zombie_tracking<D>(
+        state: &mut revm::database::State<D>,
+        from: Address,
+        to: Address,
+        amount: U256,
+        mut tx_state: Option<&mut ArbTxProcessorState>,
+    ) -> Result<(), ()>
+    where
+        D: revm::Database,
+    {
+        // Load accounts into cache - this is equivalent to geth's getOrNewStateObject
+        // which creates the account in state if it doesn't exist
         let _ = state.load_cache_account(from);
         let _ = state.load_cache_account(to);
+
+        // CRITICAL: Match Go nitro's TransferBalance behavior for zero amounts.
+        // Go nitro's TransferBalance for zero amounts:
+        // 1. Calls CreateZombieIfDeleted on `from` (if arbos_version < 30)
+        // 2. Calls SubBalance on `from` (which does nothing for zero amounts)
+        // 3. Calls AddBalance on `to` (which calls getOrNewStateObject but doesn't mark dirty for zero)
+        // 
+        // IMPORTANT: We do NOT touch the `to` account for zero amounts because:
+        // - geth's AddBalance(0) only calls getOrNewStateObject, it doesn't mark the account dirty
+        // - Only the zombie mechanism (CreateZombieIfDeleted) should create empty accounts
+        // - Creating extra empty accounts would cause stateRoot mismatches
+        if amount.is_zero() {
+            // Implement CreateZombieIfDeleted for pre-Stylus ArbOS versions.
+            // This is called on the `from` address when amount is zero.
+            // See nitro/arbos/util/transfer.go lines 70-72
+            if let Some(ref mut tx_state) = tx_state {
+                if tx_state.arbos_version < 30 {
+                    // Check if the `from` account was previously deleted and resurrect as zombie
+                    Self::create_zombie_if_deleted(state, from, tx_state);
+                }
+            }
+            
+            // For zero amounts, we just return Ok without modifying state.
+            // The `to` account is NOT touched because geth's AddBalance(0) doesn't mark it dirty.
+            return Ok(());
+        }
 
         // Check from balance
         let from_account = match state.basic(from) {
@@ -352,6 +399,136 @@ impl DefaultArbOsHooks {
         let amount_u128: u128 = amount.try_into().map_err(|_| ())?;
         let _ = state.increment_balances(core::iter::once((to, amount_u128)));
         Ok(())
+    }
+
+    /// Implements Go nitro's CreateZombieIfDeleted function.
+    /// 
+    /// This checks if an account was previously deleted (in stateObjectsDestruct)
+    /// and if so, creates a zombie entry for it. The zombie entry prevents the
+    /// account from being pruned during trie updates.
+    /// 
+    /// See nitro/go-ethereum/core/state/statedb_arbitrum.go lines 182-188
+    fn create_zombie_if_deleted<D>(
+        state: &mut revm::database::State<D>,
+        addr: Address,
+        tx_state: &mut ArbTxProcessorState,
+    )
+    where
+        D: revm::Database,
+    {
+        // Check if account doesn't exist (getStateObject returns nil)
+        let account_exists = state.cache.accounts.get(&addr)
+            .map(|cached| cached.account.is_some())
+            .unwrap_or(false);
+        
+        let was_deleted = tx_state.deleted_empty_accounts.contains(&addr);
+        
+        tracing::info!(
+            target: "arbitrum::zombie",
+            ?addr,
+            account_exists,
+            was_deleted,
+            deleted_count = tx_state.deleted_empty_accounts.len(),
+            "CreateZombieIfDeleted: checking account"
+        );
+        
+        if !account_exists {
+            // Check if account was previously deleted (in stateObjectsDestruct)
+            if was_deleted {
+                // Create zombie entry - this prevents the account from being pruned
+                // Use zombie_sink from reth-trie-common to pass the address to the trie layer via thread-local
+                tx_state.zombie_accounts.insert(addr);
+                reth_trie_common::zombie_sink::push(addr);
+                eprintln!("[ZOMBIE-THREAD-DEBUG] zombie_sink::push called on thread {:?} for addr {:?}", 
+                    std::thread::current().id(), addr);
+                
+                // Also touch the account to ensure it exists in the state
+                Self::touch_account(state, addr);
+                
+                tracing::info!(
+                    target: "arbitrum::zombie",
+                    ?addr,
+                    "CreateZombieIfDeleted: resurrected deleted account as zombie"
+                );
+            }
+        }
+    }
+
+    /// Touch an account to ensure it exists in the state trie, even if it's empty.
+    /// This matches geth's behavior where AddBalance(0) on an empty account calls touch()
+    /// which marks the account as dirty and ensures it persists in the trie.
+    /// 
+    /// This is critical for retryable escrow accounts which may have zero value but
+    /// must exist in the state trie to match the official chain's state root.
+    /// 
+    /// NOTE: We cannot use increment_balances(0) because revm skips zero increments.
+    /// Instead, we must manually update the cache and create a transition entry.
+    fn touch_account<D>(state: &mut revm::database::State<D>, address: Address)
+    where
+        D: revm::Database,
+    {
+        use revm::database::states::{TransitionAccount, StorageWithOriginalValues, AccountStatus, CacheAccount};
+        use revm::state::AccountInfo;
+        
+        // Load the account into cache (creates it if it doesn't exist)
+        let _ = state.load_cache_account(address);
+        
+        // Get the current cache status to determine the correct transition
+        let (previous_status, previous_info, needs_touch) = {
+            if let Some(cached) = state.cache.accounts.get(&address) {
+                let prev_status = cached.status;
+                let prev_info = cached.account.as_ref().map(|a| a.info.clone());
+                // Only touch if the account doesn't exist or is empty
+                let needs = cached.account.is_none() || 
+                    cached.account.as_ref().map(|a| a.info.is_empty()).unwrap_or(true);
+                (prev_status, prev_info, needs)
+            } else {
+                (AccountStatus::LoadedNotExisting, None, true)
+            }
+        };
+        
+        if !needs_touch {
+            tracing::info!(
+                target: "arbitrum::zombie",
+                ?address,
+                "touch_account: account already exists with data, skipping"
+            );
+            return;
+        }
+        
+        // First, update the cache to have the account with empty info
+        // This is necessary because apply_transition expects the cache to be consistent
+        if let Some(cached) = state.cache.accounts.get_mut(&address) {
+            if cached.account.is_none() {
+                // Create an empty account in the cache
+                cached.account = Some(revm::database::PlainAccount {
+                    info: AccountInfo::default(),
+                    storage: Default::default(),
+                });
+            }
+            // Mark the account as changed
+            cached.status = cached.status.on_changed(true); // true = has_no_nonce_and_code
+        }
+        
+        // Create a transition entry for the account to ensure it appears in bundle_state.
+        let transition = TransitionAccount {
+            info: Some(AccountInfo::default()),
+            status: AccountStatus::InMemoryChange,
+            previous_info,
+            previous_status,
+            storage: StorageWithOriginalValues::default(),
+            storage_was_destroyed: false,
+        };
+        
+        // Apply the transition to the state
+        state.apply_transition(vec![(address, transition)]);
+        
+        tracing::info!(
+            target: "arbitrum::zombie",
+            ?address,
+            ?previous_status,
+            "touch_account: created transition entry for zombie account"
+        );
     }
 
     pub fn burn_balance<D>(
@@ -511,6 +688,21 @@ impl DefaultArbOsHooks {
             let _ = Self::transfer_balance(state_db, network_fee_account, from, submission_fee);
             let _ = Self::transfer_balance(state_db, from, fee_refund_addr, withheld_submission_fee);
             return Err(());
+        }
+
+        // CRITICAL FIX: When retry_value=0, the transfer_balance above is a no-op in revm
+        // (unlike Go geth where AddBalance(0) still creates a state object).
+        // We need to explicitly touch the escrow account so it appears in the transition_state
+        // and can be tracked as deleted via EIP-161 cleanup. This is necessary for the zombie
+        // mechanism to work correctly - when the retry tx executes and does a zero-value transfer
+        // FROM the escrow, CreateZombieIfDeleted needs to find the escrow in deleted_empty_accounts.
+        if retry_value.is_zero() {
+            tracing::info!(
+                target: "arbitrum::zombie",
+                ?escrow,
+                "SubmitRetryable: touching escrow account with zero retry_value"
+            );
+            Self::touch_account(state_db, escrow);
         }
 
         let timeout = block_timestamp + 604800;
@@ -954,7 +1146,12 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 use arb_alloy_util::retryables::escrow_address_from_ticket;
                 let escrow = Address::from_slice(&escrow_address_from_ticket(ticket_id.0));
                 
-                if let Err(_) = Self::transfer_balance(state_db, escrow, ctx.sender, ctx.value) {
+                // CRITICAL: Use zombie-aware transfer for retry transactions.
+                // In block 143, the escrow account was created with zero value in tx1 (submit retryable),
+                // then deleted as empty during EIP-161 cleanup. In tx2 (retry), this zero-value transfer
+                // from escrow triggers CreateZombieIfDeleted, which resurrects the escrow as a zombie.
+                // The zombie entry prevents the escrow from being pruned in the final state trie.
+                if let Err(_) = Self::transfer_balance_with_zombie_tracking(state_db, escrow, ctx.sender, ctx.value, Some(state)) {
                     return StartTxHookResult {
                         end_tx_now: true,
                         gas_used: 0,
@@ -1055,6 +1252,29 @@ impl ArbOsHooks for DefaultArbOsHooks {
                         error: Some("failed to escrow callvalue".to_string()),
                     };
                 }
+                
+                // CRITICAL FIX: When retry_value=0, the transfer_balance above is a no-op in revm
+                // (unlike Go geth where AddBalance(0) still creates a state object).
+                // We need to explicitly touch the escrow account so it appears in the transition_state
+                // and can be tracked as deleted via EIP-161 cleanup. This is necessary for the zombie
+                // mechanism to work correctly - when the retry tx executes and does a zero-value transfer
+                // FROM the escrow, CreateZombieIfDeleted needs to find the escrow in deleted_empty_accounts.
+                if retry_value.is_zero() {
+                    tracing::info!(
+                        target: "arbitrum::zombie",
+                        ?escrow,
+                        "SubmitRetryable: touching escrow account with zero retry_value"
+                    );
+                    Self::touch_account(state_db, escrow);
+                }
+                
+                tracing::info!(
+                    target: "arbitrum::zombie",
+                    ?escrow,
+                    ?retry_value,
+                    arbos_version = state.arbos_version,
+                    "SubmitRetryable: escrow created (deletion tracking happens in build.rs)"
+                );
                 
                 let balance = match state_db.basic(ctx.sender) {
                     Ok(Some(acc)) => U256::from(acc.balance),
@@ -1893,6 +2113,15 @@ pub struct ArbTxProcessorState {
     pub cached_l1_block_hashes: std::collections::HashMap<u64, B256>,
     pub contracts_stack: Vec<Address>,
     pub programs_map: std::collections::HashMap<Address, u32>,
+    /// Tracks accounts that were deleted due to being empty (EIP-161 cleanup).
+    /// This is equivalent to geth's stateObjectsDestruct map.
+    /// Used by CreateZombieIfDeleted to resurrect accounts that were deleted
+    /// in a previous transaction within the same block.
+    pub deleted_empty_accounts: std::collections::HashSet<Address>,
+    /// Tracks accounts that should be preserved as zombies (not pruned during trie update).
+    /// These are accounts that were deleted in a previous tx and then resurrected
+    /// via CreateZombieIfDeleted in a subsequent tx.
+    pub zombie_accounts: std::collections::HashSet<Address>,
 }
 
 impl Default for ArbTxProcessorState {
@@ -1917,6 +2146,8 @@ impl Default for ArbTxProcessorState {
             cached_l1_block_hashes: std::collections::HashMap::new(),
             contracts_stack: Vec::new(),
             programs_map: std::collections::HashMap::new(),
+            deleted_empty_accounts: std::collections::HashSet::new(),
+            zombie_accounts: std::collections::HashSet::new(),
         }
     }
 }

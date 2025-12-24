@@ -268,7 +268,7 @@ impl<TX: DbTx> DatabaseHashedPostState<TX> for HashedPostState {
             })
             .collect();
 
-        Ok(Self { accounts: hashed_accounts, storages: hashed_storages })
+        Ok(Self { accounts: hashed_accounts, storages: hashed_storages, retain_empty_accounts: Default::default() })
     }
 }
 

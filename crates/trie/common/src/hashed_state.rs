@@ -29,6 +29,12 @@ pub struct HashedPostState {
     pub accounts: B256Map<Option<Account>>,
     /// Mapping of hashed address to hashed storage.
     pub storages: B256Map<HashedStorage>,
+    /// Arbitrum: Set of hashed addresses that should be retained even if empty.
+    /// This is used for the zombie account mechanism in pre-Stylus ArbOS versions.
+    /// Zombie accounts are empty accounts that were deleted in a previous tx
+    /// and then resurrected via CreateZombieIfDeleted in a subsequent tx.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub retain_empty_accounts: B256Set,
 }
 
 impl HashedPostState {
@@ -37,6 +43,7 @@ impl HashedPostState {
         Self {
             accounts: B256Map::with_capacity_and_hasher(capacity, Default::default()),
             storages: B256Map::with_capacity_and_hasher(capacity, Default::default()),
+            retain_empty_accounts: B256Set::default(),
         }
     }
 
@@ -98,12 +105,39 @@ impl HashedPostState {
             
             // CONSENSUS-CRITICAL: Match go-ethereum's IntermediateRoot(deleteEmptyObjects=true) behavior.
             // - Non-empty accounts (nonce>0 OR balance>0 OR has code): insert as Some(account)
-            // - Empty accounts (nonce=0, balance=0, no code): insert as None to mark for deletion
+            // - Empty accounts that were MODIFIED: insert as None to mark for deletion (EIP-161 cleanup)
+            // - Empty accounts that were only LOADED (not modified): skip entirely (preserve existing trie leaf)
             // - None accounts (info not loaded): skip entirely (no change to trie)
+            //
+            // CRITICAL FIX: Only delete empty accounts if they were actually modified.
+            // If an empty account was only loaded (read but not mutated), we must NOT delete it
+            // because it may be a zombie account that was preserved in a previous block.
+            // This matches go-ethereum's behavior where only "dirty" accounts are considered for deletion.
+            
+            // Check zombie accounts from thread-local sink (Arbitrum-specific).
+            // Zombie accounts are accounts that were deleted in a previous tx and resurrected
+            // via CreateZombieIfDeleted. They must be retained in the trie even though empty.
+            let zombie_accounts = crate::zombie_sink::peek_hashed();
+            if !zombie_accounts.is_empty() {
+                eprintln!("[ZOMBIE-THREAD-DEBUG] from_bundle_state: checking zombie_sink on thread {:?}, found {} accounts",
+                    std::thread::current().id(), zombie_accounts.len());
+            }
+            let is_zombie = zombie_accounts.contains(&address);
+            
+            // Check if the account was actually modified (not just loaded)
+            let was_modified = !status.is_not_modified();
+            
             if let Some(ref acc) = account {
                 if acc.is_empty() {
-                    // Empty account should be deleted from trie
-                    accounts.insert(address, None);
+                    if is_zombie {
+                        // Zombie account: retain as empty account in trie
+                        eprintln!("[BUNDLE-STATE-DEBUG] ZOMBIE RETAINED via zombie_sink: {:?}", raw_address);
+                        accounts.insert(address, account);
+                    } else if was_modified {
+                        // Modified empty account: delete from trie (EIP-161 cleanup)
+                        accounts.insert(address, None);
+                    }
+                    // If empty and NOT modified and NOT zombie, skip entirely (preserve existing trie leaf)
                 } else {
                     // Non-empty account should be stored in trie
                     accounts.insert(address, account);
@@ -117,7 +151,12 @@ impl HashedPostState {
                     eprintln!("[BUNDLE-STATE-DEBUG] Using original_info for {:?}: nonce={}, balance={}", 
                         raw_address, orig_account.nonce, orig_account.balance);
                     if orig_account.is_empty() {
-                        accounts.insert(address, None);
+                        if is_zombie {
+                            eprintln!("[BUNDLE-STATE-DEBUG] ZOMBIE RETAINED (orig_info) via zombie_sink: {:?}", raw_address);
+                            accounts.insert(address, Some(orig_account));
+                        } else {
+                            accounts.insert(address, None);
+                        }
                     } else {
                         accounts.insert(address, Some(orig_account));
                     }
@@ -130,7 +169,15 @@ impl HashedPostState {
                 storages.insert(address, storage);
             }
         }
-        Self { accounts, storages }
+        
+        // Populate retain_empty_accounts from zombie_sink
+        let retain_empty_accounts = crate::zombie_sink::peek_hashed().into_iter().collect();
+        if !crate::zombie_sink::is_empty() {
+            eprintln!("[ZOMBIE-SINK-DEBUG] from_bundle_state (rayon): setting retain_empty_accounts with {} zombie accounts",
+                crate::zombie_sink::len());
+        }
+        
+        Self { accounts, storages, retain_empty_accounts }
     }
 
     /// Initialize [`HashedPostState`] from bundle state.
@@ -177,12 +224,39 @@ impl HashedPostState {
             
             // CONSENSUS-CRITICAL: Match go-ethereum's IntermediateRoot(deleteEmptyObjects=true) behavior.
             // - Non-empty accounts (nonce>0 OR balance>0 OR has code): insert as Some(account)
-            // - Empty accounts (nonce=0, balance=0, no code): insert as None to mark for deletion
+            // - Empty accounts that were MODIFIED: insert as None to mark for deletion (EIP-161 cleanup)
+            // - Empty accounts that were only LOADED (not modified): skip entirely (preserve existing trie leaf)
             // - None accounts (info not loaded): skip entirely (no change to trie)
+            //
+            // CRITICAL FIX: Only delete empty accounts if they were actually modified.
+            // If an empty account was only loaded (read but not mutated), we must NOT delete it
+            // because it may be a zombie account that was preserved in a previous block.
+            // This matches go-ethereum's behavior where only "dirty" accounts are considered for deletion.
+            
+            // Check zombie accounts from thread-local sink (Arbitrum-specific).
+            // Zombie accounts are accounts that were deleted in a previous tx and resurrected
+            // via CreateZombieIfDeleted. They must be retained in the trie even though empty.
+            let zombie_accounts = crate::zombie_sink::peek_hashed();
+            if !zombie_accounts.is_empty() {
+                eprintln!("[ZOMBIE-THREAD-DEBUG] from_bundle_state: checking zombie_sink on thread {:?}, found {} accounts",
+                    std::thread::current().id(), zombie_accounts.len());
+            }
+            let is_zombie = zombie_accounts.contains(&address);
+            
+            // Check if the account was actually modified (not just loaded)
+            let was_modified = !status.is_not_modified();
+            
             if let Some(ref acc) = account {
                 if acc.is_empty() {
-                    // Empty account should be deleted from trie
-                    accounts.insert(address, None);
+                    if is_zombie {
+                        // Zombie account: retain as empty account in trie
+                        eprintln!("[BUNDLE-STATE-DEBUG] ZOMBIE RETAINED via zombie_sink: {:?}", raw_address);
+                        accounts.insert(address, account);
+                    } else if was_modified {
+                        // Modified empty account: delete from trie (EIP-161 cleanup)
+                        accounts.insert(address, None);
+                    }
+                    // If empty and NOT modified and NOT zombie, skip entirely (preserve existing trie leaf)
                 } else {
                     // Non-empty account should be stored in trie
                     accounts.insert(address, account);
@@ -196,7 +270,12 @@ impl HashedPostState {
                     eprintln!("[BUNDLE-STATE-DEBUG] Using original_info for {:?}: nonce={}, balance={}", 
                         raw_address, orig_account.nonce, orig_account.balance);
                     if orig_account.is_empty() {
-                        accounts.insert(address, None);
+                        if is_zombie {
+                            eprintln!("[BUNDLE-STATE-DEBUG] ZOMBIE RETAINED (orig_info) via zombie_sink: {:?}", raw_address);
+                            accounts.insert(address, Some(orig_account));
+                        } else {
+                            accounts.insert(address, None);
+                        }
                     } else {
                         accounts.insert(address, Some(orig_account));
                     }
@@ -209,7 +288,15 @@ impl HashedPostState {
                 storages.insert(address, storage);
             }
         }
-        Self { accounts, storages }
+        
+        // Populate retain_empty_accounts from zombie_sink
+        let retain_empty_accounts = crate::zombie_sink::peek_hashed().into_iter().collect();
+        if !crate::zombie_sink::is_empty() {
+            eprintln!("[ZOMBIE-SINK-DEBUG] from_bundle_state (non-rayon): setting retain_empty_accounts with {} zombie accounts",
+                crate::zombie_sink::len());
+        }
+        
+        Self { accounts, storages, retain_empty_accounts }
     }
 
     /// Construct [`HashedPostState`] from a single [`HashedStorage`].
@@ -217,6 +304,7 @@ impl HashedPostState {
         Self {
             accounts: HashMap::default(),
             storages: HashMap::from_iter([(hashed_address, storage)]),
+            retain_empty_accounts: B256Set::default(),
         }
     }
 
@@ -402,6 +490,7 @@ impl HashedPostState {
 
     fn extend_inner(&mut self, other: Cow<'_, Self>) {
         self.accounts.extend(other.accounts.iter().map(|(&k, &v)| (k, v)));
+        self.retain_empty_accounts.extend(other.retain_empty_accounts.iter().copied());
 
         self.storages.reserve(other.storages.len());
         match other {
@@ -486,6 +575,7 @@ impl HashedPostState {
     pub fn clear(&mut self) {
         self.accounts.clear();
         self.storages.clear();
+        self.retain_empty_accounts.clear();
     }
 }
 

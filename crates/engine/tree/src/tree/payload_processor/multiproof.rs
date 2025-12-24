@@ -240,6 +240,20 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
         }
     }
 
+    // Arbitrum zombie accounts: Take any zombie accounts from the thread-local sink
+    // and add them to the retain_empty_accounts set. This ensures that empty accounts
+    // that were deleted in a previous tx and resurrected via CreateZombieIfDeleted
+    // are preserved in the trie (pre-Stylus ArbOS versions only).
+    let zombie_accounts = reth_trie::zombie_sink::take_hashed();
+    if !zombie_accounts.is_empty() {
+        tracing::info!(
+            target: "engine::root",
+            zombies_count = zombie_accounts.len(),
+            "Adding zombie accounts to retain_empty_accounts"
+        );
+        hashed_state.retain_empty_accounts = zombie_accounts.into_iter().collect();
+    }
+
     hashed_state
 }
 
