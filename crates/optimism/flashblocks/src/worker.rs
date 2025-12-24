@@ -4,13 +4,11 @@ use alloy_primitives::B256;
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_errors::RethError;
-use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvm,
-};
+use reth_evm::{execute::BlockBuilder, ConfigureEvm};
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, Recovered,
+    header::HeaderMut, AlloyBlockHeader, Block, BlockTy, HeaderTy, NodePrimitives, ReceiptTy,
+    Recovered, RecoveredBlock,
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
@@ -103,31 +101,25 @@ where
             let _gas_used = builder.execute_transaction(tx)?;
         }
 
-        // if the real state root should be computed
-        let BlockBuilderOutcome { execution_result, block, hashed_state, trie_updates } =
-            if args.compute_state_root {
-                trace!(target: "flashblocks", "Computing block state root with trie updates");
-                builder.finish(&state_provider)?
-            } else {
-                trace!(target: "flashblocks", "Building block without state root computation");
-                builder.finish(NoopProvider::default())?
-            };
+        // Build the block without computing state root
+        trace!(target: "flashblocks", "Building block without state root computation");
+        let execution = builder.finish(NoopProvider::default())?;
 
         let execution_outcome = ExecutionOutcome::new(
             state.take_bundle(),
-            vec![execution_result.receipts],
-            block.number(),
-            vec![execution_result.requests],
+            vec![execution.execution_result.receipts],
+            execution.block.number(),
+            vec![execution.execution_result.requests],
         );
 
         let pending_block = PendingBlock::with_executed_block(
             Instant::now() + Duration::from_secs(1),
             ExecutedBlock::new(
-                block.into(),
+                execution.block.into(),
                 Arc::new(execution_outcome),
                 ComputedTrieData::without_trie_input(
-                    Arc::new(hashed_state.into_sorted()),
-                    Arc::new(trie_updates.into_sorted()),
+                    Arc::new(execution.hashed_state.clone().into_sorted()),
+                    Arc::default(),
                 ),
             ),
         );
@@ -135,10 +127,39 @@ where
             pending_block,
             args.last_flashblock_index,
             args.last_flashblock_hash,
+            execution.hashed_state,
             args.compute_state_root,
         );
 
         Ok(Some((pending_flashblock, request_cache)))
+    }
+
+    pub(crate) fn compute_state_root(
+        &self,
+        computed_block: PendingFlashBlock<N>,
+    ) -> eyre::Result<ExecutedBlock<N>>
+    where
+        N::BlockHeader: HeaderMut,
+    {
+        let state_provider = self.provider.state_by_block_hash(computed_block.parent_hash())?;
+        let (state_root, trie_updates) =
+            state_provider.state_root_with_updates(computed_block.hashed_state.clone())?;
+
+        // Reconstruct the block with the newly computed state root
+        let original_block = computed_block.pending.block();
+        let senders = original_block.senders().to_vec();
+        let (mut header, body) = original_block.clone_block().split();
+        header.set_state_root(state_root);
+
+        // Re-populate the executed block
+        Ok(ExecutedBlock::new(
+            Arc::new(RecoveredBlock::new_unhashed(N::Block::new(header, body), senders)),
+            computed_block.pending.executed_block.execution_output.clone(),
+            ComputedTrieData::without_trie_input(
+                Arc::new(computed_block.hashed_state.into_sorted()),
+                Arc::new(trie_updates.into_sorted()),
+            ),
+        ))
     }
 }
 

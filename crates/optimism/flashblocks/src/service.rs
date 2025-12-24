@@ -42,7 +42,7 @@ pub struct FlashBlockService<
     /// Currently running block build job with start time and result receiver.
     job: Option<BuildJob<N>>,
     /// Manages flashblock sequences with caching and intelligent build selection.
-    sequences: SequenceManager<P, N::SignedTx>,
+    sequences: Arc<SequenceManager<P, N::SignedTx>>,
 
     /// `FlashBlock` service's metrics
     metrics: FlashBlockServiceMetrics,
@@ -52,6 +52,7 @@ impl<P, N, S, EvmConfig, Provider> FlashBlockService<P, N, S, EvmConfig, Provide
 where
     P: PayloadTypes,
     N: NodePrimitives,
+    N::BlockHeader: reth_primitives_traits::header::HeaderMut,
     P::BuiltPayload: reth_payload_primitives::BuiltPayload<Primitives = N>,
     S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
     EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>
@@ -84,7 +85,7 @@ where
             builder: FlashBlockBuilder::new(evm_config, provider),
             spawner,
             job: None,
-            sequences: SequenceManager::new(engine_handle),
+            sequences: Arc::new(SequenceManager::new(engine_handle)),
             metrics: FlashBlockServiceMetrics::default(),
         }
     }
@@ -97,7 +98,7 @@ where
     }
 
     /// Returns the sender half to the flashblock sequence.
-    pub const fn block_sequence_broadcaster(
+    pub fn block_sequence_broadcaster(
         &self,
     ) -> &tokio::sync::broadcast::Sender<FlashBlockCompleteSequence> {
         self.sequences.block_sequence_broadcaster()
@@ -136,14 +137,32 @@ where
 
                     match result {
                         Ok(Some((pending, cached_reads))) => {
+                            // Update the new pending state immediately after execution for eth api handler
                             let parent_hash = pending.parent_hash();
                             self.sequences
-                                .on_build_complete(parent_hash, Some((pending.clone(), cached_reads)));
+                                .on_build_complete(parent_hash, cached_reads).await;
+                            let _ = tx.send(Some(pending.clone()));
 
                             let elapsed = start_time.elapsed();
                             self.metrics.execution_duration.record(elapsed.as_secs_f64());
 
-                            let _ = tx.send(Some(pending));
+                            // For sync and flashblocks consensus. Calculate the state root if missing
+                            if pending.compute_state_root {
+                                let sequences = Arc::clone(&self.sequences);
+                                let builder = self.builder.clone();
+                                self.spawner.spawn(async move {
+                                    match builder.compute_state_root(pending) {
+                                        Ok(computed_block) => {
+                                            sequences.on_state_root_complete(parent_hash, computed_block).await;
+                                        }
+                                        Err(err) => {
+                                            warn!(target: "flashblocks", %err, "Failed to compute state root");
+                                        }
+                                    }
+                                });
+                            }
+
+
                         }
                         Ok(None) => {
                             trace!(target: "flashblocks", "Build job returned None");
@@ -159,17 +178,17 @@ where
                     match result {
                         Some(Ok(flashblock)) => {
                             // Process first flashblock
-                            self.process_flashblock(flashblock);
+                            self.process_flashblock(flashblock).await;
 
                             // Batch process all other immediately available flashblocks
                             while let Some(result) = self.incoming_flashblock_rx.next().now_or_never().flatten() {
                                 match result {
-                                    Ok(fb) => self.process_flashblock(fb),
+                                    Ok(fb) => self.process_flashblock(fb).await,
                                     Err(err) => warn!(target: "flashblocks", %err, "Error receiving flashblock"),
                                 }
                             }
 
-                            self.try_start_build_job();
+                            self.try_start_build_job().await;
                         }
                         Some(Err(err)) => {
                             warn!(target: "flashblocks", %err, "Error receiving flashblock");
@@ -186,14 +205,14 @@ where
 
     /// Processes a single flashblock: notifies subscribers, records metrics, and inserts into
     /// sequence.
-    fn process_flashblock(&mut self, flashblock: FlashBlock) {
+    async fn process_flashblock(&self, flashblock: FlashBlock) {
         self.notify_received_flashblock(&flashblock);
 
         if flashblock.index == 0 {
-            self.metrics.last_flashblock_length.record(self.sequences.pending().count() as f64);
+            self.metrics.last_flashblock_length.record(self.sequences.pending_count().await as f64);
         }
 
-        if let Err(err) = self.sequences.insert_flashblock(flashblock) {
+        if let Err(err) = self.sequences.insert_flashblock(flashblock).await {
             trace!(target: "flashblocks", %err, "Failed to insert flashblock");
         }
     }
@@ -206,7 +225,7 @@ where
     }
 
     /// Attempts to build a block if no job is currently running and a buildable sequence exists.
-    fn try_start_build_job(&mut self) {
+    async fn try_start_build_job(&mut self) {
         if self.job.is_some() {
             return; // Already building
         }
@@ -215,7 +234,8 @@ where
             return;
         };
 
-        let Some(args) = self.sequences.next_buildable_args(latest.hash(), latest.timestamp())
+        let Some(args) =
+            self.sequences.next_buildable_args(latest.hash(), latest.timestamp()).await
         else {
             return; // Nothing buildable
         };
