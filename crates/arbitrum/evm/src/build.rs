@@ -520,16 +520,9 @@ where
             _ => None,
         };
 
-        if is_deposit {
-            let deposit_value = tx.tx().value();
-            if !deposit_value.is_zero() {
-                if let Some(to) = to_addr {
-                    let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
-                    let db: &mut revm::database::State<D> = *db_ref;
-                    let _ = DefaultArbOsHooks::execute_deposit(db, sender, to, deposit_value);
-                }
-            }
-        }
+        // NOTE: Deposit transactions are fully handled in start_tx hook (execute.rs)
+        // which mints balance to sender and transfers to recipient.
+        // Do NOT call execute_deposit here as it would duplicate the deposit.
 
         let mut maybe_predeploy_result: Option<(revm::context::result::ExecutionResult<<Self::Evm as reth_evm::Evm>::HaltReason>, u64)> = None;
         // Skip predeploy dispatch for transactions that are fully handled in start_tx
@@ -641,6 +634,7 @@ where
         // ITERATION 80: Nonce restoration logic
         // - Internal (0x6a): ALWAYS restore to 0 (ArbOS should never have nonce > 0)
         // - Retry (0x68): Restore to current_nonce (prevents increment for THIS tx)
+        // - Deposit (0x64): Restore to current_nonce (deposit txs don't increment nonce)
         // - SubmitRetryable (0x69): NO RESTORATION - it SHOULD increment nonce!
         //
         // Key insight from official chain: After Block 1 with SubmitRetryable + Retry,
@@ -650,6 +644,11 @@ where
         //
         // Previous iterations incorrectly restored SubmitRetryable nonce to 0,
         // which caused state root mismatches starting from Block 1.
+        //
+        // ITERATION 82: Added Deposit (0x64) to nonce restoration
+        // Deposit transactions are fully handled in start_tx hook (end_tx_now=true)
+        // and should NOT increment the sender's nonce. Go nitro's state_transition.go
+        // only increments nonce in the EVM execution path, which deposits skip.
         let pre_exec_nonce = if is_internal {
             tracing::info!(
                 target: "reth::evm::execute",
@@ -664,6 +663,14 @@ where
                 sender = ?sender,
                 current_nonce = current_nonce,
                 "[req-1] ITER80: Retry tx - will restore nonce to current_nonce"
+            );
+            Some(current_nonce)
+        } else if is_deposit {
+            tracing::info!(
+                target: "reth::evm::execute",
+                sender = ?sender,
+                current_nonce = current_nonce,
+                "[req-1] ITER82: Deposit tx - will restore nonce to current_nonce"
             );
             Some(current_nonce)
         } else {

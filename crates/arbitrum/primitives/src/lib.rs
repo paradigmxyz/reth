@@ -122,8 +122,10 @@ impl ArbReceipt {
             | ArbReceipt::SubmitRetryable(r)
             | ArbReceipt::Internal(r) => r.rlp_encoded_fields_length_with_bloom(bloom),
             ArbReceipt::Deposit(_) => {
+                // Deposit receipts encode the standard 4-field receipt: status, cumulative_gas, bloom, logs
                 alloy_rlp::Encodable::length(&alloy_consensus::Eip658Value::Eip658(true)) +
                     alloy_rlp::Encodable::length(&0u64) +
+                    alloy_rlp::Encodable::length(bloom) +
                     alloy_rlp::Encodable::length(&alloc::vec::Vec::<alloy_primitives::Log>::new())
             }
         }
@@ -141,8 +143,10 @@ impl ArbReceipt {
             | ArbReceipt::SubmitRetryable(r)
             | ArbReceipt::Internal(r) => r.rlp_encode_fields_with_bloom(bloom, out),
             ArbReceipt::Deposit(_) => {
+                // Deposit receipts encode the standard 4-field receipt: status, cumulative_gas, bloom, logs
                 alloy_consensus::Eip658Value::Eip658(true).encode(out);
                 (0u64).encode(out);
+                bloom.encode(out);
                 let logs: alloc::vec::Vec<alloy_primitives::Log> = alloc::vec::Vec::new();
                 logs.encode(out);
             }
@@ -205,6 +209,7 @@ impl ArbReceipt {
     pub fn rlp_decode_inner(buf: &mut &[u8], tx_type: arb_alloy_consensus::tx::ArbTxType) -> alloy_rlp::Result<alloy_consensus::ReceiptWithBloom<Self>> {
         match tx_type {
             arb_alloy_consensus::tx::ArbTxType::ArbitrumDepositTx => {
+                // Deposit receipts decode the standard 4-field receipt: status, cumulative_gas, bloom, logs
                 let header = alloy_rlp::Header::decode(buf)?;
                 if !header.list {
                     return Err(alloy_rlp::Error::UnexpectedString);
@@ -212,13 +217,14 @@ impl ArbReceipt {
                 let remaining = buf.len();
                 let _status: alloy_consensus::Eip658Value = alloy_rlp::Decodable::decode(buf)?;
                 let _cumu: u64 = alloy_rlp::Decodable::decode(buf)?;
+                let logs_bloom: alloy_primitives::Bloom = alloy_rlp::Decodable::decode(buf)?;
                 let _logs: alloc::vec::Vec<alloy_primitives::Log> = alloy_rlp::Decodable::decode(buf)?;
                 if buf.len() + header.payload_length != remaining {
                     return Err(alloy_rlp::Error::UnexpectedLength);
                 }
                 Ok(alloy_consensus::ReceiptWithBloom {
                     receipt: ArbReceipt::Deposit(ArbDepositReceipt),
-                    logs_bloom: alloy_primitives::Bloom::ZERO,
+                    logs_bloom,
                 })
             }
             _ => {

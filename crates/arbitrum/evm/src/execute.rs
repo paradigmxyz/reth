@@ -776,9 +776,13 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     // Add extra gas
                     gas_spent = gas_spent.saturating_add(report_data.batch_extra_gas);
 
-                    // Add per-batch gas cost
+                    // Add per-batch gas cost (i64, can be negative)
                     let per_batch_gas_cost = l1_pricing.get_per_batch_gas_cost().unwrap_or(0);
-                    gas_spent = gas_spent.saturating_add(per_batch_gas_cost);
+                    if per_batch_gas_cost >= 0 {
+                        gas_spent = gas_spent.saturating_add(per_batch_gas_cost as u64);
+                    } else {
+                        gas_spent = gas_spent.saturating_sub((-per_batch_gas_cost) as u64);
+                    }
 
                     // For ArbOS 50+, apply gas floor
                     if state.arbos_version >= 50 {
@@ -799,11 +803,23 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     let batch_timestamp = report_data.batch_timestamp.try_into().unwrap_or(0u64);
                     let current_time = ctx.block_timestamp;
 
+                    // Create transfer balance closure that uses our transfer_balance function
+                    let state_ptr = state_db as *mut _;
+                    let transfer_fn = |from: Address, to: Address, amount: U256| -> Result<(), String> {
+                        unsafe {
+                            let state = &mut *(state_ptr as *mut revm::database::State<D>);
+                            Self::transfer_balance(state, from, to, amount)
+                                .map_err(|_| format!("Failed to transfer {} from {} to {}", amount, from, to))
+                        }
+                    };
+
                     if let Err(e) = l1_pricing.update_for_batch_poster_spending(
-                        gas_spent,
-                        report_data.batch_calldata_length,
-                        report_data.l1_base_fee_wei,
+                        batch_timestamp,
                         current_time,
+                        report_data.batch_poster_address,
+                        wei_spent,
+                        report_data.l1_base_fee_wei,
+                        transfer_fn,
                     ) {
                         tracing::warn!("Failed to update L1 pricing for batch poster spending (V2): {:?}", e);
                     }
@@ -831,21 +847,38 @@ impl ArbOsHooks for DefaultArbOsHooks {
                             state_db as *mut _,
                             crate::arbosstate::arbos_state_subspace(0),
                         ),
-                        11,
+                        state.arbos_version,
                     );
                     
                     let per_batch_gas_cost = l1_pricing.get_per_batch_gas_cost().unwrap_or(0);
-                    let gas_spent = per_batch_gas_cost.saturating_add(report_data.batch_data_gas);
+                    // per_batch_gas_cost is i64, batch_data_gas is u64, need to handle the conversion
+                    let gas_spent = if per_batch_gas_cost >= 0 {
+                        (per_batch_gas_cost as u64).saturating_add(report_data.batch_data_gas)
+                    } else {
+                        report_data.batch_data_gas.saturating_sub((-per_batch_gas_cost) as u64)
+                    };
                     let wei_spent = report_data.l1_base_fee_wei.saturating_mul(U256::from(gas_spent));
                     
                     let batch_timestamp = report_data.batch_timestamp.try_into().unwrap_or(0u64);
                     let current_time = ctx.block_timestamp;
                     
+                    // Create transfer balance closure that uses our transfer_balance function
+                    let state_ptr = state_db as *mut _;
+                    let transfer_fn = |from: Address, to: Address, amount: U256| -> Result<(), String> {
+                        unsafe {
+                            let state = &mut *(state_ptr as *mut revm::database::State<D>);
+                            Self::transfer_balance(state, from, to, amount)
+                                .map_err(|_| format!("Failed to transfer {} from {} to {}", amount, from, to))
+                        }
+                    };
+                    
                     if let Err(e) = l1_pricing.update_for_batch_poster_spending(
-                        gas_spent,
-                        report_data.batch_data_gas,
-                        report_data.l1_base_fee_wei,
+                        batch_timestamp,
                         current_time,
+                        report_data.batch_poster_address,
+                        wei_spent,
+                        report_data.l1_base_fee_wei,
+                        transfer_fn,
                     ) {
                         tracing::warn!("Failed to update L1 pricing for batch poster spending: {:?}", e);
                     }

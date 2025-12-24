@@ -52,6 +52,7 @@ pub mod storage;
 pub mod l1_pricing;
 pub mod l2_pricing;
 pub mod addressset;
+pub mod batch_poster;
 pub mod addresstable;
 pub mod merkleaccumulator;
 pub mod blockhash;
