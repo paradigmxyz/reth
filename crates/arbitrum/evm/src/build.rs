@@ -194,6 +194,13 @@ where
     type Evm = E;
 
     fn apply_pre_execution_changes(&mut self) -> Result<(), BlockExecutionError> {
+        // Clear zombie accounts from previous block.
+        // Zombie tracking is per-block, not per-tx, so we clear at block start.
+        reth_trie_common::zombie_sink::clear();
+        
+        // Also clear the deleted_empty_accounts set for this block
+        self.tx_state.deleted_empty_accounts.clear();
+        
         {
             let (db_ref, _insp, _precompiles) = self.inner.evm_mut().components_mut();
             let state_db: &mut revm::database::State<_> = *db_ref;
@@ -1076,8 +1083,112 @@ where
             );
         }
 
+        // ZOMBIE TRACKING: MUST happen BEFORE check_and_push_scheduled_txes!
+        // This is the Rust equivalent of Go nitro's stateObjectsDestruct population in Finalise().
+        // In Go nitro, Finalise() is called at the end of each tx via IntermediateRoot, which populates
+        // stateObjectsDestruct BEFORE the next transaction starts. The retry tx's start_tx hook calls
+        // CreateZombieIfDeleted, which checks stateObjectsDestruct. So we must track deletions BEFORE
+        // scheduling the retry tx.
+        //
+        // ZOMBIE TRACKING: After each transaction, track accounts that were deleted during EIP-161 cleanup.
+        // This is the Rust equivalent of Go nitro's stateObjectsDestruct population in Finalise().
+        // We check the transition_state for accounts that are empty and would be deleted.
+        {
+            let evm = self.inner.evm_mut();
+            let (db_ref, _, _) = evm.components_mut();
+            let state: &mut revm::database::State<D> = *db_ref;
+            
+            // Iterate over all accounts in the transition state
+            if let Some(ref transition_state) = state.transition_state {
+                for (addr, transition_acc) in &transition_state.transitions {
+                    // Check if this account is empty and would be deleted
+                    let is_empty = transition_acc.info.as_ref()
+                        .map(|info| info.is_empty())
+                        .unwrap_or(false);
+                    
+                    // Log the status for debugging
+                    tracing::info!(
+                        target: "arbitrum::zombie::status",
+                        ?addr,
+                        status = ?transition_acc.status,
+                        is_empty = is_empty,
+                        has_info = transition_acc.info.is_some(),
+                        previous_status = ?transition_acc.previous_status,
+                        has_previous_info = transition_acc.previous_info.is_some(),
+                        tx_hash = ?tx_hash,
+                        "Post-tx account status check"
+                    );
+                    
+                    // Track accounts that are empty and would be deleted during EIP-161 cleanup.
+                    // In Go nitro, this happens in Finalise() when:
+                    // - deleteEmptyObjects is true (always true post-Spurious Dragon)
+                    // - obj.empty() is true (nonce=0, balance=0, no code)
+                    // - !isZombie (not already a zombie)
+                    //
+                    // We use the account status to detect deletions:
+                    // - Destroyed, DestroyedChanged, DestroyedAgain = self-destruct
+                    // - LoadedEmptyEIP161 = EIP-161 empty account cleanup
+                    // - InMemoryChange with empty info = newly created empty account that will be deleted
+                    use revm::database::AccountStatus;
+                    let is_deleted = match transition_acc.status {
+                        AccountStatus::Destroyed | 
+                        AccountStatus::DestroyedChanged | 
+                        AccountStatus::DestroyedAgain => true,
+                        AccountStatus::LoadedEmptyEIP161 => true,
+                        // For InMemoryChange, check if the account is empty
+                        AccountStatus::InMemoryChange | AccountStatus::Changed => is_empty,
+                        _ => false,
+                    };
+                    
+                    if is_deleted && !self.tx_state.zombie_accounts.contains(addr) {
+                        // Add to deleted_empty_accounts for CreateZombieIfDeleted to check
+                        self.tx_state.deleted_empty_accounts.insert(*addr);
+                        tracing::info!(
+                            target: "arbitrum::zombie",
+                            ?addr,
+                            status = ?transition_acc.status,
+                            "Tracked account as deleted (EIP-161 cleanup)"
+                        );
+                    }
+                }
+            }
+            
+            // FINALISE-LIKE STEP: Remove deleted empty accounts from the cache.
+            // This matches Go geth's Finalise() behavior where deleted accounts are removed
+            // from the stateObjects map, so that getStateObject() returns nil for them.
+            // This is critical for CreateZombieIfDeleted to work correctly - it checks
+            // if getStateObject(addr) == nil && wasDeletedEarlierInBlock.
+            // 
+            // IMPORTANT: Do NOT remove zombie accounts from the cache! Zombie accounts are
+            // accounts that were deleted earlier in the block but then resurrected via
+            // CreateZombieIfDeleted. They must remain in the cache so they persist in the trie.
+            for addr in &self.tx_state.deleted_empty_accounts {
+                // Skip zombie accounts - they should remain in the cache
+                if self.tx_state.zombie_accounts.contains(addr) {
+                    tracing::info!(
+                        target: "arbitrum::zombie",
+                        ?addr,
+                        "Finalise: skipping zombie account (not removing from cache)"
+                    );
+                    continue;
+                }
+                if let Some(cached) = state.cache.accounts.get_mut(addr) {
+                    // Mark the account as non-existent by setting account to None
+                    // This matches geth's behavior where deleted accounts are removed from stateObjects
+                    cached.account = None;
+                    tracing::info!(
+                        target: "arbitrum::zombie",
+                        ?addr,
+                        "Finalise: removed deleted empty account from cache"
+                    );
+                }
+            }
+        }
+
         // Check for and push any scheduled transactions (retry txs) to the sink
         // This matches Go behavior where ScheduledTxes are collected after each tx
+        // IMPORTANT: This MUST happen AFTER deletion tracking above, so that when the retry tx
+        // starts and calls CreateZombieIfDeleted, the deleted_empty_accounts set is populated.
         self.check_and_push_scheduled_txes();
 
         result
@@ -1216,6 +1327,43 @@ where
                 "[ITER200] Total accounts in bundle_state: {}",
                 state.bundle_state.state.len()
             );
+            
+            // ZOMBIE DEBUG: Check if zombie accounts are in bundle_state
+            if !self.tx_state.zombie_accounts.is_empty() {
+                tracing::warn!(
+                    target: "arb-reth::zombie_debug",
+                    "[ZOMBIE] Block has {} zombie accounts to check",
+                    self.tx_state.zombie_accounts.len()
+                );
+                for zombie_addr in &self.tx_state.zombie_accounts {
+                    if let Some(zombie_account) = state.bundle_state.state.get(zombie_addr) {
+                        tracing::warn!(
+                            target: "arb-reth::zombie_debug",
+                            "[ZOMBIE] Zombie account {} IS in bundle_state: status={:?}, has_info={}, storage_len={}",
+                            zombie_addr,
+                            zombie_account.status,
+                            zombie_account.info.is_some(),
+                            zombie_account.storage.len()
+                        );
+                        if let Some(ref info) = zombie_account.info {
+                            tracing::warn!(
+                                target: "arb-reth::zombie_debug",
+                                "[ZOMBIE] Zombie account {} info: balance={}, nonce={}, code_hash={:?}",
+                                zombie_addr,
+                                info.balance,
+                                info.nonce,
+                                info.code_hash
+                            );
+                        }
+                    } else {
+                        tracing::error!(
+                            target: "arb-reth::zombie_debug",
+                            "[ZOMBIE] Zombie account {} NOT FOUND in bundle_state!",
+                            zombie_addr
+                        );
+                    }
+                }
+            }
         }
 
         tracing::info!(
