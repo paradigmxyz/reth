@@ -64,7 +64,6 @@ mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
-// TODO(alexey): compare trie updates in `insert_block_inner`
 #[expect(unused)]
 mod trie_updates;
 
