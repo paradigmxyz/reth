@@ -647,7 +647,9 @@ where
             batch_data_gas: u64,
             l1_base_fee: alloy_primitives::U256,
         ) -> alloy_primitives::Bytes {
-            const SELECTOR: [u8; 4] = [0x0a, 0xdc, 0x77, 0x7d];
+            // Selector for batchPostingReport(uint256,address,uint64,uint64,uint256)
+            // keccak256("batchPostingReport(uint256,address,uint64,uint64,uint256)")[:4] = 0xb6693771
+            const SELECTOR: [u8; 4] = [0xb6, 0x69, 0x37, 0x71];
             let mut out = Vec::with_capacity(4 + 32 * 5);
             out.extend_from_slice(&SELECTOR);
             out.extend_from_slice(&abi_encode_u256(&batch_timestamp));
@@ -936,17 +938,84 @@ where
                 vec![tx]
             }
             13 => {
-                // BatchPostingReport messages should be grouped with the next message at the
-                // engine_adapter level and should never be executed standalone.
-                // If we reach here with kind=13, the grouping failed or wasn't implemented.
-                // BatchPostingReport should NOT create a user-visible transaction.
-                // It only updates internal ArbOS state during execution.
-                reth_tracing::tracing::error!(
+                // BatchPostingReport (kind=13) - creates an internal transaction that reports
+                // batch posting information to ArbOS. This matches Go nitro's parseBatchPostingReportMessage.
+                //
+                // L2msg format (from ParseBatchPostingReportMessageFields in arbostypes/incomingmessage.go):
+                // - batchTimestamp: 32 bytes (big-endian)
+                // - batchPosterAddr: 20 bytes
+                // - dataHash: 32 bytes (not used in internal tx)
+                // - batchNum: 32 bytes (big-endian, but only lower 8 bytes used as u64)
+                // - l1BaseFee: 32 bytes (big-endian)
+                // - extraGas: 8 bytes (optional, big-endian)
+                
+                let mut cur: &[u8] = l2_owned.as_slice();
+                
+                // Parse batchTimestamp (32 bytes)
+                let batch_timestamp = read_u256_be32(&mut cur)?;
+                
+                // Parse batchPosterAddr (20 bytes)
+                let batch_poster_addr = read_address20(&mut cur)?;
+                
+                // Parse dataHash (32 bytes) - not used in internal tx, but we need to skip it
+                let _data_hash = read_u256_be32(&mut cur)?;
+                
+                // Parse batchNum (32 bytes as U256, but only lower 8 bytes used as u64)
+                let batch_num_u256 = read_u256_be32(&mut cur)?;
+                let batch_num = u256_to_u64_checked(&batch_num_u256, "batchNum")?;
+                
+                // Parse l1BaseFee (32 bytes)
+                let l1_base_fee_report = read_u256_be32(&mut cur)?;
+                
+                // Parse extraGas (8 bytes, optional)
+                let extra_gas: u64 = if cur.len() >= 8 {
+                    read_u64_be(&mut cur)?
+                } else {
+                    0
+                };
+                
+                // Get batch_gas_cost from the message (computed upstream by multiplexer/delayed inbox)
+                // Go nitro requires this to be set, otherwise it returns "cannot compute batch gas cost"
+                let msg_batch_gas_cost = batch_gas_cost.ok_or_else(|| {
+                    eyre::eyre!("BatchPostingReport: batch_gas_cost is None, cannot compute batch data gas")
+                })?;
+                
+                // batchDataGas = msgBatchGasCost + extraGas (matches Go nitro)
+                let batch_data_gas = msg_batch_gas_cost.saturating_add(extra_gas);
+                
+                reth_tracing::tracing::info!(
                     target: "arb-reth::follower",
-                    "CRITICAL: execute_message_to_block called with kind=13 (BatchPostingReport). This should be grouped at engine_adapter level and never reach here."
+                    "BatchPostingReport: batch_timestamp={}, batch_poster={}, batch_num={}, batch_data_gas={} (msg_cost={} + extra={}), l1_base_fee={}",
+                    batch_timestamp, batch_poster_addr, batch_num, batch_data_gas, msg_batch_gas_cost, extra_gas, l1_base_fee_report
                 );
-                // Return empty transaction list - no user-visible transaction should be created
-                Vec::new()
+                
+                // Encode the batchPostingReport internal transaction data
+                let report_data = encode_batch_posting_report_data(
+                    batch_timestamp,
+                    batch_poster_addr,
+                    batch_num,
+                    batch_data_gas,
+                    l1_base_fee_report,
+                );
+                
+                // Create the internal transaction (same structure as startBlock)
+                let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
+                    arb_alloy_consensus::tx::ArbInternalTx {
+                        chain_id: chain_id_u256,
+                        data: report_data,
+                    },
+                );
+                let enc = env.encode_typed();
+                let mut s = enc.as_slice();
+                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|e| eyre::eyre!("decode BatchPostingReport internal tx failed: {}", e))?;
+                
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    "BatchPostingReport: created internal tx with selector 0xb6693771"
+                );
+                
+                vec![tx]
             }
             0xff => {
                 reth_tracing::tracing::info!(target: "arb-reth::follower", "follower: skipping invalid placeholder message kind=0xff");
