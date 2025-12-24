@@ -1413,15 +1413,27 @@ where
                                     self.on_forkchoice_updated(state, payload_attrs, version);
 
                                 if let Ok(res) = &mut output {
+                                    let forkchoice_status = res.outcome.forkchoice_status();
+
                                     // track last received forkchoice state
                                     self.state
                                         .forkchoice_state_tracker
-                                        .set_latest(state, res.outcome.forkchoice_status());
+                                        .set_latest(state, forkchoice_status);
+
+                                    // update forkchoice state tracker metrics with last valid state
+                                    if let Some(last_valid) =
+                                        self.state.forkchoice_state_tracker.last_valid_state()
+                                    {
+                                        self.metrics
+                                            .engine
+                                            .forkchoice_updated
+                                            .set_last_valid(&last_valid);
+                                    }
 
                                     // emit an event about the handled FCU
                                     self.emit_event(ConsensusEngineEvent::ForkchoiceUpdated(
                                         state,
-                                        res.outcome.forkchoice_status(),
+                                        forkchoice_status,
                                     ));
 
                                     // handle the event if any

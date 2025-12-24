@@ -4,7 +4,8 @@ use alloy_evm::{
     block::{BlockExecutor, ExecutableTx},
     Evm,
 };
-use alloy_rpc_types_engine::{PayloadStatus, PayloadStatusEnum};
+use alloy_primitives::B256;
+use alloy_rpc_types_engine::{ForkchoiceState, PayloadStatus, PayloadStatusEnum};
 use core::borrow::BorrowMut;
 use reth_engine_primitives::{ForkchoiceStatus, OnForkChoiceUpdated};
 use reth_errors::{BlockExecutionError, ProviderError};
@@ -218,9 +219,31 @@ pub(crate) struct ForkchoiceUpdatedMetrics {
     pub(crate) forkchoice_updated_last: Gauge,
     /// Time diff between new payload call response and the next forkchoice updated call request.
     pub(crate) new_payload_forkchoice_updated_time_diff: Histogram,
+    /// The lower 64 bits of the last valid head block hash.
+    pub(crate) forkchoice_last_valid_head: Gauge,
+    /// The lower 64 bits of the last valid safe block hash.
+    pub(crate) forkchoice_last_valid_safe: Gauge,
+    /// The lower 64 bits of the last valid finalized block hash.
+    pub(crate) forkchoice_last_valid_finalized: Gauge,
+}
+
+/// Converts a B256 hash to a f64 metric value by taking the lower 64 bits.
+#[inline]
+fn hash_to_metric(hash: B256) -> f64 {
+    let bytes: [u8; 8] = hash.0[24..32].try_into().expect("slice is 8 bytes");
+    u64::from_be_bytes(bytes) as f64
 }
 
 impl ForkchoiceUpdatedMetrics {
+    /// Updates the last valid forkchoice state metrics.
+    ///
+    /// Extracts the lower 64 bits of each hash for metric tracking.
+    pub(crate) fn set_last_valid(&self, state: &ForkchoiceState) {
+        self.forkchoice_last_valid_finalized.set(hash_to_metric(state.finalized_block_hash));
+        self.forkchoice_last_valid_head.set(hash_to_metric(state.head_block_hash));
+        self.forkchoice_last_valid_safe.set(hash_to_metric(state.safe_block_hash));
+    }
+
     /// Increment the forkchoiceUpdated counter based on the given result
     pub(crate) fn update_response_metrics(
         &self,
