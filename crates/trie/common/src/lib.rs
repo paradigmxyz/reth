@@ -68,5 +68,10 @@ pub mod serde_bincode_compat {
     pub use super::updates::serde_bincode_compat as updates;
 }
 
+/// Thread-local sink for zombie accounts (Arbitrum-specific).
+/// Zombie accounts are empty accounts that were deleted in a previous transaction
+/// and then resurrected via CreateZombieIfDeleted in a subsequent transaction.
+pub mod zombie_sink;
+
 /// Re-export
 pub use alloy_trie::{nodes::*, proof, BranchNodeCompact, HashBuilder, TrieMask, EMPTY_ROOT_HASH};
