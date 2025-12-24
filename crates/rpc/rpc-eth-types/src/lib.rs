@@ -29,7 +29,9 @@ pub use cache::{
     config::EthStateCacheConfig, db::StateCacheDb, multi_consumer::MultiConsumerLruCache,
     EthStateCache,
 };
-pub use error::{EthApiError, EthResult, RevertError, RpcInvalidTransactionError, SignError};
+pub use error::{
+    EthApiError, EthApiEvmErr, EthResult, RevertError, RpcInvalidTransactionError, SignError,
+};
 pub use fee_history::{FeeHistoryCache, FeeHistoryCacheConfig, FeeHistoryEntry};
 pub use gas_oracle::{
     GasCap, GasPriceOracle, GasPriceOracleConfig, GasPriceOracleResult, RPC_DEFAULT_GAS_CAP,
