@@ -198,7 +198,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::cached_state::{ExecutionCache, ExecutionCacheBuilder};
+    use crate::tree::cached_state::ExecutionCache;
     use alloy_eip7928::{
         AccountChanges, BalanceChange, CodeChange, NonceChange, SlotChanges, StorageChange,
     };
@@ -206,7 +206,7 @@ mod tests {
     use reth_revm::test_utils::StateProviderTest;
 
     fn new_cache() -> ExecutionCache {
-        ExecutionCacheBuilder::default().build_caches(1000)
+        crate::tree::cached_state::ExecutionCache::new(1000)
     }
 
     #[test]
