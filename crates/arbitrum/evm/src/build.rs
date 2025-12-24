@@ -502,6 +502,7 @@ where
             poster,
             gas_remaining: tx.tx().gas_limit(),
             is_ethcall: false,
+            tx_type: tx_type_u8,
         };
         {
             let mut state = core::mem::take(&mut self.tx_state);
