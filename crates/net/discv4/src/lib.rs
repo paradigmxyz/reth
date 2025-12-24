@@ -1582,8 +1582,7 @@ impl Discv4Service {
         self.pending_find_nodes.retain(|node_id, find_node_request| {
             if now.duration_since(find_node_request.sent_at) > self.config.neighbours_expiration {
                 if !find_node_request.answered {
-                    // node actually responded but with fewer entries than expected, but we don't
-                    // treat this as an hard error since it responded.
+                    // node did not respond at all
                     failed_find_nodes.push(*node_id);
                 }
                 return false
