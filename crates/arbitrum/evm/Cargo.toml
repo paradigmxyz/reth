@@ -25,6 +25,7 @@ reth-primitives = { path = "../../primitives", default-features = false, feature
 reth-primitives-traits = { path = "../../primitives-traits", default-features = false, features = ["std"] }
 reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["std", "serde", "reth-codec"] }
 reth-arbitrum-chainspec = { path = "../chainspec", default-features = false, features = ["std"] }
+reth-trie-common = { path = "../../trie/common", default-features = false, features = ["std"] }
 reth-rpc-eth-api = { path = "../../rpc/rpc-eth-api", default-features = false, optional = true }
 reth-arbitrum-payload = { path = "../payload", default-features = false, features = ["std"] }
 
