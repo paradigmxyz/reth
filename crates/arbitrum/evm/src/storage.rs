@@ -305,11 +305,36 @@ impl<D: Database> Storage<D> {
         storage_key_map(storage_key, offset)
     }
 
+    /// Computes the physical storage slot for an arbitrary B256 key using Go nitro's mapAddress algorithm.
+    /// This is different from Solidity's mapping formula - it preserves the last byte and hashes only the first 31 bytes.
+    fn compute_slot_for_key(&self, key: B256) -> U256 {
+        let boundary = 31usize;
+        let key_bytes = key.as_slice();
+        
+        // IMPORTANT: Go nitro uses an empty []byte{} for root storage, not 32 zero bytes!
+        let storage_key: &[u8] = if self.base_key == B256::ZERO {
+            &[]  // Empty slice for root storage
+        } else {
+            self.base_key.as_slice()
+        };
+        
+        // Go nitro's mapAddress: keccak256(storageKey, key[:31])[:31] || key[31]
+        let mut data = Vec::with_capacity(storage_key.len() + boundary);
+        data.extend_from_slice(storage_key);
+        data.extend_from_slice(&key_bytes[..boundary]);
+        let h = keccak256(&data);
+        let mut mapped = [0u8; 32];
+        mapped[..boundary].copy_from_slice(&h.0[..boundary]);
+        mapped[boundary] = key_bytes[boundary];
+        U256::from_be_bytes(mapped)
+    }
+
     pub fn get(&self, key: B256) -> Result<B256, ()> {
         unsafe {
             let state = &mut *self.state;
             let arbos_addr = ARBOS_STATE_ADDRESS;
-            let slot = U256::from_be_bytes(key.0);
+            // Use mapAddress algorithm to compute the physical storage slot
+            let slot = self.compute_slot_for_key(key);
 
             // First check cache for in-flight changes (writes go to cache first)
             if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
@@ -336,7 +361,8 @@ impl<D: Database> Storage<D> {
     }
 
     pub fn set(&self, key: B256, value: B256) -> Result<(), ()> {
-        let slot = U256::from_be_bytes(key.0);
+        // Use mapAddress algorithm to compute the physical storage slot
+        let slot = self.compute_slot_for_key(key);
         let value_u256 = U256::from_be_bytes(value.0);
         unsafe {
             let state = &mut *self.state;
@@ -619,7 +645,7 @@ impl<D: Database> StorageBackedInt64<D> {
 /// This stores signed 256-bit integers using two's complement representation.
 /// Go nitro uses big.Int which can be negative, and stores it as a 256-bit value.
 pub struct StorageBackedBigInt<D> {
-    storage: *mut revm::database::State<D>,
+    pub storage: *mut revm::database::State<D>,
     slot: U256,
 }
 
