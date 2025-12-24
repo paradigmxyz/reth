@@ -1,11 +1,10 @@
 use crate::BlockProvider;
 use alloy_provider::{ConnectionConfig, Network, Provider, ProviderBuilder, WebSocketConfig};
 use alloy_transport::TransportResult;
-use async_trait::async_trait;
 use futures::{Stream, StreamExt};
 use reth_node_api::Block;
 use reth_tracing::tracing::{debug, warn};
-use std::sync::Arc;
+use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::mpsc::Sender;
 
 /// Block provider that fetches new blocks from an RPC endpoint using a connection that supports
@@ -67,60 +66,66 @@ impl<N: Network, PrimitiveBlock> RpcBlockProvider<N, PrimitiveBlock> {
     }
 }
 
-#[async_trait]
 impl<N: Network, PrimitiveBlock> BlockProvider for RpcBlockProvider<N, PrimitiveBlock>
 where
     PrimitiveBlock: Block + 'static,
 {
     type Block = PrimitiveBlock;
 
-    async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
-        loop {
-            let Ok(mut stream) = self.full_block_stream().await.inspect_err(|err| {
-                warn!(
-                    target: "consensus::debug-client",
-                    %err,
-                    url=%self.url,
-                    "Failed to subscribe to blocks",
-                );
-            }) else {
-                return
-            };
+    fn subscribe_blocks(&self, tx: Sender<Self::Block>) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            loop {
+                let Ok(mut stream) = self.full_block_stream().await.inspect_err(|err| {
+                    warn!(
+                        target: "consensus::debug-client",
+                        %err,
+                        url=%self.url,
+                        "Failed to subscribe to blocks",
+                    );
+                }) else {
+                    return
+                };
 
-            while let Some(res) = stream.next().await {
-                match res {
-                    Ok(block) => {
-                        if tx.send((self.convert)(block)).await.is_err() {
-                            // Channel closed.
-                            break;
+                while let Some(res) = stream.next().await {
+                    match res {
+                        Ok(block) => {
+                            if tx.send((self.convert)(block)).await.is_err() {
+                                // Channel closed.
+                                break;
+                            }
+                        }
+                        Err(err) => {
+                            warn!(
+                                target: "consensus::debug-client",
+                                %err,
+                                url=%self.url,
+                                "Failed to fetch a block",
+                            );
                         }
                     }
-                    Err(err) => {
-                        warn!(
-                            target: "consensus::debug-client",
-                            %err,
-                            url=%self.url,
-                            "Failed to fetch a block",
-                        );
-                    }
                 }
+                // if stream terminated we want to re-establish it again
+                debug!(
+                    target: "consensus::debug-client",
+                    url=%self.url,
+                    "Re-estbalishing block subscription",
+                );
             }
-            // if stream terminated we want to re-establish it again
-            debug!(
-                target: "consensus::debug-client",
-                url=%self.url,
-                "Re-estbalishing block subscription",
-            );
-        }
+        })
     }
 
-    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
-        let block = self
-            .provider
-            .get_block_by_number(block_number.into())
-            .full()
-            .await?
-            .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?;
-        Ok((self.convert)(block))
+    fn get_block(
+        &self,
+        block_number: u64,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<Self::Block>> + Send + '_>> {
+        Box::pin(async move {
+            let block = self
+                .provider
+                .get_block_by_number(block_number.into())
+                .full()
+                .await?
+                .ok_or_else(|| eyre::eyre!("block not found by number {}", block_number))?;
+            Ok((self.convert)(block))
+        })
     }
 }

@@ -2,11 +2,10 @@ use crate::BlockProvider;
 use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumberOrTag;
 use alloy_json_rpc::{Response, ResponsePayload};
-use async_trait::async_trait;
 use reqwest::Client;
 use reth_tracing::tracing::{debug, warn};
 use serde::{de::DeserializeOwned, Serialize};
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, pin::Pin, sync::Arc, time::Duration};
 use tokio::{sync::mpsc, time::interval};
 
 /// Block provider that fetches new blocks from Etherscan API.
@@ -89,7 +88,6 @@ where
     }
 }
 
-#[async_trait]
 impl<RpcBlock, PrimitiveBlock> BlockProvider for EtherscanBlockProvider<RpcBlock, PrimitiveBlock>
 where
     RpcBlock: Serialize + DeserializeOwned + 'static,
@@ -97,37 +95,45 @@ where
 {
     type Block = PrimitiveBlock;
 
-    async fn subscribe_blocks(&self, tx: mpsc::Sender<Self::Block>) {
-        let mut last_block_number: Option<u64> = None;
-        let mut interval = interval(self.interval);
-        loop {
-            interval.tick().await;
-            let block = match self.load_block(BlockNumberOrTag::Latest).await {
-                Ok(block) => block,
-                Err(err) => {
-                    warn!(
-                        target: "consensus::debug-client",
-                        %err,
-                        "Failed to fetch a block from Etherscan",
-                    );
-                    continue
+    fn subscribe_blocks(
+        &self,
+        tx: mpsc::Sender<Self::Block>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        Box::pin(async move {
+            let mut last_block_number: Option<u64> = None;
+            let mut interval = interval(self.interval);
+            loop {
+                interval.tick().await;
+                let block = match self.load_block(BlockNumberOrTag::Latest).await {
+                    Ok(block) => block,
+                    Err(err) => {
+                        warn!(
+                            target: "consensus::debug-client",
+                            %err,
+                            "Failed to fetch a block from Etherscan",
+                        );
+                        continue
+                    }
+                };
+                let block_number = block.header().number();
+                if Some(block_number) == last_block_number {
+                    continue;
                 }
-            };
-            let block_number = block.header().number();
-            if Some(block_number) == last_block_number {
-                continue;
-            }
 
-            if tx.send(block).await.is_err() {
-                // Channel closed.
-                break;
-            }
+                if tx.send(block).await.is_err() {
+                    // Channel closed.
+                    break;
+                }
 
-            last_block_number = Some(block_number);
-        }
+                last_block_number = Some(block_number);
+            }
+        })
     }
 
-    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
-        self.load_block(BlockNumberOrTag::Number(block_number)).await
+    fn get_block(
+        &self,
+        block_number: u64,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<Self::Block>> + Send + '_>> {
+        Box::pin(async move { self.load_block(BlockNumberOrTag::Number(block_number)).await })
     }
 }

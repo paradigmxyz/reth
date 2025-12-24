@@ -25,7 +25,6 @@ alloy-rpc-types-engine.workspace = true
 alloy-json-rpc.workspace = true
 alloy-primitives.workspace = true
 
-async-trait.workspace = true
 auto_impl.workspace = true
 derive_more.workspace = true
 futures.workspace = true

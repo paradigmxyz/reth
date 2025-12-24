@@ -1,7 +1,6 @@
 use super::LaunchNode;
 use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
 use alloy_provider::{network::AnyNetwork, Network};
-use async_trait::async_trait;
 use jsonrpsee::core::{DeserializeOwned, Serialize};
 use reth_consensus_debug_client::{
     BlockProvider, DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider,
@@ -196,19 +195,21 @@ impl<N: FullNodeComponents> ArcBlockProvider<N> {
     }
 }
 
-#[async_trait]
 impl<N> BlockProvider for ArcBlockProvider<N>
 where
     N: FullNodeComponents,
 {
     type Block = BlockTy<<N as FullNodeTypes>::Types>;
 
-    async fn subscribe_blocks(&self, tx: Sender<Self::Block>) {
-        self.inner.subscribe_blocks(tx).await;
+    fn subscribe_blocks(&self, tx: Sender<Self::Block>) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.inner.subscribe_blocks(tx)
     }
 
-    async fn get_block(&self, block_number: u64) -> eyre::Result<Self::Block> {
-        self.inner.get_block(block_number).await
+    fn get_block(
+        &self,
+        block_number: u64,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<Self::Block>> + Send + '_>> {
+        self.inner.get_block(block_number)
     }
 }
 
@@ -220,17 +221,6 @@ pub(crate) type DebugBlockProviderFuture<'a, N> =
 const fn debug_block_provider_configured<ChainSpec>(config: &NodeConfig<ChainSpec>) -> bool {
     config.debug.rpc_consensus_url.is_some() || config.debug.etherscan.is_some()
 }
-
-/// Factory for producing a custom debug block provider.
-pub(crate) type DebugBlockProviderFactory<N, AddOns> = Box<
-    dyn Fn(
-            &NodeConfig<<<N as FullNodeTypes>::Types as NodeTypes>::ChainSpec>,
-            &NodeHandle<N, AddOns>,
-        ) -> eyre::Result<DynBlockProvider<N>>
-        + Send
-        + Sync
-        + 'static,
->;
 
 type PayloadAttrMapper<N> = Box<
     dyn Fn(PayloadAttrTy<<N as FullNodeTypes>::Types>) -> PayloadAttrTy<<N as FullNodeTypes>::Types>
@@ -300,7 +290,9 @@ where
         Option<Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>>,
     map_attributes: Option<PayloadAttrMapper<N>>,
     rpc_consensus_convert: Option<RpcConsensusConvert<N>>,
-    debug_block_provider_factory: Option<DebugBlockProviderFactory<N, AddOns>>,
+    debug_consensus_client:
+        Option<Box<dyn BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + Send + Sync>>,
+    phantom: std::marker::PhantomData<AddOns>,
 }
 
 impl<L, Target, N, AddOns> DebugNodeLauncherFuture<L, Target, N, AddOns>
@@ -319,7 +311,8 @@ where
             local_payload_attributes_builder: Some(Box::new(builder)),
             map_attributes: None,
             rpc_consensus_convert: self.rpc_consensus_convert,
-            debug_block_provider_factory: self.debug_block_provider_factory,
+            debug_consensus_client: self.debug_consensus_client,
+            phantom: self.phantom,
         }
     }
 
@@ -333,7 +326,8 @@ where
             local_payload_attributes_builder: None,
             map_attributes: Some(Box::new(f)),
             rpc_consensus_convert: self.rpc_consensus_convert,
-            debug_block_provider_factory: self.debug_block_provider_factory,
+            debug_consensus_client: self.debug_consensus_client,
+            phantom: self.phantom,
         }
     }
 
@@ -353,22 +347,8 @@ where
             local_payload_attributes_builder: self.local_payload_attributes_builder,
             map_attributes: self.map_attributes,
             rpc_consensus_convert: Some(Arc::new(convert)),
-            debug_block_provider_factory: self.debug_block_provider_factory,
-        }
-    }
-
-    /// Provides a factory to construct a custom block provider for the debug consensus client.
-    pub fn with_debug_block_provider_factory(
-        self,
-        factory: DebugBlockProviderFactory<N, AddOns>,
-    ) -> Self {
-        Self {
-            inner: self.inner,
-            target: self.target,
-            local_payload_attributes_builder: self.local_payload_attributes_builder,
-            map_attributes: self.map_attributes,
-            rpc_consensus_convert: self.rpc_consensus_convert,
-            debug_block_provider_factory: Some(factory),
+            debug_consensus_client: self.debug_consensus_client,
+            phantom: self.phantom,
         }
     }
 
@@ -377,8 +357,15 @@ where
         self,
         provider: impl BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + 'static,
     ) -> Self {
-        let handle: DynBlockProvider<N> = Arc::new(provider);
-        self.with_debug_block_provider_factory(Box::new(move |_, _| Ok(handle.clone())))
+        Self {
+            inner: self.inner,
+            target: self.target,
+            local_payload_attributes_builder: self.local_payload_attributes_builder,
+            map_attributes: self.map_attributes,
+            rpc_consensus_convert: self.rpc_consensus_convert,
+            debug_consensus_client: Some(Box::new(provider)),
+            phantom: self.phantom,
+        }
     }
 
     /// Alias for [`Self::with_debug_block_client`], for API symmetry with
@@ -397,14 +384,15 @@ where
             local_payload_attributes_builder,
             map_attributes,
             rpc_consensus_convert,
-            debug_block_provider_factory,
+            debug_consensus_client,
+            phantom: _,
         } = self;
 
         let handle = inner.launch_node(target).await?;
 
         let config = &handle.node.config;
-        if let Some(block_provider_factory) = debug_block_provider_factory {
-            let provider = block_provider_factory(config, &handle)?;
+        if let Some(provider) = debug_consensus_client {
+            let provider = Arc::from(provider);
             spawn_consensus_client(&handle, provider);
         } else if debug_block_provider_configured(config) {
             let convert_rpc = rpc_consensus_convert
@@ -498,7 +486,8 @@ where
             local_payload_attributes_builder: None,
             map_attributes: None,
             rpc_consensus_convert: None,
-            debug_block_provider_factory: None,
+            debug_consensus_client: None,
+            phantom: std::marker::PhantomData,
         }
     }
 }
