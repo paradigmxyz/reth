@@ -143,7 +143,8 @@ where
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
         let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
         let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
-        debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saving range of blocks");
+        let block_count = blocks.len();
+        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
         let start_time = Instant::now();
 
@@ -156,6 +157,7 @@ where
 
         debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
+        self.metrics.save_blocks_block_count.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
         Ok(last_block)
     }

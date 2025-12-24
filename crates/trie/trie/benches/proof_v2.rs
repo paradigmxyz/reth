@@ -161,10 +161,10 @@ fn bench_proof_algos(c: &mut Criterion) {
                     StorageProofCalculator::new_storage(trie_cursor, hashed_cursor);
 
                 b.iter_batched(
-                    || targets.clone(),
-                    |targets| {
+                    || targets.iter().copied().map(Into::into).collect::<Vec<_>>(),
+                    |mut targets| {
                         proof_calculator
-                            .storage_proof(hashed_address, targets)
+                            .storage_proof(hashed_address, &mut targets)
                             .expect("Proof generation failed");
                     },
                     BatchSize::SmallInput,

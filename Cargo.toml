@@ -548,6 +548,7 @@ bytes = { version = "1.5", default-features = false }
 brotli = "8"
 cfg-if = "1.0"
 clap = "4"
+color-eyre = "0.6"
 dashmap = "6.0"
 derive_more = { version = "2", default-features = false, features = ["full"] }
 dirs-next = "2.0.0"

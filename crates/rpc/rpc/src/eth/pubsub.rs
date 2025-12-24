@@ -137,7 +137,7 @@ where
                         Params::Bool(false) | Params::None => {
                             // only hashes requested
                         }
-                        Params::Logs(_) => {
+                        _ => {
                             return Err(invalid_params_rpc_err(
                                 "Invalid params for newPendingTransactions",
                             ))
