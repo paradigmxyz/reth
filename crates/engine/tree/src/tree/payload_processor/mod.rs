@@ -13,6 +13,7 @@ use crate::tree::{
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
+use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
@@ -25,8 +26,8 @@ use prewarm::PrewarmMetrics;
 use rayon::prelude::*;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
-    TxEnvFor,
+    ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, RecoveredTx,
+    SpecFor, TxEnvFor,
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
@@ -357,13 +358,20 @@ where
         // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
         self.executor.spawn_blocking(move || {
             transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
-                let tx = convert(tx);
-                let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
+                let res = convert(tx);
+                let res = res.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
                 // Only send Ok(_) variants to prewarming task.
-                if let Ok(tx) = &tx {
+                if let Ok(tx) = &res {
                     let _ = prewarm_tx.send(tx.clone());
                 }
-                let _ = ooo_tx.send((idx, tx));
+                let maybe_tx_arc = res.as_ref().ok().map(|tx| tx.tx.clone());
+                let _ = ooo_tx.send((idx, res));
+
+                // Trigger the hash calculation to make sure that other tasks are not spending time
+                // on it.
+                if let Some(tx) = maybe_tx_arc {
+                    tx.tx().tx_hash();
+                }
             });
         });
 
