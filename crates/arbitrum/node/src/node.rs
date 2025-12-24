@@ -825,10 +825,22 @@ where
                     .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?;
                 let ticket_id = *submit_tx.tx_hash();
 
+                // Calculate the actual submission fee using the same formula as Go nitro:
+                // submissionFee = (1400 + 6 * len(retryData)) * l1BaseFee
+                // This must match RetryableSubmissionFee in arbos/retryables/retryable.go
+                let l1_base_fee_u128: u128 = l1_base_fee.try_into().unwrap_or(0);
+                let submission_fee = arb_alloy_util::retryables::retryable_submission_fee(
+                    retry_data.len(),
+                    l1_base_fee_u128,
+                );
+                let submission_fee_u256 = alloy_primitives::U256::from(submission_fee);
+
                 let retry_gas_price = block_base_fee.unwrap_or(alloy_primitives::U256::ZERO);
+                // max_refund = (baseFee * gas) + submissionFee
+                // This matches Go nitro's MakeTx which receives availableRefund as maxRefund
                 let max_refund = retry_gas_price
                     .saturating_mul(alloy_primitives::U256::from(gas))
-                    .saturating_add(max_submission_fee);
+                    .saturating_add(submission_fee_u256);
 
                 let retry_env = arb_alloy_consensus::tx::ArbTxEnvelope::Retry(
                     arb_alloy_consensus::tx::ArbRetryTx {
@@ -843,7 +855,9 @@ where
                         ticket_id,
                         refund_to: fee_refund_addr,
                         max_refund,
-                        submission_fee_refund: max_submission_fee,
+                        // Despite the field name, this is the actual submission fee (not a refund)
+                        // Go nitro passes submissionFee to MakeTx's submissionFeeRefund parameter
+                        submission_fee_refund: submission_fee_u256,
                     },
                 );
                 
