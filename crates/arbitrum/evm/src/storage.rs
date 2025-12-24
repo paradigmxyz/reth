@@ -550,6 +550,149 @@ impl<D: Database> StorageBackedAddress<D> {
     }
 }
 
+/// StorageBackedInt64 matches Go nitro's StorageBackedInt64.
+/// Go nitro stores int64 by casting to uint64 first (reinterpreting the bits),
+/// then storing as a 256-bit value. This preserves the sign bit correctly.
+pub struct StorageBackedInt64<D> {
+    storage: *mut revm::database::State<D>,
+    slot: U256,
+}
+
+impl<D: Database> StorageBackedInt64<D> {
+    pub fn new(storage: *mut revm::database::State<D>, base_key: B256, offset: u64) -> Self {
+        let storage_key = if base_key == B256::ZERO {
+            &[] as &[u8]
+        } else {
+            base_key.as_slice()
+        };
+        let slot = storage_key_map(storage_key, offset);
+        Self { storage, slot }
+    }
+
+    pub fn get(&self) -> Result<i64, ()> {
+        unsafe {
+            let state = &mut *self.storage;
+            let arbos_addr = ARBOS_STATE_ADDRESS;
+
+            // First check cache for in-flight changes
+            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
+                if let Some(ref account) = cached_acc.account {
+                    if let Some(&value) = account.storage.get(&self.slot) {
+                        // Go nitro casts uint64 to int64, reinterpreting the bits
+                        let value_u64: u64 = value.try_into().unwrap_or(0);
+                        return Ok(value_u64 as i64);
+                    }
+                }
+            }
+
+            // Then check bundle_state.state for merged changes
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&self.slot) {
+                    let value_u64: u64 = slot_entry.present_value.try_into().unwrap_or(0);
+                    return Ok(value_u64 as i64);
+                }
+            }
+
+            // Fall back to database
+            match state.database.storage(arbos_addr, self.slot) {
+                Ok(value) => {
+                    let value_u64: u64 = value.try_into().unwrap_or(0);
+                    Ok(value_u64 as i64)
+                }
+                Err(_) => Err(()),
+            }
+        }
+    }
+
+    pub fn set(&self, value: i64) -> Result<(), ()> {
+        // Go nitro casts int64 to uint64, reinterpreting the bits
+        let value_u256 = U256::from(value as u64);
+        unsafe {
+            let state = &mut *self.storage;
+            write_arbos_storage(state, self.slot, value_u256);
+            Ok(())
+        }
+    }
+}
+
+/// StorageBackedBigInt matches Go nitro's StorageBackedBigInt.
+/// This stores signed 256-bit integers using two's complement representation.
+/// Go nitro uses big.Int which can be negative, and stores it as a 256-bit value.
+pub struct StorageBackedBigInt<D> {
+    storage: *mut revm::database::State<D>,
+    slot: U256,
+}
+
+impl<D: Database> StorageBackedBigInt<D> {
+    pub fn new(storage: *mut revm::database::State<D>, base_key: B256, offset: u64) -> Self {
+        let storage_key = if base_key == B256::ZERO {
+            &[] as &[u8]
+        } else {
+            base_key.as_slice()
+        };
+        let slot = storage_key_map(storage_key, offset);
+        Self { storage, slot }
+    }
+
+    /// Get the value as a signed 256-bit integer.
+    /// Returns (value, is_negative) where value is the absolute magnitude as U256.
+    /// For simplicity, we return the raw U256 and let the caller interpret it.
+    pub fn get_raw(&self) -> Result<U256, ()> {
+        unsafe {
+            let state = &mut *self.storage;
+            let arbos_addr = ARBOS_STATE_ADDRESS;
+
+            // First check cache for in-flight changes
+            if let Some(cached_acc) = state.cache.accounts.get(&arbos_addr) {
+                if let Some(ref account) = cached_acc.account {
+                    if let Some(&value) = account.storage.get(&self.slot) {
+                        return Ok(value);
+                    }
+                }
+            }
+
+            // Then check bundle_state.state for merged changes
+            if let Some(acc) = state.bundle_state.state.get(&arbos_addr) {
+                if let Some(slot_entry) = acc.storage.get(&self.slot) {
+                    return Ok(slot_entry.present_value);
+                }
+            }
+
+            // Fall back to database
+            match state.database.storage(arbos_addr, self.slot) {
+                Ok(value) => Ok(value),
+                Err(_) => Err(()),
+            }
+        }
+    }
+
+    /// Check if the stored value is negative (high bit set in two's complement)
+    pub fn is_negative(&self) -> Result<bool, ()> {
+        let raw = self.get_raw()?;
+        // Check if the high bit (bit 255) is set
+        Ok(raw.bit(255))
+    }
+
+    /// Set the value. For negative values, use set_negative.
+    pub fn set(&self, value: U256) -> Result<(), ()> {
+        unsafe {
+            let state = &mut *self.storage;
+            write_arbos_storage(state, self.slot, value);
+            Ok(())
+        }
+    }
+
+    /// Set a negative value using two's complement.
+    /// The magnitude should be the absolute value.
+    pub fn set_negative(&self, magnitude: U256) -> Result<(), ()> {
+        // Two's complement: -x = ~x + 1 = (2^256 - 1 - x) + 1 = 2^256 - x
+        // Since U256 wraps, we can compute this as: U256::MAX - magnitude + 1
+        // Or equivalently: (!magnitude).wrapping_add(U256::from(1))
+        let neg_value = (!magnitude).wrapping_add(U256::from(1));
+        self.set(neg_value)
+    }
+}
+
 /// StorageBackedAddressOrNil matches Go nitro's StorageBackedAddressOrNil.
 /// It uses a special sentinel value (1 << 255) to represent nil addresses.
 /// This is used for the retryable `to` field which can be nil for contract creation.
