@@ -4,7 +4,7 @@ use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
         CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache,
-        ExecutionCacheBuilder, FixedCacheMetrics, SavedCache,
+        FixedCacheMetrics, SavedCache,
     },
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
