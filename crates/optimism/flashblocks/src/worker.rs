@@ -103,11 +103,11 @@ where
 
         // Build the block without computing state root
         trace!(target: "flashblocks", "Building block without state root computation");
-        let execution = builder.finish(&state_provider, false)?;
-        let hashed_state = state_provider.hashed_post_state(&execution.bundle_state);
+        let (execution, bundle_state) = builder.finish_no_state_root(&state_provider)?;
+        let hashed_state = state_provider.hashed_post_state(&bundle_state);
 
         let execution_outcome = ExecutionOutcome::new(
-            execution.bundle_state,
+            bundle_state,
             vec![execution.execution_result.receipts],
             execution.block.number(),
             vec![execution.execution_result.requests],

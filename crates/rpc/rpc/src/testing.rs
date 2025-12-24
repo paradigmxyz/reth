@@ -87,7 +87,7 @@ where
 
                     total_fees += U256::from(tip) * U256::from(gas_used);
                 }
-                let outcome = builder.finish(&state, true).map_err(Eth::Error::from_eth_err)?;
+                let outcome = builder.finish(&state).map_err(Eth::Error::from_eth_err)?;
 
                 let requests = outcome
                     .block

@@ -316,8 +316,6 @@ pub struct BlockBuilderOutcome<N: NodePrimitives> {
     pub trie_updates: TrieUpdates,
     /// The built block.
     pub block: RecoveredBlock<N::Block>,
-    /// The bundle state after execution.
-    pub bundle_state: BundleState,
 }
 
 /// A type that knows how to execute and build a block.
@@ -375,8 +373,14 @@ pub trait BlockBuilder {
     fn finish(
         self,
         state_provider: impl StateProvider,
-        calculate_state_root: bool,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
+
+    /// Complete the block building process but skip calculating the state root, and returns the
+    /// [`BlockBuilderOutcome`] with empty state root and trie updates.
+    fn finish_no_state_root(
+        self,
+        state_provider: impl StateProvider,
+    ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
 
     /// Provides mutable access to the inner [`BlockExecutor`].
     fn executor_mut(&mut self) -> &mut Self::Executor;
@@ -509,8 +513,42 @@ where
     fn finish(
         self,
         state: impl StateProvider,
-        calculate_state_root: bool,
     ) -> Result<BlockBuilderOutcome<N>, BlockExecutionError> {
+        let (evm, result) = self.executor.finish()?;
+        let (db, evm_env) = evm.finish();
+
+        // merge all transitions into bundle state
+        db.merge_transitions(BundleRetention::Reverts);
+
+        // calculate the state root
+        let hashed_state = state.hashed_post_state(&db.bundle_state);
+        let (state_root, trie_updates) = state
+            .state_root_with_updates(hashed_state.clone())
+            .map_err(BlockExecutionError::other)?;
+
+        let (transactions, senders) =
+            self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+
+        let block = self.assembler.assemble_block(BlockAssemblerInput {
+            evm_env,
+            execution_ctx: self.ctx,
+            parent: self.parent,
+            transactions,
+            output: &result,
+            bundle_state: &db.bundle_state,
+            state_provider: &state,
+            state_root,
+        })?;
+
+        let block = RecoveredBlock::new_unhashed(block, senders);
+
+        Ok(BlockBuilderOutcome { execution_result: result, hashed_state, trie_updates, block })
+    }
+
+    fn finish_no_state_root(
+        self,
+        state: impl StateProvider,
+    ) -> Result<(BlockBuilderOutcome<N>, BundleState), BlockExecutionError> {
         let (evm, result) = self.executor.finish()?;
         let (db, evm_env) = evm.finish();
 
@@ -520,14 +558,6 @@ where
         // calculate the state root
         let bundle_state = db.take_bundle();
         let hashed_state = state.hashed_post_state(&bundle_state);
-        let (state_root, trie_updates) = if calculate_state_root {
-            state
-                .state_root_with_updates(hashed_state.clone())
-                .map_err(BlockExecutionError::other)?
-        } else {
-            (B256::default(), TrieUpdates::default())
-        };
-
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
 
@@ -539,18 +569,20 @@ where
             output: &result,
             bundle_state: &bundle_state,
             state_provider: &state,
-            state_root,
+            state_root: B256::default(),
         })?;
 
         let block = RecoveredBlock::new_unhashed(block, senders);
 
-        Ok(BlockBuilderOutcome {
-            execution_result: result,
-            hashed_state,
-            trie_updates,
-            block,
+        Ok((
+            BlockBuilderOutcome {
+                execution_result: result,
+                hashed_state,
+                trie_updates: TrieUpdates::default(),
+                block,
+            },
             bundle_state,
-        })
+        ))
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {

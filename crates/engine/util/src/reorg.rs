@@ -316,7 +316,7 @@ where
         cumulative_gas_used += gas_used;
     }
 
-    let BlockBuilderOutcome { block, .. } = builder.finish(&state_provider, true)?;
+    let BlockBuilderOutcome { block, .. } = builder.finish(&state_provider)?;
 
     Ok(block.into_sealed_block())
 }

@@ -359,7 +359,7 @@ where
     }
 
     let BlockBuilderOutcome { execution_result, block, .. } =
-        builder.finish(state_provider.as_ref(), true)?;
+        builder.finish(state_provider.as_ref())?;
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)
