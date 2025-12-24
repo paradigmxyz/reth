@@ -1,5 +1,6 @@
 use crate::metrics::PersistenceMetrics;
 use alloy_eips::BlockNumHash;
+use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
@@ -40,6 +41,8 @@ where
     metrics: PersistenceMetrics,
     /// Sender for sync metrics - we only submit sync metrics for persisted blocks
     sync_metrics_tx: MetricEventsSender,
+    /// Sender to signal when persistence completes.
+    persistence_complete_tx: CrossbeamSender<()>,
 }
 
 impl<N> PersistenceService<N>
@@ -52,8 +55,16 @@ where
         incoming: Receiver<PersistenceAction<N::Primitives>>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
+        persistence_complete_tx: CrossbeamSender<()>,
     ) -> Self {
-        Self { provider, incoming, pruner, metrics: PersistenceMetrics::default(), sync_metrics_tx }
+        Self {
+            provider,
+            incoming,
+            pruner,
+            metrics: PersistenceMetrics::default(),
+            sync_metrics_tx,
+            persistence_complete_tx,
+        }
     }
 
     /// Prunes block data before the given block number according to the configured prune
@@ -85,6 +96,8 @@ where
                         self.sync_metrics_tx.send(MetricEvent::SyncHeight { height: new_tip_num });
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(result);
+                    // we ignore the error because a pending signal or disconnected receiver is fine
+                    let _ = self.persistence_complete_tx.try_send(());
                 }
                 PersistenceAction::SaveBlocks(blocks, sender) => {
                     let result = self.on_save_blocks(blocks)?;
@@ -92,6 +105,8 @@ where
 
                     // we ignore the error because the caller may or may not care about the result
                     let _ = sender.send(result);
+                    // we ignore the error because a pending signal or disconnected receiver is fine
+                    let _ = self.persistence_complete_tx.try_send(());
 
                     if let Some(block_number) = result_number {
                         // send new sync metrics based on saved blocks
@@ -216,6 +231,7 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         provider_factory: ProviderFactory<N>,
         pruner: PrunerWithFactory<ProviderFactory<N>>,
         sync_metrics_tx: MetricEventsSender,
+        persistence_complete_tx: CrossbeamSender<()>,
     ) -> PersistenceHandle<N::Primitives>
     where
         N: ProviderNodeTypes,
@@ -227,8 +243,13 @@ impl<T: NodePrimitives> PersistenceHandle<T> {
         let persistence_handle = PersistenceHandle::new(db_service_tx);
 
         // spawn the persistence service
-        let db_service =
-            PersistenceService::new(provider_factory, db_service_rx, pruner, sync_metrics_tx);
+        let db_service = PersistenceService::new(
+            provider_factory,
+            db_service_rx,
+            pruner,
+            sync_metrics_tx,
+            persistence_complete_tx,
+        );
         std::thread::Builder::new()
             .name("Persistence Service".to_string())
             .spawn(|| {
@@ -316,7 +337,13 @@ mod tests {
             Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();
-        PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx)
+        let (persistence_complete_tx, _persistence_complete_rx) = crossbeam_channel::bounded(1);
+        PersistenceHandle::<EthPrimitives>::spawn_service(
+            provider,
+            pruner,
+            sync_metrics_tx,
+            persistence_complete_tx,
+        )
     }
 
     #[tokio::test]
@@ -390,5 +417,39 @@ mod tests {
             let BlockNumHash { hash: actual_hash, number: _ } = rx.await.unwrap().unwrap();
             assert_eq!(last_hash, actual_hash);
         }
+    }
+
+    #[tokio::test]
+    async fn test_persistence_complete_signal_on_save_blocks() {
+        reth_tracing::init_test_tracing();
+        let provider = create_test_provider_factory();
+
+        let (_finished_exex_height_tx, finished_exex_height_rx) =
+            tokio::sync::watch::channel(FinishedExExHeight::NoExExs);
+
+        let pruner =
+            Pruner::new_with_factory(provider.clone(), vec![], 5, 0, None, finished_exex_height_rx);
+
+        let (sync_metrics_tx, _) = unbounded_channel();
+        let (persistence_complete_tx, persistence_complete_rx) = crossbeam_channel::bounded(1);
+        let persistence_handle = PersistenceHandle::<EthPrimitives>::spawn_service(
+            provider,
+            pruner,
+            sync_metrics_tx,
+            persistence_complete_tx,
+        );
+
+        let mut test_block_builder = TestBlockBuilder::eth();
+        let executed = test_block_builder.get_executed_block_with_number(0, B256::random());
+        let (tx, rx) = oneshot::channel();
+
+        persistence_handle.save_blocks(vec![executed], tx).unwrap();
+
+        // wait for result
+        let _ = rx.await.unwrap();
+
+        // verify completion signal was sent
+        let signal = persistence_complete_rx.try_recv();
+        assert!(signal.is_ok());
     }
 }

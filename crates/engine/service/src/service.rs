@@ -94,8 +94,15 @@ where
 
         let downloader = BasicBlockDownloader::new(client, consensus.clone());
 
-        let persistence_handle =
-            PersistenceHandle::<EthPrimitives>::spawn_service(provider, pruner, sync_metrics_tx);
+        // Create channel for persistence completion signals
+        let (persistence_complete_tx, persistence_complete_rx) = crossbeam_channel::bounded(1);
+
+        let persistence_handle = PersistenceHandle::<EthPrimitives>::spawn_service(
+            provider,
+            pruner,
+            sync_metrics_tx,
+            persistence_complete_tx,
+        );
 
         let canonical_in_memory_state = blockchain_db.canonical_in_memory_state();
 
@@ -109,6 +116,7 @@ where
             tree_config,
             engine_kind,
             evm_config,
+            persistence_complete_rx,
         );
 
         let engine_handler = EngineApiRequestHandler::new(to_tree_tx, from_tree);

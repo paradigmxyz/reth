@@ -37,15 +37,9 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use revm::state::EvmState;
 use state::TreeState;
-use std::{
-    fmt::Debug,
-    ops,
-    sync::{
-        mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
-        Arc,
-    },
-    time::Instant,
-};
+use std::{fmt::Debug, ops, sync::Arc, time::Instant};
+
+use crossbeam_channel::{Receiver, RecvError, Sender};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     oneshot::{self, error::TryRecvError},
@@ -278,6 +272,8 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
+    /// Receiver for persistence completion signals.
+    persistence_complete_rx: Receiver<()>,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -338,8 +334,9 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
+        persistence_complete_rx: Receiver<()>,
     ) -> Self {
-        let (incoming_tx, incoming) = std::sync::mpsc::channel();
+        let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
         Self {
             provider,
@@ -358,6 +355,7 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
+            persistence_complete_rx,
         }
     }
 
@@ -377,6 +375,7 @@ where
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
+        persistence_complete_rx: Receiver<()>,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -408,6 +407,7 @@ where
             config,
             kind,
             evm_config,
+            persistence_complete_rx,
         );
         let incoming = task.incoming_tx.clone();
         std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
@@ -1194,9 +1194,10 @@ where
     /// Attempts to receive the next engine request.
     ///
     /// If there's currently no persistence action in progress, this will block until a new request
-    /// is received. If there's a persistence action in progress, this will try to receive the
-    /// next request with a timeout to not block indefinitely and return `Ok(None)` if no request is
-    /// received in time.
+    /// is received. If there's a persistence action in progress, this will wait on either:
+    /// - An incoming engine message
+    /// - A persistence completion signal
+    /// - A fallback timeout (500ms)
     ///
     /// Returns an error if the engine channel is disconnected.
     #[expect(clippy::type_complexity)]
@@ -1204,13 +1205,11 @@ where
         &self,
     ) -> Result<Option<FromEngine<EngineApiRequest<T, N>, N::Block>>, RecvError> {
         if self.persistence_state.in_progress() {
-            // try to receive the next request with a timeout to not block indefinitely
-            match self.incoming.recv_timeout(std::time::Duration::from_millis(500)) {
-                Ok(msg) => Ok(Some(msg)),
-                Err(err) => match err {
-                    RecvTimeoutError::Timeout => Ok(None),
-                    RecvTimeoutError::Disconnected => Err(RecvError),
-                },
+            let timeout = std::time::Duration::from_millis(500);
+            crossbeam_channel::select! {
+                recv(self.incoming) -> msg => msg.map(Some).map_err(|_| RecvError),
+                recv(self.persistence_complete_rx) -> _ => Ok(None),
+                default(timeout) => Ok(None),
             }
         } else {
             self.incoming.recv().map(Some)
