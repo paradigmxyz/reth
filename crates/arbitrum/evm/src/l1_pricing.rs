@@ -10,6 +10,39 @@ use revm::Database;
 use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress, StorageBackedInt64, StorageBackedBigInt};
 use crate::batch_poster::BatchPostersTable;
 
+/// Performs signed floor division matching Go's big.Int.Div semantics.
+/// Go's Div uses Euclidean division which rounds towards negative infinity.
+/// 
+/// For positive dividend: floor(a/b) = a/b (truncation)
+/// For negative dividend with positive divisor: if there's a remainder, subtract 1 from truncated result
+/// 
+/// Returns (quotient_magnitude, quotient_is_positive)
+fn signed_floor_div(
+    dividend_magnitude: U256,
+    dividend_positive: bool,
+    divisor: U256,
+) -> (U256, bool) {
+    if divisor.is_zero() {
+        return (U256::ZERO, true);
+    }
+    
+    let quotient = dividend_magnitude.checked_div(divisor).unwrap_or(U256::ZERO);
+    let remainder = dividend_magnitude.checked_rem(divisor).unwrap_or(U256::ZERO);
+    
+    if dividend_positive {
+        // Positive dividend: truncation = floor division
+        (quotient, true)
+    } else {
+        // Negative dividend: floor division rounds towards negative infinity
+        // If there's a remainder, we need to add 1 to the magnitude (making it more negative)
+        if remainder.is_zero() {
+            (quotient, false)
+        } else {
+            (quotient.saturating_add(U256::from(1)), false)
+        }
+    }
+}
+
 fn compress_brotli(data: &[u8], level: u64) -> Result<u64, ()> {
     use brotli::enc::BrotliEncoderParams;
     
@@ -514,15 +547,15 @@ impl<D: Database> L1PricingState<D> {
             
             let units_allocated_u256 = U256::from(units_allocated);
             
-            // Compute desiredDerivative = -surplus / equilUnits
-            // If surplus is positive, desiredDerivative is negative
-            // If surplus is negative, desiredDerivative is positive
-            let desired_deriv_magnitude = if !equil_units.is_zero() {
-                surplus_magnitude.checked_div(equil_units).unwrap_or(U256::ZERO)
-            } else {
-                U256::ZERO
-            };
-            let desired_deriv_positive = !surplus_positive; // negation of surplus sign
+            // Compute desiredDerivative = -surplus / equilUnits using floor division
+            // Go's big.Int.Div uses Euclidean/floor division (rounds towards negative infinity)
+            // If surplus is positive, -surplus is negative, so desiredDerivative is negative
+            // If surplus is negative, -surplus is positive, so desiredDerivative is positive
+            let (desired_deriv_magnitude, desired_deriv_positive) = signed_floor_div(
+                surplus_magnitude,
+                !surplus_positive,  // -surplus has opposite sign of surplus
+                equil_units,
+            );
             
             // Compute actualDerivative = (surplus - oldSurplus) / unitsAllocated
             // Need to compute surplus - oldSurplus with proper sign handling
@@ -548,12 +581,12 @@ impl<D: Database> L1PricingState<D> {
                 (surplus_magnitude.saturating_add(old_surplus_raw), false)
             };
             
-            let actual_deriv_magnitude = if !units_allocated_u256.is_zero() {
-                surplus_diff_magnitude.checked_div(units_allocated_u256).unwrap_or(U256::ZERO)
-            } else {
-                U256::ZERO
-            };
-            let actual_deriv_positive = surplus_diff_positive;
+            // Compute actualDerivative = (surplus - oldSurplus) / unitsAllocated using floor division
+            let (actual_deriv_magnitude, actual_deriv_positive) = signed_floor_div(
+                surplus_diff_magnitude,
+                surplus_diff_positive,
+                units_allocated_u256,
+            );
             
             // Compute changeDerivativeBy = desiredDerivative - actualDerivative
             let (change_deriv_magnitude, change_deriv_positive) = if desired_deriv_positive && actual_deriv_positive {
@@ -578,18 +611,17 @@ impl<D: Database> L1PricingState<D> {
                 (desired_deriv_magnitude.saturating_add(actual_deriv_magnitude), false)
             };
             
-            // Compute priceChange = changeDerivativeBy * unitsAllocated / allocPlusInert
-            let price_change = if !alloc_plus_inert.is_zero() {
-                change_deriv_magnitude
-                    .saturating_mul(units_allocated_u256)
-                    .checked_div(alloc_plus_inert)
-                    .unwrap_or(U256::ZERO)
-            } else {
-                U256::ZERO
-            };
+            // Compute priceChange = changeDerivativeBy * unitsAllocated / allocPlusInert using floor division
+            // First multiply, then divide with floor semantics
+            let change_times_units = change_deriv_magnitude.saturating_mul(units_allocated_u256);
+            let (price_change, price_change_positive) = signed_floor_div(
+                change_times_units,
+                change_deriv_positive,
+                alloc_plus_inert,
+            );
 
-            // newPrice = price + priceChange (with sign)
-            let new_price = if change_deriv_positive {
+            // newPrice = price + priceChange (with sign from floor division)
+            let new_price = if price_change_positive {
                 price.saturating_add(price_change)
             } else {
                 price.saturating_sub(price_change)
