@@ -381,7 +381,7 @@ where
         self.with_debug_block_provider_factory(Box::new(move |_, _| Ok(handle.clone())))
     }
 
-    /// Alias for [`with_debug_block_client`], for API symmetry with
+    /// Alias for [`Self::with_debug_block_client`], for API symmetry with
     /// `launch_with_debug_capabilities().with_debug_consensus(...)`.
     pub fn with_debug_consensus(
         self,
