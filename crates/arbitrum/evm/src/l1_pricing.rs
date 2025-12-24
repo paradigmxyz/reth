@@ -469,7 +469,7 @@ impl<D: Database> L1PricingState<D> {
         // Update time
         self.set_last_update_time(update_time).ok();
 
-        // Adjust the price
+        // Adjust the price - matching Go nitro's exact algorithm
         if units_allocated > 0 {
             let total_funds_due = batch_poster_table.total_funds_due().unwrap_or(U256::ZERO);
             let funds_due_for_rewards = self.get_funds_due_for_rewards().unwrap_or(U256::ZERO);
@@ -491,22 +491,108 @@ impl<D: Database> L1PricingState<D> {
 
             let alloc_plus_inert = inertia_units.saturating_add(U256::from(units_allocated));
 
-            // Simplified price adjustment formula
-            // If surplus is positive (have more than need), decrease price
-            // If surplus is negative (need more than have), increase price
-            let price_change = if !equil_units.is_zero() && !alloc_plus_inert.is_zero() {
-                surplus_magnitude
-                    .saturating_mul(U256::from(units_allocated))
-                    .checked_div(equil_units.saturating_mul(alloc_plus_inert).checked_div(U256::from(units_allocated)).unwrap_or(U256::from(1)))
+            // Get old surplus for derivative calculation
+            let old_surplus_raw = self.get_last_surplus().unwrap_or(U256::ZERO);
+            let old_surplus_negative = self.last_surplus.is_negative().unwrap_or(false);
+            
+            // Go nitro price adjustment formula:
+            // desiredDerivative := -surplus / equilUnits
+            // actualDerivative := (surplus - oldSurplus) / unitsAllocated
+            // changeDerivativeBy := desiredDerivative - actualDerivative
+            // priceChange := changeDerivativeBy * unitsAllocated / allocPlusInert
+            //
+            // Simplified: priceChange = (-surplus/equilUnits - (surplus-oldSurplus)/unitsAllocated) * unitsAllocated / allocPlusInert
+            //
+            // For the first batch (oldSurplus = 0, surplus is negative since we have no funds but owe funds):
+            // desiredDerivative = -(-magnitude) / equilUnits = magnitude / equilUnits (positive, want to increase price)
+            // actualDerivative = (-magnitude - 0) / unitsAllocated = -magnitude / unitsAllocated (negative)
+            // changeDerivativeBy = magnitude/equilUnits - (-magnitude/unitsAllocated) = magnitude/equilUnits + magnitude/unitsAllocated
+            // priceChange = changeDerivativeBy * unitsAllocated / allocPlusInert
+            
+            // For simplicity, we'll compute this using signed arithmetic approximation
+            // Since U256 doesn't support signed operations, we track sign separately
+            
+            let units_allocated_u256 = U256::from(units_allocated);
+            
+            // Compute desiredDerivative = -surplus / equilUnits
+            // If surplus is positive, desiredDerivative is negative
+            // If surplus is negative, desiredDerivative is positive
+            let desired_deriv_magnitude = if !equil_units.is_zero() {
+                surplus_magnitude.checked_div(equil_units).unwrap_or(U256::ZERO)
+            } else {
+                U256::ZERO
+            };
+            let desired_deriv_positive = !surplus_positive; // negation of surplus sign
+            
+            // Compute actualDerivative = (surplus - oldSurplus) / unitsAllocated
+            // Need to compute surplus - oldSurplus with proper sign handling
+            let (surplus_diff_magnitude, surplus_diff_positive) = if surplus_positive && !old_surplus_negative {
+                // Both positive: surplus - oldSurplus
+                if surplus_magnitude >= old_surplus_raw {
+                    (surplus_magnitude.saturating_sub(old_surplus_raw), true)
+                } else {
+                    (old_surplus_raw.saturating_sub(surplus_magnitude), false)
+                }
+            } else if !surplus_positive && old_surplus_negative {
+                // Both negative: -surplus_mag - (-old_surplus_mag) = old_surplus_mag - surplus_mag
+                if old_surplus_raw >= surplus_magnitude {
+                    (old_surplus_raw.saturating_sub(surplus_magnitude), true)
+                } else {
+                    (surplus_magnitude.saturating_sub(old_surplus_raw), false)
+                }
+            } else if surplus_positive && old_surplus_negative {
+                // surplus positive, oldSurplus negative: surplus - (-old) = surplus + old
+                (surplus_magnitude.saturating_add(old_surplus_raw), true)
+            } else {
+                // surplus negative, oldSurplus positive: -surplus - old = -(surplus + old)
+                (surplus_magnitude.saturating_add(old_surplus_raw), false)
+            };
+            
+            let actual_deriv_magnitude = if !units_allocated_u256.is_zero() {
+                surplus_diff_magnitude.checked_div(units_allocated_u256).unwrap_or(U256::ZERO)
+            } else {
+                U256::ZERO
+            };
+            let actual_deriv_positive = surplus_diff_positive;
+            
+            // Compute changeDerivativeBy = desiredDerivative - actualDerivative
+            let (change_deriv_magnitude, change_deriv_positive) = if desired_deriv_positive && actual_deriv_positive {
+                // Both positive
+                if desired_deriv_magnitude >= actual_deriv_magnitude {
+                    (desired_deriv_magnitude.saturating_sub(actual_deriv_magnitude), true)
+                } else {
+                    (actual_deriv_magnitude.saturating_sub(desired_deriv_magnitude), false)
+                }
+            } else if !desired_deriv_positive && !actual_deriv_positive {
+                // Both negative: -d - (-a) = a - d
+                if actual_deriv_magnitude >= desired_deriv_magnitude {
+                    (actual_deriv_magnitude.saturating_sub(desired_deriv_magnitude), true)
+                } else {
+                    (desired_deriv_magnitude.saturating_sub(actual_deriv_magnitude), false)
+                }
+            } else if desired_deriv_positive && !actual_deriv_positive {
+                // desired positive, actual negative: d - (-a) = d + a
+                (desired_deriv_magnitude.saturating_add(actual_deriv_magnitude), true)
+            } else {
+                // desired negative, actual positive: -d - a = -(d + a)
+                (desired_deriv_magnitude.saturating_add(actual_deriv_magnitude), false)
+            };
+            
+            // Compute priceChange = changeDerivativeBy * unitsAllocated / allocPlusInert
+            let price_change = if !alloc_plus_inert.is_zero() {
+                change_deriv_magnitude
+                    .saturating_mul(units_allocated_u256)
+                    .checked_div(alloc_plus_inert)
                     .unwrap_or(U256::ZERO)
             } else {
                 U256::ZERO
             };
 
-            let new_price = if surplus_positive {
-                price.saturating_sub(price_change)
-            } else {
+            // newPrice = price + priceChange (with sign)
+            let new_price = if change_deriv_positive {
                 price.saturating_add(price_change)
+            } else {
+                price.saturating_sub(price_change)
             };
 
             // Store surplus for next iteration
