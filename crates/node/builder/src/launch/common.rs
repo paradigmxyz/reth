@@ -1060,13 +1060,10 @@ where
     }
 
     /// Spawns the [`EthStatsService`] service if configured.
-    pub async fn spawn_ethstats<E>(&self, engine_events: Option<E>) -> eyre::Result<()>
+    pub async fn spawn_ethstats<St>(&self, mut engine_events: St) -> eyre::Result<()>
     where
-        E: Stream<
-                Item = reth_engine_primitives::ConsensusEngineEvent<
-                    <T::Types as reth_node_api::NodeTypes>::Primitives,
-                >,
-            > + Send
+        St: Stream<Item = reth_engine_primitives::ConsensusEngineEvent<PrimitivesTy<T::Types>>>
+            + Send
             + Unpin
             + 'static,
     {
@@ -1081,38 +1078,35 @@ where
         let ethstats = EthStatsService::new(url, network, provider, pool).await?;
 
         // If engine events are provided, spawn listener for new payload reporting
-        if let Some(engine_events) = engine_events {
-            let ethstats_for_events = ethstats.clone();
-            let task_executor = self.task_executor().clone();
-            task_executor.spawn(Box::pin(async move {
-                let mut events_stream = engine_events;
-                while let Some(event) = events_stream.next().await {
-                    use reth_engine_primitives::ConsensusEngineEvent;
-                    match event {
-                        ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
-                        ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {
-                            let block_hash = executed.recovered_block.num_hash().hash;
-                            let block_number = executed.recovered_block.num_hash().number;
-                            if let Err(e) = ethstats_for_events
-                                .report_new_payload(block_hash, block_number, duration)
-                                .await
-                            {
-                                reth_tracing::tracing::debug!(
-                                    target: "ethstats",
-                                    "Failed to report new payload: {}", e
-                                );
-                            }
-                        }
-                        _ => {
-                            // Ignore other event types for ethstats reporting
+        let ethstats_for_events = ethstats.clone();
+        let task_executor = self.task_executor().clone();
+        task_executor.spawn(Box::pin(async move {
+            while let Some(event) = engine_events.next().await {
+                use reth_engine_primitives::ConsensusEngineEvent;
+                match event {
+                    ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
+                    ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {
+                        let block_hash = executed.recovered_block.num_hash().hash;
+                        let block_number = executed.recovered_block.num_hash().number;
+                        if let Err(e) = ethstats_for_events
+                            .report_new_payload(block_hash, block_number, duration)
+                            .await
+                        {
+                            debug!(
+                                target: "ethstats",
+                                "Failed to report new payload: {}", e
+                            );
                         }
                     }
+                    _ => {
+                        // Ignore other event types for ethstats reporting
+                    }
                 }
-            }));
-        }
+            }
+        }));
 
         // Spawn main ethstats service
-        tokio::spawn(async move { ethstats.run().await });
+        task_executor.spawn(Box::pin(async move { ethstats.run().await }));
 
         Ok(())
     }

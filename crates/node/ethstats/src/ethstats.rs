@@ -355,7 +355,7 @@ where
         &self,
         block_hash: alloy_primitives::B256,
         block_number: u64,
-        processing_time: std::time::Duration,
+        processing_time: Duration,
     ) -> Result<(), EthStatsError> {
         let conn = self.conn.read().await;
         let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
