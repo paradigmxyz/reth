@@ -125,6 +125,9 @@ where
 /// `SenderRecovery` segment.
 ///
 /// Under the hood, this stage has the same functionality as [`PruneStage`].
+///
+/// Should be run right after `Execution`, unlike [`PruneStage`] which runs at the end.
+/// This lets subsequent stages reuse the freed pages instead of growing the freelist.
 #[derive(Debug)]
 pub struct PruneSenderRecoveryStage(PruneStage);
 

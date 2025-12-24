@@ -1,6 +1,8 @@
 //! Multiproof task related functionality.
 
-use crate::tree::payload_processor::bal::bal_to_hashed_post_state;
+use crate::tree::{
+    cached_state::CachedStateProvider, payload_processor::bal::bal_to_hashed_post_state,
+};
 use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
@@ -594,8 +596,9 @@ impl MultiProofTask {
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
         chunk_size: Option<usize>,
+        tx: CrossbeamSender<MultiProofMessage>,
+        rx: CrossbeamReceiver<MultiProofMessage>,
     ) -> Self {
-        let (tx, rx) = unbounded();
         let (proof_result_tx, proof_result_rx) = unbounded();
         let metrics = MultiProofTaskMetrics::default();
 
@@ -872,7 +875,7 @@ impl MultiProofTask {
         msg: MultiProofMessage,
         ctx: &mut MultiproofBatchCtx,
         batch_metrics: &mut MultiproofBatchMetrics,
-        provider: &P,
+        provider: &CachedStateProvider<P>,
     ) -> bool
     where
         P: AccountReader,
@@ -1048,7 +1051,7 @@ impl MultiProofTask {
                 }
 
                 // Convert BAL to HashedPostState and process it
-                match bal_to_hashed_post_state(&bal, &provider) {
+                match bal_to_hashed_post_state(&bal, provider) {
                     Ok(hashed_state) => {
                         debug!(
                             target: "engine::tree::payload_processor::multiproof",
@@ -1177,7 +1180,7 @@ impl MultiProofTask {
         target = "engine::tree::payload_processor::multiproof",
         skip_all
     )]
-    pub(crate) fn run<P>(mut self, provider: P)
+    pub(crate) fn run<P>(mut self, provider: CachedStateProvider<P>)
     where
         P: AccountReader,
     {
@@ -1494,12 +1497,13 @@ fn estimate_evm_state_targets(state: &EvmState) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::cached_state::ExecutionCacheBuilder;
     use alloy_eip7928::{AccountChanges, BalanceChange};
     use alloy_primitives::{map::B256Set, Address};
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        BlockReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
-        TrieReader,
+        BlockReader, DatabaseProviderFactory, LatestStateProvider, PruneCheckpointReader,
+        StageCheckpointReader, StateProviderBox, TrieReader,
     };
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
@@ -1531,8 +1535,23 @@ mod tests {
         let task_ctx = ProofTaskCtx::new(overlay_factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
 
-        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1))
+        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1), tx, rx)
+    }
+
+    fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>
+    where
+        F: DatabaseProviderFactory<
+                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            > + Clone
+            + Send
+            + 'static,
+    {
+        let db_provider = factory.database_provider_ro().unwrap();
+        let state_provider: StateProviderBox = Box::new(LatestStateProvider::new(db_provider));
+        let cache = ExecutionCacheBuilder::default().build_caches(1000);
+        CachedStateProvider::new(state_provider, cache, Default::default())
     }
 
     #[test]
@@ -2464,7 +2483,7 @@ mod tests {
         use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
-        let test_provider = test_provider_factory.latest().unwrap();
+        let test_provider = create_cached_provider(test_provider_factory.clone());
         let mut task = create_test_state_root_task(test_provider_factory);
 
         // Queue: Prefetch1, StateUpdate, Prefetch2
@@ -2684,7 +2703,7 @@ mod tests {
     #[test]
     fn test_bal_message_processing() {
         let test_provider_factory = create_test_provider_factory();
-        let test_provider = test_provider_factory.latest().unwrap();
+        let test_provider = create_cached_provider(test_provider_factory.clone());
         let mut task = create_test_state_root_task(test_provider_factory);
 
         // Create a simple BAL with one account change
