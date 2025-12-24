@@ -80,13 +80,13 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
                     BundleAccountSorted {
                         info: acc.info.clone(),
                         original_info: acc.original_info.clone(),
-                        storage: BTreeMap::from_iter(acc.storage.clone()),
+                        storage: acc.storage.iter().map(|(k, v)| (*k, *v)).collect(),
                         status: acc.status,
                     },
                 )
             })
             .collect(),
-        contracts: BTreeMap::from_iter(bundle_state.contracts.clone()),
+        contracts: bundle_state.contracts.iter().map(|(k, v)| (*k, v.clone())).collect(),
         reverts: bundle_state
             .reverts
             .iter()
@@ -98,7 +98,7 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
                             *addr,
                             AccountRevertSorted {
                                 account: rev.account.clone(),
-                                storage: BTreeMap::from_iter(rev.storage.clone()),
+                                storage: rev.storage.iter().map(|(k, v)| (*k, *v)).collect(),
                                 previous_status: rev.previous_status,
                                 wipe_storage: rev.wipe_storage,
                             },
