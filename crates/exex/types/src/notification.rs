@@ -65,7 +65,14 @@ impl<P: NodePrimitives> From<CanonStateNotification<P>> for ExExNotification<P> 
     fn from(notification: CanonStateNotification<P>) -> Self {
         match notification {
             CanonStateNotification::Commit { new } => Self::ChainCommitted { new },
-            CanonStateNotification::Reorg { old, new } => Self::ChainReorged { old, new },
+            CanonStateNotification::Reorg { old, new } => {
+                // If new is empty, this is a revert, not a reorg
+                if new.is_empty() {
+                    Self::ChainReverted { old }
+                } else {
+                    Self::ChainReorged { old, new }
+                }
+            }
         }
     }
 }
