@@ -100,33 +100,46 @@ where
         // Get runtime handle once outside the loop
         let handle = get_runtime_handle();
 
+        // Collect all storage root targets with their channels
+        let mut tasks = Vec::with_capacity(storage_root_targets.len());
+
         for (hashed_address, prefix_set) in
             storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
         {
-            let factory = self.factory.clone();
-            #[cfg(feature = "metrics")]
-            let metrics = self.metrics.storage_trie.clone();
-
             let (tx, rx) = mpsc::sync_channel(1);
-
-            // Spawn a blocking task to calculate account's storage root from database I/O
-            drop(handle.spawn_blocking(move || {
-                let result = (|| -> Result<_, ParallelStateRootError> {
-                    let provider = factory.database_provider_ro()?;
-                    Ok(StorageRoot::new_hashed(
-                        &provider,
-                        &provider,
-                        hashed_address,
-                        prefix_set,
-                        #[cfg(feature = "metrics")]
-                        metrics,
-                    )
-                    .calculate(retain_updates)?)
-                })();
-                let _ = tx.send(result);
-            }));
+            tasks.push((hashed_address, prefix_set, tx));
             storage_roots.insert(hashed_address, rx);
         }
+
+        // Spawn all storage root tasks in parallel within a single spawn_blocking
+        let factory = self.factory.clone();
+        #[cfg(feature = "metrics")]
+        let metrics = self.metrics.storage_trie.clone();
+        let handle_clone = handle.clone();
+
+        handle.spawn_blocking(move || {
+            for (hashed_address, prefix_set, tx) in tasks {
+                let factory = factory.clone();
+                #[cfg(feature = "metrics")]
+                let metrics = metrics.clone();
+
+                handle_clone.spawn_blocking(move || {
+                    let result = (|| -> Result<_, ParallelStateRootError> {
+                        let provider = factory.database_provider_ro()?;
+                        Ok(StorageRoot::new_hashed(
+                            &provider,
+                            &provider,
+                            hashed_address,
+                            prefix_set,
+                            #[cfg(feature = "metrics")]
+                            metrics,
+                        )
+                        .calculate(retain_updates)?)
+                    })();
+                    let _ = tx.send(result);
+                });
+            }
+        });
 
         trace!(target: "trie::parallel_state_root", "calculating state root");
         let mut trie_updates = TrieUpdates::default();
