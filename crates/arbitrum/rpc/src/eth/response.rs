@@ -324,6 +324,15 @@ pub fn arb_tx_with_other_fields(
 
             }
         }
+        ArbTypedTransaction::Deposit(dep) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x64]));
+            let _ = out.other.insert_value("gas".to_string(), U256::ZERO);
+            let _ = out.other.insert_value("gasPrice".to_string(), U256::ZERO);
+            let _ = out.other.insert_value("value".to_string(), dep.value);
+            let _ = out.other.insert_value("to".to_string(), dep.to);
+            let _ = out.other.insert_value("from".to_string(), dep.from);
+            let _ = out.other.insert_value("input".to_string(), Bytes::default());
+        }
         _ => {}
     }
 
