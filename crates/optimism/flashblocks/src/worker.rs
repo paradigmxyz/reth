@@ -12,7 +12,7 @@ use reth_primitives_traits::{
 };
 use reth_revm::{cached::CachedReads, database::StateProviderDatabase, db::State};
 use reth_rpc_eth_types::{EthApiError, PendingBlock};
-use reth_storage_api::{noop::NoopProvider, BlockReaderIdExt, StateProviderFactory};
+use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use std::{
     sync::Arc,
     time::{Duration, Instant},
@@ -103,10 +103,11 @@ where
 
         // Build the block without computing state root
         trace!(target: "flashblocks", "Building block without state root computation");
-        let execution = builder.finish(NoopProvider::default())?;
+        let execution = builder.finish(&state_provider, false)?;
+        let hashed_state = state_provider.hashed_post_state(&execution.bundle_state);
 
         let execution_outcome = ExecutionOutcome::new(
-            state.take_bundle(),
+            execution.bundle_state,
             vec![execution.execution_result.receipts],
             execution.block.number(),
             vec![execution.execution_result.requests],
@@ -118,7 +119,7 @@ where
                 execution.block.into(),
                 Arc::new(execution_outcome),
                 ComputedTrieData::without_trie_input(
-                    Arc::new(execution.hashed_state.clone().into_sorted()),
+                    Arc::new(hashed_state.clone().into_sorted()),
                     Arc::default(),
                 ),
             ),
@@ -127,7 +128,7 @@ where
             pending_block,
             args.last_flashblock_index,
             args.last_flashblock_hash,
-            execution.hashed_state,
+            hashed_state,
             args.compute_state_root,
         );
 
@@ -141,7 +142,7 @@ where
     where
         N::BlockHeader: HeaderMut,
     {
-        let state_provider = self.provider.state_by_block_hash(computed_block.parent_hash())?;
+        let state_provider = self.provider.history_by_block_hash(computed_block.parent_hash())?;
         let (state_root, trie_updates) =
             state_provider.state_root_with_updates(computed_block.hashed_state.clone())?;
 

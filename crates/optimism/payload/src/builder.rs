@@ -369,8 +369,8 @@ impl<Txs> OpBuilder<'_, Txs> {
             }
         }
 
-        let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, block } =
-            builder.finish(state_provider)?;
+        let BlockBuilderOutcome { execution_result, hashed_state, trie_updates, block, .. } =
+            builder.finish(state_provider, true)?;
 
         let sealed_block = Arc::new(block.sealed_block().clone());
         debug!(target: "payload_builder", id=%ctx.attributes().payload_id(), sealed_block_header = ?sealed_block.header(), "sealed built block");
