@@ -43,18 +43,42 @@ fn signed_floor_div(
     }
 }
 
+/// Default window size for brotli compression, matching Go nitro's DEFAULT_WINDOW_SIZE.
+/// This must be 22 to produce identical compression output as the official implementation.
+const BROTLI_DEFAULT_WINDOW_SIZE: i32 = 22;
+
+/// Compresses data using brotli with parameters matching Go nitro exactly.
+/// 
+/// IMPORTANT: This uses BrotliCompressCustomAlloc with a full-size input buffer
+/// to ensure the entire input is processed in a single shot, matching Go nitro's
+/// compress_fixed behavior. Using the standard BrotliCompress with its 4096-byte
+/// chunked input buffer produces different output for inputs > 4096 bytes.
 fn compress_brotli(data: &[u8], level: u64) -> Result<u64, ()> {
     use brotli::enc::BrotliEncoderParams;
+    use brotli::enc::StandardAlloc;
+    use std::io::Cursor;
     
-    let quality = level.min(11) as u32;
+    let quality = level.min(11) as i32;
     
     let mut params = BrotliEncoderParams::default();
-    params.quality = quality as i32;
+    params.quality = quality;
+    params.lgwin = BROTLI_DEFAULT_WINDOW_SIZE;
     
     let mut compressed = Vec::new();
-    let mut cursor = std::io::Cursor::new(data);
     
-    match brotli::BrotliCompress(&mut cursor, &mut compressed, &params) {
+    // Use a full-size input buffer to ensure single-shot compression
+    // This matches Go nitro's compress_fixed which processes the entire input at once
+    let mut input_buffer = data.to_vec();
+    let mut output_buffer = vec![0u8; data.len() + 1024]; // Generous output buffer
+    
+    match brotli::BrotliCompressCustomAlloc(
+        &mut Cursor::new(data),
+        &mut compressed,
+        &mut input_buffer[..],
+        &mut output_buffer[..],
+        &params,
+        StandardAlloc::default(),
+    ) {
         Ok(_) => Ok(compressed.len() as u64),
         Err(_) => Err(()),
     }
