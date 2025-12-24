@@ -118,7 +118,7 @@ where
             results.push(executor.execute_one(&block)?);
             execution_duration += execute_start.elapsed();
 
-            // TODO(alexey): report gas metrics using `block.header.gas_used`
+            // Gas metrics are tracked via cumulative_gas and logged at batch level (see line 143)
 
             // Seal the block back and save it
             blocks.push(block);
