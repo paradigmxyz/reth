@@ -72,7 +72,10 @@ where
 {
     type Block = PrimitiveBlock;
 
-    fn subscribe_blocks(&self, tx: Sender<Self::Block>) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+    fn subscribe_blocks(
+        &self,
+        tx: Sender<Self::Block>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         Box::pin(async move {
             loop {
                 let Ok(mut stream) = self.full_block_stream().await.inspect_err(|err| {

@@ -201,7 +201,10 @@ where
 {
     type Block = BlockTy<<N as FullNodeTypes>::Types>;
 
-    fn subscribe_blocks(&self, tx: Sender<Self::Block>) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+    fn subscribe_blocks(
+        &self,
+        tx: Sender<Self::Block>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         self.inner.subscribe_blocks(tx)
     }
 
