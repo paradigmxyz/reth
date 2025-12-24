@@ -53,7 +53,22 @@ impl alloy_consensus::Typed2718 for ArbReceipt {
         matches!(self, ArbReceipt::Legacy(_))
     }
     fn ty(&self) -> u8 {
-        self.tx_type().as_u8()
+        // Return the correct EIP-2718 type byte for receipt encoding.
+        // Standard Ethereum types use their standard type bytes (0x00, 0x01, 0x02, 0x03).
+        // Arbitrum-specific types use their Arbitrum type bytes (0x64-0x6A, 0x78).
+        // This matches Go nitro's Receipts.EncodeIndex behavior in go-ethereum/core/types/receipt.go
+        match self {
+            ArbReceipt::Legacy(_) => 0x00,      // LegacyTxType
+            ArbReceipt::Eip2930(_) => 0x01,     // AccessListTxType
+            ArbReceipt::Eip1559(_) => 0x02,     // DynamicFeeTxType
+            ArbReceipt::Eip7702(_) => 0x04,     // SetCodeTxType
+            ArbReceipt::Deposit(_) => 0x64,     // ArbitrumDepositTxType
+            ArbReceipt::Unsigned(_) => 0x65,    // ArbitrumUnsignedTxType
+            ArbReceipt::Contract(_) => 0x66,    // ArbitrumContractTxType
+            ArbReceipt::Retry(_) => 0x68,       // ArbitrumRetryTxType
+            ArbReceipt::SubmitRetryable(_) => 0x69, // ArbitrumSubmitRetryableTxType
+            ArbReceipt::Internal(_) => 0x6A,    // ArbitrumInternalTxType
+        }
     }
 }
 
@@ -284,7 +299,7 @@ impl alloy_eips::Encodable2718 for ArbReceipt {
 
     fn encode_2718(&self, out: &mut dyn alloy_rlp::bytes::BufMut) {
         if !matches!(self, ArbReceipt::Legacy(_)) {
-            out.put_u8(self.tx_type().as_u8());
+            out.put_u8(self.ty());
         }
         self.rlp_header_inner_without_bloom().encode(out);
         self.rlp_encode_fields_without_bloom(out);
@@ -1251,13 +1266,28 @@ impl ConsensusTx for ArbTransactionSigned {
     }
 
     fn effective_gas_price(&self, _base_fee: Option<u64>) -> u128 {
+        // CRITICAL FIX: On Arbitrum (ArbOS version != 9), DropTip() returns true for ALL transactions.
+        // This means the effective gas price is ALWAYS baseFee, not the calculated EIP-1559 price.
+        // See go-ethereum/core/state_transition.go lines 574-578:
+        //   if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice.Cmp(st.evm.Context.BaseFee) > 0 {
+        //       st.msg.GasPrice = st.evm.Context.BaseFee
+        //       st.msg.GasTipCap = common.Big0
+        //   }
+        // And arbos/tx_processor.go lines 756-759:
+        //   func (p *TxProcessor) DropTip() bool {
+        //       version := p.state.ArbOSVersion()
+        //       return version != params.ArbosVersion_9 || p.delayedInbox
+        //   }
+        // Since Arbitrum Sepolia uses ArbOS version > 9, DropTip() is always true.
         match &self.transaction {
-            // Standard Ethereum types use their own gas pricing logic
+            // Legacy and EIP-2930 use their gas_price directly (no tip to drop)
             ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
             ArbTypedTransaction::Eip2930(tx) => tx.gas_price.into(),
-            ArbTypedTransaction::Eip1559(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
-            ArbTypedTransaction::Eip4844(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
-            ArbTypedTransaction::Eip7702(tx) => core::cmp::min(tx.max_fee_per_gas as u128, (tx.max_priority_fee_per_gas as u128) + _base_fee.unwrap_or(0) as u128),
+            // EIP-1559, EIP-4844, EIP-7702: DropTip applies - return baseFee
+            // This matches Go nitro behavior where tips are dropped for all tx types
+            ArbTypedTransaction::Eip1559(_) |
+            ArbTypedTransaction::Eip4844(_) |
+            ArbTypedTransaction::Eip7702(_) => _base_fee.unwrap_or(0) as u128,
             // All Arbitrum-specific types (0x64-0x6A) return baseFee as effectiveGasPrice
             // This matches the official Nitro implementation in go-ethereum/core/types/arb_types.go
             // Each of these types has: if baseFee == nil { return GasFeeCap } else { return baseFee }

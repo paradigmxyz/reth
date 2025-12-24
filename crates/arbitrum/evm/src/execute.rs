@@ -48,6 +48,24 @@ pub struct ArbGasChargingContext {
     pub poster: Address,
     pub gas_remaining: u64,
     pub is_ethcall: bool,
+    /// Transaction type byte (e.g., 0x6A for internal tx)
+    pub tx_type: u8,
+}
+
+/// Returns true if the given transaction type should have poster costs charged.
+/// This matches Go nitro's TxTypeHasPosterCosts function in arbos/util/util.go.
+/// Internal transactions and other system tx types do NOT have poster costs
+/// because they are synthetic and not part of what was posted to L1.
+pub fn tx_type_has_poster_costs(tx_type: u8) -> bool {
+    // ArbitrumUnsignedTxType = 0x65
+    // ArbitrumContractTxType = 0x66
+    // ArbitrumRetryTxType = 0x68
+    // ArbitrumInternalTxType = 0x6A
+    // ArbitrumSubmitRetryableTxType = 0x69
+    match tx_type {
+        0x65 | 0x66 | 0x68 | 0x69 | 0x6A => false,
+        _ => true,
+    }
 }
 
 pub struct ArbEndTxContext {
@@ -1219,7 +1237,11 @@ impl ArbOsHooks for DefaultArbOsHooks {
             return (tip_recipient, Ok(()));
         }
         
-        if ctx.poster != crate::l1_pricing::BATCH_POSTER_ADDRESS {
+        // Check if poster is batch poster AND tx type has poster costs.
+        // Internal transactions (0x6A) and other system tx types do NOT have poster costs
+        // because they are synthetic and not part of what was posted to L1.
+        // This matches Go nitro's TxTypeHasPosterCosts check in getPosterUnitsWithoutCache.
+        if ctx.poster != crate::l1_pricing::BATCH_POSTER_ADDRESS || !tx_type_has_poster_costs(ctx.tx_type) {
             if !ctx.is_ethcall && ctx.gas_remaining > 0 {
                 if let Ok(arbos_state) = ArbosState::open(state_db as *mut _) {
                     if let Ok(gas_available) = arbos_state.l2_pricing_state.get_per_block_gas_limit() {
@@ -1882,9 +1904,14 @@ mod tests {
         let ctx = ArbGasChargingContext {
             intrinsic_gas: 21_000,
             calldata: calldata.clone(),
+            tx_bytes: vec![],
             basefee,
             is_executed_on_chain: true,
             skip_l1_charging: false,
+            poster: Address::ZERO,
+            gas_remaining: 1_000_000,
+            is_ethcall: false,
+            tx_type: 0x02, // EIP-1559 tx type (has poster costs)
         };
 
         let mut evm = DummyEvm;
