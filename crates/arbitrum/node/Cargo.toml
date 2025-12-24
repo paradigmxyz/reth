@@ -62,6 +62,7 @@ alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-rpc-types-eth.workspace = true
 arb-alloy-consensus.workspace = true
+arb-alloy-util.workspace = true
 alloy-eips.workspace = true
 
 alloy-consensus.workspace = true
