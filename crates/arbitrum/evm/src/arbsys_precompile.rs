@@ -38,6 +38,21 @@ pub struct ArbSysMerkleState {
     pub leaf_num: u64,
     /// The value to burn from ArbSys account
     pub value_to_burn: U256,
+    /// Block number this state change is for (for shadow accumulator tracking)
+    pub block_number: u64,
+}
+
+/// Block-local shadow accumulator state.
+/// This tracks the cumulative Merkle state across transactions within the same block.
+/// The precompile reads from this shadow first, so tx2 can see tx1's updated state.
+#[derive(Debug, Clone, Default)]
+pub struct ShadowAccumulatorState {
+    /// Current size of the Merkle accumulator (cumulative across txs in block)
+    pub size: u64,
+    /// Partial hashes at each level
+    pub partials: Vec<B256>,
+    /// Block number this shadow is for (to detect block boundaries)
+    pub block_number: u64,
 }
 
 thread_local! {
@@ -45,6 +60,22 @@ thread_local! {
     /// This is set by the precompile and consumed by build.rs after EVM execution.
     static ARBSYS_STATE: RefCell<Option<ArbSysMerkleState>> = RefCell::new(None);
 }
+
+// Global static storage for the shadow accumulator with Mutex for thread safety.
+// This replaces thread-local storage because transactions in the same block
+// may be processed on different threads.
+use std::sync::Mutex;
+use once_cell::sync::Lazy;
+use std::collections::HashSet;
+
+static SHADOW_ACCUMULATOR: Lazy<Mutex<Option<ShadowAccumulatorState>>> = Lazy::new(|| Mutex::new(None));
+
+// Track which (block_number, tx_hash) pairs have already been applied to prevent duplicate state application.
+// This is needed because the same transaction may be executed in multiple "committing" contexts
+// (e.g., building and validating), and we must only apply state changes once.
+// CRITICAL: We dedupe by tx_hash, NOT by leaf_num, because different execution contexts may compute
+// different leaf_nums for the same conceptual send (due to shadow accumulator contamination).
+static APPLIED_TXS: Lazy<Mutex<(u64, HashSet<B256>)>> = Lazy::new(|| Mutex::new((0, HashSet::new())));
 
 /// Store ArbSys state changes for later application.
 pub fn store_arbsys_state(state: ArbSysMerkleState) {
@@ -65,6 +96,129 @@ pub fn clear_arbsys_state() {
     ARBSYS_STATE.with(|cell| {
         *cell.borrow_mut() = None;
     });
+}
+
+/// Check if a tx has already been applied for this block, and mark it as applied if not.
+/// Returns true if this is the first time we're seeing this tx (should apply state).
+/// Returns false if this tx was already applied (should skip).
+/// CRITICAL: We dedupe by tx_hash (send_hash), NOT by leaf_num, because different execution
+/// contexts may compute different leaf_nums for the same conceptual send.
+pub fn try_mark_tx_applied(block_number: u64, send_hash: B256) -> bool {
+    let mut applied = APPLIED_TXS.lock().unwrap();
+    
+    // If block number changed, reset the set
+    if applied.0 != block_number {
+        applied.0 = block_number;
+        applied.1.clear();
+    }
+    
+    // Try to insert the send_hash. Returns true if it was newly inserted.
+    let is_new = applied.1.insert(send_hash);
+    
+    tracing::info!(
+        target: "arb::applied_txs",
+        block_number = block_number,
+        send_hash = ?send_hash,
+        is_new = is_new,
+        set_size = applied.1.len(),
+        "Checking if tx was already applied"
+    );
+    
+    is_new
+}
+
+/// Update the shadow accumulator with the new state after a transaction commits.
+/// This should be called after applying deferred state changes.
+pub fn update_shadow_accumulator(block_number: u64, new_size: u64, partials: &[(u64, B256)]) {
+    let thread_id = std::thread::current().id();
+    let mut shadow = SHADOW_ACCUMULATOR.lock().unwrap();
+    let old_state = shadow.as_ref().map(|s| (s.block_number, s.size));
+    
+    // If block number changed, reset the shadow
+    if shadow.as_ref().map(|s| s.block_number) != Some(block_number) {
+        *shadow = Some(ShadowAccumulatorState {
+            size: new_size,
+            partials: Vec::new(),
+            block_number,
+        });
+    }
+    
+    if let Some(ref mut s) = *shadow {
+        s.size = new_size;
+        // Update partials
+        for (level, hash) in partials {
+            let level = *level as usize;
+            // Extend partials vector if needed
+            while s.partials.len() <= level {
+                s.partials.push(B256::ZERO);
+            }
+            s.partials[level] = *hash;
+        }
+    }
+    
+    tracing::info!(
+        target: "arb::shadow",
+        ?thread_id,
+        block_number = block_number,
+        new_size = new_size,
+        ?old_state,
+        "SHADOW_UPDATE: updated shadow accumulator"
+    );
+}
+
+/// Get the current size from the shadow accumulator, if available for this block.
+pub fn get_shadow_size(block_number: u64) -> Option<u64> {
+    let thread_id = std::thread::current().id();
+    let shadow = SHADOW_ACCUMULATOR.lock().unwrap();
+    let shadow_state = shadow.as_ref().map(|s| (s.block_number, s.size));
+    let result = shadow.as_ref().and_then(|s| {
+        if s.block_number == block_number {
+            Some(s.size)
+        } else {
+            None
+        }
+    });
+    
+    tracing::info!(
+        target: "arb::shadow",
+        ?thread_id,
+        requested_block = block_number,
+        ?shadow_state,
+        ?result,
+        "SHADOW_GET: checking shadow accumulator"
+    );
+    
+    result
+}
+
+/// Get a partial hash from the shadow accumulator, if available for this block.
+pub fn get_shadow_partial(block_number: u64, level: u64) -> Option<B256> {
+    let shadow = SHADOW_ACCUMULATOR.lock().unwrap();
+    shadow.as_ref().and_then(|s| {
+        if s.block_number == block_number {
+            s.partials.get(level as usize).copied()
+        } else {
+            None
+        }
+    })
+}
+
+/// Clear the shadow accumulator (call at block boundaries or when starting a new replay).
+/// NOTE: Based on instrumentation, this is called very frequently (per-tx or per-pass),
+/// so we should NOT call this in apply_pre_execution_changes. Instead, the shadow
+/// auto-resets when the block number changes in update_shadow_accumulator.
+pub fn clear_shadow_accumulator() {
+    let thread_id = std::thread::current().id();
+    let mut shadow = SHADOW_ACCUMULATOR.lock().unwrap();
+    let old_state = shadow.as_ref().map(|s| (s.block_number, s.size));
+    *shadow = None;
+    
+    tracing::info!(
+        target: "arb::shadow",
+        ?thread_id,
+        ?old_state,
+        "SHADOW_CLEAR: cleared shadow accumulator"
+    );
 }
 
 /// ArbSys precompile address (0x64 = 100)
@@ -244,7 +398,9 @@ fn execute_send_tx_to_l1(
     );
     
     // Append to Merkle accumulator and get events + state changes to apply later
-    let (leaf_num, merkle_events, new_size, partials_to_set) = append_to_merkle_accumulator(internals, send_hash)?;
+    // Pass block_number so the shadow accumulator can track state across txs in the same block
+    let block_num_u64: u64 = block_number.try_into().unwrap_or(0);
+    let (leaf_num, merkle_events, new_size, partials_to_set) = append_to_merkle_accumulator(internals, send_hash, block_num_u64)?;
     
     tracing::info!(
         target: "arb::arbsys_precompile",
@@ -264,6 +420,7 @@ fn execute_send_tx_to_l1(
         send_hash,
         leaf_num,
         value_to_burn: value,
+        block_number: block_num_u64,
     });
     
     // NOTE: We no longer burn the value here because the EVM journal might not persist.
@@ -392,9 +549,13 @@ struct MerkleTreeNodeEvent {
 /// Instead, it returns the list of partial hashes that need to be set.
 /// The caller is responsible for storing these in the thread-local sink,
 /// and build.rs will apply them after EVM execution using storage.rs.
+///
+/// The `block_number` parameter is used to check the shadow accumulator for
+/// state from previous transactions in the same block.
 fn append_to_merkle_accumulator(
     internals: &mut alloy_evm::EvmInternals<'_>,
     item_hash: B256,
+    block_number: u64,
 ) -> Result<(u64, Vec<MerkleTreeNodeEvent>, u64, Vec<(u64, B256)>), PrecompileError> {
     // Storage layout for SendMerkleAccumulator:
     // - Substorage at subspace ID 5 (sendMerkleSubspace = []byte{5})
@@ -405,10 +566,23 @@ fn append_to_merkle_accumulator(
     let merkle_key = compute_substorage_key(&[], 5);
     let size_slot = compute_storage_slot(&merkle_key, 0);
     
-    // Get current size from EVM state (this still works via sload)
+    // IMPORTANT: Always read from EVM state, NOT from the global shadow accumulator.
+    // The global shadow accumulator causes cross-context contamination when the same
+    // transaction is executed in multiple contexts (non-canonical and canonical passes).
+    // Each execution context should compute its own leaf_num from the database state.
+    // For blocks with multiple ArbSys calls, the deferred state application ensures
+    // that tx2 sees tx1's updated state within the same execution context.
     let current_size_result = internals.sload(ARBOS_STATE_ADDRESS, size_slot)
         .map_err(|e| PrecompileError::other(format!("sload size failed: {:?}", e)))?;
     let current_size: u64 = current_size_result.data.try_into().unwrap_or(0);
+    
+    tracing::info!(
+        target: "arb::arbsys_precompile",
+        current_size = current_size,
+        block_number = block_number,
+        "Merkle accumulator: read size from EVM state (no shadow)"
+    );
+    
     let new_size = current_size + 1;
     
     tracing::info!(
@@ -416,6 +590,7 @@ fn append_to_merkle_accumulator(
         current_size = current_size,
         new_size = new_size,
         size_slot = ?size_slot,
+        block_number = block_number,
         "Merkle accumulator: read current size, will defer writes"
     );
     
@@ -432,7 +607,10 @@ fn append_to_merkle_accumulator(
             break;
         }
         
+        // Always read from EVM state, NOT from the global shadow accumulator.
+        // See comment above about cross-context contamination.
         let this_level = get_partial(internals, &merkle_key, level)?;
+        
         if this_level == B256::ZERO {
             // Set this level's partial
             partials_to_set.push((level, so_far));

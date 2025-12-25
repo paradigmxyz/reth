@@ -200,6 +200,11 @@ where
         // Zombie tracking is per-block, not per-tx, so we clear at block start.
         reth_trie_common::zombie_sink::clear();
         
+        // NOTE: We do NOT clear the shadow accumulator here because instrumentation showed
+        // that apply_pre_execution_changes is called very frequently (per-tx or per-pass),
+        // not just once per block. The shadow auto-resets when the block number changes
+        // in update_shadow_accumulator, which is the correct behavior.
+        
         // Also clear the deleted_empty_accounts set for this block
         self.tx_state.deleted_empty_accounts.clear();
         
@@ -951,40 +956,64 @@ where
         // This is the key fix: the precompile stores state changes in a thread-local sink,
         // and we apply them here using storage.rs which uses state.apply_transition().
         // This ensures the state changes survive merge_transitions() and end up in bundle_state.
+        //
+        // CRITICAL: Only apply deferred state changes when the transaction is COMMITTED.
+        // The same transaction may be executed multiple times (simulation, validation, canonical),
+        // and we must only apply state changes on the canonical/committing pass.
+        // result = Ok(Some(gas)) means the transaction was committed.
+        // result = Ok(None) means the transaction was NOT committed (non-canonical pass).
+        let is_committing_pass = matches!(result, Ok(Some(_)));
+        
         if let Some(arbsys_state) = take_arbsys_state() {
-            tracing::info!(
-                target: "arb::arbsys_deferred",
-                tx_hash = ?tx_hash,
-                new_size = arbsys_state.new_size,
-                partials_count = arbsys_state.partials.len(),
-                send_hash = ?arbsys_state.send_hash,
-                leaf_num = arbsys_state.leaf_num,
-                value_to_burn = %arbsys_state.value_to_burn,
-                "Applying deferred ArbSys Merkle state changes"
-            );
-            
-            // Get mutable access to the EVM state
-            let evm = self.inner.evm_mut();
-            let (db_ref, _, _) = evm.components_mut();
-            let state: &mut revm::database::State<D> = *db_ref;
-            
-            // Apply the Merkle accumulator state changes using storage.rs
-            apply_arbsys_merkle_state(state, arbsys_state.new_size, arbsys_state.partials);
-            
-            // Handle value burning: subtract the burned value from ArbSys account balance
-            // The EVM has already transferred the value from caller to ArbSys (0x64),
-            // so we need to burn it (subtract from ArbSys balance)
-            // Use burn_arbsys_balance which uses the proper transition mechanism
-            // to ensure the balance change survives merge_transitions()
-            if arbsys_state.value_to_burn > U256::ZERO {
-                burn_arbsys_balance(state, arbsys_state.value_to_burn);
+            if is_committing_pass {
+                // Apply deferred ArbSys state changes for this committing pass.
+                // IMPORTANT: We no longer use global dedupe or shadow accumulator because they cause
+                // cross-context contamination when the same transaction is executed in multiple contexts.
+                // Each execution context computes its own leaf_num from the database state, and the
+                // canonical context's state changes will be the ones that persist.
+                tracing::info!(
+                    target: "arb::arbsys_deferred",
+                    tx_hash = ?tx_hash,
+                    new_size = arbsys_state.new_size,
+                    partials_count = arbsys_state.partials.len(),
+                    send_hash = ?arbsys_state.send_hash,
+                    leaf_num = arbsys_state.leaf_num,
+                    value_to_burn = %arbsys_state.value_to_burn,
+                    "Applying deferred ArbSys Merkle state changes (committing pass)"
+                );
+                
+                // Get mutable access to the EVM state
+                let evm = self.inner.evm_mut();
+                let (db_ref, _, _) = evm.components_mut();
+                let state: &mut revm::database::State<D> = *db_ref;
+                
+                // Apply the Merkle accumulator state changes using storage.rs
+                apply_arbsys_merkle_state(state, arbsys_state.new_size, arbsys_state.partials);
+                
+                // Handle value burning: subtract the burned value from ArbSys account balance
+                // The EVM has already transferred the value from caller to ArbSys (0x64),
+                // so we need to burn it (subtract from ArbSys balance)
+                // Use burn_arbsys_balance which uses the proper transition mechanism
+                // to ensure the balance change survives merge_transitions()
+                if arbsys_state.value_to_burn > U256::ZERO {
+                    burn_arbsys_balance(state, arbsys_state.value_to_burn);
+                }
+                
+                tracing::info!(
+                    target: "arb::arbsys_deferred",
+                    tx_hash = ?tx_hash,
+                    block_number = arbsys_state.block_number,
+                    new_size = arbsys_state.new_size,
+                    "Successfully applied deferred ArbSys state changes"
+                );
+            } else {
+                tracing::debug!(
+                    target: "arb::arbsys_deferred",
+                    tx_hash = ?tx_hash,
+                    new_size = arbsys_state.new_size,
+                    "Skipping deferred ArbSys state changes (non-committing pass)"
+                );
             }
-            
-            tracing::info!(
-                target: "arb::arbsys_deferred",
-                tx_hash = ?tx_hash,
-                "Successfully applied deferred ArbSys state changes"
-            );
         }
 
         if let Ok(Some(evm_gas)) = result {
