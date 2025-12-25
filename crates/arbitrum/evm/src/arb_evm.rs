@@ -1,8 +1,9 @@
 extern crate alloc;
 
 use alloy_evm::{
-    eth::EthEvmContext, precompiles::PrecompilesMap, Database, EvmEnv, EvmFactory, IntoTxEnv,
+    eth::EthEvmContext, precompiles::PrecompilesMap, Database, EvmEnv, EvmFactory, IntoTxEnv, Evm,
 };
+use crate::arbsys_precompile::{create_arbsys_precompile, ARBSYS_ADDRESS};
 use alloy_evm::tx::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::{Address, Bytes};
 use core::fmt::Debug;
@@ -279,7 +280,14 @@ impl EvmFactory for ArbEvmFactory {
         db: DB,
         input: EvmEnv<Self::Spec>,
     ) -> Self::Evm<DB, NoOpInspector> {
-        ArbEvm::new(self.0.create_evm(db, input))
+        let mut evm = ArbEvm::new(self.0.create_evm(db, input));
+        
+        // Register ArbSys precompile at address 0x64
+        let arbsys_precompile = create_arbsys_precompile();
+        let (_, _, precompiles) = evm.components_mut();
+        precompiles.apply_precompile(&ARBSYS_ADDRESS, |_| Some(arbsys_precompile));
+        
+        evm
     }
 
     fn create_evm_with_inspector<DB: Database, I: revm::inspector::Inspector<Self::Context<DB>>>(
@@ -288,7 +296,14 @@ impl EvmFactory for ArbEvmFactory {
         input: EvmEnv<Self::Spec>,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        ArbEvm::new(self.0.create_evm_with_inspector(db, input, inspector))
+        let mut evm = ArbEvm::new(self.0.create_evm_with_inspector(db, input, inspector));
+        
+        // Register ArbSys precompile at address 0x64
+        let arbsys_precompile = create_arbsys_precompile();
+        let (_, _, precompiles) = evm.components_mut();
+        precompiles.apply_precompile(&ARBSYS_ADDRESS, |_| Some(arbsys_precompile));
+        
+        evm
     }
 }
 impl<DB, I> ArbEvmExt for ArbEvm<DB, I>

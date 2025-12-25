@@ -34,6 +34,8 @@ use alloy_primitives::Log as AlloyLog;
 use crate::predeploys::PredeployRegistry;
 use crate::predeploys::{PredeployCallContext, LogEmitter};
 use crate::execute::{DefaultArbOsHooks, ArbTxProcessorState, ArbStartTxContext, ArbGasChargingContext, ArbEndTxContext, ArbOsHooks};
+use crate::arbsys_precompile::{take_arbsys_state, clear_arbsys_state};
+use crate::storage::{apply_arbsys_merkle_state, burn_arbsys_balance};
 
 // Arbitrum-specific EthSpec that has Paris (The Merge) active from block 0.
 // This is critical because Arbitrum is post-merge from genesis and should NOT give block rewards.
@@ -197,6 +199,11 @@ where
         // Clear zombie accounts from previous block.
         // Zombie tracking is per-block, not per-tx, so we clear at block start.
         reth_trie_common::zombie_sink::clear();
+        
+        // NOTE: We do NOT clear the shadow accumulator here because instrumentation showed
+        // that apply_pre_execution_changes is called very frequently (per-tx or per-pass),
+        // not just once per block. The shadow auto-resets when the block number changes
+        // in update_shadow_accumulator, which is the correct behavior.
         
         // Also clear the deleted_empty_accounts set for this block
         self.tx_state.deleted_empty_accounts.clear();
@@ -540,6 +547,7 @@ where
                 let block = alloy_evm::Evm::block(evm);
                 let ctx = PredeployCallContext {
                     block_number: u64::try_from(block.number).unwrap_or(0),
+                    l1_block_number: self.tx_state.cached_l1_block_number.unwrap_or(0),
                     block_hashes: alloc::vec::Vec::new(),
                     chain_id: alloy_primitives::U256::from(self.inner.evm().chain_id()),
                     os_version: 0,
@@ -880,6 +888,133 @@ where
         // ITERATION 116: Calculate gas_left for end_tx hook
         let actual_gas_used = captured_gas_used.load(std::sync::atomic::Ordering::SeqCst);
         let gas_left_for_end_tx = gas_limit.saturating_sub(actual_gas_used);
+
+        // DEBUG: Check if ArbSys precompile state changes are in the in-memory state
+        // This helps pinpoint where state is being lost
+        if let Some(call_to) = to_addr {
+            // Check if this is a call to ArbSys (0x64)
+            let arbsys_addr = alloy_primitives::Address::from([
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+                0x00, 0x00, 0x00, 0x64,
+            ]);
+            if call_to == arbsys_addr {
+                // Check the sendMerkle size slot in the in-memory state
+                let arbos_state_addr = alloy_primitives::Address::from([
+                    0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+                    0xFF, 0xFF, 0xFF, 0xFF,
+                ]);
+                
+                // Use the EXACT same slot computation as arbsys_precompile.rs
+                // compute_substorage_key(&[], 5) -> keccak256([5])
+                let merkle_key = alloy_primitives::keccak256(&[5u8]).to_vec();
+                
+                // compute_storage_slot(&merkle_key, 0) - matches the complex boundary-based computation
+                let boundary = 31usize;
+                let offset = 0u64;
+                let mut key_bytes = [0u8; 32];
+                key_bytes[24..32].copy_from_slice(&offset.to_be_bytes());
+                let mut data = Vec::with_capacity(merkle_key.len() + boundary);
+                data.extend_from_slice(&merkle_key);
+                data.extend_from_slice(&key_bytes[..boundary]);
+                let h = alloy_primitives::keccak256(&data);
+                let mut mapped = [0u8; 32];
+                mapped[..boundary].copy_from_slice(&h.0[..boundary]);
+                mapped[boundary] = key_bytes[boundary];
+                let size_slot_u256 = alloy_primitives::U256::from_be_bytes(mapped);
+                
+                let evm = self.inner.evm_mut();
+                let (db_ref, _, _) = evm.components_mut();
+                let state: &mut revm::database::State<D> = *db_ref;
+                
+                // Check cache
+                let cache_value = state.cache.accounts.get(&arbos_state_addr)
+                    .and_then(|acc| acc.account.as_ref())
+                    .and_then(|acc| acc.storage.get(&size_slot_u256))
+                    .copied();
+                
+                // Check transition_state
+                let transition_value = state.transition_state.as_ref()
+                    .and_then(|ts| ts.transitions.get(&arbos_state_addr))
+                    .and_then(|ta| ta.storage.get(&size_slot_u256))
+                    .map(|sv| sv.present_value);
+                
+                tracing::warn!(
+                    target: "arb::arbsys_debug",
+                    tx_hash = ?tx_hash,
+                    arbos_state_addr = ?arbos_state_addr,
+                    size_slot = ?size_slot_u256,
+                    cache_value = ?cache_value,
+                    transition_value = ?transition_value,
+                    "DEBUG: Checking sendMerkle size slot AFTER execute_transaction_with_commit_condition"
+                );
+            }
+        }
+
+        // Apply deferred ArbSys state changes using the proper transition mechanism.
+        // This is the key fix: the precompile stores state changes in a thread-local sink,
+        // and we apply them here using storage.rs which uses state.apply_transition().
+        // This ensures the state changes survive merge_transitions() and end up in bundle_state.
+        //
+        // CRITICAL: Only apply deferred state changes when the transaction is COMMITTED.
+        // The same transaction may be executed multiple times (simulation, validation, canonical),
+        // and we must only apply state changes on the canonical/committing pass.
+        // result = Ok(Some(gas)) means the transaction was committed.
+        // result = Ok(None) means the transaction was NOT committed (non-canonical pass).
+        let is_committing_pass = matches!(result, Ok(Some(_)));
+        
+        if let Some(arbsys_state) = take_arbsys_state() {
+            if is_committing_pass {
+                // Apply deferred ArbSys state changes for this committing pass.
+                // IMPORTANT: We no longer use global dedupe or shadow accumulator because they cause
+                // cross-context contamination when the same transaction is executed in multiple contexts.
+                // Each execution context computes its own leaf_num from the database state, and the
+                // canonical context's state changes will be the ones that persist.
+                tracing::info!(
+                    target: "arb::arbsys_deferred",
+                    tx_hash = ?tx_hash,
+                    new_size = arbsys_state.new_size,
+                    partials_count = arbsys_state.partials.len(),
+                    send_hash = ?arbsys_state.send_hash,
+                    leaf_num = arbsys_state.leaf_num,
+                    value_to_burn = %arbsys_state.value_to_burn,
+                    "Applying deferred ArbSys Merkle state changes (committing pass)"
+                );
+                
+                // Get mutable access to the EVM state
+                let evm = self.inner.evm_mut();
+                let (db_ref, _, _) = evm.components_mut();
+                let state: &mut revm::database::State<D> = *db_ref;
+                
+                // Apply the Merkle accumulator state changes using storage.rs
+                apply_arbsys_merkle_state(state, arbsys_state.new_size, arbsys_state.partials);
+                
+                // Handle value burning: subtract the burned value from ArbSys account balance
+                // The EVM has already transferred the value from caller to ArbSys (0x64),
+                // so we need to burn it (subtract from ArbSys balance)
+                // Use burn_arbsys_balance which uses the proper transition mechanism
+                // to ensure the balance change survives merge_transitions()
+                if arbsys_state.value_to_burn > U256::ZERO {
+                    burn_arbsys_balance(state, arbsys_state.value_to_burn);
+                }
+                
+                tracing::info!(
+                    target: "arb::arbsys_deferred",
+                    tx_hash = ?tx_hash,
+                    block_number = arbsys_state.block_number,
+                    new_size = arbsys_state.new_size,
+                    "Successfully applied deferred ArbSys state changes"
+                );
+            } else {
+                tracing::debug!(
+                    target: "arb::arbsys_deferred",
+                    tx_hash = ?tx_hash,
+                    new_size = arbsys_state.new_size,
+                    "Skipping deferred ArbSys state changes (non-committing pass)"
+                );
+            }
+        }
 
         if let Ok(Some(evm_gas)) = result {
             // Internal transactions don't contribute to cumulative gas

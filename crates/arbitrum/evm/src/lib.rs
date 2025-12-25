@@ -58,6 +58,7 @@ pub mod merkleaccumulator;
 pub mod blockhash;
 pub mod features;
 pub mod programs;
+pub mod arbsys_precompile;
 pub mod arbosstate;
 pub mod internal_tx;
 
@@ -437,6 +438,7 @@ pub(crate) mod test_helpers {
         let sys = address!("0000000000000000000000000000000000000064");
         let ctx = crate::predeploys::PredeployCallContext {
             block_number: 100,
+            l1_block_number: 0,
             block_hashes: alloc::vec::Vec::new(),
             chain_id: U256::from(42161u64),
             os_version: 0,

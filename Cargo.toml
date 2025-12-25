@@ -492,7 +492,7 @@ reth-arbitrum-txpool = { path = "crates/arbitrum/txpool" }
 
 # arb-alloy
 arb-alloy-consensus = { version = "0.1.1", default-features = false }
-arb-alloy-predeploys = { version = "0.1.1", default-features = false }
+arb-alloy-predeploys = { path = "../arb-alloy/crates/predeploys", default-features = false }
 arb-alloy-util = { version = "0.1.1", default-features = false }
 arb-alloy-network = { version = "0.1.2", default-features = false }
 

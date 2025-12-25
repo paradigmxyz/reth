@@ -182,6 +182,11 @@ impl<D: Database> ArbosState<D> {
     pub fn set_infra_fee_account(&self, account: Address) -> Result<(), ()> {
         self.infra_fee_account.set(account)
     }
+
+    /// Get the send Merkle accumulator for L2-to-L1 transactions.
+    pub fn send_merkle_accumulator(&self) -> &MerkleAccumulator<D> {
+        &self.send_merkle
+    }
     
     pub fn upgrade_arbos_version_if_necessary<D2: Database>(
         &mut self,
