@@ -324,8 +324,6 @@ where
                 }
             };
 
-            env.active_node_state_mut()?.next_payload_id = Some(payload_id);
-
             sleep(Duration::from_secs(1)).await;
 
             let built_payload_envelope = EngineApiClient::<Engine>::get_payload_v3(
