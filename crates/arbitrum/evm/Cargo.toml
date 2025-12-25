@@ -68,3 +68,4 @@ alloy-rlp.workspace = true
 alloy-hardforks.workspace = true
 revm-context-interface.workspace = true
 tracing.workspace = true
+once_cell.workspace = true
