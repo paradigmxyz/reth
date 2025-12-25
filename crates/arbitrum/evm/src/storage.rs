@@ -82,7 +82,9 @@ fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State
 /// 4. Call apply_transition() to register the transition
 ///
 /// This ensures storage changes are properly tracked and persisted.
-fn write_arbos_storage<D: Database>(
+/// Writes a storage slot to the ArbOS account using the proper transition mechanism.
+/// This is the correct way to persist storage changes that will survive merge_transitions().
+pub fn write_arbos_storage<D: Database>(
     state: &mut revm::database::State<D>,
     slot: U256,
     value: U256,
@@ -197,6 +199,185 @@ fn write_arbos_storage<D: Database>(
         "[STORAGE-WRITE] write_arbos_storage: slot={:?} value={:?} original={:?} status={:?}",
         slot, value, original_value, current_status
     );
+}
+
+/// Computes the sendMerkle substorage key.
+/// sendMerkleSubspace = []byte{5} in Go nitro
+pub fn compute_send_merkle_key() -> Vec<u8> {
+    keccak256(&[5u8]).to_vec()
+}
+
+/// Computes a storage slot for the sendMerkle accumulator.
+/// offset 0 = size, offset 2+ = partials
+pub fn compute_send_merkle_slot(offset: u64) -> U256 {
+    let merkle_key = compute_send_merkle_key();
+    storage_key_map(&merkle_key, offset)
+}
+
+/// Applies ArbSys Merkle accumulator state changes using the proper transition mechanism.
+/// This should be called AFTER EVM execution to ensure the state changes persist.
+///
+/// Parameters:
+/// - state: The REVM state to apply changes to
+/// - new_size: The new size of the Merkle accumulator
+/// - partials: Vec of (level, hash) pairs for partial hashes to set
+pub fn apply_arbsys_merkle_state<D: Database>(
+    state: &mut revm::database::State<D>,
+    new_size: u64,
+    partials: Vec<(u64, B256)>,
+) {
+    // Write the new size
+    let size_slot = compute_send_merkle_slot(0);
+    write_arbos_storage(state, size_slot, U256::from(new_size));
+    
+    tracing::warn!(
+        target: "arb-storage",
+        "[ARBSYS-MERKLE] Applied size={} to slot={:?}",
+        new_size, size_slot
+    );
+    
+    // Write the partials
+    for (level, hash) in partials {
+        let partial_slot = compute_send_merkle_slot(2 + level);
+        let value = U256::from_be_bytes(hash.0);
+        write_arbos_storage(state, partial_slot, value);
+        
+        tracing::warn!(
+            target: "arb-storage",
+            "[ARBSYS-MERKLE] Applied partial level={} hash={:?} to slot={:?}",
+            level, hash, partial_slot
+        );
+    }
+}
+
+/// Burns (subtracts) a value from the ArbSys account balance using the proper transition mechanism.
+/// This is the correct way to persist balance changes that will survive merge_transitions().
+pub fn burn_arbsys_balance<D: Database>(
+    state: &mut revm::database::State<D>,
+    value_to_burn: U256,
+) {
+    use revm_database::AccountStatus;
+    
+    let arbsys_address = address!("0000000000000000000000000000000000000064");
+    
+    // Step 1: Load the ArbSys account into cache
+    let _ = state.load_cache_account(arbsys_address);
+    
+    // Step 2: Get the current balance and modify it
+    let (previous_info, previous_status, current_info, current_status) = {
+        let cached_acc = match state.cache.accounts.get_mut(&arbsys_address) {
+            Some(acc) => acc,
+            None => {
+                tracing::error!(
+                    target: "arb-storage",
+                    "[BURN-ARBSYS] ArbSys account not found in cache after load_cache_account!"
+                );
+                return;
+            }
+        };
+
+        let previous_status = cached_acc.status;
+        let previous_info = cached_acc.account.as_ref().map(|a| a.info.clone());
+        
+        // Get current balance and subtract the burn value
+        let old_balance = cached_acc.account.as_ref().map(|a| a.info.balance).unwrap_or(U256::ZERO);
+        let new_balance = old_balance.saturating_sub(value_to_burn);
+        
+        tracing::info!(
+            target: "arb-storage",
+            "[BURN-ARBSYS] Burning value from ArbSys: old_balance={:?} value_to_burn={:?} new_balance={:?}",
+            old_balance, value_to_burn, new_balance
+        );
+        
+        // Update the balance in the cache
+        if let Some(ref mut account) = cached_acc.account {
+            account.info.balance = new_balance;
+        }
+
+        // Update status to Changed
+        let had_no_nonce_and_code = previous_info
+            .as_ref()
+            .map(|info| info.has_no_code_and_nonce())
+            .unwrap_or_default();
+        cached_acc.status = cached_acc.status.on_changed(had_no_nonce_and_code);
+
+        let current_info = cached_acc.account.as_ref().map(|a| a.info.clone());
+        let current_status = cached_acc.status;
+
+        (previous_info, previous_status, current_info, current_status)
+    };
+
+    // Step 3: Create and apply the transition with balance change (no storage changes)
+    let transition = revm::database::TransitionAccount {
+        info: current_info.clone(),
+        status: current_status,
+        previous_info,
+        previous_status,
+        storage: std::collections::HashMap::default(),
+        storage_was_destroyed: false,
+    };
+
+    state.apply_transition(vec![(arbsys_address, transition)]);
+
+    tracing::info!(
+        target: "arb-storage",
+        "[BURN-ARBSYS] Applied balance burn transition: new_balance={:?} status={:?}",
+        current_info.map(|i| i.balance), current_status
+    );
+}
+
+/// Reads the current sendMerkle size from the state.
+pub fn read_send_merkle_size<D: Database>(state: &mut revm::database::State<D>) -> u64 {
+    let size_slot = compute_send_merkle_slot(0);
+    
+    // Check cache first
+    if let Some(cached_acc) = state.cache.accounts.get(&ARBOS_STATE_ADDRESS) {
+        if let Some(ref account) = cached_acc.account {
+            if let Some(&cached_value) = account.storage.get(&size_slot) {
+                return cached_value.try_into().unwrap_or(0);
+            }
+        }
+    }
+    
+    // Then check bundle_state
+    if let Some(acc) = state.bundle_state.state.get(&ARBOS_STATE_ADDRESS) {
+        if let Some(slot_entry) = acc.storage.get(&size_slot) {
+            return slot_entry.present_value.try_into().unwrap_or(0);
+        }
+    }
+    
+    // Finally check database
+    state.database.storage(ARBOS_STATE_ADDRESS, size_slot)
+        .ok()
+        .map(|v| v.try_into().unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Reads a partial hash from the sendMerkle accumulator.
+pub fn read_send_merkle_partial<D: Database>(state: &mut revm::database::State<D>, level: u64) -> B256 {
+    let partial_slot = compute_send_merkle_slot(2 + level);
+    
+    // Check cache first
+    if let Some(cached_acc) = state.cache.accounts.get(&ARBOS_STATE_ADDRESS) {
+        if let Some(ref account) = cached_acc.account {
+            if let Some(&cached_value) = account.storage.get(&partial_slot) {
+                return B256::from(cached_value);
+            }
+        }
+    }
+    
+    // Then check bundle_state
+    if let Some(acc) = state.bundle_state.state.get(&ARBOS_STATE_ADDRESS) {
+        if let Some(slot_entry) = acc.storage.get(&partial_slot) {
+            return B256::from(slot_entry.present_value);
+        }
+    }
+    
+    // Finally check database
+    state.database.storage(ARBOS_STATE_ADDRESS, partial_slot)
+        .ok()
+        .map(|v| B256::from(v))
+        .unwrap_or(B256::ZERO)
 }
 
 /// Logs the full ArbOS account state for debugging.
