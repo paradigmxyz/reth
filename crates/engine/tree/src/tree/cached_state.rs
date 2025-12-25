@@ -14,7 +14,7 @@ use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
     MultiProofTargets, StorageMultiProof, StorageProof, TrieInput,
 };
-use revm_primitives::map::DefaultHashBuilder;
+use revm_primitives::{hardfork::SpecId, map::DefaultHashBuilder};
 use std::{sync::Arc, time::Duration};
 use tracing::{debug_span, instrument, trace};
 
@@ -442,7 +442,11 @@ impl ExecutionCache {
     ///
     /// Returns an error if the state updates are inconsistent and should be discarded.
     #[instrument(level = "debug", target = "engine::caching", skip_all)]
-    pub(crate) fn insert_state(&self, state_updates: &BundleState) -> Result<(), ()> {
+    pub(crate) fn insert_state(
+        &self,
+        state_updates: &BundleState,
+        spec: &SpecId,
+    ) -> Result<(), ()> {
         let _enter =
             debug_span!(target: "engine::tree", "contracts", len = state_updates.contracts.len())
                 .entered();
@@ -467,8 +471,13 @@ impl ExecutionCache {
                 continue
             }
 
-            // If the account was destroyed, invalidate from the account / storage caches
-            if account.was_destroyed() {
+            // If the account was destroyed, invalidate from the account / storage caches.
+            //
+            // Post-cancun when EIP-6780 is live, an account can be destroyed only when it's created
+            // in the same transaction. This guarantees that we will not have such accounts
+            // and storage slots in our cache, because Revm doesn't go through the
+            // Database for freshly created accounts. Hence we can safely ignore invalidating them.
+            if account.was_destroyed() && !spec.is_enabled_in(revm_primitives::hardfork::CANCUN) {
                 // Invalidate the account cache entry if destroyed
                 self.account_cache.invalidate(addr);
 

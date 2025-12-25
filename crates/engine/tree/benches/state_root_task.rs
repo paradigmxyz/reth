@@ -9,7 +9,7 @@ use alloy_primitives::{Address, B256};
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
 use proptest::test_runner::TestRunner;
 use rand::Rng;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, MAINNET};
 use reth_db_common::init::init_genesis;
 use reth_engine_tree::tree::{
     executor::WorkloadExecutor, precompile_cache::PrecompileCacheMap, PayloadProcessor,
@@ -220,6 +220,7 @@ fn bench_state_root(c: &mut Criterion) {
                             EthEvmConfig::new(factory.chain_spec()),
                             &TreeConfig::default(),
                             PrecompileCacheMap::default(),
+                            MAINNET.clone(),
                         );
                         let provider = BlockchainProvider::new(factory).unwrap();
 
