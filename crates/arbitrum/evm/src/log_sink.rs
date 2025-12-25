@@ -38,3 +38,18 @@ pub fn take() -> Vec<Log> {
         out
     })
 }
+
+/// Peek at the logs without clearing them.
+/// Use this when you need to read the logs but want to preserve them for later use.
+pub fn peek() -> Vec<Log> {
+    PREDEPLOY_LOGS.with(|b| {
+        let v = b.borrow();
+        let out = v.clone();
+        tracing::info!(
+            target: "arb-reth::log-sink",
+            logs_count = out.len(),
+            "Peeking logs from sink (not clearing)"
+        );
+        out
+    })
+}
