@@ -530,6 +530,7 @@ mod tests {
         let _result = metrics.execute_metered::<_, EmptyDB>(
             executor,
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+            input.transactions_count(),
             state_hook,
         );
 
@@ -586,6 +587,7 @@ mod tests {
         let _result = metrics.execute_metered::<_, EmptyDB>(
             executor,
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+            input.transactions_count(),
             state_hook,
         );
 
