@@ -429,20 +429,27 @@ fn execute_send_tx_to_l1(
     // so the balance is correct for the precompile's execution.
     
     // Emit SendMerkleUpdate events
+    // Go nitro ABI: event SendMerkleUpdate(uint256 indexed reserved, bytes32 indexed hash, uint256 indexed position)
+    // All 3 parameters are indexed, so they go in topics, not data
     let send_merkle_update_topic = send_merkle_update_topic();
     for event in &merkle_events {
+        // Position is encoded as (level << 192) + numLeaves (matches Go nitro's LevelAndLeaf.ToBigInt())
         let position = level_and_leaf_to_u256(event.level, event.num_leaves);
         
-        // ABI encode: (reserved=0, hash, position)
-        let mut event_data = Vec::with_capacity(96);
-        event_data.extend_from_slice(&U256::ZERO.to_be_bytes::<32>());
-        event_data.extend_from_slice(event.hash.as_slice());
-        event_data.extend_from_slice(&position.to_be_bytes::<32>());
-        
+        // All parameters are indexed (in topics), data is empty
+        // topic[0] = event signature
+        // topic[1] = reserved (always 0)
+        // topic[2] = hash (bytes32)
+        // topic[3] = position (uint256 encoded as (level << 192) + numLeaves)
         let log = Log::new(
             ARBSYS_ADDRESS,
-            vec![send_merkle_update_topic],
-            event_data.into(),
+            vec![
+                send_merkle_update_topic,
+                B256::ZERO,  // reserved = 0
+                event.hash,  // hash (already B256)
+                B256::from(position),  // position as B256
+            ],
+            Bytes::new(),  // empty data - all params are indexed
         ).expect("valid log");
         
         internals.log(log);
