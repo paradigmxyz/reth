@@ -115,8 +115,6 @@ where
     pub latest_header_time: u64,
     /// Stores payload IDs returned by this node, indexed by block number
     pub payload_id_history: HashMap<u64, PayloadId>,
-    /// Stores the next expected payload ID for this node
-    pub next_payload_id: Option<PayloadId>,
     /// Stores the latest fork choice state for this node
     pub latest_fork_choice_state: ForkchoiceState,
     /// Stores the most recent built execution payload for this node
@@ -139,7 +137,6 @@ where
             payload_attributes: HashMap::new(),
             latest_header_time: 0,
             payload_id_history: HashMap::new(),
-            next_payload_id: None,
             latest_fork_choice_state: ForkchoiceState::default(),
             latest_payload_built: None,
             latest_payload_executed: None,
@@ -159,7 +156,6 @@ where
             .field("payload_attributes", &self.payload_attributes)
             .field("latest_header_time", &self.latest_header_time)
             .field("payload_id_history", &self.payload_id_history)
-            .field("next_payload_id", &self.next_payload_id)
             .field("latest_fork_choice_state", &self.latest_fork_choice_state)
             .field("latest_payload_built", &self.latest_payload_built)
             .field("latest_payload_executed", &self.latest_payload_executed)
