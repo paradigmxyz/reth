@@ -138,11 +138,23 @@ where
     pub(crate) fn compute_state_root(
         &self,
         computed_block: PendingFlashBlock<N>,
-    ) -> eyre::Result<ExecutedBlock<N>>
+    ) -> eyre::Result<Option<ExecutedBlock<N>>>
     where
         N::BlockHeader: HeaderMut,
     {
-        let state_provider = self.provider.history_by_block_hash(computed_block.parent_hash())?;
+        let latest = self
+            .provider
+            .latest_header()?
+            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+        let latest_hash = latest.hash();
+
+        if computed_block.parent_hash() != latest_hash {
+            trace!(target: "flashblocks", flashblock_parent = ?computed_block.parent_hash(), local_latest=?latest.num_hash(),"Skipping non consecutive flashblock");
+            // doesn't attach to the latest block
+            return Ok(None)
+        }
+
+        let state_provider = self.provider.history_by_block_hash(latest.hash())?;
         let (state_root, trie_updates) =
             state_provider.state_root_with_updates(computed_block.hashed_state.clone())?;
 
@@ -153,14 +165,14 @@ where
         header.set_state_root(state_root);
 
         // Re-populate the executed block
-        Ok(ExecutedBlock::new(
+        Ok(Some(ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_unhashed(N::Block::new(header, body), senders)),
             computed_block.pending.executed_block.execution_output.clone(),
             ComputedTrieData::without_trie_input(
                 Arc::new(computed_block.hashed_state.into_sorted()),
                 Arc::new(trie_updates.into_sorted()),
             ),
-        ))
+        )))
     }
 }
 

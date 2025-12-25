@@ -152,8 +152,10 @@ where
                                 let builder = self.builder.clone();
                                 self.spawner.spawn(async move {
                                     match builder.compute_state_root(pending) {
-                                        Ok(computed_block) => {
-                                            sequences.on_state_root_complete(parent_hash, computed_block).await;
+                                        Ok(execution) => {
+                                            if let Some(computed_block) = execution {
+                                                sequences.on_state_root_complete(parent_hash, computed_block).await;
+                                            }
                                         }
                                         Err(err) => {
                                             warn!(target: "flashblocks", %err, "Failed to compute state root");
