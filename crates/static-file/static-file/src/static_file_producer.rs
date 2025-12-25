@@ -144,7 +144,7 @@ where
             let provider = self.provider.database_provider_ro()?.disable_long_read_transaction_safety();
             segment.copy_to_static_files(provider,  block_range.clone())?;
 
-            let elapsed = start.elapsed(); // TODO(alexey): track in metrics
+            let elapsed = start.elapsed();
             debug!(target: "static_file", segment = %segment.segment(), ?block_range, ?elapsed, "Finished StaticFileProducer segment");
 
             Ok(())
@@ -157,7 +157,7 @@ where
                 .update_index(segment.segment(), Some(*block_range.end()))?;
         }
 
-        let elapsed = start.elapsed(); // TODO(alexey): track in metrics
+        let elapsed = start.elapsed();
         debug!(target: "static_file", ?targets, ?elapsed, "StaticFileProducer finished");
 
         self.event_sender
