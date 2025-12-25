@@ -64,6 +64,7 @@ impl EngineApiMetrics {
         &self,
         executor: E,
         mut transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
+        transaction_count: usize,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<(BlockExecutionOutput<E::Receipt>, Vec<Address>), BlockExecutionError>
     where
@@ -75,7 +76,7 @@ impl EngineApiMetrics {
         // be accessible.
         let wrapper = MeteredStateHook { metrics: self.executor.clone(), inner_hook: state_hook };
 
-        let mut senders = Vec::new();
+        let mut senders = Vec::with_capacity(transaction_count);
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
         let f = || {
