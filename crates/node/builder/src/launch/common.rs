@@ -453,11 +453,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         Pool: TransactionPool + Unpin,
     {
-        if let Some(interval) = self.node_config().dev.block_time {
-            MiningMode::interval(interval)
-        } else {
-            MiningMode::instant(pool, self.node_config().dev.block_max_transactions)
-        }
+        self.node_config().dev_mining_mode(pool)
     }
 }
 
@@ -938,28 +934,44 @@ where
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
     pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
+        // We skip the era stage if it's not enabled
+        let era_enabled = self.era_import_source().is_some();
+        let mut all_stages =
+            StageId::ALL.into_iter().filter(|id| era_enabled || id != &StageId::Era);
+
+        // Get the expected first stage based on config.
+        let first_stage = all_stages.next().expect("there must be at least one stage");
+
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
             .blockchain_db()
-            .get_stage_checkpoint(*StageId::ALL.first().unwrap())?
+            .get_stage_checkpoint(first_stage)?
             .unwrap_or_default()
             .block_number;
 
-        // Skip the first stage as we've already retrieved it and comparing all other checkpoints
-        // against it.
-        for stage_id in StageId::ALL.iter().skip(1) {
+        // Compare all other stages against the first
+        for stage_id in all_stages {
             let stage_checkpoint = self
                 .blockchain_db()
-                .get_stage_checkpoint(*stage_id)?
+                .get_stage_checkpoint(stage_id)?
                 .unwrap_or_default()
                 .block_number;
 
             // If the checkpoint of any stage is less than the checkpoint of the first stage,
             // retrieve and return the block hash of the latest header and use it as the target.
+            debug!(
+                target: "consensus::engine",
+                first_stage_id = %first_stage,
+                first_stage_checkpoint,
+                stage_id = %stage_id,
+                stage_checkpoint = stage_checkpoint,
+                "Checking stage against first stage",
+            );
             if stage_checkpoint < first_stage_checkpoint {
                 debug!(
                     target: "consensus::engine",
+                    first_stage_id = %first_stage,
                     first_stage_checkpoint,
                     inconsistent_stage_id = %stage_id,
                     inconsistent_stage_checkpoint = stage_checkpoint,
@@ -1044,7 +1056,13 @@ where
     }
 
     /// Spawns the [`EthStatsService`] service if configured.
-    pub async fn spawn_ethstats(&self) -> eyre::Result<()> {
+    pub async fn spawn_ethstats<St>(&self, mut engine_events: St) -> eyre::Result<()>
+    where
+        St: Stream<Item = reth_engine_primitives::ConsensusEngineEvent<PrimitivesTy<T::Types>>>
+            + Send
+            + Unpin
+            + 'static,
+    {
         let Some(url) = self.node_config().debug.ethstats.as_ref() else { return Ok(()) };
 
         let network = self.components().network().clone();
@@ -1054,7 +1072,37 @@ where
         info!(target: "reth::cli", "Starting EthStats service at {}", url);
 
         let ethstats = EthStatsService::new(url, network, provider, pool).await?;
-        tokio::spawn(async move { ethstats.run().await });
+
+        // If engine events are provided, spawn listener for new payload reporting
+        let ethstats_for_events = ethstats.clone();
+        let task_executor = self.task_executor().clone();
+        task_executor.spawn(Box::pin(async move {
+            while let Some(event) = engine_events.next().await {
+                use reth_engine_primitives::ConsensusEngineEvent;
+                match event {
+                    ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
+                    ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {
+                        let block_hash = executed.recovered_block.num_hash().hash;
+                        let block_number = executed.recovered_block.num_hash().number;
+                        if let Err(e) = ethstats_for_events
+                            .report_new_payload(block_hash, block_number, duration)
+                            .await
+                        {
+                            debug!(
+                                target: "ethstats",
+                                "Failed to report new payload: {}", e
+                            );
+                        }
+                    }
+                    _ => {
+                        // Ignore other event types for ethstats reporting
+                    }
+                }
+            }
+        }));
+
+        // Spawn main ethstats service
+        task_executor.spawn(Box::pin(async move { ethstats.run().await }));
 
         Ok(())
     }

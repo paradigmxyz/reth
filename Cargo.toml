@@ -548,6 +548,7 @@ bytes = { version = "1.5", default-features = false }
 brotli = "8"
 cfg-if = "1.0"
 clap = "4"
+color-eyre = "0.6"
 dashmap = "6.0"
 derive_more = { version = "2", default-features = false, features = ["full"] }
 dirs-next = "2.0.0"
@@ -587,6 +588,7 @@ url = { version = "2.3", default-features = false }
 zstd = "0.13"
 byteorder = "1"
 mini-moka = "0.10"
+moka = "0.12"
 tar-no-std = { version = "0.3.2", default-features = false }
 miniz_oxide = { version = "0.8.4", default-features = false }
 chrono = "0.4.41"
@@ -729,6 +731,7 @@ socket2 = { version = "0.5", default-features = false }
 sysinfo = { version = "0.33", default-features = false }
 tracing-journald = "0.3"
 tracing-logfmt = "0.3.3"
+tracing-samply = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false }
 triehash = "0.8"
 typenum = "1.15.0"

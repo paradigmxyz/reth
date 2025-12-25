@@ -39,6 +39,7 @@ use revm::state::EvmState;
 use state::TreeState;
 use std::{
     fmt::Debug,
+    ops,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
         Arc,
@@ -63,7 +64,6 @@ mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
-// TODO(alexey): compare trie updates in `insert_block_inner`
 #[expect(unused)]
 mod trie_updates;
 
@@ -426,9 +426,13 @@ where
             match self.try_recv_engine_message() {
                 Ok(Some(msg)) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
-                    if let Err(fatal) = self.on_engine_message(msg) {
-                        error!(target: "engine::tree", %fatal, "insert block fatal error");
-                        return
+                    match self.on_engine_message(msg) {
+                        Ok(ops::ControlFlow::Break(())) => return,
+                        Ok(ops::ControlFlow::Continue(())) => {}
+                        Err(fatal) => {
+                            error!(target: "engine::tree", %fatal, "insert block fatal error");
+                            return
+                        }
                     }
                 }
                 Ok(None) => {
@@ -926,48 +930,6 @@ where
         Ok(())
     }
 
-    /// Determines if the given block is part of a fork by checking that these
-    /// conditions are true:
-    /// * walking back from the target hash to verify that the target hash is not part of an
-    ///   extension of the canonical chain.
-    /// * walking back from the current head to verify that the target hash is not already part of
-    ///   the canonical chain.
-    ///
-    /// The header is required as an arg, because we might be checking that the header is a fork
-    /// block before it's in the tree state and before it's in the database.
-    fn is_fork(&self, target: BlockWithParent) -> ProviderResult<bool> {
-        let target_hash = target.block.hash;
-        // verify that the given hash is not part of an extension of the canon chain.
-        let canonical_head = self.state.tree_state.canonical_head();
-        let mut current_hash;
-        let mut current_block = target;
-        loop {
-            if current_block.block.hash == canonical_head.hash {
-                return Ok(false)
-            }
-            // We already passed the canonical head
-            if current_block.block.number <= canonical_head.number {
-                break
-            }
-            current_hash = current_block.parent;
-
-            let Some(next_block) = self.sealed_header_by_hash(current_hash)? else { break };
-            current_block = next_block.block_with_parent();
-        }
-
-        // verify that the given hash is not already part of canonical chain stored in memory
-        if self.canonical_in_memory_state.header_by_hash(target_hash).is_some() {
-            return Ok(false)
-        }
-
-        // verify that the given hash is not already part of persisted canonical chain
-        if self.provider.block_number(target_hash)?.is_some() {
-            return Ok(false)
-        }
-
-        Ok(true)
-    }
-
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
     /// to resolve chain forks and ensure that the Execution Layer is working with the latest valid
     /// chain.
@@ -1315,12 +1277,48 @@ where
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
             } else if self.should_persist() {
-                let blocks_to_persist = self.get_canonical_blocks_to_persist()?;
+                let blocks_to_persist =
+                    self.get_canonical_blocks_to_persist(PersistTarget::Threshold)?;
                 self.persist_blocks(blocks_to_persist);
             }
         }
 
         Ok(())
+    }
+
+    /// Finishes termination by persisting all remaining blocks and signaling completion.
+    ///
+    /// This blocks until all persistence is complete. Always signals completion,
+    /// even if an error occurs.
+    fn finish_termination(
+        &mut self,
+        pending_termination: oneshot::Sender<()>,
+    ) -> Result<(), AdvancePersistenceError> {
+        trace!(target: "engine::tree", "finishing termination, persisting remaining blocks");
+        let result = self.persist_until_complete();
+        let _ = pending_termination.send(());
+        result
+    }
+
+    /// Persists all remaining blocks until none are left.
+    fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
+        loop {
+            // Wait for any in-progress persistence to complete (blocking)
+            if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
+                let result = rx.blocking_recv().map_err(|_| TryRecvError::Closed)?;
+                self.on_persistence_complete(result, start_time)?;
+            }
+
+            let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
+
+            if blocks_to_persist.is_empty() {
+                debug!(target: "engine::tree", "persistence complete, signaling termination");
+                return Ok(())
+            }
+
+            debug!(target: "engine::tree", count = blocks_to_persist.len(), "persisting remaining blocks before shutdown");
+            self.persist_blocks(blocks_to_persist);
+        }
     }
 
     /// Handles a completed persistence task.
@@ -1348,10 +1346,12 @@ where
     }
 
     /// Handles a message from the engine.
+    ///
+    /// Returns `ControlFlow::Break(())` if the engine should terminate.
     fn on_engine_message(
         &mut self,
         msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
-    ) -> Result<(), InsertBlockFatalError> {
+    ) -> Result<ops::ControlFlow<()>, InsertBlockFatalError> {
         match msg {
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
@@ -1361,6 +1361,13 @@ where
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl)?;
                 }
+                FromOrchestrator::Terminate { tx } => {
+                    debug!(target: "engine::tree", "received terminate request");
+                    if let Err(err) = self.finish_termination(tx) {
+                        error!(target: "engine::tree", %err, "Termination failed");
+                    }
+                    return Ok(ops::ControlFlow::Break(()))
+                }
             },
             FromEngine::Request(request) => {
                 match request {
@@ -1368,7 +1375,7 @@ where
                         let block_num_hash = block.recovered_block().num_hash();
                         if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
                             // outdated block that can be skipped
-                            return Ok(())
+                            return Ok(ops::ControlFlow::Continue(()))
                         }
 
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
@@ -1476,7 +1483,7 @@ where
                 }
             }
         }
-        Ok(())
+        Ok(ops::ControlFlow::Continue(()))
     }
 
     /// Invoked if the backfill sync has finished to target.
@@ -1710,10 +1717,10 @@ where
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range
-    /// `(last_persisted_number .. canonical_head - threshold]`. The expected
-    /// order is oldest -> newest.
+    /// `(last_persisted_number .. target]`. The expected order is oldest -> newest.
     fn get_canonical_blocks_to_persist(
         &self,
+        target: PersistTarget,
     ) -> Result<Vec<ExecutedBlock<N>>, AdvancePersistenceError> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
@@ -1724,9 +1731,12 @@ where
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
-        // Persist only up to block buffer target
-        let target_number =
-            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+        let target_number = match target {
+            PersistTarget::Head => canonical_head_number,
+            PersistTarget::Threshold => {
+                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
+            }
+        };
 
         debug!(
             target: "engine::tree",
@@ -2516,14 +2526,11 @@ where
             Ok(Some(_)) => {}
         }
 
-        // determine whether we are on a fork chain
-        let is_fork = match self.is_fork(block_id) {
-            Err(err) => {
-                let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block, err.into()).into());
-            }
-            Ok(is_fork) => is_fork,
-        };
+        // determine whether we are on a fork chain by comparing the block number with the
+        // canonical head. This is a simple check that is sufficient for the event emission below.
+        // A block is considered a fork if its number is less than or equal to the canonical head,
+        // as this indicates there's already a canonical block at that height.
+        let is_fork = block_id.block.number <= self.state.tree_state.current_canonical_head.number;
 
         let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
 
@@ -2868,4 +2875,13 @@ pub enum InsertPayloadOk {
     AlreadySeen(BlockStatus),
     /// The payload was valid and inserted into the tree.
     Inserted(BlockStatus),
+}
+
+/// Target for block persistence.
+#[derive(Debug, Clone, Copy)]
+enum PersistTarget {
+    /// Persist up to `canonical_head - memory_block_buffer_target`.
+    Threshold,
+    /// Persist all blocks up to and including the canonical head.
+    Head,
 }

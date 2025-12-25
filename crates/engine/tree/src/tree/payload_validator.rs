@@ -35,12 +35,13 @@ use reth_primitives_traits::{
 };
 use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
-    DatabaseProviderFactory, ExecutionOutcome, HashedPostStateProvider, ProviderError,
-    PruneCheckpointReader, StageCheckpointReader, StateProvider, StateProviderFactory, StateReader,
-    StateRootProvider, TrieReader,
+    DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome, HashedPostStateProvider,
+    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
+    StateProviderFactory, StateReader, TrieReader,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, TrieInputSorted};
+use reth_storage_errors::db::DatabaseError;
+use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
 use std::{
@@ -434,8 +435,7 @@ where
         }
 
         // Execute the block and handle any execution errors
-        let (output, senders) = match self.execute_block(&state_provider, env, &input, &mut handle)
-        {
+        let (output, senders) = match self.execute_block(state_provider, env, &input, &mut handle) {
             Ok(output) => output,
             Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
@@ -519,7 +519,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                state_provider.state_root_with_updates(hashed_state.clone()),
+                self.compute_state_root_serial(block.parent_hash(), &hashed_state, ctx.state()),
                 block
             );
             (root, updates, root_time.elapsed())
@@ -602,7 +602,7 @@ where
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Vec<Address>), InsertBlockErrorKind>
     where
-        S: StateProvider,
+        S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -657,8 +657,6 @@ where
     ///
     /// Returns `Ok(_)` if computed successfully.
     /// Returns `Err(_)` if error was encountered during computation.
-    /// `Err(ProviderError::ConsistentView(_))` can be safely ignored and fallback computation
-    /// should be used instead.
     #[instrument(level = "debug", target = "engine::tree::payload_validator", skip_all)]
     fn compute_state_root_parallel(
         &self,
@@ -686,6 +684,36 @@ where
         let prefix_sets = prefix_sets_mut.freeze();
 
         ParallelStateRoot::new(factory, prefix_sets).incremental_root_with_updates()
+    }
+
+    /// Compute state root for the given hashed post state in serial.
+    fn compute_state_root_serial(
+        &self,
+        parent_hash: B256,
+        hashed_state: &HashedPostState,
+        state: &EngineApiTreeState<N>,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let (mut input, block_hash) = self.compute_trie_input(parent_hash, state)?;
+
+        // Extend state overlay with current block's sorted state.
+        input.prefix_sets.extend(hashed_state.construct_prefix_sets());
+        let sorted_hashed_state = hashed_state.clone_into_sorted();
+        Arc::make_mut(&mut input.state).extend_ref(&sorted_hashed_state);
+
+        let TrieInputSorted { nodes, state, .. } = input;
+        let prefix_sets = hashed_state.construct_prefix_sets();
+
+        let factory = OverlayStateProviderFactory::new(self.provider.clone())
+            .with_block_hash(Some(block_hash))
+            .with_trie_overlay(Some(nodes))
+            .with_hashed_state_overlay(Some(state));
+
+        let provider = factory.database_provider_ro()?;
+
+        Ok(StateRoot::new(&provider, &provider)
+            .with_prefix_sets(prefix_sets.freeze())
+            .root_with_updates()
+            .map_err(Into::<DatabaseError>::into)?)
     }
 
     /// Validates the block after execution.
@@ -833,8 +861,12 @@ where
             }
             StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
                 let start = Instant::now();
-                let handle =
-                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
+                let handle = self.payload_processor.spawn_cache_exclusive(
+                    env,
+                    txs,
+                    provider_builder,
+                    block_access_list,
+                );
 
                 // Record prewarming initialization duration
                 self.metrics
