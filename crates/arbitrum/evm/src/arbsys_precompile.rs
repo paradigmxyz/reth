@@ -18,6 +18,54 @@
 use alloy_evm::precompiles::{DynPrecompile, PrecompileInput};
 use alloy_primitives::{keccak256, Address, Bytes, Log, B256, U256};
 use revm::precompile::{PrecompileId, PrecompileOutput, PrecompileResult, PrecompileError};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::cell::RefCell;
+
+/// Global execution counter to track which execution pass the precompile is called in.
+static EXEC_COUNTER: AtomicU64 = AtomicU64::new(0);
+
+/// Represents the state changes from an ArbSys precompile call that need to be applied
+/// after EVM execution using the proper transition mechanism.
+#[derive(Debug, Clone, Default)]
+pub struct ArbSysMerkleState {
+    /// The new size of the Merkle accumulator
+    pub new_size: u64,
+    /// Partial hashes to set: (level, hash)
+    pub partials: Vec<(u64, B256)>,
+    /// The send hash for this transaction
+    pub send_hash: B256,
+    /// The leaf number for this transaction
+    pub leaf_num: u64,
+    /// The value to burn from ArbSys account
+    pub value_to_burn: U256,
+}
+
+thread_local! {
+    /// Thread-local storage for ArbSys state changes.
+    /// This is set by the precompile and consumed by build.rs after EVM execution.
+    static ARBSYS_STATE: RefCell<Option<ArbSysMerkleState>> = RefCell::new(None);
+}
+
+/// Store ArbSys state changes for later application.
+pub fn store_arbsys_state(state: ArbSysMerkleState) {
+    ARBSYS_STATE.with(|cell| {
+        *cell.borrow_mut() = Some(state);
+    });
+}
+
+/// Take the stored ArbSys state changes (clears the storage).
+pub fn take_arbsys_state() -> Option<ArbSysMerkleState> {
+    ARBSYS_STATE.with(|cell| {
+        cell.borrow_mut().take()
+    })
+}
+
+/// Clear any stored ArbSys state changes.
+pub fn clear_arbsys_state() {
+    ARBSYS_STATE.with(|cell| {
+        *cell.borrow_mut() = None;
+    });
+}
 
 /// ArbSys precompile address (0x64 = 100)
 pub const ARBSYS_ADDRESS: Address = Address::new([
@@ -59,6 +107,7 @@ pub fn create_arbsys_precompile() -> DynPrecompile {
 
 /// Main precompile handler function.
 fn arbsys_precompile_handler(mut input: PrecompileInput<'_>) -> PrecompileResult {
+    let exec_id = EXEC_COUNTER.fetch_add(1, Ordering::SeqCst);
     let data = input.data;
     
     // Check minimum input length for selector
@@ -68,12 +117,22 @@ fn arbsys_precompile_handler(mut input: PrecompileInput<'_>) -> PrecompileResult
     
     let selector: [u8; 4] = [data[0], data[1], data[2], data[3]];
     
+    // Log execution pass info
+    tracing::warn!(
+        target: "arb::arbsys_precompile",
+        exec_id = exec_id,
+        selector = ?selector,
+        caller = ?input.caller,
+        value = ?input.value,
+        "EXEC_COUNTER: ArbSys precompile handler called"
+    );
+    
     match selector {
         SEND_TX_TO_L1_SELECTOR => {
-            handle_send_tx_to_l1(&mut input)
+            handle_send_tx_to_l1(&mut input, exec_id)
         }
         WITHDRAW_ETH_SELECTOR => {
-            handle_withdraw_eth(&mut input)
+            handle_withdraw_eth(&mut input, exec_id)
         }
         _ => {
             // Unknown selector - revert
@@ -84,7 +143,7 @@ fn arbsys_precompile_handler(mut input: PrecompileInput<'_>) -> PrecompileResult
 
 /// Handle SendTxToL1 call.
 /// Input format: selector (4 bytes) + destination (32 bytes) + offset (32 bytes) + length (32 bytes) + data
-fn handle_send_tx_to_l1(input: &mut PrecompileInput<'_>) -> PrecompileResult {
+fn handle_send_tx_to_l1(input: &mut PrecompileInput<'_>, exec_id: u64) -> PrecompileResult {
     let data = input.data;
     
     // Parse destination address
@@ -121,12 +180,12 @@ fn handle_send_tx_to_l1(input: &mut PrecompileInput<'_>) -> PrecompileResult {
         Bytes::new()
     };
     
-    execute_send_tx_to_l1(input, destination, calldata_for_l1)
+    execute_send_tx_to_l1(input, destination, calldata_for_l1, exec_id)
 }
 
 /// Handle WithdrawEth call.
 /// Input format: selector (4 bytes) + destination (32 bytes)
-fn handle_withdraw_eth(input: &mut PrecompileInput<'_>) -> PrecompileResult {
+fn handle_withdraw_eth(input: &mut PrecompileInput<'_>, exec_id: u64) -> PrecompileResult {
     let data = input.data;
     
     // Parse destination address
@@ -138,7 +197,7 @@ fn handle_withdraw_eth(input: &mut PrecompileInput<'_>) -> PrecompileResult {
     let destination = Address::from(dest_bytes);
     
     // WithdrawEth is just SendTxToL1 with empty calldata
-    execute_send_tx_to_l1(input, destination, Bytes::new())
+    execute_send_tx_to_l1(input, destination, Bytes::new(), exec_id)
 }
 
 /// Execute the SendTxToL1 logic.
@@ -146,6 +205,7 @@ fn execute_send_tx_to_l1(
     input: &mut PrecompileInput<'_>,
     destination: Address,
     calldata_for_l1: Bytes,
+    exec_id: u64,
 ) -> PrecompileResult {
     let caller = input.caller;
     let value = input.value;
@@ -161,6 +221,7 @@ fn execute_send_tx_to_l1(
     
     tracing::info!(
         target: "arb::arbsys_precompile",
+        exec_id = exec_id,
         caller = ?caller,
         destination = ?destination,
         value = %value,
@@ -182,23 +243,33 @@ fn execute_send_tx_to_l1(
         &calldata_for_l1,
     );
     
-    // Append to Merkle accumulator and get events
-    let (leaf_num, merkle_events) = append_to_merkle_accumulator(internals, send_hash)?;
+    // Append to Merkle accumulator and get events + state changes to apply later
+    let (leaf_num, merkle_events, new_size, partials_to_set) = append_to_merkle_accumulator(internals, send_hash)?;
     
     tracing::info!(
         target: "arb::arbsys_precompile",
         leaf_num = leaf_num,
         send_hash = ?send_hash,
         merkle_events_count = merkle_events.len(),
-        "Merkle accumulator updated"
+        new_size = new_size,
+        partials_count = partials_to_set.len(),
+        "Merkle accumulator computed, storing state changes for deferred application"
     );
     
-    // Burn the call value from the precompile's account
-    // The EVM has already transferred the value from caller to ArbSys (0x64)
-    // We need to burn it (subtract from ArbSys balance)
-    if value > U256::ZERO {
-        burn_value_from_precompile(internals, value)?;
-    }
+    // Store the state changes in the thread-local sink for later application
+    // build.rs will apply these after EVM execution using storage.rs
+    store_arbsys_state(ArbSysMerkleState {
+        new_size,
+        partials: partials_to_set,
+        send_hash,
+        leaf_num,
+        value_to_burn: value,
+    });
+    
+    // NOTE: We no longer burn the value here because the EVM journal might not persist.
+    // The value burning will be handled by build.rs after EVM execution.
+    // The EVM has already transferred the value from caller to ArbSys (0x64),
+    // so the balance is correct for the precompile's execution.
     
     // Emit SendMerkleUpdate events
     let send_merkle_update_topic = send_merkle_update_topic();
@@ -315,46 +386,56 @@ struct MerkleTreeNodeEvent {
 }
 
 /// Append to Merkle accumulator and return (leaf_num, events).
+/// Append to Merkle accumulator and return (leaf_num, events, partials_to_set).
+/// 
+/// IMPORTANT: This function now READS from the EVM state but does NOT WRITE to it.
+/// Instead, it returns the list of partial hashes that need to be set.
+/// The caller is responsible for storing these in the thread-local sink,
+/// and build.rs will apply them after EVM execution using storage.rs.
 fn append_to_merkle_accumulator(
     internals: &mut alloy_evm::EvmInternals<'_>,
     item_hash: B256,
-) -> Result<(u64, Vec<MerkleTreeNodeEvent>), PrecompileError> {
+) -> Result<(u64, Vec<MerkleTreeNodeEvent>, u64, Vec<(u64, B256)>), PrecompileError> {
     // Storage layout for SendMerkleAccumulator:
     // - Substorage at subspace ID 5 (sendMerkleSubspace = []byte{5})
     // - Size at offset 0 within substorage
     // - Partials at offset 2+ within substorage
     
-    // IMPORTANT: Ensure account is loaded (should already be from get_l1_block_number, but be safe)
-    let _ = internals.load_account(ARBOS_STATE_ADDRESS)
-        .map_err(|e| PrecompileError::other(format!("load_account failed: {:?}", e)))?;
-    
     // sendMerkleSubspace = []byte{5} in Go nitro
     let merkle_key = compute_substorage_key(&[], 5);
     let size_slot = compute_storage_slot(&merkle_key, 0);
     
-    // Get current size
+    // Get current size from EVM state (this still works via sload)
     let current_size_result = internals.sload(ARBOS_STATE_ADDRESS, size_slot)
         .map_err(|e| PrecompileError::other(format!("sload size failed: {:?}", e)))?;
     let current_size: u64 = current_size_result.data.try_into().unwrap_or(0);
     let new_size = current_size + 1;
     
-    // Set new size
-    internals.sstore(ARBOS_STATE_ADDRESS, size_slot, U256::from(new_size))
-        .map_err(|e| PrecompileError::other(format!("sstore size failed: {:?}", e)))?;
+    tracing::info!(
+        target: "arb::arbsys_precompile",
+        current_size = current_size,
+        new_size = new_size,
+        size_slot = ?size_slot,
+        "Merkle accumulator: read current size, will defer writes"
+    );
     
+    // Collect partial hashes to set (instead of calling sstore directly)
+    let mut partials_to_set: Vec<(u64, B256)> = Vec::new();
     let mut events = Vec::new();
     let mut level = 0u64;
     let mut so_far = keccak256(item_hash.as_slice());
     
     loop {
         if level == calc_num_partials(current_size) {
-            set_partial(internals, &merkle_key, level, so_far)?;
+            // Set this level's partial
+            partials_to_set.push((level, so_far));
             break;
         }
         
         let this_level = get_partial(internals, &merkle_key, level)?;
         if this_level == B256::ZERO {
-            set_partial(internals, &merkle_key, level, so_far)?;
+            // Set this level's partial
+            partials_to_set.push((level, so_far));
             break;
         }
         
@@ -364,8 +445,8 @@ fn append_to_merkle_accumulator(
         combined.extend_from_slice(so_far.as_slice());
         so_far = keccak256(&combined);
         
-        // Clear this level
-        set_partial(internals, &merkle_key, level, B256::ZERO)?;
+        // Clear this level (set to zero)
+        partials_to_set.push((level, B256::ZERO));
         
         level += 1;
         
@@ -378,7 +459,7 @@ fn append_to_merkle_accumulator(
     }
     
     let leaf_num = new_size - 1;
-    Ok((leaf_num, events))
+    Ok((leaf_num, events, new_size, partials_to_set))
 }
 
 /// Calculate number of partials for a given size.
