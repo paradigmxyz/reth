@@ -542,21 +542,112 @@ fn level_and_leaf_to_u256(level: u64, leaf: u64) -> U256 {
     level_shifted + U256::from(leaf)
 }
 
-/// Calculate gas cost for the precompile.
-fn calculate_gas_cost(calldata_len: usize, merkle_events_count: usize) -> u64 {
-    // Base cost for precompile execution
-    let base_cost = 21000u64;
+/// Gas constants matching Go nitro's storage/storage.go and Ethereum params
+const STORAGE_READ_COST: u64 = 800;  // params.SloadGasEIP2200
+const STORAGE_WRITE_COST: u64 = 20000;  // params.SstoreSetGasEIP2200 (0 -> non-zero)
+const STORAGE_WRITE_ZERO_COST: u64 = 5000;  // params.SstoreResetGasEIP2200 (non-zero -> zero)
+const LOG_GAS: u64 = 375;  // params.LogGas
+const LOG_TOPIC_GAS: u64 = 375;  // params.LogTopicGas
+const LOG_DATA_GAS: u64 = 8;  // params.LogDataGas
+const COPY_GAS: u64 = 3;  // params.CopyGas
+
+/// Calculate gas cost for the precompile matching Go nitro's approach.
+/// 
+/// Go nitro charges gas via the burner for:
+/// 1. Input args copying: CopyGas * WordsForBytes(len(input)-4)
+/// 2. Storage reads: SloadGasEIP2200 per sload
+/// 3. Storage writes: SstoreSetGasEIP2200 or SstoreResetGasEIP2200 per sstore
+/// 4. Keccak operations: 30 + 6 * words
+/// 5. Event emissions: LogGas + LogTopicGas * (1 + indexed_count) + LogDataGas * data_len
+/// 6. Output result copying: CopyGas * WordsForBytes(len(output))
+fn calculate_gas_cost(calldata_for_l1_len: usize, merkle_events_count: usize) -> u64 {
+    // Input args copying cost (for withdrawEth: 32 bytes = 1 word)
+    // Go nitro: argsCost := params.CopyGas * arbmath.WordsForBytes(uint64(len(input)-4))
+    let args_words = (32 + 31) / 32;  // 1 word for the address argument
+    let args_cost = COPY_GAS * args_words;
     
-    // Cost per byte of calldata
-    let calldata_cost = (calldata_len as u64) * 16;
+    // Storage operations for get_l1_block_number:
+    // - 1 sload for L1 block number
+    let l1_block_read_cost = STORAGE_READ_COST;
     
-    // Cost for merkle operations (sload/sstore)
-    let merkle_cost = (merkle_events_count as u64 + 2) * 2100; // ~2100 gas per sstore
+    // Keccak for send hash computation
+    // Go nitro: cost := 30 + 6*arbmath.WordsForBytes(byteCount)
+    // sendHash uses: caller(20) + dest(20) + blockNum(32) + l1BlockNum(32) + timestamp(32) + value(32) + calldata
+    let send_hash_bytes = 20 + 20 + 32 + 32 + 32 + 32 + calldata_for_l1_len;
+    let send_hash_words = (send_hash_bytes as u64 + 31) / 32;
+    let keccak_cost = 30 + 6 * send_hash_words;
     
-    // Cost for log emissions
-    let log_cost = 375 + 375 * 4 + (calldata_len as u64) * 8; // LOG4 + data
+    // Storage operations for Merkle accumulator:
+    // - 1 sload for current size
+    // - 1 sstore for new size
+    // - For each level in the tree: 1 sload for partial, potentially 1 sstore
+    // In the worst case (first append), we have 1 sload + 1 sstore for size, 1 sload + 1 sstore for partial[0]
+    // For subsequent appends, we may have more levels
+    let merkle_size_read_cost = STORAGE_READ_COST;
+    let merkle_size_write_cost = STORAGE_WRITE_COST;
     
-    base_cost + calldata_cost + merkle_cost + log_cost
+    // For each merkle event, there's a level that got updated
+    // Each level involves: 1 sload for partial, 1 sstore to clear it, then 1 sstore at next level
+    // Plus keccak for combining hashes
+    let merkle_level_cost = if merkle_events_count > 0 {
+        // Each event means we combined two hashes and wrote to a higher level
+        // sload for partial at each level, sstore to clear, keccak to combine
+        let per_level_cost = STORAGE_READ_COST + STORAGE_WRITE_ZERO_COST + (30 + 6 * 2);  // 2 words for 64 bytes
+        (merkle_events_count as u64) * per_level_cost
+    } else {
+        0
+    };
+    
+    // Final partial write (always happens)
+    let final_partial_read_cost = STORAGE_READ_COST;
+    let final_partial_write_cost = STORAGE_WRITE_COST;
+    
+    // Initial hash of item (keccak of sendHash)
+    let initial_hash_cost = 30 + 6 * 1;  // 1 word for 32 bytes
+    
+    // L2ToL1Tx event gas cost
+    // Event signature from ArbSys.sol:
+    //   event L2ToL1Tx(
+    //     address caller,              // non-indexed
+    //     address indexed destination, // indexed
+    //     uint256 indexed hash,        // indexed
+    //     uint256 indexed position,    // indexed
+    //     uint256 arbBlockNum,         // non-indexed
+    //     uint256 ethBlockNum,         // non-indexed
+    //     uint256 timestamp,           // non-indexed
+    //     uint256 callvalue,           // non-indexed
+    //     bytes data                   // non-indexed
+    //   );
+    // Go nitro: cost := params.LogGas + params.LogTopicGas * uint64(1+len(topicInputs)) + params.LogDataGas * uint64(len(data))
+    let l2_to_l1_tx_indexed_count = 3u64;  // destination, hash, position
+    // Non-indexed data is ABI-encoded: caller(32) + arbBlockNum(32) + ethBlockNum(32) + timestamp(32) + callvalue(32) + offset(32) + length(32) + data(padded)
+    // For empty calldata: 7 * 32 = 224 bytes
+    let l2_to_l1_tx_data_len = 32 * 6 + 32 + ((calldata_for_l1_len + 31) / 32) * 32;  // 6 fixed fields + offset + data
+    let l2_to_l1_tx_log_cost = LOG_GAS + LOG_TOPIC_GAS * (1 + l2_to_l1_tx_indexed_count) + LOG_DATA_GAS * (l2_to_l1_tx_data_len as u64);
+    
+    // SendMerkleUpdate events (one per merkle_events_count)
+    // Event has: reserved(indexed), hash(indexed), position(indexed) - 3 indexed, 0 non-indexed
+    let send_merkle_update_indexed_count = 3;
+    let send_merkle_update_log_cost = LOG_GAS + LOG_TOPIC_GAS * (1 + send_merkle_update_indexed_count);
+    let total_merkle_update_log_cost = (merkle_events_count as u64) * send_merkle_update_log_cost;
+    
+    // Output result copying cost (32 bytes = 1 word for leafNum)
+    let result_words = 1u64;
+    let result_cost = COPY_GAS * result_words;
+    
+    // Total gas
+    args_cost
+        + l1_block_read_cost
+        + keccak_cost
+        + merkle_size_read_cost
+        + merkle_size_write_cost
+        + merkle_level_cost
+        + final_partial_read_cost
+        + final_partial_write_cost
+        + initial_hash_cost
+        + l2_to_l1_tx_log_cost
+        + total_merkle_update_log_cost
+        + result_cost
 }
 
 #[cfg(test)]

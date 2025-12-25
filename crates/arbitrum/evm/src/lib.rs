@@ -58,7 +58,6 @@ pub mod merkleaccumulator;
 pub mod blockhash;
 pub mod features;
 pub mod programs;
-pub mod arbsys;
 pub mod arbsys_precompile;
 pub mod arbosstate;
 pub mod internal_tx;
