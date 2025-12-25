@@ -603,7 +603,9 @@ fn calculate_gas_cost(calldata_for_l1_len: usize, merkle_events_count: usize) ->
     let final_partial_write_cost = STORAGE_WRITE_COST;
     
     // Initial hash of item (keccak of sendHash)
-    let initial_hash_cost = 30 + 6 * 1;  // 1 word for 32 bytes
+    // NOTE: Go nitro uses crypto.Keccak256 directly (not acc.Keccak) for the initial hash,
+    // so it does NOT charge gas for this operation. See merkleAccumulator.go line 134.
+    let initial_hash_cost = 0u64;
     
     // L2ToL1Tx event gas cost
     // Event signature from ArbSys.sol:
