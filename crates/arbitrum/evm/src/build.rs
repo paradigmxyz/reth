@@ -540,6 +540,7 @@ where
                 let block = alloy_evm::Evm::block(evm);
                 let ctx = PredeployCallContext {
                     block_number: u64::try_from(block.number).unwrap_or(0),
+                    l1_block_number: self.tx_state.cached_l1_block_number.unwrap_or(0),
                     block_hashes: alloc::vec::Vec::new(),
                     chain_id: alloy_primitives::U256::from(self.inner.evm().chain_id()),
                     os_version: 0,
