@@ -26,7 +26,10 @@ use std::{
     future::Future,
     ops::Deref,
     pin::Pin,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     task::{Context, Poll},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -177,6 +180,7 @@ where
             payload_task_guard: self.payload_task_guard.clone(),
             metrics: Default::default(),
             builder: self.builder.clone(),
+            is_resolving: Arc::new(AtomicBool::new(false)),
         };
 
         // start the first job right away
@@ -328,6 +332,12 @@ where
     ///
     /// See [`PayloadBuilder`]
     builder: Builder,
+    /// Flag to indicate that the payload is being resolved.
+    ///
+    /// This is set to `true` when [`PayloadJob::resolve`] is called, signaling to any
+    /// in-progress build tasks that they should finish as quickly as possible and return
+    /// whatever payload they have built so far rather than waiting for more transactions.
+    is_resolving: Arc<AtomicBool>,
 }
 
 impl<Tasks, Builder> BasicPayloadJob<Tasks, Builder>
@@ -349,11 +359,17 @@ where
         self.metrics.inc_initiated_payload_builds();
         let cached_reads = self.cached_reads.take().unwrap_or_default();
         let builder = self.builder.clone();
+        let is_resolving = self.is_resolving.clone();
         self.executor.spawn_blocking(Box::pin(async move {
             // acquire the permit for executing the task
             let _permit = guard.acquire().await;
-            let args =
-                BuildArguments { cached_reads, config: payload_config, cancel, best_payload };
+            let args = BuildArguments {
+                cached_reads,
+                config: payload_config,
+                cancel,
+                best_payload,
+                is_resolving,
+            };
             let result = builder.try_build(args);
             let _ = tx.send(result);
         }));
@@ -463,6 +479,9 @@ where
         &mut self,
         kind: PayloadKind,
     ) -> (Self::ResolvePayloadFuture, KeepPayloadJobAlive) {
+        // Signal to any in-progress build tasks that we're resolving
+        self.is_resolving.store(true, Ordering::SeqCst);
+
         let best_payload = self.best_payload.payload().cloned();
         if best_payload.is_none() && self.pending_block.is_none() {
             // ensure we have a job scheduled if we don't have a best payload yet and none is active
@@ -480,6 +499,7 @@ where
                 config: self.config.clone(),
                 cancel: CancelOnDrop::default(),
                 best_payload: None,
+                is_resolving: self.is_resolving.clone(),
             };
 
             match self.builder.on_missing_payload(args) {
@@ -804,6 +824,11 @@ pub struct BuildArguments<Attributes, Payload: BuiltPayload> {
     pub cancel: CancelOnDrop,
     /// The best payload achieved so far.
     pub best_payload: Option<Payload>,
+    /// Flag indicating whether the payload job is being resolved.
+    ///
+    /// When `true`, the builder should finish as quickly as possible and return whatever
+    /// payload it has built so far, rather than waiting for more transactions.
+    pub is_resolving: Arc<AtomicBool>,
 }
 
 impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
@@ -813,8 +838,16 @@ impl<Attributes, Payload: BuiltPayload> BuildArguments<Attributes, Payload> {
         config: PayloadConfig<Attributes, HeaderTy<Payload::Primitives>>,
         cancel: CancelOnDrop,
         best_payload: Option<Payload>,
+        is_resolving: Arc<AtomicBool>,
     ) -> Self {
-        Self { cached_reads, config, cancel, best_payload }
+        Self { cached_reads, config, cancel, best_payload, is_resolving }
+    }
+
+    /// Returns `true` if the payload job is being resolved.
+    ///
+    /// When this returns `true`, the builder should finish as quickly as possible.
+    pub fn is_resolving(&self) -> bool {
+        self.is_resolving.load(Ordering::Relaxed)
     }
 }
 
