@@ -641,11 +641,14 @@ fn append_to_merkle_accumulator(
 }
 
 /// Calculate number of partials for a given size.
+/// This matches Go nitro's CalcNumPartials which uses Log2ceil.
+/// Log2ceil(value) = 64 - leading_zeros(value)
 fn calc_num_partials(size: u64) -> u64 {
     if size == 0 {
         return 0;
     }
-    64 - (size - 1).leading_zeros() as u64
+    // Go nitro: return uint64(64 - bits.LeadingZeros64(value))
+    64 - size.leading_zeros() as u64
 }
 
 /// Get partial at level.
@@ -955,11 +958,12 @@ mod tests {
     
     #[test]
     fn test_calc_num_partials() {
+        // calc_num_partials uses Log2ceil: 64 - leading_zeros(size)
         assert_eq!(calc_num_partials(0), 0);
-        assert_eq!(calc_num_partials(1), 1);
-        assert_eq!(calc_num_partials(2), 1);
-        assert_eq!(calc_num_partials(3), 2);
-        assert_eq!(calc_num_partials(4), 2);
-        assert_eq!(calc_num_partials(5), 3);
+        assert_eq!(calc_num_partials(1), 1);  // 64 - 63 = 1
+        assert_eq!(calc_num_partials(2), 2);  // 64 - 62 = 2
+        assert_eq!(calc_num_partials(3), 2);  // 64 - 62 = 2
+        assert_eq!(calc_num_partials(4), 3);  // 64 - 61 = 3
+        assert_eq!(calc_num_partials(5), 3);  // 64 - 61 = 3
     }
 }
