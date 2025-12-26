@@ -43,7 +43,7 @@ use reth_revm::db::State;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
-use revm_primitives::Address;
+use revm_primitives::{keccak256, Address};
 use std::{
     collections::HashMap,
     panic::{self, AssertUnwindSafe},
@@ -207,6 +207,9 @@ where
     }
 
     /// Returns [`ExecutableTxIterator`] for the given payload or block.
+    ///
+    /// The returned iterator warms the keccak cache as transactions are decoded/recovered,
+    /// avoiding duplicate work.
     pub fn tx_iterator_for<'a, T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>>(
         &'a self,
         input: &'a BlockOrPayload<T>,
@@ -215,6 +218,10 @@ where
         V: PayloadValidator<T, Block = N::Block>,
         Evm: ConfigureEngineEvm<T::ExecutionData, Primitives = N>,
     {
+        use alloy_consensus::Transaction as _;
+        use alloy_evm::RecoveredTx;
+        use alloy_primitives::TxKind;
+
         match input {
             BlockOrPayload::Payload(payload) => {
                 let (iter, convert) = self
@@ -224,9 +231,23 @@ where
                     .into();
 
                 let iter = Either::Left(iter.into_par_iter().map(Either::Left));
+
+                // Wrap the convert function to warm keccak cache as transactions are recovered
                 let convert = move |tx| {
                     let Either::Left(tx) = tx else { unreachable!() };
-                    convert(tx).map(Either::Left).map_err(Either::Left)
+                    convert(tx)
+                        .map(|recovered_tx| {
+                            // Warm cache for sender address
+                            let _ = keccak256(recovered_tx.signer());
+
+                            // Warm cache for recipient address (skip contract creations)
+                            if let TxKind::Call(to) = recovered_tx.tx().kind() {
+                                let _ = keccak256(to);
+                            }
+
+                            Either::Left(recovered_tx)
+                        })
+                        .map_err(Either::Left)
                 };
 
                 // Box the closure to satisfy the `Fn` bound both here and in the branch below
@@ -236,9 +257,23 @@ where
                 let iter = Either::Right(
                     block.body().clone_transactions().into_par_iter().map(Either::Right),
                 );
+
+                // Wrap the convert function to warm keccak cache as transactions are recovered
                 let convert = move |tx: Either<_, N::SignedTx>| {
                     let Either::Right(tx) = tx else { unreachable!() };
-                    tx.try_into_recovered().map(Either::Right).map_err(Either::Right)
+                    tx.try_into_recovered()
+                        .map(|recovered_tx| {
+                            // Warm cache for sender address
+                            let _ = keccak256(recovered_tx.signer());
+
+                            // Warm cache for recipient address (skip contract creations)
+                            if let TxKind::Call(to) = recovered_tx.inner().kind() {
+                                let _ = keccak256(to);
+                            }
+
+                            Either::Right(recovered_tx)
+                        })
+                        .map_err(Either::Right)
                 };
 
                 Ok((iter, Box::new(convert)))
@@ -401,7 +436,8 @@ where
             "Decided which state root algorithm to run"
         );
 
-        // Get an iterator over the transactions in the payload
+        // Get an iterator over the transactions in the payload.
+        // Note: The keccak cache is warmed automatically as transactions are decoded/recovered
         let txs = self.tx_iterator_for(&input)?;
 
         // Extract the BAL, if valid and available
