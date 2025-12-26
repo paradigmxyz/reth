@@ -407,6 +407,11 @@ impl<'a, T: TrieCursorFactory, H: HashedCursorFactory + Clone> Verifier<'a, T, H
                     let max_account = B256::from([0xFFu8; 32]);
 
                     self.verify_empty_storages(prev_account, max_account, false, true)?;
+                } else {
+                    // No storage accounts were seen in the state root updates; validate that all
+                    // accounts have empty storages in the trie tables.
+                    let max_account = B256::from([0xFFu8; 32]);
+                    self.verify_empty_storages(B256::ZERO, max_account, true, true)?;
                 }
                 self.complete = true;
             }
@@ -1007,5 +1012,51 @@ mod tests {
             }
         }
         assert!(outputs.is_empty());
+    }
+
+    #[test]
+    fn test_verifier_storage_extra_when_hashed_storage_empty() {
+        // Hashed state: one account with empty storage (no storage entries at all).
+        let account_hash = B256::from([1u8; 32]);
+
+        let mut hashed_accounts = BTreeMap::new();
+        hashed_accounts
+            .insert(account_hash, Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None });
+
+        // For this account, hashed storage is completely empty.
+        let mut hashed_storage_tries = B256Map::default();
+        hashed_storage_tries.insert(account_hash, BTreeMap::new());
+
+        let hashed_factory = MockHashedCursorFactory::new(hashed_accounts, hashed_storage_tries);
+
+        // Trie tables: no account nodes, but there is a stray storage trie node for this account.
+        let account_trie_nodes = BTreeMap::new();
+
+        let mut storage_trie_nodes = BTreeMap::new();
+        let storage_path = Nibbles::from_nibbles([0x1]);
+        let storage_node = test_branch_node(0b1111, 0, 0b1111, vec![B256::from([2u8; 32])]);
+        storage_trie_nodes.insert(storage_path, storage_node.clone());
+
+        let mut trie_storage_tries = B256Map::default();
+        trie_storage_tries.insert(account_hash, storage_trie_nodes);
+
+        let trie_factory = MockTrieCursorFactory::new(account_trie_nodes, trie_storage_tries);
+
+        let verifier = Verifier::new(&trie_factory, hashed_factory).unwrap();
+
+        let mut found_storage_extra = false;
+        for result in verifier {
+            let output = result.expect("verifier should not error");
+            if let Output::StorageExtra(acc, path, node) = output &&
+                acc == account_hash &&
+                path == Nibbles::from_nibbles([0x1]) &&
+                node == storage_node
+            {
+                found_storage_extra = true;
+                break;
+            }
+        }
+
+        assert!(found_storage_extra, "expected StorageExtra for stray storage trie node");
     }
 }
