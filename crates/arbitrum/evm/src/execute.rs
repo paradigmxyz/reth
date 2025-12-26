@@ -858,6 +858,15 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     );
                 }
 
+                // CRITICAL: Cache the l1_block_number for the ArbSys precompile to use.
+                // This ensures deterministic l1_block_number across all execution passes
+                // (follower + consensus validation), which is required for deterministic
+                // send_hash computation in SendTxToL1.
+                crate::arbsys_precompile::set_cached_l1_block_number(
+                    internal_data.l2_block_number,
+                    l1_block_number,
+                );
+
                 if l1_block_number > old_l1_block_number {
                     tracing::info!(
                         target: "arb-evm::startblock",

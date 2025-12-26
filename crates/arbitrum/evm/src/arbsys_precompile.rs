@@ -70,6 +70,47 @@ use std::collections::HashSet;
 
 static SHADOW_ACCUMULATOR: Lazy<Mutex<Option<ShadowAccumulatorState>>> = Lazy::new(|| Mutex::new(None));
 
+// Cache for l1_block_number from StartBlock internal transaction.
+// This ensures deterministic l1_block_number across all execution passes (follower + validator).
+// Uses a HashMap keyed by L2 block number to handle concurrent block execution.
+use std::collections::HashMap;
+static L1_BLOCK_NUMBER_CACHE: Lazy<Mutex<HashMap<u64, u64>>> = Lazy::new(|| Mutex::new(HashMap::new()));
+
+/// Set the cached l1_block_number for a given L2 block.
+/// This should be called when processing the StartBlock internal transaction.
+pub fn set_cached_l1_block_number(l2_block_number: u64, l1_block_number: u64) {
+    let mut cache = L1_BLOCK_NUMBER_CACHE.lock().unwrap();
+    cache.insert(l2_block_number, l1_block_number);
+    
+    // Keep cache size bounded to prevent memory leaks
+    // Remove entries for blocks more than 100 blocks behind
+    if l2_block_number > 100 {
+        let min_block = l2_block_number - 100;
+        cache.retain(|&k, _| k >= min_block);
+    }
+    
+    tracing::debug!(
+        target: "arb::l1_block_cache",
+        l2_block_number = l2_block_number,
+        l1_block_number = l1_block_number,
+        cache_size = cache.len(),
+        "Cached l1_block_number for block"
+    );
+}
+
+/// Get the cached l1_block_number for a given L2 block.
+/// Returns None if no cache exists for this block.
+pub fn get_cached_l1_block_number(l2_block_number: u64) -> Option<u64> {
+    let cache = L1_BLOCK_NUMBER_CACHE.lock().unwrap();
+    cache.get(&l2_block_number).copied()
+}
+
+/// Clear the l1_block_number cache.
+pub fn clear_l1_block_number_cache() {
+    let mut cache = L1_BLOCK_NUMBER_CACHE.lock().unwrap();
+    cache.clear();
+}
+
 // Track which (block_number, tx_hash) pairs have already been applied to prevent duplicate state application.
 // This is needed because the same transaction may be executed in multiple "committing" contexts
 // (e.g., building and validating), and we must only apply state changes once.
@@ -256,7 +297,10 @@ fn send_merkle_update_topic() -> B256 {
 /// This precompile intercepts CALL operations to address 0x64 and executes
 /// the ArbSys logic (SendTxToL1, WithdrawEth) within the EVM's journal semantics.
 pub fn create_arbsys_precompile() -> DynPrecompile {
-    (PrecompileId::custom("arbsys"), arbsys_precompile_handler).into()
+    // Use new_stateful() to mark this precompile as non-pure.
+    // This prevents the validator from wrapping it in CachedPrecompile,
+    // which would cache results and drop logs.
+    DynPrecompile::new_stateful(PrecompileId::custom("arbsys"), arbsys_precompile_handler)
 }
 
 /// Main precompile handler function.
@@ -368,10 +412,11 @@ fn execute_send_tx_to_l1(
     // Get block info
     let block_number = internals.block_number();
     let block_timestamp = internals.block_timestamp();
+    let block_num_u64: u64 = block_number.try_into().unwrap_or(0);
     
-    // Get L1 block number from ArbOS state
-    // Storage layout: blockhashes substorage at offset 5, l1BlockNumber at offset 0
-    let l1_block_number = get_l1_block_number(internals)?;
+    // Get L1 block number from cache or ArbOS state
+    // The cache is set by StartBlock internal tx to ensure determinism across execution passes
+    let l1_block_number = get_l1_block_number(internals, block_num_u64)?;
     
     tracing::info!(
         target: "arb::arbsys_precompile",
@@ -399,7 +444,6 @@ fn execute_send_tx_to_l1(
     
     // Append to Merkle accumulator and get events + state changes to apply later
     // Pass block_number so the shadow accumulator can track state across txs in the same block
-    let block_num_u64: u64 = block_number.try_into().unwrap_or(0);
     let (leaf_num, merkle_events, new_size, partials_to_set) = append_to_merkle_accumulator(internals, send_hash, block_num_u64)?;
     
     tracing::info!(
@@ -475,21 +519,63 @@ fn execute_send_tx_to_l1(
     
     // Gas cost - use a reasonable estimate based on operations performed
     // Go nitro charges based on the precompile's gas model
-    let gas_used = calculate_gas_cost(calldata_for_l1.len(), merkle_events.len());
+    // Pass current_size (before increment) to determine if a partial read happened
+    let current_size = new_size - 1;
+    let gas_used = calculate_gas_cost(calldata_for_l1.len(), merkle_events.len(), current_size);
     
     Ok(PrecompileOutput::new(gas_used, output.into()))
 }
 
-/// Get L1 block number from ArbOS state.
-fn get_l1_block_number(internals: &mut alloy_evm::EvmInternals<'_>) -> Result<u64, PrecompileError> {
+/// Get L1 block number from cache or ArbOS state.
+/// 
+/// This function first checks the l1_block_number cache (set by StartBlock internal tx),
+/// and falls back to reading from ArbOS storage if no cache exists.
+/// Using the cache ensures deterministic l1_block_number across all execution passes.
+fn get_l1_block_number(internals: &mut alloy_evm::EvmInternals<'_>, l2_block_number: u64) -> Result<u64, PrecompileError> {
+    // First, check the cache for this L2 block
+    // The cache MUST be populated by StartBlock internal tx before any ArbSys calls
+    if let Some(cached_l1_block) = get_cached_l1_block_number(l2_block_number) {
+        tracing::debug!(
+            target: "arb::l1_block_cache",
+            l2_block_number = l2_block_number,
+            cached_l1_block = cached_l1_block,
+            "Using cached l1_block_number"
+        );
+        return Ok(cached_l1_block);
+    }
+    
+    // Cache miss - this should not happen in normal operation because StartBlock
+    // should always be processed before any user transactions that call ArbSys.
+    // However, we try to fall back to reading from storage for robustness.
+    tracing::warn!(
+        target: "arb::l1_block_cache",
+        l2_block_number = l2_block_number,
+        "Cache miss for l1_block_number - falling back to storage read"
+    );
+    
+    // Fall back to reading from storage
     // Storage layout in Go nitro:
     // - ArbOS state is at ARBOS_STATE_ADDRESS
     // - blockhashes substorage is at subspace ID 6 (blockhashesSubspace = []byte{6})
     // - l1BlockNumber is at offset 0 within blockhashes substorage
     
-    // IMPORTANT: Must load the account into the journal before accessing storage
-    let _ = internals.load_account(ARBOS_STATE_ADDRESS)
-        .map_err(|e| PrecompileError::other(format!("load_account failed: {:?}", e)))?;
+    // Try to load the account into the journal before accessing storage
+    // If this fails, return an error instead of panicking
+    match internals.load_account(ARBOS_STATE_ADDRESS) {
+        Ok(_) => {}
+        Err(e) => {
+            tracing::error!(
+                target: "arb::l1_block_cache",
+                l2_block_number = l2_block_number,
+                error = ?e,
+                "Failed to load ArbOS account for l1_block_number read"
+            );
+            return Err(PrecompileError::other(format!(
+                "l1_block_number cache miss and load_account failed for block {}: {:?}",
+                l2_block_number, e
+            )));
+        }
+    }
     
     // Compute the storage slot for blockhashes.l1BlockNumber
     // This matches Go nitro's storage.OpenSubStorage and storage.NewSlot
@@ -497,11 +583,31 @@ fn get_l1_block_number(internals: &mut alloy_evm::EvmInternals<'_>) -> Result<u6
     let blockhashes_key = compute_substorage_key(&[], 6);
     let l1_block_slot = compute_storage_slot(&blockhashes_key, 0);
     
-    let result = internals.sload(ARBOS_STATE_ADDRESS, l1_block_slot)
-        .map_err(|e| PrecompileError::other(format!("sload failed: {:?}", e)))?;
-    
-    let value: u64 = result.data.try_into().unwrap_or(0);
-    Ok(value)
+    // Try to read from storage, return error if it fails
+    match internals.sload(ARBOS_STATE_ADDRESS, l1_block_slot) {
+        Ok(result) => {
+            let value: u64 = result.data.try_into().unwrap_or(0);
+            tracing::debug!(
+                target: "arb::l1_block_cache",
+                l2_block_number = l2_block_number,
+                l1_block_from_storage = value,
+                "Read l1_block_number from storage (cache miss)"
+            );
+            Ok(value)
+        }
+        Err(e) => {
+            tracing::error!(
+                target: "arb::l1_block_cache",
+                l2_block_number = l2_block_number,
+                error = ?e,
+                "Failed to sload l1_block_number from storage"
+            );
+            Err(PrecompileError::other(format!(
+                "l1_block_number cache miss and sload failed for block {}: {:?}",
+                l2_block_number, e
+            )))
+        }
+    }
 }
 
 /// Compute send hash (matches Go nitro's arbosState.KeccakHash).
@@ -568,6 +674,12 @@ fn append_to_merkle_accumulator(
     // - Substorage at subspace ID 5 (sendMerkleSubspace = []byte{5})
     // - Size at offset 0 within substorage
     // - Partials at offset 2+ within substorage
+    
+    // IMPORTANT: Must load the account into the journal before accessing storage.
+    // This is required by revm's journal semantics - sload will panic if the account
+    // isn't loaded first.
+    let _ = internals.load_account(ARBOS_STATE_ADDRESS)
+        .map_err(|e| PrecompileError::other(format!("load_account failed in merkle accumulator: {:?}", e)))?;
     
     // sendMerkleSubspace = []byte{5} in Go nitro
     let merkle_key = compute_substorage_key(&[], 5);
@@ -829,7 +941,12 @@ const COPY_GAS: u64 = 3;  // params.CopyGas
 /// 4. Keccak operations: 30 + 6 * words
 /// 5. Event emissions: LogGas + LogTopicGas * (1 + indexed_count) + LogDataGas * data_len
 /// 6. Output result copying: CopyGas * WordsForBytes(len(output))
-fn calculate_gas_cost(calldata_for_l1_len: usize, merkle_events_count: usize) -> u64 {
+/// 
+/// The `current_size` parameter is the Merkle accumulator size BEFORE the append.
+/// This is used to determine if a partial read happens:
+/// - For size 0→1: NO partial read (we exit immediately because level == calc_num_partials(0) == 0)
+/// - For size N→N+1 (N > 0): 1 partial read (we read partial[0] before deciding to exit or continue)
+fn calculate_gas_cost(calldata_for_l1_len: usize, merkle_events_count: usize, current_size: u64) -> u64 {
     // Input args copying cost (for withdrawEth: 32 bytes = 1 word)
     // Go nitro: argsCost := params.CopyGas * arbmath.WordsForBytes(uint64(len(input)-4))
     let args_words = (32 + 31) / 32;  // 1 word for the address argument
@@ -856,20 +973,33 @@ fn calculate_gas_cost(calldata_for_l1_len: usize, merkle_events_count: usize) ->
     let merkle_size_write_cost = STORAGE_WRITE_COST;
     
     // For each merkle event, there's a level that got updated
-    // Each level involves: 1 sload for partial, 1 sstore to clear it, then 1 sstore at next level
-    // Plus keccak for combining hashes
+    // Each level involves: 1 sstore to clear the partial, then keccak to combine hashes
+    // NOTE: The partial read is already counted in final_partial_read_cost below,
+    // so we only count the sstore to clear and the keccak here.
     let merkle_level_cost = if merkle_events_count > 0 {
         // Each event means we combined two hashes and wrote to a higher level
-        // sload for partial at each level, sstore to clear, keccak to combine
-        let per_level_cost = STORAGE_READ_COST + STORAGE_WRITE_ZERO_COST + (30 + 6 * 2);  // 2 words for 64 bytes
+        // sstore to clear partial, keccak to combine (partial read is counted separately)
+        let per_level_cost = STORAGE_WRITE_ZERO_COST + (30 + 6 * 2);  // 2 words for 64 bytes
         (merkle_events_count as u64) * per_level_cost
     } else {
         0
     };
     
-    // Final partial write (always happens)
+    // Final partial write (always happens) - this includes a read cost
+    // Go nitro always charges for the final partial read/write even for size 0→1
     let final_partial_read_cost = STORAGE_READ_COST;
     let final_partial_write_cost = STORAGE_WRITE_COST;
+    
+    // Additional partial read cost for size > 0
+    // For size 0→1: NO additional partial read (we exit immediately because level == calc_num_partials(0) == 0)
+    // For size N→N+1 (N > 0): 1 additional partial read (we read partial[0] before deciding to exit or continue)
+    // This is separate from final_partial_read_cost because Go nitro charges for the getPartial call
+    // in the loop, which only happens when current_size > 0.
+    let additional_partial_read_cost = if current_size > 0 {
+        STORAGE_READ_COST
+    } else {
+        0
+    };
     
     // Initial hash of item (keccak of sendHash)
     // NOTE: Go nitro uses crypto.Keccak256 directly (not acc.Keccak) for the initial hash,
@@ -915,6 +1045,7 @@ fn calculate_gas_cost(calldata_for_l1_len: usize, merkle_events_count: usize) ->
         + merkle_level_cost
         + final_partial_read_cost
         + final_partial_write_cost
+        + additional_partial_read_cost
         + initial_hash_cost
         + l2_to_l1_tx_log_cost
         + total_merkle_update_log_cost
