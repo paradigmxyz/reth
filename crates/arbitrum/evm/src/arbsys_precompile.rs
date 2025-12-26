@@ -990,13 +990,26 @@ fn calculate_gas_cost(calldata_for_l1_len: usize, merkle_events_count: usize, cu
     let final_partial_read_cost = STORAGE_READ_COST;
     let final_partial_write_cost = STORAGE_WRITE_COST;
     
-    // Additional partial read cost for size > 0
-    // For size 0→1: NO additional partial read (we exit immediately because level == calc_num_partials(0) == 0)
-    // For size N→N+1 (N > 0): 1 additional partial read (we read partial[0] before deciding to exit or continue)
-    // This is separate from final_partial_read_cost because Go nitro charges for the getPartial call
-    // in the loop, which only happens when current_size > 0.
+    // Partial read cost for getPartial calls in the Append loop.
+    // 
+    // Go nitro's Append loop calls getPartial() for each level it processes:
+    // - For size 0→1: 0 reads (exit immediately via level == CalcNumPartials(0) == 0)
+    // - For size N→N+1: reads = merkle_events_count + termination_read
+    //   where termination_read = 0 if new_size is power of 2 (exit via full carry)
+    //                          = 1 if new_size is NOT power of 2 (exit via empty partial)
+    //
+    // Examples:
+    // - size 0→1: 0 reads (current_size == 0)
+    // - size 1→2: 1 read (merkle_events_count=1, new_size=2 is power of 2, no termination read)
+    // - size 3→4: 2 reads (merkle_events_count=2, new_size=4 is power of 2, no termination read)
+    // - size 4→5: 1 read (merkle_events_count=0, new_size=5 is NOT power of 2, 1 termination read)
+    // - size 5→6: 2 reads (merkle_events_count=1, new_size=6 is NOT power of 2, 1 termination read)
     let additional_partial_read_cost = if current_size > 0 {
-        STORAGE_READ_COST
+        let new_size = current_size + 1;
+        let is_power_of_two = new_size > 0 && (new_size & (new_size - 1)) == 0;
+        let termination_read = if is_power_of_two { 0u64 } else { 1u64 };
+        let total_reads = merkle_events_count as u64 + termination_read;
+        total_reads * STORAGE_READ_COST
     } else {
         0
     };
