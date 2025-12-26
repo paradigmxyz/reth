@@ -282,7 +282,7 @@ impl<T: Table, CURSOR: DbCursorRO<T>> Iterator for RangeWalker<'_, T, CURSOR> {
             },
             Some(res @ Err(_)) => Some(res),
             None => {
-                self.is_done = matches!(self.end_key, Bound::Unbounded);
+                self.is_done = true;
                 None
             }
         }
