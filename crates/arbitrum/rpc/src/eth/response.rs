@@ -265,14 +265,24 @@ pub fn arb_tx_with_other_fields(
             let _ = out.other.insert_value("gas".to_string(), U256::from(tx1559.gas_limit));
             let _ = out.other.insert_value("maxFeePerGas".to_string(), U256::from(tx1559.max_fee_per_gas));
             let _ = out.other.insert_value("maxPriorityFeePerGas".to_string(), U256::from(tx1559.max_priority_fee_per_gas));
-            if !tx1559.access_list.0.is_empty() {
-                let _ = out.other.insert_value("accessList".to_string(), tx1559.access_list.clone());
+            let _ = out.other.insert_value("chainId".to_string(), U256::from(tx1559.chain_id));
+            let _ = out.other.insert_value("nonce".to_string(), U256::from(tx1559.nonce));
+            let _ = out.other.insert_value("value".to_string(), tx1559.value);
+            let _ = out.other.insert_value("input".to_string(), tx1559.input.clone());
+            match tx1559.to {
+                alloy_primitives::TxKind::Call(addr) => {
+                    let _ = out.other.insert_value("to".to_string(), addr);
+                }
+                alloy_primitives::TxKind::Create => {
+                    // to is null for contract creation - don't add it
+                }
+            }
+            let _ = out.other.insert_value("accessList".to_string(), tx1559.access_list.clone());
             let sig = tx.signature();
             let _ = out.other.insert_value("v".to_string(), U256::from(sig.v() as u64));
             let _ = out.other.insert_value("r".to_string(), sig.r());
             let _ = out.other.insert_value("s".to_string(), sig.s());
-
-            }
+            let _ = out.other.insert_value("yParity".to_string(), U256::from(sig.v() as u64));
         }
         ArbTypedTransaction::Eip4844(tx4844) => {
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x03]));
