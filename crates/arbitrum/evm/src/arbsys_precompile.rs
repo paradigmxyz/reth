@@ -994,29 +994,22 @@ fn calculate_gas_cost(calldata_for_l1_len: usize, merkle_events_count: usize, cu
     // 
     // Go nitro's Append loop calls getPartial() for each level it processes:
     // - For size 0→1: 0 reads (exit immediately via level == CalcNumPartials(0) == 0)
-    // - For size N→N+1 with K carries (merkle_events_count = K): K reads (one per carry level)
-    // - For size N→N+1 with 0 carries but N > 0: 1 read (getPartial(0) returns empty, exit)
+    // - For size N→N+1: reads = merkle_events_count + termination_read
+    //   where termination_read = 0 if new_size is power of 2 (exit via full carry)
+    //                          = 1 if new_size is NOT power of 2 (exit via empty partial)
     //
-    // The number of getPartial reads equals merkle_events_count when there are carries,
-    // plus 1 extra read when we exit via the "empty partial" condition (not power of 2).
-    // However, the original working model used:
-    // - final_partial_read_cost = 800 (always) for the Size() call after Append
-    // - additional_partial_read_cost = 800 if current_size > 0 (for 1 getPartial read)
-    //
-    // This model was correct for merkle_events_count <= 1, but for merkle_events_count >= 2,
-    // we need to charge for the additional getPartial reads at each carry level.
-    // 
-    // The fix: charge for (merkle_events_count - 1) additional reads when merkle_events_count > 1,
-    // because the original model already accounts for 1 read via additional_partial_read_cost.
+    // Examples:
+    // - size 0→1: 0 reads (current_size == 0)
+    // - size 1→2: 1 read (merkle_events_count=1, new_size=2 is power of 2, no termination read)
+    // - size 3→4: 2 reads (merkle_events_count=2, new_size=4 is power of 2, no termination read)
+    // - size 4→5: 1 read (merkle_events_count=0, new_size=5 is NOT power of 2, 1 termination read)
+    // - size 5→6: 2 reads (merkle_events_count=1, new_size=6 is NOT power of 2, 1 termination read)
     let additional_partial_read_cost = if current_size > 0 {
-        // Base cost: 1 read for the first getPartial call
-        // Plus: (merkle_events_count - 1) reads for additional carry levels when merkle_events_count > 1
-        let extra_carry_reads = if merkle_events_count > 1 {
-            (merkle_events_count as u64 - 1) * STORAGE_READ_COST
-        } else {
-            0
-        };
-        STORAGE_READ_COST + extra_carry_reads
+        let new_size = current_size + 1;
+        let is_power_of_two = new_size > 0 && (new_size & (new_size - 1)) == 0;
+        let termination_read = if is_power_of_two { 0u64 } else { 1u64 };
+        let total_reads = merkle_events_count as u64 + termination_read;
+        total_reads * STORAGE_READ_COST
     } else {
         0
     };
