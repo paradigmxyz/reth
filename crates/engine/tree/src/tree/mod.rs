@@ -115,10 +115,10 @@ impl<N: NodePrimitives, P> StateProviderBuilder<N, P>
 where
     P: BlockReader + StateProviderFactory + StateReader + Clone,
 {
-    /// Creates a new state provider from this builder.
-    pub fn build(&self) -> ProviderResult<StateProviderBox> {
+    /// Consumes the builder and creates a new state provider.
+    pub fn build(self) -> ProviderResult<StateProviderBox> {
         let mut provider = self.provider_factory.state_by_block_hash(self.historical)?;
-        if let Some(overlay) = self.overlay.clone() {
+        if let Some(overlay) = self.overlay {
             provider = Box::new(MemoryOverlayStateProvider::new(provider, overlay))
         }
         Ok(provider)
@@ -315,12 +315,14 @@ where
         + HashedPostStateProvider
         + TrieReader
         + Clone
+        + Send
+        + Sync
         + 'static,
     <P as DatabaseProviderFactory>::Provider:
         BlockReader<Block = N::Block, Header = N::BlockHeader>,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
-    V: EngineValidator<T>,
+    V: EngineValidator<T, Provider = P>,
 {
     /// Creates a new [`EngineApiTreeHandler`].
     #[expect(clippy::too_many_arguments)]
@@ -2474,7 +2476,7 @@ where
         &mut self,
         block_id: BlockWithParent,
         input: Input,
-        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ExecutedBlock<N>, Err>,
+        execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N, P>) -> Result<ExecutedBlock<N>, Err>,
         convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
@@ -2498,8 +2500,7 @@ where
             _ => {}
         };
 
-        // Ensure that the parent state is available.
-        match self.state_provider_builder(block_id.parent) {
+        let provider_builder = match self.state_provider_builder(block_id.parent) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
                 return Err(InsertBlockError::new(block, err.into()).into());
@@ -2523,8 +2524,18 @@ where
                     missing_ancestor,
                 }))
             }
-            Ok(Some(_)) => {}
-        }
+            Ok(Some(builder)) => builder,
+        };
+
+        // Build the state provider. The builder is cloned because it's also needed for parallel
+        // tasks.
+        let state_provider = match provider_builder.clone().build() {
+            Ok(provider) => provider,
+            Err(err) => {
+                let block = convert_to_block(self, input)?;
+                return Err(InsertBlockError::new(block, err.into()).into());
+            }
+        };
 
         // determine whether we are on a fork chain by comparing the block number with the
         // canonical head. This is a simple check that is sufficient for the event emission below.
@@ -2532,7 +2543,12 @@ where
         // as this indicates there's already a canonical block at that height.
         let is_fork = block_id.block.number <= self.state.tree_state.current_canonical_head.number;
 
-        let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
+        let ctx = TreeCtx::with_precomputed(
+            &mut self.state,
+            &self.canonical_in_memory_state,
+            state_provider,
+            provider_builder,
+        );
 
         let start = Instant::now();
 
