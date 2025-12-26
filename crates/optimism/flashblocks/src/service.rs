@@ -239,7 +239,11 @@ where
         let Some(args) =
             self.sequences.next_buildable_args(latest.hash(), latest.timestamp()).await
         else {
-            return; // Nothing buildable
+            // Nothing buildable, skipping - state mismatch between local chainstate tip and
+            // flashblock sequences cache.
+            debug!(target: "flashblocks", local_latest=?latest.num_hash(),
+                "No buildable jobs available, chainstate mismatch between flashblock cache and local chainstate tip");
+            return;
         };
 
         // Spawn build job
