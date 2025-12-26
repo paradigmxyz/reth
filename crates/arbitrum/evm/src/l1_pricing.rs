@@ -549,8 +549,9 @@ impl<D: Database> L1PricingState<D> {
             let alloc_plus_inert = inertia_units.saturating_add(U256::from(units_allocated));
 
             // Get old surplus for derivative calculation
-            let old_surplus_raw = self.get_last_surplus().unwrap_or(U256::ZERO);
-            let old_surplus_negative = self.last_surplus.is_negative().unwrap_or(false);
+            // IMPORTANT: Use get_signed() to properly decode two's complement representation
+            // The raw storage value for negative numbers is 2^256 - magnitude, not the magnitude itself
+            let (old_surplus_magnitude, old_surplus_negative) = self.last_surplus.get_signed().unwrap_or((U256::ZERO, false));
             
             // Go nitro price adjustment formula:
             // desiredDerivative := -surplus / equilUnits
@@ -585,24 +586,24 @@ impl<D: Database> L1PricingState<D> {
             // Need to compute surplus - oldSurplus with proper sign handling
             let (surplus_diff_magnitude, surplus_diff_positive) = if surplus_positive && !old_surplus_negative {
                 // Both positive: surplus - oldSurplus
-                if surplus_magnitude >= old_surplus_raw {
-                    (surplus_magnitude.saturating_sub(old_surplus_raw), true)
+                if surplus_magnitude >= old_surplus_magnitude {
+                    (surplus_magnitude.saturating_sub(old_surplus_magnitude), true)
                 } else {
-                    (old_surplus_raw.saturating_sub(surplus_magnitude), false)
+                    (old_surplus_magnitude.saturating_sub(surplus_magnitude), false)
                 }
             } else if !surplus_positive && old_surplus_negative {
                 // Both negative: -surplus_mag - (-old_surplus_mag) = old_surplus_mag - surplus_mag
-                if old_surplus_raw >= surplus_magnitude {
-                    (old_surplus_raw.saturating_sub(surplus_magnitude), true)
+                if old_surplus_magnitude >= surplus_magnitude {
+                    (old_surplus_magnitude.saturating_sub(surplus_magnitude), true)
                 } else {
-                    (surplus_magnitude.saturating_sub(old_surplus_raw), false)
+                    (surplus_magnitude.saturating_sub(old_surplus_magnitude), false)
                 }
             } else if surplus_positive && old_surplus_negative {
                 // surplus positive, oldSurplus negative: surplus - (-old) = surplus + old
-                (surplus_magnitude.saturating_add(old_surplus_raw), true)
+                (surplus_magnitude.saturating_add(old_surplus_magnitude), true)
             } else {
                 // surplus negative, oldSurplus positive: -surplus - old = -(surplus + old)
-                (surplus_magnitude.saturating_add(old_surplus_raw), false)
+                (surplus_magnitude.saturating_add(old_surplus_magnitude), false)
             };
             
             // Compute actualDerivative = (surplus - oldSurplus) / unitsAllocated using floor division

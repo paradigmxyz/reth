@@ -880,6 +880,23 @@ impl<D: Database> StorageBackedBigInt<D> {
         Ok(raw.bit(255))
     }
 
+    /// Get the signed value as (magnitude, is_negative).
+    /// This properly decodes two's complement representation.
+    /// For negative values stored as 2^256 - magnitude, this returns (magnitude, true).
+    /// For positive values, this returns (value, false).
+    pub fn get_signed(&self) -> Result<(U256, bool), ()> {
+        let raw = self.get_raw()?;
+        if raw.bit(255) {
+            // Negative: convert from two's complement
+            // magnitude = 2^256 - raw = ~raw + 1
+            let magnitude = (!raw).wrapping_add(U256::from(1));
+            Ok((magnitude, true))
+        } else {
+            // Positive: raw is the magnitude
+            Ok((raw, false))
+        }
+    }
+
     /// Set the value. For negative values, use set_negative.
     pub fn set(&self, value: U256) -> Result<(), ()> {
         unsafe {
