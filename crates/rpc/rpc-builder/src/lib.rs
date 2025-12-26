@@ -336,7 +336,7 @@ where
         RpcRegistryInner<Provider, Pool, Network, EthApi, EvmConfig, Consensus>,
     )
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + RpcNodeCore<Primitives = N>,
     {
         let config = module_config.config.clone().unwrap_or_default();
 
@@ -383,7 +383,7 @@ where
         engine_events: EventSender<ConsensusEngineEvent<N>>,
     ) -> TransportRpcModules<()>
     where
-        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool>,
+        EthApi: FullEthApiServer<Provider = Provider, Pool = Pool> + RpcNodeCore<Primitives = N>,
     {
         let mut modules = TransportRpcModules::default();
 
@@ -655,7 +655,7 @@ where
             Transaction = N::SignedTx,
         > + AccountReader
         + ChangeSetReader
-        + CanonStateSubscriptions,
+        + CanonStateSubscriptions<Primitives = N>,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: EthApiServer<
             RpcTxReq<EthApi::NetworkTypes>,
@@ -743,7 +743,10 @@ where
     /// # Panics
     ///
     /// If called outside of the tokio runtime.
-    pub fn register_reth(&mut self) -> &mut Self {
+    pub fn register_reth(&mut self) -> &mut Self
+    where
+        EthApi: FullEthApiTypes + RpcNodeCore<Primitives = N>,
+    {
         let rethapi = self.reth_api();
         self.modules.insert(RethRpcModule::Reth, rethapi.into_rpc().into());
         self
@@ -832,8 +835,11 @@ where
     }
 
     /// Instantiates `RethApi`
-    pub fn reth_api(&self) -> RethApi<Provider> {
-        RethApi::new(self.provider.clone(), self.executor.clone())
+    pub fn reth_api(&self) -> RethApi<Provider, <EthApi as RpcNodeCore>::Primitives>
+    where
+        EthApi: FullEthApiTypes,
+    {
+        RethApi::new(self.provider.clone(), self.executor.clone(), self.engine_events.clone())
     }
 }
 
@@ -847,7 +853,7 @@ where
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
-    EthApi: FullEthApiServer,
+    EthApi: FullEthApiServer + RpcNodeCore<Primitives = N>,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
     Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
 {
@@ -984,11 +990,13 @@ where
                         .into_rpc()
                         .into(),
                         RethRpcModule::Ots => OtterscanApi::new(eth_api.clone()).into_rpc().into(),
-                        RethRpcModule::Reth => {
-                            RethApi::new(self.provider.clone(), self.executor.clone())
-                                .into_rpc()
-                                .into()
-                        }
+                        RethRpcModule::Reth => RethApi::new(
+                            self.provider.clone(),
+                            self.executor.clone(),
+                            self.engine_events.clone(),
+                        )
+                        .into_rpc()
+                        .into(),
                         RethRpcModule::Miner => MinerApi::default().into_rpc().into(),
                         RethRpcModule::Mev => {
                             EthSimBundle::new(eth_api.clone(), self.blocking_pool_guard.clone())
