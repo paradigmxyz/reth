@@ -31,6 +31,7 @@ futures.workspace = true
 pin-project.workspace = true
 
 # misc
+crossbeam-channel.workspace = true
 
 [dev-dependencies]
 reth-engine-tree = { workspace = true, features = ["test-utils"] }

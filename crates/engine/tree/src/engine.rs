@@ -6,6 +6,7 @@ use crate::{
     download::{BlockDownloader, DownloadAction, DownloadOutcome},
 };
 use alloy_primitives::B256;
+use crossbeam_channel::Sender;
 use futures::{Stream, StreamExt};
 use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
@@ -15,7 +16,6 @@ use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
 use std::{
     collections::HashSet,
     fmt::Display,
-    sync::mpsc::Sender,
     task::{ready, Context, Poll},
 };
 use tokio::sync::mpsc::UnboundedReceiver;
