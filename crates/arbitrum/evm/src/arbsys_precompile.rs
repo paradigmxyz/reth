@@ -285,6 +285,9 @@ const WITHDRAW_ETH_SELECTOR: [u8; 4] = [0x25, 0xe1, 0x60, 0x63];
 /// ArbOSVersion function selector: keccak256("arbOSVersion()")[:4] = 0x051038f2
 const ARBOS_VERSION_SELECTOR: [u8; 4] = [0x05, 0x10, 0x38, 0xf2];
 
+/// ArbBlockNumber function selector: keccak256("arbBlockNumber()")[:4] = 0xa3b1b31d
+const ARB_BLOCK_NUMBER_SELECTOR: [u8; 4] = [0xa3, 0xb1, 0xb3, 0x1d];
+
 /// L2ToL1Tx event topic:keccak256("L2ToL1Tx(address,address,uint256,uint256,uint256,uint256,uint256,uint256,bytes)")
 fn l2_to_l1_tx_topic() -> B256 {
     keccak256(b"L2ToL1Tx(address,address,uint256,uint256,uint256,uint256,uint256,uint256,bytes)")
@@ -337,6 +340,9 @@ fn arbsys_precompile_handler(mut input: PrecompileInput<'_>) -> PrecompileResult
         }
         ARBOS_VERSION_SELECTOR => {
             handle_arbos_version(&mut input, exec_id)
+        }
+        ARB_BLOCK_NUMBER_SELECTOR => {
+            handle_arb_block_number(&mut input, exec_id)
         }
         _ => {
             // Unknown selector - revert
@@ -446,6 +452,33 @@ fn handle_arbos_version(input: &mut PrecompileInput<'_>, exec_id: u64) -> Precom
     const SLOAD_GAS_EIP2200: u64 = 800;
     const COPY_GAS: u64 = 3; // params.CopyGas in Go
     let gas_cost = SLOAD_GAS_EIP2200 + COPY_GAS;
+    
+    Ok(PrecompileOutput::new(gas_cost, output.to_vec().into()))
+}
+
+/// Handle ArbBlockNumber call.
+/// Returns the current L2 block number as a uint256.
+/// Go nitro implementation: return evm.Context.BlockNumber, nil
+fn handle_arb_block_number(input: &mut PrecompileInput<'_>, exec_id: u64) -> PrecompileResult {
+    let internals = input.internals_mut();
+    
+    // Get the current block number from the EVM context
+    let block_number = internals.block_number();
+    
+    tracing::info!(
+        target: "arb::arbsys_precompile",
+        exec_id = exec_id,
+        block_number = ?block_number,
+        "ArbBlockNumber called"
+    );
+    
+    // Return block number as uint256 (32 bytes, big-endian)
+    let output: [u8; 32] = block_number.to_be_bytes();
+    
+    // Gas cost: just the base precompile cost (3 for CopyGas)
+    // Go nitro doesn't charge any storage reads for this function
+    const COPY_GAS: u64 = 3;
+    let gas_cost = COPY_GAS;
     
     Ok(PrecompileOutput::new(gas_cost, output.to_vec().into()))
 }
