@@ -990,13 +990,33 @@ fn calculate_gas_cost(calldata_for_l1_len: usize, merkle_events_count: usize, cu
     let final_partial_read_cost = STORAGE_READ_COST;
     let final_partial_write_cost = STORAGE_WRITE_COST;
     
-    // Additional partial read cost for size > 0
-    // For size 0→1: NO additional partial read (we exit immediately because level == calc_num_partials(0) == 0)
-    // For size N→N+1 (N > 0): 1 additional partial read (we read partial[0] before deciding to exit or continue)
-    // This is separate from final_partial_read_cost because Go nitro charges for the getPartial call
-    // in the loop, which only happens when current_size > 0.
+    // Partial read cost for getPartial calls in the Append loop.
+    // 
+    // Go nitro's Append loop calls getPartial() for each level it processes:
+    // - For size 0→1: 0 reads (exit immediately via level == CalcNumPartials(0) == 0)
+    // - For size N→N+1 with K carries (merkle_events_count = K): K reads (one per carry level)
+    // - For size N→N+1 with 0 carries but N > 0: 1 read (getPartial(0) returns empty, exit)
+    //
+    // The number of getPartial reads equals merkle_events_count when there are carries,
+    // plus 1 extra read when we exit via the "empty partial" condition (not power of 2).
+    // However, the original working model used:
+    // - final_partial_read_cost = 800 (always) for the Size() call after Append
+    // - additional_partial_read_cost = 800 if current_size > 0 (for 1 getPartial read)
+    //
+    // This model was correct for merkle_events_count <= 1, but for merkle_events_count >= 2,
+    // we need to charge for the additional getPartial reads at each carry level.
+    // 
+    // The fix: charge for (merkle_events_count - 1) additional reads when merkle_events_count > 1,
+    // because the original model already accounts for 1 read via additional_partial_read_cost.
     let additional_partial_read_cost = if current_size > 0 {
-        STORAGE_READ_COST
+        // Base cost: 1 read for the first getPartial call
+        // Plus: (merkle_events_count - 1) reads for additional carry levels when merkle_events_count > 1
+        let extra_carry_reads = if merkle_events_count > 1 {
+            (merkle_events_count as u64 - 1) * STORAGE_READ_COST
+        } else {
+            0
+        };
+        STORAGE_READ_COST + extra_carry_reads
     } else {
         0
     };
