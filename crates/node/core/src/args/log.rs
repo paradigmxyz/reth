@@ -62,7 +62,7 @@ pub struct LogArgs {
     pub journald_filter: String,
 
     /// Emit traces to samply. Only useful when profiling.
-    #[arg(long = "log.samply", global = true)]
+    #[arg(long = "log.samply", global = true, hide = true)]
     pub samply: bool,
 
     /// The filter to use for traces emitted to samply.
@@ -70,7 +70,8 @@ pub struct LogArgs {
         long = "log.samply.filter",
         value_name = "FILTER",
         global = true,
-        default_value = "debug"
+        default_value = "debug",
+        hide = true
     )]
     pub samply_filter: String,
 
