@@ -4,6 +4,15 @@ use alloy_primitives::{keccak256, B256};
 use revm::Database;
 use crate::storage::{Storage, StorageBackedUint64};
 
+/// Event emitted when a Merkle tree node is updated during append.
+/// Matches Go nitro's MerkleTreeNodeEvent in merkleAccumulator.go
+#[derive(Debug, Clone)]
+pub struct MerkleTreeNodeEvent {
+    pub level: u64,
+    pub num_leaves: u64,
+    pub hash: B256,
+}
+
 pub struct MerkleAccumulator<D> {
     backing_storage: Storage<D>,
     size: StorageBackedUint64<D>,
@@ -38,23 +47,30 @@ impl<D: Database> MerkleAccumulator<D> {
     }
 
     pub fn append(&self, item_hash: B256) -> Result<(), ()> {
+        self.append_with_events(item_hash).map(|_| ())
+    }
+
+    /// Append an item to the Merkle accumulator and return the events.
+    /// Matches Go nitro's MerkleAccumulator.Append in merkleAccumulator.go
+    pub fn append_with_events(&self, item_hash: B256) -> Result<Vec<MerkleTreeNodeEvent>, ()> {
         let current_size = self.size.get()?;
         let new_size = current_size + 1;
         self.size.set(new_size)?;
 
+        let mut events = Vec::new();
         let mut level = 0u64;
         let mut so_far = keccak256(item_hash.as_slice());
 
         loop {
             if level == Self::calc_num_partials(current_size) {
                 self.set_partial(level, so_far)?;
-                return Ok(());
+                return Ok(events);
             }
 
             let this_level = self.get_partial(level)?;
             if this_level == B256::ZERO {
                 self.set_partial(level, so_far)?;
-                return Ok(());
+                return Ok(events);
             }
 
             let mut combined = Vec::with_capacity(64);
@@ -65,6 +81,13 @@ impl<D: Database> MerkleAccumulator<D> {
             self.set_partial(level, B256::ZERO)?;
             
             level += 1;
+            // Event is emitted AFTER incrementing level, with the new hash
+            // Go nitro: events = append(events, MerkleTreeNodeEvent{level, size - 1, common.BytesToHash(soFar)})
+            events.push(MerkleTreeNodeEvent {
+                level,
+                num_leaves: new_size - 1,
+                hash: so_far,
+            });
         }
     }
 

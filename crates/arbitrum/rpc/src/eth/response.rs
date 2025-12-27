@@ -210,6 +210,11 @@ pub fn arb_tx_with_other_fields(
         }
         ArbTypedTransaction::SubmitRetryable(s) => {
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x69]));
+            // SubmitRetryable tx is sent to ArbRetryableTx precompile (0x6e)
+            let arb_retryable_tx_addr = address!("000000000000000000000000000000000000006e");
+            let _ = out.other.insert_value("to".to_string(), arb_retryable_tx_addr);
+            // Include the ABI-encoded input data for the retryable submission
+            let _ = out.other.insert_value("input".to_string(), tx.input().clone());
             let _ = out.other.insert_value("gas".to_string(), U256::from(s.gas));
             let _ = out.other.insert_value("gasPrice".to_string(), s.gas_fee_cap);
             let _ = out.other.insert_value("maxFeePerGas".to_string(), s.gas_fee_cap);
@@ -227,6 +232,13 @@ pub fn arb_tx_with_other_fields(
         }
         ArbTypedTransaction::Retry(r) => {
             let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x68]));
+            // Include standard tx fields
+            if let Some(to) = r.to {
+                let _ = out.other.insert_value("to".to_string(), to);
+            }
+            let _ = out.other.insert_value("input".to_string(), tx.input().clone());
+            let _ = out.other.insert_value("value".to_string(), r.value);
+            let _ = out.other.insert_value("nonce".to_string(), U256::from(r.nonce));
             let _ = out.other.insert_value("gas".to_string(), U256::from(r.gas));
             let _ = out.other.insert_value("gasPrice".to_string(), r.gas_fee_cap);
             let _ = out.other.insert_value("maxFeePerGas".to_string(), r.gas_fee_cap);
@@ -311,6 +323,15 @@ pub fn arb_tx_with_other_fields(
             let _ = out.other.insert_value("s".to_string(), sig.s());
 
             }
+        }
+        ArbTypedTransaction::Deposit(dep) => {
+            let _ = out.other.insert_value("type".to_string(), alloy_primitives::hex::encode_prefixed([0x64]));
+            let _ = out.other.insert_value("gas".to_string(), U256::ZERO);
+            let _ = out.other.insert_value("gasPrice".to_string(), U256::ZERO);
+            let _ = out.other.insert_value("value".to_string(), dep.value);
+            let _ = out.other.insert_value("to".to_string(), dep.to);
+            let _ = out.other.insert_value("from".to_string(), dep.from);
+            let _ = out.other.insert_value("input".to_string(), Bytes::default());
         }
         _ => {}
     }

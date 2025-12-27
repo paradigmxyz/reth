@@ -136,6 +136,19 @@ where
 
     let alloc = &genesis.alloc;
 
+    // DEBUG: Log all addresses in genesis.alloc
+    eprintln!("DEBUG init_genesis: genesis.alloc has {} entries", alloc.len());
+    for (addr, acct) in alloc.iter() {
+        let addr_str = format!("{:?}", addr);
+        if addr_str.contains("A4B05") || addr_str.contains("a4b05") {
+            eprintln!("DEBUG init_genesis: FOUND ArbOS in alloc! addr={} nonce={:?}", addr, acct.nonce);
+        }
+    }
+    // Also log first few entries
+    for (i, (addr, acct)) in alloc.iter().take(5).enumerate() {
+        eprintln!("DEBUG init_genesis: alloc[{}] = {} nonce={:?}", i, addr, acct.nonce);
+    }
+
     // use transaction to insert genesis header
     let provider_rw = factory.database_provider_rw()?;
     insert_genesis_hashes(&provider_rw, alloc.iter())?;
@@ -202,6 +215,13 @@ where
         HashMap::with_capacity_and_hasher(capacity, Default::default());
 
     for (address, account) in alloc {
+        // DEBUG: Log the nonce being set for each account
+        if format!("{:?}", address).contains("A4B05") || format!("{:?}", address).contains("a4b05") {
+            eprintln!(
+                "DEBUG insert_state: ArbOS addr={} nonce={:?} balance={}",
+                address, account.nonce, account.balance
+            );
+        }
         let bytecode_hash = if let Some(code) = &account.code {
             match Bytecode::new_raw_checked(code.clone()) {
                 Ok(bytecode) => {
@@ -237,12 +257,20 @@ where
             (Some(None), storage.keys().map(|k| StorageEntry::new(*k, U256::ZERO)).collect()),
         );
 
+        let final_nonce = account.nonce.unwrap_or_default();
+        // DEBUG: Log the final nonce being used
+        if format!("{:?}", address).contains("A4B05") || format!("{:?}", address).contains("a4b05") {
+            eprintln!(
+                "DEBUG insert_state: ArbOS state_init nonce={} (from {:?})",
+                final_nonce, account.nonce
+            );
+        }
         state_init.insert(
             *address,
             (
                 None,
                 Some(Account {
-                    nonce: account.nonce.unwrap_or_default(),
+                    nonce: final_nonce,
                     balance: account.balance,
                     bytecode_hash,
                 }),

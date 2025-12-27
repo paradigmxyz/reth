@@ -657,7 +657,15 @@ pub fn build_full_arbos_storage(
 
     storage.insert(map_slot(&l1_space, be_u64(L1_PER_BATCH_GAS_COST_OFFSET)), be_u64(100_000));
 
-    let _retryables = subspace(&root_key, RETRYABLES_SUBSPACE);
+    // Initialize retryables subspace with TimeoutQueue
+    // Go nitro's InitializeQueue sets both nextPutOffset and nextGetOffset to 2
+    let retryables_space = subspace(&root_key, RETRYABLES_SUBSPACE);
+    let timeout_queue_space = subspace_bytes(&retryables_space, &[0u8]); // TimeoutQueue key is [0]
+    // TimeoutQueue slot 0 = nextPutOffset = 2
+    storage.insert(map_slot(&timeout_queue_space, be_u64(0)), be_u64(2));
+    // TimeoutQueue slot 1 = nextGetOffset = 2
+    storage.insert(map_slot(&timeout_queue_space, be_u64(1)), be_u64(2));
+
     let _addr_table = subspace(&root_key, ADDRESS_TABLE_SUBSPACE);
     let _send_merkle = subspace(&root_key, SEND_MERKLE_SUBSPACE);
     let _blockhashes = subspace(&root_key, BLOCKHASHES_SUBSPACE);
@@ -719,14 +727,6 @@ pub fn sepolia_baked_genesis_from_header(
     genesis.number = Some(0);
 
     let mut alloc = BTreeMap::new();
-    #[cfg(feature = "std")]
-    {
-        if let Ok(embedded) = crate::embedded_alloc::load_sepolia_secure_alloc_accounts() {
-            if !embedded.is_empty() {
-                alloc = embedded;
-            }
-        }
-    }
 
     let chain_cfg_bytes = chain_config_bytes.map(|b| alloy_primitives::Bytes::from(b.to_vec()));
 
@@ -734,42 +734,57 @@ pub fn sepolia_baked_genesis_from_header(
         .map(|h| parse_hex_quantity(h))
         .unwrap_or_else(|| U256::from(50_000_000_000u64));
 
-    if alloc.is_empty() {
-        let arbos_storage = build_full_arbos_storage(chain_id, chain_cfg_bytes, initial_l1_price);
-        if !arbos_storage.is_empty() {
-            let acct = GenesisAccount::default()
-                .with_nonce(Some(1))
-                .with_balance(U256::ZERO)
-                .with_code(Some(Bytes::default()))
-                .with_storage(Some(arbos_storage));
-            alloc.insert(ARBOS_ADDR, acct);
-        }
+    // IMPORTANT: For Arbitrum Sepolia, the official genesis at block 0 has EMPTY storage
+    // for all accounts. The ArbOS storage is populated during block execution, not at genesis.
+    // We do NOT include any storage in the genesis alloc - only accounts with code (precompiles).
+    //
+    // The state root is computed from the hashed state (secureAlloc) which contains accounts
+    // with code but NO storage at genesis block 0.
+    let _ = chain_cfg_bytes; // Suppress unused variable warning
+    let _ = initial_l1_price; // Suppress unused variable warning
+    
+    // NOTE: We intentionally do NOT add any accounts to the genesis alloc here.
+    // The genesis state is loaded from the embedded secureAlloc data which contains
+    // the correct accounts with code but NO storage.
+    // Adding accounts here would cause duplicate entries and incorrect state root.
 
-        for &b in &[0x64u8, 0x65, 0x66, 0x67, 0x68, 0x69, 0x6b, 0x6c, 0x6d, 0x6e, 0x6f, 0x70, 0xff] {
-            let mut a = [0u8; 20];
-            a[19] = b;
-            let addr = Address::from_slice(&a);
-            let acct = GenesisAccount::default()
-                .with_nonce(Some(0))
-                .with_balance(U256::ZERO)
-                .with_code(Some(Bytes::from_static(&[0xfe])));
-            alloc.insert(addr, acct);
-        }
-        for &b in &[0x71u8, 0x72, 0x73, 0xc8, 0xc9] {
-            let mut a = [0u8; 20];
-            a[19] = b;
-            let addr = Address::from_slice(&a);
-            let acct = GenesisAccount::default()
-                .with_nonce(Some(0))
-                .with_balance(U256::ZERO)
-                .with_code(Some(Bytes::default()));
-            alloc.insert(addr, acct);
-        }
-    }
-
+    // Genesis alloc is intentionally empty - state comes from secureAlloc
     genesis.alloc = alloc;
 
     let mut spec = reth_chainspec::ChainSpec::from_genesis(genesis.clone());
+
+    // ITERATION 109: Arbitrum is post-merge from genesis, so Paris must be active at block 0
+    // This is critical to prevent block rewards from being given to the coinbase/beneficiary!
+    // Without Paris being active, alloy-evm gives 5 ETH block rewards.
+    {
+        use reth_chainspec::{EthereumHardfork, ForkCondition, ChainHardforks, Hardfork};
+        use alloc::vec;
+
+        let hardforks = ChainHardforks::new(vec![
+            (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+            (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+            (
+                EthereumHardfork::Paris.boxed(),
+                ForkCondition::TTD {
+                    activation_block_number: 0,
+                    fork_block: None,
+                    total_difficulty: U256::ZERO,
+                },
+            ),
+            (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(0)),
+            (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(0)),
+        ]);
+        spec.hardforks = hardforks;
+        spec.paris_block_and_final_difficulty = Some((0, U256::from(1)));
+    }
 
     let mut header = alloy_consensus::Header::default();
     header.number = 0u64.into();
@@ -801,12 +816,32 @@ pub struct ArbChainSpec {
     pub chain_id: u64,
 }
 
+/// Arbitrum Sepolia hardfork timestamps from alloy-hardforks
+const ARBITRUM_SEPOLIA_SHANGHAI_TIMESTAMP: u64 = 1_706_634_000;
+const ARBITRUM_SEPOLIA_CANCUN_TIMESTAMP: u64 = 1_709_229_600;
+const ARBITRUM_SEPOLIA_PRAGUE_TIMESTAMP: u64 = 1_746_543_285;
+
+/// Returns the correct SpecId for a given timestamp on Arbitrum Sepolia.
+/// This is critical for EVM execution to use the correct gas rules (e.g., EIP-3860 initcode gas).
+fn arbitrum_sepolia_spec_id_by_timestamp(timestamp: u64) -> SpecId {
+    if timestamp >= ARBITRUM_SEPOLIA_PRAGUE_TIMESTAMP {
+        SpecId::PRAGUE
+    } else if timestamp >= ARBITRUM_SEPOLIA_CANCUN_TIMESTAMP {
+        SpecId::CANCUN
+    } else if timestamp >= ARBITRUM_SEPOLIA_SHANGHAI_TIMESTAMP {
+        SpecId::SHANGHAI
+    } else {
+        // Pre-Shanghai: use Paris (post-merge but pre-Shanghai)
+        SpecId::MERGE
+    }
+}
+
 impl ArbitrumChainSpec for ArbChainSpec {
     fn chain_id(&self) -> u64 {
         self.chain_id
     }
-    fn spec_id_by_timestamp(&self, _timestamp: u64) -> SpecId {
-        SpecId::CANCUN
+    fn spec_id_by_timestamp(&self, timestamp: u64) -> SpecId {
+        arbitrum_sepolia_spec_id_by_timestamp(timestamp)
     }
 }
 
@@ -814,14 +849,75 @@ impl ArbitrumChainSpec for reth_chainspec::ChainSpec {
     fn chain_id(&self) -> u64 {
         self.chain().id()
     }
-    fn spec_id_by_timestamp(&self, _timestamp: u64) -> SpecId {
-        SpecId::CANCUN
+    fn spec_id_by_timestamp(&self, timestamp: u64) -> SpecId {
+        arbitrum_sepolia_spec_id_by_timestamp(timestamp)
     }
 }
 
 pub fn arbitrum_sepolia_spec() -> reth_chainspec::ChainSpec {
-    let mut spec = reth_chainspec::ChainSpec::default();
-    spec.chain = Chain::from(421_614u64);
+    use reth_chainspec::{EthereumHardfork, ForkCondition, ChainHardforks, Hardfork};
+    use alloc::vec;
+
+    // ITERATION 104: Arbitrum is post-merge from genesis, so Paris must be active at block 0
+    // This is critical to prevent block rewards from being given to the coinbase/beneficiary!
+    // Without Paris being active, alloy-evm gives 5 ETH block rewards.
+    let hardforks = ChainHardforks::new(vec![
+        (EthereumHardfork::Frontier.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Homestead.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Tangerine.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::SpuriousDragon.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Byzantium.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Constantinople.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Petersburg.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Istanbul.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::Berlin.boxed(), ForkCondition::Block(0)),
+        (EthereumHardfork::London.boxed(), ForkCondition::Block(0)),
+        (
+            EthereumHardfork::Paris.boxed(),
+            ForkCondition::TTD {
+                activation_block_number: 0,
+                fork_block: None,
+                total_difficulty: U256::ZERO,
+            },
+        ),
+        // Use correct Arbitrum Sepolia hardfork timestamps from alloy-hardforks
+        // Shanghai: 1706634000 (Jan 30, 2024)
+        // Cancun: 1709229600 (Feb 29, 2024)
+        // Prague: 1746543285 (May 6, 2025)
+        (EthereumHardfork::Shanghai.boxed(), ForkCondition::Timestamp(1_706_634_000)),
+        (EthereumHardfork::Cancun.boxed(), ForkCondition::Timestamp(1_709_229_600)),
+        (EthereumHardfork::Prague.boxed(), ForkCondition::Timestamp(1_746_543_285)),
+    ]);
+
+    // Build spec from the baked genesis with proper allocations
+    // Parameters from Arbitrum Sepolia mainnet genesis block (block 0):
+    // - chain_id: 421614
+    // - base_fee: 0x5f5e100 (100_000_000 = 0.1 gwei)
+    // - timestamp: 0x0
+    // - state_root: 0x8647a2ae10b316ca12fbd76327fe4d64d12cb0ec664a128b0d59df15d05391be
+    // - gas_limit: 0x4000000000000 (1,125,899,906,842,624 - Arbitrum's very high gas limit)
+    // - extra_data: 32 bytes of zeros
+    // - mix_hash: 0x00000000000000000000000000000000000000000000000a0000000000000000
+    // - nonce: 0x1 (Arbitrum uses non-zero nonce)
+    // - initial_l1_base_fee: 0xb2d05e00 (3 gwei)
+    //
+    // Expected genesis hash: 0x77194da4010e549a7028a9c3c51c3e277823be6ac7d138d0bb8a70197b5c004c
+    let mut spec = sepolia_baked_genesis_from_header(
+        421_614,
+        "0x5f5e100",  // base_fee (100 gwei)
+        "0x0",        // timestamp
+        "0x8647a2ae10b316ca12fbd76327fe4d64d12cb0ec664a128b0d59df15d05391be",  // state_root
+        "0x4000000000000",  // gas_limit - Arbitrum's high limit
+        "0x0000000000000000000000000000000000000000000000000000000000000000",  // extra_data - 32 bytes zeros
+        "0x00000000000000000000000000000000000000000000000a0000000000000000",  // mix_hash - Arbitrum-specific
+        "0x1",        // nonce - Arbitrum uses 1 for genesis
+        None,         // chain_config_bytes
+        Some("0xb2d05e00"),  // initial_l1_base_fee
+    ).expect("failed to build arbitrum sepolia chainspec");
+
+    // Override hardforks to ensure Paris is active (post-merge = no block rewards)
+    spec.paris_block_and_final_difficulty = Some((0, U256::from(1)));
+    spec.hardforks = hardforks;
     spec
 }
 
@@ -893,5 +989,59 @@ mod tests {
         assert_eq!(header.mix_hash, mix_bytes);
         let expected_nonce = alloy_primitives::B64::from(parse_hex_quantity(nonce_hex).to::<u64>().to_be_bytes());
         assert_eq!(header.nonce, expected_nonce);
+    }
+
+    #[test]
+    fn check_arbos_address_in_alloc() {
+        let (accounts_h, _) = embedded_alloc::load_sepolia_secure_alloc_hashed().expect("load");
+
+        // ArbosAddress = 0xa4b05
+        let arbos_addr = alloy_primitives::address!("00000000000000000000000000000000000a4b05");
+        let hashed = keccak256(arbos_addr);
+
+        eprintln!("ArbosAddress: {:?}", arbos_addr);
+        eprintln!("Hashed: {:?}", hashed);
+        eprintln!("Total accounts in alloc: {}", accounts_h.len());
+
+        if let Some(acct) = accounts_h.get(&hashed) {
+            eprintln!("Found ArbosAddress in alloc: nonce={}, code_hash={:?}", acct.nonce, acct.bytecode_hash);
+            // Check if it has the 0xfe code (keccak256(0xfe) = a specific hash)
+            let fe_code_hash = keccak256(&[0xfe]);
+            eprintln!("Expected code hash for 0xfe: {:?}", fe_code_hash);
+            assert_eq!(acct.bytecode_hash, Some(fe_code_hash), "ArbosAddress should have 0xfe code");
+        } else {
+            eprintln!("ArbosAddress NOT found in alloc!");
+            eprintln!("Listing all hashed addresses:");
+            for (h, a) in accounts_h.iter() {
+                eprintln!("  {:?}: nonce={} code_hash={:?}", h, a.nonce, a.bytecode_hash);
+            }
+            panic!("ArbosAddress (0xa4b05) not found in embedded alloc");
+        }
+    }
+
+    #[test]
+    fn check_arbos_storage_backing_in_alloc() {
+        let (accounts_h, _) = embedded_alloc::load_sepolia_secure_alloc_hashed().expect("load");
+
+        // ArbOS storage backing = 0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
+        let arbos_storage_addr = alloy_primitives::address!("A4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
+        let hashed = keccak256(arbos_storage_addr);
+
+        eprintln!("ArbOS Storage Backing: {:?}", arbos_storage_addr);
+        eprintln!("Hashed: {:?}", hashed);
+        eprintln!("Total accounts in alloc: {}", accounts_h.len());
+
+        eprintln!("\nAll accounts in alloc:");
+        for (h, a) in accounts_h.iter() {
+            eprintln!("  {:?}: nonce={} balance={} code_hash={:?}", h, a.nonce, a.balance, a.bytecode_hash);
+        }
+
+        if let Some(acct) = accounts_h.get(&hashed) {
+            eprintln!("\nFound ArbOS Storage Backing in alloc: nonce={}, balance={}", acct.nonce, acct.balance);
+            assert_eq!(acct.nonce, 1, "ArbOS storage backing should have nonce=1");
+        } else {
+            eprintln!("\nArbOS Storage Backing NOT found in alloc!");
+            panic!("ArbOS Storage Backing (0xA4B05FFF...) not found in embedded alloc");
+        }
     }
 }

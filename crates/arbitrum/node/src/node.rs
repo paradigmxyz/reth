@@ -260,9 +260,13 @@ where
         let l2_owned: Vec<u8> = l2msg_bytes.to_vec();
 
         let state_provider = provider.state_by_block_hash(parent_hash)?;
+        // CRITICAL FOR DETERMINISM: Must use .without_state_clear() to match validation!
+        // The validation code in payload_validator.rs uses this flag, so assembly must too.
+        // Otherwise empty accounts are handled differently, causing state root mismatch.
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
+            .without_state_clear()
             .build();
 
         let mut attrs2 = attrs.clone();
@@ -345,6 +349,13 @@ where
         }
 
         let next_block_number = sealed_parent.number() + 1;
+        reth_tracing::tracing::warn!(
+            target: "arb-reth::BLOCK_ASSEMBLY",
+            "🔍 BLOCK_START: Creating block {} from message kind {}, delayed_messages_read {}",
+            next_block_number,
+            kind,
+            delayed_messages_read
+        );
         reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: keeping suggested_fee_recipient from attrs");
 
         let mut builder = evm_config
@@ -517,24 +528,54 @@ where
                     }
                 }
                 0x04 => {
-                    let mut s = cur;
-                    while !s.is_empty() {
-                        let before_len = s.len();
-                        let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                            .map_err(|_| eyre::eyre!("decode_2718 failed for SignedTx"))?;
-                        reth_tracing::tracing::info!(
-                            target: "arb-reth::decode",
-                            tx_type = ?tx.tx_type(),
-                            tx_hash = %tx.tx_hash(),
-                            remaining = s.len(),
-                            "decoded 0x04 segment tx"
-                        );
+                    // ⚠️ CRITICAL FIX ENTRY POINT - SignedTx parsing (commit 81ba70691)
+                    reth_tracing::tracing::warn!(
+                        target: "arb-reth::FIX-VERIFICATION",
+                        "🔍 SIGNEDTX_FIX_CALLED: Processing 0x04 SignedTx message - SINGLE transaction (not loop)"
+                    );
 
-                        out.push(tx);
-                        if s.len() == before_len {
-                            break;
-                        }
-                    }
+                    // SignedTx message contains a SINGLE transaction (not multiple like Batch)
+                    // The Go implementation reads all remaining bytes and unmarshals as one transaction
+                    // See: nitro/arbos/parse_l2.go:159-174
+
+                    // SignedTx messages can contain either:
+                    // 1. Legacy RLP transactions (first byte >= 0xc0) - no type byte
+                    // 2. Typed transactions (first byte 0x00-0x7f) - has type byte
+                    let first_byte = if cur.len() >= 1 { cur[0] } else { 0xff };
+                    let is_legacy_rlp = first_byte >= 0xc0;
+
+                    reth_tracing::tracing::warn!(
+                        target: "arb-reth::FIX-VERIFICATION",
+                        first_byte = format!("0x{:02x}", first_byte),
+                        is_legacy = is_legacy_rlp,
+                        data_len = cur.len(),
+                        "🔍 SIGNEDTX_FIX: Parsing SINGLE transaction (NO LOOP) - this is the fix"
+                    );
+
+                    let mut s = cur;
+                    let tx = if is_legacy_rlp {
+                        // Legacy RLP transaction - decode directly without type byte
+                        use alloy_rlp::Decodable;
+                        reth_arbitrum_primitives::ArbTransactionSigned::decode(&mut s)
+                            .map_err(|e| eyre::eyre!("Failed to decode Legacy RLP transaction: {}", e))?
+                    } else {
+                        // Typed transaction (EIP-2718) - use decode_2718
+                        use alloy_eips::eip2718::Decodable2718;
+                        reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                            .map_err(|e| eyre::eyre!("Failed to decode typed transaction: {:?}", e))?
+                    };
+
+                    reth_tracing::tracing::warn!(
+                        target: "arb-reth::FIX-VERIFICATION",
+                        tx_type = ?tx.tx_type(),
+                        tx_hash = %tx.tx_hash(),
+                        consumed = cur.len() - s.len(),
+                        remaining = s.len(),
+                        "🔍 SIGNEDTX_FIX: Successfully parsed 1 transaction (NOT multiple) - fix applied"
+                    );
+
+                    // SignedTx contains exactly ONE transaction - push it to output
+                    out.push(tx);
                 }
                 _ => {}
             }
@@ -606,7 +647,9 @@ where
             batch_data_gas: u64,
             l1_base_fee: alloy_primitives::U256,
         ) -> alloy_primitives::Bytes {
-            const SELECTOR: [u8; 4] = [0x0a, 0xdc, 0x77, 0x7d];
+            // Selector for batchPostingReport(uint256,address,uint64,uint64,uint256)
+            // keccak256("batchPostingReport(uint256,address,uint64,uint64,uint256)")[:4] = 0xb6693771
+            const SELECTOR: [u8; 4] = [0xb6, 0x69, 0x37, 0x71];
             let mut out = Vec::with_capacity(4 + 32 * 5);
             out.extend_from_slice(&SELECTOR);
             out.extend_from_slice(&abi_encode_u256(&batch_timestamp));
@@ -616,24 +659,61 @@ where
             out.extend_from_slice(&abi_encode_u256(&l1_base_fee));
             alloy_primitives::Bytes::from(out)
         }
-        reth_tracing::tracing::info!(target: "arb-reth::follower", %kind, "follower: deriving txs for message kind");
+        // 🔍 MESSAGE TYPE TRACKING - Show which message types are actually used
+        let kind_name = match kind {
+            3 => "L2Message/Batch",
+            4 => "SignedTx",
+            6 => "Heartbeat",
+            7 => "L2FundedByL1",
+            8 => "Reserved",
+            9 => "SubmitRetryable",
+            13 => "BatchPostingReport",
+            _ => "Unknown",
+        };
+        reth_tracing::tracing::warn!(
+            target: "arb-reth::MESSAGE-TYPE-TRACKING",
+            kind = %kind,
+            kind_name = %kind_name,
+            data_len = l2_owned.len(),
+            "🔍 PROCESSING_MESSAGE_KIND: {} (0x{:02x}) with {} bytes",
+            kind_name, kind, l2_owned.len()
+        );
+
         let chain_id_u256 =
             alloy_primitives::U256::from(evm_config.chain_spec().chain().id());
-        
+
         reth_tracing::tracing::info!(
             target: "arb-reth::follower",
             "Before match: l2_owned len={}, l2_owned first bytes={:02x?}",
             l2_owned.len(),
             &l2_owned[..std::cmp::min(32, l2_owned.len())]
         );
-        
+
         let mut txs: Vec<reth_arbitrum_primitives::ArbTransactionSigned> = match kind {
             3 => {
                 let first = l2_owned.first().copied().unwrap_or(0xff);
                 let len = l2_owned.len();
                 reth_tracing::tracing::info!(target: "arb-reth::follower", l2_payload_len = len, l2_first_byte = first, "follower: L2_MESSAGE payload summary");
-                parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id)
-                    .map_err(|e| eyre::eyre!("parse_l2_message_to_txs error: {e}"))?
+                // Match Go behavior: if parsing fails, log warning and produce empty tx list
+                // See: nitro/arbos/block_processor.go:192-195
+                let parsed_txs = match parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id) {
+                    Ok(txs) => txs,
+                    Err(e) => {
+                        reth_tracing::tracing::warn!(
+                            target: "arb-reth::follower",
+                            error = %e,
+                            "error parsing incoming message - producing empty tx list (matching Go behavior)"
+                        );
+                        Vec::new()
+                    }
+                };
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    tx_count = parsed_txs.len(),
+                    "L2_MESSAGE_PARSED: Derived {} transactions from L1 message",
+                    parsed_txs.len()
+                );
+                parsed_txs
             },
             6 => Vec::new(),
             7 => {
@@ -745,10 +825,22 @@ where
                     .map_err(|_| eyre::eyre!("decode submit-retryable failed"))?;
                 let ticket_id = *submit_tx.tx_hash();
 
+                // Calculate the actual submission fee using the same formula as Go nitro:
+                // submissionFee = (1400 + 6 * len(retryData)) * l1BaseFee
+                // This must match RetryableSubmissionFee in arbos/retryables/retryable.go
+                let l1_base_fee_u128: u128 = l1_base_fee.try_into().unwrap_or(0);
+                let submission_fee = arb_alloy_util::retryables::retryable_submission_fee(
+                    retry_data.len(),
+                    l1_base_fee_u128,
+                );
+                let submission_fee_u256 = alloy_primitives::U256::from(submission_fee);
+
                 let retry_gas_price = block_base_fee.unwrap_or(alloy_primitives::U256::ZERO);
+                // max_refund = (baseFee * gas) + submissionFee
+                // This matches Go nitro's MakeTx which receives availableRefund as maxRefund
                 let max_refund = retry_gas_price
                     .saturating_mul(alloy_primitives::U256::from(gas))
-                    .saturating_add(max_submission_fee);
+                    .saturating_add(submission_fee_u256);
 
                 let retry_env = arb_alloy_consensus::tx::ArbTxEnvelope::Retry(
                     arb_alloy_consensus::tx::ArbRetryTx {
@@ -763,7 +855,9 @@ where
                         ticket_id,
                         refund_to: fee_refund_addr,
                         max_refund,
-                        submission_fee_refund: max_submission_fee,
+                        // Despite the field name, this is the actual submission fee (not a refund)
+                        // Go nitro passes submissionFee to MakeTx's submissionFeeRefund parameter
+                        submission_fee_refund: submission_fee_u256,
                     },
                 );
                 
@@ -803,9 +897,27 @@ where
                 Vec::new()
             }
             12 => {
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::ETHDEPOSIT-DEBUG",
+                    data_len = l2_owned.len(),
+                    "🔍 ETHDEPOSIT: Parsing message, data_len={} bytes",
+                    l2_owned.len()
+                );
                 let mut cur = &l2_owned[..];
                 let to = read_address20(&mut cur)?;
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::ETHDEPOSIT-DEBUG",
+                    to = %to,
+                    remaining = cur.len(),
+                    "🔍 ETHDEPOSIT: Read to address"
+                );
                 let balance = read_u256_be32(&mut cur)?;
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::ETHDEPOSIT-DEBUG",
+                    balance = %balance,
+                    remaining = cur.len(),
+                    "🔍 ETHDEPOSIT: Read balance"
+                );
                 let req = request_id.ok_or_else(|| {
                     eyre::eyre!("cannot issue deposit tx without L1 request id")
                 })?;
@@ -819,48 +931,105 @@ where
                     },
                 );
                 let mut enc = env.encode_typed();
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::ETHDEPOSIT-DEBUG",
+                    enc_len = enc.len(),
+                    "🔍 ETHDEPOSIT: Encoded deposit tx"
+                );
                 let mut s = enc.as_slice();
-                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                    .map_err(|_| eyre::eyre!("decode deposit failed"))?]
+                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|_| eyre::eyre!("decode deposit failed"))?;
+                use reth_primitives_traits::SignedTransaction;
+                reth_tracing::tracing::warn!(
+                    target: "arb-reth::ETHDEPOSIT-DEBUG",
+                    tx_hash = %tx.tx_hash(),
+                    tx_type = ?tx.tx_type(),
+                    from = %poster,
+                    to_addr = %to,
+                    value = %balance,
+                    "🔍 ETHDEPOSIT: Created deposit transaction"
+                );
+                vec![tx]
             }
             13 => {
-                let mut cur = &l2_owned[..];
+                // BatchPostingReport (kind=13) - creates an internal transaction that reports
+                // batch posting information to ArbOS. This matches Go nitro's parseBatchPostingReportMessage.
+                //
+                // L2msg format (from ParseBatchPostingReportMessageFields in arbostypes/incomingmessage.go):
+                // - batchTimestamp: 32 bytes (big-endian)
+                // - batchPosterAddr: 20 bytes
+                // - dataHash: 32 bytes (not used in internal tx)
+                // - batchNum: 32 bytes (big-endian, but only lower 8 bytes used as u64)
+                // - l1BaseFee: 32 bytes (big-endian)
+                // - extraGas: 8 bytes (optional, big-endian)
+                
+                let mut cur: &[u8] = l2_owned.as_slice();
+                
+                // Parse batchTimestamp (32 bytes)
                 let batch_timestamp = read_u256_be32(&mut cur)?;
-                let batch_poster = read_address20(&mut cur)?;
-                let _data_hash = read_u256_be32(&mut cur)?; // Skip data hash
+                
+                // Parse batchPosterAddr (20 bytes)
+                let batch_poster_addr = read_address20(&mut cur)?;
+                
+                // Parse dataHash (32 bytes) - not used in internal tx, but we need to skip it
+                let _data_hash = read_u256_be32(&mut cur)?;
+                
+                // Parse batchNum (32 bytes as U256, but only lower 8 bytes used as u64)
                 let batch_num_u256 = read_u256_be32(&mut cur)?;
-                let batch_num = u256_to_u64_checked(&batch_num_u256, "batch_num")?;
-                let l1_base_fee_wei = read_u256_be32(&mut cur)?;
-                let extra_gas = if cur.len() >= 8 {
+                let batch_num = u256_to_u64_checked(&batch_num_u256, "batchNum")?;
+                
+                // Parse l1BaseFee (32 bytes)
+                let l1_base_fee_report = read_u256_be32(&mut cur)?;
+                
+                // Parse extraGas (8 bytes, optional)
+                let extra_gas: u64 = if cur.len() >= 8 {
                     read_u64_be(&mut cur)?
                 } else {
-                    0u64
+                    0
                 };
                 
-                let batch_data_gas = if let Some(gas) = batch_gas_cost {
-                    gas.saturating_add(extra_gas)
-                } else {
-                    extra_gas
-                };
+                // Get batch_gas_cost from the message (computed upstream by multiplexer/delayed inbox)
+                // Go nitro requires this to be set, otherwise it returns "cannot compute batch gas cost"
+                let msg_batch_gas_cost = batch_gas_cost.ok_or_else(|| {
+                    eyre::eyre!("BatchPostingReport: batch_gas_cost is None, cannot compute batch data gas")
+                })?;
                 
-                let batch_report_data = encode_batch_posting_report_data(
-                    batch_timestamp,
-                    batch_poster,
-                    batch_num,
-                    batch_data_gas,
-                    l1_base_fee_wei,
+                // batchDataGas = msgBatchGasCost + extraGas (matches Go nitro)
+                let batch_data_gas = msg_batch_gas_cost.saturating_add(extra_gas);
+                
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    "BatchPostingReport: batch_timestamp={}, batch_poster={}, batch_num={}, batch_data_gas={} (msg_cost={} + extra={}), l1_base_fee={}",
+                    batch_timestamp, batch_poster_addr, batch_num, batch_data_gas, msg_batch_gas_cost, extra_gas, l1_base_fee_report
                 );
                 
+                // Encode the batchPostingReport internal transaction data
+                let report_data = encode_batch_posting_report_data(
+                    batch_timestamp,
+                    batch_poster_addr,
+                    batch_num,
+                    batch_data_gas,
+                    l1_base_fee_report,
+                );
+                
+                // Create the internal transaction (same structure as startBlock)
                 let env = arb_alloy_consensus::tx::ArbTxEnvelope::Internal(
                     arb_alloy_consensus::tx::ArbInternalTx {
                         chain_id: chain_id_u256,
-                        data: batch_report_data,
-                    }
+                        data: report_data,
+                    },
                 );
-                let mut enc = env.encode_typed();
+                let enc = env.encode_typed();
                 let mut s = enc.as_slice();
-                vec![reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
-                    .map_err(|_| eyre::eyre!("decode Internal failed for BatchPostingReport"))?]
+                let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
+                    .map_err(|e| eyre::eyre!("decode BatchPostingReport internal tx failed: {}", e))?;
+                
+                reth_tracing::tracing::info!(
+                    target: "arb-reth::follower",
+                    "BatchPostingReport: created internal tx with selector 0xb6693771"
+                );
+                
+                vec![tx]
             }
             0xff => {
                 reth_tracing::tracing::info!(target: "arb-reth::follower", "follower: skipping invalid placeholder message kind=0xff");
@@ -904,6 +1073,14 @@ where
                 let has_selector = input.as_ref().len() >= 4 && &input.as_ref()[0..4] == &selector.0[..4];
                 is_internal && has_selector
             }).unwrap_or(false);
+
+            reth_tracing::tracing::info!(
+                target: "arb-reth::follower",
+                l2_block = next_block_number,
+                tx_count_before_startblock = txs.len(),
+                is_first_startblock = is_first_startblock,
+                "STARTBLOCK_CHECK: About to check if we need to create StartBlock"
+            );
 
             if !is_first_startblock {
                 let parent_number = sealed_parent.number();
@@ -964,14 +1141,29 @@ where
         {
             use reth_primitives_traits::SignedTransaction;
             let tx_hashes: Vec<alloy_primitives::B256> = txs.iter().map(|t| *t.tx_hash()).collect();
-            reth_tracing::tracing::info!(target: "arb-reth::follower", tx_hashes = ?tx_hashes, "follower: built tx hashes before execution");
+            let tx_types: Vec<String> = txs.iter().map(|t| format!("{:?}", t.tx_type())).collect();
+            reth_tracing::tracing::warn!(
+                target: "arb-reth::BLOCK_TX_FINAL",
+                "🔍 FINAL_TX_LIST: block={} kind={} tx_count={} types={:?} hashes={:?}",
+                next_block_number,
+                kind,
+                txs.len(),
+                tx_types,
+                tx_hashes
+            );
         }
 
         reth_tracing::tracing::info!(target: "arb-reth::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
 
         reth_tracing::tracing::info!(target: "arb-reth::follower", tx_count = txs.len(), "follower: built tx list");
         use reth_primitives_traits::{Recovered, SignerRecoverable, SignedTransaction};
-        for tx in &txs {
+        
+        // Use a VecDeque to allow adding scheduled transactions (like retry txs) during execution
+        // This matches Go behavior where scheduled_txes are collected after each tx and processed
+        use std::collections::VecDeque;
+        let mut tx_queue: VecDeque<reth_arbitrum_primitives::ArbTransactionSigned> = txs.into_iter().collect();
+        
+        while let Some(tx) = tx_queue.pop_front() {
             let sender =
                 tx.recover_signer().map_err(|_| eyre::eyre!("failed to recover signer"))?;
             let bal =
@@ -988,9 +1180,64 @@ where
                 "follower: executing tx"
             );
             let recovered = Recovered::new_unchecked(tx.clone(), sender);
-            builder
-                .execute_transaction(recovered)
-                .map_err(|e| eyre::eyre!("execute_transaction error: {e}"))?;
+            // Match Go behavior: internal transactions (ArbitrumInternalTxType) must succeed,
+            // but user transactions that fail are logged and skipped (not included in block).
+            // See nitro/arbos/block_processor.go lines 412-428
+            let is_internal = tx.tx_type() == reth_arbitrum_primitives::ArbTxType::Internal;
+            match builder.execute_transaction(recovered) {
+                Ok(_) => {
+                    // After successful execution, check for scheduled transactions (retry txs)
+                    // This matches Go behavior in block_processor.go where ScheduledTxes are
+                    // collected after each transaction and added to the redeems queue
+                    // Scheduled transactions are pushed to the sink by execute_transaction_with_commit_condition
+                    let scheduled = reth_arbitrum_evm::scheduled_tx_sink::take();
+                    if !scheduled.is_empty() {
+                        reth_tracing::tracing::info!(
+                            target: "arb-reth::follower",
+                            scheduled_count = scheduled.len(),
+                            "Found scheduled transactions after tx execution"
+                        );
+                        for encoded_tx in scheduled {
+                            // Decode the scheduled transaction and add to queue
+                            let mut slice = encoded_tx.as_slice();
+                            match reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut slice) {
+                                Ok(scheduled_tx) => {
+                                    reth_tracing::tracing::info!(
+                                        target: "arb-reth::follower",
+                                        scheduled_tx_hash = %scheduled_tx.tx_hash(),
+                                        scheduled_tx_type = ?scheduled_tx.tx_type(),
+                                        "Adding scheduled transaction to queue"
+                                    );
+                                    tx_queue.push_back(scheduled_tx);
+                                }
+                                Err(e) => {
+                                    reth_tracing::tracing::warn!(
+                                        target: "arb-reth::follower",
+                                        error = %e,
+                                        "Failed to decode scheduled transaction"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    if is_internal {
+                        // Internal transactions must succeed - fail the block if they don't
+                        return Err(eyre::eyre!("failed to apply internal transaction: {e}"));
+                    } else {
+                        // User transactions that fail are skipped (matching Go behavior)
+                        reth_tracing::tracing::debug!(
+                            target: "arb-reth::follower",
+                            tx_hash = %txh,
+                            error = %e,
+                            "error applying transaction - skipping (matching Go behavior)"
+                        );
+                        // Continue to next transaction - don't include this one in block
+                        continue;
+                    }
+                }
+            }
         }
         let outcome = builder
             .finish(&state_provider)
@@ -1013,6 +1260,7 @@ where
         }
         let sealed_block0 = outcome.block.sealed_block().clone();
         let (mut header_unsealed, body_unsealed) = sealed_block0.clone().split_header_body();
+
         header_unsealed.nonce = alloy_primitives::B64::new(delayed_messages_read.to_be_bytes());
         type ArbBlock = alloy_consensus::Block<reth_arbitrum_primitives::ArbTransactionSigned, alloy_consensus::Header>;
         let sealed_block: reth_primitives_traits::block::SealedBlock<ArbBlock> =
@@ -1020,7 +1268,7 @@ where
 
         let header = sealed_block.header();
         let new_block_hash = sealed_block.hash();
-        
+
         let senders = outcome.block.senders().to_vec();
         let modified_block = reth_primitives_traits::block::RecoveredBlock::new_sealed(sealed_block.clone(), senders);
         
@@ -1193,7 +1441,7 @@ pub struct ArbAddOns<
     EthB: EthApiBuilder<N> = reth_arbitrum_rpc::ArbEthApiBuilder,
     PVB = (),
     EB = ArbEngineApiBuilder<PVB>,
-    EVB = BasicEngineValidatorBuilder<crate::engine::ArbEngineValidatorBuilder>,
+    EVB = crate::engine::ArbEngineValidatorBuilder,
     RpcM = Identity,
 > {
     pub rpc_add_ons: RpcAddOns<N, EthB, PVB, EB, EVB, RpcM>,
@@ -1348,7 +1596,7 @@ where
             reth_arbitrum_rpc::ArbEthApiBuilder,
             (),
             ArbEngineApiBuilder<crate::validator::ArbPayloadValidatorBuilder>,
-            BasicEngineValidatorBuilder<crate::engine::ArbEngineValidatorBuilder>,
+            crate::engine::ArbEngineValidatorBuilder,
             Identity,
         >;
 

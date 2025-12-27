@@ -96,6 +96,7 @@ impl EngineApiMetrics {
 
         // merge transitions into bundle state
         db.borrow_mut().merge_transitions(BundleRetention::Reverts);
+
         let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
 
         // Update the metrics for the number of accounts, storage slots and bytecodes updated

@@ -81,17 +81,15 @@ fn read_storage_hash(provider: &dyn StateProvider, addr: Address, slot: B256) ->
     Some(B256::from(bytes))
 }
 
+/// Calculate the number of partials in the Merkle accumulator.
+/// This matches Go nitro's CalcNumPartials which uses Log2ceil.
+/// Log2ceil(value) = 64 - leading_zeros(value)
 fn calc_num_partials(size: u64) -> u64 {
     if size == 0 {
         return 0;
     }
-    let mut p = 0u64;
-    let mut v = size - 1;
-    while v > 0 {
-        v >>= 1;
-        p += 1;
-    }
-    p
+    // Go nitro: return uint64(64 - bits.LeadingZeros64(value))
+    64 - size.leading_zeros() as u64
 }
 
 fn merkle_root_from_partials(
@@ -111,6 +109,65 @@ fn merkle_root_from_partials(
         let key = uint_to_hash_u64_be(2 + level);
         let slot = storage_key_map(send_merkle_storage_key, key);
         let partial = read_storage_hash(provider, addr, slot).unwrap_or(B256::ZERO);
+        if partial != B256::ZERO {
+            if let Some(mut h) = hash_so_far {
+                while capacity_in_hash < capacity {
+                    let x = keccak256(&[h.0.as_slice(), &[0u8; 32]].concat());
+                    h = B256::from(x.0);
+                    capacity_in_hash *= 2;
+                }
+                let x = keccak256(&[partial.0.as_slice(), h.0.as_slice()].concat());
+                hash_so_far = Some(B256::from(x.0));
+                capacity_in_hash = 2 * capacity;
+            } else {
+                hash_so_far = Some(partial);
+                capacity_in_hash = capacity;
+            }
+        }
+        capacity = capacity.saturating_mul(2);
+    }
+    hash_so_far
+}
+
+use revm_database::BundleAccount;
+
+/// Read a storage hash from bundle_state first, falling back to state_provider
+fn read_storage_hash_with_bundle(
+    bundle_account: Option<&BundleAccount>,
+    provider: &dyn StateProvider,
+    addr: Address,
+    slot: B256,
+) -> Option<B256> {
+    // First check bundle_state
+    if let Some(acc) = bundle_account {
+        if let Some(val_u256) = acc.storage_slot(U256::from_be_bytes(slot.0)) {
+            let bytes: [u8; 32] = val_u256.to_be_bytes::<32>();
+            return Some(B256::from(bytes));
+        }
+    }
+    // Fall back to state_provider
+    read_storage_hash(provider, addr, slot)
+}
+
+/// Compute merkle root from partials, checking bundle_state first for each partial
+fn merkle_root_from_partials_with_bundle(
+    bundle_account: Option<&BundleAccount>,
+    provider: &dyn StateProvider,
+    addr: Address,
+    send_merkle_storage_key: &[u8],
+    size: u64,
+) -> Option<B256> {
+    if size == 0 {
+        return Some(B256::ZERO);
+    }
+    let mut hash_so_far: Option<B256> = None;
+    let mut capacity_in_hash: u64 = 0;
+    let mut capacity = 1u64;
+    let num_partials = calc_num_partials(size);
+    for level in 0..num_partials {
+        let key = uint_to_hash_u64_be(2 + level);
+        let slot = storage_key_map(send_merkle_storage_key, key);
+        let partial = read_storage_hash_with_bundle(bundle_account, provider, addr, slot).unwrap_or(B256::ZERO);
         if partial != B256::ZERO {
             if let Some(mut h) = hash_so_far {
                 while capacity_in_hash < capacity {
@@ -158,25 +215,70 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
 
     let send_count_slot = storage_key_map(&send_merkle_sub, uint_to_hash_u64_be(0));
     let send_count = if let Some(acc) = input.bundle_state.account(&addr) {
+        // Debug: Log the storage slots in the bundle_state account
+        reth_tracing::tracing::debug!(
+            target: "arb-evm::header",
+            block_number = input.evm_env.block_env.number.saturating_to::<u64>(),
+            arbos_storage_slots = acc.storage.len(),
+            send_count_slot = %send_count_slot,
+            "Checking bundle_state for send_count"
+        );
+        
+        // Try to get the slot using storage_slot() method
         if let Some(sc_u256) = acc.storage_slot(alloy_primitives::U256::from_be_bytes(send_count_slot.0)) {
             let bytes: [u8; 32] = sc_u256.to_be_bytes::<32>();
             let mut buf = [0u8; 8];
             buf.copy_from_slice(&bytes[24..32]);
-            u64::from_be_bytes(buf)
+            let count = u64::from_be_bytes(buf);
+            reth_tracing::tracing::info!(
+                target: "arb-evm::header",
+                block_number = input.evm_env.block_env.number.saturating_to::<u64>(),
+                send_count = count,
+                "Found send_count in bundle_state"
+            );
+            count
         } else {
-            read_storage_u64_be(input.state_provider, addr, send_count_slot).unwrap_or(0)
+            // Also try direct storage lookup
+            let slot_u256 = alloy_primitives::U256::from_be_bytes(send_count_slot.0);
+            if let Some(slot_entry) = acc.storage.get(&slot_u256) {
+                let bytes: [u8; 32] = slot_entry.present_value.to_be_bytes::<32>();
+                let mut buf = [0u8; 8];
+                buf.copy_from_slice(&bytes[24..32]);
+                let count = u64::from_be_bytes(buf);
+                reth_tracing::tracing::info!(
+                    target: "arb-evm::header",
+                    block_number = input.evm_env.block_env.number.saturating_to::<u64>(),
+                    send_count = count,
+                    "Found send_count via direct storage lookup"
+                );
+                count
+            } else {
+                reth_tracing::tracing::warn!(
+                    target: "arb-evm::header",
+                    block_number = input.evm_env.block_env.number.saturating_to::<u64>(),
+                    "send_count slot NOT FOUND in bundle_state, falling back to state_provider"
+                );
+                read_storage_u64_be(input.state_provider, addr, send_count_slot).unwrap_or(0)
+            }
         }
     } else {
+        reth_tracing::tracing::warn!(
+            target: "arb-evm::header",
+            block_number = input.evm_env.block_env.number.saturating_to::<u64>(),
+            "ARBOS account NOT FOUND in bundle_state, falling back to state_provider"
+        );
         read_storage_u64_be(input.state_provider, addr, send_count_slot).unwrap_or(0)
     };
 
-    let send_root = if let Some(acc) = input.bundle_state.account(&addr) {
-        merkle_root_from_partials(input.state_provider, addr, &send_merkle_sub, send_count)
-            .unwrap_or(B256::ZERO)
-    } else {
-        merkle_root_from_partials(input.state_provider, addr, &send_merkle_sub, send_count)
-            .unwrap_or(B256::ZERO)
-    };
+    let bundle_account = input.bundle_state.account(&addr);
+    let send_root = merkle_root_from_partials_with_bundle(
+        bundle_account,
+        input.state_provider,
+        addr,
+        &send_merkle_sub,
+        send_count,
+    )
+    .unwrap_or(B256::ZERO);
 
     let l1_block_num_slot = storage_key_map(&blockhashes_sub, uint_to_hash_u64_be(0));
     let l1_block_number = if let Some(acc) = input.bundle_state.account(&addr) {

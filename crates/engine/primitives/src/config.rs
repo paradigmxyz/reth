@@ -103,6 +103,11 @@ pub struct TreeConfig {
     precompile_cache_disabled: bool,
     /// Whether to use state root fallback for testing
     state_root_fallback: bool,
+    /// Whether to skip state root validation entirely (trust the sequencer/consensus layer).
+    /// This is useful for L2 rollups like Arbitrum where the state root comes from a trusted
+    /// sequencer and local re-execution may not produce matching state roots due to
+    /// chain-specific state changes that happen outside the EVM.
+    skip_state_root_validation: bool,
     /// Whether to always process payload attributes and begin a payload build process
     /// even if `forkchoiceState.headBlockHash` is already the canonical head or an ancestor.
     ///
@@ -146,6 +151,7 @@ impl Default for TreeConfig {
             reserved_cpu_cores: DEFAULT_RESERVED_CPU_CORES,
             precompile_cache_disabled: false,
             state_root_fallback: false,
+            skip_state_root_validation: false,
             always_process_payload_attributes_on_canonical_head: false,
             prewarm_max_concurrency: DEFAULT_PREWARM_MAX_CONCURRENCY,
             allow_unwind_canonical_header: false,
@@ -201,6 +207,7 @@ impl TreeConfig {
             reserved_cpu_cores,
             precompile_cache_disabled,
             state_root_fallback,
+            skip_state_root_validation: false,
             always_process_payload_attributes_on_canonical_head,
             prewarm_max_concurrency,
             allow_unwind_canonical_header,
@@ -293,6 +300,11 @@ impl TreeConfig {
     /// Returns whether to use state root fallback.
     pub const fn state_root_fallback(&self) -> bool {
         self.state_root_fallback
+    }
+
+    /// Returns whether to skip state root validation (trust the sequencer).
+    pub const fn skip_state_root_validation(&self) -> bool {
+        self.skip_state_root_validation
     }
 
     /// Sets whether to always process payload attributes when the FCU head is already canonical.
@@ -447,6 +459,17 @@ impl TreeConfig {
     /// Setter for whether to use state root fallback, useful for testing.
     pub const fn with_state_root_fallback(mut self, state_root_fallback: bool) -> Self {
         self.state_root_fallback = state_root_fallback;
+        self
+    }
+
+    /// Setter for whether to skip state root validation (trust the sequencer).
+    /// This is useful for L2 rollups like Arbitrum where the state root comes from a trusted
+    /// sequencer.
+    pub const fn with_skip_state_root_validation(
+        mut self,
+        skip_state_root_validation: bool,
+    ) -> Self {
+        self.skip_state_root_validation = skip_state_root_validation;
         self
     }
 

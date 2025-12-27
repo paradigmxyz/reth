@@ -99,9 +99,19 @@ use reth_trie_common::HashedStorage;
 
 pub fn load_sepolia_secure_alloc_hashed(
 ) -> Result<(BTreeMap<B256, Account>, BTreeMap<B256, HashedStorage>)> {
+    let (accounts_h, storages_h, _bytecodes) = load_sepolia_secure_alloc_hashed_with_bytecodes()?;
+    Ok((accounts_h, storages_h))
+}
+
+/// Load the embedded Sepolia genesis alloc with accounts, storage, and bytecodes.
+/// Returns (hashed_accounts, hashed_storage, bytecodes)
+/// The bytecodes map is keyed by code hash (B256) with value being the raw bytecode bytes.
+pub fn load_sepolia_secure_alloc_hashed_with_bytecodes(
+) -> Result<(BTreeMap<B256, Account>, BTreeMap<B256, HashedStorage>, BTreeMap<B256, Vec<u8>>)> {
     let parsed = decode_embedded_alloc_json()?;
     let mut accounts_h = BTreeMap::<B256, Account>::new();
     let mut storages_h = BTreeMap::<B256, HashedStorage>::new();
+    let mut bytecodes = BTreeMap::<B256, Vec<u8>>::new();
 
     let obj = parsed.get("secureAlloc").and_then(|v| v.as_object()).ok_or_else(|| {
         anyhow::anyhow!("secureAlloc not found in embedded artifact")
@@ -120,7 +130,10 @@ pub fn load_sepolia_secure_alloc_hashed(
 
         let code_bytes = v.get("code").and_then(|x| x.as_str()).map(|s| hex::decode(s.trim_start_matches("0x")).unwrap_or_default()).unwrap_or_default();
         let code_hash = if !code_bytes.is_empty() {
-            keccak256(&code_bytes)
+            let hash = keccak256(&code_bytes);
+            // Store the bytecode keyed by its hash
+            bytecodes.insert(hash, code_bytes);
+            hash
         } else if let Some(ch) = v.get("codeHash").and_then(|x| x.as_str()) {
             parse_b256_hex(ch)
         } else {
@@ -144,5 +157,48 @@ pub fn load_sepolia_secure_alloc_hashed(
         }
     }
 
-    Ok((accounts_h, storages_h))
+    // Fix ArbOS account nonce to 1
+    // Go nitro's storage.go:73 sets: statedb.SetNonce(account, 1, tracing.NonceChangeUnspecified)
+    // This ensures Geth won't treat ArbOS as empty. The secureAlloc data has nonce=0, so we fix it here.
+    let arbos_hashed_addr = B256::from_slice(&hex::decode("b4d14ec89c201c23aa60e231e3993b3966b33ff1f55d198ec25980957ab32065").unwrap());
+    eprintln!("DEBUG embedded_alloc: accounts_h contains ArbOS: {}", accounts_h.contains_key(&arbos_hashed_addr));
+    if let Some(arbos_acct) = accounts_h.get_mut(&arbos_hashed_addr) {
+        eprintln!("DEBUG embedded_alloc: ArbOS account found, setting nonce from {} to 1", arbos_acct.nonce);
+        arbos_acct.nonce = 1;
+    } else {
+        eprintln!("DEBUG embedded_alloc: ArbOS account NOT found in secureAlloc, creating it with nonce=1");
+        // ArbOS account is not in secureAlloc, create it with nonce=1
+        let arbos_acct = Account { nonce: 1, balance: U256::ZERO, bytecode_hash: Some(KECCAK_EMPTY) };
+        accounts_h.insert(arbos_hashed_addr, arbos_acct);
+    }
+
+    // Add missing TimeoutQueue slot 1 (nextGetOffset=2) to ArbOS storage
+    // Go nitro's InitializeQueue sets both nextPutOffset and nextGetOffset to 2
+    // The secureAlloc data is missing slot 1, so we add it here
+    // TimeoutQueue slot 1 hashed key = keccak256(preimage_slot_1)
+    // where preimage_slot_1 = 0x9e9ffd355c04cc0ffaba550b5b46d79f750513bcaf322e22daca18080c857a01
+    let timeout_queue_slot1_hashed = B256::from_slice(&hex::decode("3685c8c6988ac7abfacfa36241f4ee3b2c9fd55a665e86b9bf8b4fa0130799ca").unwrap());
+    
+    // DEBUG: Log before adding the slot
+    eprintln!("DEBUG embedded_alloc: Adding TimeoutQueue slot 1 to ArbOS storage");
+    eprintln!("DEBUG embedded_alloc: ArbOS hashed addr: {:?}", arbos_hashed_addr);
+    eprintln!("DEBUG embedded_alloc: storages_h contains ArbOS: {}", storages_h.contains_key(&arbos_hashed_addr));
+    
+    if let Some(arbos_storage) = storages_h.get_mut(&arbos_hashed_addr) {
+        // Add the missing slot to existing storage
+        eprintln!("DEBUG embedded_alloc: ArbOS storage exists, adding to existing storage");
+        let mut entries: BTreeMap<B256, U256> = arbos_storage.storage.iter().map(|(k, v)| (*k, *v)).collect();
+        entries.insert(timeout_queue_slot1_hashed, U256::from(2));
+        *arbos_storage = HashedStorage::from_iter(false, entries.into_iter());
+    } else {
+        // ArbOS storage doesn't exist in secureAlloc, create it with just the TimeoutQueue slot 1
+        eprintln!("DEBUG embedded_alloc: ArbOS storage does NOT exist, creating new storage entry");
+        let mut entries: BTreeMap<B256, U256> = BTreeMap::new();
+        entries.insert(timeout_queue_slot1_hashed, U256::from(2));
+        let storage = HashedStorage::from_iter(false, entries.into_iter());
+        storages_h.insert(arbos_hashed_addr, storage);
+        eprintln!("DEBUG embedded_alloc: storages_h now has {} entries", storages_h.len());
+    }
+
+    Ok((accounts_h, storages_h, bytecodes))
 }

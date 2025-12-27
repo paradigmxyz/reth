@@ -4,7 +4,7 @@ use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint};
 
 pub struct L2PricingState<D> {
     storage: Storage<D>,
-    
+
     speed_limit_per_second: StorageBackedUint64<D>,  // offset 0
     per_block_gas_limit: StorageBackedUint64<D>,     // offset 1
     base_fee_wei: StorageBackedBigUint<D>,           // offset 2
@@ -12,6 +12,7 @@ pub struct L2PricingState<D> {
     gas_backlog: StorageBackedUint64<D>,             // offset 4
     pricing_inertia: StorageBackedUint64<D>,         // offset 5
     backlog_tolerance: StorageBackedUint64<D>,       // offset 6
+    per_tx_gas_limit: StorageBackedUint64<D>,        // offset 7
 }
 
 const SPEED_LIMIT_PER_SECOND_OFFSET: u64 = 0;
@@ -21,6 +22,7 @@ const MIN_BASE_FEE_WEI_OFFSET: u64 = 3;
 const GAS_BACKLOG_OFFSET: u64 = 4;
 const PRICING_INERTIA_OFFSET: u64 = 5;
 const BACKLOG_TOLERANCE_OFFSET: u64 = 6;
+const PER_TX_GAS_LIMIT_OFFSET: u64 = 7;
 
 const INITIAL_SPEED_LIMIT_PER_SECOND_V6: u64 = 7_000_000;
 const INITIAL_PER_BLOCK_GAS_LIMIT_V6: u64 = 32_000_000;
@@ -33,7 +35,7 @@ impl<D: Database> L2PricingState<D> {
     pub fn open(storage: Storage<D>) -> Self {
         let state = storage.state;
         let base_key = storage.base_key;
-        
+
         Self {
             speed_limit_per_second: StorageBackedUint64::new(state, base_key, SPEED_LIMIT_PER_SECOND_OFFSET),
             per_block_gas_limit: StorageBackedUint64::new(state, base_key, PER_BLOCK_GAS_LIMIT_OFFSET),
@@ -42,6 +44,7 @@ impl<D: Database> L2PricingState<D> {
             gas_backlog: StorageBackedUint64::new(state, base_key, GAS_BACKLOG_OFFSET),
             pricing_inertia: StorageBackedUint64::new(state, base_key, PRICING_INERTIA_OFFSET),
             backlog_tolerance: StorageBackedUint64::new(state, base_key, BACKLOG_TOLERANCE_OFFSET),
+            per_tx_gas_limit: StorageBackedUint64::new(state, base_key, PER_TX_GAS_LIMIT_OFFSET),
             storage,
         }
     }
@@ -110,6 +113,7 @@ impl<D: Database> L2PricingState<D> {
     }
 
     pub fn set_gas_backlog(&self, backlog: u64) -> Result<(), ()> {
+        tracing::warn!(target: "arb-l2pricing", "[ITER119] set_gas_backlog: backlog={}", backlog);
         self.gas_backlog.set(backlog)
     }
 
@@ -129,16 +133,28 @@ impl<D: Database> L2PricingState<D> {
         self.backlog_tolerance.set(val)
     }
 
+    pub fn per_tx_gas_limit(&self) -> Result<u64, ()> {
+        self.per_tx_gas_limit.get()
+    }
+
+    pub fn set_per_tx_gas_limit(&self, limit: u64) -> Result<(), ()> {
+        self.per_tx_gas_limit.set(limit)
+    }
+
     pub fn add_to_gas_pool(&self, gas: i64) -> Result<(), ()> {
         let backlog = self.gas_backlog()?;
-        
+
         let new_backlog = if gas > 0 {
             backlog.saturating_sub(gas as u64)
         } else {
             backlog.saturating_add((-gas) as u64)
         };
-        
-        self.set_gas_backlog(new_backlog)
+
+        tracing::warn!(target: "arb-l2pricing", "[ITER120] add_to_gas_pool: gas={} backlog={} -> new_backlog={} slot={:?} storage_ptr={:p}",
+            gas, backlog, new_backlog, self.gas_backlog.slot, self.gas_backlog.storage);
+        let result = self.set_gas_backlog(new_backlog);
+        tracing::warn!(target: "arb-l2pricing", "[ITER120] add_to_gas_pool: set_gas_backlog result={:?}", result);
+        result
     }
     
     pub fn update_pricing_model(&self, _l2_base_fee: U256, time_passed: u64) -> Result<(), ()> {
@@ -159,6 +175,13 @@ impl<D: Database> L2PricingState<D> {
         let min_base_fee = self.min_base_fee_wei()?;
         
         let mut base_fee = min_base_fee;
+        
+        // Defensive check: if speed_limit or inertia is 0, skip the pricing update
+        // This can happen if the L2 pricing state is not initialized yet
+        if speed_limit == 0 || inertia == 0 {
+            tracing::warn!(target: "arb-l2pricing", "Skipping pricing update: speed_limit={} inertia={}", speed_limit, inertia);
+            return Ok(());
+        }
         
         let tolerance_limit = tolerance.saturating_mul(speed_limit);
         if backlog > tolerance_limit {
@@ -228,5 +251,9 @@ impl<D: Database> L2PricingState<D> {
 
     pub fn get_backlog_tolerance(&self) -> Result<u64, ()> {
         self.backlog_tolerance()
+    }
+
+    pub fn get_per_tx_gas_limit(&self) -> Result<u64, ()> {
+        self.per_tx_gas_limit()
     }
 }

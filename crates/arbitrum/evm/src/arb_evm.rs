@@ -1,8 +1,9 @@
 extern crate alloc;
 
 use alloy_evm::{
-    eth::EthEvmContext, precompiles::PrecompilesMap, Database, EvmEnv, EvmFactory, IntoTxEnv,
+    eth::EthEvmContext, precompiles::PrecompilesMap, Database, EvmEnv, EvmFactory, IntoTxEnv, Evm,
 };
+use crate::arbsys_precompile::{create_arbsys_precompile, ARBSYS_ADDRESS};
 use alloy_evm::tx::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::{Address, Bytes};
 use core::fmt::Debug;
@@ -40,8 +41,26 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
                 tx.value = alloy_primitives::U256::ZERO;
                 tx.gas_price = 0;
             }
-            _ => {
+            // CRITICAL FIX: Retry transactions MUST have their value set for ETH transfers to work
+            // Use max_fee_per_gas (which equals basefee) for gas accounting
+            reth_arbitrum_primitives::ArbTxType::Retry => {
+                tx.value = signed.value();
+                tx.gas_price = signed.max_fee_per_gas();
+            }
+            // CRITICAL FIX: SubmitRetryable ends early (end_tx_now=true) but still goes through revm
+            // which pays (gas_price - basefee) * gas_used to the block beneficiary (coinbase).
+            // To prevent this unwanted coinbase tip, set gas_price = 0. The actual fee distribution
+            // is handled entirely by ArbOS hooks, not revm's standard fee mechanism.
+            // Without this fix, sequencer gets ~5 ETH per SubmitRetryable from coinbase tips!
+            reth_arbitrum_primitives::ArbTxType::SubmitRetryable => {
                 tx.value = alloy_primitives::U256::ZERO;
+                tx.gas_price = 0;
+            }
+            // CRITICAL FIX: EIP-1559, EIP-2930, EIP-4844, EIP-7702 transactions MUST have their
+            // value set for ETH transfers to work. Previously this was incorrectly set to ZERO,
+            // which caused value transfers to not execute (e.g., block 507's 0.01 ETH transfer).
+            _ => {
+                tx.value = signed.value();
                 tx.gas_price = signed.max_fee_per_gas();
             }
         }
@@ -261,7 +280,14 @@ impl EvmFactory for ArbEvmFactory {
         db: DB,
         input: EvmEnv<Self::Spec>,
     ) -> Self::Evm<DB, NoOpInspector> {
-        ArbEvm::new(self.0.create_evm(db, input))
+        let mut evm = ArbEvm::new(self.0.create_evm(db, input));
+        
+        // Register ArbSys precompile at address 0x64
+        let arbsys_precompile = create_arbsys_precompile();
+        let (_, _, precompiles) = evm.components_mut();
+        precompiles.apply_precompile(&ARBSYS_ADDRESS, |_| Some(arbsys_precompile));
+        
+        evm
     }
 
     fn create_evm_with_inspector<DB: Database, I: revm::inspector::Inspector<Self::Context<DB>>>(
@@ -270,7 +296,14 @@ impl EvmFactory for ArbEvmFactory {
         input: EvmEnv<Self::Spec>,
         inspector: I,
     ) -> Self::Evm<DB, I> {
-        ArbEvm::new(self.0.create_evm_with_inspector(db, input, inspector))
+        let mut evm = ArbEvm::new(self.0.create_evm_with_inspector(db, input, inspector));
+        
+        // Register ArbSys precompile at address 0x64
+        let arbsys_precompile = create_arbsys_precompile();
+        let (_, _, precompiles) = evm.components_mut();
+        precompiles.apply_precompile(&ARBSYS_ADDRESS, |_| Some(arbsys_precompile));
+        
+        evm
     }
 }
 impl<DB, I> ArbEvmExt for ArbEvm<DB, I>

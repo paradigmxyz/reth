@@ -45,17 +45,20 @@ mod arb_evm;
 pub use arb_evm::{ArbTransaction, ArbEvm, ArbEvmFactory};
 
 mod log_sink;
+pub mod scheduled_tx_sink;
 mod early_tx_state;
-pub use early_tx_state::{set_early_tx_gas, get_early_tx_gas, clear_early_tx_gas, add_gas_adjustment, get_and_clear_gas_adjustment};
+pub use early_tx_state::{set_early_tx_gas, set_early_tx_gas_with_status, get_early_tx_gas, clear_early_tx_gas, add_gas_adjustment, get_and_clear_gas_adjustment};
 pub mod storage;
 pub mod l1_pricing;
 pub mod l2_pricing;
 pub mod addressset;
+pub mod batch_poster;
 pub mod addresstable;
 pub mod merkleaccumulator;
 pub mod blockhash;
 pub mod features;
 pub mod programs;
+pub mod arbsys_precompile;
 pub mod arbosstate;
 pub mod internal_tx;
 
@@ -177,12 +180,26 @@ where
         Ok(EvmEnv { cfg_env, block_env })
     }
     fn context_for_block(&self, block: &'_ SealedBlock<BlockTy<Self::Primitives>>) -> Result<ArbBlockExecutionCtx, Infallible> {
+        // Extract L1 block number and delayed messages from the block header
+        // mixHash encoding: [send_count(8), l1_block_num(8), arbos_version(8), reserved(8)]
+        let mix_hash_bytes = block.header().mix_hash.0;
+        let l1_block_number = u64::from_be_bytes([
+            mix_hash_bytes[8], mix_hash_bytes[9], mix_hash_bytes[10], mix_hash_bytes[11],
+            mix_hash_bytes[12], mix_hash_bytes[13], mix_hash_bytes[14], mix_hash_bytes[15],
+        ]);
+
+        // Nonce contains delayed_messages_read
+        let delayed_messages_read = u64::from_be_bytes(block.header().nonce.0);
+
         Ok(ArbBlockExecutionCtx {
             parent_hash: block.header().parent_hash,
             parent_beacon_block_root: block.header().parent_beacon_block_root,
             extra_data: block.header().extra_data.clone().into(),
-            delayed_messages_read: 0,
-            l1_block_number: 0,
+            delayed_messages_read,
+            l1_block_number,
+            chain_id: self.chain_spec().chain_id() as u64,
+            block_timestamp: block.header().timestamp,
+            basefee: U256::from(block.header().base_fee_per_gas.unwrap_or_default()),
         })
     }
 
@@ -197,6 +214,9 @@ where
             extra_data: attributes.extra_data.into(),
             delayed_messages_read: attributes.delayed_messages_read,
             l1_block_number: attributes.l1_block_number,
+            chain_id: self.chain_spec().chain_id() as u64,
+            block_timestamp: attributes.timestamp,
+            basefee: attributes.basefee,
         })
     }
 
@@ -223,7 +243,7 @@ where
             number: U256::from(payload.payload.block_number()),
             beneficiary: payload.payload.as_v1().fee_recipient,
             timestamp: U256::from(payload.payload.timestamp()),
-            difficulty: U256::ZERO,
+            difficulty: U256::from(1),  // Must match assembly path for consistency
             prevrandao: Some(payload.payload.as_v1().prev_randao),
             gas_limit: payload.payload.as_v1().gas_limit,
             basefee: payload.payload.as_v1().base_fee_per_gas.try_into().unwrap_or_default(),
@@ -236,12 +256,30 @@ where
         &self,
         payload: &'a ArbExecutionData,
     ) -> Result<ExecutionCtxFor<'a, Self>, Infallible> {
+        // CRITICAL FOR DETERMINISM: Extract delayed_messages_read and l1_block_number from payload!
+        // Assembly path sets these from message data. Validation MUST match or state roots diverge.
+        //
+        // delayed_messages_read: stored in sidecar.nonce (B64)
+        // l1_block_number: stored in prev_randao (mix_hash) bytes 8-15
+        //   mix_hash encoding: [send_count(8), l1_block_num(8), arbos_version(8), reserved(8)]
+
+        let delayed_messages_read = u64::from_be_bytes(payload.sidecar.nonce.0);
+
+        let mix_hash_bytes = payload.payload.as_v1().prev_randao.0;
+        let l1_block_number = u64::from_be_bytes([
+            mix_hash_bytes[8], mix_hash_bytes[9], mix_hash_bytes[10], mix_hash_bytes[11],
+            mix_hash_bytes[12], mix_hash_bytes[13], mix_hash_bytes[14], mix_hash_bytes[15],
+        ]);
+
         Ok(ArbBlockExecutionCtx {
             parent_hash: payload.parent_hash(),
             parent_beacon_block_root: payload.sidecar.parent_beacon_block_root,
             extra_data: payload.payload.as_v1().extra_data.clone().into(),
-            delayed_messages_read: 0,
-            l1_block_number: 0,
+            delayed_messages_read,
+            l1_block_number,
+            chain_id: self.chain_spec().chain_id() as u64,
+            block_timestamp: payload.payload.timestamp(),
+            basefee: payload.payload.as_v1().base_fee_per_gas.try_into().unwrap_or_default(),
         })
     }
 
@@ -400,6 +438,7 @@ pub(crate) mod test_helpers {
         let sys = address!("0000000000000000000000000000000000000064");
         let ctx = crate::predeploys::PredeployCallContext {
             block_number: 100,
+            l1_block_number: 0,
             block_hashes: alloc::vec::Vec::new(),
             chain_id: U256::from(42161u64),
             os_version: 0,

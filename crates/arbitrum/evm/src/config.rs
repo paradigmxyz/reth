@@ -40,6 +40,14 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
 {
         let reth_execution_types::BlockExecutionResult { receipts, gas_used, .. } = input.output;
 
+        reth_tracing::tracing::info!(
+            target: "arb-evm::assemble",
+            number = input.evm_env.block_env.number.saturating_to::<u64>(),
+            gas_used_from_result = gas_used,
+            receipts_count = receipts.len(),
+            "Block assembly: gas_used from BlockExecutionResult"
+        );
+
         let gas_adjustment = crate::get_and_clear_gas_adjustment();
         let adjusted_gas_used = if gas_adjustment != 0 {
             let new_gas = (*gas_used as i64 + gas_adjustment) as u64;
@@ -56,7 +64,9 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         };
 
         let transactions_root = alloy_consensus::proofs::calculate_transaction_root(&input.transactions);
-        let receipts_root = alloy_consensus::proofs::calculate_receipt_root(&receipts);
+        // Wrap receipts in ReceiptWithBloom before calculating root, as per EIP-2718 encoding
+        let receipts_with_bloom = receipts.iter().map(|r| r.with_bloom_ref()).collect::<Vec<_>>();
+        let receipts_root = alloy_consensus::proofs::calculate_receipt_root(&receipts_with_bloom);
         let logs_bloom = alloy_primitives::logs_bloom(receipts.iter().flat_map(|r| r.logs()));
 
         let mut header = alloy_consensus::Header {
@@ -85,13 +95,37 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         reth_tracing::tracing::info!(
             target: "arb-evm::assemble",
             number = header.number,
+            gas_used = adjusted_gas_used,
+            receipts_count = receipts.len(),
+            "ArbBlockAssembler: header created with gas_used"
+        );
+        reth_tracing::tracing::info!(
+            target: "arb-evm::assemble",
+            number = header.number,
             beneficiary = %header.beneficiary,
             "ArbBlockAssembler: initial beneficiary set from evm_env"
         );
         header.difficulty = U256::from(1u64);
         header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 
+        reth_tracing::tracing::info!(
+            target: "arb-evm::assemble",
+            block_number = header.number,
+            exec_ctx_l1_block_num = input.execution_ctx.l1_block_number,
+            exec_ctx_delayed_msgs = input.execution_ctx.delayed_messages_read,
+            "Block assembly: execution context values"
+        );
+
         if let Some(mut info) = derive_arb_header_info_from_state(&input) {
+            reth_tracing::tracing::info!(
+                target: "arb-evm::assemble",
+                block_number = header.number,
+                send_count = info.send_count,
+                l1_block_num_from_state = info.l1_block_number,
+                arbos_version = info.arbos_format_version,
+                send_root = %info.send_root,
+                "Derived ArbHeaderInfo from state"
+            );
             if info.arbos_format_version == 0 {
                 if let Some(ver) = read_arbos_version(input.state_provider) {
                     info.arbos_format_version = ver;
@@ -99,8 +133,32 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
                     info.arbos_format_version = 10;
                 }
             }
+            // If the L1 block number from state is 0, use the one from execution context
+            if info.l1_block_number == 0 && input.execution_ctx.l1_block_number != 0 {
+                reth_tracing::tracing::warn!(
+                    target: "arb-evm::assemble",
+                    block_number = header.number,
+                    l1_block_from_ctx = input.execution_ctx.l1_block_number,
+                    "L1 block number from state is 0, using execution context value as fallback"
+                );
+                info.l1_block_number = input.execution_ctx.l1_block_number;
+            }
+            reth_tracing::tracing::info!(
+                target: "arb-evm::assemble",
+                block_number = header.number,
+                final_send_count = info.send_count,
+                final_l1_block_num = info.l1_block_number,
+                final_arbos_version = info.arbos_format_version,
+                "Applying final ArbHeaderInfo to header"
+            );
             info.apply_to_header(&mut header);
         } else {
+            reth_tracing::tracing::error!(
+                target: "arb-evm::assemble",
+                block_number = header.number,
+                l1_block_from_ctx = input.execution_ctx.l1_block_number,
+                "Failed to derive ArbHeaderInfo from state, using fallback"
+            );
             let l1_bn = input.execution_ctx.l1_block_number;
             if l1_bn != 0 {
                 let ver = read_arbos_version(input.state_provider).unwrap_or(10);
@@ -154,6 +212,8 @@ pub struct ArbNextBlockEnvAttributes {
     pub blob_gas_price: Option<u128>,
     pub delayed_messages_read: u64,
     pub l1_block_number: u64,
+    /// Base fee for scheduled transactions
+    pub basefee: U256,
 }
 #[cfg(feature = "rpc")]
 impl<H: alloy_consensus::BlockHeader>
@@ -172,6 +232,7 @@ impl<H: alloy_consensus::BlockHeader>
             blob_gas_price: None,
             delayed_messages_read: 0,
             l1_block_number: 0,
+            basefee: U256::from(parent.base_fee_per_gas().unwrap_or_default()),
         }
     }
 }
@@ -204,6 +265,7 @@ where
             blob_gas_price: None,
             delayed_messages_read: 0,
             l1_block_number: 0,
+            basefee: U256::from(parent.base_fee_per_gas().unwrap_or_default()),
         })
     }
 }

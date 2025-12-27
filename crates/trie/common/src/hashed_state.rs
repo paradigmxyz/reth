@@ -29,6 +29,12 @@ pub struct HashedPostState {
     pub accounts: B256Map<Option<Account>>,
     /// Mapping of hashed address to hashed storage.
     pub storages: B256Map<HashedStorage>,
+    /// Arbitrum: Set of hashed addresses that should be retained even if empty.
+    /// This is used for the zombie account mechanism in pre-Stylus ArbOS versions.
+    /// Zombie accounts are empty accounts that were deleted in a previous tx
+    /// and then resurrected via CreateZombieIfDeleted in a subsequent tx.
+    #[cfg_attr(feature = "serde", serde(default))]
+    pub retain_empty_accounts: B256Set,
 }
 
 impl HashedPostState {
@@ -37,6 +43,7 @@ impl HashedPostState {
         Self {
             accounts: B256Map::with_capacity_and_hasher(capacity, Default::default()),
             storages: B256Map::with_capacity_and_hasher(capacity, Default::default()),
+            retain_empty_accounts: B256Set::default(),
         }
     }
 
@@ -52,29 +59,125 @@ impl HashedPostState {
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
+                let hashed_account: Option<Account> = account.info.as_ref().map(Into::into);
+                // CONSENSUS-CRITICAL: Only include storage slots that actually changed.
+                // In go-ethereum, only dirtyStorage slots are written to the trie.
+                // Filter out slots where present_value == previous_or_original_value.
+                let changed_storage_count = account.storage.iter()
+                    .filter(|(_, value)| value.present_value != value.previous_or_original_value)
+                    .count();
+                // Count non-zero vs zero-valued slots
+                let non_zero_count = account.storage.iter()
+                    .filter(|(_, value)| value.present_value != value.previous_or_original_value && !value.present_value.is_zero())
+                    .count();
+                let zero_count = account.storage.iter()
+                    .filter(|(_, value)| value.present_value != value.previous_or_original_value && value.present_value.is_zero())
+                    .count();
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    account.storage.iter()
+                        .filter(|(_, value)| value.present_value != value.previous_or_original_value)
+                        .map(|(slot, value)| (slot, &value.present_value)),
                 );
-                (hashed_address, (hashed_account, hashed_storage))
+                
+                // DEBUG: Log accounts with storage changes
+                if changed_storage_count > 0 {
+                    eprintln!("[BUNDLE-STATE-STORAGE-DEBUG] Account {:?} storage: changed={}, non_zero={}, zero={}, status={:?}",
+                        address, changed_storage_count, non_zero_count, zero_count, account.status);
+                }
+                
+                // DEBUG: Log accounts with storage changes but no info
+                if changed_storage_count > 0 && account.info.is_none() {
+                    eprintln!("[BUNDLE-STATE-DEBUG] Account {:?} has {} changed storage slots but info=None, original_info={:?}, status={:?}",
+                        address, changed_storage_count, account.original_info.is_some(), account.status);
+                }
+                
+                (hashed_address, (hashed_account, hashed_storage, *address, account.info.is_some(), account.original_info.clone(), account.status, changed_storage_count))
             })
-            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
+            .collect::<Vec<_>>();
 
         let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        for (address, (account, storage)) in hashed {
-            // CONSENSUS-CRITICAL: Only insert non-None accounts to match go-ethereum's
-            // IntermediateRoot(deleteEmptyObjects=true) behavior for Arbitrum and other chains.
-            // Empty accounts (None) must not be included in the state trie.
-            if account.is_some() {
-                accounts.insert(address, account);
+        for (address, (account, storage, raw_address, info_present, original_info, status, changed_storage_count)) in hashed {
+            // DEBUG: Log all accounts in bundle state
+            eprintln!("[BUNDLE-STATE-DEBUG] Processing {:?}: info_present={}, original_info={:?}, status={:?}, changed_storage_count={}, storage_empty={}",
+                raw_address, info_present, original_info.is_some(), status, changed_storage_count, storage.is_empty());
+            
+            // CONSENSUS-CRITICAL: Match go-ethereum's IntermediateRoot(deleteEmptyObjects=true) behavior.
+            // - Non-empty accounts (nonce>0 OR balance>0 OR has code): insert as Some(account)
+            // - Empty accounts that were MODIFIED: insert as None to mark for deletion (EIP-161 cleanup)
+            // - Empty accounts that were only LOADED (not modified): skip entirely (preserve existing trie leaf)
+            // - None accounts (info not loaded): skip entirely (no change to trie)
+            //
+            // CRITICAL FIX: Only delete empty accounts if they were actually modified.
+            // If an empty account was only loaded (read but not mutated), we must NOT delete it
+            // because it may be a zombie account that was preserved in a previous block.
+            // This matches go-ethereum's behavior where only "dirty" accounts are considered for deletion.
+            
+            // Check zombie accounts from thread-local sink (Arbitrum-specific).
+            // Zombie accounts are accounts that were deleted in a previous tx and resurrected
+            // via CreateZombieIfDeleted. They must be retained in the trie even though empty.
+            let zombie_accounts = crate::zombie_sink::peek_hashed();
+            if !zombie_accounts.is_empty() {
+                eprintln!("[ZOMBIE-THREAD-DEBUG] from_bundle_state: checking zombie_sink on thread {:?}, found {} accounts",
+                    std::thread::current().id(), zombie_accounts.len());
             }
+            let is_zombie = zombie_accounts.contains(&address);
+            
+            // Check if the account was actually modified (not just loaded)
+            let was_modified = !status.is_not_modified();
+            
+            if let Some(ref acc) = account {
+                if acc.is_empty() {
+                    if is_zombie {
+                        // Zombie account: retain as empty account in trie
+                        eprintln!("[BUNDLE-STATE-DEBUG] ZOMBIE RETAINED via zombie_sink: {:?}", raw_address);
+                        accounts.insert(address, account);
+                    } else if was_modified {
+                        // Modified empty account: delete from trie (EIP-161 cleanup)
+                        accounts.insert(address, None);
+                    }
+                    // If empty and NOT modified and NOT zombie, skip entirely (preserve existing trie leaf)
+                } else {
+                    // Non-empty account should be stored in trie
+                    accounts.insert(address, account);
+                }
+            } else if !storage.is_empty() {
+                // CRITICAL FIX: If account.info is None but we have storage changes,
+                // we need to include the account in the accounts map using original_info
+                // so that the trie leaf gets rebuilt with the new storage root.
+                if let Some(ref orig_info) = original_info {
+                    let orig_account: Account = orig_info.into();
+                    eprintln!("[BUNDLE-STATE-DEBUG] Using original_info for {:?}: nonce={}, balance={}", 
+                        raw_address, orig_account.nonce, orig_account.balance);
+                    if orig_account.is_empty() {
+                        if is_zombie {
+                            eprintln!("[BUNDLE-STATE-DEBUG] ZOMBIE RETAINED (orig_info) via zombie_sink: {:?}", raw_address);
+                            accounts.insert(address, Some(orig_account));
+                        } else {
+                            accounts.insert(address, None);
+                        }
+                    } else {
+                        accounts.insert(address, Some(orig_account));
+                    }
+                } else {
+                    eprintln!("[BUNDLE-STATE-DEBUG] WARNING: Account {:?} has storage changes but no info and no original_info!", raw_address);
+                }
+            }
+            // Note: if account is None (info not loaded) and no storage changes, we don't insert anything
             if !storage.is_empty() {
                 storages.insert(address, storage);
             }
         }
-        Self { accounts, storages }
+        
+        // Populate retain_empty_accounts from zombie_sink
+        let retain_empty_accounts = crate::zombie_sink::peek_hashed().into_iter().collect();
+        if !crate::zombie_sink::is_empty() {
+            eprintln!("[ZOMBIE-SINK-DEBUG] from_bundle_state (rayon): setting retain_empty_accounts with {} zombie accounts",
+                crate::zombie_sink::len());
+        }
+        
+        Self { accounts, storages, retain_empty_accounts }
     }
 
     /// Initialize [`HashedPostState`] from bundle state.
@@ -88,29 +191,112 @@ impl HashedPostState {
             .into_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
-                let hashed_account = account.info.as_ref().map(Into::into);
+                let hashed_account: Option<Account> = account.info.as_ref().map(Into::into);
+                // CONSENSUS-CRITICAL: Only include storage slots that actually changed.
+                // In go-ethereum, only dirtyStorage slots are written to the trie.
+                // Filter out slots where present_value == previous_or_original_value.
+                let changed_storage_count = account.storage.iter()
+                    .filter(|(_, value)| value.present_value != value.previous_or_original_value)
+                    .count();
                 let hashed_storage = HashedStorage::from_plain_storage(
                     account.status,
-                    account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
+                    account.storage.iter()
+                        .filter(|(_, value)| value.present_value != value.previous_or_original_value)
+                        .map(|(slot, value)| (slot, &value.present_value)),
                 );
-                (hashed_address, (hashed_account, hashed_storage))
+                
+                // DEBUG: Log accounts with storage changes but no info
+                if changed_storage_count > 0 && account.info.is_none() {
+                    eprintln!("[BUNDLE-STATE-DEBUG] Account {:?} has {} changed storage slots but info=None, original_info={:?}, status={:?}",
+                        address, changed_storage_count, account.original_info.is_some(), account.status);
+                }
+                
+                (hashed_address, (hashed_account, hashed_storage, *address, account.info.is_some(), account.original_info.clone(), account.status, changed_storage_count))
             })
-            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
+            .collect::<Vec<_>>();
 
         let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
         let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        for (address, (account, storage)) in hashed {
-            // CONSENSUS-CRITICAL: Only insert non-None accounts to match go-ethereum's
-            // IntermediateRoot(deleteEmptyObjects=true) behavior for Arbitrum and other chains.
-            // Empty accounts (None) must not be included in the state trie.
-            if account.is_some() {
-                accounts.insert(address, account);
+        for (address, (account, storage, raw_address, info_present, original_info, status, changed_storage_count)) in hashed {
+            // DEBUG: Log all accounts in bundle state
+            eprintln!("[BUNDLE-STATE-DEBUG] Processing {:?}: info_present={}, original_info={:?}, status={:?}, changed_storage_count={}, storage_empty={}",
+                raw_address, info_present, original_info.is_some(), status, changed_storage_count, storage.is_empty());
+            
+            // CONSENSUS-CRITICAL: Match go-ethereum's IntermediateRoot(deleteEmptyObjects=true) behavior.
+            // - Non-empty accounts (nonce>0 OR balance>0 OR has code): insert as Some(account)
+            // - Empty accounts that were MODIFIED: insert as None to mark for deletion (EIP-161 cleanup)
+            // - Empty accounts that were only LOADED (not modified): skip entirely (preserve existing trie leaf)
+            // - None accounts (info not loaded): skip entirely (no change to trie)
+            //
+            // CRITICAL FIX: Only delete empty accounts if they were actually modified.
+            // If an empty account was only loaded (read but not mutated), we must NOT delete it
+            // because it may be a zombie account that was preserved in a previous block.
+            // This matches go-ethereum's behavior where only "dirty" accounts are considered for deletion.
+            
+            // Check zombie accounts from thread-local sink (Arbitrum-specific).
+            // Zombie accounts are accounts that were deleted in a previous tx and resurrected
+            // via CreateZombieIfDeleted. They must be retained in the trie even though empty.
+            let zombie_accounts = crate::zombie_sink::peek_hashed();
+            if !zombie_accounts.is_empty() {
+                eprintln!("[ZOMBIE-THREAD-DEBUG] from_bundle_state: checking zombie_sink on thread {:?}, found {} accounts",
+                    std::thread::current().id(), zombie_accounts.len());
             }
+            let is_zombie = zombie_accounts.contains(&address);
+            
+            // Check if the account was actually modified (not just loaded)
+            let was_modified = !status.is_not_modified();
+            
+            if let Some(ref acc) = account {
+                if acc.is_empty() {
+                    if is_zombie {
+                        // Zombie account: retain as empty account in trie
+                        eprintln!("[BUNDLE-STATE-DEBUG] ZOMBIE RETAINED via zombie_sink: {:?}", raw_address);
+                        accounts.insert(address, account);
+                    } else if was_modified {
+                        // Modified empty account: delete from trie (EIP-161 cleanup)
+                        accounts.insert(address, None);
+                    }
+                    // If empty and NOT modified and NOT zombie, skip entirely (preserve existing trie leaf)
+                } else {
+                    // Non-empty account should be stored in trie
+                    accounts.insert(address, account);
+                }
+            } else if !storage.is_empty() {
+                // CRITICAL FIX: If account.info is None but we have storage changes,
+                // we need to include the account in the accounts map using original_info
+                // so that the trie leaf gets rebuilt with the new storage root.
+                if let Some(ref orig_info) = original_info {
+                    let orig_account: Account = orig_info.into();
+                    eprintln!("[BUNDLE-STATE-DEBUG] Using original_info for {:?}: nonce={}, balance={}", 
+                        raw_address, orig_account.nonce, orig_account.balance);
+                    if orig_account.is_empty() {
+                        if is_zombie {
+                            eprintln!("[BUNDLE-STATE-DEBUG] ZOMBIE RETAINED (orig_info) via zombie_sink: {:?}", raw_address);
+                            accounts.insert(address, Some(orig_account));
+                        } else {
+                            accounts.insert(address, None);
+                        }
+                    } else {
+                        accounts.insert(address, Some(orig_account));
+                    }
+                } else {
+                    eprintln!("[BUNDLE-STATE-DEBUG] WARNING: Account {:?} has storage changes but no info and no original_info!", raw_address);
+                }
+            }
+            // Note: if account is None (info not loaded) and no storage changes, we don't insert anything
             if !storage.is_empty() {
                 storages.insert(address, storage);
             }
         }
-        Self { accounts, storages }
+        
+        // Populate retain_empty_accounts from zombie_sink
+        let retain_empty_accounts = crate::zombie_sink::peek_hashed().into_iter().collect();
+        if !crate::zombie_sink::is_empty() {
+            eprintln!("[ZOMBIE-SINK-DEBUG] from_bundle_state (non-rayon): setting retain_empty_accounts with {} zombie accounts",
+                crate::zombie_sink::len());
+        }
+        
+        Self { accounts, storages, retain_empty_accounts }
     }
 
     /// Construct [`HashedPostState`] from a single [`HashedStorage`].
@@ -118,6 +304,7 @@ impl HashedPostState {
         Self {
             accounts: HashMap::default(),
             storages: HashMap::from_iter([(hashed_address, storage)]),
+            retain_empty_accounts: B256Set::default(),
         }
     }
 
@@ -303,6 +490,7 @@ impl HashedPostState {
 
     fn extend_inner(&mut self, other: Cow<'_, Self>) {
         self.accounts.extend(other.accounts.iter().map(|(&k, &v)| (k, v)));
+        self.retain_empty_accounts.extend(other.retain_empty_accounts.iter().copied());
 
         self.storages.reserve(other.storages.len());
         match other {
@@ -387,6 +575,7 @@ impl HashedPostState {
     pub fn clear(&mut self) {
         self.accounts.clear();
         self.storages.clear();
+        self.retain_empty_accounts.clear();
     }
 }
 
@@ -421,10 +610,24 @@ impl HashedStorage {
         status: AccountStatus,
         storage: impl IntoIterator<Item = (&'a U256, &'a U256)>,
     ) -> Self {
-        Self::from_iter(
-            status.was_destroyed(),
-            storage.into_iter().map(|(key, value)| (keccak256(B256::from(*key)), *value)),
-        )
+        // DEBUG: Log the first few storage slot hashing operations
+        let mut count = 0;
+        let hashed_storage: Vec<(B256, U256)> = storage.into_iter().map(|(key, value)| {
+            let plain_key = B256::from(*key);
+            let hashed_key = keccak256(plain_key);
+            if count < 3 {
+                eprintln!("[FROM-PLAIN-STORAGE-DEBUG] slot {} plain_key={:?} -> hashed_key={:?} value={:?}",
+                    count, plain_key, hashed_key, value);
+            }
+            count += 1;
+            (hashed_key, *value)
+        }).collect();
+        
+        if count > 0 {
+            eprintln!("[FROM-PLAIN-STORAGE-DEBUG] Total {} slots hashed, wiped={}", count, status.was_destroyed());
+        }
+        
+        Self::from_iter(status.was_destroyed(), hashed_storage)
     }
 
     /// Construct [`PrefixSetMut`] from hashed storage.

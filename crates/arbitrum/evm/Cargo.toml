@@ -25,6 +25,7 @@ reth-primitives = { path = "../../primitives", default-features = false, feature
 reth-primitives-traits = { path = "../../primitives-traits", default-features = false, features = ["std"] }
 reth-arbitrum-primitives = { path = "../primitives", default-features = false, features = ["std", "serde", "reth-codec"] }
 reth-arbitrum-chainspec = { path = "../chainspec", default-features = false, features = ["std"] }
+reth-trie-common = { path = "../../trie/common", default-features = false, features = ["std"] }
 reth-rpc-eth-api = { path = "../../rpc/rpc-eth-api", default-features = false, optional = true }
 reth-arbitrum-payload = { path = "../payload", default-features = false, features = ["std"] }
 
@@ -42,9 +43,10 @@ reth-payload-builder = { path = "../../payload/builder" }
 reth-evm-ethereum = { path = "../../ethereum/evm", default-features = false, features = ["std"] }
 
 # revm (workspace)
-revm.workspace = true
+revm = { workspace = true, features = ["optional_eip3607"] }
 revm-state.workspace = true
 revm-database.workspace = true
+revm-context = { workspace = true, features = ["optional_eip3607"] }
 
 # Compression
 brotli.workspace = true
@@ -62,5 +64,8 @@ alloy-consensus.workspace = true
 alloy-primitives.workspace = true
 alloy-evm.workspace = true
 alloy-eips.workspace = true
+alloy-rlp.workspace = true
+alloy-hardforks.workspace = true
 revm-context-interface.workspace = true
 tracing.workspace = true
+once_cell.workspace = true

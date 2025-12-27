@@ -12,6 +12,7 @@ use crate::retryables::{Retryables, DefaultRetryables};
 
 pub struct PredeployCallContext {
     pub block_number: u64,
+    pub l1_block_number: u64,
     pub block_hashes: alloc::vec::Vec<B256>,
     pub chain_id: U256,
     pub os_version: u64,
@@ -185,6 +186,7 @@ impl PredeployHandler for ArbSys {
                     beneficiary: Address::ZERO,
                     call_to: Address::ZERO,
                     call_data: Bytes::default(),
+                    callvalue: U256::ZERO,
                     l1_base_fee: ctx.basefee,
                     submission_fee: U256::ZERO,
                     max_submission_cost: U256::MAX,
@@ -301,6 +303,7 @@ impl PredeployHandler for ArbRetryableTx {
                     beneficiary: Address::ZERO,
                     call_to: Address::ZERO,
                     call_data: input.clone(),
+                    callvalue: U256::ZERO,
                     l1_base_fee: ctx.basefee,
                     submission_fee: U256::ZERO,
                     max_submission_cost: U256::MAX,
@@ -726,6 +729,7 @@ mod tests {
     pub(crate) fn mk_ctx() -> PredeployCallContext {
         PredeployCallContext {
             block_number: 100,
+            l1_block_number: 0,
             block_hashes: alloc::vec::Vec::new(),
             chain_id: U256::from(42161u64),
             os_version: 0,
@@ -1334,6 +1338,7 @@ mod tests {
         let addr_owner = address!("0000000000000000000000000000000000000070");
         let ctx = PredeployCallContext {
             block_number: 100,
+            l1_block_number: 0,
             block_hashes: alloc::vec::Vec::new(),
             chain_id: U256::from(42161u64),
             os_version: 0,

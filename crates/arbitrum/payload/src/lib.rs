@@ -23,6 +23,38 @@ use alloy_eips::eip7685::Requests;
 use alloy_consensus::proofs::calculate_transaction_root;
 use alloy_consensus::{Block, EMPTY_OMMER_ROOT_HASH};
 
+/// Arbitrum-specific execution payload V3 that includes the nonce field.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ArbExecutionPayloadV3 {
+    pub parent_hash: B256,
+    pub fee_recipient: Address,
+    pub state_root: B256,
+    pub receipts_root: B256,
+    pub logs_bloom: Bloom,
+    pub prev_randao: B256,
+    #[serde(with = "alloy_serde::quantity")]
+    pub block_number: u64,
+    #[serde(with = "alloy_serde::quantity")]
+    pub gas_limit: u64,
+    #[serde(with = "alloy_serde::quantity")]
+    pub gas_used: u64,
+    #[serde(with = "alloy_serde::quantity")]
+    pub timestamp: u64,
+    pub extra_data: Bytes,
+    pub base_fee_per_gas: U256,
+    pub block_hash: B256,
+    pub transactions: Vec<Bytes>,
+    pub withdrawals: Vec<Withdrawal>,
+    #[serde(with = "alloy_serde::quantity")]
+    pub blob_gas_used: u64,
+    #[serde(with = "alloy_serde::quantity")]
+    pub excess_blob_gas: u64,
+    /// Arbitrum-specific: nonce carries transaction count info
+    #[serde(default)]
+    pub nonce: B64,
+}
+
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct ArbPayloadV1 {
     pub fee_recipient: Address,
@@ -143,6 +175,34 @@ impl ArbExecutionData {
             block_hash: ep.block_hash,
         }
     }
+
+    /// Create from Arbitrum-specific payload V3 that includes nonce.
+    pub fn v3_arb(payload: ArbExecutionPayloadV3, parent_beacon_block_root: B256) -> Self {
+        let v1 = ArbPayloadV1 {
+            fee_recipient: payload.fee_recipient,
+            prev_randao: payload.prev_randao,
+            gas_limit: payload.gas_limit,
+            base_fee_per_gas: payload.base_fee_per_gas,
+            extra_data: payload.extra_data.clone(),
+            block_number: payload.block_number,
+            timestamp: payload.timestamp,
+            gas_used: payload.gas_used,
+            transactions: payload.transactions.clone(),
+            withdrawals: Some(payload.withdrawals.clone()),
+            state_root: payload.state_root,
+            receipts_root: payload.receipts_root,
+            logs_bloom: payload.logs_bloom,
+        };
+        ArbExecutionData {
+            payload: ArbPayload { v1 },
+            sidecar: ArbSidecar {
+                parent_beacon_block_root: Some(parent_beacon_block_root),
+                nonce: payload.nonce,
+            },
+            parent_hash: payload.parent_hash,
+            block_hash: payload.block_hash,
+        }
+    }
 }
 
 impl ExecutionPayload for ArbExecutionData {
@@ -248,6 +308,12 @@ impl ArbExecutionData {
         let transactions = txs?;
         let tx_root = calculate_transaction_root(&transactions);
         let v1 = self.payload.as_v1();
+        // Arbitrum block hash computation uses pre-Shanghai header format:
+        // - Does NOT include withdrawals_root in hash
+        // - Does NOT include parent_beacon_block_root in hash
+        // - Does NOT include blob_gas_used/excess_blob_gas in hash
+        // The parent_beacon_block_root is stored in the sidecar and used
+        // for EVM execution (beacon block root precompile) but NOT for block hash.
         let header = alloy_consensus::Header {
             parent_hash: self.parent_hash,
             ommers_hash: EMPTY_OMMER_ROOT_HASH,
@@ -269,7 +335,7 @@ impl ArbExecutionData {
             blob_gas_used: None,
             excess_blob_gas: None,
             requests_hash: None,
-            parent_beacon_block_root: self.sidecar.parent_beacon_block_root,
+            parent_beacon_block_root: None, // Arbitrum: NOT included in block hash
         };
         let withdrawals: Option<Withdrawals> =
             v1.withdrawals.clone().map(Into::into);

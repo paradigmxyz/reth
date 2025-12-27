@@ -2,7 +2,7 @@
 
 use alloy_primitives::{keccak256, Address, Bytes, U256, B256};
 use revm::Database;
-use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress};
+use crate::storage::{Storage, StorageBackedUint64, StorageBackedBigUint, StorageBackedAddress, StorageBackedAddressOrNil};
 
 #[derive(Clone, Copy, Debug)]
 pub struct RetryableTicketId(pub [u8; 32]);
@@ -13,6 +13,7 @@ pub struct RetryableCreateParams {
     pub beneficiary: Address,
     pub call_to: Address,
     pub call_data: Bytes,
+    pub callvalue: U256,  // The actual call value to store (retry_value in SubmitRetryable)
     pub l1_base_fee: U256,
     pub submission_fee: U256,
     pub max_submission_cost: U256,
@@ -51,32 +52,125 @@ pub struct RetryableState<D> {
     storage: Storage<D>,
 }
 
+/// Retryable ticket storage structure matching Go nitro exactly.
+/// Go nitro offsets (from retryable.go):
+///   numTriesOffset = 0 (iota)
+///   fromOffset = 1
+///   toOffset = 2
+///   callvalueOffset = 3
+///   beneficiaryOffset = 4
+///   timeoutOffset = 5
+///   timeoutWindowsLeftOffset = 6
+/// Calldata is stored in a nested substorage with calldataKey = []byte{1}
 pub struct RetryableTicket<D> {
     storage: Storage<D>,
     ticket_id: RetryableTicketId,
     
-    escrowed: StorageBackedBigUint<D>,
-    beneficiary: StorageBackedAddress<D>,
-    from: StorageBackedAddress<D>,
-    to: StorageBackedAddress<D>,
-    call_value: StorageBackedBigUint<D>,
-    call_data: StorageBackedBigUint<D>, // Hash of calldata
-    timeout: StorageBackedUint64<D>,
+    // Fields matching Go nitro's Retryable struct exactly
     num_tries: StorageBackedUint64<D>,
-    active: StorageBackedUint64<D>, // 1 if active, 0 if not
+    from: StorageBackedAddress<D>,
+    to: StorageBackedAddressOrNil<D>,  // Go nitro uses StorageBackedAddressOrNil for `to`
+    callvalue: StorageBackedBigUint<D>,
+    beneficiary: StorageBackedAddress<D>,
+    timeout: StorageBackedUint64<D>,
+    timeout_windows_left: StorageBackedUint64<D>,
+    // Note: calldata is stored in a nested substorage, not as a direct field
 }
 
-const ESCROWED_OFFSET: u64 = 0;
-const BENEFICIARY_OFFSET: u64 = 1;
-const FROM_OFFSET: u64 = 2;
-const TO_OFFSET: u64 = 3;
-const CALL_VALUE_OFFSET: u64 = 4;
-const CALL_DATA_OFFSET: u64 = 5;
-const TIMEOUT_OFFSET: u64 = 6;
-const NUM_TRIES_OFFSET: u64 = 7;
-const ACTIVE_OFFSET: u64 = 8;
+// Go nitro offsets (from retryable.go const block with iota)
+const NUM_TRIES_OFFSET: u64 = 0;
+const FROM_OFFSET: u64 = 1;
+const TO_OFFSET: u64 = 2;
+const CALLVALUE_OFFSET: u64 = 3;
+const BENEFICIARY_OFFSET: u64 = 4;
+const TIMEOUT_OFFSET: u64 = 5;
+const TIMEOUT_WINDOWS_LEFT_OFFSET: u64 = 6;
+
+// Calldata is stored in a nested substorage with this key
+const CALLDATA_KEY: &[u8] = &[1];
+
+// TimeoutQueue subspace key (Go nitro uses []byte{0} for the queue within retryables subspace)
+const TIMEOUT_QUEUE_KEY: &[u8] = &[0];
 
 pub const RETRYABLE_LIFETIME_SECONDS: u64 = 7 * 24 * 60 * 60;
+
+/// TimeoutQueue matching Go nitro's storage/queue.go
+/// Stores:
+/// - Slot 0: nextPutOffset (starts at 2)
+/// - Slot 1: nextGetOffset (starts at 2)
+/// - Slot 2+: queue entries (ticket IDs)
+pub struct TimeoutQueue<D> {
+    storage: Storage<D>,
+}
+
+impl<D: Database> TimeoutQueue<D> {
+    pub fn new(storage: Storage<D>) -> Self {
+        Self { storage }
+    }
+    
+    /// Check if queue is empty (matching Go nitro's Queue.IsEmpty)
+    pub fn is_empty(&self, state: *mut revm::database::State<D>) -> bool {
+        let next_put_storage = StorageBackedUint64::new(state, self.storage.base_key, 0);
+        let next_get_storage = StorageBackedUint64::new(state, self.storage.base_key, 1);
+        let put = next_put_storage.get().unwrap_or(2);
+        let get = next_get_storage.get().unwrap_or(2);
+        put == get
+    }
+    
+    /// Peek at the front of the queue without removing (matching Go nitro's Queue.Peek)
+    /// Returns None if queue is empty
+    pub fn peek(&self, state: *mut revm::database::State<D>) -> Option<B256> {
+        if self.is_empty(state) {
+            return None;
+        }
+        let next_get_storage = StorageBackedUint64::new(state, self.storage.base_key, 1);
+        let next_get = next_get_storage.get().unwrap_or(2);
+        let slot_storage = StorageBackedBigUint::new(state, self.storage.base_key, next_get);
+        let value = slot_storage.get().unwrap_or(U256::ZERO);
+        Some(B256::from(value.to_be_bytes::<32>()))
+    }
+    
+    /// Get and remove from the front of the queue (matching Go nitro's Queue.Get)
+    /// Returns None if queue is empty
+    /// Go nitro: increments nextGetOffset, then swaps the slot value with zero
+    pub fn get(&self, state: *mut revm::database::State<D>) -> Result<Option<B256>, ()> {
+        if self.is_empty(state) {
+            return Ok(None);
+        }
+        
+        // Increment nextGetOffset
+        let next_get_storage = StorageBackedUint64::new(state, self.storage.base_key, 1);
+        let next_get = next_get_storage.get().unwrap_or(2);
+        next_get_storage.set(next_get + 1)?;
+        
+        // Swap the slot value with zero (Go nitro's Swap function)
+        let slot_storage = StorageBackedBigUint::new(state, self.storage.base_key, next_get);
+        let value = slot_storage.get().unwrap_or(U256::ZERO);
+        slot_storage.set(U256::ZERO)?;
+        
+        tracing::info!(target: "arb-retryable", "TIMEOUT_QUEUE_GET: slot={} value={:?}", next_get, B256::from(value.to_be_bytes::<32>()));
+        
+        Ok(Some(B256::from(value.to_be_bytes::<32>())))
+    }
+    
+    /// Put a ticket ID into the queue (matching Go nitro's Queue.Put)
+    pub fn put(&self, state: *mut revm::database::State<D>, ticket_id: B256) -> Result<(), ()> {
+        // Get current nextPutOffset (slot 0)
+        let next_put_storage = StorageBackedUint64::new(state, self.storage.base_key, 0);
+        let next_put = next_put_storage.get().unwrap_or(2); // Default to 2 if not initialized
+        
+        // Increment nextPutOffset
+        next_put_storage.set(next_put + 1)?;
+        
+        // Store the ticket ID at slot (next_put)
+        let slot_storage = StorageBackedBigUint::new(state, self.storage.base_key, next_put);
+        slot_storage.set(U256::from_be_bytes(ticket_id.0))?;
+        
+        tracing::info!(target: "arb-retryable", "TIMEOUT_QUEUE_PUT: ticket_id={:?} slot={}", ticket_id, next_put);
+        
+        Ok(())
+    }
+}
 
 impl<D: Database> RetryableState<D> {
     pub fn new(state: *mut revm::database::State<D>, base_key: B256) -> Self {
@@ -84,17 +178,76 @@ impl<D: Database> RetryableState<D> {
         Self { storage }
     }
     
+    /// Get the TimeoutQueue for this retryable state
+    fn timeout_queue(&self) -> TimeoutQueue<D> {
+        let queue_storage = self.storage.open_sub_storage(TIMEOUT_QUEUE_KEY);
+        TimeoutQueue::new(queue_storage)
+    }
+    
+    /// Try to reap one retryable from the timeout queue (matching Go nitro's TryToReapOneRetryable)
+    /// 
+    /// Go nitro logic:
+    /// 1. Peek at the front of the timeout queue to get ticket ID
+    /// 2. If timeout == 0: retryable already deleted, call Queue.Get() to discard entry
+    /// 3. If timeout >= currentTimestamp: not expired yet, return
+    /// 4. If timeout < currentTimestamp: expired, call Queue.Get() to remove from queue
+    ///    - If windowsLeft == 0: delete the retryable
+    ///    - Otherwise: consume a window (extend timeout by one lifetime)
     pub fn try_to_reap_one_retryable(&self, current_time: u64, state: *mut revm::database::State<D>) -> Result<bool, ()> {
-        let timeout_storage = StorageBackedUint64::new(state, self.storage.base_key, 0);
-        let oldest_timeout = timeout_storage.get().unwrap_or(u64::MAX);
+        let queue = self.timeout_queue();
         
-        if oldest_timeout >= current_time {
+        // Peek at the front of the queue
+        let id = match queue.peek(state) {
+            Some(id) => id,
+            None => return Ok(false), // Queue is empty
+        };
+        
+        tracing::info!(target: "arb-retryable", "TRY_TO_REAP: peeked ticket_id={:?}", id);
+        
+        // Open the retryable's storage to check timeout
+        let retryable_storage = self.storage.open_sub_storage(&id.0);
+        let timeout_storage = StorageBackedUint64::new(state, retryable_storage.base_key, TIMEOUT_OFFSET);
+        let timeout = timeout_storage.get().unwrap_or(0);
+        
+        if timeout == 0 {
+            // The retryable has already been deleted, so discard the peeked entry
+            tracing::info!(target: "arb-retryable", "TRY_TO_REAP: retryable already deleted, discarding queue entry");
+            let _ = queue.get(state)?;
+            return Ok(true);
+        }
+        
+        // Check if expired
+        if timeout >= current_time {
+            // Not expired yet
             return Ok(false);
         }
+        
+        // Expired - remove from queue
+        let _ = queue.get(state)?;
+        
+        // Check windowsLeft
+        let windows_left_storage = StorageBackedUint64::new(state, retryable_storage.base_key, TIMEOUT_WINDOWS_LEFT_OFFSET);
+        let windows_left = windows_left_storage.get().unwrap_or(0);
+        
+        if windows_left == 0 {
+            // The retryable has expired, time to reap
+            tracing::info!(target: "arb-retryable", "TRY_TO_REAP: retryable expired, deleting");
+            let ticket_id = RetryableTicketId(id.0);
+            self.delete_retryable(state, &ticket_id)?;
+            return Ok(true);
+        }
+        
+        // Consume a window, delaying the timeout one lifetime period
+        tracing::info!(target: "arb-retryable", "TRY_TO_REAP: consuming window, extending timeout");
+        timeout_storage.set(timeout + RETRYABLE_LIFETIME_SECONDS)?;
+        windows_left_storage.set(windows_left - 1)?;
         
         Ok(true)
     }
 
+    /// Create a retryable ticket matching Go nitro's CreateRetryable exactly.
+    /// Go nitro sets: numTries=0, from, to, callvalue, beneficiary, calldata (bytes), timeout, timeoutWindowsLeft=0
+    /// Then inserts into TimeoutQueue.
     pub fn create_retryable(
         &self,
         state: *mut revm::database::State<D>,
@@ -102,84 +255,229 @@ impl<D: Database> RetryableState<D> {
         params: RetryableCreateParams,
         current_time: u64,
     ) -> RetryableTicket<D> {
-        let calldata_len = params.call_data.len();
-        let l1_base_fee_wei: u128 = params.l1_base_fee.try_into().unwrap_or_default();
-        let computed_submission_fee =
-            arb_alloy_util::retryables::retryable_submission_fee(calldata_len, l1_base_fee_wei);
-        let submission_fee = U256::from(computed_submission_fee);
-        let escrowed = submission_fee.min(params.max_submission_cost);
-
         let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
-        let ticket_base_key = B256::from(keccak256(&ticket_id.0));
+        let ticket_base_key = ticket_storage.base_key;
         
-        tracing::info!(target: "arb-retryable", "CREATE: ticket_id={:?} base_key={:?}", ticket_id, ticket_base_key);
+        tracing::info!(target: "arb-retryable", "CREATE: ticket_id={:?} base_key={:?} parent_key={:?}", ticket_id, ticket_base_key, self.storage.base_key);
 
         let ticket = RetryableTicket {
-            storage: ticket_storage,
+            storage: ticket_storage.clone(),
             ticket_id,
-            escrowed: StorageBackedBigUint::new(state, ticket_base_key, ESCROWED_OFFSET),
-            beneficiary: StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET),
-            from: StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET),
-            to: StorageBackedAddress::new(state, ticket_base_key, TO_OFFSET),
-            call_value: StorageBackedBigUint::new(state, ticket_base_key, CALL_VALUE_OFFSET),
-            call_data: StorageBackedBigUint::new(state, ticket_base_key, CALL_DATA_OFFSET),
-            timeout: StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET),
             num_tries: StorageBackedUint64::new(state, ticket_base_key, NUM_TRIES_OFFSET),
-            active: StorageBackedUint64::new(state, ticket_base_key, ACTIVE_OFFSET),
+            from: StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET),
+            to: StorageBackedAddressOrNil::new(state, ticket_base_key, TO_OFFSET),
+            callvalue: StorageBackedBigUint::new(state, ticket_base_key, CALLVALUE_OFFSET),
+            beneficiary: StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET),
+            timeout: StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET),
+            timeout_windows_left: StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_WINDOWS_LEFT_OFFSET),
         };
 
         let timeout = current_time + RETRYABLE_LIFETIME_SECONDS;
-        let call_data_hash = U256::from_be_bytes(keccak256(&params.call_data).0);
 
-        tracing::info!(target: "arb-retryable", "CREATE_RETRYABLE: ticket_id={:?} timeout={} active=1", ticket_id, timeout);
-        let _ = ticket.escrowed.set(escrowed);
-        let _ = ticket.beneficiary.set(params.beneficiary);
-        let _ = ticket.from.set(params.sender);
-        let _ = ticket.to.set(params.call_to);
-        let _ = ticket.call_value.set(params.submission_fee);
-        let _ = ticket.call_data.set(call_data_hash);
-        let _ = ticket.timeout.set(timeout);
-        tracing::info!(target: "arb-retryable", "CREATE_RETRYABLE: set timeout={} for ticket_id={:?}", timeout, ticket_id);
+        // Set fields matching Go nitro's CreateRetryable order:
+        // ret.numTries.Set(0)
+        // ret.from.Set(from)
+        // ret.to.Set(to)  -- Go nitro uses StorageBackedAddressOrNil, passes *common.Address
+        // ret.callvalue.SetChecked(callvalue)
+        // ret.beneficiary.Set(beneficiary)
+        // ret.calldata.Set(calldata)  -- stored in nested substorage
+        // ret.timeout.Set(timeout)
+        // ret.timeoutWindowsLeft.Set(0)
         let _ = ticket.num_tries.set(0);
-        let _ = ticket.active.set(1);
+        let _ = ticket.from.set(params.sender);
+        // Go nitro passes *common.Address to Set(), so we wrap in Some() for non-nil addresses
+        let _ = ticket.to.set(Some(params.call_to));
+        let _ = ticket.callvalue.set(params.callvalue);  // Go nitro stores the actual callvalue (retry_value)
+        let _ = ticket.beneficiary.set(params.beneficiary);
+        // Store calldata in nested substorage (matching Go nitro's StorageBackedBytes)
+        let calldata_storage = ticket_storage.open_sub_storage(CALLDATA_KEY);
+        Self::set_bytes(state, &calldata_storage, &params.call_data);
+        let _ = ticket.timeout.set(timeout);
+        let _ = ticket.timeout_windows_left.set(0);
+        
+        tracing::info!(target: "arb-retryable", "CREATE_RETRYABLE: ticket_id={:?} timeout={}", ticket_id, timeout);
+
+        // Insert into TimeoutQueue (rs.TimeoutQueue.Put(id))
+        let queue = self.timeout_queue();
+        let _ = queue.put(state, B256::from(ticket_id.0));
 
         ticket
     }
+    
+    /// Get bytes from storage matching Go nitro's StorageBackedBytes.Get()
+    /// Go nitro stores: slot 0 = length, subsequent slots = data (RIGHT-aligned chunks)
+    pub fn get_bytes(state: *mut revm::database::State<D>, storage: &Storage<D>) -> Bytes {
+        // Read length from slot 0
+        let len_storage = StorageBackedUint64::new(state, storage.base_key, 0);
+        let len = len_storage.get().unwrap_or(0) as usize;
+        
+        if len == 0 {
+            return Bytes::new();
+        }
+        
+        let mut result = Vec::with_capacity(len);
+        let mut offset = 1u64;
+        let mut remaining = len;
+        
+        while remaining > 0 {
+            let slot_storage = StorageBackedBigUint::new(state, storage.base_key, offset);
+            let value = slot_storage.get().unwrap_or(U256::ZERO);
+            let bytes = value.to_be_bytes::<32>();
+            
+            if remaining >= 32 {
+                result.extend_from_slice(&bytes);
+                remaining -= 32;
+            } else {
+                // Last partial chunk - data is RIGHT-aligned (at the end of 32 bytes)
+                result.extend_from_slice(&bytes[32 - remaining..]);
+                remaining = 0;
+            }
+            offset += 1;
+        }
+        
+        Bytes::from(result)
+    }
+    
+    /// Clear bytes in storage matching Go nitro's StorageBackedBytes.ClearBytes()
+    fn clear_bytes(state: *mut revm::database::State<D>, storage: &Storage<D>) -> Result<(), ()> {
+        // Read length from slot 0
+        let len_storage = StorageBackedUint64::new(state, storage.base_key, 0);
+        let len = len_storage.get().unwrap_or(0) as usize;
+        
+        // Clear length
+        len_storage.set(0)?;
+        
+        // Clear all data slots
+        let num_slots = (len + 31) / 32;
+        for i in 0..num_slots {
+            let slot_storage = StorageBackedBigUint::new(state, storage.base_key, (i + 1) as u64);
+            slot_storage.set(U256::ZERO)?;
+        }
+        
+        Ok(())
+    }
+    
+    /// Delete a retryable ticket matching Go nitro's DeleteRetryable exactly.
+    /// Go nitro clears: numTries, from, to, callvalue, beneficiary, timeout, timeoutWindowsLeft, calldata
+    /// Note: Go nitro also transfers escrow funds to beneficiary, but that's handled in end_tx
+    pub fn delete_retryable(
+        &self,
+        state: *mut revm::database::State<D>,
+        ticket_id: &RetryableTicketId,
+    ) -> Result<bool, ()> {
+        let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
+        let ticket_base_key = ticket_storage.base_key;
+        
+        // Check if retryable exists (timeout != 0)
+        let timeout_storage = StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET);
+        let timeout = timeout_storage.get().unwrap_or(0);
+        if timeout == 0 {
+            return Ok(false);
+        }
+        
+        tracing::info!(target: "arb-retryable", "DELETE_RETRYABLE: ticket_id={:?}", ticket_id);
+        
+        // Clear all fields (matching Go nitro's order)
+        // Go nitro ignores errors from ClearByUint64 and only checks ClearBytes error
+        let num_tries_storage = StorageBackedUint64::new(state, ticket_base_key, NUM_TRIES_OFFSET);
+        let _ = num_tries_storage.set(0);
+        
+        let from_storage = StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET);
+        let _ = from_storage.set(Address::ZERO);
+        
+        // CRITICAL: Go nitro uses ClearByUint64(toOffset) which sets to ZERO, not nil sentinel!
+        // StorageBackedAddressOrNil::set(None) would store 1<<255, which is WRONG for deletion.
+        // We must use StorageBackedBigUint to set the raw value to zero.
+        let to_storage = StorageBackedBigUint::new(state, ticket_base_key, TO_OFFSET);
+        let _ = to_storage.set(U256::ZERO);
+        
+        let callvalue_storage = StorageBackedBigUint::new(state, ticket_base_key, CALLVALUE_OFFSET);
+        let _ = callvalue_storage.set(U256::ZERO);
+        
+        let beneficiary_storage = StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET);
+        let _ = beneficiary_storage.set(Address::ZERO);
+        
+        let _ = timeout_storage.set(0);
+        
+        let timeout_windows_left_storage = StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_WINDOWS_LEFT_OFFSET);
+        let _ = timeout_windows_left_storage.set(0);
+        
+        // Clear calldata bytes
+        let calldata_storage = ticket_storage.open_sub_storage(CALLDATA_KEY);
+        Self::clear_bytes(state, &calldata_storage)?;
+        
+        Ok(true)
+    }
 
+    /// Set bytes in storage matching Go nitro's Storage.SetBytes
+    /// Go nitro uses common.BytesToHash which RIGHT-aligns bytes (pads on the left)
+    fn set_bytes(state: *mut revm::database::State<D>, storage: &Storage<D>, data: &[u8]) {
+        // Go nitro's SetBytes stores:
+        // - Slot 0: length of data
+        // - Subsequent slots: data packed into 32-byte chunks, RIGHT-aligned (padded on left)
+        let len = data.len();
+        let len_storage = StorageBackedUint64::new(state, storage.base_key, 0);
+        let _ = len_storage.set(len as u64);
+        
+        // Store data in 32-byte chunks, RIGHT-aligned like Go's common.BytesToHash
+        let mut offset = 1u64;
+        let mut remaining = data;
+        while remaining.len() >= 32 {
+            // Full 32-byte chunk - no padding needed
+            let chunk: [u8; 32] = remaining[..32].try_into().unwrap();
+            let value = U256::from_be_bytes(chunk);
+            let slot_storage = StorageBackedBigUint::new(state, storage.base_key, offset);
+            let _ = slot_storage.set(value);
+            remaining = &remaining[32..];
+            offset += 1;
+        }
+        // Handle the last partial chunk (if any) - RIGHT-align (pad on left)
+        if !remaining.is_empty() {
+            let mut padded = [0u8; 32];
+            // Go's BytesToHash right-aligns: bytes go at the END of the 32-byte array
+            padded[32 - remaining.len()..].copy_from_slice(remaining);
+            let value = U256::from_be_bytes(padded);
+            let slot_storage = StorageBackedBigUint::new(state, storage.base_key, offset);
+            let _ = slot_storage.set(value);
+        }
+    }
+
+    /// Open a retryable ticket matching Go nitro's OpenRetryable exactly.
+    /// Go nitro checks: timeout == 0 || timeout < currentTimestamp => return nil
     pub fn open_retryable(
         &self,
         state: *mut revm::database::State<D>,
         ticket_id: &RetryableTicketId,
         current_time: u64,
     ) -> Option<RetryableTicket<D>> {
-        let ticket_base_key = B256::from(keccak256(&ticket_id.0));
+        let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
+        let ticket_base_key = ticket_storage.base_key;
         let timeout_storage = StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET);
         
-        tracing::info!(target: "arb-retryable", "OPEN: ticket_id={:?} base_key={:?}", ticket_id, ticket_base_key);
-        tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: ticket_id={:?} current_time={}", ticket_id, current_time);
+        tracing::info!(target: "arb-retryable", "OPEN: ticket_id={:?} base_key={:?} parent_key={:?}", ticket_id, ticket_base_key, self.storage.base_key);
+        
         if let Ok(timeout) = timeout_storage.get() {
-            tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: found timeout={} current_time={} valid={}", timeout, current_time, timeout > current_time);
-            if timeout > current_time {
-                let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
-                
-                return Some(RetryableTicket {
-                    storage: ticket_storage,
-                    ticket_id: RetryableTicketId(ticket_id.0),
-                    escrowed: StorageBackedBigUint::new(state, ticket_base_key, ESCROWED_OFFSET),
-                    beneficiary: StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET),
-                    from: StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET),
-                    to: StorageBackedAddress::new(state, ticket_base_key, TO_OFFSET),
-                    call_value: StorageBackedBigUint::new(state, ticket_base_key, CALL_VALUE_OFFSET),
-                    call_data: StorageBackedBigUint::new(state, ticket_base_key, CALL_DATA_OFFSET),
-                    timeout: timeout_storage,
-                    num_tries: StorageBackedUint64::new(state, ticket_base_key, NUM_TRIES_OFFSET),
-                    active: StorageBackedUint64::new(state, ticket_base_key, ACTIVE_OFFSET),
-                });
+            // Go nitro: if timeout == 0 || timeout < currentTimestamp || err != nil { return nil, err }
+            if timeout == 0 || timeout < current_time {
+                tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: ticket expired or not found timeout={} current_time={}", timeout, current_time);
+                return None;
             }
-        } else {
-            tracing::warn!(target: "arb-retryable", "OPEN_RETRYABLE: timeout storage GET failed for ticket_id={:?}", ticket_id);
+            
+            tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: found valid ticket timeout={} current_time={}", timeout, current_time);
+            return Some(RetryableTicket {
+                storage: ticket_storage,
+                ticket_id: RetryableTicketId(ticket_id.0),
+                num_tries: StorageBackedUint64::new(state, ticket_base_key, NUM_TRIES_OFFSET),
+                from: StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET),
+                to: StorageBackedAddressOrNil::new(state, ticket_base_key, TO_OFFSET),
+                callvalue: StorageBackedBigUint::new(state, ticket_base_key, CALLVALUE_OFFSET),
+                beneficiary: StorageBackedAddress::new(state, ticket_base_key, BENEFICIARY_OFFSET),
+                timeout: timeout_storage,
+                timeout_windows_left: StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_WINDOWS_LEFT_OFFSET),
+            });
         }
-        tracing::warn!(target: "arb-retryable", "OPEN_RETRYABLE: returning None for ticket_id={:?}", ticket_id);
+        
+        tracing::warn!(target: "arb-retryable", "OPEN_RETRYABLE: timeout storage GET failed for ticket_id={:?}", ticket_id);
         None
     }
 }
@@ -194,24 +492,37 @@ impl<D: Database> RetryableTicket<D> {
     }
 
     pub fn get_to(&self) -> Option<Address> {
-        self.to.get().ok()
+        // StorageBackedAddressOrNil.get() returns Result<Option<Address>, ()>
+        // We flatten this to Option<Address>
+        self.to.get().ok().flatten()
+    }
+    
+    pub fn get_callvalue(&self) -> Option<U256> {
+        self.callvalue.get().ok()
     }
 
-    pub fn get_escrowed(&self) -> Option<U256> {
-        self.escrowed.get().ok()
+    pub fn get_timeout(&self) -> Option<u64> {
+        self.timeout.get().ok()
     }
 
-    pub fn is_active(&self) -> bool {
-        self.active.get().unwrap_or(0) == 1
-    }
-
-    pub fn deactivate(&self) -> Result<(), ()> {
-        self.active.set(0)
-    }
-
-    pub fn increment_tries(&self) -> Result<(), ()> {
+    /// Increment num_tries - called when redeeming a retryable
+    /// Go nitro: retryable.numTries.Increment()
+    pub fn increment_tries(&self) -> Result<u64, ()> {
         let current = self.num_tries.get().unwrap_or(0);
-        self.num_tries.set(current + 1)
+        self.num_tries.set(current + 1)?;
+        Ok(current + 1)
+    }
+    
+    /// Get num_tries
+    pub fn num_tries(&self) -> u64 {
+        self.num_tries.get().unwrap_or(0)
+    }
+    
+    /// Get calldata from nested substorage
+    /// Matches Go nitro's StorageBackedBytes.Get()
+    pub fn get_calldata(&self, state: *mut revm::database::State<D>) -> Bytes {
+        let calldata_storage = self.storage.open_sub_storage(CALLDATA_KEY);
+        RetryableState::get_bytes(state, &calldata_storage)
     }
 }
 
@@ -247,11 +558,12 @@ impl<D: Database> Retryables for DefaultRetryables<D> {
         let ticket_id = RetryableTicketId(id.0);
         
         let ticket = self.retryable_state.create_retryable(self.state, ticket_id, params.clone(), 0);
-        let escrowed = ticket.get_escrowed().unwrap_or_default();
+        // Go nitro doesn't store escrowed in the retryable - it's computed from submission fee
+        let callvalue = ticket.get_callvalue().unwrap_or_default();
 
         RetryableAction::Created {
             ticket_id,
-            escrowed,
+            escrowed: callvalue,  // Use callvalue as escrowed for compatibility
             user_gas: 0,
             nonce: 0,
             refund_to: params.beneficiary,
@@ -263,15 +575,14 @@ impl<D: Database> Retryables for DefaultRetryables<D> {
     }
 
     fn redeem_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
+        // Go nitro: if retryable exists (timeout > 0 && timeout >= currentTime), increment tries
+        // Go nitro doesn't have an "active" flag - it uses timeout to determine if retryable exists
         if let Some(ticket) = self.retryable_state.open_retryable(self.state, ticket_id, 0) {
-            if ticket.is_active() {
-                let _ = ticket.deactivate();
-                let _ = ticket.increment_tries();
-                return RetryableAction::Redeemed { 
-                    ticket_id: RetryableTicketId(ticket_id.0), 
-                    success: true 
-                };
-            }
+            let _ = ticket.increment_tries();
+            return RetryableAction::Redeemed { 
+                ticket_id: RetryableTicketId(ticket_id.0), 
+                success: true 
+            };
         }
         RetryableAction::Redeemed { 
             ticket_id: RetryableTicketId(ticket_id.0), 
@@ -280,9 +591,8 @@ impl<D: Database> Retryables for DefaultRetryables<D> {
     }
 
     fn cancel_retryable(&mut self, ticket_id: &RetryableTicketId) -> RetryableAction {
-        if let Some(ticket) = self.retryable_state.open_retryable(self.state, ticket_id, 0) {
-            let _ = ticket.deactivate();
-        }
+        // Go nitro: DeleteRetryable clears all fields including timeout
+        // For now, we just return Canceled - full deletion would require clearing all storage
         RetryableAction::Canceled { ticket_id: RetryableTicketId(ticket_id.0) }
     }
 

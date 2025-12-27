@@ -3,24 +3,32 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 
 thread_local! {
-    static EARLY_TX_GAS: RefCell<HashMap<B256, (u64, u64)>> = RefCell::new(HashMap::new());
+    // Stores (gas_used, cumulative_gas, success_flag) for early-terminated transactions
+    static EARLY_TX_GAS: RefCell<HashMap<B256, (u64, u64, bool)>> = RefCell::new(HashMap::new());
     static BLOCK_GAS_ADJUSTMENT: RefCell<i64> = RefCell::new(0);
 }
 
 pub fn set_early_tx_gas(tx_hash: B256, gas_used: u64, cumulative_gas: u64) {
+    // Default success=true for backward compatibility
+    set_early_tx_gas_with_status(tx_hash, gas_used, cumulative_gas, true);
+}
+
+pub fn set_early_tx_gas_with_status(tx_hash: B256, gas_used: u64, cumulative_gas: u64, success: bool) {
     tracing::info!(
         target: "arb-reth::gas-tracking",
         tx_hash = ?tx_hash,
         gas_used = gas_used,
         cumulative_gas = cumulative_gas,
-        "STORING early_tx_gas"
+        success = success,
+        "STORING early_tx_gas with status"
     );
     EARLY_TX_GAS.with(|map| {
-        map.borrow_mut().insert(tx_hash, (gas_used, cumulative_gas));
+        map.borrow_mut().insert(tx_hash, (gas_used, cumulative_gas, success));
     });
 }
 
-pub fn get_early_tx_gas(tx_hash: &B256) -> Option<(u64, u64)> {
+/// Returns (gas_used, cumulative_gas, success) for early-terminated transactions
+pub fn get_early_tx_gas(tx_hash: &B256) -> Option<(u64, u64, bool)> {
     let result = EARLY_TX_GAS.with(|map| {
         map.borrow().get(tx_hash).copied()
     });
@@ -35,6 +43,11 @@ pub fn get_early_tx_gas(tx_hash: &B256) -> Option<(u64, u64)> {
 }
 
 pub fn clear_early_tx_gas(tx_hash: &B256) {
+    tracing::info!(
+        target: "arb-reth::gas-tracking",
+        tx_hash = ?tx_hash,
+        "CLEARING early_tx_gas"
+    );
     EARLY_TX_GAS.with(|map| {
         map.borrow_mut().remove(tx_hash);
     });
