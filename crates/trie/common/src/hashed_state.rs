@@ -227,7 +227,7 @@ impl HashedPostState {
                         if storage_in_targets.contains(&slot) &&
                             !storage_added_removed_keys.is_some_and(|k| k.is_removed(&slot))
                         {
-                            return true
+                            return true;
                         }
 
                         storage_not_in_targets.storage.insert(slot, *value);
@@ -262,7 +262,7 @@ impl HashedPostState {
         });
         self.accounts.retain(|&address, account| {
             if targets.contains_key(&address) {
-                return true
+                return true;
             }
 
             state_updates_not_in_targets.accounts.insert(address, *account);
@@ -861,6 +861,7 @@ mod tests {
             nonce: 42,
             code_hash: B256::random(),
             code: Some(Bytecode::new_raw(Bytes::from(vec![1, 2]))),
+            account_id: None,
         };
 
         let mut storage = StorageWithOriginalValues::default();
@@ -905,6 +906,7 @@ mod tests {
             nonce: 1,
             code_hash: B256::random(),
             code: None,
+            account_id: None,
         };
 
         // Create hashed accounts with addresses.

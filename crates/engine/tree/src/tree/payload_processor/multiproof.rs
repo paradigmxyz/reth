@@ -157,7 +157,7 @@ impl ProofSequencer {
 
         // return early if we don't have the next expected proof
         if !self.pending_proofs.contains_key(&self.next_to_deliver) {
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
@@ -2058,7 +2058,9 @@ mod tests {
                     nonce: 1,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,
@@ -2074,7 +2076,9 @@ mod tests {
                     nonce: 2,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,
@@ -2134,7 +2138,9 @@ mod tests {
                         nonce: 1,
                         code_hash: Default::default(),
                         code: Default::default(),
+                        account_id: None,
                     },
+                    original_info: Box::new(revm_state::AccountInfo::default()),
                     transaction_id: Default::default(),
                     storage: Default::default(),
                     status: revm_state::AccountStatus::Touched,
@@ -2257,7 +2263,9 @@ mod tests {
                         nonce: 1,
                         code_hash: Default::default(),
                         code: Default::default(),
+                        account_id: None,
                     },
+                    original_info: Box::new(revm_state::AccountInfo::default()),
                     transaction_id: Default::default(),
                     storage: Default::default(),
                     status: revm_state::AccountStatus::Touched,
@@ -2385,7 +2393,9 @@ mod tests {
                     nonce: 1,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,
@@ -2402,7 +2412,9 @@ mod tests {
                     nonce: 2,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,
@@ -2504,7 +2516,9 @@ mod tests {
                     nonce: 1,
                     code_hash: Default::default(),
                     code: Default::default(),
+                    account_id: None,
                 },
+                original_info: Box::new(revm_state::AccountInfo::default()),
                 transaction_id: Default::default(),
                 storage: Default::default(),
                 status: revm_state::AccountStatus::Touched,
@@ -2597,7 +2611,9 @@ mod tests {
                         nonce: 1,
                         code_hash: Default::default(),
                         code: Default::default(),
+                        account_id: None,
                     },
+                    original_info: Box::new(revm_state::AccountInfo::default()),
                     transaction_id: Default::default(),
                     storage: Default::default(),
                     status: revm_state::AccountStatus::Touched,
