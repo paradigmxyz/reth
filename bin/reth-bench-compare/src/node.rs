@@ -211,6 +211,11 @@ impl NodeManager {
         cmd.arg("--");
         cmd.args(reth_args);
 
+        // Enable tracing-samply
+        if supports_samply_flags(&reth_args[0]) {
+            cmd.arg("--log.samply");
+        }
+
         // Set environment variable to disable log styling
         cmd.env("RUST_LOG_STYLE", "never");
 
@@ -551,4 +556,17 @@ impl NodeManager {
         info!("Unwound to block: {}", block_number);
         Ok(())
     }
+}
+
+fn supports_samply_flags(bin: &str) -> bool {
+    let mut cmd = std::process::Command::new(bin);
+    // NOTE: The flag to check must come before --help.
+    // We pass --help as a shortcut to not execute any command.
+    cmd.args(["--log.samply", "--help"]);
+    debug!(?cmd, "Checking samply flags support");
+    let Ok(output) = cmd.output() else {
+        return false;
+    };
+    debug!(?output, "Samply flags support check");
+    output.status.success()
 }
