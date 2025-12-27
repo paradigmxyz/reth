@@ -201,7 +201,7 @@ pub enum EthApiError {
 }
 
 impl EthApiError {
-    /// crates a new [`EthApiError::Other`] variant.
+    /// Creates a new [`EthApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
@@ -654,7 +654,7 @@ pub enum RpcInvalidTransactionError {
     /// The transaction is before Spurious Dragon and has a chain ID
     #[error("transactions before Spurious Dragon should not have a chain ID")]
     OldLegacyChainId,
-    /// The transitions is before Berlin and has access list
+    /// The transaction is before Berlin and has access list
     #[error("transactions before Berlin should not have access list")]
     AccessListNotSupported,
     /// `max_fee_per_blob_gas` is not supported for blocks before the Cancun hardfork.
@@ -700,7 +700,7 @@ pub enum RpcInvalidTransactionError {
 }
 
 impl RpcInvalidTransactionError {
-    /// crates a new [`RpcInvalidTransactionError::Other`] variant.
+    /// Creates a new [`RpcInvalidTransactionError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }

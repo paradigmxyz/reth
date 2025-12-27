@@ -1534,22 +1534,22 @@ impl TransportRpcModuleConfig {
         self
     }
 
-    /// Get a mutable reference to the
+    /// Get a mutable reference to the http module configuration.
     pub const fn http_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.http
     }
 
-    /// Get a mutable reference to the
+    /// Get a mutable reference to the ws module configuration.
     pub const fn ws_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.ws
     }
 
-    /// Get a mutable reference to the
+    /// Get a mutable reference to the ipc module configuration.
     pub const fn ipc_mut(&mut self) -> &mut Option<RpcModuleSelection> {
         &mut self.ipc
     }
 
-    /// Get a mutable reference to the
+    /// Get a mutable reference to the rpc module configuration.
     pub const fn config_mut(&mut self) -> &mut Option<RpcModuleConfig> {
         &mut self.config
     }
