@@ -14,7 +14,6 @@ pub(crate) struct CompilationManager {
     output_dir: PathBuf,
     git_manager: GitManager,
     features: String,
-    enable_profiling: bool,
 }
 
 impl CompilationManager {
@@ -24,9 +23,8 @@ impl CompilationManager {
         output_dir: PathBuf,
         git_manager: GitManager,
         features: String,
-        enable_profiling: bool,
     ) -> Result<Self> {
-        Ok(Self { repo_root, output_dir, git_manager, features, enable_profiling })
+        Ok(Self { repo_root, output_dir, git_manager, features })
     }
 
     /// Detect if the RPC endpoint is an Optimism chain
