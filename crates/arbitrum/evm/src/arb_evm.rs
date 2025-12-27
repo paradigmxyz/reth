@@ -4,6 +4,7 @@ use alloy_evm::{
     eth::EthEvmContext, precompiles::PrecompilesMap, Database, EvmEnv, EvmFactory, IntoTxEnv, Evm,
 };
 use crate::arbsys_precompile::{create_arbsys_precompile, ARBSYS_ADDRESS};
+use crate::arbgasinfo_precompile::{create_arbgasinfo_precompile, ARBGASINFO_ADDRESS};
 use alloy_evm::tx::{FromRecoveredTx, FromTxWithEncoded};
 use alloy_primitives::{Address, Bytes};
 use core::fmt::Debug;
@@ -287,6 +288,10 @@ impl EvmFactory for ArbEvmFactory {
         let (_, _, precompiles) = evm.components_mut();
         precompiles.apply_precompile(&ARBSYS_ADDRESS, |_| Some(arbsys_precompile));
         
+        // Register ArbGasInfo precompile at address 0x6c
+        let arbgasinfo_precompile = create_arbgasinfo_precompile();
+        precompiles.apply_precompile(&ARBGASINFO_ADDRESS, |_| Some(arbgasinfo_precompile));
+        
         evm
     }
 
@@ -302,6 +307,10 @@ impl EvmFactory for ArbEvmFactory {
         let arbsys_precompile = create_arbsys_precompile();
         let (_, _, precompiles) = evm.components_mut();
         precompiles.apply_precompile(&ARBSYS_ADDRESS, |_| Some(arbsys_precompile));
+        
+        // Register ArbGasInfo precompile at address 0x6c
+        let arbgasinfo_precompile = create_arbgasinfo_precompile();
+        precompiles.apply_precompile(&ARBGASINFO_ADDRESS, |_| Some(arbgasinfo_precompile));
         
         evm
     }

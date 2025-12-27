@@ -282,7 +282,13 @@ const SEND_TX_TO_L1_SELECTOR: [u8; 4] = [0x92, 0x8c, 0x16, 0x9a];
 /// WithdrawEth function selector: keccak256("withdrawEth(address)")[:4]
 const WITHDRAW_ETH_SELECTOR: [u8; 4] = [0x25, 0xe1, 0x60, 0x63];
 
-/// L2ToL1Tx event topic: keccak256("L2ToL1Tx(address,address,uint256,uint256,uint256,uint256,uint256,uint256,bytes)")
+/// ArbOSVersion function selector: keccak256("arbOSVersion()")[:4] = 0x051038f2
+const ARBOS_VERSION_SELECTOR: [u8; 4] = [0x05, 0x10, 0x38, 0xf2];
+
+/// ArbBlockNumber function selector: keccak256("arbBlockNumber()")[:4] = 0xa3b1b31d
+const ARB_BLOCK_NUMBER_SELECTOR: [u8; 4] = [0xa3, 0xb1, 0xb3, 0x1d];
+
+/// L2ToL1Tx event topic:keccak256("L2ToL1Tx(address,address,uint256,uint256,uint256,uint256,uint256,uint256,bytes)")
 fn l2_to_l1_tx_topic() -> B256 {
     keccak256(b"L2ToL1Tx(address,address,uint256,uint256,uint256,uint256,uint256,uint256,bytes)")
 }
@@ -331,6 +337,12 @@ fn arbsys_precompile_handler(mut input: PrecompileInput<'_>) -> PrecompileResult
         }
         WITHDRAW_ETH_SELECTOR => {
             handle_withdraw_eth(&mut input, exec_id)
+        }
+        ARBOS_VERSION_SELECTOR => {
+            handle_arbos_version(&mut input, exec_id)
+        }
+        ARB_BLOCK_NUMBER_SELECTOR => {
+            handle_arb_block_number(&mut input, exec_id)
         }
         _ => {
             // Unknown selector - revert
@@ -396,6 +408,79 @@ fn handle_withdraw_eth(input: &mut PrecompileInput<'_>, exec_id: u64) -> Precomp
     
     // WithdrawEth is just SendTxToL1 with empty calldata
     execute_send_tx_to_l1(input, destination, Bytes::new(), exec_id)
+}
+
+/// Handle ArbOSVersion call.
+/// Returns the current ArbOS version as a uint256.
+/// Go nitro returns: 55 + state.ArbOSVersion() (Nitro starts at version 56)
+fn handle_arbos_version(input: &mut PrecompileInput<'_>, exec_id: u64) -> PrecompileResult {
+    let internals = input.internals_mut();
+    
+    // Load the ArbOS state account first to ensure it's in the journal
+    let _ = internals.load_account(ARBOS_STATE_ADDRESS)
+        .map_err(|e| PrecompileError::other(format!("load_account failed for ArbOS state: {:?}", e)))?;
+    
+    // Read ArbOS version from storage at offset 0 in ArbOS state
+    // Go nitro stores the version at versionOffset = 0
+    // The slot is calculated using storage_key_map with empty storage key (root storage)
+    let arbos_version = {
+        // Go nitro uses storage_key_map with empty slice for root storage
+        // storage_key_map([], 0) = keccak256([] || key_bytes[0:31]) with key_bytes[31] preserved
+        let slot = compute_arbos_version_slot();
+        let value = internals.sload(ARBOS_STATE_ADDRESS, slot)
+            .map_err(|_| PrecompileError::other("failed to read ArbOS version"))?;
+        value.data.as_limbs()[0] // Get the u64 value
+    };
+    
+    // Go nitro returns: 55 + arbosVersion (Nitro starts at version 56)
+    let version = 55u64 + arbos_version;
+    
+    tracing::info!(
+        target: "arb::arbsys_precompile",
+        exec_id = exec_id,
+        arbos_version = arbos_version,
+        returned_version = version,
+        "ArbOSVersion called"
+    );
+    
+    // Return version as uint256 (32 bytes, big-endian)
+    let mut output = [0u8; 32];
+    output[24..32].copy_from_slice(&version.to_be_bytes());
+    
+    // Gas cost: 800 (SloadGasEIP2200 for reading version) + 3 (CopyGas for 32-byte output)
+    // Go nitro charges this via OpenArbosState (800) and resultCost (3) in precompile.go
+    const SLOAD_GAS_EIP2200: u64 = 800;
+    const COPY_GAS: u64 = 3; // params.CopyGas in Go
+    let gas_cost = SLOAD_GAS_EIP2200 + COPY_GAS;
+    
+    Ok(PrecompileOutput::new(gas_cost, output.to_vec().into()))
+}
+
+/// Handle ArbBlockNumber call.
+/// Returns the current L2 block number as a uint256.
+/// Go nitro implementation: return evm.Context.BlockNumber, nil
+fn handle_arb_block_number(input: &mut PrecompileInput<'_>, exec_id: u64) -> PrecompileResult {
+    let internals = input.internals_mut();
+    
+    // Get the current block number from the EVM context
+    let block_number = internals.block_number();
+    
+    tracing::info!(
+        target: "arb::arbsys_precompile",
+        exec_id = exec_id,
+        block_number = ?block_number,
+        "ArbBlockNumber called"
+    );
+    
+    // Return block number as uint256 (32 bytes, big-endian)
+    let output: [u8; 32] = block_number.to_be_bytes();
+    
+    // Gas cost: just the base precompile cost (3 for CopyGas)
+    // Go nitro doesn't charge any storage reads for this function
+    const COPY_GAS: u64 = 3;
+    let gas_cost = COPY_GAS;
+    
+    Ok(PrecompileOutput::new(gas_cost, output.to_vec().into()))
 }
 
 /// Execute the SendTxToL1 logic.
@@ -915,6 +1000,13 @@ fn compute_storage_slot(storage_key: &[u8], offset: u64) -> U256 {
     mapped[..boundary].copy_from_slice(&h.0[..boundary]);
     mapped[boundary] = key_bytes[boundary];
     U256::from_be_bytes(mapped)
+}
+
+/// Compute the storage slot for ArbOS version (offset 0 in root storage).
+/// Go nitro uses empty slice for root storage, so this is compute_storage_slot(&[], 0).
+fn compute_arbos_version_slot() -> U256 {
+    // versionOffset = 0 in Go nitro
+    compute_storage_slot(&[], 0)
 }
 
 /// Compute LevelAndLeaf position as U256.
