@@ -100,16 +100,30 @@ impl BanList {
         self.is_banned_peer(peer_id) || self.is_banned_ip(ip)
     }
 
-    /// checks the ban list to see if it contains the given ip
+    /// Checks the ban list to see if the given IP is currently banned.
+    ///
+    /// Returns `true` if the IP is banned and the ban has not expired.
+    /// Temporary bans are automatically considered expired if their timeout has passed.
     #[inline]
     pub fn is_banned_ip(&self, ip: &IpAddr) -> bool {
-        self.banned_ips.contains_key(ip)
+        match self.banned_ips.get(ip) {
+            Some(None) => true,                            // Permanent ban
+            Some(Some(until)) => Instant::now() <= *until, // Temporary ban - check if not expired
+            None => false,                                 // Not banned
+        }
     }
 
-    /// checks the ban list to see if it contains the given ip
+    /// Checks the ban list to see if the given peer is currently banned.
+    ///
+    /// Returns `true` if the peer is banned and the ban has not expired.
+    /// Temporary bans are automatically considered expired if their timeout has passed.
     #[inline]
     pub fn is_banned_peer(&self, peer_id: &PeerId) -> bool {
-        self.banned_peers.contains_key(peer_id)
+        match self.banned_peers.get(peer_id) {
+            Some(None) => true,                            // Permanent ban
+            Some(Some(until)) => Instant::now() <= *until, // Temporary ban - check if not expired
+            None => false,                                 // Not banned
+        }
     }
 
     /// Unbans the ip address
@@ -213,6 +227,63 @@ mod tests {
         ip = IpAddr::from([172, 16, 0, 0]);
         banlist.ban_ip(ip);
         assert!(!banlist.is_banned_ip(&ip));
+    }
+
+    #[test]
+    fn expired_peer_ban_is_not_banned() {
+        let peer = PeerId::new([1; 64]);
+        let mut banlist = BanList::default();
+        let now = Instant::now();
+        let past = now - std::time::Duration::from_secs(10);
+
+        banlist.ban_peer_until(peer, past);
+        assert!(!banlist.is_banned_peer(&peer));
+    }
+
+    #[test]
+    fn expired_ip_ban_is_not_banned() {
+        let ip = IpAddr::from([1, 1, 1, 1]);
+        let mut banlist = BanList::default();
+        let now = Instant::now();
+        let past = now - std::time::Duration::from_secs(10);
+
+        banlist.ban_ip_until(ip, past);
+        assert!(!banlist.is_banned_ip(&ip));
+    }
+
+    #[test]
+    fn active_temporary_peer_ban_is_banned() {
+        let peer = PeerId::new([1; 64]);
+        let mut banlist = BanList::default();
+        let now = Instant::now();
+        let future = now + std::time::Duration::from_secs(10);
+
+        banlist.ban_peer_until(peer, future);
+        assert!(banlist.is_banned_peer(&peer));
+    }
+
+    #[test]
+    fn active_temporary_ip_ban_is_banned() {
+        let ip = IpAddr::from([1, 1, 1, 1]);
+        let mut banlist = BanList::default();
+        let now = Instant::now();
+        let future = now + std::time::Duration::from_secs(10);
+
+        banlist.ban_ip_until(ip, future);
+        assert!(banlist.is_banned_ip(&ip));
+    }
+
+    #[test]
+    fn permanent_ban_remains_banned() {
+        let peer = PeerId::new([1; 64]);
+        let ip = IpAddr::from([1, 1, 1, 1]);
+        let mut banlist = BanList::default();
+
+        banlist.ban_peer(peer);
+        banlist.ban_ip(ip);
+
+        assert!(banlist.is_banned_peer(&peer));
+        assert!(banlist.is_banned_ip(&ip));
     }
 }
 
