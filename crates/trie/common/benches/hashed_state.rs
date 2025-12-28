@@ -5,7 +5,7 @@ use rayon::prelude::{IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::Account;
 use reth_trie_common::{HashedPostState, HashedStorage};
 
-/// Generate test data: (hashed_address, account, storage)
+/// Generate test data: (`hashed_address`, account, storage)
 fn generate_test_data(size: usize) -> Vec<(B256, Option<Account>, Option<HashedStorage>)> {
     (0..size)
         .map(|i| {
@@ -22,8 +22,7 @@ fn generate_test_data(size: usize) -> Vec<(B256, Option<Account>, Option<HashedS
                 })
             };
 
-            let storage = if i % 3 == 0 {
-                // ~33% have storage
+            let storage = (i % 3 == 0).then(|| {
                 let mut storage = HashedStorage::new(false);
                 // Add 5 storage slots per account with storage
                 for j in 0..5 {
@@ -31,10 +30,8 @@ fn generate_test_data(size: usize) -> Vec<(B256, Option<Account>, Option<HashedS
                         .storage
                         .insert(B256::from(keccak256_u64((i * 100 + j) as u64)), U256::from(j));
                 }
-                Some(storage)
-            } else {
-                None
-            };
+                storage
+            });
 
             (hashed_address, account, storage)
         })
@@ -46,13 +43,13 @@ fn keccak256_u64(n: u64) -> [u8; 32] {
     let mut bytes = [0u8; 32];
     bytes[24..].copy_from_slice(&n.to_be_bytes());
     // XOR with some pattern to spread bits
-    for i in 0..32 {
-        bytes[i] ^= ((n.wrapping_mul(0x9e3779b97f4a7c15) >> (i * 8)) & 0xff) as u8;
+    for (i, item) in bytes.iter_mut().enumerate() {
+        *item ^= ((n.wrapping_mul(0x9e3779b97f4a7c15) >> (i * 8)) & 0xff) as u8;
     }
     bytes
 }
 
-/// Comparison implementation: fold + reduce with HashMap (not used, kept for benchmarking)
+/// Comparison implementation: fold + reduce with `HashMap` (not used, kept for benchmarking)
 fn from_par_iter_fold_reduce(
     data: Vec<(B256, Option<Account>, Option<HashedStorage>)>,
 ) -> HashedPostState {
@@ -71,7 +68,7 @@ fn from_par_iter_fold_reduce(
 }
 
 /// Current implementation: collect to Vec (using rayon's optimized parallel collect), then
-/// sequentially collect to HashedPostState
+/// sequentially collect to `HashedPostState`
 fn from_par_iter_collect_twice(
     data: Vec<(B256, Option<Account>, Option<HashedStorage>)>,
 ) -> HashedPostState {
