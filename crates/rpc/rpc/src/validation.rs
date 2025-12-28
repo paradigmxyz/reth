@@ -111,6 +111,26 @@ where
     }
 }
 
+/// Spawns a validation task in a blocking context to prevent blocking the async runtime.
+///
+/// This macro follows the pattern established in `reth_rpc_eth_api::helpers::blocking_task`
+/// for spawning async validation work that should not block the main async runtime.
+/// It eliminates boilerplate by encapsulating oneshot channel creation, `spawn_blocking`
+/// invocation, and error handling.
+macro_rules! spawn_validation {
+    ($self:expr, $method:ident, $request:expr) => {{
+        let this = $self.clone();
+        let (tx, rx) = oneshot::channel();
+
+        $self.task_spawner.spawn_blocking(Box::pin(async move {
+            let result = Self::$method(&this, $request).await.map_err(ErrorObject::from);
+            let _ = tx.send(result);
+        }));
+
+        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+    }};
+}
+
 impl<Provider, E, T> ValidationApi<Provider, E, T>
 where
     Provider: BlockReaderIdExt<Header = <E::Primitives as NodePrimitives>::BlockHeader>
@@ -507,17 +527,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV3,
     ) -> RpcResult<()> {
-        let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking(Box::pin(async move {
-            let result = Self::validate_builder_submission_v3(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        }));
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        spawn_validation!(self, validate_builder_submission_v3, request)
     }
 
     /// Validates a block submitted to the relay
@@ -525,17 +535,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV4,
     ) -> RpcResult<()> {
-        let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking(Box::pin(async move {
-            let result = Self::validate_builder_submission_v4(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        }));
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        spawn_validation!(self, validate_builder_submission_v4, request)
     }
 
     /// Validates a block submitted to the relay
@@ -543,17 +543,7 @@ where
         &self,
         request: BuilderBlockValidationRequestV5,
     ) -> RpcResult<()> {
-        let this = self.clone();
-        let (tx, rx) = oneshot::channel();
-
-        self.task_spawner.spawn_blocking(Box::pin(async move {
-            let result = Self::validate_builder_submission_v5(&this, request)
-                .await
-                .map_err(ErrorObject::from);
-            let _ = tx.send(result);
-        }));
-
-        rx.await.map_err(|_| internal_rpc_err("Internal blocking task error"))?
+        spawn_validation!(self, validate_builder_submission_v5, request)
     }
 }
 
