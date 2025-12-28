@@ -130,7 +130,7 @@ mod tests {
 
         assert_eq!(result, "test_result");
     }
-    
+
     #[test]
     fn test_sload_sstore_metrics_exist() {
         let metrics = ExecutorMetrics::default();
