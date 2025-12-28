@@ -203,8 +203,7 @@ impl Drop for StateHookSender {
 }
 
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let hashed: Vec<_> = update
-        .into_par_iter()
+    update.into_par_iter()
         .filter_map(|(address, account)| {
             if !account.is_touched() {
                 return None;
@@ -235,17 +234,7 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
 
             Some((hashed_address, info, hashed_storage))
         })
-        .collect();
-
-    let mut hashed_state = HashedPostState::with_capacity(hashed.len());
-    for (hashed_address, info, hashed_storage) in hashed {
-        hashed_state.accounts.insert(hashed_address, info);
-        if let Some(storage) = hashed_storage {
-            hashed_state.storages.insert(hashed_address, storage);
-        }
-    }
-
-    hashed_state
+        .collect()
 }
 
 /// Input parameters for dispatching a multiproof calculation.
