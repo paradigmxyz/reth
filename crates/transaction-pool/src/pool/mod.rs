@@ -328,6 +328,34 @@ where
         );
     }
 
+    /// Extends the given vector with pooled transactions for the given hashes that are allowed to
+    /// be propagated.
+    pub fn append_pooled_transaction_elements(
+        &self,
+        tx_hashes: Vec<TxHash>,
+        limit: GetPooledTransactionLimit,
+        out: &mut Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>,
+    ) where
+        <V as TransactionValidator>::Transaction: EthPoolTransaction,
+    {
+        let transactions = self.get_all_propagatable(tx_hashes);
+        out.reserve(transactions.len());
+        let mut size = 0;
+        for transaction in transactions {
+            let encoded_len = transaction.encoded_length();
+            let Some(pooled) = self.to_pooled_transaction(transaction) else {
+                continue;
+            };
+
+            size += encoded_len;
+            out.push(pooled.into_inner());
+
+            if limit.exceeds(size) {
+                break
+            }
+        }
+    }
+
     /// Extends the given vector with the hashes of all transactions in the pool that can be
     /// propagated.
     pub fn append_pooled_transactions_hashes(&self, out: &mut Vec<TxHash>) {
@@ -409,23 +437,8 @@ where
     where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
-        let transactions = self.get_all_propagatable(tx_hashes);
-        let mut elements = Vec::with_capacity(transactions.len());
-        let mut size = 0;
-        for transaction in transactions {
-            let encoded_len = transaction.encoded_length();
-            let Some(pooled) = self.to_pooled_transaction(transaction) else {
-                continue;
-            };
-
-            size += encoded_len;
-            elements.push(pooled.into_inner());
-
-            if limit.exceeds(size) {
-                break
-            }
-        }
-
+        let mut elements = Vec::new();
+        self.append_pooled_transaction_elements(tx_hashes, limit, &mut elements);
         elements
     }
 
