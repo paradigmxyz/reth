@@ -1,19 +1,17 @@
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{keccak256, Address, Bytes, B256, U256};
+use alloy_primitives::{Address, B256, U256};
 use alloy_rpc_types_debug::ExecutionWitness;
 use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
+use reth_provider::{BlockExecutionOutput, StateProviderFactory};
 use reth_revm::{
-    database::StateProviderDatabase,
-    db::{BundleState, State},
-    witness::ExecutionWitnessRecord,
+    database::StateProviderDatabase, db::BundleState, witness::ExecutionWitnessRecord,
 };
 use reth_rpc_api::DebugApiClient;
 use reth_tracing::tracing::warn;
-use reth_trie::{updates::TrieUpdates, HashedStorage};
+use reth_trie::updates::TrieUpdates;
 use revm::state::AccountInfo;
 use revm_bytecode::Bytecode;
 use revm_database::{
@@ -165,6 +163,8 @@ where
         let witness_record = ExecutionWitnessRecord::from_executed_state(&db);
         let ExecutionWitnessRecord { hashed_state, codes, keys, .. } = witness_record;
 
+        // Get state_provider again for witness generation
+        let state_provider = self.provider.state_by_block_hash(parent_header.hash())?;
         let state = state_provider.witness(Default::default(), hashed_state)?;
         let witness = ExecutionWitness { state, codes, keys, ..Default::default() };
 
@@ -359,9 +359,10 @@ mod tests {
     use reth_chainspec::ChainSpec;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_evm_ethereum::EthEvmConfig;
-    use reth_provider::test_utils::MockEthProvider;
+    use reth_provider::{test_utils::MockEthProvider, StateProvider, StateProviderBox};
     use reth_revm::{
-        db::{BundleAccount, BundleState},
+        database::StateProviderDatabase,
+        db::{BundleAccount, BundleState, State},
         witness::ExecutionWitnessRecord,
     };
     use revm_database::states::reverts::AccountRevert;
@@ -483,21 +484,22 @@ mod tests {
             .with_bundle_update()
             .build();
 
-        // Insert contracts from the fixture into the state cache
-        for (code_hash, bytecode) in &bundle_state.contracts {
-            state.cache.contracts.insert(*code_hash, bytecode.clone());
-        }
-
         // Manually set the bundle state in the state object
+        // ExecutionWitnessRecord collects codes from both cache.contracts and
+        // bundle_state.contracts
         state.bundle_state = bundle_state.clone();
 
         // Use ExecutionWitnessRecord to unify with DebugApi::debug_execution_witness
         let witness_record = ExecutionWitnessRecord::from_executed_state(&state);
 
         // Verify that the returned data contains expected values
-        // Since we used the fixture data, we should have some codes and state
+        // ExecutionWitnessRecord collects codes from bundle_state.contracts
         assert!(!witness_record.codes.is_empty(), "Expected some bytecode entries");
-        assert!(!witness_record.hashed_state.accounts.is_empty(), "Expected some state entries");
+        assert_eq!(
+            witness_record.codes.len(),
+            bundle_state.contracts.len(),
+            "Codes should match contracts from bundle_state"
+        );
 
         // Verify the bundle state structure matches our fixture
         assert_eq!(bundle_state.state.len(), 3, "Expected 3 accounts from fixture");
@@ -640,12 +642,8 @@ mod tests {
 
         // Generate ExecutionWitness
         let state_witness = state_provider.witness(Default::default(), hashed_state).unwrap();
-        let execution_witness = ExecutionWitness {
-            state: state_witness,
-            codes,
-            keys,
-            ..Default::default()
-        };
+        let execution_witness =
+            ExecutionWitness { state: state_witness, codes, keys, ..Default::default() };
 
         // Verify result
         assert!(!execution_witness.codes.is_empty(), "Expected some codes");
