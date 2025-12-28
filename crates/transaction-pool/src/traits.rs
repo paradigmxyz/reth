@@ -346,6 +346,21 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         limit: GetPooledTransactionLimit,
     ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled>;
 
+    /// Extends the given vector with pooled transactions for the given hashes that are allowed to
+    /// be propagated.
+    ///
+    /// This adheres to the expected behavior of [`Self::get_pooled_transaction_elements`].
+    ///
+    /// Consumer: P2P
+    fn append_pooled_transaction_elements(
+        &self,
+        tx_hashes: &[TxHash],
+        limit: GetPooledTransactionLimit,
+        out: &mut Vec<<Self::Transaction as PoolTransaction>::Pooled>,
+    ) {
+        out.extend(self.get_pooled_transaction_elements(tx_hashes.to_vec(), limit));
+    }
+
     /// Returns the pooled transaction variant for the given transaction hash.
     ///
     /// This adheres to the expected behavior of

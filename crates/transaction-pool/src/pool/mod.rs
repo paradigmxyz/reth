@@ -332,7 +332,7 @@ where
     /// be propagated.
     pub fn append_pooled_transaction_elements(
         &self,
-        tx_hashes: Vec<TxHash>,
+        tx_hashes: &[TxHash],
         limit: GetPooledTransactionLimit,
         out: &mut Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>,
     ) where
@@ -438,7 +438,7 @@ where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
         let mut elements = Vec::new();
-        self.append_pooled_transaction_elements(tx_hashes, limit, &mut elements);
+        self.append_pooled_transaction_elements(&tx_hashes, limit, &mut elements);
         elements
     }
 
@@ -1146,12 +1146,13 @@ where
     /// If no transaction exists, it is skipped.
     fn get_all_propagatable(
         &self,
-        txs: Vec<TxHash>,
+        txs: &[TxHash],
     ) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
         if txs.is_empty() {
             return Vec::new()
         }
-        self.get_pool_data().get_all(txs).filter(|tx| tx.propagate).collect()
+        let pool = self.get_pool_data();
+        txs.iter().filter_map(|tx| pool.get(tx).filter(|tx| tx.propagate)).collect()
     }
 
     /// Notify about propagated transactions.
