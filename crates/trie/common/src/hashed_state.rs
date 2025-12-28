@@ -427,11 +427,6 @@ impl FromParallelIterator<(B256, Option<Account>, Option<HashedStorage>)> for Ha
     /// Parallel version of [`FromIterator`] for constructing [`HashedPostState`] from a parallel
     /// iterator.
     ///
-    /// This implementation first collects items into a [`Vec`] in parallel (which is very
-    /// efficient), then sequentially builds the [`HashedPostState`] using [`FromIterator`].
-    /// Benchmarks show this approach is 35-78% faster than parallel fold-reduce due to better
-    /// cache locality and avoiding HashMap merge overhead.
-    ///
     /// See [`FromIterator::from_iter`] for details on the expected input format.
     ///
     /// # Important
