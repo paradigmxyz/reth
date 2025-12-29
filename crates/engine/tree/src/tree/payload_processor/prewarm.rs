@@ -29,6 +29,7 @@ use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
 use metrics::{Counter, Gauge, Histogram};
+use rayon::prelude::*;
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_execution_types::ExecutionOutcome;
 use reth_metrics::Metrics;
@@ -766,33 +767,36 @@ where
 /// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
 /// given state.
 fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
-    let mut targets = MultiProofTargets::with_capacity(state.len());
-    let mut storage_targets = 0;
-    for (addr, account) in state {
-        // if the account was not touched, or if the account was selfdestructed, do not
-        // fetch proofs for it
-        //
-        // Since selfdestruct can only happen in the same transaction, we can skip
-        // prefetching proofs for selfdestructed accounts
-        //
-        // See: https://eips.ethereum.org/EIPS/eip-6780
-        if !account.is_touched() || account.is_selfdestructed() {
-            continue
-        }
-
-        let mut storage_set =
-            B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
-        for (key, slot) in account.storage {
-            // do nothing if unchanged
-            if !slot.is_changed() {
-                continue
+    let results: Vec<_> = state
+        .into_par_iter()
+        .filter_map(|(address, account)| {
+            if !account.is_touched() || account.is_selfdestructed() {
+                return None;
             }
 
-            storage_set.insert(keccak256(B256::new(key.to_be_bytes())));
-        }
+            let hashed_address = keccak256(address);
 
+            // Pre-allocate storage set
+            let mut storage_set =
+                B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
+            storage_set.extend(
+                account
+                    .storage
+                    .into_iter()
+                    .filter(|(_, slot)| slot.is_changed())
+                    .map(|(key, _)| keccak256(B256::new(key.to_be_bytes()))),
+            );
+
+            Some((hashed_address, storage_set))
+        })
+        .collect();
+
+    let mut targets = MultiProofTargets::default();
+    let mut storage_targets = 0usize;
+
+    for (hashed_address, storage_set) in results {
         storage_targets += storage_set.len();
-        targets.insert(keccak256(addr), storage_set);
+        targets.insert(hashed_address, storage_set);
     }
 
     (targets, storage_targets)
