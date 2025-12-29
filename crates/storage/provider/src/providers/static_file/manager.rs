@@ -1158,6 +1158,38 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(unwind_target.map(PipelineTarget::Unwind))
     }
 
+    /// Heals file-level (`NippyJar`) inconsistencies for eligible static file segments.
+    ///
+    /// Call before [`Self::check_consistency`] so files are internally consistent.
+    /// Uses the same segment-skip logic as [`Self::check_consistency`], but does not compare with
+    /// database checkpoints or prune against them. Healing may truncate to the last committed
+    /// config.
+    pub fn check_file_consistency<Provider>(&self, provider: &Provider) -> ProviderResult<()>
+    where
+        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
+    {
+        info!(target: "reth::cli", "Healing static file inconsistencies.");
+
+        for segment in self.segments_to_check(provider) {
+            let (initial_highest_block, highest_block) = self.maybe_heal_segment(segment)?;
+
+            // The updated `highest_block` may have decreased if we healed from a pruning
+            // interruption. The subsequent `check_consistency` call will detect this
+            // (checkpoint > healed_block) and request an unwind.
+            if initial_highest_block != highest_block {
+                info!(
+                    target: "reth::providers::static_file",
+                    ?initial_highest_block,
+                    ?highest_block,
+                    ?segment,
+                    "Healed segment, highest block changed."
+                );
+            }
+        }
+
+        Ok(())
+    }
+
     /// Returns the static file segments that should be checked/healed for this provider.
     fn segments_to_check<'a, Provider>(
         &'a self,
@@ -1166,10 +1198,15 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     where
         Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
     {
-        StaticFileSegment::iter().filter(move |segment| self.should_check_segment(provider, *segment))
+        StaticFileSegment::iter()
+            .filter(move |segment| self.should_check_segment(provider, *segment))
     }
 
-    fn should_check_segment<Provider>(&self, provider: &Provider, segment: StaticFileSegment) -> bool
+    fn should_check_segment<Provider>(
+        &self,
+        provider: &Provider,
+        segment: StaticFileSegment,
+    ) -> bool
     where
         Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
     {
@@ -1199,37 +1236,6 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 !EitherWriterDestination::senders(provider).is_database()
             }
         }
-    }
-
-    /// Heals file-level (`NippyJar`) inconsistencies for eligible static file segments.
-    ///
-    /// Call before [`Self::check_consistency`] so files are internally consistent. Uses the same
-    /// segment-skip logic as [`Self::check_consistency`], but does not compare with database
-    /// checkpoints or prune based on them. Healing may truncate files to the last committed config.
-    pub fn check_file_consistency<Provider>(&self, provider: &Provider) -> ProviderResult<()>
-    where
-        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
-    {
-        info!(target: "reth::cli", "Healing static file inconsistencies.");
-
-        for segment in self.segments_to_check(provider) {
-            let (initial_highest_block, highest_block) = self.maybe_heal_segment(segment)?;
-
-            // The updated `highest_block` may have decreased if we healed from a pruning
-            // interruption. The subsequent `check_consistency` call will detect this
-            // (checkpoint > healed_block) and request an unwind.
-            if initial_highest_block != highest_block {
-                info!(
-                    target: "reth::providers::static_file",
-                    ?initial_highest_block,
-                    ?highest_block,
-                    ?segment,
-                    "Healed segment, highest block changed."
-                );
-            }
-        }
-
-        Ok(())
     }
 
     /// Checks consistency of the latest static file segment and throws an error if at fault.
