@@ -23,13 +23,7 @@ use std::{collections::BTreeMap, ops::RangeBounds};
 /// Provides a lightweight implementation of the [`Database`] trait suitable
 /// for testing scenarios where actual database operations are not required.
 #[derive(Clone, Debug, Default)]
-pub struct DatabaseMock {
-    /// Internal data storage using a `BTreeMap`.
-    ///
-    /// TODO: Make the mock database table-aware by properly utilizing
-    /// this data structure to simulate realistic database behavior during testing.
-    pub data: BTreeMap<Vec<u8>, Vec<u8>>,
-}
+pub struct DatabaseMock {}
 
 impl Database for DatabaseMock {
     type TX = TxMock;
