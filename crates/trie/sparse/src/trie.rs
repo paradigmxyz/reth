@@ -299,7 +299,7 @@ pub struct SerialSparseTrie {
     /// Map from a path (nibbles) to its corresponding sparse trie node.
     /// This contains all of the revealed nodes in trie.
     nodes: HashMap<Nibbles, SparseNode>,
-    /// Branch node masks containing tree_mask and hash_mask for each path.
+    /// Branch node masks containing `tree_mask` and `hash_mask` for each path.
     /// - `tree_mask`: When a bit is set, the corresponding child subtree is stored in the
     ///   database.
     /// - `hash_mask`: When a bit is set, the corresponding child is stored as a hash in the
@@ -1626,6 +1626,13 @@ impl SerialSparseTrie {
                     let mut tree_mask = TrieMask::default();
                     let mut hash_mask = TrieMask::default();
                     let mut hashes = Vec::new();
+
+                    // Lazy lookup for branch node masks - shared across loop iterations
+                    let mut path_masks_storage = None;
+                    let mut path_masks = || {
+                        *path_masks_storage.get_or_insert_with(|| self.branch_node_masks.get(&path))
+                    };
+
                     for (i, child_path) in buffers.branch_child_buf.iter().enumerate() {
                         if buffers.rlp_node_stack.last().is_some_and(|e| &e.path == child_path) {
                             let RlpNodeStackItem {
@@ -1639,9 +1646,6 @@ impl SerialSparseTrie {
                                 // SAFETY: it's a child, so it's never empty
                                 let last_child_nibble = child_path.last().unwrap();
 
-                                // Get the branch node masks for this path once (single lookup)
-                                let path_masks = self.branch_node_masks.get(&path);
-
                                 // Determine whether we need to set trie mask bit.
                                 let should_set_tree_mask_bit = if let Some(store_in_db_trie) =
                                     child_node_type.store_in_db_trie()
@@ -1652,7 +1656,7 @@ impl SerialSparseTrie {
                                 } else {
                                     // A blinded node has the tree mask bit set
                                     child_node_type.is_hash() &&
-                                        path_masks.is_some_and(|masks| {
+                                        path_masks().is_some_and(|masks| {
                                             masks.tree_mask.is_bit_set(last_child_nibble)
                                         })
                                 };
@@ -1666,7 +1670,7 @@ impl SerialSparseTrie {
                                 let hash = child.as_hash().filter(|_| {
                                     child_node_type.is_branch() ||
                                         (child_node_type.is_hash() &&
-                                            path_masks.is_some_and(|masks| {
+                                            path_masks().is_some_and(|masks| {
                                                 masks.hash_mask.is_bit_set(last_child_nibble)
                                             }))
                                 });
@@ -1732,20 +1736,16 @@ impl SerialSparseTrie {
                                 hash.filter(|_| path.is_empty()),
                             );
                             updates.updated_nodes.insert(path, branch_node);
-                        } else if self.branch_node_masks.get(&path).is_some_and(|masks| {
-                            !masks.tree_mask.is_empty() || !masks.hash_mask.is_empty()
-                        }) {
-                            // If new tree and hash masks are empty, but previously they weren't, we
-                            // need to remove the node update and add the node itself to the list of
-                            // removed nodes.
+                        } else {
+                            // New tree and hash masks are empty - check previous state
+                            let prev_had_masks = path_masks().is_some_and(|m| {
+                                !m.tree_mask.is_empty() || !m.hash_mask.is_empty()
+                            });
                             updates.updated_nodes.remove(&path);
-                            updates.removed_nodes.insert(path);
-                        } else if self.branch_node_masks.get(&path).is_none_or(|masks| {
-                            masks.tree_mask.is_empty() && masks.hash_mask.is_empty()
-                        }) {
-                            // If new tree and hash masks are empty, and they were previously empty
-                            // as well, we need to remove the node update.
-                            updates.updated_nodes.remove(&path);
+                            if prev_had_masks {
+                                // Previously had masks, now empty - mark as removed
+                                updates.removed_nodes.insert(path);
+                            }
                         }
 
                         store_in_db_trie
