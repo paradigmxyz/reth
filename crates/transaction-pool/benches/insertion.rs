@@ -87,7 +87,8 @@ fn txpool_batch_insertion(c: &mut Criterion) {
                     let rt = tokio::runtime::Runtime::new().unwrap();
                     let pool = testing_pool();
                     let txs = generate_transactions(tx_count, sender_count);
-                    let (processor, request_tx) = BatchTxProcessor::new(pool, tx_count);
+                    let (processor, request_tx) =
+                        BatchTxProcessor::new(pool, tx_count, std::time::Duration::ZERO);
                     let processor_handle = rt.spawn(processor);
 
                     let mut batch_requests = Vec::with_capacity(tx_count);
