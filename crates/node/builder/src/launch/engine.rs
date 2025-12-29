@@ -9,7 +9,7 @@ use crate::{
     NodeBuilderWithComponents, NodeComponents, NodeComponentsBuilder, NodeHandle, NodeTypesAdapter,
 };
 use alloy_consensus::BlockHeader;
-use futures::{stream_select, StreamExt};
+use futures::{stream_select, FutureExt, StreamExt};
 use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
