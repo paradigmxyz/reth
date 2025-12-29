@@ -409,6 +409,13 @@ impl NewPooledTransactionHashes68 {
         }
     }
 
+    /// Shrinks the capacity of the message vectors as much as possible.
+    pub fn shrink_to_fit(&mut self) {
+        self.hashes.shrink_to_fit();
+        self.sizes.shrink_to_fit();
+        self.types.shrink_to_fit()
+    }
+
     /// Consumes and appends a transaction
     pub fn with_transaction<T: SignedTransaction>(mut self, tx: &T) -> Self {
         self.push(tx);
