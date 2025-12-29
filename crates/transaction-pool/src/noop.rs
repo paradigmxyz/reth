@@ -155,6 +155,14 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
+    fn append_pooled_transaction_elements(
+        &self,
+        _tx_hashes: &[TxHash],
+        _limit: GetPooledTransactionLimit,
+        _out: &mut Vec<<Self::Transaction as PoolTransaction>::Pooled>,
+    ) {
+    }
+
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
