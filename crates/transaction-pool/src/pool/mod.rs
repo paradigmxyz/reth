@@ -339,7 +339,6 @@ where
         <V as TransactionValidator>::Transaction: EthPoolTransaction,
     {
         let transactions = self.get_all_propagatable(tx_hashes);
-        out.reserve(transactions.len());
         let mut size = 0;
         for transaction in transactions {
             let encoded_len = transaction.encoded_length();
@@ -439,6 +438,7 @@ where
     {
         let mut elements = Vec::new();
         self.append_pooled_transaction_elements(&tx_hashes, limit, &mut elements);
+        elements.shrink_to_fit();
         elements
     }
 
