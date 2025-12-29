@@ -25,7 +25,7 @@ reth-revm.workspace = true
 reth-rpc-server-types.workspace = true
 reth-rpc-convert.workspace = true
 reth-tasks.workspace = true
-reth-transaction-pool.workspace = true
+reth-transaction-pool = { workspace = true, features = ["serde"] }
 reth-trie.workspace = true
 
 # ethereum
