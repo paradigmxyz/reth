@@ -290,7 +290,7 @@ impl EngineNodeLauncher {
         let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
-        ctx.task_executor().spawn_critical("consensus engine", Box::pin(async move {
+        let consensus_engine = async move {
             if let Some(initial_target) = initial_target {
                 debug!(target: "reth::cli", %initial_target,  "start backfill sync");
                 // network_handle's sync state is already initialized at Syncing
@@ -302,7 +302,9 @@ impl EngineNodeLauncher {
             let mut res = Ok(());
             let mut shutdown_rx = shutdown_rx.fuse();
 
-            // advance the chain and await payloads built locally to add into the engine api tree handler to prevent re-execution if that block is received as payload from the CL
+            // advance the chain and await payloads built locally to add into the engine api
+            // tree handler to prevent re-execution if that block is received as payload from
+            // the CL
             loop {
                 tokio::select! {
                     shutdown_req = &mut shutdown_rx => {
@@ -344,19 +346,21 @@ impl EngineNodeLauncher {
                                 if let Some(head) = ev.canonical_header() {
                                     // Once we're progressing via live sync, we can consider the node is not syncing anymore
                                     network_handle.update_sync_state(SyncState::Idle);
-                                                                        let head_block = Head {
+                                    let head_block = Head {
                                         number: head.number(),
                                         hash: head.hash(),
                                         difficulty: head.difficulty(),
                                         timestamp: head.timestamp(),
-                                        total_difficulty: chainspec.final_paris_total_difficulty().filter(|_| chainspec.is_paris_active_at_block(head.number())).unwrap_or_default(),
+                                        total_difficulty: chainspec.final_paris_total_difficulty()
+                                            .filter(|_| chainspec.is_paris_active_at_block(head.number()))
+                                            .unwrap_or_default(),
                                     };
                                     network_handle.update_status(head_block);
 
                                     let updated = BlockRangeUpdate {
                                         earliest: provider.earliest_block_number().unwrap_or_default(),
-                                        latest:head.number(),
-                                        latest_hash:head.hash()
+                                        latest: head.number(),
+                                        latest_hash: head.hash(),
                                     };
                                     network_handle.update_block_range(updated);
                                 }
@@ -368,7 +372,10 @@ impl EngineNodeLauncher {
             }
 
             let _ = exit.send(res);
-        }));
+        };
+        ctx.task_executor().spawn_critical("consensus engine", Box::pin(consensus_engine));
+
+        let engine_events_for_ethstats = engine_events.new_listener();
 
         let full_node = FullNode {
             evm_config: ctx.components().evm_config().clone(),
@@ -390,7 +397,7 @@ impl EngineNodeLauncher {
         // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;
 
-        ctx.spawn_ethstats().await?;
+        ctx.spawn_ethstats(engine_events_for_ethstats).await?;
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(

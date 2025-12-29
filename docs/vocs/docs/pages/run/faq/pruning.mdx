@@ -129,6 +129,9 @@ The following tables describe RPC methods available in the full node.
 
 | RPC                                 | Note                                                       |
 | ----------------------------------- | ---------------------------------------------------------- |
+| `debug_chainConfig`                 |                                                            |
+| `debug_codeByHash`                  | Only for the last 10064 blocks                             |
+| `debug_dbGet`                       |                                                            |
 | `debug_executionWitness`            | Only for the last 10064 blocks                             |
 | `debug_executionWitnessByBlockHash` | Only for the last 10064 blocks                             |
 | `debug_getBadBlocks`                |                                                            |
@@ -136,6 +139,8 @@ The following tables describe RPC methods available in the full node.
 | `debug_getRawHeader`                |                                                            |
 | `debug_getRawReceipts`              | Only for the last 10064 blocks and Beacon Deposit Contract |
 | `debug_getRawTransaction`           |                                                            |
+| `debug_getRawTransactions`          |                                                            |
+| `debug_stateRootWithUpdates`        | Only for the last 10064 blocks                             |
 | `debug_traceBlock`                  | Only for the last 10064 blocks                             |
 | `debug_traceBlockByHash`            | Only for the last 10064 blocks                             |
 | `debug_traceBlockByNumber`          | Only for the last 10064 blocks                             |
@@ -235,6 +240,9 @@ The following tables describe the requirements for prune segments, per RPC metho
 
 | RPC / Segment                       | Sender Recovery | Transaction Lookup | Receipts | Account History | Storage History |
 | ----------------------------------- | --------------- | ------------------ | -------- | --------------- | --------------- |
+| `debug_chainConfig`                 | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_codeByHash`                  | ✅              | ✅                 | ✅       | ❌              | ✅              |
+| `debug_dbGet`                       | ✅              | ✅                 | ✅       | ✅              | ✅              |
 | `debug_executionWitness`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `debug_executionWitnessByBlockHash` | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `debug_getBadBlocks`                | ✅              | ✅                 | ✅       | ✅              | ✅              |
@@ -242,6 +250,8 @@ The following tables describe the requirements for prune segments, per RPC metho
 | `debug_getRawHeader`                | ✅              | ✅                 | ✅       | ✅              | ✅              |
 | `debug_getRawReceipts`              | ✅              | ✅                 | ❌       | ✅              | ✅              |
 | `debug_getRawTransaction`           | ✅              | ❌                 | ✅       | ✅              | ✅              |
+| `debug_getRawTransactions`          | ✅              | ✅                 | ✅       | ✅              | ✅              |
+| `debug_stateRootWithUpdates`        | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `debug_traceBlock`                  | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `debug_traceBlockByHash`            | ✅              | ✅                 | ✅       | ❌              | ❌              |
 | `debug_traceBlockByNumber`          | ✅              | ✅                 | ✅       | ❌              | ❌              |

@@ -18,7 +18,7 @@ pub use rayon::*;
 use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use revm_database::{AccountStatus, BundleAccount};
 
@@ -50,7 +50,7 @@ impl HashedPostState {
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
-        let hashed = state
+        state
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
@@ -59,19 +59,14 @@ impl HashedPostState {
                     account.status,
                     account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                 );
-                (hashed_address, (hashed_account, hashed_storage))
-            })
-            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
 
-        let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        for (address, (account, storage)) in hashed {
-            accounts.insert(address, account);
-            if !storage.is_empty() {
-                storages.insert(address, storage);
-            }
-        }
-        Self { accounts, storages }
+                (
+                    hashed_address,
+                    hashed_account,
+                    (!hashed_storage.is_empty()).then_some(hashed_storage),
+                )
+            })
+            .collect()
     }
 
     /// Initialize [`HashedPostState`] from bundle state.
@@ -81,7 +76,7 @@ impl HashedPostState {
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
-        let hashed = state
+        state
             .into_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
@@ -90,19 +85,14 @@ impl HashedPostState {
                     account.status,
                     account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                 );
-                (hashed_address, (hashed_account, hashed_storage))
-            })
-            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
 
-        let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        for (address, (account, storage)) in hashed {
-            accounts.insert(address, account);
-            if !storage.is_empty() {
-                storages.insert(address, storage);
-            }
-        }
-        Self { accounts, storages }
+                (
+                    hashed_address,
+                    hashed_account,
+                    (!hashed_storage.is_empty()).then_some(hashed_storage),
+                )
+            })
+            .collect()
     }
 
     /// Construct [`HashedPostState`] from a single [`HashedStorage`].
@@ -395,6 +385,62 @@ impl HashedPostState {
     pub fn clear(&mut self) {
         self.accounts.clear();
         self.storages.clear();
+    }
+}
+
+impl FromIterator<(B256, Option<Account>, Option<HashedStorage>)> for HashedPostState {
+    /// Constructs a [`HashedPostState`] from an iterator of tuples containing:
+    /// - Hashed address (B256)
+    /// - Optional account info (`None` indicates destroyed account)
+    /// - Optional hashed storage
+    ///
+    /// # Important
+    ///
+    /// - The iterator **assumes unique hashed addresses** (B256). If duplicate addresses are
+    ///   present, later entries will overwrite earlier ones for accounts, and storage will be
+    ///   merged.
+    /// - The [`HashedStorage`] **must not be empty** (as determined by
+    ///   [`HashedStorage::is_empty`]). Empty storage should be represented as `None` rather than
+    ///   `Some(empty_storage)`. This ensures the storage map only contains meaningful entries.
+    ///
+    /// Use `(!storage.is_empty()).then_some(storage)` to convert empty storage to `None`.
+    fn from_iter<T: IntoIterator<Item = (B256, Option<Account>, Option<HashedStorage>)>>(
+        iter: T,
+    ) -> Self {
+        let iter = iter.into_iter();
+        let (lower, _) = iter.size_hint();
+        let mut hashed_state = Self::with_capacity(lower);
+
+        for (hashed_address, info, hashed_storage) in iter {
+            hashed_state.accounts.insert(hashed_address, info);
+            if let Some(storage) = hashed_storage {
+                hashed_state.storages.insert(hashed_address, storage);
+            }
+        }
+
+        hashed_state
+    }
+}
+
+#[cfg(feature = "rayon")]
+impl FromParallelIterator<(B256, Option<Account>, Option<HashedStorage>)> for HashedPostState {
+    /// Parallel version of [`FromIterator`] for constructing [`HashedPostState`] from a parallel
+    /// iterator.
+    ///
+    /// See [`FromIterator::from_iter`] for details on the expected input format.
+    ///
+    /// # Important
+    ///
+    /// - The iterator **assumes unique hashed addresses** (B256). If duplicate addresses are
+    ///   present, later entries will overwrite earlier ones for accounts, and storage will be
+    ///   merged.
+    /// - The [`HashedStorage`] **must not be empty**. Empty storage should be `None`.
+    fn from_par_iter<I>(par_iter: I) -> Self
+    where
+        I: IntoParallelIterator<Item = (B256, Option<Account>, Option<HashedStorage>)>,
+    {
+        let vec: Vec<_> = par_iter.into_par_iter().collect();
+        vec.into_iter().collect()
     }
 }
 
