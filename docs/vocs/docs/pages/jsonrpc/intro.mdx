@@ -77,6 +77,14 @@ reth node --http --http.api all
 reth node --http --http.api All
 ```
 
+Similarly, you can pass the `none` option (also case-insensitive) to start the HTTP server without exposing any JSON-RPC namespaces on that transport:
+
+```bash
+reth node --http --http.api none
+```
+
+The same options (`all` and `none`) are supported for the WebSocket transport via `--ws.api`.
+
 You can also restrict who can access the HTTP server by specifying a domain for Cross-Origin requests. This is important, since any application local to your node will be able to access the RPC server:
 
 ```bash
