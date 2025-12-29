@@ -79,8 +79,9 @@ where
             .multiproof(targets)
             .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.account_subtree.into_inner().remove(path);
-        let tree_mask = proof.branch_node_tree_masks.remove(path);
-        let hash_mask = proof.branch_node_hash_masks.remove(path);
+        let masks = proof.branch_node_masks.remove(path);
+        let hash_mask = masks.map(|m| m.hash_mask);
+        let tree_mask = masks.map(|m| m.tree_mask);
 
         trace!(
             target: "trie::proof::blinded",
@@ -131,8 +132,9 @@ where
         .storage_multiproof(targets)
         .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.subtree.into_inner().remove(path);
-        let tree_mask = proof.branch_node_tree_masks.remove(path);
-        let hash_mask = proof.branch_node_hash_masks.remove(path);
+        let masks = proof.branch_node_masks.remove(path);
+        let hash_mask = masks.map(|m| m.hash_mask);
+        let tree_mask = masks.map(|m| m.tree_mask);
 
         trace!(
             target: "trie::proof::blinded",
