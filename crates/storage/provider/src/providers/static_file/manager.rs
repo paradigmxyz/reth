@@ -1203,9 +1203,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Heals file-level (`NippyJar`) inconsistencies for eligible static file segments.
     ///
-    /// Call before [`Self::check_consistency`] so files are internally consistent.
-    /// Uses the same segment-skip logic as [`Self::check_consistency`], but does not compare
-    /// with database checkpoints or prune.
+    /// Call before [`Self::check_consistency`] so files are internally consistent. Uses the same
+    /// segment-skip logic as [`Self::check_consistency`], but does not compare with database
+    /// checkpoints or prune based on them. Healing may truncate files to the last committed config.
     pub fn check_file_consistency<Provider>(&self, provider: &Provider) -> ProviderResult<()>
     where
         Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
