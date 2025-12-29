@@ -12,10 +12,11 @@ use alloc::{
 };
 use alloy_primitives::{
     hex, keccak256,
-    map::{Entry, HashMap, HashSet},
+    map::{HashMap, HashSet},
     B256,
 };
 use alloy_rlp::Decodable;
+use core::num::NonZeroU32;
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
@@ -24,6 +25,98 @@ use reth_trie_common::{
 };
 use smallvec::SmallVec;
 use tracing::{debug, instrument, trace};
+
+/// Index into a [`NodeArena`]. Uses `NonZeroU32` for `Option<NodeId>` optimization.
+#[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
+pub struct NodeId(NonZeroU32);
+
+impl NodeId {
+    /// Creates a new `NodeId` from a raw index.
+    ///
+    /// # Panics
+    /// Panics if `index` is `u32::MAX` (reserved for `None` representation).
+    #[inline]
+    pub const fn new(index: u32) -> Self {
+        match NonZeroU32::new(index.wrapping_add(1)) {
+            Some(v) => Self(v),
+            None => panic!("NodeId index overflow"),
+        }
+    }
+
+    /// Returns the underlying index.
+    #[inline]
+    pub const fn index(self) -> usize {
+        (self.0.get() - 1) as usize
+    }
+}
+
+/// Arena-based storage for sparse trie nodes.
+///
+/// Nodes are stored in a dense `Vec` and addressed by [`NodeId`] handles.
+/// This provides cache-friendly traversal and avoids HashMap lookup overhead.
+#[derive(Clone, PartialEq, Eq, Debug, Default)]
+pub struct NodeArena {
+    nodes: Vec<SparseNode>,
+}
+
+impl NodeArena {
+    /// Creates a new empty arena.
+    pub const fn new() -> Self {
+        Self { nodes: Vec::new() }
+    }
+
+    /// Creates a new arena with the specified capacity.
+    pub fn with_capacity(capacity: usize) -> Self {
+        Self { nodes: Vec::with_capacity(capacity) }
+    }
+
+    /// Allocates a new node in the arena and returns its [`NodeId`].
+    #[inline]
+    pub fn alloc(&mut self, node: SparseNode) -> NodeId {
+        let index = self.nodes.len() as u32;
+        self.nodes.push(node);
+        NodeId::new(index)
+    }
+
+    /// Returns a reference to the node at the given [`NodeId`].
+    #[inline]
+    pub fn get(&self, id: NodeId) -> &SparseNode {
+        &self.nodes[id.index()]
+    }
+
+    /// Returns a mutable reference to the node at the given [`NodeId`].
+    #[inline]
+    pub fn get_mut(&mut self, id: NodeId) -> &mut SparseNode {
+        &mut self.nodes[id.index()]
+    }
+
+    /// Returns the number of nodes in the arena.
+    #[inline]
+    pub fn len(&self) -> usize {
+        self.nodes.len()
+    }
+
+    /// Returns `true` if the arena contains no nodes.
+    #[inline]
+    pub fn is_empty(&self) -> bool {
+        self.nodes.is_empty()
+    }
+
+    /// Clears the arena, removing all nodes but keeping allocated capacity.
+    pub fn clear(&mut self) {
+        self.nodes.clear();
+    }
+
+    /// Reserves capacity for at least `additional` more nodes.
+    pub fn reserve(&mut self, additional: usize) {
+        self.nodes.reserve(additional);
+    }
+
+    /// Shrinks the capacity of the arena to the specified size.
+    pub fn shrink_to(&mut self, min_capacity: usize) {
+        self.nodes.shrink_to(min_capacity);
+    }
+}
 
 /// The level below which the sparse trie hashes are calculated in
 /// [`SerialSparseTrie::update_subtrie_hashes`].
@@ -295,6 +388,12 @@ impl<T: SparseTrieInterface> SparseTrie<T> {
 /// - All keys in `values` collection are full leaf paths.
 #[derive(Clone, PartialEq, Eq)]
 pub struct SerialSparseTrie {
+    /// Arena-based storage for all trie nodes.
+    arena: NodeArena,
+    /// Handle to the root node in the arena.
+    root: Option<NodeId>,
+    /// Map from paths to their NodeId handles in the arena.
+    path_to_node_id: HashMap<Nibbles, NodeId>,
     /// Map from a path (nibbles) to its corresponding sparse trie node.
     /// This contains all of the revealed nodes in trie.
     nodes: HashMap<Nibbles, SparseNode>,
@@ -317,6 +416,9 @@ pub struct SerialSparseTrie {
 impl fmt::Debug for SerialSparseTrie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SerialSparseTrie")
+            .field("arena", &self.arena)
+            .field("root", &self.root)
+            .field("path_to_node_id", &self.path_to_node_id)
             .field("nodes", &self.nodes)
             .field("branch_tree_masks", &self.branch_node_tree_masks)
             .field("branch_hash_masks", &self.branch_node_hash_masks)
@@ -402,7 +504,12 @@ impl fmt::Display for SerialSparseTrie {
 
 impl Default for SerialSparseTrie {
     fn default() -> Self {
+        let mut arena = NodeArena::new();
+        let root_id = arena.alloc(SparseNode::Empty);
         Self {
+            arena,
+            root: Some(root_id),
+            path_to_node_id: HashMap::from_iter([(Nibbles::default(), root_id)]),
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
             branch_node_tree_masks: HashMap::default(),
             branch_node_hash_masks: HashMap::default(),
@@ -441,8 +548,11 @@ impl SparseTrieInterface for SerialSparseTrie {
     }
 
     fn reserve_nodes(&mut self, additional: usize) {
+        self.arena.reserve(additional);
+        self.path_to_node_id.reserve(additional);
         self.nodes.reserve(additional);
     }
+
     fn reveal_node(
         &mut self,
         path: Nibbles,
@@ -467,122 +577,141 @@ impl SparseTrieInterface for SerialSparseTrie {
             TrieNode::EmptyRoot => {
                 // For an empty root, ensure that we are at the root path.
                 debug_assert!(path.is_empty());
-                self.nodes.insert(path, SparseNode::Empty);
+                self.replace_node(path, SparseNode::Empty);
             }
             TrieNode::Branch(branch) => {
+                // Collect child paths for later pointer setup
+                let mut child_paths: [(u8, Nibbles); 16] = [(0, Nibbles::default()); 16];
+                let mut child_count = 0;
+
                 // For a branch node, iterate over all potential children
                 let mut stack_ptr = branch.as_ref().first_child_index();
                 for idx in CHILD_INDEX_RANGE {
                     if branch.state_mask.is_bit_set(idx) {
                         let mut child_path = path;
                         child_path.push_unchecked(idx);
+                        child_paths[child_count] = (idx, child_path);
+                        child_count += 1;
                         // Reveal each child node or hash it has
                         self.reveal_node_or_hash(child_path, &branch.stack[stack_ptr])?;
                         stack_ptr += 1;
                     }
                 }
-                // Update the branch node entry in the nodes map, handling cases where a blinded
-                // node is now replaced with a revealed node.
-                match self.nodes.entry(path) {
-                    Entry::Occupied(mut entry) => match entry.get() {
-                        // Replace a hash node with a fully revealed branch node.
-                        SparseNode::Hash(hash) => {
-                            entry.insert(SparseNode::Branch {
-                                state_mask: branch.state_mask,
-                                // Memoize the hash of a previously blinded node in a new branch
-                                // node.
-                                hash: Some(*hash),
-                                store_in_db_trie: Some(
-                                    masks.hash_mask.is_some_and(|mask| !mask.is_empty()) ||
-                                        masks.tree_mask.is_some_and(|mask| !mask.is_empty()),
-                                ),
-                            });
+                // Update the branch node entry, handling cases where a blinded node is now
+                // replaced with a revealed node.
+                match self.nodes.get(&path) {
+                    // Replace a hash node with a fully revealed branch node.
+                    Some(SparseNode::Hash(hash)) => {
+                        let new_node = SparseNode::Branch {
+                            state_mask: branch.state_mask,
+                            children: EMPTY_CHILDREN,
+                            // Memoize the hash of a previously blinded node in a new branch
+                            // node.
+                            hash: Some(*hash),
+                            store_in_db_trie: Some(
+                                masks.hash_mask.is_some_and(|mask| !mask.is_empty()) ||
+                                    masks.tree_mask.is_some_and(|mask| !mask.is_empty()),
+                            ),
+                        };
+                        self.replace_node(path, new_node);
+                    }
+                    // Branch node already exists, or an extension node was placed where a
+                    // branch node was before.
+                    Some(SparseNode::Branch { .. } | SparseNode::Extension { .. }) => {}
+                    // All other node types can't be handled.
+                    Some(node @ (SparseNode::Empty | SparseNode::Leaf { .. })) => {
+                        return Err(SparseTrieErrorKind::Reveal {
+                            path,
+                            node: Box::new(node.clone()),
                         }
-                        // Branch node already exists, or an extension node was placed where a
-                        // branch node was before.
-                        SparseNode::Branch { .. } | SparseNode::Extension { .. } => {}
-                        // All other node types can't be handled.
-                        node @ (SparseNode::Empty | SparseNode::Leaf { .. }) => {
-                            return Err(SparseTrieErrorKind::Reveal {
-                                path: *entry.key(),
-                                node: Box::new(node.clone()),
-                            }
-                            .into())
-                        }
-                    },
-                    Entry::Vacant(entry) => {
-                        entry.insert(SparseNode::new_branch(branch.state_mask));
+                        .into())
+                    }
+                    None => {
+                        self.insert_node(path, SparseNode::new_branch(branch.state_mask));
                     }
                 }
+                // Set child pointers now that both parent and children are in the arena
+                for (nibble, child_path) in &child_paths[..child_count] {
+                    self.set_branch_child_pointer(&path, *nibble, child_path);
+                }
             }
-            TrieNode::Extension(ext) => match self.nodes.entry(path) {
-                Entry::Occupied(mut entry) => match entry.get() {
+            TrieNode::Extension(ext) => {
+                let mut child_path = path;
+                child_path.extend(&ext.key);
+
+                let should_set_pointer = match self.nodes.get(&path) {
                     // Replace a hash node with a revealed extension node.
-                    SparseNode::Hash(hash) => {
-                        let mut child_path = *entry.key();
-                        child_path.extend(&ext.key);
-                        entry.insert(SparseNode::Extension {
+                    Some(SparseNode::Hash(hash)) => {
+                        let new_node = SparseNode::Extension {
                             key: ext.key,
+                            child: None,
                             // Memoize the hash of a previously blinded node in a new extension
                             // node.
                             hash: Some(*hash),
                             store_in_db_trie: None,
-                        });
+                        };
+                        self.replace_node(path, new_node);
                         self.reveal_node_or_hash(child_path, &ext.child)?;
+                        true
                     }
-                    // Extension node already exists, or an extension node was placed where a branch
-                    // node was before.
-                    SparseNode::Extension { .. } | SparseNode::Branch { .. } => {}
+                    // Extension node already exists, or an extension node was placed where a
+                    // branch node was before.
+                    Some(SparseNode::Extension { .. } | SparseNode::Branch { .. }) => false,
                     // All other node types can't be handled.
-                    node @ (SparseNode::Empty | SparseNode::Leaf { .. }) => {
+                    Some(node @ (SparseNode::Empty | SparseNode::Leaf { .. })) => {
                         return Err(SparseTrieErrorKind::Reveal {
-                            path: *entry.key(),
+                            path,
                             node: Box::new(node.clone()),
                         }
                         .into())
                     }
-                },
-                Entry::Vacant(entry) => {
-                    let mut child_path = *entry.key();
-                    child_path.extend(&ext.key);
-                    entry.insert(SparseNode::new_ext(ext.key));
-                    self.reveal_node_or_hash(child_path, &ext.child)?;
+                    None => {
+                        self.insert_node(path, SparseNode::new_ext(ext.key));
+                        self.reveal_node_or_hash(child_path, &ext.child)?;
+                        true
+                    }
+                };
+                // Set child pointer now that both parent and child are in the arena
+                if should_set_pointer {
+                    self.set_ext_child_pointer(&path, &child_path);
                 }
-            },
-            TrieNode::Leaf(leaf) => match self.nodes.entry(path) {
-                Entry::Occupied(mut entry) => match entry.get() {
+            }
+            TrieNode::Leaf(leaf) => {
+                let mut full = path;
+                full.extend(&leaf.key);
+
+                match self.nodes.get(&path) {
                     // Replace a hash node with a revealed leaf node and store leaf node value.
-                    SparseNode::Hash(hash) => {
-                        let mut full = *entry.key();
-                        full.extend(&leaf.key);
+                    Some(SparseNode::Hash(hash)) => {
                         self.values.insert(full, leaf.value.clone());
-                        entry.insert(SparseNode::Leaf {
+                        let new_node = SparseNode::Leaf {
                             key: leaf.key,
                             // Memoize the hash of a previously blinded node in a new leaf
                             // node.
                             hash: Some(*hash),
-                        });
+                        };
+                        self.replace_node(path, new_node);
                     }
-                    // Left node already exists.
-                    SparseNode::Leaf { .. } => {}
+                    // Leaf node already exists.
+                    Some(SparseNode::Leaf { .. }) => {}
                     // All other node types can't be handled.
-                    node @ (SparseNode::Empty |
-                    SparseNode::Extension { .. } |
-                    SparseNode::Branch { .. }) => {
+                    Some(
+                        node @ (SparseNode::Empty |
+                        SparseNode::Extension { .. } |
+                        SparseNode::Branch { .. }),
+                    ) => {
                         return Err(SparseTrieErrorKind::Reveal {
-                            path: *entry.key(),
+                            path,
                             node: Box::new(node.clone()),
                         }
                         .into())
                     }
-                },
-                Entry::Vacant(entry) => {
-                    let mut full = *entry.key();
-                    full.extend(&leaf.key);
-                    entry.insert(SparseNode::new_leaf(leaf.key));
-                    self.values.insert(full, leaf.value.clone());
+                    None => {
+                        self.insert_node(path, SparseNode::new_leaf(leaf.key));
+                        self.values.insert(full, leaf.value.clone());
+                    }
                 }
-            },
+            }
         }
 
         Ok(())
@@ -825,7 +954,7 @@ impl SparseTrieInterface for SerialSparseTrie {
                         SparseNode::Branch { .. } => removed_node.node,
                     }
                 }
-                &SparseNode::Branch { mut state_mask, hash: _, store_in_db_trie: _ } => {
+                &SparseNode::Branch { mut state_mask, hash: _, store_in_db_trie: _, .. } => {
                     // If the node is a branch node, we need to check the number of children left
                     // after deleting the child at the given nibble.
 
@@ -949,6 +1078,11 @@ impl SparseTrieInterface for SerialSparseTrie {
     }
 
     fn wipe(&mut self) {
+        self.arena.clear();
+        let root_id = self.arena.alloc(SparseNode::Empty);
+        self.root = Some(root_id);
+        self.path_to_node_id.clear();
+        self.path_to_node_id.insert(Nibbles::default(), root_id);
         self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
         self.values = HashMap::default();
         self.prefix_set = PrefixSetMut::all();
@@ -956,6 +1090,11 @@ impl SparseTrieInterface for SerialSparseTrie {
     }
 
     fn clear(&mut self) {
+        self.arena.clear();
+        let root_id = self.arena.alloc(SparseNode::Empty);
+        self.root = Some(root_id);
+        self.path_to_node_id.clear();
+        self.path_to_node_id.insert(Nibbles::default(), root_id);
         self.nodes.clear();
         self.nodes.insert(Nibbles::default(), SparseNode::Empty);
 
@@ -1086,6 +1225,8 @@ impl SparseTrieInterface for SerialSparseTrie {
     }
 
     fn shrink_nodes_to(&mut self, size: usize) {
+        self.arena.shrink_to(size);
+        self.path_to_node_id.shrink_to(size);
         self.nodes.shrink_to(size);
         self.branch_node_tree_masks.shrink_to(size);
         self.branch_node_hash_masks.shrink_to(size);
@@ -1097,6 +1238,72 @@ impl SparseTrieInterface for SerialSparseTrie {
 }
 
 impl SerialSparseTrie {
+    /// Inserts a node into both the HashMap and the arena, returning the NodeId.
+    ///
+    /// If the path is the root path, also updates the `root` field.
+    fn insert_node(&mut self, path: Nibbles, node: SparseNode) -> NodeId {
+        let node_id = self.arena.alloc(node.clone());
+        self.path_to_node_id.insert(path, node_id);
+        self.nodes.insert(path, node);
+        if path.is_empty() {
+            self.root = Some(node_id);
+        }
+        node_id
+    }
+
+    /// Replaces the node at the given path in both the HashMap and the arena.
+    ///
+    /// If the node doesn't exist in the arena yet (no NodeId mapping), allocates a new one.
+    fn replace_node(&mut self, path: Nibbles, node: SparseNode) -> NodeId {
+        self.nodes.insert(path, node.clone());
+        if let Some(&node_id) = self.path_to_node_id.get(&path) {
+            *self.arena.get_mut(node_id) = node;
+            node_id
+        } else {
+            let node_id = self.arena.alloc(node);
+            self.path_to_node_id.insert(path, node_id);
+            if path.is_empty() {
+                self.root = Some(node_id);
+            }
+            node_id
+        }
+    }
+
+    /// Sets the child pointer for a branch node at the given nibble index.
+    ///
+    /// Looks up the child's NodeId from `path_to_node_id` and updates the parent's
+    /// child pointer in the arena.
+    fn set_branch_child_pointer(
+        &mut self,
+        parent_path: &Nibbles,
+        nibble: u8,
+        child_path: &Nibbles,
+    ) {
+        if let (Some(&parent_id), Some(&child_id)) =
+            (self.path_to_node_id.get(parent_path), self.path_to_node_id.get(child_path))
+        {
+            self.arena.get_mut(parent_id).set_branch_child(nibble, Some(child_id));
+            if let Some(parent_node) = self.nodes.get_mut(parent_path) {
+                parent_node.set_branch_child(nibble, Some(child_id));
+            }
+        }
+    }
+
+    /// Sets the child pointer for an extension node.
+    ///
+    /// Looks up the child's NodeId from `path_to_node_id` and updates the parent's
+    /// child pointer in the arena.
+    fn set_ext_child_pointer(&mut self, parent_path: &Nibbles, child_path: &Nibbles) {
+        if let (Some(&parent_id), Some(&child_id)) =
+            (self.path_to_node_id.get(parent_path), self.path_to_node_id.get(child_path))
+        {
+            self.arena.get_mut(parent_id).set_ext_child(Some(child_id));
+            if let Some(parent_node) = self.nodes.get_mut(parent_path) {
+                parent_node.set_ext_child(Some(child_id));
+            }
+        }
+    }
+
     /// Creates a new revealed sparse trie from the given root node.
     ///
     /// This function initializes the internal structures and then reveals the root.
@@ -1152,20 +1359,18 @@ impl SerialSparseTrie {
     fn reveal_node_or_hash(&mut self, path: Nibbles, child: &[u8]) -> SparseTrieResult<()> {
         if child.len() == B256::len_bytes() + 1 {
             let hash = B256::from_slice(&child[1..]);
-            match self.nodes.entry(path) {
-                Entry::Occupied(entry) => match entry.get() {
-                    // Hash node with a different hash can't be handled.
-                    SparseNode::Hash(previous_hash) if previous_hash != &hash => {
-                        return Err(SparseTrieErrorKind::Reveal {
-                            path: *entry.key(),
-                            node: Box::new(SparseNode::Hash(hash)),
-                        }
-                        .into())
+            match self.nodes.get(&path) {
+                // Hash node with a different hash can't be handled.
+                Some(SparseNode::Hash(previous_hash)) if previous_hash != &hash => {
+                    return Err(SparseTrieErrorKind::Reveal {
+                        path,
+                        node: Box::new(SparseNode::Hash(hash)),
                     }
-                    _ => {}
-                },
-                Entry::Vacant(entry) => {
-                    entry.insert(SparseNode::Hash(hash));
+                    .into())
+                }
+                Some(_) => {}
+                None => {
+                    self.insert_node(path, SparseNode::Hash(hash));
                 }
             }
             return Ok(())
@@ -1425,7 +1630,7 @@ impl SerialSparseTrie {
 
                     targets.push((level, path));
                 }
-                SparseNode::Extension { key, hash, store_in_db_trie: _ } => {
+                SparseNode::Extension { key, hash, .. } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
@@ -1439,7 +1644,7 @@ impl SerialSparseTrie {
                         paths.push((path, level + 1));
                     }
                 }
-                SparseNode::Branch { state_mask, hash, store_in_db_trie: _ } => {
+                SparseNode::Branch { state_mask, hash, .. } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
                         continue
                     }
@@ -1537,7 +1742,7 @@ impl SerialSparseTrie {
                         (rlp_node, SparseNodeType::Leaf)
                     }
                 }
-                SparseNode::Extension { key, hash, store_in_db_trie } => {
+                SparseNode::Extension { key, hash, store_in_db_trie, .. } => {
                     let mut child_path = path;
                     child_path.extend(key);
                     if let Some((hash, store_in_db_trie)) =
@@ -1590,7 +1795,7 @@ impl SerialSparseTrie {
                         continue
                     }
                 }
-                SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
+                SparseNode::Branch { state_mask, hash, store_in_db_trie, .. } => {
                     if let Some((hash, store_in_db_trie)) =
                         hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                     {
@@ -1849,6 +2054,8 @@ pub enum SparseNode {
     Extension {
         /// The key slice stored by this extension node.
         key: Nibbles,
+        /// Direct pointer to the child node in the arena.
+        child: Option<NodeId>,
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
         ///
@@ -1864,6 +2071,10 @@ pub enum SparseNode {
     Branch {
         /// The bitmask representing children present in the branch node.
         state_mask: TrieMask,
+        /// Direct pointers to child nodes in the arena, indexed by nibble (0-15).
+        /// `None` means the child exists (per state_mask) but pointer not yet set,
+        /// or the child doesn't exist.
+        children: [Option<NodeId>; 16],
         /// Pre-computed hash of the sparse node.
         /// Can be reused unless this trie path has been updated.
         ///
@@ -1876,6 +2087,9 @@ pub enum SparseNode {
         store_in_db_trie: Option<bool>,
     },
 }
+
+/// Constant for empty children array in branch nodes.
+const EMPTY_CHILDREN: [Option<NodeId>; 16] = [None; 16];
 
 impl SparseNode {
     /// Create new sparse node from [`TrieNode`].
@@ -1890,21 +2104,40 @@ impl SparseNode {
 
     /// Create new [`SparseNode::Branch`] from state mask.
     pub const fn new_branch(state_mask: TrieMask) -> Self {
-        Self::Branch { state_mask, hash: None, store_in_db_trie: None }
+        Self::Branch { state_mask, children: EMPTY_CHILDREN, hash: None, store_in_db_trie: None }
     }
 
-    /// Create new [`SparseNode::Branch`] with two bits set.
+    /// Create new [`SparseNode::Branch`] with two bits set and corresponding child pointers.
     pub const fn new_split_branch(bit_a: u8, bit_b: u8) -> Self {
         let state_mask = TrieMask::new(
             // set bits for both children
             (1u16 << bit_a) | (1u16 << bit_b),
         );
-        Self::Branch { state_mask, hash: None, store_in_db_trie: None }
+        Self::Branch { state_mask, children: EMPTY_CHILDREN, hash: None, store_in_db_trie: None }
+    }
+
+    /// Create new [`SparseNode::Branch`] with two bits set and corresponding child pointers.
+    pub const fn new_split_branch_with_children(
+        bit_a: u8,
+        child_a: NodeId,
+        bit_b: u8,
+        child_b: NodeId,
+    ) -> Self {
+        let state_mask = TrieMask::new((1u16 << bit_a) | (1u16 << bit_b));
+        let mut children = EMPTY_CHILDREN;
+        children[bit_a as usize] = Some(child_a);
+        children[bit_b as usize] = Some(child_b);
+        Self::Branch { state_mask, children, hash: None, store_in_db_trie: None }
     }
 
     /// Create new [`SparseNode::Extension`] from the key slice.
     pub const fn new_ext(key: Nibbles) -> Self {
-        Self::Extension { key, hash: None, store_in_db_trie: None }
+        Self::Extension { key, child: None, hash: None, store_in_db_trie: None }
+    }
+
+    /// Create new [`SparseNode::Extension`] from the key slice with a child pointer.
+    pub const fn new_ext_with_child(key: Nibbles, child: NodeId) -> Self {
+        Self::Extension { key, child: Some(child), hash: None, store_in_db_trie: None }
     }
 
     /// Create new [`SparseNode::Leaf`] from leaf key and value.
@@ -1917,6 +2150,14 @@ impl SparseNode {
         matches!(self, Self::Hash(_))
     }
 
+    /// Returns the state mask for a branch node.
+    pub const fn state_mask(&self) -> Option<TrieMask> {
+        match self {
+            Self::Branch { state_mask, .. } => Some(*state_mask),
+            _ => None,
+        }
+    }
+
     /// Returns the hash of the node if it exists.
     pub const fn hash(&self) -> Option<B256> {
         match self {
@@ -1925,6 +2166,40 @@ impl SparseNode {
             Self::Leaf { hash, .. } | Self::Extension { hash, .. } | Self::Branch { hash, .. } => {
                 *hash
             }
+        }
+    }
+
+    /// Returns the child pointer for an extension node.
+    pub const fn ext_child(&self) -> Option<NodeId> {
+        match self {
+            Self::Extension { child, .. } => *child,
+            _ => None,
+        }
+    }
+
+    /// Returns a reference to the children array for a branch node.
+    pub const fn branch_children(&self) -> Option<&[Option<NodeId>; 16]> {
+        match self {
+            Self::Branch { children, .. } => Some(children),
+            _ => None,
+        }
+    }
+
+    /// Sets the child pointer for an extension node.
+    pub fn set_ext_child(&mut self, new_child: Option<NodeId>) {
+        if let Self::Extension { child, hash, store_in_db_trie, .. } = self {
+            *child = new_child;
+            *hash = None;
+            *store_in_db_trie = None;
+        }
+    }
+
+    /// Sets a child pointer for a branch node at the given nibble index.
+    pub fn set_branch_child(&mut self, nibble: u8, child_id: Option<NodeId>) {
+        if let Self::Branch { children, hash, store_in_db_trie, .. } = self {
+            children[nibble as usize] = child_id;
+            *hash = None;
+            *store_in_db_trie = None;
         }
     }
 
@@ -2222,6 +2497,9 @@ mod find_leaf_tests {
         nodes.insert(leaf_path, SparseNode::Hash(blinded_hash)); // Blinded node at 0x1234
 
         let sparse = SerialSparseTrie {
+            arena: NodeArena::new(),
+            root: None,
+            path_to_node_id: Default::default(),
             nodes,
             branch_node_tree_masks: Default::default(),
             branch_node_hash_masks: Default::default(),
@@ -2265,6 +2543,9 @@ mod find_leaf_tests {
         values.insert(path_revealed_leaf, VALUE_A());
 
         let sparse = SerialSparseTrie {
+            arena: NodeArena::new(),
+            root: None,
+            path_to_node_id: Default::default(),
             nodes,
             branch_node_tree_masks: Default::default(),
             branch_node_hash_masks: Default::default(),
@@ -3241,8 +3522,8 @@ mod tests {
 
         // Check that the branch node exists with only two nibbles set
         assert_eq!(
-            sparse.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b101.into()))
+            sparse.nodes.get(&Nibbles::default()).and_then(|n| n.state_mask()),
+            Some(TrieMask::new(0b101))
         );
 
         // Insert the leaf for the second key
@@ -3250,8 +3531,8 @@ mod tests {
 
         // Check that the branch node was updated and another nibble was set
         assert_eq!(
-            sparse.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b111.into()))
+            sparse.nodes.get(&Nibbles::default()).and_then(|n| n.state_mask()),
+            Some(TrieMask::new(0b111))
         );
 
         // Generate the proof for the third key and reveal it in the sparse trie
@@ -3276,8 +3557,8 @@ mod tests {
 
         // Check that nothing changed in the branch node
         assert_eq!(
-            sparse.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b111.into()))
+            sparse.nodes.get(&Nibbles::default()).and_then(|n| n.state_mask()),
+            Some(TrieMask::new(0b111))
         );
 
         // Generate the nodes for the full trie with all three key using the hash builder, and
@@ -3352,18 +3633,18 @@ mod tests {
 
         // Check that the branch node exists
         assert_eq!(
-            sparse.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_branch(0b11.into()))
+            sparse.nodes.get(&Nibbles::default()).and_then(|n| n.state_mask()),
+            Some(TrieMask::new(0b11))
         );
 
         // Remove the leaf for the first key
         sparse.remove_leaf(&key1(), &provider).unwrap();
 
         // Check that the branch node was turned into an extension node
-        assert_eq!(
+        assert!(matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x01])))
-        );
+            Some(SparseNode::Extension { key, .. }) if *key == Nibbles::from_nibbles_unchecked([0x01])
+        ));
 
         // Generate the proof for the third key and reveal it in the sparse trie
         let (_, _, hash_builder_proof_nodes, branch_node_hash_masks, branch_node_tree_masks) =
@@ -3386,10 +3667,10 @@ mod tests {
         }
 
         // Check that nothing changed in the extension node
-        assert_eq!(
+        assert!(matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(&SparseNode::new_ext(Nibbles::from_nibbles_unchecked([0x01])))
-        );
+            Some(SparseNode::Extension { key, .. }) if *key == Nibbles::from_nibbles_unchecked([0x01])
+        ));
     }
 
     /// We have two leaves that share the same prefix: 0x0001 and 0x0002, and a leaf with a
@@ -3435,7 +3716,7 @@ mod tests {
         // Check that the root extension node exists
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None }) if *key == Nibbles::from_nibbles([0x00])
+            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None, .. }) if *key == Nibbles::from_nibbles([0x00])
         );
 
         // Insert the leaf with a different prefix
@@ -3444,7 +3725,7 @@ mod tests {
         // Check that the extension node was turned into a branch node
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None, .. }) if *state_mask == TrieMask::new(0b11)
         );
 
         // Generate the proof for the first key and reveal it in the sparse trie
@@ -3470,7 +3751,7 @@ mod tests {
         // Check that the branch node wasn't overwritten by the extension node in the proof
         assert_matches!(
             sparse.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None, .. }) if *state_mask == TrieMask::new(0b11)
         );
     }
 
@@ -3716,16 +3997,16 @@ mod tests {
 
         let normal_printed = format!("{sparse}");
         let expected = "\
-Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
-5 -> Branch { state_mask: TrieMask(0000000000001101), hash: None, store_in_db_trie: None }
-50 -> Extension { key: Nibbles(0x23), hash: None, store_in_db_trie: None }
-5023 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
+Root -> Extension { key: Nibbles(0x5), child: None, hash: None, store_in_db_trie: None }
+5 -> Branch { state_mask: TrieMask(0000000000001101), children: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None], hash: None, store_in_db_trie: None }
+50 -> Extension { key: Nibbles(0x23), child: None, hash: None, store_in_db_trie: None }
+5023 -> Branch { state_mask: TrieMask(0000000000001010), children: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None], hash: None, store_in_db_trie: None }
 50231 -> Leaf { key: Nibbles(0x), hash: None }
 50233 -> Leaf { key: Nibbles(0x), hash: None }
 52013 -> Leaf { key: Nibbles(0x013), hash: None }
-53 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
+53 -> Branch { state_mask: TrieMask(0000000000001010), children: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None], hash: None, store_in_db_trie: None }
 53102 -> Leaf { key: Nibbles(0x02), hash: None }
-533 -> Branch { state_mask: TrieMask(0000000000000101), hash: None, store_in_db_trie: None }
+533 -> Branch { state_mask: TrieMask(0000000000000101), children: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None], hash: None, store_in_db_trie: None }
 53302 -> Leaf { key: Nibbles(0x2), hash: None }
 53320 -> Leaf { key: Nibbles(0x0), hash: None }
 ";
@@ -3733,16 +4014,16 @@ Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
 
         let alternate_printed = format!("{sparse:#}");
         let expected = "\
-Root -> Extension { key: Nibbles(0x5), hash: None, store_in_db_trie: None }
-    5 -> Branch { state_mask: TrieMask(0000000000001101), hash: None, store_in_db_trie: None }
-        50 -> Extension { key: Nibbles(0x23), hash: None, store_in_db_trie: None }
-            5023 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
+Root -> Extension { key: Nibbles(0x5), child: None, hash: None, store_in_db_trie: None }
+    5 -> Branch { state_mask: TrieMask(0000000000001101), children: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None], hash: None, store_in_db_trie: None }
+        50 -> Extension { key: Nibbles(0x23), child: None, hash: None, store_in_db_trie: None }
+            5023 -> Branch { state_mask: TrieMask(0000000000001010), children: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None], hash: None, store_in_db_trie: None }
                 50231 -> Leaf { key: Nibbles(0x), hash: None }
                 50233 -> Leaf { key: Nibbles(0x), hash: None }
         52013 -> Leaf { key: Nibbles(0x013), hash: None }
-        53 -> Branch { state_mask: TrieMask(0000000000001010), hash: None, store_in_db_trie: None }
+        53 -> Branch { state_mask: TrieMask(0000000000001010), children: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None], hash: None, store_in_db_trie: None }
             53102 -> Leaf { key: Nibbles(0x02), hash: None }
-            533 -> Branch { state_mask: TrieMask(0000000000000101), hash: None, store_in_db_trie: None }
+            533 -> Branch { state_mask: TrieMask(0000000000000101), children: [None, None, None, None, None, None, None, None, None, None, None, None, None, None, None, None], hash: None, store_in_db_trie: None }
                 53302 -> Leaf { key: Nibbles(0x2), hash: None }
                 53320 -> Leaf { key: Nibbles(0x0), hash: None }
 ";

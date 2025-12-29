@@ -1889,6 +1889,7 @@ impl SparseSubtrie {
                         SparseNode::Hash(hash) => {
                             entry.insert(SparseNode::Branch {
                                 state_mask: branch.state_mask,
+                                children: [None; 16],
                                 // Memoize the hash of a previously blinded node in a new branch
                                 // node.
                                 hash: Some(*hash),
@@ -1923,6 +1924,7 @@ impl SparseSubtrie {
                         child_path.extend(&ext.key);
                         entry.insert(SparseNode::Extension {
                             key: ext.key,
+                            child: None,
                             // Memoize the hash of a previously blinded node in a new extension
                             // node.
                             hash: Some(*hash),
@@ -2211,7 +2213,7 @@ impl SparseSubtrieInner {
                     (rlp_node, SparseNodeType::Leaf)
                 }
             }
-            SparseNode::Extension { key, hash, store_in_db_trie } => {
+            SparseNode::Extension { key, hash, store_in_db_trie, .. } => {
                 let mut child_path = path;
                 child_path.extend(key);
                 if let Some((hash, store_in_db_trie)) =
@@ -2266,7 +2268,7 @@ impl SparseSubtrieInner {
                     return
                 }
             }
-            SparseNode::Branch { state_mask, hash, store_in_db_trie } => {
+            SparseNode::Branch { state_mask, hash, store_in_db_trie, .. } => {
                 if let Some((hash, store_in_db_trie)) =
                     hash.zip(*store_in_db_trie).filter(|_| !prefix_set_contains(&path))
                 {
@@ -4081,6 +4083,7 @@ mod tests {
                     Nibbles::default(),
                     SparseNode::Branch {
                         state_mask: TrieMask::new(0b0011),
+                        children: [None; 16],
                         hash: Some(B256::repeat_byte(0x10)),
                         store_in_db_trie: None,
                     },
@@ -4089,6 +4092,7 @@ mod tests {
                     Nibbles::from_nibbles([0x0]),
                     SparseNode::Extension {
                         key: Nibbles::from_nibbles([0x1]),
+                        child: None,
                         hash: Some(B256::repeat_byte(0x20)),
                         store_in_db_trie: None,
                     },
@@ -4097,6 +4101,7 @@ mod tests {
                     Nibbles::from_nibbles([0x0, 0x1]),
                     SparseNode::Branch {
                         state_mask: TrieMask::new(0b11100),
+                        children: [None; 16],
                         hash: Some(B256::repeat_byte(0x30)),
                         store_in_db_trie: None,
                     },
@@ -5560,7 +5565,7 @@ mod tests {
         // Check that the root extension node exists
         assert_matches!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None }) if *key == Nibbles::from_nibbles([0x00])
+            Some(SparseNode::Extension { key, hash: None, store_in_db_trie: None, .. }) if *key == Nibbles::from_nibbles([0x00])
         );
 
         // Insert the leaf with a different prefix
@@ -5569,7 +5574,7 @@ mod tests {
         // Check that the extension node was turned into a branch node
         assert_matches!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None, .. }) if *state_mask == TrieMask::new(0b11)
         );
 
         // Generate the proof for the first key and reveal it in the sparse trie
@@ -5598,7 +5603,7 @@ mod tests {
         // Check that the branch node wasn't overwritten by the extension node in the proof
         assert_matches!(
             sparse.upper_subtrie.nodes.get(&Nibbles::default()),
-            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None }) if *state_mask == TrieMask::new(0b11)
+            Some(SparseNode::Branch { state_mask, hash: None, store_in_db_trie: None, .. }) if *state_mask == TrieMask::new(0b11)
         );
     }
 
