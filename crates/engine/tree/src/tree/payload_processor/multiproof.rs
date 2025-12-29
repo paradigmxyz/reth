@@ -158,7 +158,7 @@ impl ProofSequencer {
 
         // return early if we don't have the next expected proof
         if !self.pending_proofs.contains_key(&self.next_to_deliver) {
-            return Vec::new()
+            return Vec::new();
         }
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
@@ -218,12 +218,12 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
             let hashed_storage = if destroyed {
                 Some(HashedStorage::new(true))
             } else {
-                let storage: Vec<_> = account
+                let mut storage = Vec::with_capacity(account.storage.len());
+                storage.extend(account
                     .storage
                     .into_iter()
                     .filter(|(_slot, value)| value.is_changed())
-                    .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                    .collect();
+                    .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value)));
 
                 if storage.is_empty() {
                     None
@@ -902,8 +902,8 @@ impl MultiProofTask {
                 ctx.accumulated_prefetch_targets.push(targets);
 
                 // Batch consecutive prefetch messages up to limits.
-                while accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
-                    ctx.accumulated_prefetch_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
+                while accumulated_count < PREFETCH_MAX_BATCH_TARGETS
+                    && ctx.accumulated_prefetch_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
                 {
                     match self.rx.try_recv() {
                         Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
@@ -1384,8 +1384,8 @@ fn get_proof_targets(
             .storage
             .keys()
             .filter(|slot| {
-                !fetched.is_some_and(|f| f.contains(*slot)) ||
-                    storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
+                !fetched.is_some_and(|f| f.contains(*slot))
+                    || storage_added_removed_keys.is_some_and(|k| k.is_removed(slot))
             })
             .peekable();
 
@@ -1418,13 +1418,13 @@ fn dispatch_with_chunking<T, I>(
 where
     I: IntoIterator<Item = T>,
 {
-    let should_chunk = chunking_len > max_targets_for_chunking ||
-        available_account_workers > 1 ||
-        available_storage_workers > 1;
+    let should_chunk = chunking_len > max_targets_for_chunking
+        || available_account_workers > 1
+        || available_storage_workers > 1;
 
-    if should_chunk &&
-        let Some(chunk_size) = chunk_size &&
-        chunking_len > chunk_size
+    if should_chunk
+        && let Some(chunk_size) = chunk_size
+        && chunking_len > chunk_size
     {
         let mut num_chunks = 0usize;
         for chunk in chunker(items, chunk_size) {
@@ -1457,8 +1457,8 @@ fn can_batch_state_update(
         (
             Source::Evm(StateChangeSource::PreBlock(_)),
             Source::Evm(StateChangeSource::PreBlock(_)),
-        ) |
-        (
+        )
+        | (
             Source::Evm(StateChangeSource::PostBlock(_)),
             Source::Evm(StateChangeSource::PostBlock(_)),
         ) => batch_update == next_update,
@@ -2174,8 +2174,8 @@ mod tests {
                 }
                 match task.rx.try_recv() {
                     Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                            !can_batch_state_update(
+                        if let Some((batch_source, batch_update)) = accumulated_updates.first()
+                            && !can_batch_state_update(
                                 *batch_source,
                                 batch_update,
                                 next_source,
@@ -2193,8 +2193,8 @@ mod tests {
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
                             break;
                         }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                            !accumulated_updates.is_empty()
+                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
+                            && !accumulated_updates.is_empty()
                         {
                             pending_msg =
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
@@ -2296,8 +2296,8 @@ mod tests {
                 }
                 match task.rx.try_recv() {
                     Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                            !can_batch_state_update(
+                        if let Some((batch_source, batch_update)) = accumulated_updates.first()
+                            && !can_batch_state_update(
                                 *batch_source,
                                 batch_update,
                                 next_source,
@@ -2315,8 +2315,8 @@ mod tests {
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
                             break;
                         }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                            !accumulated_updates.is_empty()
+                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
+                            && !accumulated_updates.is_empty()
                         {
                             pending_msg =
                                 Some(MultiProofMessage::StateUpdate(next_source, next_update));
