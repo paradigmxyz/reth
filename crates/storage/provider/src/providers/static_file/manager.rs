@@ -1162,8 +1162,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// Call before [`Self::check_consistency`] so files are internally consistent.
     /// Uses the same segment-skip logic as [`Self::check_consistency`], but does not compare with
-    /// database checkpoints or prune against them. Healing may truncate to the last committed
-    /// config.
+    /// database checkpoints or prune against them.
     pub fn check_file_consistency<Provider>(&self, provider: &Provider) -> ProviderResult<()>
     where
         Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
@@ -1173,18 +1172,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         for segment in self.segments_to_check(provider) {
             let (initial_highest_block, highest_block) = self.maybe_heal_segment(segment)?;
 
-            // Healing after an interrupted prune can lower `highest_block`. The follow-up
-            // `check_consistency` compares checkpoints and will request an unwind if
-            // `checkpoint > healed_block`.
-            if initial_highest_block != highest_block {
-                info!(
-                    target: "reth::providers::static_file",
-                    ?initial_highest_block,
-                    ?highest_block,
-                    ?segment,
-                    "Healed segment, highest block changed."
-                );
-            }
+            let _ = (initial_highest_block, highest_block, segment);
         }
 
         Ok(())
