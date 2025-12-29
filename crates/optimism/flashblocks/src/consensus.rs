@@ -1,10 +1,10 @@
 use crate::{
-    traits::FlashblockPayloadBase, FlashBlock, FlashBlockCompleteSequence,
-    FlashBlockCompleteSequenceRx,
+    traits::{FlashblockPayload, FlashblockPayloadBase},
+    FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
 };
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadStatusEnum;
-use op_alloy_rpc_types_engine::{OpExecutionData, OpFlashblockPayload};
+use op_alloy_rpc_types_engine::OpExecutionData;
 use reth_engine_primitives::ConsensusEngineHandle;
 use reth_optimism_payload_builder::OpPayloadTypes;
 use reth_payload_primitives::{EngineApiMessageVersion, ExecutionPayload, PayloadTypes};
@@ -18,26 +18,27 @@ use tracing::*;
 ///
 /// [`FlashBlockService`]: crate::FlashBlockService
 #[derive(Debug)]
-pub struct FlashBlockConsensusClient<P = OpPayloadTypes>
+pub struct FlashBlockConsensusClient<P = OpPayloadTypes, F = FlashBlock>
 where
     P: PayloadTypes,
+    F: FlashblockPayload,
 {
     /// Handle to execution client.
     engine_handle: ConsensusEngineHandle<P>,
     /// Receiver for completed flashblock sequences from `FlashBlockService`.
-    sequence_receiver: FlashBlockCompleteSequenceRx<OpFlashblockPayload>,
+    sequence_receiver: FlashBlockCompleteSequenceRx<F>,
 }
 
-impl<P> FlashBlockConsensusClient<P>
+impl<P, F> FlashBlockConsensusClient<P, F>
 where
     P: PayloadTypes,
-    P::ExecutionData:
-        for<'a> TryFrom<&'a FlashBlockCompleteSequence<FlashBlock>, Error: std::fmt::Display>,
+    F: FlashblockPayload,
+    P::ExecutionData: for<'a> TryFrom<&'a FlashBlockCompleteSequence<F>, Error: std::fmt::Display>,
 {
-    /// Create a new `FlashBlockConsensusClient` with the given Op engine and sequence receiver.
+    /// Create a new `FlashBlockConsensusClient` with the given engine handle and sequence receiver.
     pub const fn new(
         engine_handle: ConsensusEngineHandle<P>,
-        sequence_receiver: FlashBlockCompleteSequenceRx<OpFlashblockPayload>,
+        sequence_receiver: FlashBlockCompleteSequenceRx<F>,
     ) -> eyre::Result<Self> {
         Ok(Self { engine_handle, sequence_receiver })
     }
@@ -48,7 +49,7 @@ where
     /// in which case this returns the `parent_hash` instead to drive the chain forward.
     ///
     /// Returns the block hash to use for FCU (either the new block or parent).
-    async fn submit_new_payload(&self, sequence: &FlashBlockCompleteSequence<FlashBlock>) -> B256 {
+    async fn submit_new_payload(&self, sequence: &FlashBlockCompleteSequence<F>) -> B256 {
         let payload = match P::ExecutionData::try_from(sequence) {
             Ok(payload) => payload,
             Err(err) => {
@@ -97,7 +98,7 @@ where
     async fn submit_forkchoice_update(
         &self,
         head_block_hash: B256,
-        sequence: &FlashBlockCompleteSequence<FlashBlock>,
+        sequence: &FlashBlockCompleteSequence<F>,
     ) {
         let block_number = sequence.block_number();
         let safe_hash = sequence.payload_base().parent_hash();

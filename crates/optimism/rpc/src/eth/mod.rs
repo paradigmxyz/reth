@@ -25,8 +25,8 @@ use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
     FlashBlockBuildInfo, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
-    FlashBlockService, FlashblockPayload, FlashblocksListeners, PendingBlockRx, PendingFlashBlock,
-    WsFlashBlockStream,
+    FlashBlockConsensusClient, FlashBlockService, FlashblockPayload, FlashblocksListeners,
+    PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc::eth::core::EthApiInner;
@@ -568,16 +568,13 @@ where
             ctx.components.task_executor().spawn(Box::pin(service.run(tx)));
 
             if flashblock_consensus {
-                todo!("Modularize FlashBlockConsensusClient?")
+                info!(target: "reth::cli", "Launching FlashBlockConsensusClient");
+                let flashblock_client = FlashBlockConsensusClient::new(
+                    ctx.engine_handle.clone(),
+                    flashblocks_sequence.subscribe(),
+                )?;
+                ctx.components.task_executor().spawn(Box::pin(flashblock_client.run()));
             }
-            // if flashblock_consensus {
-            //     info!(target: "reth::cli", "Launching FlashBlockConsensusClient");
-            //     let flashblock_client = FlashBlockConsensusClient::new(
-            //         ctx.engine_handle.clone(),
-            //         flashblocks_sequence.subscribe(),
-            //     )?;
-            //     ctx.components.task_executor().spawn(Box::pin(flashblock_client.run()));
-            // }
 
             Some(FlashblocksListeners::new(
                 pending_rx,
