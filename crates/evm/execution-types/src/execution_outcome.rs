@@ -144,7 +144,12 @@ impl<T> ExecutionOutcome<T> {
         bundle: BundleState,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
-        let mut value = Self { bundle, first_block, receipts: Vec::new(), requests: Vec::new() };
+        let mut value = Self {
+            bundle,
+            first_block,
+            receipts: Vec::with_capacity(results.len()),
+            requests: Vec::with_capacity(results.len()),
+        };
         for result in results {
             value.receipts.push(result.receipts);
             value.requests.push(result.requests);
