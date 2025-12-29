@@ -107,27 +107,32 @@ The `NetworkManager::builder` constructor requires a `NetworkConfig` struct to b
 
 [File: crates/net/network/src/config.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/config.rs)
 ```rust,ignore
-pub struct NetworkConfig<C> {
+pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
-    pub client: Arc<C>,
+    ///
+    /// This type is used to fetch the block number after we established a session and received the
+    /// [`UnifiedStatus`] block hash.
+    pub client: C,
     /// The node's secret key, from which the node's identity is derived.
     pub secret_key: SecretKey,
     /// All boot nodes to start network discovery with.
-    pub boot_nodes: Vec<NodeRecord>,
+    pub boot_nodes: HashSet<TrustedPeer>,
+    /// How to set up discovery over DNS.
+    pub dns_discovery_config: Option<DnsDiscoveryConfig>,
+    /// Address to use for discovery v4.
+    pub discovery_v4_addr: SocketAddr,
     /// How to set up discovery.
-    pub discovery_v4_config: Discv4Config,
-    /// Address to use for discovery
-    pub discovery_addr: SocketAddr,
+    pub discovery_v4_config: Option<Discv4Config>,
+    /// How to set up discovery version 5.
+    pub discovery_v5_config: Option<reth_discv5::Config>,
     /// Address to listen for incoming connections
     pub listener_addr: SocketAddr,
     /// How to instantiate peer manager.
     pub peers_config: PeersConfig,
-    /// How to configure the [SessionManager](crate::session::SessionManager).
+    /// How to configure the [`SessionManager`](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
-    /// The id of the network
-    pub chain: Chain,
-    /// Genesis hash of the network
-    pub genesis_hash: B256,
+    /// The chain id
+    pub chain_id: u64,
     /// The [`ForkFilter`] to use at launch for authenticating sessions.
     ///
     /// See also <https://github.com/ethereum/EIPs/blob/master/EIPS/eip-2124.md#stale-software-examples>
@@ -136,15 +141,31 @@ pub struct NetworkConfig<C> {
     /// first hardfork, `Frontier` for mainnet.
     pub fork_filter: ForkFilter,
     /// The block importer type.
-    pub block_import: Box<dyn BlockImport>,
+    pub block_import: Box<dyn BlockImport<N::NewBlockPayload>>,
     /// The default mode of the network.
     pub network_mode: NetworkMode,
     /// The executor to use for spawning tasks.
-    pub executor: Option<TaskExecutor>,
+    pub executor: Box<dyn TaskSpawner>,
     /// The `Status` message to send to peers at the beginning.
-    pub status: Status,
-    /// Sets the hello message for the p2p handshake in ``RLPx``
-    pub hello_message: HelloMessage,
+    pub status: UnifiedStatus,
+    /// Sets the hello message for the p2p handshake in `RLPx`
+    pub hello_message: HelloMessageWithProtocols,
+    /// Additional protocols to announce and handle in `RLPx`
+    pub extra_protocols: RlpxSubProtocols,
+    /// Whether to disable transaction gossip
+    pub tx_gossip_disabled: bool,
+    /// How to instantiate transactions manager.
+    pub transactions_manager_config: TransactionsManagerConfig,
+    /// The NAT resolver for external IP
+    pub nat: Option<NatResolver>,
+    /// The Ethereum P2P handshake, see also:
+    /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
+    /// This can be overridden to support custom handshake logic via the
+    /// [`NetworkConfigBuilder`].
+    pub handshake: Arc<dyn EthRlpxHandshake>,
+    /// List of block number-hash pairs to check for required blocks.
+    /// If non-empty, peers that don't have these blocks will be filtered out.
+    pub required_block_hashes: Vec<BlockNumHash>,
 }
 ```
 
