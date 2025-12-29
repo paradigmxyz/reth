@@ -1198,6 +1198,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         info!(target: "reth::cli", "Healing static file inconsistencies.");
 
         for segment in StaticFileSegment::iter() {
+            // Only heal if static files already exist for this segment.
+            // This avoids creating empty jars for segments stored in DB.
+            if self.get_highest_static_file_block(segment).is_none() {
+                continue;
+            }
+
             let (initial_highest_block, highest_block) = self.maybe_heal_segment(segment)?;
 
             // The updated `highest_block` may have decreased if we healed from a pruning

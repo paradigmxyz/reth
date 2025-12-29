@@ -498,18 +498,17 @@ where
         )?
         .with_prune_modes(self.prune_modes());
 
-        // Check for consistency between MDBX, static files, and RocksDB. If any
-        // inconsistencies are found, unwind to the first block that's consistent across all
-        // storage layers.
+        // Keep MDBX, static files, and RocksDB aligned. If any check fails, unwind to the
+        // earliest consistent block.
         //
-        // The ordering is critical:
-        // 1. File healing - heals NippyJar inconsistencies without pruning data
-        // 2. RocksDB check - needs static file tx data for hash lookups
-        // 3. Static file checkpoint check - compares with MDBX, may prune data
+        // Order matters:
+        // 1) heal static files (no pruning)
+        // 2) check RocksDB (needs static-file tx data)
+        // 3) check static-file checkpoints vs MDBX (may prune)
         //
-        // We compute a combined unwind target from all checks and run a single unwind pass.
+        // Compute one unwind target and run a single unwind.
 
-        // Step 1: Heal file-level inconsistencies (no pruning)
+        // Step 1: heal file-level inconsistencies (no pruning)
         factory.static_file_provider().check_file_consistency()?;
 
         let provider_ro = factory.database_provider_ro()?;
