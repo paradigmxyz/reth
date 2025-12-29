@@ -91,4 +91,8 @@ pub trait RethTransactionPoolConfig {
 
     /// Returns max batch size for transaction batch insertion.
     fn max_batch_size(&self) -> usize;
+
+    /// Returns batch timeout for transaction batch insertion.
+    /// Use `Duration::ZERO` for immediate processing (zero-cost path).
+    fn batch_timeout(&self) -> Duration;
 }
