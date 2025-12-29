@@ -1173,9 +1173,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         for segment in self.segments_to_check(provider) {
             let (initial_highest_block, highest_block) = self.maybe_heal_segment(segment)?;
 
-            // The updated `highest_block` may have decreased if we healed from a pruning
-            // interruption. The subsequent `check_consistency` call will detect this
-            // (checkpoint > healed_block) and request an unwind.
+            // Healing after an interrupted prune can lower `highest_block`. The follow-up
+            // `check_consistency` compares checkpoints and will request an unwind if
+            // `checkpoint > healed_block`.
             if initial_highest_block != highest_block {
                 info!(
                     target: "reth::providers::static_file",
