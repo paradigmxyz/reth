@@ -8,7 +8,8 @@
 //! When `batch_timeout` is zero, the batcher processes requests immediately (zero-cost path).
 
 use crate::{
-    error::PoolError, AddedTransactionOutcome, PoolTransaction, TransactionOrigin, TransactionPool,
+    config::BatchConfig, error::PoolError, AddedTransactionOutcome, PoolTransaction,
+    TransactionOrigin, TransactionPool,
 };
 use pin_project::pin_project;
 use std::{
@@ -50,10 +51,9 @@ where
 /// Transaction batch processor that handles batch processing
 ///
 /// Supports two modes:
-/// - **Immediate mode** (`batch_timeout = 0`): Processes requests as soon as available (original
-///   behavior)
-/// - **Batch-and-timeout mode** (`batch_timeout > 0`): Waits for `max_batch_size` OR timeout before
-///   processing
+/// - **Immediate mode** (`batch_timeout = None`): Processes requests as soon as available (greedy)
+/// - **Batch-and-timeout mode** (`batch_timeout = Some(...)`): Waits for `max_batch_size` OR
+///   timeout before processing
 #[pin_project]
 pub struct BatchTxProcessor<Pool: TransactionPool> {
     pool: Pool,
@@ -85,27 +85,19 @@ where
     Pool: TransactionPool + 'static,
 {
     /// Create a new `BatchTxProcessor`
-    ///
-    /// # Arguments
-    /// - `pool`: The transaction pool to insert transactions into
-    /// - `max_batch_size`: Maximum number of transactions to batch before processing
-    /// - `batch_timeout`: Duration to wait before processing a partial batch. Use `Duration::ZERO`
-    ///   for immediate processing (zero-cost path).
     pub fn new(
         pool: Pool,
-        max_batch_size: usize,
-        batch_timeout: Duration,
+        config: BatchConfig,
     ) -> (Self, mpsc::UnboundedSender<BatchTxRequest<Pool::Transaction>>) {
         let (request_tx, request_rx) = mpsc::unbounded_channel();
+        let BatchConfig { max_batch_size, batch_timeout } = config;
 
-        // Only create interval if timeout is non-zero (zero-cost abstraction)
-        let interval = if batch_timeout.is_zero() {
-            None
-        } else {
-            let mut interval = tokio::time::interval(batch_timeout);
+        // Only create interval if timeout is provided
+        let interval = batch_timeout.map(|timeout| {
+            let mut interval = tokio::time::interval(timeout);
             interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-            Some(interval)
-        };
+            interval
+        });
 
         let processor = Self {
             pool,
@@ -115,11 +107,19 @@ where
             interval,
         };
 
+        const fn as_ms(d: Option<Duration>) -> u64 {
+            if let Some(d) = d {
+                d.as_millis() as u64
+            } else {
+                0
+            }
+        }
+
         tracing::info!(
             target: "txpool::batcher",
             max_batch_size,
-            batch_timeout_ms = batch_timeout.as_millis() as u64,
-            mode = if batch_timeout.is_zero() { "immediate" } else { "batch-and-timeout" },
+            batch_timeout_ms = as_ms(batch_timeout),
+            mode = if batch_timeout.is_none() { "immediate" } else { "batch-and-timeout" },
             "Transaction batcher initialized"
         );
 
@@ -171,51 +171,47 @@ where
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
         let mut this = self.project();
 
-        match this.interval.as_mut().as_pin_mut() {
-            // Immediate mode (timeout = 0): zero-cost path, original behavior
-            None => loop {
-                match this.request_rx.as_mut().poll_recv_many(cx, this.buf, *this.max_batch_size) {
-                    Poll::Ready(0) => return Poll::Ready(()), // Channel closed
-                    Poll::Ready(_) => {
+        loop {
+            // 1. Collect available requests (non-blocking)
+            while this.buf.len() < *this.max_batch_size {
+                match this.request_rx.as_mut().poll_recv(cx) {
+                    Poll::Ready(Some(req)) => this.buf.push(req),
+                    Poll::Ready(None) => {
+                        // Channel closed, flush remaining and exit
                         Self::spawn_batch(this.pool, this.buf);
-                        this.buf.reserve(*this.max_batch_size);
-                        // continue to check for more requests
+                        return Poll::Ready(())
                     }
-                    Poll::Pending => return Poll::Pending,
+                    Poll::Pending => break,
                 }
-            },
+            }
 
-            // Batch-and-timeout mode: wait for max_batch_size OR timeout
-            Some(mut interval) => loop {
-                // 1. Collect available requests (non-blocking)
-                while this.buf.len() < *this.max_batch_size {
-                    match this.request_rx.as_mut().poll_recv(cx) {
-                        Poll::Ready(Some(req)) => this.buf.push(req),
-                        Poll::Ready(None) => {
-                            // Channel closed, flush remaining and exit
-                            Self::spawn_batch(this.pool, this.buf);
-                            return Poll::Ready(());
-                        }
-                        Poll::Pending => break,
-                    }
-                }
+            // 2. Check flush conditions
+            let batch_full = this.buf.len() >= *this.max_batch_size;
+            let timeout_ready = if let Some(mut interval) = this.interval.as_mut().as_pin_mut() {
+                // If we have items and interval ticked, we should flush
+                !this.buf.is_empty() && interval.as_mut().poll_tick(cx).is_ready()
+            } else {
+                // Immediate mode: always flush if we have items
+                // This corresponds to "zero cost" greedy processing
+                !this.buf.is_empty()
+            };
 
-                // 2. Check flush conditions
-                let batch_full = this.buf.len() >= *this.max_batch_size;
-                // Only poll interval if we have items to flush
-                let timeout_ready =
-                    !this.buf.is_empty() && interval.as_mut().poll_tick(cx).is_ready();
+            if batch_full || timeout_ready {
+                Self::spawn_batch(this.pool, this.buf);
+                this.buf.reserve(*this.max_batch_size);
 
-                if batch_full || timeout_ready {
-                    Self::spawn_batch(this.pool, this.buf);
-                    this.buf.reserve(*this.max_batch_size);
+                // Reset interval if present
+                if let Some(mut interval) = this.interval.as_mut().as_pin_mut() {
                     interval.as_mut().reset();
-                    continue; // check for more without returning Pending
                 }
+                continue // check for more without returning Pending
+            }
 
-                // 3. Nothing to do - wakers already registered by poll_recv and poll_tick
-                return Poll::Pending;
-            },
+            // 3. Nothing to do
+            // Wakers logic:
+            // - request_rx.poll_recv returned Pending (registered waker)
+            // - interval.poll_tick returned Pending (registered waker)
+            return Poll::Pending
         }
     }
 }
@@ -257,7 +253,8 @@ mod tests {
     #[tokio::test]
     async fn test_batch_processor() {
         let pool = testing_pool();
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000, Duration::ZERO);
+        let config = BatchConfig { max_batch_size: 1000, batch_timeout: None };
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         // Spawn the processor
         let handle = tokio::spawn(processor);
@@ -291,7 +288,8 @@ mod tests {
     #[tokio::test]
     async fn test_add_transaction() {
         let pool = testing_pool();
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000, Duration::ZERO);
+        let config = BatchConfig { max_batch_size: 1000, batch_timeout: None };
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         // Spawn the processor
         let handle = tokio::spawn(processor);
@@ -319,8 +317,8 @@ mod tests {
     async fn test_max_batch_size() {
         let pool = testing_pool();
         let max_batch_size = 10;
-        let (processor, request_tx) =
-            BatchTxProcessor::new(pool.clone(), max_batch_size, Duration::ZERO);
+        let config = BatchConfig { max_batch_size, batch_timeout: None };
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         // Spawn batch processor with threshold
         let handle = tokio::spawn(processor);
@@ -355,7 +353,8 @@ mod tests {
         let pool = testing_pool();
         // Large batch size, small timeout - timeout should trigger the flush
         let batch_timeout = Duration::from_millis(50);
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000, batch_timeout);
+        let config = BatchConfig { max_batch_size: 1000, batch_timeout: Some(batch_timeout) };
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         let handle = tokio::spawn(processor);
 
@@ -391,8 +390,8 @@ mod tests {
         let max_batch_size = 5;
         // Long timeout, small batch size - batch size should trigger first
         let batch_timeout = Duration::from_secs(60);
-        let (processor, request_tx) =
-            BatchTxProcessor::new(pool.clone(), max_batch_size, batch_timeout);
+        let config = BatchConfig { max_batch_size, batch_timeout: Some(batch_timeout) };
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         let handle = tokio::spawn(processor);
 
@@ -422,8 +421,10 @@ mod tests {
     #[tokio::test]
     async fn test_zero_timeout_immediate_processing() {
         let pool = testing_pool();
-        // Zero timeout = immediate mode (original behavior)
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), 1000, Duration::ZERO);
+        // Zero timeout (None) = immediate mode based on our logic (if configured that way)
+        // But here we test explicit "None" configuration
+        let config = BatchConfig { max_batch_size: 1000, batch_timeout: None };
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
 
         let handle = tokio::spawn(processor);
 
