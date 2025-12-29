@@ -152,6 +152,7 @@ where
         proof_permits: usize,
         rpc_converter: Rpc,
         max_batch_size: usize,
+        batch_timeout: Duration,
         max_blocking_io_requests: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: ForwardConfig,
@@ -173,6 +174,7 @@ where
             rpc_converter,
             (),
             max_batch_size,
+            batch_timeout,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
@@ -361,6 +363,7 @@ where
         converter: Rpc,
         next_env: impl PendingEnvBuilder<N::Evm>,
         max_batch_size: usize,
+        batch_timeout: Duration,
         max_blocking_io_requests: usize,
         pending_block_kind: PendingBlockKind,
         raw_tx_forwarder: Option<RpcClient>,
@@ -384,8 +387,8 @@ where
 
         // Create tx pool insertion batcher
         let (processor, tx_batch_sender) =
-            BatchTxProcessor::new(components.pool().clone(), max_batch_size);
-        task_spawner.spawn_critical_task("tx-batcher", Box::pin(processor));
+            BatchTxProcessor::new(components.pool().clone(), max_batch_size, batch_timeout);
+        task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
 
         Self {
             components,

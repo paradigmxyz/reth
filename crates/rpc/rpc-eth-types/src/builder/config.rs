@@ -99,6 +99,9 @@ pub struct EthConfig {
     pub proof_permits: usize,
     /// Maximum batch size for transaction pool insertions.
     pub max_batch_size: usize,
+    /// Batch timeout for transaction pool insertions.
+    /// Use `Duration::ZERO` for immediate processing (zero-cost path).
+    pub batch_timeout: Duration,
     /// Controls how pending blocks are built when requested via RPC methods
     pub pending_block_kind: PendingBlockKind,
     /// The raw transaction forwarder.
@@ -141,6 +144,7 @@ impl Default for EthConfig {
             fee_history_cache: FeeHistoryCacheConfig::default(),
             proof_permits: DEFAULT_PROOF_PERMITS,
             max_batch_size: 1,
+            batch_timeout: Duration::ZERO,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
             send_raw_transaction_sync_timeout: RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS,
@@ -220,6 +224,13 @@ impl EthConfig {
     /// Configures the maximum batch size for transaction pool insertions
     pub const fn max_batch_size(mut self, max_batch_size: usize) -> Self {
         self.max_batch_size = max_batch_size;
+        self
+    }
+
+    /// Configures the batch timeout for transaction pool insertions.
+    /// Use `Duration::ZERO` for immediate processing (zero-cost path).
+    pub const fn batch_timeout(mut self, batch_timeout: Duration) -> Self {
+        self.batch_timeout = batch_timeout;
         self
     }
 
