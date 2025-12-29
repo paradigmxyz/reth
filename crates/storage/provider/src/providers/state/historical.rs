@@ -37,7 +37,8 @@ use std::fmt::Debug;
 /// Indicates where to find the historical value for a given key at a specific block.
 #[derive(Debug, Eq, PartialEq)]
 pub enum HistoryInfo {
-    /// The key is written to, but only after our block (not yet written at the target block).
+    /// The key is written to, but only after our block (not yet written at the target block). Or
+    /// it has never been written.
     NotYetWritten,
     /// The chunk contains an entry for a write after our block at the given block number.
     /// The value should be looked up in the changeset at this block.
@@ -48,6 +49,43 @@ pub enum HistoryInfo {
     /// The key may have been written, but due to pruning we may not have changesets and
     /// history, so we need to make a plain state lookup.
     MaybeInPlainState,
+}
+
+impl HistoryInfo {
+    /// Determines where to find the historical value based on computed shard lookup results.
+    ///
+    /// This is a pure function shared by both MDBX and `RocksDB` backends.
+    ///
+    /// # Arguments
+    /// * `found_block` - The block number from the shard lookup
+    /// * `is_before_first_write` - True if the target block is before the first write to this key.
+    ///   This should be computed as: `rank == 0 && found_block != Some(block_number) &&
+    ///   !has_previous_shard` where `has_previous_shard` comes from a lazy `cursor.prev()` check.
+    /// * `lowest_available` - Lowest block where history is available (pruning boundary)
+    pub const fn from_lookup(
+        found_block: Option<u64>,
+        is_before_first_write: bool,
+        lowest_available: Option<BlockNumber>,
+    ) -> Self {
+        if is_before_first_write {
+            if let (Some(_), Some(block_number)) = (lowest_available, found_block) {
+                // The key may have been written, but due to pruning we may not have changesets
+                // and history, so we need to make a changeset lookup.
+                return Self::InChangeset(block_number)
+            }
+            // The key is written to, but only after our block.
+            return Self::NotYetWritten
+        }
+
+        if let Some(block_number) = found_block {
+            // The chunk contains an entry for a write after our block, return it.
+            Self::InChangeset(block_number)
+        } else {
+            // The chunk does not contain an entry for a write after our block. This can only
+            // happen if this is the last chunk and so we need to look in the plain state.
+            Self::InPlainState
+        }
+    }
 }
 
 /// State provider for a given block number which takes a tx reference.
@@ -201,7 +239,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
                 needs_prev_shard_check(rank, found_block, self.block_number) &&
                     !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key));
 
-            Ok(find_changeset_block_from_index(
+            Ok(HistoryInfo::from_lookup(
                 found_block,
                 is_before_first_write,
                 lowest_available_block_number,
@@ -528,41 +566,6 @@ impl LowestAvailableBlocks {
 /// the target block number. In this case, we need to check if there's a previous shard.
 fn needs_prev_shard_check(rank: u64, found_block: Option<u64>, block_number: BlockNumber) -> bool {
     rank == 0 && found_block != Some(block_number)
-}
-
-/// Determines where to find the historical value based on computed shard lookup results.
-///
-/// This is a pure function shared by both MDBX and `RocksDB` backends.
-///
-/// # Arguments
-/// * `found_block` - The block number from the shard lookup
-/// * `is_before_first_write` - True if the target block is before the first write to this key. This
-///   should be computed as: `rank == 0 && found_block != Some(block_number) && !has_previous_shard`
-///   where `has_previous_shard` comes from a lazy `cursor.prev()` check.
-/// * `lowest_available` - Lowest block where history is available (pruning boundary)
-pub const fn find_changeset_block_from_index(
-    found_block: Option<u64>,
-    is_before_first_write: bool,
-    lowest_available: Option<BlockNumber>,
-) -> HistoryInfo {
-    if is_before_first_write {
-        if let (Some(_), Some(block_number)) = (lowest_available, found_block) {
-            // The key may have been written, but due to pruning we may not have changesets
-            // and history, so we need to make a changeset lookup.
-            return HistoryInfo::InChangeset(block_number)
-        }
-        // The key is written to, but only after our block.
-        return HistoryInfo::NotYetWritten
-    }
-
-    if let Some(block_number) = found_block {
-        // The chunk contains an entry for a write after our block, return it.
-        HistoryInfo::InChangeset(block_number)
-    } else {
-        // The chunk does not contain an entry for a write after our block. This can only
-        // happen if this is the last chunk and so we need to look in the plain state.
-        HistoryInfo::InPlainState
-    }
 }
 
 #[cfg(test)]
