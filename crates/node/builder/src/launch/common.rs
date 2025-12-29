@@ -526,7 +526,7 @@ where
                 PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
             });
 
-        // Combine unwind targets - take the minimum (most conservative)
+        // Take the minimum block number to ensure all storage layers are consistent.
         let unwind_target = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
 
         if let Some(unwind_block) = unwind_target {
@@ -941,9 +941,9 @@ where
     /// This checks for OP-Mainnet and ensures we have all the necessary data to progress (past
     /// bedrock height)
     fn ensure_chain_specific_db_checks(&self) -> ProviderResult<()> {
-        if self.chain_spec().is_optimism()
-            && !self.is_dev()
-            && self.chain_id() == Chain::optimism_mainnet()
+        if self.chain_spec().is_optimism() &&
+            !self.is_dev() &&
+            self.chain_id() == Chain::optimism_mainnet()
         {
             let latest = self.blockchain_db().last_block_number()?;
             // bedrock height
