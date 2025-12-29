@@ -516,7 +516,6 @@ where
         // Step 1: Heal file-level inconsistencies (no pruning)
         factory.static_file_provider().check_file_consistency()?;
 
-        // Reuse the same provider for consistency checks
         let provider_ro = factory.database_provider_ro()?;
 
         // Step 2: RocksDB consistency check (needs static files tx data)
@@ -946,9 +945,9 @@ where
     /// This checks for OP-Mainnet and ensures we have all the necessary data to progress (past
     /// bedrock height)
     fn ensure_chain_specific_db_checks(&self) -> ProviderResult<()> {
-        if self.chain_spec().is_optimism() &&
-            !self.is_dev() &&
-            self.chain_id() == Chain::optimism_mainnet()
+        if self.chain_spec().is_optimism()
+            && !self.is_dev()
+            && self.chain_id() == Chain::optimism_mainnet()
         {
             let latest = self.blockchain_db().last_block_number()?;
             // bedrock height
@@ -956,7 +955,7 @@ where
                 error!(
                     "Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended"
                 );
-                return Err(ProviderError::BestBlockNotFound)
+                return Err(ProviderError::BestBlockNotFound);
             }
         }
 
