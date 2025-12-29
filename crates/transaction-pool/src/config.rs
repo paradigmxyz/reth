@@ -213,6 +213,22 @@ impl Default for PriceBumpConfig {
     }
 }
 
+/// Configuration for transaction batching
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct BatchConfig {
+    /// Maximum number of transactions to batch before processing.
+    pub max_batch_size: usize,
+    /// Maximum duration to wait before processing a partial batch.
+    /// If None, batching is disabled (immediate processing).
+    pub batch_timeout: Option<Duration>,
+}
+
+impl Default for BatchConfig {
+    fn default() -> Self {
+        Self { max_batch_size: 1, batch_timeout: None }
+    }
+}
+
 /// Configuration options for the locally received transactions:
 /// [`TransactionOrigin::Local`](TransactionOrigin)
 #[derive(Debug, Clone, Eq, PartialEq)]

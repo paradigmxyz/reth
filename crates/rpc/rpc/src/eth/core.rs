@@ -386,8 +386,12 @@ where
         let (raw_tx_sender, _) = broadcast::channel(DEFAULT_BROADCAST_CAPACITY);
 
         // Create tx pool insertion batcher
+        let batch_config = reth_transaction_pool::BatchConfig {
+            max_batch_size,
+            batch_timeout: if batch_timeout.is_zero() { None } else { Some(batch_timeout) },
+        };
         let (processor, tx_batch_sender) =
-            BatchTxProcessor::new(components.pool().clone(), max_batch_size, batch_timeout);
+            BatchTxProcessor::new(components.pool().clone(), batch_config);
         task_spawner.spawn_critical("tx-batcher", Box::pin(processor));
 
         Self {
