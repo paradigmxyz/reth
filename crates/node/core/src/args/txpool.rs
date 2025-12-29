@@ -10,10 +10,11 @@ use reth_transaction_pool::{
     maintain::MAX_QUEUED_TRANSACTION_LIFETIME,
     pool::{NEW_TX_LISTENER_BUFFER_SIZE, PENDING_TX_LISTENER_BUFFER_SIZE},
     validate::DEFAULT_MAX_TX_INPUT_BYTES,
-    LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit, DEFAULT_PRICE_BUMP,
-    DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS, MAX_NEW_PENDING_TXS_NOTIFICATIONS,
-    REPLACE_BLOB_PRICE_BUMP, TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER,
-    TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT, TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
+    BatchConfig, LocalTransactionConfig, PoolConfig, PriceBumpConfig, SubPoolLimit,
+    DEFAULT_PRICE_BUMP, DEFAULT_TXPOOL_ADDITIONAL_VALIDATION_TASKS,
+    MAX_NEW_PENDING_TXS_NOTIFICATIONS, REPLACE_BLOB_PRICE_BUMP,
+    TXPOOL_MAX_ACCOUNT_SLOTS_PER_SENDER, TXPOOL_SUBPOOL_MAX_SIZE_MB_DEFAULT,
+    TXPOOL_SUBPOOL_MAX_TXS_DEFAULT,
 };
 use std::{path::PathBuf, sync::OnceLock, time::Duration};
 
@@ -423,7 +424,7 @@ pub struct TxPoolArgs {
 
     /// Batch timeout for transaction pool insertions (e.g. "50ms" or "0" for immediate).
     /// When non-zero, transactions are batched until either max-batch-size is reached OR timeout
-    /// expires. Use "0" for immediate processing (zero-cost path, original behavior).
+    /// expires. Use "0" for immediate processing.
     #[arg(long = "txpool.batch-timeout", value_parser = parse_duration_from_secs_or_ms, value_name = "DURATION", default_value = format_duration_as_secs_or_ms(DefaultTxPoolValues::get_global().batch_timeout))]
     pub batch_timeout: Duration,
 }
@@ -560,14 +561,16 @@ impl RethTransactionPoolConfig for TxPoolArgs {
         }
     }
 
-    /// Returns max batch size for transaction batch insertion.
-    fn max_batch_size(&self) -> usize {
-        self.max_batch_size
-    }
-
-    /// Returns batch timeout for transaction batch insertion.
-    fn batch_timeout(&self) -> Duration {
-        self.batch_timeout
+    /// Returns batch config for transaction batch insertion.
+    fn batch_config(&self) -> BatchConfig {
+        BatchConfig {
+            max_batch_size: self.max_batch_size,
+            batch_timeout: if self.batch_timeout.is_zero() {
+                None
+            } else {
+                Some(self.batch_timeout)
+            },
+        }
     }
 }
 
