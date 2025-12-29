@@ -384,7 +384,7 @@ mod tests {
         handle.abort();
     }
 
-    /// Test that max_batch_size triggers flush before timeout
+    /// Test that `max_batch_size` triggers flush before timeout
     #[tokio::test]
     async fn test_max_batch_size_triggers_before_timeout() {
         let pool = testing_pool();
