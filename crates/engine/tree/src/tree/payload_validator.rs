@@ -643,6 +643,7 @@ where
         let (output, senders) = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
+            input.transaction_count(),
             state_hook,
         )?;
         let execution_finish = Instant::now();
@@ -1290,5 +1291,16 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
         // TODO decode and return `BlockAccessList`
         None
+    }
+
+    /// Returns the number of transactions in the payload or block.
+    pub fn transaction_count(&self) -> usize
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.transaction_count(),
+            Self::Block(block) => block.transaction_count(),
+        }
     }
 }
