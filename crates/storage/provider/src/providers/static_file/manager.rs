@@ -1538,6 +1538,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
         }
 
+        result.shrink_to_fit();
+
         Ok(result)
     }
 
