@@ -185,7 +185,8 @@ where
     /// `stale_filter_ttl` at the given instant.
     pub async fn clear_stale_filters(&self, now: Instant) {
         trace!(target: "rpc::eth", "clear stale filters");
-        self.active_filters().inner.lock().await.retain(|id, filter| {
+        let mut filters = self.active_filters().inner.lock().await;
+        filters.retain(|id, filter| {
             let is_valid = (now - filter.last_poll_timestamp) < self.inner.stale_filter_ttl;
 
             if !is_valid {
@@ -193,7 +194,8 @@ where
             }
 
             is_valid
-        })
+        });
+        filters.shrink_to_fit();
     }
 }
 
