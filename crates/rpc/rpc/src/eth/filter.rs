@@ -195,8 +195,6 @@ where
 
             is_valid
         });
-        // Release excess capacity after removing stale filters to prevent
-        // the HashMap from retaining memory indefinitely (high water mark problem).
         filters.shrink_to_fit();
     }
 }
