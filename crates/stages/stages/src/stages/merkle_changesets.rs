@@ -195,7 +195,8 @@ impl MerkleChangeSets {
             ?target_range,
             "Computing per-block state reverts",
         );
-        let mut per_block_state_reverts = Vec::new();
+        let range_len = target_end - target_start;
+        let mut per_block_state_reverts = Vec::with_capacity(range_len as usize);
         for block_number in target_range.clone() {
             per_block_state_reverts.push(HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
