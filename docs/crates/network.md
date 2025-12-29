@@ -84,16 +84,23 @@ Let's begin by taking a look at the line where the network is started, with the 
 
 [File: bin/reth/src/node/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/bin/reth/src/node/mod.rs)
 ```rust,ignore
-async fn start_network<C>(config: NetworkConfig<C>) -> Result<NetworkHandle, NetworkError>
+// Method on NetworkConfig for starting the network with request handler
+pub async fn start_network(self) -> Result<NetworkHandle<N>, NetworkError>
 where
-    C: BlockReader + HeaderProvider + 'static,
+    C: BlockReader<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
+        + HeaderProvider
+        + Clone
+        + Unpin
+        + 'static,
 {
-    let client = config.client.clone();
-    let (handle, network, _txpool, eth) =
-        NetworkManager::builder(config).await?.request_handler(client).split_with_handle();
+    let client = self.client.clone();
+    let (handle, network, _txpool, eth) = NetworkManager::builder::<C>(self)
+        .await?
+        .request_handler::<C>(client)
+        .split_with_handle();
 
     tokio::task::spawn(network);
-    // TODO: tokio::task::spawn(txpool);
+    // TODO: tokio::task::spawn(txpool); 
     tokio::task::spawn(eth);
     Ok(handle)
 }
@@ -168,6 +175,9 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub required_block_hashes: Vec<BlockNumHash>,
 }
 ```
+The `NetworkConfig` struct is generic over two parameters:
+- `C`: The client type that provides access to blockchain data (headers, blocks, etc.)
+- `N`: The network primitives type that defines block and transaction types for the network. Defaults to `EthNetworkPrimitives` for standard Ethereum networks, but can be customized for other chains (e.g., Optimism).
 
 The discovery task progresses as the network management task is polled, handling events regarding peer management through the `Swarm` struct which is stored as a field on the `NetworkManager`:
 
