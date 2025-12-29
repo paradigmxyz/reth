@@ -508,10 +508,10 @@ where
         //
         // Compute one unwind target and run a single unwind.
 
-        // Step 1: heal file-level inconsistencies (no pruning)
-        factory.static_file_provider().check_file_consistency()?;
-
         let provider_ro = factory.database_provider_ro()?;
+
+        // Step 1: heal file-level inconsistencies (no pruning)
+        factory.static_file_provider().check_file_consistency(&provider_ro)?;
 
         // Step 2: RocksDB consistency check (needs static files tx data)
         let rocksdb_unwind = factory.rocksdb_provider().check_consistency(&provider_ro)?;

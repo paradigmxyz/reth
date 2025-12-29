@@ -1055,34 +1055,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
         };
 
-        for segment in StaticFileSegment::iter() {
+        for segment in self.segments_to_check(provider) {
             debug!(target: "reth::providers::static_file", ?segment, "Checking consistency for segment");
-            match segment {
-                StaticFileSegment::Headers | StaticFileSegment::Transactions => {}
-                StaticFileSegment::Receipts => {
-                    if EitherWriter::receipts_destination(provider).is_database() {
-                        // Old pruned nodes (including full node) do not store receipts as static
-                        // files.
-                        debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts consistency check: receipts stored in database");
-                        continue
-                    }
-
-                    if NamedChain::Gnosis == provider.chain_spec().chain_id() ||
-                        NamedChain::Chiado == provider.chain_spec().chain_id()
-                    {
-                        // Gnosis and Chiado's historical import is broken and does not work with
-                        // this check. They are importing receipts along
-                        // with importing headers/bodies.
-                        debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts consistency check: broken historical import for gnosis/chiado");
-                        continue;
-                    }
-                }
-                StaticFileSegment::TransactionSenders => {
-                    if EitherWriterDestination::senders(provider).is_database() {
-                        continue
-                    }
-                }
-            }
 
             // Heal file-level inconsistencies and get before/after highest block
             let (initial_highest_block, mut highest_block) = self.maybe_heal_segment(segment)?;
@@ -1184,26 +1158,61 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(unwind_target.map(PipelineTarget::Unwind))
     }
 
-    /// Heals file-level (`NippyJar`) inconsistencies for all static file segments.
+    /// Returns the static file segments that should be checked/healed for this provider.
+    fn segments_to_check<'a, Provider>(
+        &'a self,
+        provider: &'a Provider,
+    ) -> impl Iterator<Item = StaticFileSegment> + 'a
+    where
+        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
+    {
+        StaticFileSegment::iter().filter(move |segment| self.should_check_segment(provider, *segment))
+    }
+
+    fn should_check_segment<Provider>(&self, provider: &Provider, segment: StaticFileSegment) -> bool
+    where
+        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
+    {
+        match segment {
+            StaticFileSegment::Headers | StaticFileSegment::Transactions => true,
+            StaticFileSegment::Receipts => {
+                if EitherWriter::receipts_destination(provider).is_database() {
+                    // Old pruned nodes (including full node) do not store receipts as static
+                    // files.
+                    debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts segment: receipts stored in database");
+                    return false
+                }
+
+                if NamedChain::Gnosis == provider.chain_spec().chain_id() ||
+                    NamedChain::Chiado == provider.chain_spec().chain_id()
+                {
+                    // Gnosis and Chiado's historical import is broken and does not work with
+                    // this check. They are importing receipts along
+                    // with importing headers/bodies.
+                    debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts segment: broken historical import for gnosis/chiado");
+                    return false;
+                }
+
+                true
+            }
+            StaticFileSegment::TransactionSenders => {
+                !EitherWriterDestination::senders(provider).is_database()
+            }
+        }
+    }
+
+    /// Heals file-level (`NippyJar`) inconsistencies for eligible static file segments.
     ///
-    /// This should be called BEFORE any checks that depend on static file data (e.g., `RocksDB`
-    /// consistency checks that need transaction data), as it ensures files are in a consistent
-    /// state without pruning any data.
-    ///
-    /// Unlike [`Self::check_consistency`], this method:
-    /// - Does NOT compare with database checkpoints
-    /// - Does NOT prune data
-    /// - Applies to ALL segments unconditionally
-    pub fn check_file_consistency(&self) -> ProviderResult<()> {
+    /// Call before [`Self::check_consistency`] so files are internally consistent.
+    /// Uses the same segment-skip logic as [`Self::check_consistency`], but does not compare
+    /// with database checkpoints or prune.
+    pub fn check_file_consistency<Provider>(&self, provider: &Provider) -> ProviderResult<()>
+    where
+        Provider: DBProvider + ChainSpecProvider + StorageSettingsCache,
+    {
         info!(target: "reth::cli", "Healing static file inconsistencies.");
 
-        for segment in StaticFileSegment::iter() {
-            // Only heal if static files already exist for this segment.
-            // This avoids creating empty jars for segments stored in DB.
-            if self.get_highest_static_file_block(segment).is_none() {
-                continue;
-            }
-
+        for segment in self.segments_to_check(provider) {
             let (initial_highest_block, highest_block) = self.maybe_heal_segment(segment)?;
 
             // The updated `highest_block` may have decreased if we healed from a pruning
