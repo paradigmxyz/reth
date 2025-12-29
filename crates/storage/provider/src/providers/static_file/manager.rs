@@ -1194,33 +1194,27 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     /// - Does NOT compare with database checkpoints
     /// - Does NOT prune data
     /// - Applies to ALL segments unconditionally
-    ///
-    /// Returns an unwind target if file healing detected a decrease in the highest block
-    /// (indicating a pruning interruption that needs a database unwind).
-    pub fn check_file_consistency(&self) -> ProviderResult<Option<BlockNumber>> {
+    pub fn check_file_consistency(&self) -> ProviderResult<()> {
         info!(target: "reth::cli", "Healing static file inconsistencies.");
-
-        let mut unwind_target: Option<BlockNumber> = None;
 
         for segment in StaticFileSegment::iter() {
             let (initial_highest_block, highest_block) = self.maybe_heal_segment(segment)?;
 
             // The updated `highest_block` may have decreased if we healed from a pruning
-            // interruption.
+            // interruption. The subsequent `check_consistency` call will detect this
+            // (checkpoint > healed_block) and request an unwind.
             if initial_highest_block != highest_block {
                 info!(
                     target: "reth::providers::static_file",
                     ?initial_highest_block,
-                    unwind_target = highest_block,
+                    ?highest_block,
                     ?segment,
-                    "Setting unwind target."
+                    "Healed segment, highest block changed."
                 );
-                let target = highest_block.unwrap_or_default();
-                unwind_target = Some(unwind_target.map_or(target, |t| t.min(target)));
             }
         }
 
-        Ok(unwind_target)
+        Ok(())
     }
 
     /// Checks consistency of the latest static file segment and throws an error if at fault.
