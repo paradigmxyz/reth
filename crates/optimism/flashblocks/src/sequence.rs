@@ -109,7 +109,7 @@ impl<P: FlashblockPayload> FlashBlockPendingSequence<P> {
     }
 
     /// Returns the payload base of the first tracked flashblock.
-    pub fn payload_base(&self) -> Option<P::Base> {
+    pub fn payload_base(&self) -> Option<&P::Base> {
         self.inner.values().next()?.base()
     }
 
@@ -205,7 +205,7 @@ impl<P: FlashblockPayload> FlashBlockCompleteSequence<P> {
     }
 
     /// Returns the payload base of the first flashblock.
-    pub fn payload_base(&self) -> P::Base {
+    pub fn payload_base(&self) -> &P::Base {
         self.inner.first().unwrap().base().unwrap()
     }
 

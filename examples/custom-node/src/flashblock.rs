@@ -101,8 +101,8 @@ impl FlashblockPayload for CustomFlashblockPayload {
         self.payload_id
     }
 
-    fn base(&self) -> Option<Self::Base> {
-        self.base.clone()
+    fn base(&self) -> Option<&Self::Base> {
+        self.base.as_ref()
     }
 
     fn diff(&self) -> &Self::Diff {

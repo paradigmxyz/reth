@@ -51,7 +51,9 @@ where
             sink: None,
         }
     }
+}
 
+impl<F> WsFlashBlockStream<WsStream, WsSink, WsConnector, F> {
     /// Sets a custom decoder for the websocket stream.
     pub fn with_decoder(self, decoder: Box<dyn FlashBlockDecoder<F>>) -> Self {
         Self { decoder, ..self }

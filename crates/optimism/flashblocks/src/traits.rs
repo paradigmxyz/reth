@@ -70,7 +70,7 @@ pub trait FlashblockPayload:
     fn payload_id(&self) -> PayloadId;
 
     /// Base payload (only present on index 0).
-    fn base(&self) -> Option<Self::Base>;
+    fn base(&self) -> Option<&Self::Base>;
 
     /// State diff for this flashblock.
     fn diff(&self) -> &Self::Diff;

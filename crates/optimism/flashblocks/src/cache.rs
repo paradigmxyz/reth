@@ -147,7 +147,7 @@ impl<P: FlashblockPayload> SequenceManager<P> {
         // source_name)
         let (base, last_flashblock, transactions, cached_state, source_name) =
             // Priority 1: Try current pending sequence
-            if let Some(base) = self.pending.payload_base().filter(|b| b.parent_hash() == local_tip_hash) {
+            if let Some(base) = self.pending.payload_base().cloned().filter(|b| b.parent_hash() == local_tip_hash) {
                 let cached_state = self.pending.take_cached_reads().map(|r| (base.parent_hash(), r));
                 let last_fb = self.pending.last_flashblock()?.clone();
                 let transactions = self.pending_transactions.clone();
@@ -155,7 +155,7 @@ impl<P: FlashblockPayload> SequenceManager<P> {
             }
             // Priority 2: Try cached sequence with exact parent match
             else if let Some((cached, txs)) = self.completed_cache.iter().find(|(c, _)| c.payload_base().parent_hash() == local_tip_hash) {
-                let base = cached.payload_base();
+                let base = cached.payload_base().clone();
                 let last_fb = cached.last().clone();
                 let transactions = txs.clone();
                 let cached_state = None;

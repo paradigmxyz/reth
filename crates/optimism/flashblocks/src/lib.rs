@@ -50,9 +50,6 @@ pub type PendingBlockRx<N> = tokio::sync::watch::Receiver<Option<PendingFlashBlo
 pub type FlashBlockCompleteSequenceRx<P> =
     tokio::sync::broadcast::Receiver<FlashBlockCompleteSequence<P>>;
 
-/// Receiver of received flashblocks from the (websocket) subscription.
-pub type FlashBlockRx = tokio::sync::broadcast::Receiver<Arc<FlashBlock>>;
-
 /// Receiver that signals whether a flashblock is currently being built.
 pub type InProgressFlashBlockRx = tokio::sync::watch::Receiver<Option<FlashBlockBuildInfo>>;
 
