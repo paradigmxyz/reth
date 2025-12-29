@@ -1648,17 +1648,15 @@ mod tests {
                     // though we never store the root node so the masks for it aren't really valid.
                     let masks = if path.is_empty() {
                         TrieMasks::none()
-                    } else {
+                    } else if let Some(branch_masks) =
+                        proof_legacy_result.branch_node_masks.get(path)
+                    {
                         TrieMasks {
-                            hash_mask: proof_legacy_result
-                                .branch_node_hash_masks
-                                .get(path)
-                                .copied(),
-                            tree_mask: proof_legacy_result
-                                .branch_node_tree_masks
-                                .get(path)
-                                .copied(),
+                            hash_mask: Some(branch_masks.hash_mask),
+                            tree_mask: Some(branch_masks.tree_mask),
                         }
+                    } else {
+                        TrieMasks::none()
                     };
 
                     ProofTrieNode { path: *path, node, masks }
