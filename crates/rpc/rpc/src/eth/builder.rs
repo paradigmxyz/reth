@@ -42,6 +42,7 @@ pub struct EthApiBuilder<N: RpcNodeCore, Rpc, NextEnv = ()> {
     task_spawner: Box<dyn TaskSpawner + 'static>,
     next_env: NextEnv,
     max_batch_size: usize,
+    batch_timeout: Duration,
     max_blocking_io_requests: usize,
     pending_block_kind: PendingBlockKind,
     raw_tx_forwarder: ForwardConfig,
@@ -94,6 +95,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             task_spawner,
             next_env,
             max_batch_size,
+            batch_timeout,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -116,6 +118,7 @@ impl<N: RpcNodeCore, Rpc, NextEnv> EthApiBuilder<N, Rpc, NextEnv> {
             task_spawner,
             next_env,
             max_batch_size,
+            batch_timeout,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -149,6 +152,7 @@ where
             eth_state_cache_config: Default::default(),
             next_env: Default::default(),
             max_batch_size: 1,
+            batch_timeout: Duration::ZERO,
             max_blocking_io_requests: DEFAULT_MAX_BLOCKING_IO_REQUEST,
             pending_block_kind: PendingBlockKind::Full,
             raw_tx_forwarder: ForwardConfig::default(),
@@ -189,6 +193,7 @@ where
             gas_oracle_config,
             next_env,
             max_batch_size,
+            batch_timeout,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -211,6 +216,7 @@ where
             gas_oracle_config,
             next_env,
             max_batch_size,
+            batch_timeout,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -240,6 +246,7 @@ where
             gas_oracle_config,
             next_env: _,
             max_batch_size,
+            batch_timeout,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -262,6 +269,7 @@ where
             gas_oracle_config,
             next_env,
             max_batch_size,
+            batch_timeout,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -341,6 +349,13 @@ where
     /// Sets the max batch size for batching transaction insertions.
     pub const fn max_batch_size(mut self, max_batch_size: usize) -> Self {
         self.max_batch_size = max_batch_size;
+        self
+    }
+
+    /// Sets the batch timeout for batching transaction insertions.
+    /// Use `Duration::ZERO` for immediate processing (zero-cost path).
+    pub const fn batch_timeout(mut self, batch_timeout: Duration) -> Self {
+        self.batch_timeout = batch_timeout;
         self
     }
 
@@ -497,6 +512,7 @@ where
             task_spawner,
             next_env,
             max_batch_size,
+            batch_timeout,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder,
@@ -539,6 +555,7 @@ where
             rpc_converter,
             next_env,
             max_batch_size,
+            batch_timeout,
             max_blocking_io_requests,
             pending_block_kind,
             raw_tx_forwarder.forwarder_client(),
