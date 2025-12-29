@@ -16,7 +16,7 @@ use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
 use reth_trie_common::{BranchNode, Nibbles, ProofTrieNode, RlpNode, TrieMasks, TrieNode};
-use std::{cmp::Ordering, iter::Peekable};
+use std::cmp::Ordering;
 use tracing::{instrument, trace};
 
 mod value;
@@ -24,6 +24,9 @@ pub use value::*;
 
 mod node;
 use node::*;
+
+mod target;
+pub use target::*;
 
 /// Target to use with the `tracing` crate.
 static TRACE_TARGET: &str = "trie::proof_v2";
@@ -111,9 +114,6 @@ impl<TC, HC, VE: LeafValueEncoder> ProofCalculator<TC, HC, VE> {
     }
 }
 
-/// Helper type for the [`Iterator`] used to pass targets in from the caller.
-type TargetsIter<I> = Peekable<WindowIter<I>>;
-
 impl<TC, HC, VE> ProofCalculator<TC, HC, VE>
 where
     TC: TrieCursor,
@@ -145,18 +145,19 @@ where
         !self.branch_stack.is_empty() as usize
     }
 
-    /// Returns true if the proof of a node at the given path should be retained.
-    /// A node is retained if its path is a prefix of any target.
-    /// This may move the
-    /// `targets` iterator forward if the given path comes after the current target.
+    /// Returns true if the proof of a node at the given path should be retained. A node is retained
+    /// if its path is a prefix of any target.
     ///
-    /// This method takes advantage of the [`WindowIter`] component of [`TargetsIter`] to only check
-    /// a single target at a time. The [`WindowIter`] allows us to look at a current target and the
-    /// next target simultaneously, forming an end-exclusive range.
+    /// This may move the `targets` iterator forward if the given path comes after the current
+    /// target.
+    ///
+    /// This method takes advantage of the [`std::slice::Iter`] component of [`TargetsCursor`] to
+    /// check the minimum number of targets. In general it looks at a current target and the next
+    /// target simultaneously, forming an end-exclusive range.
     ///
     /// ```text
     /// * Given targets: [ 0x012, 0x045, 0x678 ]
-    /// * targets.next() returns:
+    /// * targets.current() returns:
     ///     - (0x012, Some(0x045)): covers (0x012..0x045)
     ///     - (0x045, Some(0x678)): covers (0x045..0x678)
     ///     - (0x678, None): covers (0x678..)
@@ -169,26 +170,25 @@ where
     /// ```text
     /// * Given:
     ///     - path: 0x04
-    ///     - targets.peek() returns (0x012, Some(0x045))
+    ///     - targets.current() returns (0x012, Some(0x045))
     ///
     /// * 0x04 comes _after_ 0x045 in depth-first order, so (0x012..0x045) does not contain 0x04.
     ///
     /// * targets.next() is called.
     ///
-    /// * targets.peek() now returns (0x045, Some(0x678)). This does contain 0x04.
+    /// * targets.current() now returns (0x045, Some(0x678)). This does contain 0x04.
     ///
     /// * 0x04 is a prefix of 0x045, and so is retained.
     /// ```
-    ///
-    /// Because paths in the trie are visited in depth-first order, it's imperative that targets are
-    /// given in depth-first order as well. If the targets were generated off of B256s, which is
-    /// the common-case, then this is equivalent to lexicographical order.
-    fn should_retain(
+    fn should_retain<'a>(
         &self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsCursor<'a>,
         path: &Nibbles,
+        check_min_len: bool,
     ) -> bool {
-        trace!(target: TRACE_TARGET, ?path, target = ?targets.peek(), "should_retain: called");
+        let (mut lower, mut upper) = targets.current();
+
+        trace!(target: TRACE_TARGET, ?path, target = ?lower, "should_retain: called");
         debug_assert!(self.retained_proofs.last().is_none_or(
                 |ProofTrieNode { path: last_retained_path, .. }| {
                     depth_first::cmp(path, last_retained_path) == Ordering::Greater
@@ -198,21 +198,47 @@ where
             self.retained_proofs.last().map(|n| n.path),
         );
 
-        let &(mut lower, mut upper) = targets.peek().expect("targets is never exhausted");
-
         loop {
-            // If the node in question is a prefix of the target then we retain
-            if lower.starts_with(path) {
-                return true
+            // If the node in question is a prefix of the target then we do not iterate targets
+            // further.
+            //
+            // Even if the node is a prefix of the target's key, if the target has a non-zero
+            // `min_len` it indicates that the node should only be retained if it is
+            // longer than that value.
+            //
+            // _However_ even if the node doesn't match the target due to the target's `min_len`, it
+            // may match other targets whose keys match this node. So we search forwards and
+            // backwards for all targets which might match this node, and check against the
+            // `min_len` of each.
+            //
+            // For example, given a branch 0xabc, with children at 0, 1, and 2, and targets:
+            // - key: 0xabc0, min_len: 2
+            // - key: 0xabc1, min_len: 1
+            // - key: 0xabc2, min_len: 4 <-- current
+            // - key: 0xabc3, min_len: 3
+            //
+            // When the branch node at 0xabc is visited it will be after the targets has iterated
+            // forward to 0xabc2 (because all children will have been visited already). At this
+            // point the target for 0xabc2 will not match the branch due to its prefix, but any of
+            // the other targets would, so we need to check those as well.
+            if lower.key.starts_with(path) {
+                return !check_min_len ||
+                    (path.len() >= lower.min_len as usize ||
+                        targets
+                            .skip_iter()
+                            .take_while(|target| target.key.starts_with(path))
+                            .any(|target| path.len() >= target.min_len as usize) ||
+                        targets
+                            .rev_iter()
+                            .take_while(|target| target.key.starts_with(path))
+                            .any(|target| path.len() >= target.min_len as usize))
             }
 
             // If the path isn't in the current range then iterate forward until it is (or until
             // there is no upper bound, indicating unbounded).
-            if upper.is_some_and(|upper| depth_first::cmp(path, &upper) != Ordering::Less) {
-                targets.next();
-                trace!(target: TRACE_TARGET, target = ?targets.peek(), "upper target <= path, next target");
-                let &(l, u) = targets.peek().expect("targets is never exhausted");
-                (lower, upper) = (l, u);
+            if upper.is_some_and(|upper| depth_first::cmp(path, &upper.key) != Ordering::Less) {
+                (lower, upper) = targets.next();
+                trace!(target: TRACE_TARGET, target = ?lower, "upper target <= path, next target");
             } else {
                 return false
             }
@@ -224,9 +250,9 @@ where
     ///
     /// Calling this method indicates that the child will not undergo any further modifications, and
     /// therefore can be retained as a proof node if applicable.
-    fn commit_child(
+    fn commit_child<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsCursor<'a>,
         child_path: Nibbles,
         child: ProofTrieBranchChild<VE::DeferredEncoder>,
     ) -> Result<RlpNode, StateProofError> {
@@ -236,7 +262,7 @@ where
         }
 
         // If we should retain the child then do so.
-        if self.should_retain(targets, &child_path) {
+        if self.should_retain(targets, &child_path, true) {
             trace!(target: TRACE_TARGET, ?child_path, "Retaining child");
 
             // Convert to `ProofTrieNode`, which will be what is retained.
@@ -310,9 +336,9 @@ where
     /// `branch_stack` to determine the last child's path. When committing the last child prior to
     /// pushing a new child, it's important to set the new child's `state_mask` bit _after_ the call
     /// to this method.
-    fn commit_last_child(
+    fn commit_last_child<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsCursor<'a>,
     ) -> Result<(), StateProofError> {
         let Some(child) = self.child_stack.pop() else { return Ok(()) };
 
@@ -341,9 +367,9 @@ where
     ///
     /// - If `branch_stack` is empty
     /// - If the leaf's nibble is already set in the branch's `state_mask`.
-    fn push_new_leaf(
+    fn push_new_leaf<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsCursor<'a>,
         leaf_nibble: u8,
         leaf_short_key: Nibbles,
         leaf_val: VE::DeferredEncoder,
@@ -448,10 +474,7 @@ where
     /// # Panics
     ///
     /// This method panics if `branch_stack` is empty.
-    fn pop_branch(
-        &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
-    ) -> Result<(), StateProofError> {
+    fn pop_branch<'a>(&mut self, targets: &mut TargetsCursor<'a>) -> Result<(), StateProofError> {
         trace!(
             target: TRACE_TARGET,
             branch = ?self.branch_stack.last(),
@@ -530,9 +553,9 @@ where
 
     /// Adds a single leaf for a key to the stack, possibly collapsing an existing branch and/or
     /// creating a new one depending on the path of the key.
-    fn push_leaf(
+    fn push_leaf<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsCursor<'a>,
         key: Nibbles,
         val: VE::DeferredEncoder,
     ) -> Result<(), StateProofError> {
@@ -614,12 +637,13 @@ where
     #[instrument(
         target = TRACE_TARGET,
         level = "trace",
-        skip(self, value_encoder, targets, hashed_cursor_current),
+        skip_all,
+        fields(?lower_bound, ?upper_bound),
     )]
-    fn calculate_key_range(
+    fn calculate_key_range<'a>(
         &mut self,
         value_encoder: &VE,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsCursor<'a>,
         hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
         lower_bound: Nibbles,
         upper_bound: Option<Nibbles>,
@@ -638,6 +662,12 @@ where
         // If the cursor hasn't been used, or the last iterated key is prior to this range's
         // key range, then seek forward to at least the first key.
         if hashed_cursor_current.as_ref().is_none_or(|(key, _)| key < &lower_bound) {
+            trace!(
+                target: TRACE_TARGET,
+                current=?hashed_cursor_current.as_ref().map(|(k, _)| k),
+                "Seeking hashed cursor to meet lower bound",
+            );
+
             let lower_key = B256::right_padding_from(&lower_bound.pack());
             *hashed_cursor_current =
                 self.hashed_cursor.seek(lower_key)?.map(map_hashed_cursor_entry);
@@ -653,6 +683,7 @@ where
             *hashed_cursor_current = self.hashed_cursor.next()?.map(map_hashed_cursor_entry);
         }
 
+        trace!(target: TRACE_TARGET, "No further keys within range");
         Ok(())
     }
 
@@ -678,9 +709,9 @@ where
     /// If there is already a child at the top branch of `branch_stack` occupying this new branch's
     /// nibble then that child will have its short-key split with another new branch, and this
     /// cached branch will be a child of that splitting branch.
-    fn push_cached_branch(
+    fn push_cached_branch<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsCursor<'a>,
         cached_path: Nibbles,
         cached_branch: &BranchNodeCompact,
     ) -> Result<(), StateProofError> {
@@ -770,6 +801,7 @@ where
     fn try_pop_cached_branch(
         &mut self,
         trie_cursor_state: &mut TrieCursorState,
+        sub_trie_prefix: &Nibbles,
         uncalculated_lower_bound: &Option<Nibbles>,
     ) -> Result<PopCachedBranchOutcome, StateProofError> {
         // If there is a branch on top of the stack we use that.
@@ -782,14 +814,14 @@ where
         // attempts to find it.
 
         // If the `uncalculated_lower_bound` is None it indicates that there can be no more
-        // leaf data, so similarly there be no more branches.
+        // leaf data, so similarly there can be no more branches.
         let Some(uncalculated_lower_bound) = uncalculated_lower_bound else {
             return Ok(PopCachedBranchOutcome::Exhausted)
         };
 
         // If [`TrieCursorState::path`] returns None it means that the cursor has been
         // exhausted, so there can be no more cached data.
-        let Some(trie_cursor_path) = trie_cursor_state.path() else {
+        let Some(mut trie_cursor_path) = trie_cursor_state.path() else {
             return Ok(PopCachedBranchOutcome::Exhausted)
         };
 
@@ -797,16 +829,24 @@ where
         // then we can't use it, instead we seek forward and try again.
         if trie_cursor_path < uncalculated_lower_bound {
             *trie_cursor_state =
-                TrieCursorState::new(self.trie_cursor.seek(*uncalculated_lower_bound)?);
+                TrieCursorState::seeked(self.trie_cursor.seek(*uncalculated_lower_bound)?);
 
-            // Having just seeked forward we need to check if the cursor is now exhausted.
-            if matches!(trie_cursor_state, TrieCursorState::Exhausted) {
+            // Having just seeked forward we need to check if the cursor is now exhausted,
+            // extracting the new path at the same time.
+            if let Some(new_trie_cursor_path) = trie_cursor_state.path() {
+                trie_cursor_path = new_trie_cursor_path
+            } else {
                 return Ok(PopCachedBranchOutcome::Exhausted)
             };
         }
 
+        // If the trie cursor has exceeded the sub-trie then we consider it to be exhausted.
+        if !trie_cursor_path.starts_with(sub_trie_prefix) {
+            return Ok(PopCachedBranchOutcome::Exhausted)
+        }
+
         // At this point we can be sure that the cursor is in an `Available` state. We know for
-        // sure it's not `Exhausted` because of the call to `path` above, and we know it's not
+        // sure it's not `Exhausted` because of the calls to `path` above, and we know it's not
         // `Taken` because we push all taken branches onto the `cached_branch_stack`, and the
         // stack is empty.
         //
@@ -851,16 +891,18 @@ where
     /// - `Some(lower, Some(upper))`: Indicates to call `push_leaf` on all keys starting at `lower`,
     ///   up to but excluding `upper`, and then call this method once done.
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
-    fn next_uncached_key_range(
+    fn next_uncached_key_range<'a>(
         &mut self,
-        targets: &mut TargetsIter<impl Iterator<Item = Nibbles>>,
+        targets: &mut TargetsCursor<'a>,
         trie_cursor_state: &mut TrieCursorState,
-        hashed_key_current_path: Option<Nibbles>,
+        sub_trie_prefix: &Nibbles,
+        sub_trie_upper_bound: Option<&Nibbles>,
+        mut uncalculated_lower_bound: Option<Nibbles>,
     ) -> Result<Option<(Nibbles, Option<Nibbles>)>, StateProofError> {
         // Pop any under-construction branches that are now complete.
         // All trie data prior to the current cached branch, if any, has been computed. Any branches
         // which were under-construction previously, and which are not on the same path as this
-        // cached branch, can be assumed to be completed; they will not have any further keys added
+        // cached branch, can be assumed to be completed; they will not have any further keys added.
         // to them.
         if let Some(cached_path) = self.cached_branch_stack.last().map(|kv| kv.0) {
             while !cached_path.starts_with(&self.branch_path) {
@@ -868,30 +910,25 @@ where
             }
         }
 
-        // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
-        // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor (this
-        // method). If this is None then there are no further nodes which could exist.
-        //
-        // This starts off being based on the hashed cursor's current position, which is the
-        // next hashed key which hasn't been processed. If that is None then we start from zero.
-        let mut uncalculated_lower_bound = Some(hashed_key_current_path.unwrap_or_default());
-
         loop {
             // Pop the currently cached branch node.
             //
             // NOTE we pop off the `cached_branch_stack` because cloning the `BranchNodeCompact`
             // means cloning an Arc, which incurs synchronization overhead. We have to be sure to
             // push the cached branch back onto the stack once done.
-            let (cached_path, cached_branch) = match self
-                .try_pop_cached_branch(trie_cursor_state, &uncalculated_lower_bound)?
-            {
+            let (cached_path, cached_branch) = match self.try_pop_cached_branch(
+                trie_cursor_state,
+                sub_trie_prefix,
+                &uncalculated_lower_bound,
+            )? {
                 PopCachedBranchOutcome::Popped(cached) => cached,
                 PopCachedBranchOutcome::Exhausted => {
                     // If cached branches are exhausted it's possible that there is still an
                     // unbounded range of leaves to be processed. `uncalculated_lower_bound` is
                     // used to return that range.
                     trace!(target: TRACE_TARGET, ?uncalculated_lower_bound, "Exhausted cached trie nodes");
-                    return Ok(uncalculated_lower_bound.map(|lower| (lower, None)));
+                    return Ok(uncalculated_lower_bound
+                        .map(|lower| (lower, sub_trie_upper_bound.copied())));
                 }
                 PopCachedBranchOutcome::CalculateLeaves(range) => {
                     return Ok(Some(range));
@@ -983,7 +1020,7 @@ where
                 //   last child before pushing a new one onto the stack anyway.
                 self.commit_last_child(targets)?;
 
-                if !self.should_retain(targets, &child_path) {
+                if !self.should_retain(targets, &child_path, false) {
                     // Pull this child's hash out of the cached branch node. To get the hash's index
                     // we first need to calculate the mask of which cached hashes have already been
                     // used by this branch (if any). The number of set bits in that mask will be the
@@ -1026,7 +1063,7 @@ where
             // trie cursor to the next cached node at-or-after `child_path`.
             if trie_cursor_state.path().is_some_and(|path| path < &child_path) {
                 trace!(target: TRACE_TARGET, ?child_path, "Seeking trie cursor to child path");
-                *trie_cursor_state = TrieCursorState::new(self.trie_cursor.seek(child_path)?);
+                *trie_cursor_state = TrieCursorState::seeked(self.trie_cursor.seek(child_path)?);
             }
 
             // If the next cached branch node is a child of `child_path` then we can assume it is
@@ -1068,63 +1105,58 @@ where
         }
     }
 
-    /// Internal implementation of proof calculation. Assumes both cursors have already been reset.
-    /// See docs on [`Self::proof`] for expected behavior.
-    fn proof_inner(
+    /// Calculates trie nodes and retains proofs for targeted nodes within a sub-trie. The
+    /// sub-trie's bounds are denoted by the `lower_bound` and `upper_bound` arguments,
+    /// `upper_bound` is exclusive, None indicates unbounded.
+    #[instrument(
+        target = TRACE_TARGET,
+        level = "trace",
+        skip_all,
+        fields(prefix=?sub_trie_targets.prefix),
+    )]
+    fn proof_subtrie<'a>(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = B256>,
-    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
-        trace!(target: TRACE_TARGET, "proof_inner: called");
+        trie_cursor_state: &mut TrieCursorState,
+        hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
+        sub_trie_targets: SubTrieTargets<'a>,
+    ) -> Result<(), StateProofError> {
+        let sub_trie_upper_bound = sub_trie_targets.upper_bound();
 
-        // In debug builds, verify that targets are sorted
-        #[cfg(debug_assertions)]
-        let targets = {
-            let mut prev: Option<B256> = None;
-            targets.into_iter().inspect(move |target| {
-                if let Some(prev) = prev {
-                    debug_assert!(&prev <= target, "prev:{prev:?} target:{target:?}");
-                }
-                prev = Some(*target);
-            })
-        };
-
-        #[cfg(not(debug_assertions))]
-        let targets = targets.into_iter();
-
-        // Convert B256 targets into Nibbles.
-        let targets = targets.into_iter().map(|key| {
-            // SAFETY: key is a B256 and so is exactly 32-bytes.
-            unsafe { Nibbles::unpack_unchecked(key.as_slice()) }
-        });
-
-        // Wrap targets into a `TargetsIter`.
-        let mut targets = WindowIter::new(targets).peekable();
-
-        // If there are no targets then nothing could be returned, return early.
-        if targets.peek().is_none() {
-            trace!(target: TRACE_TARGET, "Empty targets, returning");
-            return Ok(Vec::new())
-        }
+        // Wrap targets into a `TargetsCursor`.
+        let mut targets = TargetsCursor::new(sub_trie_targets.targets);
 
         // Ensure initial state is cleared. By the end of the method call these should be empty once
         // again.
+        debug_assert!(self.cached_branch_stack.is_empty());
         debug_assert!(self.branch_stack.is_empty());
         debug_assert!(self.branch_path.is_empty());
         debug_assert!(self.child_stack.is_empty());
 
-        // Initialize the hashed cursor to None to indicate it hasn't been seeked yet.
-        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+        // `next_uncached_key_range`, which will be called in the loop below, expects the trie
+        // cursor to have already been seeked. If it's not yet seeked, or seeked to a prior node,
+        // then we seek it to the prefix (the first possible node) to initialize it.
+        if trie_cursor_state.before(&sub_trie_targets.prefix) {
+            trace!(target: TRACE_TARGET, "Doing initial seek of trie cursor");
+            *trie_cursor_state =
+                TrieCursorState::seeked(self.trie_cursor.seek(sub_trie_targets.prefix)?);
+        }
 
-        // Initialize the `trie_cursor_state` with the node closest to root.
-        let mut trie_cursor_state = TrieCursorState::new(self.trie_cursor.seek(Nibbles::new())?);
+        // `uncalculated_lower_bound` tracks the lower bound of node paths which have yet to be
+        // visited, either via the hashed key cursor (`calculate_key_range`) or trie cursor
+        // (`next_uncached_key_range`). If/when this becomes None then there are no further nodes
+        // which could exist.
+        let mut uncalculated_lower_bound = Some(sub_trie_targets.prefix);
 
+        trace!(target: TRACE_TARGET, "Starting loop");
         loop {
             // Determine the range of keys of the overall trie which need to be re-computed.
-            let Some((lower_bound, upper_bound)) = self.next_uncached_key_range(
+            let Some((calc_lower_bound, calc_upper_bound)) = self.next_uncached_key_range(
                 &mut targets,
-                &mut trie_cursor_state,
-                hashed_cursor_current.as_ref().map(|kv| kv.0),
+                trie_cursor_state,
+                &sub_trie_targets.prefix,
+                sub_trie_upper_bound.as_ref(),
+                uncalculated_lower_bound,
             )?
             else {
                 // If `next_uncached_key_range` determines that there can be no more keys then
@@ -1136,22 +1168,31 @@ where
             self.calculate_key_range(
                 value_encoder,
                 &mut targets,
-                &mut hashed_cursor_current,
-                lower_bound,
-                upper_bound,
+                hashed_cursor_current,
+                calc_lower_bound,
+                calc_upper_bound,
             )?;
 
             // Once outside `calculate_key_range`, `hashed_cursor_current` will be at the first key
             // after the range.
             //
-            // If the `hashed_cursor_current` is None then there are no more keys at all, meaning
-            // the trie couldn't possibly have more data and we should complete computation.
-            if hashed_cursor_current.is_none() {
+            // If the `hashed_cursor_current` is None (exhausted), or not within the range of the
+            // sub-trie, then there are no more keys at all, meaning the trie couldn't possibly have
+            // more data and we should complete computation.
+            if hashed_cursor_current
+                .as_ref()
+                .is_none_or(|(key, _)| !key.starts_with(&sub_trie_targets.prefix))
+            {
                 break;
             }
+
+            // The upper bound of previous calculation becomes the lower bound of the uncalculated
+            // range, for which we'll once again check for cached data.
+            uncalculated_lower_bound = calc_upper_bound;
         }
 
         // Once there's no more leaves we can pop the remaining branches, if any.
+        trace!(target: TRACE_TARGET, "Exited loop, popping remaining branches");
         while !self.branch_stack.is_empty() {
             self.pop_branch(&mut targets)?;
         }
@@ -1163,19 +1204,71 @@ where
         debug_assert!(self.branch_path.is_empty());
         debug_assert!(self.child_stack.len() < 2);
 
-        // All targets match the root node, so always retain it. Determine the root node based on
-        // the child stack, and push the proof of the root node onto the result stack.
-        let root_node = if let Some(node) = self.child_stack.pop() {
-            self.rlp_encode_buf.clear();
-            node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?
-        } else {
-            ProofTrieNode {
-                path: Nibbles::new(), // root path
-                node: TrieNode::EmptyRoot,
-                masks: TrieMasks::none(),
+        // The `cached_branch_stack` may still have cached branches on it, as it's not affected by
+        // `pop_branch`, but it is no longer needed and should be cleared.
+        self.cached_branch_stack.clear();
+
+        // We always pop the root node off of the `child_stack` in order to empty it, however we
+        // might not want to retain the node unless the `SubTrieTargets` indicates it.
+        trace!(
+            target: TRACE_TARGET,
+            retain_root = ?sub_trie_targets.retain_root,
+            child_stack_empty = self.child_stack.is_empty(),
+            "Maybe retaining root",
+        );
+        match (sub_trie_targets.retain_root, self.child_stack.pop()) {
+            (false, _) => {
+                // Whether the root node is exists or not, we don't want it.
             }
-        };
-        self.retained_proofs.push(root_node);
+            (true, None) => {
+                // If `child_stack` is empty it means there was no keys at all, retain an empty
+                // root node.
+                self.retained_proofs.push(ProofTrieNode {
+                    path: Nibbles::new(), // root path
+                    node: TrieNode::EmptyRoot,
+                    masks: TrieMasks::none(),
+                });
+            }
+            (true, Some(root_node)) => {
+                // Encode and retain the root node.
+                self.rlp_encode_buf.clear();
+                let root_node =
+                    root_node.into_proof_trie_node(Nibbles::new(), &mut self.rlp_encode_buf)?;
+                self.retained_proofs.push(root_node);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Internal implementation of proof calculation. Assumes both cursors have already been reset.
+    /// See docs on [`Self::proof`] for expected behavior.
+    fn proof_inner(
+        &mut self,
+        value_encoder: &VE,
+        targets: &mut [Target],
+    ) -> Result<Vec<ProofTrieNode>, StateProofError> {
+        // If there are no targets then nothing could be returned, return early.
+        if targets.is_empty() {
+            trace!(target: TRACE_TARGET, "Empty targets, returning");
+            return Ok(Vec::new())
+        }
+
+        // Initialize the variables which track the state of the two cursors. Both indicated the
+        // cursors are unseeked.
+        let mut trie_cursor_state = TrieCursorState::unseeked();
+        let mut hashed_cursor_current: Option<(Nibbles, VE::DeferredEncoder)> = None;
+
+        // Divide targets into chunks, each chunk corresponding to a different sub-trie within the
+        // overall trie, and handle all proofs within that sub-trie.
+        for sub_trie_targets in iter_sub_trie_targets(targets) {
+            self.proof_subtrie(
+                value_encoder,
+                &mut trie_cursor_state,
+                &mut hashed_cursor_current,
+                sub_trie_targets,
+            )?;
+        }
 
         trace!(
             target: TRACE_TARGET,
@@ -1194,8 +1287,8 @@ where
 {
     /// Generate a proof for the given targets.
     ///
-    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
-    /// target. The returned nodes will be sorted lexicographically by path.
+    /// Given a set of [`Target`]s, returns nodes whose paths are a prefix of any target. The
+    /// returned nodes will be sorted depth-first by path.
     ///
     /// # Panics
     ///
@@ -1204,7 +1297,7 @@ where
     pub fn proof(
         &mut self,
         value_encoder: &VE,
-        targets: impl IntoIterator<Item = B256>,
+        targets: &mut [Target],
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.trie_cursor.reset();
         self.hashed_cursor.reset();
@@ -1227,8 +1320,8 @@ where
 
     /// Generate a proof for a storage trie at the given hashed address.
     ///
-    /// Given lexicographically sorted targets, returns nodes whose paths are a prefix of any
-    /// target. The returned nodes will be sorted lexicographically by path.
+    /// Given a set of [`Target`]s, returns nodes whose paths are a prefix of any target. The
+    /// returned nodes will be sorted depth-first by path.
     ///
     /// # Panics
     ///
@@ -1237,7 +1330,7 @@ where
     pub fn storage_proof(
         &mut self,
         hashed_address: B256,
-        targets: impl IntoIterator<Item = B256>,
+        targets: &mut [Target],
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         /// Static storage value encoder instance used by all storage proofs.
         static STORAGE_VALUE_ENCODER: StorageValueEncoder = StorageValueEncoder;
@@ -1263,40 +1356,51 @@ where
     }
 }
 
-/// `WindowIter` is a wrapper around an [`Iterator`] which allows viewing both previous and current
-/// items on every iteration. It is similar to `itertools::tuple_windows`, except that the final
-/// item returned will contain the previous item and `None` as the current.
-struct WindowIter<I: Iterator> {
-    iter: I,
-    prev: Option<I::Item>,
+/// Helper type wrapping a slice of [`Target`]s, primarily used to iterate through targets in
+/// [`ProofCalculator::should_retain`].
+///
+/// It is assumed that the underlying slice is never empty, and that the iterator is never
+/// exhausted.
+struct TargetsCursor<'a> {
+    targets: &'a [Target],
+    i: usize,
 }
 
-impl<I: Iterator> WindowIter<I> {
-    /// Wraps an iterator with a [`WindowIter`].
-    const fn new(iter: I) -> Self {
-        Self { iter, prev: None }
+impl<'a> TargetsCursor<'a> {
+    /// Wraps a slice of [`Target`]s with the `TargetsCursor`.
+    ///
+    /// # Panics
+    ///
+    /// Will panic in debug mode if called with an empty slice.
+    fn new(targets: &'a [Target]) -> Self {
+        debug_assert!(!targets.is_empty());
+        Self { targets, i: 0 }
     }
-}
 
-impl<I: Iterator<Item: Copy>> Iterator for WindowIter<I> {
-    /// The iterator returns the previous and current items, respectively. If the underlying
-    /// iterator is exhausted then `Some(prev, None)` is returned on the subsequent call to
-    /// `WindowIter::next`, and `None` from the call after that.
-    type Item = (I::Item, Option<I::Item>);
+    /// Returns the current and next [`Target`] that the cursor is pointed at.
+    fn current(&self) -> (&'a Target, Option<&'a Target>) {
+        (&self.targets[self.i], self.targets.get(self.i + 1))
+    }
 
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            match (self.prev, self.iter.next()) {
-                (None, None) => return None,
-                (None, Some(v)) => {
-                    self.prev = Some(v);
-                }
-                (Some(v), next) => {
-                    self.prev = next;
-                    return Some((v, next))
-                }
-            }
-        }
+    /// Iterates the cursor forward.
+    ///
+    /// # Panics
+    ///
+    /// Will panic if the cursor is exhausted.
+    fn next(&mut self) -> (&'a Target, Option<&'a Target>) {
+        self.i += 1;
+        debug_assert!(self.i < self.targets.len());
+        self.current()
+    }
+
+    // Iterate forwards over the slice, starting from the [`Target`] after the current.
+    fn skip_iter(&self) -> impl Iterator<Item = &'a Target> {
+        self.targets[self.i + 1..].iter()
+    }
+
+    /// Iterated backwards over the slice, starting from the [`Target`] previous to the current.
+    fn rev_iter(&self) -> impl Iterator<Item = &'a Target> {
+        self.targets[..self.i].iter().rev()
     }
 }
 
@@ -1304,6 +1408,8 @@ impl<I: Iterator<Item: Copy>> Iterator for WindowIter<I> {
 /// been taken (used as a cached branch) and the cursor having been exhausted.
 #[derive(Debug)]
 enum TrieCursorState {
+    /// The initial state of the cursor, indicating it's never been seeked.
+    Unseeked,
     /// Cursor is seeked to this path and the node has not been used yet.
     Available(Nibbles, BranchNodeCompact),
     /// Cursor is seeked to this path, but the node has been used.
@@ -1313,16 +1419,35 @@ enum TrieCursorState {
 }
 
 impl TrieCursorState {
+    /// Creates a [`Self::Unseeked`] based on an entry returned from the cursor itself.
+    const fn unseeked() -> Self {
+        Self::Unseeked
+    }
+
     /// Creates a [`Self`] based on an entry returned from the cursor itself.
-    fn new(entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
+    fn seeked(entry: Option<(Nibbles, BranchNodeCompact)>) -> Self {
         entry.map_or(Self::Exhausted, |(path, node)| Self::Available(path, node))
     }
 
     /// Returns the path the cursor is seeked to, or None if it's exhausted.
+    ///
+    /// # Panics
+    ///
+    /// Panics if the cursor is unseeked.
     const fn path(&self) -> Option<&Nibbles> {
         match self {
+            Self::Unseeked => panic!("cursor is unseeked"),
             Self::Available(path, _) | Self::Taken(path) => Some(path),
             Self::Exhausted => None,
+        }
+    }
+
+    /// Returns true if the cursor is unseeked, or is seeked to a node prior to the given one.
+    fn before(&self, path: &Nibbles) -> bool {
+        match self {
+            Self::Unseeked => true,
+            Self::Available(seeked_to, _) | Self::Taken(seeked_to) => path < seeked_to,
+            Self::Exhausted => false,
         }
     }
 
@@ -1388,7 +1513,6 @@ mod tests {
     };
     use alloy_primitives::map::{B256Map, B256Set};
     use alloy_rlp::Decodable;
-    use assert_matches::assert_matches;
     use itertools::Itertools;
     use reth_primitives_traits::Account;
     use reth_trie_common::{
@@ -1457,15 +1581,16 @@ mod tests {
         /// the results.
         fn assert_proof(
             &self,
-            targets: impl IntoIterator<Item = B256>,
+            targets: impl IntoIterator<Item = Target>,
         ) -> Result<(), StateProofError> {
-            let targets_vec = targets.into_iter().sorted().collect::<Vec<_>>();
+            let targets_vec = targets.into_iter().collect::<Vec<_>>();
 
-            // Convert B256 targets to MultiProofTargets for legacy implementation
+            // Convert Target keys to MultiProofTargets for legacy implementation
             // For account-only proofs, each account maps to an empty storage set
+            // Legacy implementation only uses the keys, not the prefix
             let legacy_targets = targets_vec
                 .iter()
-                .map(|addr| (*addr, B256Set::default()))
+                .map(|target| (B256::from_slice(&target.key.pack()), B256Set::default()))
                 .collect::<MultiProofTargets>();
 
             // Create ProofCalculator (proof_v2) with account cursors
@@ -1485,7 +1610,8 @@ mod tests {
                 self.hashed_cursor_factory.clone(),
             );
             let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
-            let proof_v2_result = proof_calculator.proof(&value_encoder, targets_vec.clone())?;
+            let proof_v2_result =
+                proof_calculator.proof(&value_encoder, &mut targets_vec.clone())?;
 
             // Output metrics
             trace!(target: TRACE_TARGET, ?trie_cursor_metrics, "V2 trie cursor metrics");
@@ -1497,10 +1623,22 @@ mod tests {
                     .with_branch_node_masks(true)
                     .multiproof(legacy_targets)?;
 
-            // Decode and sort legacy proof nodes
-            let mut proof_legacy_nodes = proof_legacy_result
+            // Helper function to check if a node path matches at least one target
+            let node_matches_target = |node_path: &Nibbles| -> bool {
+                targets_vec.iter().any(|target| {
+                    // Node path must be a prefix of the target's key
+                    target.key.starts_with(node_path) &&
+                    // Node path must be at least `min_len` long
+                    node_path.len() >= target.min_len as usize
+                })
+            };
+
+            // Decode and sort legacy proof nodes, filtering to only those that match at least one
+            // target
+            let proof_legacy_nodes = proof_legacy_result
                 .account_subtree
                 .iter()
+                .filter(|(path, _)| node_matches_target(path))
                 .map(|(path, node_enc)| {
                     let mut buf = node_enc.as_ref();
                     let node = TrieNode::decode(&mut buf)
@@ -1510,34 +1648,21 @@ mod tests {
                     // though we never store the root node so the masks for it aren't really valid.
                     let masks = if path.is_empty() {
                         TrieMasks::none()
-                    } else {
+                    } else if let Some(branch_masks) =
+                        proof_legacy_result.branch_node_masks.get(path)
+                    {
                         TrieMasks {
-                            hash_mask: proof_legacy_result
-                                .branch_node_hash_masks
-                                .get(path)
-                                .copied(),
-                            tree_mask: proof_legacy_result
-                                .branch_node_tree_masks
-                                .get(path)
-                                .copied(),
+                            hash_mask: Some(branch_masks.hash_mask),
+                            tree_mask: Some(branch_masks.tree_mask),
                         }
+                    } else {
+                        TrieMasks::none()
                     };
 
                     ProofTrieNode { path: *path, node, masks }
                 })
                 .sorted_by(|a, b| depth_first::cmp(&a.path, &b.path))
                 .collect::<Vec<_>>();
-
-            // When no targets are given the legacy implementation will still produce the root node
-            // in the proof. This differs from the V2 implementation, which produces nothing when
-            // given no targets.
-            if targets_vec.is_empty() {
-                assert_matches!(
-                    proof_legacy_nodes.pop(),
-                    Some(ProofTrieNode { path, .. }) if path.is_empty()
-                );
-                assert!(proof_legacy_nodes.is_empty());
-            }
 
             // Basic comparison: both should succeed and produce identical results
             pretty_assertions::assert_eq!(proof_legacy_nodes, proof_v2_result);
@@ -1578,8 +1703,8 @@ mod tests {
         }
 
         /// Generate a strategy for proof targets that are 80% from the `HashedPostState` accounts
-        /// and 20% random keys.
-        fn proof_targets_strategy(account_keys: Vec<B256>) -> impl Strategy<Value = Vec<B256>> {
+        /// and 20% random keys. Each target has a random `min_len` of 0..16.
+        fn proof_targets_strategy(account_keys: Vec<B256>) -> impl Strategy<Value = Vec<Target>> {
             let num_accounts = account_keys.len();
 
             // Generate between 0 and (num_accounts + 5) targets
@@ -1588,15 +1713,19 @@ mod tests {
             target_count.prop_flat_map(move |count| {
                 let account_keys = account_keys.clone();
                 prop::collection::vec(
-                    prop::bool::weighted(0.8).prop_flat_map(move |from_accounts| {
-                        if from_accounts && !account_keys.is_empty() {
-                            // 80% chance: pick from existing account keys
-                            prop::sample::select(account_keys.clone()).boxed()
-                        } else {
-                            // 20% chance: generate random B256
-                            any::<[u8; 32]>().prop_map(B256::from).boxed()
-                        }
-                    }),
+                    (
+                        prop::bool::weighted(0.8).prop_flat_map(move |from_accounts| {
+                            if from_accounts && !account_keys.is_empty() {
+                                // 80% chance: pick from existing account keys
+                                prop::sample::select(account_keys.clone()).boxed()
+                            } else {
+                                // 20% chance: generate random B256
+                                any::<[u8; 32]>().prop_map(B256::from).boxed()
+                            }
+                        }),
+                        0u8..16u8, // Random min_len from 0 to 15
+                    )
+                        .prop_map(|(key, min_len)| Target::new(key).with_min_len(min_len)),
                     count,
                 )
             })
@@ -1667,8 +1796,10 @@ mod tests {
         // Create test harness
         let harness = ProofTestHarness::new(post_state);
 
-        // Assert the proof
-        harness.assert_proof(targets).expect("Proof generation failed");
+        // Assert the proof (convert B256 to Target with no min_len for this test)
+        harness
+            .assert_proof(targets.into_iter().map(Target::new))
+            .expect("Proof generation failed");
     }
 
     #[test]
@@ -1693,5 +1824,394 @@ mod tests {
             let result = increment_and_strip_trailing_zeros(&input);
             assert_eq!(result, expected, "Failed for input: {:?}", input);
         }
+    }
+
+    #[test]
+    fn test_failing_proptest_case_0() {
+        use alloy_primitives::{hex, map::B256Map};
+
+        reth_tracing::init_test_tracing();
+
+        // Helper function to create B256 from hex string
+        let b256 = |s: &str| B256::from_slice(&hex::decode(s).unwrap());
+
+        // Create the HashedPostState from test case input
+        let mut accounts = B256Map::default();
+
+        // Define all account data from test case input
+        let account_data = [
+            (
+                "9f3a475db85ff1f5b5e82d8614ee4afc670d27aefb9a43da0bd863a54acf1fe6",
+                8396790837504194281u64,
+                9224366602005816983u64,
+                "103c5b0538f4e37944321a30f5cb1f7005d2ee70998106f34f36d7adb838c789",
+            ),
+            (
+                "c736258fdfd23d73ec4c5e54b8c3b58e26726b361d438ef48670f028286b70ca",
+                9193115115482903760u64,
+                4515164289866465875u64,
+                "9f24ef3ab0b4893b0ec38d0e9b00f239da072ccf093b0b24f1ea1f99547abe55",
+            ),
+            (
+                "780a3476520090f97e847181aee17515c5ea30b7607775103df16d2b6611a87a",
+                8404772182417755681u64,
+                16639574952778823617u64,
+                "214b12bee666ce8c64c6bbbcfafa0c3e55b4b05a8724ec4182b9a6caa774c56d",
+            ),
+            (
+                "23ebfa849308a5d02c3048040217cd1f4b71fb01a9b54dafe541284ebec2bcce",
+                17978809803974566048u64,
+                11093542035392742776u64,
+                "5384dfda8f1935d98e463c00a96960ff24e4d4893ec21e5ece0d272df33ac7e9",
+            ),
+            (
+                "348e476c24fac841b11d358431b4526db09edc9f39906e0ac8809886a04f3c5a",
+                9422945522568453583u64,
+                9737072818780682487u64,
+                "79f8f25b2cbb7485c5c7b627917c0f562f012d3d7ddd486212c90fbea0cf686e",
+            ),
+            (
+                "830536ee6c8f780a1cd760457345b79fc09476018a59cf3e8fd427a793d99633",
+                16497625187081138489u64,
+                15143978245385012455u64,
+                "00ede4000cc2a16fca7e930761aaf30d1fddcc3803f0009d6a0742b4ee519342",
+            ),
+            (
+                "806c74b024b2fe81f077ea93d2936c489689f7fe024febc3a0fb71a8a9f22fbc",
+                8103477314050566918u64,
+                1383893458340561723u64,
+                "690ed176136174c4f0cc442e6dcbcf6e7b577e30fc052430b6060f97af1f8e85",
+            ),
+            (
+                "b903d962ffc520877f14e1e8328160e5b22f8086b0f7e9cba7a373a8376028a0",
+                12972727566246296372u64,
+                1130659127924527352u64,
+                "cadf1f09d8e6a0d945a58ccd2ff36e2ae99f8146f02be96873e84bef0462d64a",
+            ),
+            (
+                "d36a16afff0097e06b2c28bd795b889265e2ceff9a086173113fbeb6f7a9bc42",
+                15682404502571860137u64,
+                2025886798818635036u64,
+                "c2cee70663e9ff1b521e2e1602e88723da52ccdc7a69e370cde9595af435e654",
+            ),
+            (
+                "f3e8461cba0b84f5b81f8ca63d0456cb567e701ec1d6e77b1a03624c5018389b",
+                5663749586038550112u64,
+                7681243595728002238u64,
+                "072c547c3ab9744bcd2ed9dbd813bd62866a673f4ca5d46939b65e9507be0e70",
+            ),
+            (
+                "40b71840b6f43a493b32f4aa755e02d572012392fd582c81a513a169447e194c",
+                518207789203399614u64,
+                317311275468085815u64,
+                "85541d48471bf639c2574600a9b637338c49729ba9e741f157cc6ebaae139da0",
+            ),
+            (
+                "3f77cd91ceb7d335dd2527c29e79aaf94f14141438740051eb0163d86c35bcc9",
+                16227517944662106096u64,
+                12646193931088343779u64,
+                "54999911d82dd63d526429275115fa98f6a560bc2d8e00be24962e91e38d7182",
+            ),
+            (
+                "5cd903814ba84daa6956572411cd1bf4d48a8e230003d28cc3f942697bf8debb",
+                5096288383163945009u64,
+                17919982845103509853u64,
+                "6a53c812e713f1bfe6bf21954f291140c60ec3f2ef353ecdae5dc7b263a37282",
+            ),
+            (
+                "23f3602c95fd98d7fbe48a326ae1549030a2c7574099432cce5b458182f16bf2",
+                11136020130962086191u64,
+                12045219101880183180u64,
+                "ce53fb9b108a3ee90db8469e44948ba3263ca8d8a0d92a076c9516f9a3d30bd1",
+            ),
+            (
+                "be86489b3594a9da83e04a9ff81c8d68d528b8b9d31f3942d1c5856a4a8c5af7",
+                16293506537092575994u64,
+                536238712429663046u64,
+                "a2af0607ade21241386ecfb3780aa90514f43595941daeff8dd599c203cde30a",
+            ),
+            (
+                "97bcd85ee5d6033bdf86397e8b26f711912948a7298114be27ca5499ea99725f",
+                3086656672041156193u64,
+                8667446575959669532u64,
+                "0474377538684a991ffc9b41f970b48e65eda9e07c292e60861258ef87d45272",
+            ),
+            (
+                "40065932e6c70eb907e4f2a89ec772f5382ca90a49ef44c4ae21155b9decdcc0",
+                17152529399128063686u64,
+                3643450822628960860u64,
+                "d5f6198c64c797f455f5b44062bb136734f508f9cdd02d8d69d24100ac8d6252",
+            ),
+            (
+                "c136436c2db6b2ebd14985e2c883e73c6d8fd95ace54bfefae9eeca47b7da800",
+                727585093455815585u64,
+                521742371554431881u64,
+                "3dfad04a6eb46d175b63e96943c7d636c56d61063277e25557aace95820432da",
+            ),
+            (
+                "9ea50348595593788645394eb041ac4f75ee4d6a4840b9cf1ed304e895060791",
+                8654829249939415079u64,
+                15623358443672184321u64,
+                "61bb0d6ffcd5b32d0ee34a3b7dfb1c495888059be02b255dd1fa3be02fa1ddbd",
+            ),
+            (
+                "5abc714353ad6abda44a609f9b61f310f5b0a7df55ccf553dc2db3edda18ca17",
+                5732104102609402825u64,
+                15720007305337585794u64,
+                "8b55b7e9c6f54057322c5e0610b33b3137f1fcd46f7d4af1aca797c7b5fff033",
+            ),
+            (
+                "e270b59e6e56100f9e2813f263884ba5f74190a1770dd88cd9603266174e0a6b",
+                4728642361690813205u64,
+                6762867306120182099u64,
+                "5e9aa1ff854504b4bfea4a7f0175866eba04e88e14e57ac08dddc63d6917bf47",
+            ),
+            (
+                "78286294c6fb6823bb8b2b2ddb7a1e71ee64e05c9ba33b0eb8bb6654c64a8259",
+                6032052879332640150u64,
+                498315069638377858u64,
+                "799ef578ffb51a5ec42484e788d6ada4f13f0ff73e1b7b3e6d14d58caae9319a",
+            ),
+            (
+                "af1b85cf284b0cb59a4bfb0f699194bcd6ad4538f27057d9d93dc7a95c1ff32e",
+                1647153930670480138u64,
+                13109595411418593026u64,
+                "429dcdf4748c0047b0dd94f3ad12b5e62bbadf8302525cc5d2aad9c9c746696f",
+            ),
+            (
+                "0152b7a0626771a2518de84c01e52839e7821a655f9dcb9a174d8f52b64b7086",
+                3915492299782594412u64,
+                9550071871839879785u64,
+                "4d5e6ce993dfc9597585ae2b4bacd6d055fefc56ae825666c83e0770e4aa0527",
+            ),
+            (
+                "9ea9b8a4f6bce1dba63290b81f4d1b88dfeac3e244856904a5c9d4086a10271b",
+                8824593031424861220u64,
+                15831101445348312026u64,
+                "a07602b4dd5cba679562061b7c5c0344b2edd6eba36aa97ca57a6fe01ed80a48",
+            ),
+            (
+                "d7b26c2d8f85b74423a57a3da56c61829340f65967791bab849c90b5e1547e7a",
+                12723258987146468813u64,
+                10714399360315276559u64,
+                "3705e57b27d931188c0d2017ab62577355b0cdda4173203478a8562a0cdcae0c",
+            ),
+            (
+                "da354ceca117552482e628937931870a28e9d4416f47a58ee77176d0b760c75b",
+                1580954430670112951u64,
+                14920857341852745222u64,
+                "a13d6b0123daa2e662699ac55a2d0ed1d2e73a02ed00ee5a4dd34db8dea2a37e",
+            ),
+            (
+                "53140d0c8b90b4c3c49e0604879d0dc036e914c4c4f799f1ccae357fef2613e3",
+                12521658365236780592u64,
+                11630410585145916252u64,
+                "46f06ce1435a7a0fd3476bbcffe4aac88c33a7fcf50080270b715d25c93d96d7",
+            ),
+            (
+                "4b1c151815da6f18f27e98890eac1f7d43b80f3386c7c7d15ee0e43a7edfe0a6",
+                9575643484508382933u64,
+                3471795678079408573u64,
+                "a9e6a8fac46c5fc61ae07bddc223e9f105f567ad039d2312a03431d1f24d8b2c",
+            ),
+            (
+                "39436357a2bcd906e58fb88238be2ddb2e43c8a5590332e3aee1d1134a0d0ba4",
+                10171391804125392783u64,
+                2915644784933705108u64,
+                "1d5db03f07137da9d3af85096ed51a4ff64bb476a79bf4294850438867fe3833",
+            ),
+            (
+                "5fbe8d9d6a12b061a94a72436caec331ab1fd4e472c3bb4688215788c5e9bcd9",
+                5663512925993713993u64,
+                18170240962605758111u64,
+                "bd5d601cbcb47bd84d410bafec72f2270fceb1ed2ed11499a1e218a9f89a9f7f",
+            ),
+            (
+                "f2e29a909dd31b38e9b92b2b2d214e822ebddb26183cd077d4009773854ab099",
+                7512894577556564068u64,
+                15905517369556068583u64,
+                "a36e66ce11eca7900248c518e12c6c08d659d609f4cbd98468292de7adf780f2",
+            ),
+            (
+                "3eb82e6d6e964ca56b50cc54bdd55bb470c67a4932aba48d27d175d1be2542aa",
+                12645567232869276853u64,
+                8416544129280224452u64,
+                "d177f246a45cc76d39a8ee06b32d8c076c986106b9a8e0455a0b41d00fe3cbde",
+            ),
+            (
+                "c903731014f6a5b4b45174ef5f9d5a2895a19d1308292f25aa323fda88acc938",
+                5989992708726918818u64,
+                17462460601463602125u64,
+                "01241c61ad1c8adc27e5a1096ab6c643af0fbb6e2818ef77272b70e5c3624abc",
+            ),
+            (
+                "ef46410ab47113a78c27e100ed1b476f82a8789012bd95a047a4b23385596f53",
+                11884362385049322305u64,
+                619908411193297508u64,
+                "e9b4c929e26077ac1fd5a771ea5badc7e9ddb58a20a2a797389c63b3dd3df00d",
+            ),
+            (
+                "be336bc6722bb787d542f4ef8ecb6f46a449557ca7b69b8668b6fed19dfa73b7",
+                11490216175357680195u64,
+                13136528075688203375u64,
+                "31bfd807f92e6d5dc5c534e9ad0cb29d00c6f0ae7d7b5f1e65f8e683de0bce59",
+            ),
+            (
+                "39599e5828a8f102b8a6808103ae7df29b838fe739d8b73f72f8f0d282ca5a47",
+                6957481657451522177u64,
+                4196708540027060724u64,
+                "968a12d79704b313471ece148cb4e26b8b11620db2a9ee6da0f5dc200801f555",
+            ),
+            (
+                "acd99530bb14ca9a7fac3df8eebfd8cdd234b0f6f7c3893a20bc159a4fd54df5",
+                9792913946138032169u64,
+                9219321015500590384u64,
+                "db45a98128770a329c82c904ceee21d3917f6072b8bd260e46218f65656c964c",
+            ),
+            (
+                "453b80a0b11f237011c57630034ed46888ad96f4300a58aea24c0fe4a5472f68",
+                14407140330317286994u64,
+                5783848199433986576u64,
+                "b8cded0b4efd6bf2282a4f8b3c353f74821714f84df9a6ab25131edc7fdad00f",
+            ),
+            (
+                "23e464d1e9b413a4a6b378cee3a0405ec6ccbb4d418372d1b42d3fde558d48d1",
+                1190974500816796805u64,
+                1621159728666344828u64,
+                "d677f41d273754da3ab8080b605ae07a7193c9f35f6318b809e42a1fdf594be3",
+            ),
+            (
+                "d0e590648dec459aca50edf44251627bab5a36029a0c748b1ddf86b7b887425b",
+                4807164391931567365u64,
+                4256042233199858200u64,
+                "a8677de59ab856516a03663730af54c55a79169346c3d958b564e5ee35d8622b",
+            ),
+            (
+                "72387dbaaaf2c39175d8c067558b869ba7bdc6234bc63ee97a53fea1d988ff39",
+                5046042574093452325u64,
+                3088471405044806123u64,
+                "83c226621506b07073936aec3c87a8e2ef34dd42e504adc2bbab39ede49aa77f",
+            ),
+            (
+                "de6874ca2b9dd8b4347c25d32b882a2a7c127b127d6c5e00d073ab3853339d0e",
+                6112730660331874479u64,
+                10943246617310133253u64,
+                "a0c96a69e5ab3e3fe1a1a2fd0e5e68035ff3c7b2985e4e6b8407d4c377600c6f",
+            ),
+            (
+                "b0d8689e08b983e578d6a0c136b76952497087ee144369af653a0a1b231eeb28",
+                15612408165265483596u64,
+                13112504741499957010u64,
+                "4fc49edeff215f1d54dfd2e60a14a3de2abecbe845db2148c7aee32c65f3c91c",
+            ),
+            (
+                "29d7fb6b714cbdd1be95c4a268cef7f544329642ae05fab26dc251bbc773085e",
+                17509162400681223655u64,
+                5075629528173950353u64,
+                "781ecb560ef8cf0bcfa96b8d12075f4cf87ad52d69dfb2c72801206eded135bd",
+            ),
+            (
+                "85dbf7074c93a4e39b67cc504b35351ee16c1fab437a7fb9e5d9320be1d9c13c",
+                17692199403267011109u64,
+                7069378948726478427u64,
+                "a3ff0d8dee5aa0214460f5b03a70bd76ef00ac8c07f07c0b3d82c9c57e4c72a9",
+            ),
+            (
+                "7bd5a9f3126b4a681afac9a177c6ff7f3dd80d8d7fd5a821a705221c96975ded",
+                17807965607151214145u64,
+                5562549152802999850u64,
+                "dbc3861943b7372e49698b1c5b0e4255b7c93e9fa2c13d6a4405172ab0db9a5b",
+            ),
+            (
+                "496d13d45dbe7eb02fee23c914ac9fefdf86cf5c937c520719fc6a31b3fcf8d9",
+                13446203348342334214u64,
+                332407928246785326u64,
+                "d2d73f15fcdc12adce25b911aa4551dcf900e225761e254eb6392cbd414e389c",
+            ),
+            (
+                "b2f0a0127fc74a35dec5515b1c7eb8a3833ca99925049c47cd109ec94678e6c5",
+                9683373807753869342u64,
+                7570798132195583433u64,
+                "e704110433e5ab17858c5fbe4f1b6d692942d5f5981cac68372d06066bee97fe",
+            ),
+            (
+                "d5f65171b17d7720411905ef138e84b9d1f459e2b248521c449f1781aafd675e",
+                10088287051097617949u64,
+                185695341767856973u64,
+                "8d784c4171e242af4187f30510cd298106b7e68cd3088444a055cb1f3893ba28",
+            ),
+            (
+                "7dcbec5c20fbf1d69665d4b9cdc450fea2d0098e78084bce0a864fea4ba016b0",
+                13908816056510478374u64,
+                17793990636863600193u64,
+                "18e9026372d91e116faf813ce3ba9d7fadef2bb3b779be6efeba8a4ecd9e1f38",
+            ),
+            (
+                "d4f772f4bf1cfa4dad4b55962b50900da8657a4961dabbdf0664f3cd42d368f8",
+                16438076732493217366u64,
+                18419670900047275588u64,
+                "b9fd16b16b3a8fab4d9c47f452d9ce4aad530edeb06ee6830589078db2f79382",
+            ),
+            (
+                "2d009535f82b1813ce2ca7236ceae7864c1e4d3644a1acd02656919ef1aa55d0",
+                10206924399607440433u64,
+                3986996560633257271u64,
+                "db49e225bd427768599a7c06d7aee432121fa3179505f9ee8c717f51c7fa8c54",
+            ),
+            (
+                "b1d7a292df12e505e7433c7e850e9efc81a8931b65f3354a66402894b6d5ba76",
+                8215550459234533539u64,
+                10241096845089693964u64,
+                "5567813b312cb811909a01d14ee8f7ec4d239198ea2d37243123e1de2317e1af",
+            ),
+            (
+                "85120d6f43ea9258accf6a87e49cd5461d9b3735a4dc623f9fbcc669cbdd1ce6",
+                17566770568845511328u64,
+                8686605711223432099u64,
+                "e163f4fcd17acf5714ee48278732808601e861cd4c4c24326cd24431aab1d0ce",
+            ),
+            (
+                "48fe4c22080c6e702f7af0e97fb5354c1c14ff4616c6fc4ac8a4491d4b9b3473",
+                14371024664575587429u64,
+                15149464181957728462u64,
+                "061dec7af4b41bdd056306a8b13b71d574a49a4595884b1a77674f5150d4509d",
+            ),
+            (
+                "29d14b014fa3cabbb3b4808e751e81f571de6d0e727cae627318a5fd82fef517",
+                9612395342616083334u64,
+                3700617080099093094u64,
+                "f7b33a2d2784441f77f0cc1c87930e79bea3332a921269b500e81d823108561c",
+            ),
+        ];
+
+        // Insert all accounts
+        for (addr, nonce, balance, code_hash) in &account_data {
+            accounts.insert(
+                b256(addr),
+                Some(Account {
+                    nonce: *nonce,
+                    balance: U256::from(*balance),
+                    bytecode_hash: Some(b256(code_hash)),
+                }),
+            );
+        }
+
+        let post_state = HashedPostState { accounts, storages: Default::default() };
+
+        // Create test harness
+        let harness = ProofTestHarness::new(post_state);
+
+        // Create targets from test case input - these are Nibbles in hex form
+        let targets = vec![
+            Target::new(b256("0153000000000000000000000000000000000000000000000000000000000000"))
+                .with_min_len(2),
+            Target::new(b256("0000000000000000000000000000000000000000000000000000000000000000"))
+                .with_min_len(2),
+            Target::new(b256("2300000000000000000000000000000000000000000000000000000000000000"))
+                .with_min_len(2),
+        ];
+
+        // Test proof generation
+        harness.assert_proof(targets).expect("Proof generation failed");
     }
 }

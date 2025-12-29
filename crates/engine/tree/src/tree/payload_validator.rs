@@ -435,8 +435,7 @@ where
         }
 
         // Execute the block and handle any execution errors
-        let (output, senders) = match self.execute_block(&state_provider, env, &input, &mut handle)
-        {
+        let (output, senders) = match self.execute_block(state_provider, env, &input, &mut handle) {
             Ok(output) => output,
             Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
@@ -603,7 +602,7 @@ where
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Vec<Address>), InsertBlockErrorKind>
     where
-        S: StateProvider,
+        S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -644,6 +643,7 @@ where
         let (output, senders) = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
+            input.transaction_count(),
             state_hook,
         )?;
         let execution_finish = Instant::now();
@@ -862,8 +862,12 @@ where
             }
             StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
                 let start = Instant::now();
-                let handle =
-                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
+                let handle = self.payload_processor.spawn_cache_exclusive(
+                    env,
+                    txs,
+                    provider_builder,
+                    block_access_list,
+                );
 
                 // Record prewarming initialization duration
                 self.metrics
@@ -1287,5 +1291,16 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
         // TODO decode and return `BlockAccessList`
         None
+    }
+
+    /// Returns the number of transactions in the payload or block.
+    pub fn transaction_count(&self) -> usize
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.transaction_count(),
+            Self::Block(block) => block.transaction_count(),
+        }
     }
 }
