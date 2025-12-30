@@ -653,30 +653,6 @@ impl<'db> RocksTx<'db> {
         Ok(RocksTxIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
-    /// Creates a raw iterator for bidirectional traversal of the specified table.
-    ///
-    /// Unlike [`Self::iter_from`], raw iterators support `prev()` for backward navigation.
-    /// Use this for history lookups where checking the previous entry is needed.
-    pub fn raw_iterator_cf<T: Table>(
-        &self,
-    ) -> ProviderResult<DBRawIteratorWithThreadMode<'_, Transaction<'_, TransactionDB>>> {
-        let cf = self.provider.get_cf_handle::<T>()?;
-        Ok(self.inner.raw_iterator_cf(cf))
-    }
-
-    /// Raw iterators surface I/O errors via `status()`, not through `key()`/`value()`.
-    /// Call this after `seek`/`next`/`prev` before interpreting `valid()`.
-    fn raw_iter_status_ok(
-        iter: &DBRawIteratorWithThreadMode<'_, Transaction<'_, TransactionDB>>,
-    ) -> ProviderResult<()> {
-        iter.status().map_err(|e| {
-            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })
-    }
-
     /// Commits the transaction, persisting all changes.
     pub fn commit(self) -> ProviderResult<()> {
         self.inner.commit().map_err(|e| {
@@ -809,6 +785,30 @@ impl<'db> RocksTx<'db> {
             is_before_first_write,
             lowest_available_block_number,
         ))
+    }
+
+    /// Creates a raw iterator for bidirectional traversal of the specified table.
+    ///
+    /// Unlike [`Self::iter_from`], raw iterators support `prev()` for backward navigation.
+    /// Use this for history lookups where checking the previous entry is needed.
+    fn raw_iterator_cf<T: Table>(
+        &self,
+    ) -> ProviderResult<DBRawIteratorWithThreadMode<'_, Transaction<'_, TransactionDB>>> {
+        let cf = self.provider.get_cf_handle::<T>()?;
+        Ok(self.inner.raw_iterator_cf(cf))
+    }
+
+    /// Raw iterators surface I/O errors via `status()`, not through `key()`/`value()`.
+    /// Call this after `seek`/`next`/`prev` before interpreting `valid()`.
+    fn raw_iter_status_ok(
+        iter: &DBRawIteratorWithThreadMode<'_, Transaction<'_, TransactionDB>>,
+    ) -> ProviderResult<()> {
+        iter.status().map_err(|e| {
+            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
     }
 }
 
