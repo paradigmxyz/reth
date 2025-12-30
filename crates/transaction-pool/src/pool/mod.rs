@@ -325,7 +325,7 @@ where
     }
 
     #[inline]
-    fn with_event_listener<F>(&self, f: F)
+    fn with_event_listener<F>(&self, emit: F)
     where
         F: FnOnce(&mut PoolEventBroadcast<T::Transaction>),
     {
@@ -334,7 +334,7 @@ where
         }
         let mut listener = self.event_listener.write();
         if !listener.is_empty() {
-            f(&mut listener);
+            emit(&mut listener);
         }
         self.update_event_listener_state(&listener);
     }
