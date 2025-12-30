@@ -25,12 +25,12 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
-    message::{EthBroadcastMessage, MessageError},
     eth_snap_stream::EthSnapMessage,
+    message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
-use reth_eth_wire_types::{message::RequestPair};
 use reth_eth_wire_types::{
+    message::RequestPair,
     snap::{
         AccountRangeMessage, ByteCodesMessage, SnapProtocolMessage, StorageRangesMessage,
         TrieNodesMessage,
@@ -302,26 +302,23 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     };
                 }
 
-                    // Validate that the latest hash is not zero
-                    if msg.latest_hash.is_zero() {
-                        return OnIncomingMessageOutcome::BadMessage {
-                            error: EthStreamError::InvalidMessage(MessageError::Other(
-                                "invalid block range: latest_hash cannot be zero".to_string(),
-                            )),
-                            message: EthMessage::BlockRangeUpdate(msg),
-                        };
-                    }
-
-                    if let Some(range_info) = self.range_info.as_ref() {
-                        range_info.update(msg.earliest, msg.latest, msg.latest_hash);
-                    }
-
-                    OnIncomingMessageOutcome::Ok
+                // Validate that the latest hash is not zero
+                if msg.latest_hash.is_zero() {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(
+                            "invalid block range: latest_hash cannot be zero".to_string(),
+                        )),
+                        message: EthMessage::BlockRangeUpdate(msg),
+                    };
                 }
-                EthMessage::Other(bytes) => {
-                    self.try_emit_broadcast(PeerMessage::Other(bytes)).into()
+
+                if let Some(range_info) = self.range_info.as_ref() {
+                    range_info.update(msg.earliest, msg.latest, msg.latest_hash);
                 }
-            },
+
+                OnIncomingMessageOutcome::Ok
+            }
+            EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
             EthSnapMessage::Snap(msg) => self.on_incoming_snap_message(msg),
         }
     }

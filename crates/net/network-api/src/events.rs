@@ -5,13 +5,13 @@ use reth_eth_wire_types::{
     EthNetworkPrimitives, EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData,
     GetPooledTransactions, GetReceipts, GetReceipts70, NetworkPrimitives, NodeData,
     PooledTransactions, Receipts, Receipts69, Receipts70, UnifiedStatus,
-    message::RequestPair,
     snap::{
         AccountRangeMessage, ByteCodesMessage, GetAccountRangeMessage, GetByteCodesMessage,
         GetStorageRangesMessage, GetTrieNodesMessage, SnapProtocolMessage, StorageRangesMessage,
         TrieNodesMessage,
     }
 };
+use reth_eth_wire_types::RawCapabilityMessage;
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
 use reth_network_peers::PeerId;
