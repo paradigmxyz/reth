@@ -825,7 +825,8 @@ where
         new_head_number: u64,
         current_head_number: u64,
     ) -> Vec<ExecutedBlock<N>> {
-        let mut old_blocks = Vec::new();
+        let mut old_blocks =
+            Vec::with_capacity((current_head_number.saturating_sub(new_head_number)) as usize);
 
         for block_num in (new_head_number + 1)..=current_head_number {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(block_num) {
