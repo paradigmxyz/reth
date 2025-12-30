@@ -1535,4 +1535,247 @@ mod tests {
             "Should require unwind to block 50 to rebuild AccountsHistory"
         );
     }
+
+    /// Test Case 7: Defensive check catches entries missed by changeset-based pruning.
+    ///
+    /// This tests the scenario where MDBX has changesets for some but not all of the
+    /// entries that need to be pruned in RocksDB. The defensive check after the optimized
+    /// path should detect remaining entries and trigger a fallback full scan.
+    #[test]
+    fn test_storages_history_defensive_check_catches_missed_entries() {
+        use alloy_primitives::U256;
+        use reth_db_api::models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress};
+        use reth_primitives_traits::StorageEntry;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+
+        // Create addresses and storage keys for testing
+        let addr1 = Address::from([0x01; 20]);
+        let addr2 = Address::from([0x02; 20]);
+        let addr3 = Address::from([0x03; 20]); // This one won't have changesets
+        let storage_key1 = B256::from([0x11; 32]);
+        let storage_key2 = B256::from([0x22; 32]);
+        let storage_key3 = B256::from([0x33; 32]); // This one won't have changesets
+
+        // Insert StoragesHistory entries with highest_block > 100 (checkpoint)
+        // Entry 1: addr1/storage_key1 at block 150 - WILL have changeset
+        let key1 = StorageShardedKey::new(addr1, storage_key1, 150);
+        // Entry 2: addr2/storage_key2 at block 150 - WILL have changeset
+        let key2 = StorageShardedKey::new(addr2, storage_key2, 150);
+        // Entry 3: addr3/storage_key3 at block 150 - NO changeset (defensive check should catch)
+        let key3 = StorageShardedKey::new(addr3, storage_key3, 150);
+        // Entry 4: addr1/storage_key1 at block 50 - Should remain (below checkpoint)
+        let key4 = StorageShardedKey::new(addr1, storage_key1, 50);
+
+        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
+        rocksdb.put::<tables::StoragesHistory>(key1.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(key2.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(key3.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(key4.clone(), &block_list).unwrap();
+
+        // Create a test provider factory for MDBX
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        // Insert blocks so that last_block_number() returns > 100
+        // We need to insert blocks via insert_block to populate static files
+        let mut rng = generators::rng();
+        let blocks = generators::random_block_range(
+            &mut rng,
+            0..=150,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            for block in &blocks {
+                provider
+                    .insert_block(&block.clone().try_recover().expect("recover block"))
+                    .unwrap();
+            }
+            provider.commit().unwrap();
+        }
+
+        // Insert StorageChangeSets for SOME entries only (addr1 and addr2, but NOT addr3)
+        // This simulates incomplete changeset data
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            let mut cursor =
+                provider.tx_ref().cursor_dup_write::<tables::StorageChangeSets>().unwrap();
+
+            // Changeset at block 150 for addr1/storage_key1
+            let key_block_150_addr1 = BlockNumberAddress((150, addr1));
+            cursor
+                .upsert(
+                    key_block_150_addr1,
+                    &StorageEntry { key: storage_key1, value: U256::from(100) },
+                )
+                .unwrap();
+
+            // Changeset at block 150 for addr2/storage_key2
+            let key_block_150_addr2 = BlockNumberAddress((150, addr2));
+            cursor
+                .upsert(
+                    key_block_150_addr2,
+                    &StorageEntry { key: storage_key2, value: U256::from(200) },
+                )
+                .unwrap();
+
+            // NOTE: No changeset for addr3/storage_key3 - this is the "gap" that
+            // defensive check should catch
+
+            provider.commit().unwrap();
+        }
+
+        // Set checkpoint to block 100
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // Run consistency check
+        // The optimized path will only find changesets for addr1 and addr2 (blocks 101-150)
+        // But key3 (addr3/storage_key3 at block 150) has no changeset
+        // The defensive check should catch key3 and prune it too
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+
+        // Verify ALL entries with highest_block > 100 were pruned, including the one
+        // without changesets (key3)
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key4).unwrap().is_some(),
+            "Entry at block 50 should remain (below checkpoint)"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key1).unwrap().is_none(),
+            "Entry at block 150 (addr1) should be pruned"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key2).unwrap().is_none(),
+            "Entry at block 150 (addr2) should be pruned"
+        );
+        assert!(
+            rocksdb.get::<tables::StoragesHistory>(key3).unwrap().is_none(),
+            "Entry at block 150 (addr3) should be pruned by defensive check (no changeset)"
+        );
+    }
+
+    /// Test Case 7 for AccountsHistory: Defensive check catches entries missed by
+    /// changeset-based pruning.
+    #[test]
+    fn test_accounts_history_defensive_check_catches_missed_entries() {
+        use reth_db_api::models::{AccountBeforeTx, ShardedKey};
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+
+        // Create addresses for testing
+        let addr1 = Address::from([0x01; 20]);
+        let addr2 = Address::from([0x02; 20]);
+        let addr3 = Address::from([0x03; 20]); // This one won't have changesets
+
+        // Insert AccountsHistory entries with highest_block > 100 (checkpoint)
+        // Entry 1: addr1 at block 150 - WILL have changeset
+        let key1 = ShardedKey::new(addr1, 150);
+        // Entry 2: addr2 at block 150 - WILL have changeset
+        let key2 = ShardedKey::new(addr2, 150);
+        // Entry 3: addr3 at block 150 - NO changeset (defensive check should catch)
+        let key3 = ShardedKey::new(addr3, 150);
+        // Entry 4: addr1 at block 50 - Should remain (below checkpoint)
+        let key4 = ShardedKey::new(addr1, 50);
+
+        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
+        rocksdb.put::<tables::AccountsHistory>(key1.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key2.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key3.clone(), &block_list).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key4.clone(), &block_list).unwrap();
+
+        // Create a test provider factory for MDBX
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        // Insert blocks so that last_block_number() returns > 100
+        let mut rng = generators::rng();
+        let blocks = generators::random_block_range(
+            &mut rng,
+            0..=150,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 0..1, ..Default::default() },
+        );
+
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            for block in &blocks {
+                provider
+                    .insert_block(&block.clone().try_recover().expect("recover block"))
+                    .unwrap();
+            }
+            provider.commit().unwrap();
+        }
+
+        // Insert AccountChangeSets for SOME entries only (addr1 and addr2, but NOT addr3)
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            let mut cursor =
+                provider.tx_ref().cursor_dup_write::<tables::AccountChangeSets>().unwrap();
+
+            // Changeset at block 150 for addr1
+            cursor.upsert(150, &AccountBeforeTx { address: addr1, info: None }).unwrap();
+
+            // Changeset at block 150 for addr2
+            cursor.upsert(150, &AccountBeforeTx { address: addr2, info: None }).unwrap();
+
+            // NOTE: No changeset for addr3 - defensive check should catch
+
+            provider.commit().unwrap();
+        }
+
+        // Set checkpoint to block 100
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // Run consistency check
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(result, None, "Should heal by pruning, no unwind needed");
+
+        // Verify ALL entries with highest_block > 100 were pruned
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key4).unwrap().is_some(),
+            "Entry at block 50 should remain (below checkpoint)"
+        );
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key1).unwrap().is_none(),
+            "Entry at block 150 (addr1) should be pruned"
+        );
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key2).unwrap().is_none(),
+            "Entry at block 150 (addr2) should be pruned"
+        );
+        assert!(
+            rocksdb.get::<tables::AccountsHistory>(key3).unwrap().is_none(),
+            "Entry at block 150 (addr3) should be pruned by defensive check (no changeset)"
+        );
+    }
 }
