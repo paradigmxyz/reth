@@ -1,7 +1,10 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
+use crate::providers::HistoryInfo;
+use alloy_primitives::{Address, BlockNumber, B256};
 use reth_db_api::{
-    table::{Compress, Decompress, Encode, Table},
-    tables, DatabaseError,
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    table::{Compress, Decode, Decompress, Encode, Table},
+    tables, BlockNumberList, DatabaseError,
 };
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
@@ -9,8 +12,8 @@ use reth_storage_errors::{
 };
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
-    IteratorMode, Options, Transaction, TransactionDB, TransactionDBOptions, TransactionOptions,
-    WriteBatchWithTransaction, WriteOptions,
+    DBRawIteratorWithThreadMode, IteratorMode, Options, Transaction, TransactionDB,
+    TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction, WriteOptions,
 };
 use std::{
     fmt,
@@ -281,13 +284,10 @@ impl RocksDBProvider {
     /// Creates a new batch for atomic writes.
     ///
     /// Use [`Self::write_batch`] for closure-based atomic writes.
-    /// Use this method when the batch needs to be held by [`crate::EitherWriter`].
-    pub fn batch(&self) -> RocksDBBatch<'_> {
-        RocksDBBatch {
-            provider: self,
-            inner: WriteBatchWithTransaction::<true>::default(),
-            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
-        }
+    /// Use this method when the batch needs to be held by [`crate::EitherWriter`]
+    /// or stored in `DatabaseProvider`.
+    pub fn batch(&self) -> RocksDBBatch {
+        RocksDBBatch::new(self.clone())
     }
 
     /// Gets the column family handle for a table.
@@ -442,7 +442,7 @@ impl RocksDBProvider {
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
-        F: FnOnce(&mut RocksDBBatch<'_>) -> ProviderResult<()>,
+        F: FnOnce(&mut RocksDBBatch) -> ProviderResult<()>,
     {
         self.execute_with_operation_metric(RocksDBOperation::BatchWrite, "Batch", |this| {
             let mut batch_handle = this.batch();
@@ -467,23 +467,27 @@ impl RocksDBProvider {
 
 /// Handle for building a batch of operations atomically.
 ///
-/// Uses `WriteBatchWithTransaction` for atomic writes without full transaction overhead.
-/// Unlike [`RocksTx`], this does NOT support read-your-writes. Use for write-only flows
-/// where you don't need to read back uncommitted data within the same operation
-/// (e.g., history index writes).
+/// Uses `WriteBatchWithTransaction` for atomic write-only batching.
+/// This does NOT support read-your-writes; use [`RocksTx`] (or an optimistic transaction)
+/// if you need to read within the same logical operation.
+///
+/// Note: `WriteBatch` operations are applied in order. If the same key is updated multiple times,
+/// the last update wins. Ref: <https://github.com/facebook/rocksdb/wiki/Basic-Operations#atomic-updates>
+///
+/// This type owns a `RocksDBProvider` to allow storing it in `DatabaseProvider`
+/// without lifetime issues.
 #[must_use = "batch must be committed"]
-pub struct RocksDBBatch<'a> {
-    provider: &'a RocksDBProvider,
+pub struct RocksDBBatch {
+    provider: RocksDBProvider,
     inner: WriteBatchWithTransaction<true>,
     buf: Vec<u8>,
 }
 
-impl fmt::Debug for RocksDBBatch<'_> {
+impl fmt::Debug for RocksDBBatch {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RocksDBBatch")
             .field("provider", &self.provider)
             .field("batch", &"<WriteBatchWithTransaction>")
-            // Number of operations in this batch
             .field("length", &self.inner.len())
             // Total serialized size (encoded key + compressed value + metadata) of this batch
             // in bytes
@@ -492,7 +496,15 @@ impl fmt::Debug for RocksDBBatch<'_> {
     }
 }
 
-impl<'a> RocksDBBatch<'a> {
+impl RocksDBBatch {
+    /// Creates a new batch for the given provider.
+    pub(crate) fn new(provider: RocksDBProvider) -> Self {
+        Self {
+            provider,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+        }
+    }
     /// Puts a value into the batch.
     pub fn put<T: Table>(&mut self, key: T::Key, value: &T::Value) -> ProviderResult<()> {
         let encoded_key = key.encode();
@@ -520,12 +532,7 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// This consumes the batch and writes all operations atomically to `RocksDB`.
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.0.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
-            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })
+        self.provider.commit_batch(self.inner)
     }
 
     /// Returns the number of write operations (puts + deletes) queued in this batch.
@@ -536,11 +543,6 @@ impl<'a> RocksDBBatch<'a> {
     /// Returns `true` if the batch contains no operations.
     pub fn is_empty(&self) -> bool {
         self.inner.is_empty()
-    }
-
-    /// Returns a reference to the underlying `RocksDB` provider.
-    pub const fn provider(&self) -> &RocksDBProvider {
-        self.provider
     }
 
     /// Consumes the batch and returns the underlying `WriteBatchWithTransaction`.
@@ -650,6 +652,30 @@ impl<'db> RocksTx<'db> {
         Ok(RocksTxIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
+    /// Creates a raw iterator for bidirectional traversal of the specified table.
+    ///
+    /// Unlike [`Self::iter_from`], raw iterators support `prev()` for backward navigation.
+    /// Use this for history lookups where checking the previous entry is needed.
+    pub fn raw_iterator_cf<T: Table>(
+        &self,
+    ) -> ProviderResult<DBRawIteratorWithThreadMode<'_, Transaction<'_, TransactionDB>>> {
+        let cf = self.provider.get_cf_handle::<T>()?;
+        Ok(self.inner.raw_iterator_cf(cf))
+    }
+
+    /// Raw iterators surface I/O errors via `status()`, not through `key()`/`value()`.
+    /// Call this after `seek`/`next`/`prev` before interpreting `valid()`.
+    fn raw_iter_status_ok(
+        iter: &DBRawIteratorWithThreadMode<'_, Transaction<'_, TransactionDB>>,
+    ) -> ProviderResult<()> {
+        iter.status().map_err(|e| {
+            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+
     /// Commits the transaction, persisting all changes.
     pub fn commit(self) -> ProviderResult<()> {
         self.inner.commit().map_err(|e| {
@@ -665,6 +691,123 @@ impl<'db> RocksTx<'db> {
         self.inner.rollback().map_err(|e| {
             ProviderError::Database(DatabaseError::Other(format!("rollback failed: {e}")))
         })
+    }
+
+    /// Lookup account history and return [`HistoryInfo`] directly.
+    pub fn account_history_info(
+        &self,
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        let key = ShardedKey::new(address, block_number);
+        self.history_info::<tables::AccountsHistory>(
+            key.encode().as_ref(),
+            block_number,
+            lowest_available_block_number,
+            |key_bytes| Ok(<ShardedKey<Address> as Decode>::decode(key_bytes)?.key == address),
+            |prev_bytes| {
+                <ShardedKey<Address> as Decode>::decode(prev_bytes)
+                    .map(|k| k.key == address)
+                    .unwrap_or(false)
+            },
+        )
+    }
+
+    /// Lookup storage history and return [`HistoryInfo`] directly.
+    pub fn storage_history_info(
+        &self,
+        address: Address,
+        storage_key: B256,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        let key = StorageShardedKey::new(address, storage_key, block_number);
+        self.history_info::<tables::StoragesHistory>(
+            key.encode().as_ref(),
+            block_number,
+            lowest_available_block_number,
+            |key_bytes| {
+                let k = <StorageShardedKey as Decode>::decode(key_bytes)?;
+                Ok(k.address == address && k.sharded_key.key == storage_key)
+            },
+            |prev_bytes| {
+                <StorageShardedKey as Decode>::decode(prev_bytes)
+                    .map(|k| k.address == address && k.sharded_key.key == storage_key)
+                    .unwrap_or(false)
+            },
+        )
+    }
+
+    /// Generic history lookup for sharded history tables.
+    ///
+    /// Seeks to the shard containing `block_number`, checks if the key matches via `key_matches`,
+    /// and uses `prev_key_matches` to detect if a previous shard exists for the same key.
+    fn history_info<T>(
+        &self,
+        encoded_key: &[u8],
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+        key_matches: impl FnOnce(&[u8]) -> Result<bool, reth_db_api::DatabaseError>,
+        prev_key_matches: impl Fn(&[u8]) -> bool,
+    ) -> ProviderResult<HistoryInfo>
+    where
+        T: Table<Value = BlockNumberList>,
+    {
+        let mut iter = self.raw_iterator_cf::<T>()?;
+        iter.seek::<&[u8]>(encoded_key);
+        Self::raw_iter_status_ok(&iter)?;
+
+        if !iter.valid() {
+            return Ok(if lowest_available_block_number.is_some() {
+                HistoryInfo::MaybeInPlainState
+            } else {
+                HistoryInfo::NotYetWritten
+            })
+        }
+
+        let key_bytes =
+            iter.key().ok_or(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: "missing key".into(),
+                code: -1,
+            })))?;
+        let value_bytes = iter.value().ok_or(ProviderError::Database(DatabaseError::Read(
+            DatabaseErrorInfo { message: "missing value".into(), code: -1 },
+        )))?;
+
+        if !key_matches(key_bytes).map_err(ProviderError::Database)? {
+            return Ok(if lowest_available_block_number.is_some() {
+                HistoryInfo::MaybeInPlainState
+            } else {
+                HistoryInfo::NotYetWritten
+            })
+        }
+
+        let chunk = T::Value::decompress(value_bytes)
+            .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+
+        // Get rank of first entry <= block_number, then adjust to get entry strictly before
+        let mut rank = chunk.rank(block_number);
+        if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+            rank -= 1;
+        }
+        let found_block = chunk.select(rank);
+
+        // Lazy check for previous shard - only called when needed
+        let is_before_first_write = if rank == 0 && found_block != Some(block_number) {
+            iter.prev();
+            Self::raw_iter_status_ok(&iter)?;
+            let has_prev = iter.valid() && iter.key().is_some_and(&prev_key_matches);
+            !has_prev
+        } else {
+            false
+        };
+
+        Ok(HistoryInfo::from_lookup(
+            found_block,
+            is_before_first_write,
+            lowest_available_block_number,
+        ))
     }
 }
 
@@ -1093,5 +1236,180 @@ mod tests {
         // Last should return the largest key
         let last = provider.last::<TestTable>().unwrap();
         assert_eq!(last, Some((20, b"value_20".to_vec())));
+    }
+
+    #[test]
+    fn test_account_history_info_single_shard() {
+        use crate::providers::HistoryInfo;
+
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Create a single shard with blocks [100, 200, 300] and highest_block = u64::MAX
+        // This is the "last shard" invariant
+        let chunk = IntegerList::new([100, 200, 300]).unwrap();
+        let shard_key = ShardedKey::new(address, u64::MAX);
+        provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
+
+        let tx = provider.tx();
+
+        // Query for block 150: should find block 200 in changeset
+        let result = tx.account_history_info(address, 150, None).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(200));
+
+        // Query for block 50: should return NotYetWritten (before first entry, no prev shard)
+        let result = tx.account_history_info(address, 50, None).unwrap();
+        assert_eq!(result, HistoryInfo::NotYetWritten);
+
+        // Query for block 300: should return InChangeset(300) - exact match means look at
+        // changeset at that block for the previous value
+        let result = tx.account_history_info(address, 300, None).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(300));
+
+        // Query for block 500: should return InPlainState (after last entry in last shard)
+        let result = tx.account_history_info(address, 500, None).unwrap();
+        assert_eq!(result, HistoryInfo::InPlainState);
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn test_account_history_info_multiple_shards() {
+        use crate::providers::HistoryInfo;
+
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Create two shards: first shard ends at block 500, second is the last shard
+        let chunk1 = IntegerList::new([100, 200, 300, 400, 500]).unwrap();
+        let shard_key1 = ShardedKey::new(address, 500);
+        provider.put::<tables::AccountsHistory>(shard_key1, &chunk1).unwrap();
+
+        let chunk2 = IntegerList::new([600, 700, 800]).unwrap();
+        let shard_key2 = ShardedKey::new(address, u64::MAX);
+        provider.put::<tables::AccountsHistory>(shard_key2, &chunk2).unwrap();
+
+        let tx = provider.tx();
+
+        // Query for block 50: should return NotYetWritten (before first shard, no prev)
+        let result = tx.account_history_info(address, 50, None).unwrap();
+        assert_eq!(result, HistoryInfo::NotYetWritten);
+
+        // Query for block 150: should find block 200 in first shard's changeset
+        let result = tx.account_history_info(address, 150, None).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(200));
+
+        // Query for block 550: should find block 600 in second shard's changeset
+        // prev() should detect first shard exists
+        let result = tx.account_history_info(address, 550, None).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(600));
+
+        // Query for block 900: should return InPlainState (after last entry in last shard)
+        let result = tx.account_history_info(address, 900, None).unwrap();
+        assert_eq!(result, HistoryInfo::InPlainState);
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn test_account_history_info_no_history() {
+        use crate::providers::HistoryInfo;
+
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address1 = Address::from([0x42; 20]);
+        let address2 = Address::from([0x43; 20]);
+
+        // Create history only for address1 to test cross-address isolation
+        let chunk = IntegerList::new([100, 200, 300]).unwrap();
+        let shard_key = ShardedKey::new(address1, u64::MAX);
+        provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
+
+        let tx = provider.tx();
+
+        // Query for address2 (no history) should return NotYetWritten
+        let result = tx.account_history_info(address2, 150, None).unwrap();
+        assert_eq!(result, HistoryInfo::NotYetWritten);
+
+        // With lowest_available_block_number set, should return MaybeInPlainState
+        let result = tx.account_history_info(address2, 150, Some(50)).unwrap();
+        assert_eq!(result, HistoryInfo::MaybeInPlainState);
+
+        // Query for address1 should find the history (verifies isolation works both ways)
+        let result = tx.account_history_info(address1, 150, None).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(200));
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn test_account_history_info_pruned_before_first_entry() {
+        use crate::providers::HistoryInfo;
+
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+
+        // Single shard with entries starting at 100.
+        let chunk = IntegerList::new([100, 200, 300]).unwrap();
+        let shard_key = ShardedKey::new(address, u64::MAX);
+        provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
+
+        let tx = provider.tx();
+
+        // Query before first entry with pruning boundary should return InChangeset at first entry.
+        let result = tx.account_history_info(address, 50, Some(10)).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(100));
+
+        tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn test_storage_history_info() {
+        use crate::providers::HistoryInfo;
+
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        let address = Address::from([0x42; 20]);
+        let storage_key1 = B256::from([0x11; 32]);
+        let storage_key2 = B256::from([0x22; 32]);
+
+        // Create two shards for storage_key1 to test multi-shard behavior
+        let chunk1 = IntegerList::new([100, 200, 300]).unwrap();
+        let shard_key1 = StorageShardedKey::new(address, storage_key1, 300);
+        provider.put::<tables::StoragesHistory>(shard_key1, &chunk1).unwrap();
+
+        let chunk2 = IntegerList::new([400, 500, 600]).unwrap();
+        let shard_key2 = StorageShardedKey::new(address, storage_key1, u64::MAX);
+        provider.put::<tables::StoragesHistory>(shard_key2, &chunk2).unwrap();
+
+        let tx = provider.tx();
+
+        // Query for block 150: should find block 200 in first shard
+        let result = tx.storage_history_info(address, storage_key1, 150, None).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(200));
+
+        // Query for block 50: should return NotYetWritten (before first entry)
+        let result = tx.storage_history_info(address, storage_key1, 50, None).unwrap();
+        assert_eq!(result, HistoryInfo::NotYetWritten);
+
+        // Query for block 350: should find block 400 in second shard
+        // prev() should detect first shard exists (tests has_prev)
+        let result = tx.storage_history_info(address, storage_key1, 350, None).unwrap();
+        assert_eq!(result, HistoryInfo::InChangeset(400));
+
+        // Query for storage_key2 (no history) should return NotYetWritten
+        // Tests cross-slot isolation
+        let result = tx.storage_history_info(address, storage_key2, 150, None).unwrap();
+        assert_eq!(result, HistoryInfo::NotYetWritten);
+
+        tx.rollback().unwrap();
     }
 }
