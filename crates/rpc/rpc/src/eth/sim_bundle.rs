@@ -135,7 +135,8 @@ where
                 // Check if there's a parent waiting on the stack
                 if let Some((parent_bundle, parent_idx, mut parent_logs)) = stack.pop() {
                     // Add this bundle's logs as nested bundle_logs in parent
-                    parent_logs.push(SimBundleLogs { tx_logs: None, bundle_logs: Some(current_logs) });
+                    parent_logs
+                        .push(SimBundleLogs { tx_logs: None, bundle_logs: Some(current_logs) });
                     // Put parent back on stack to continue processing
                     stack.push((parent_bundle, parent_idx, parent_logs));
                 } else {
@@ -345,7 +346,9 @@ where
                     let max_block_number =
                         item.inclusion.max_block_number().unwrap_or(block_number);
 
-                    if current_block_number < block_number || current_block_number > max_block_number {
+                    if current_block_number < block_number ||
+                        current_block_number > max_block_number
+                    {
                         return Err(EthApiError::InvalidParams(
                             EthSimBundleError::InvalidInclusion.to_string(),
                         )
@@ -382,7 +385,8 @@ where
                     // Update coinbase balance before next tx
                     coinbase_balance_before_tx = coinbase_balance_after_tx;
 
-                    // Collect logs in map keyed by raw_tx_hash for hierarchical structure reconstruction
+                    // Collect logs in map keyed by raw_tx_hash for hierarchical structure
+                    // reconstruction
                     if logs {
                         let tx_hash = item.raw_tx_hash;
                         let tx_logs: Vec<alloy_rpc_types_eth::Log> = result
@@ -424,13 +428,16 @@ where
                         });
 
                         // Calculate payout transaction fee
-                        let payout_tx_fee = U256::from(basefee) * U256::from(SBUNDLE_PAYOUT_MAX_COST) * U256::from(refund_configs.len() as u64);
+                        let payout_tx_fee = U256::from(basefee) *
+                            U256::from(SBUNDLE_PAYOUT_MAX_COST) *
+                            U256::from(refund_configs.len() as u64);
 
                         // Add gas used for payout transactions
                         total_gas_used += SBUNDLE_PAYOUT_MAX_COST * refund_configs.len() as u64;
 
                         // Calculate payout value based on ORIGINAL refundable value
-                        let payout_value = original_refundable_value * U256::from(refund_percent) / U256::from(100);
+                        let payout_value = original_refundable_value * U256::from(refund_percent) /
+                            U256::from(100);
 
                         if payout_tx_fee > payout_value {
                             return Err(EthApiError::InvalidParams(
@@ -601,7 +608,8 @@ mod tests {
                 }
             } else {
                 if let Some((parent_bundle, parent_idx, mut parent_logs)) = stack.pop() {
-                    parent_logs.push(SimBundleLogs { tx_logs: None, bundle_logs: Some(current_logs) });
+                    parent_logs
+                        .push(SimBundleLogs { tx_logs: None, bundle_logs: Some(current_logs) });
                     stack.push((parent_bundle, parent_idx, parent_logs));
                 } else {
                     final_result = current_logs;
@@ -712,10 +720,10 @@ mod tests {
         let hash2 = keccak256(&tx2);
         let hash3 = keccak256(&tx3);
 
-        let bundle_c = create_test_bundle(vec![tx3.clone()]);
+        let bundle_c = create_test_bundle(vec![tx3]);
         let bundle_b = MevSendBundle {
             bundle_body: vec![
-                BundleItem::Tx { tx: tx2.clone(), can_revert: false },
+                BundleItem::Tx { tx: tx2, can_revert: false },
                 BundleItem::Bundle { bundle: bundle_c },
             ],
             inclusion: Inclusion { block: 1, max_block: None },
@@ -725,7 +733,7 @@ mod tests {
         };
         let bundle_a = MevSendBundle {
             bundle_body: vec![
-                BundleItem::Tx { tx: tx1.clone(), can_revert: false },
+                BundleItem::Tx { tx: tx1, can_revert: false },
                 BundleItem::Bundle { bundle: bundle_b },
             ],
             inclusion: Inclusion { block: 1, max_block: None },
