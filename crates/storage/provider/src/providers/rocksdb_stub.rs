@@ -77,6 +77,11 @@ impl RocksDBProvider {
     pub const fn tx(&self) -> RocksTx {
         RocksTx
     }
+
+    /// Creates a new batch for atomic writes (stub implementation).
+    pub const fn batch(&self) -> RocksDBBatch {
+        RocksDBBatch
+    }
 }
 
 /// A stub batch writer for `RocksDB` on non-Unix platforms.
@@ -100,6 +105,11 @@ impl RocksDBBatch {
 
     /// Deletes a value from the batch (stub implementation).
     pub fn delete<T: Table>(&self, _key: T::Key) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+
+    /// Commits the batch (stub implementation).
+    pub const fn commit(self) -> ProviderResult<()> {
         Err(UnsupportedProvider)
     }
 }

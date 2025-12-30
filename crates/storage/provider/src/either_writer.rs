@@ -43,10 +43,11 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
 
 // Helper types so constructors stay exported even when RocksDB feature is off.
 // Historical data tables use a write-only RocksDB batch (no read-your-writes needed).
+// The batch is owned by the writer and extracted via `into_raw_rocksdb_batch()` after use.
 #[cfg(all(unix, feature = "rocksdb"))]
-type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
+type RocksBatchArg = crate::providers::rocksdb::RocksDBBatch;
 #[cfg(not(all(unix, feature = "rocksdb")))]
-type RocksBatchArg<'a> = ();
+type RocksBatchArg = ();
 
 #[cfg(all(unix, feature = "rocksdb"))]
 type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
@@ -61,8 +62,9 @@ pub enum EitherWriter<'a, CURSOR, N> {
     /// Write to static file
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
     /// Write to `RocksDB` using a write-only batch (historical tables).
+    /// The batch is owned and extracted via `into_raw_rocksdb_batch()` after use.
     #[cfg(all(unix, feature = "rocksdb"))]
-    RocksDB(RocksDBBatch<'a>),
+    RocksDB(RocksDBBatch),
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -135,7 +137,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     /// Creates a new [`EitherWriter`] for storages history based on storage settings.
     pub fn new_storages_history<P>(
         provider: &P,
-        _rocksdb_batch: RocksBatchArg<'a>,
+        _rocksdb_batch: RocksBatchArg,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::StoragesHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
@@ -152,7 +154,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     /// Creates a new [`EitherWriter`] for transaction hash numbers based on storage settings.
     pub fn new_transaction_hash_numbers<P>(
         provider: &P,
-        _rocksdb_batch: RocksBatchArg<'a>,
+        _rocksdb_batch: RocksBatchArg,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionHashNumbers>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
@@ -171,7 +173,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     /// Creates a new [`EitherWriter`] for account history based on storage settings.
     pub fn new_accounts_history<P>(
         provider: &P,
-        _rocksdb_batch: RocksBatchArg<'a>,
+        _rocksdb_batch: RocksBatchArg,
     ) -> ProviderResult<EitherWriterTy<'a, P, tables::AccountsHistory>>
     where
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
@@ -960,9 +962,8 @@ mod rocksdb_tests {
         writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
         writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
 
-        // Extract the raw batch from the writer and register it with the provider
-        let raw_batch = writer.into_raw_rocksdb_batch();
-        if let Some(batch) = raw_batch {
+        // Extract and register the batch with the provider
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
             provider.set_pending_rocksdb_batch(batch);
         }
 
