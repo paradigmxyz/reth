@@ -672,7 +672,7 @@ impl<'db> RocksTx<'db> {
 
     /// Lookup account history and return [`HistoryInfo`] directly.
     ///
-    /// This is a thin wrapper around [`Self::history_info`] that:
+    /// This is a thin wrapper around `history_info` that:
     /// - Builds the `ShardedKey` for the address + target block.
     /// - Validates that the found shard belongs to the same address.
     pub fn account_history_info(
@@ -697,7 +697,7 @@ impl<'db> RocksTx<'db> {
 
     /// Lookup storage history and return [`HistoryInfo`] directly.
     ///
-    /// This is a thin wrapper around [`Self::history_info`] that:
+    /// This is a thin wrapper around `history_info` that:
     /// - Builds the `StorageShardedKey` for address + storage key + target block.
     /// - Validates that the found shard belongs to the same address and storage slot.
     pub fn storage_history_info(
