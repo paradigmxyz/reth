@@ -90,13 +90,13 @@ pub struct RocksDBBatch;
 
 impl RocksDBBatch {
     /// Puts a value into the batch (stub implementation).
-    pub fn put<T: Table>(&mut self, _key: T::Key, _value: &T::Value) -> ProviderResult<()> {
+    pub fn put<T: Table>(&self, _key: T::Key, _value: &T::Value) -> ProviderResult<()> {
         Err(UnsupportedProvider)
     }
 
     /// Puts a value into the batch using pre-encoded key (stub implementation).
     pub const fn put_encoded<T: Table>(
-        &mut self,
+        &self,
         _key: &<T::Key as Encode>::Encoded,
         _value: &T::Value,
     ) -> ProviderResult<()> {
@@ -104,7 +104,7 @@ impl RocksDBBatch {
     }
 
     /// Deletes a value from the batch (stub implementation).
-    pub fn delete<T: Table>(&mut self, _key: T::Key) -> ProviderResult<()> {
+    pub fn delete<T: Table>(&self, _key: T::Key) -> ProviderResult<()> {
         Err(UnsupportedProvider)
     }
 
