@@ -456,6 +456,34 @@ where
     }
 }
 
+/// Drop implementation that detects non-empty `RocksDB` batches being dropped without extraction.
+///
+/// This catches bugs where callers forget to call `into_raw_rocksdb_batch()` on `RocksDB` writers,
+/// which would silently discard pending writes.
+#[cfg(all(unix, feature = "rocksdb"))]
+impl<CURSOR, N> Drop for EitherWriter<'_, CURSOR, N> {
+    fn drop(&mut self) {
+        if let Self::RocksDB(Some(batch)) = self &&
+            !batch.is_empty()
+        {
+            let count = batch.len();
+            // Debug builds: panic to catch the bug during development/testing
+            #[cfg(debug_assertions)]
+            panic!(
+                "EitherWriter::RocksDB dropped with {count} uncommitted writes. \
+                 Call into_raw_rocksdb_batch() to extract the batch."
+            );
+            // Release builds: log error but don't crash
+            #[cfg(not(debug_assertions))]
+            tracing::error!(
+                target: "reth::storage",
+                writes = count,
+                "EitherWriter::RocksDB dropped with uncommitted writes - data loss occurred"
+            );
+        }
+    }
+}
+
 /// Represents a source for reading data, either from database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherReader<'a, CURSOR, N> {
@@ -1017,5 +1045,59 @@ mod rocksdb_tests {
             Some(tx_num2),
             "Data should be visible after provider.commit()"
         );
+    }
+
+    /// Test that dropping an `EitherWriter::RocksDB` with uncommitted writes panics in debug
+    /// builds.
+    ///
+    /// This test documents the safety behavior: forgetting to call `into_raw_rocksdb_batch()`
+    /// will cause a panic in debug builds to catch bugs during development.
+    #[test]
+    #[should_panic(expected = "uncommitted writes")]
+    fn test_dropping_rocksdb_writer_with_writes_panics() {
+        let factory = create_test_provider_factory();
+
+        // Enable RocksDB for transaction hash numbers
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+        );
+
+        let hash = B256::from([1u8; 32]);
+        let tx_num = 100u64;
+
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+
+        // Write data but intentionally forget to call into_raw_rocksdb_batch()
+        writer.put_transaction_hash_number(hash, tx_num, false).unwrap();
+
+        // Drop the writer without extracting the batch - should panic!
+        drop(writer);
+    }
+
+    /// Test that dropping an `EitherWriter::RocksDB` with NO writes does NOT panic.
+    ///
+    /// Empty batches are fine to drop without extraction.
+    #[test]
+    fn test_dropping_empty_rocksdb_writer_does_not_panic() {
+        let factory = create_test_provider_factory();
+
+        // Enable RocksDB for transaction hash numbers
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+        );
+
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+
+        let provider = factory.database_provider_rw().unwrap();
+        let writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
+
+        // Drop without writing anything or calling into_raw_rocksdb_batch()
+        // This should NOT panic because the batch is empty
+        drop(writer);
     }
 }
