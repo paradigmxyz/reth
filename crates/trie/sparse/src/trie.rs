@@ -595,7 +595,7 @@ impl SparseTrieInterface for SerialSparseTrie {
             // Read the node from arena via pointer
             match *self.node(node_id) {
                 SparseNode::Empty => {
-                    self.replace_node(current, SparseNode::new_leaf(full_path));
+                    *self.arena.get_mut(node_id) = SparseNode::new_leaf(full_path);
                     break
                 }
                 SparseNode::Hash(hash) => {
@@ -646,13 +646,13 @@ impl SparseTrieInterface for SerialSparseTrie {
                         // directly replace the leaf with a branch. This preserves the NodeId
                         // so parent pointers remain valid.
                         debug_assert_eq!(branch_path, ext_path);
-                        self.replace_node(ext_path, branch);
+                        *self.arena.get_mut(node_id) = branch;
                     } else {
                         // Regular case: ext_path -> Extension(new_ext_key) -> Branch(branch_path)
-                        let ext_id = self.replace_node(ext_path, SparseNode::new_ext(new_ext_key));
+                        *self.arena.get_mut(node_id) = SparseNode::new_ext(new_ext_key);
                         let branch_id = self.insert_node(branch_path, branch);
                         // Set extension's child pointer to the branch
-                        self.arena.get_mut(ext_id).set_ext_child(Some(branch_id));
+                        self.arena.get_mut(node_id).set_ext_child(Some(branch_id));
                     }
 
                     break;
@@ -742,13 +742,12 @@ impl SparseTrieInterface for SerialSparseTrie {
                             // extension and directly replace the extension with a branch. This
                             // preserves the NodeId so parent pointers remain valid.
                             debug_assert_eq!(branch_path, ext_path);
-                            self.replace_node(ext_path, branch);
+                            *self.arena.get_mut(node_id) = branch;
                         } else {
                             // Regular case: ext_path -> Extension(new_ext_key) -> Branch
-                            let ext_id =
-                                self.replace_node(ext_path, SparseNode::new_ext(new_ext_key));
+                            *self.arena.get_mut(node_id) = SparseNode::new_ext(new_ext_key);
                             let branch_id = self.insert_node(branch_path, branch);
-                            self.arena.get_mut(ext_id).set_ext_child(Some(branch_id));
+                            self.arena.get_mut(node_id).set_ext_child(Some(branch_id));
                         }
 
                         break;
