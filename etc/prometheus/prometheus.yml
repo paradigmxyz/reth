@@ -10,9 +10,21 @@ scrape_configs:
           # Instance label for identification in Grafana
           # Dashboard uses 'job' label by default, which will be 'op-reth'
           instance: 'op-reth-rpc2'
-  # Optional: Keep ethereum-metrics-exporter if you use it
-  # - job_name: ethereum-metrics-exporter
-  #   metrics_path: "/metrics"
-  #   scrape_interval: 5s
-  #   static_configs:
-  #     - targets: ['metrics-exporter:9091']
+  - job_name: op-node
+    metrics_path: "/"
+    scrape_interval: 5s
+    static_configs:
+      # Connect to local op-node running on host machine
+      # Metrics port is 29730 as configured in op-node envs
+      - targets: ['host.docker.internal:29730']
+        labels:
+          instance: 'op-node-rpc2'
+  - job_name: ethereum-metrics-exporter
+    metrics_path: "/metrics"
+    scrape_interval: 5s
+    static_configs:
+      - targets: ['metrics-exporter:9091']
+        labels:
+          # Instance label should match the name in ethereum-metrics-exporter config.yaml
+          # The exporter uses the 'name' field from config as the instance label in metrics
+          instance: 'op-reth-rpc2'

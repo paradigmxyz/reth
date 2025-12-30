@@ -44,11 +44,27 @@ services:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
 
+  metrics-exporter:
+    restart: unless-stopped
+    image: ethpandaops/ethereum-metrics-exporter:debian-latest
+    depends_on:
+      - prometheus
+    ports:
+      - 9091:9091 # metrics
+    volumes:
+      - ./ethereum-metrics-exporter/config.yaml:/root/config.yaml
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    command:
+      - --config=/root/config.yaml
+      - --metrics-port=9091
+
   grafana:
     restart: unless-stopped
     image: grafana/grafana:latest
     depends_on:
       - prometheus
+      - metrics-exporter
     ports:
       - 3001:3000  # Changed to 3001 to avoid conflict with existing Grafana on 3000
     environment:
