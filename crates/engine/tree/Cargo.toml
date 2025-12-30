@@ -95,7 +95,7 @@ reth-tracing.workspace = true
 reth-node-ethereum.workspace = true
 reth-e2e-test-utils.workspace = true
 
-# alloy
+# revm
 revm-state.workspace = true
 
 assert_matches.workspace = true
