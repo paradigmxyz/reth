@@ -112,19 +112,6 @@ impl RocksDBBatch {
     pub const fn commit(self) -> ProviderResult<()> {
         Err(UnsupportedProvider)
     }
-
-    /// Returns the number of operations in this batch (stub implementation).
-    pub const fn len(&self) -> usize {
-        0
-    }
-
-    /// Returns `true` if the batch is empty (stub implementation).
-    pub const fn is_empty(&self) -> bool {
-        true
-    }
-
-    /// Consumes the batch and returns the inner batch (stub returns nothing).
-    pub fn into_inner(self) {}
 }
 
 /// A stub builder for `RocksDB` on non-Unix platforms.
