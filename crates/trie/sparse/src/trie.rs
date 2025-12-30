@@ -825,13 +825,17 @@ impl SparseTrieInterface for SerialSparseTrie {
 
         let mut removed_nodes = self.take_nodes_for_path(full_path)?;
         // Pop the first node from the stack which is the leaf node we want to remove.
-        let mut child = removed_nodes.pop().expect("leaf exists");
+        let removed_leaf = removed_nodes.pop().expect("leaf exists");
+        let mut child_node_id = removed_leaf.node_id;
+        let mut child_path = removed_leaf.path;
         #[cfg(debug_assertions)]
         {
-            let mut child_path = child.path;
-            let SparseNode::Leaf { key, .. } = &child.node else { panic!("expected leaf node") };
-            child_path.extend(key);
-            assert_eq!(&child_path, full_path);
+            let mut full_child_path = child_path;
+            let SparseNode::Leaf { key, .. } = self.node(child_node_id) else {
+                panic!("expected leaf node")
+            };
+            full_child_path.extend(key);
+            assert_eq!(&full_child_path, full_path);
         }
 
         // If we don't have any other removed nodes, the leaf was the root - reset to empty.
@@ -849,7 +853,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         while let Some(removed_node) = removed_nodes.pop() {
             let removed_path = removed_node.path;
 
-            let new_node = match &removed_node.node {
+            let new_node = match self.node(removed_node.node_id) {
                 SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
                 &SparseNode::Hash(hash) => {
                     return Err(SparseTrieErrorKind::BlindedNode { path: removed_path, hash }.into())
@@ -860,11 +864,11 @@ impl SparseTrieInterface for SerialSparseTrie {
                 SparseNode::Extension { key, .. } => {
                     // If the node is an extension node, we need to look at its child to see if we
                     // need to merge them.
-                    match &child.node {
+                    match self.node(child_node_id) {
                         SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
                         &SparseNode::Hash(hash) => {
                             return Err(
-                                SparseTrieErrorKind::BlindedNode { path: child.path, hash }.into()
+                                SparseTrieErrorKind::BlindedNode { path: child_path, hash }.into()
                             )
                         }
                         // For a leaf node, we collapse the extension node into a leaf node,
@@ -897,10 +901,10 @@ impl SparseTrieInterface for SerialSparseTrie {
                         // set/update the child pointer.
                         SparseNode::Branch { .. } => {
                             // Get the child's NodeId via pointer traversal
-                            let child_id = self.traverse_to_node_id(&child.path);
+                            let c_id = self.traverse_to_node_id(&child_path);
                             SparseNode::Extension {
                                 key: *key,
-                                child: child_id,
+                                child: c_id,
                                 hash: None,
                                 store_in_db_trie: None,
                             }
@@ -1006,11 +1010,8 @@ impl SparseTrieInterface for SerialSparseTrie {
                 }
             };
 
-            child = RemovedSparseNode {
-                path: removed_path,
-                node: new_node.clone(),
-                unset_branch_nibble: None,
-            };
+            child_node_id = removed_node.node_id;
+            child_path = removed_path;
             trace!(target: "trie::sparse", ?removed_path, ?new_node, "Re-inserting the node");
             self.replace_node(removed_path, new_node);
         }
@@ -1695,35 +1696,34 @@ impl SerialSparseTrie {
         };
 
         loop {
-            let node = self.node(node_id).clone();
-            match node {
+            match self.node(node_id) {
                 SparseNode::Empty => return Err(SparseTrieErrorKind::Blind.into()),
-                SparseNode::Hash(hash) => {
+                &SparseNode::Hash(hash) => {
                     return Err(SparseTrieErrorKind::BlindedNode { path: current, hash }.into())
                 }
-                SparseNode::Leaf { key, hash } => {
+                SparseNode::Leaf { key, .. } => {
                     // Leaf node is always the one that we're deleting, and no other leaf nodes can
                     // be found during traversal.
 
                     #[cfg(debug_assertions)]
                     {
                         let mut current = current;
-                        current.extend(&key);
+                        current.extend(key);
                         assert_eq!(&current, path);
                     }
 
                     nodes.push(RemovedSparseNode {
                         path: current,
-                        node: SparseNode::Leaf { key, hash },
+                        node_id,
                         unset_branch_nibble: None,
                     });
                     break
                 }
-                SparseNode::Extension { key, child, hash, store_in_db_trie } => {
+                SparseNode::Extension { key, child, .. } => {
                     #[cfg(debug_assertions)]
                     {
                         let mut current = current;
-                        current.extend(&key);
+                        current.extend(key);
                         assert!(
                             path.starts_with(&current),
                             "path: {path:?}, current: {current:?}, key: {key:?}",
@@ -1731,14 +1731,13 @@ impl SerialSparseTrie {
                     }
 
                     let node_path = current;
-                    current.extend(&key);
+                    current.extend(key);
 
-                    // Copy child pointer before moving node fields
-                    let child_id = child;
+                    let child_id = *child;
 
                     nodes.push(RemovedSparseNode {
                         path: node_path,
-                        node: SparseNode::Extension { key, child, hash, store_in_db_trie },
+                        node_id,
                         unset_branch_nibble: None,
                     });
 
@@ -1748,7 +1747,7 @@ impl SerialSparseTrie {
                     };
                     node_id = cid;
                 }
-                SparseNode::Branch { state_mask, children, hash, store_in_db_trie } => {
+                SparseNode::Branch { state_mask, children, .. } => {
                     let nibble = path.get_unchecked(current.len());
                     debug_assert!(
                         state_mask.is_bit_set(nibble),
@@ -1772,7 +1771,7 @@ impl SerialSparseTrie {
 
                     nodes.push(RemovedSparseNode {
                         path: current,
-                        node: SparseNode::Branch { state_mask, children, hash, store_in_db_trie },
+                        node_id,
                         unset_branch_nibble,
                     });
 
@@ -2591,8 +2590,8 @@ impl SparseNode {
 struct RemovedSparseNode {
     /// The path at which the node was located.
     path: Nibbles,
-    /// The removed node
-    node: SparseNode,
+    /// The ID of the removed node in the arena.
+    node_id: NodeId,
     /// For branch nodes, an optional nibble that should be unset due to the node being removed.
     ///
     /// During leaf deletion, this identifies the specific branch nibble path that
