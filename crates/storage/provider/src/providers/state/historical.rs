@@ -568,6 +568,25 @@ fn needs_prev_shard_check(rank: u64, found_block: Option<u64>, block_number: Blo
     rank == 0 && found_block != Some(block_number)
 }
 
+/// Determines where to find the historical value based on computed shard lookup results.
+///
+/// This is a pure function shared by both MDBX and `RocksDB` backends.
+/// Delegates to [`HistoryInfo::from_lookup`].
+///
+/// # Arguments
+/// * `found_block` - The block number from the shard lookup
+/// * `is_before_first_write` - True if the target block is before the first write to this key. This
+///   should be computed as: `rank == 0 && found_block != Some(block_number) && !has_previous_shard`
+///   where `has_previous_shard` comes from a lazy `cursor.prev()` check.
+/// * `lowest_available` - Lowest block where history is available (pruning boundary)
+pub const fn find_changeset_block_from_index(
+    found_block: Option<u64>,
+    is_before_first_write: bool,
+    lowest_available: Option<BlockNumber>,
+) -> HistoryInfo {
+    HistoryInfo::from_lookup(found_block, is_before_first_write, lowest_available)
+}
+
 #[cfg(test)]
 mod tests {
     use super::needs_prev_shard_check;
