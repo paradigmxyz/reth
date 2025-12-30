@@ -204,12 +204,6 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         }
     }
 
-    /// Stub version for non-RocksDB builds.
-    #[cfg(not(all(unix, feature = "rocksdb")))]
-    pub fn into_raw_rocksdb_batch(self) -> Option<()> {
-        None
-    }
-
     /// Increment the block number.
     ///
     /// Relevant only for [`Self::StaticFile`]. It is a no-op for [`Self::Database`].
