@@ -40,9 +40,12 @@ impl MockTrieCursorFactory {
 
     /// Creates a new mock trie cursor factory from `TrieUpdates`.
     pub fn from_trie_updates(updates: TrieUpdates) -> Self {
-        // Convert account nodes from HashMap to BTreeMap
-        let account_trie_nodes: BTreeMap<Nibbles, BranchNodeCompact> =
-            updates.account_nodes.into_iter().collect();
+        // Convert account nodes from HashMap to BTreeMap (only updated nodes, not removed)
+        let account_trie_nodes: BTreeMap<Nibbles, BranchNodeCompact> = updates
+            .account_nodes
+            .into_iter()
+            .filter_map(|(k, v)| v.map(|node| (k, node)))
+            .collect();
 
         // Convert storage tries
         let storage_tries: B256Map<BTreeMap<Nibbles, BranchNodeCompact>> = updates

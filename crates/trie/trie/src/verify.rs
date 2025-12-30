@@ -119,7 +119,10 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
 
             // collect account updates and sort them in descending order, so that when we pop them
             // off the Vec they are popped in ascending order.
-            self.account_nodes.extend(updates.account_nodes);
+            // Only include updated nodes (Some), not removed nodes (None)
+            self.account_nodes.extend(
+                updates.account_nodes.into_iter().filter_map(|(k, v)| v.map(|node| (k, node))),
+            );
             Self::sort_updates(&mut self.account_nodes);
 
             self.storage_tries = updates

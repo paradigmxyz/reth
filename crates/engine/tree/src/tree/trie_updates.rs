@@ -17,34 +17,20 @@ struct EntryDiff<T> {
 
 #[derive(Debug, Default)]
 struct TrieUpdatesDiff {
+    /// Account node differences. `None` in value means the node was removed.
     account_nodes: HashMap<Nibbles, EntryDiff<Option<BranchNodeCompact>>>,
-    removed_nodes: HashMap<Nibbles, EntryDiff<bool>>,
     storage_tries: HashMap<B256, StorageTrieUpdatesDiff>,
 }
 
 impl TrieUpdatesDiff {
     fn has_differences(&self) -> bool {
-        !self.account_nodes.is_empty() ||
-            !self.removed_nodes.is_empty() ||
-            !self.storage_tries.is_empty()
+        !self.account_nodes.is_empty() || !self.storage_tries.is_empty()
     }
 
     pub(super) fn log_differences(mut self) {
         if self.has_differences() {
             for (path, EntryDiff { task, regular, database }) in &mut self.account_nodes {
                 warn!(target: "engine::tree", ?path, ?task, ?regular, ?database, "Difference in account trie updates");
-            }
-
-            for (
-                path,
-                EntryDiff {
-                    task: task_removed,
-                    regular: regular_removed,
-                    database: database_not_exists,
-                },
-            ) in &self.removed_nodes
-            {
-                warn!(target: "engine::tree", ?path, ?task_removed, ?regular_removed, ?database_not_exists, "Difference in removed account trie nodes");
             }
 
             for (address, storage_diff) in self.storage_tries {
@@ -100,15 +86,13 @@ impl StorageTrieUpdatesDiff {
 /// and logs the differences if there's any.
 pub(super) fn compare_trie_updates(
     trie_cursor_factory: impl TrieCursorFactory,
-    task: TrieUpdates,
-    regular: TrieUpdates,
+    mut task: TrieUpdates,
+    mut regular: TrieUpdates,
 ) -> Result<(), DatabaseError> {
-    let mut task = adjust_trie_updates(task);
-    let mut regular = adjust_trie_updates(regular);
-
     let mut diff = TrieUpdatesDiff::default();
 
-    // compare account nodes
+    // compare account nodes (both updated and removed are in account_nodes map)
+    // None = removed, Some(node) = updated
     let mut account_trie_cursor = trie_cursor_factory.account_trie_cursor()?;
     for key in task
         .account_nodes
@@ -117,37 +101,13 @@ pub(super) fn compare_trie_updates(
         .copied()
         .collect::<BTreeSet<_>>()
     {
-        let (task, regular) = (task.account_nodes.remove(&key), regular.account_nodes.remove(&key));
+        let task_entry = task.account_nodes.remove(&key).flatten();
+        let regular_entry = regular.account_nodes.remove(&key).flatten();
         let database = account_trie_cursor.seek_exact(key)?.map(|x| x.1);
 
-        if !branch_nodes_equal(task.as_ref(), regular.as_ref(), database.as_ref())? {
-            diff.account_nodes.insert(key, EntryDiff { task, regular, database });
-        }
-    }
-
-    // compare removed nodes
-    let mut account_trie_cursor = trie_cursor_factory.account_trie_cursor()?;
-    for key in task
-        .removed_nodes
-        .iter()
-        .chain(regular.removed_nodes.iter())
-        .copied()
-        .collect::<BTreeSet<_>>()
-    {
-        let (task_removed, regular_removed) =
-            (task.removed_nodes.contains(&key), regular.removed_nodes.contains(&key));
-        let database_not_exists = account_trie_cursor.seek_exact(key)?.is_none();
-        // If the deletion is a no-op, meaning that the entry is not in the
-        // database, do not add it to the diff.
-        if task_removed != regular_removed && !database_not_exists {
-            diff.removed_nodes.insert(
-                key,
-                EntryDiff {
-                    task: task_removed,
-                    regular: regular_removed,
-                    database: database_not_exists,
-                },
-            );
+        if !branch_nodes_equal(task_entry.as_ref(), regular_entry.as_ref(), database.as_ref())? {
+            diff.account_nodes
+                .insert(key, EntryDiff { task: task_entry, regular: regular_entry, database });
         }
     }
 
@@ -242,36 +202,6 @@ fn compare_storage_trie_updates<C: TrieCursor>(
     }
 
     Ok(diff)
-}
-
-/// Filters the removed nodes of both account trie updates and storage trie updates, so that they
-/// don't include those nodes that were also updated.
-fn adjust_trie_updates(trie_updates: TrieUpdates) -> TrieUpdates {
-    TrieUpdates {
-        removed_nodes: trie_updates
-            .removed_nodes
-            .into_iter()
-            .filter(|key| !trie_updates.account_nodes.contains_key(key))
-            .collect(),
-        storage_tries: trie_updates
-            .storage_tries
-            .into_iter()
-            .map(|(address, updates)| {
-                (
-                    address,
-                    StorageTrieUpdates {
-                        removed_nodes: updates
-                            .removed_nodes
-                            .into_iter()
-                            .filter(|key| !updates.storage_nodes.contains_key(key))
-                            .collect(),
-                        ..updates
-                    },
-                )
-            })
-            .collect(),
-        ..trie_updates
-    }
 }
 
 /// Compares the branch nodes from state root task and regular state root calculation.

@@ -613,11 +613,16 @@ where
         let revealed = self.revealed_trie_mut(provider_factory)?;
 
         let (root, updates) = (revealed.root(), revealed.take_updates());
-        let updates = TrieUpdates {
-            account_nodes: updates.updated_nodes,
-            removed_nodes: updates.removed_nodes,
-            storage_tries,
-        };
+        // Convert updated_nodes (HashMap<Nibbles, BranchNodeCompact>) to
+        // account_nodes (HashMap<Nibbles, Option<BranchNodeCompact>>)
+        let mut account_nodes = updates
+            .updated_nodes
+            .into_iter()
+            .map(|(k, v)| (k, Some(v)))
+            .collect::<alloy_primitives::map::HashMap<_, _>>();
+        // Add removed nodes as None entries
+        account_nodes.extend(updates.removed_nodes.into_iter().map(|k| (k, None)));
+        let updates = TrieUpdates { account_nodes, storage_tries };
         Ok((root, updates))
     }
 
@@ -649,11 +654,16 @@ where
         let storage_tries = self.storage_trie_updates();
         self.state.as_revealed_mut().map(|state| {
             let updates = state.take_updates();
-            TrieUpdates {
-                account_nodes: updates.updated_nodes,
-                removed_nodes: updates.removed_nodes,
-                storage_tries,
-            }
+            // Convert updated_nodes (HashMap<Nibbles, BranchNodeCompact>) to
+            // account_nodes (HashMap<Nibbles, Option<BranchNodeCompact>>)
+            let mut account_nodes = updates
+                .updated_nodes
+                .into_iter()
+                .map(|(k, v)| (k, Some(v)))
+                .collect::<alloy_primitives::map::HashMap<_, _>>();
+            // Add removed nodes as None entries
+            account_nodes.extend(updates.removed_nodes.into_iter().map(|k| (k, None)));
+            TrieUpdates { account_nodes, storage_tries }
         })
     }
 
@@ -1337,7 +1347,6 @@ mod tests {
                         removed_nodes: HashSet::default()
                     }
                 )]),
-                removed_nodes: HashSet::default()
             }
         );
     }

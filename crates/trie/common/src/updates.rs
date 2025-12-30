@@ -9,15 +9,17 @@ use alloy_primitives::{
 };
 
 /// The aggregation of trie updates.
+///
+/// Account nodes are stored as `Option<BranchNodeCompact>` where:
+/// - `Some(node)` indicates an updated node
+/// - `None` indicates a removed node
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
 pub struct TrieUpdates {
-    /// Collection of updated intermediate account nodes indexed by full path.
-    #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_map"))]
-    pub account_nodes: HashMap<Nibbles, BranchNodeCompact>,
-    /// Collection of removed intermediate account nodes indexed by full path.
-    #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_set"))]
-    pub removed_nodes: HashSet<Nibbles>,
+    /// Collection of account node updates indexed by full path.
+    /// `Some(node)` = updated node, `None` = removed node.
+    #[cfg_attr(any(test, feature = "serde"), serde(with = "serde_nibbles_option_map"))]
+    pub account_nodes: HashMap<Nibbles, Option<BranchNodeCompact>>,
     /// Collection of updated storage tries indexed by the hashed address.
     pub storage_tries: B256Map<StorageTrieUpdates>,
 }
@@ -25,19 +27,12 @@ pub struct TrieUpdates {
 impl TrieUpdates {
     /// Returns `true` if the updates are empty.
     pub fn is_empty(&self) -> bool {
-        self.account_nodes.is_empty() &&
-            self.removed_nodes.is_empty() &&
-            self.storage_tries.is_empty()
+        self.account_nodes.is_empty() && self.storage_tries.is_empty()
     }
 
-    /// Returns reference to updated account nodes.
-    pub const fn account_nodes_ref(&self) -> &HashMap<Nibbles, BranchNodeCompact> {
+    /// Returns reference to account nodes (both updated and removed).
+    pub const fn account_nodes_ref(&self) -> &HashMap<Nibbles, Option<BranchNodeCompact>> {
         &self.account_nodes
-    }
-
-    /// Returns a reference to removed account nodes.
-    pub const fn removed_nodes_ref(&self) -> &HashSet<Nibbles> {
-        &self.removed_nodes
     }
 
     /// Returns a reference to updated storage tries.
@@ -47,9 +42,7 @@ impl TrieUpdates {
 
     /// Extends the trie updates.
     pub fn extend(&mut self, other: Self) {
-        self.extend_common(&other);
-        self.account_nodes.extend(exclude_empty_from_pair(other.account_nodes));
-        self.removed_nodes.extend(exclude_empty(other.removed_nodes));
+        self.account_nodes.extend(exclude_empty_from_option_pair(other.account_nodes));
         for (hashed_address, storage_trie) in other.storage_tries {
             self.storage_tries.entry(hashed_address).or_default().extend(storage_trie);
         }
@@ -59,18 +52,12 @@ impl TrieUpdates {
     ///
     /// Slightly less efficient than [`Self::extend`], but preferred to `extend(other.clone())`.
     pub fn extend_ref(&mut self, other: &Self) {
-        self.extend_common(other);
-        self.account_nodes.extend(exclude_empty_from_pair(
+        self.account_nodes.extend(exclude_empty_from_option_pair(
             other.account_nodes.iter().map(|(k, v)| (*k, v.clone())),
         ));
-        self.removed_nodes.extend(exclude_empty(other.removed_nodes.iter().copied()));
         for (hashed_address, storage_trie) in &other.storage_tries {
             self.storage_tries.entry(*hashed_address).or_default().extend_ref(storage_trie);
         }
-    }
-
-    fn extend_common(&mut self, other: &Self) {
-        self.account_nodes.retain(|nibbles, _| !other.removed_nodes.contains(nibbles));
     }
 
     /// Extend trie updates with sorted data, converting directly into the unsorted `HashMap`
@@ -84,21 +71,12 @@ impl TrieUpdates {
         let new_nodes_count = sorted.account_nodes.len();
         self.account_nodes.reserve(new_nodes_count);
 
-        // Insert account nodes from sorted (only non-None entries)
+        // Insert account nodes from sorted
         for (nibbles, maybe_node) in &sorted.account_nodes {
             if nibbles.is_empty() {
                 continue;
             }
-            match maybe_node {
-                Some(node) => {
-                    self.removed_nodes.remove(nibbles);
-                    self.account_nodes.insert(*nibbles, node.clone());
-                }
-                None => {
-                    self.account_nodes.remove(nibbles);
-                    self.removed_nodes.insert(*nibbles);
-                }
-            }
+            self.account_nodes.insert(*nibbles, maybe_node.clone());
         }
 
         // Extend storage tries
@@ -131,12 +109,15 @@ impl TrieUpdates {
         removed_keys: HashSet<Nibbles>,
         destroyed_accounts: B256Set,
     ) {
-        // Retrieve updated nodes from hash builder.
-        let (_, updated_nodes) = hash_builder.split();
-        self.account_nodes.extend(exclude_empty_from_pair(updated_nodes));
+        // Add deleted node paths first (None indicates removal).
+        // Updated nodes take precedence over removed nodes.
+        self.account_nodes.extend(exclude_empty(removed_keys).map(|k| (k, None)));
 
-        // Add deleted node paths.
-        self.removed_nodes.extend(exclude_empty(removed_keys));
+        // Retrieve updated nodes from hash builder.
+        // Extend after removed_keys so updates take precedence.
+        let (_, updated_nodes) = hash_builder.split();
+        self.account_nodes
+            .extend(exclude_empty_from_pair(updated_nodes).map(|(k, v)| (k, Some(v))));
 
         // Add deleted storage tries for destroyed accounts.
         for destroyed in destroyed_accounts {
@@ -145,35 +126,35 @@ impl TrieUpdates {
     }
 
     /// Converts trie updates into [`TrieUpdatesSorted`].
-    pub fn into_sorted(mut self) -> TrieUpdatesSorted {
-        let mut account_nodes = self
-            .account_nodes
-            .drain()
-            .map(|(path, node)| {
-                // Updated nodes take precedence over removed nodes.
-                self.removed_nodes.remove(&path);
-                (path, Some(node))
-            })
-            .collect::<Vec<_>>();
-
-        account_nodes.extend(self.removed_nodes.drain().map(|path| (path, None)));
+    pub fn into_sorted(self) -> TrieUpdatesSorted {
+        let mut account_nodes = self.account_nodes.into_iter().collect::<Vec<_>>();
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         let storage_tries = self
             .storage_tries
-            .drain()
+            .into_iter()
             .map(|(hashed_address, updates)| (hashed_address, updates.into_sorted()))
             .collect();
         TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
-    pub fn into_sorted_ref<'a>(&'a self) -> TrieUpdatesSortedRef<'a> {
-        let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
+    pub fn into_sorted_ref(&self) -> TrieUpdatesSortedRef<'_> {
+        let mut account_nodes = self
+            .account_nodes
+            .iter()
+            .filter_map(|(k, v)| v.as_ref().map(|node| (k, node)))
+            .collect::<Vec<_>>();
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(b.0));
 
+        let removed_nodes = self
+            .account_nodes
+            .iter()
+            .filter_map(|(k, v)| v.is_none().then_some(k))
+            .collect::<BTreeSet<_>>();
+
         TrieUpdatesSortedRef {
-            removed_nodes: self.removed_nodes.iter().collect::<BTreeSet<_>>(),
+            removed_nodes,
             account_nodes,
             storage_tries: self
                 .storage_tries
@@ -186,7 +167,6 @@ impl TrieUpdates {
     /// Clears the nodes and storage trie maps in this `TrieUpdates`.
     pub fn clear(&mut self) {
         self.account_nodes.clear();
-        self.removed_nodes.clear();
         self.storage_tries.clear();
     }
 }
@@ -473,6 +453,91 @@ mod serde_nibbles_map {
     }
 }
 
+/// Serializes and deserializes any [`HashMap`] that uses [`Nibbles`] as keys and `Option<T>` as
+/// values, by using the hex-encoded packed representation.
+///
+/// This also sorts the map's keys before encoding and serializing.
+#[cfg(any(test, feature = "serde"))]
+mod serde_nibbles_option_map {
+    use crate::Nibbles;
+    use alloc::{
+        string::{String, ToString},
+        vec::Vec,
+    };
+    use alloy_primitives::{hex, map::HashMap};
+    use core::marker::PhantomData;
+    use serde::{
+        de::{Error, MapAccess, Visitor},
+        ser::SerializeMap,
+        Deserialize, Deserializer, Serialize, Serializer,
+    };
+
+    pub(super) fn serialize<S, T>(
+        map: &HashMap<Nibbles, Option<T>>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+        T: Serialize,
+    {
+        let mut map_serializer = serializer.serialize_map(Some(map.len()))?;
+        let mut nodes = Vec::from_iter(map);
+        nodes.sort_unstable_by_key(|node| node.0);
+        for (k, v) in nodes {
+            // pack, then hex encode the Nibbles
+            let packed = alloy_primitives::hex::encode(k.pack());
+            map_serializer.serialize_entry(&packed, &v)?;
+        }
+        map_serializer.end()
+    }
+
+    pub(super) fn deserialize<'de, D, T>(
+        deserializer: D,
+    ) -> Result<HashMap<Nibbles, Option<T>>, D::Error>
+    where
+        D: Deserializer<'de>,
+        T: Deserialize<'de>,
+    {
+        struct NibblesOptionMapVisitor<T> {
+            marker: PhantomData<T>,
+        }
+
+        impl<'de, T> Visitor<'de> for NibblesOptionMapVisitor<T>
+        where
+            T: Deserialize<'de>,
+        {
+            type Value = HashMap<Nibbles, Option<T>>;
+
+            fn expecting(&self, formatter: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+                formatter.write_str("a map with hex-encoded Nibbles keys and optional values")
+            }
+
+            fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+            where
+                A: MapAccess<'de>,
+            {
+                let mut result = HashMap::with_capacity_and_hasher(
+                    map.size_hint().unwrap_or(0),
+                    Default::default(),
+                );
+
+                while let Some((key, value)) = map.next_entry::<String, Option<T>>()? {
+                    let decoded_key =
+                        hex::decode(&key).map_err(|err| Error::custom(err.to_string()))?;
+
+                    let nibbles = Nibbles::unpack(&decoded_key);
+
+                    result.insert(nibbles, value);
+                }
+
+                Ok(result)
+            }
+        }
+
+        deserializer.deserialize_map(NibblesOptionMapVisitor { marker: PhantomData })
+    }
+}
+
 /// Sorted trie updates reference used for serializing trie to file.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize))]
@@ -574,16 +639,7 @@ impl AsRef<Self> for TrieUpdatesSorted {
 
 impl From<TrieUpdatesSorted> for TrieUpdates {
     fn from(sorted: TrieUpdatesSorted) -> Self {
-        let mut account_nodes = HashMap::default();
-        let mut removed_nodes = HashSet::default();
-
-        for (nibbles, node) in sorted.account_nodes {
-            if let Some(node) = node {
-                account_nodes.insert(nibbles, node);
-            } else {
-                removed_nodes.insert(nibbles);
-            }
-        }
+        let account_nodes = sorted.account_nodes.into_iter().collect();
 
         let storage_tries = sorted
             .storage_tries
@@ -591,7 +647,7 @@ impl From<TrieUpdatesSorted> for TrieUpdates {
             .map(|(address, storage)| (address, storage.into()))
             .collect();
 
-        Self { account_nodes, removed_nodes, storage_tries }
+        Self { account_nodes, storage_tries }
     }
 }
 
@@ -666,6 +722,14 @@ fn exclude_empty(iter: impl IntoIterator<Item = Nibbles>) -> impl Iterator<Item 
 fn exclude_empty_from_pair<V>(
     iter: impl IntoIterator<Item = (Nibbles, V)>,
 ) -> impl Iterator<Item = (Nibbles, V)> {
+    iter.into_iter().filter(|(n, _)| !n.is_empty())
+}
+
+/// Excludes empty nibbles from the given iterator of pairs where the nibbles are the key
+/// and value is `Option<V>`.
+fn exclude_empty_from_option_pair<V>(
+    iter: impl IntoIterator<Item = (Nibbles, Option<V>)>,
+) -> impl Iterator<Item = (Nibbles, Option<V>)> {
     iter.into_iter().filter(|(n, _)| !n.is_empty())
 }
 
@@ -987,8 +1051,7 @@ pub mod serde_bincode_compat {
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
     pub struct TrieUpdates<'a> {
-        account_nodes: Cow<'a, HashMap<Nibbles, BranchNodeCompact>>,
-        removed_nodes: Cow<'a, HashSet<Nibbles>>,
+        account_nodes: Cow<'a, HashMap<Nibbles, Option<BranchNodeCompact>>>,
         storage_tries: B256Map<StorageTrieUpdates<'a>>,
     }
 
@@ -996,7 +1059,6 @@ pub mod serde_bincode_compat {
         fn from(value: &'a super::TrieUpdates) -> Self {
             Self {
                 account_nodes: Cow::Borrowed(&value.account_nodes),
-                removed_nodes: Cow::Borrowed(&value.removed_nodes),
                 storage_tries: value.storage_tries.iter().map(|(k, v)| (*k, v.into())).collect(),
             }
         }
@@ -1006,7 +1068,6 @@ pub mod serde_bincode_compat {
         fn from(value: TrieUpdates<'a>) -> Self {
             Self {
                 account_nodes: value.account_nodes.into_owned(),
-                removed_nodes: value.removed_nodes.into_owned(),
                 storage_tries: value
                     .storage_tries
                     .into_iter()
@@ -1122,16 +1183,18 @@ pub mod serde_bincode_compat {
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
+            // Insert a removed node (None)
             data.trie_updates
-                .removed_nodes
-                .insert(Nibbles::from_nibbles_unchecked([0x0b, 0x0e, 0x0e, 0x0f]));
+                .account_nodes
+                .insert(Nibbles::from_nibbles_unchecked([0x0b, 0x0e, 0x0e, 0x0f]), None);
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
             assert_eq!(decoded, data);
 
+            // Insert an updated node (Some)
             data.trie_updates.account_nodes.insert(
                 Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
-                BranchNodeCompact::default(),
+                Some(BranchNodeCompact::default()),
             );
             let encoded = bincode::serialize(&data).unwrap();
             let decoded: Data = bincode::deserialize(&encoded).unwrap();
@@ -1186,16 +1249,18 @@ mod serde_tests {
         let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
         assert_eq!(updates_deserialized, default_updates);
 
+        // Insert a removed node (None)
         default_updates
-            .removed_nodes
-            .insert(Nibbles::from_nibbles_unchecked([0x0b, 0x0e, 0x0e, 0x0f]));
+            .account_nodes
+            .insert(Nibbles::from_nibbles_unchecked([0x0b, 0x0e, 0x0e, 0x0f]), None);
         let updates_serialized = serde_json::to_string(&default_updates).unwrap();
         let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();
         assert_eq!(updates_deserialized, default_updates);
 
+        // Insert an updated node (Some)
         default_updates.account_nodes.insert(
             Nibbles::from_nibbles_unchecked([0x0d, 0x0e, 0x0a, 0x0d]),
-            BranchNodeCompact::default(),
+            Some(BranchNodeCompact::default()),
         );
         let updates_serialized = serde_json::to_string(&default_updates).unwrap();
         let updates_deserialized: TrieUpdates = serde_json::from_str(&updates_serialized).unwrap();

@@ -19,8 +19,9 @@ use alloy_rlp::Decodable;
 use reth_execution_errors::{SparseTrieErrorKind, SparseTrieResult};
 use reth_trie_common::{
     prefix_set::{PrefixSet, PrefixSetMut},
-    BranchNodeCompact, BranchNodeRef, ExtensionNodeRef, LeafNodeRef, Nibbles, ProofTrieNode,
-    RlpNode, TrieMask, TrieMasks, TrieNode, CHILD_INDEX_RANGE, EMPTY_ROOT_HASH,
+    BranchNodeCompact, BranchNodeMasks, BranchNodeMasksMap, BranchNodeRef, ExtensionNodeRef,
+    LeafNodeRef, Nibbles, ProofTrieNode, RlpNode, TrieMask, TrieMasks, TrieNode, CHILD_INDEX_RANGE,
+    EMPTY_ROOT_HASH,
 };
 use smallvec::SmallVec;
 use tracing::{debug, instrument, trace};
@@ -298,10 +299,12 @@ pub struct SerialSparseTrie {
     /// Map from a path (nibbles) to its corresponding sparse trie node.
     /// This contains all of the revealed nodes in trie.
     nodes: HashMap<Nibbles, SparseNode>,
-    /// When a branch is set, the corresponding child subtree is stored in the database.
-    branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
-    /// When a bit is set, the corresponding child is stored as a hash in the database.
-    branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
+    /// Branch node masks containing `tree_mask` and `hash_mask` for each path.
+    /// - `tree_mask`: When a bit is set, the corresponding child subtree is stored in the
+    ///   database.
+    /// - `hash_mask`: When a bit is set, the corresponding child is stored as a hash in the
+    ///   database.
+    branch_node_masks: BranchNodeMasksMap,
     /// Map from leaf key paths to their values.
     /// All values are stored here instead of directly in leaf nodes.
     values: HashMap<Nibbles, Vec<u8>>,
@@ -318,8 +321,7 @@ impl fmt::Debug for SerialSparseTrie {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("SerialSparseTrie")
             .field("nodes", &self.nodes)
-            .field("branch_tree_masks", &self.branch_node_tree_masks)
-            .field("branch_hash_masks", &self.branch_node_hash_masks)
+            .field("branch_node_masks", &self.branch_node_masks)
             .field("values", &self.values)
             .field("prefix_set", &self.prefix_set)
             .field("updates", &self.updates)
@@ -404,8 +406,7 @@ impl Default for SerialSparseTrie {
     fn default() -> Self {
         Self {
             nodes: HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]),
-            branch_node_tree_masks: HashMap::default(),
-            branch_node_hash_masks: HashMap::default(),
+            branch_node_masks: BranchNodeMasksMap::default(),
             values: HashMap::default(),
             prefix_set: PrefixSetMut::default(),
             updates: None,
@@ -456,11 +457,14 @@ impl SparseTrieInterface for SerialSparseTrie {
             return Ok(())
         }
 
-        if let Some(tree_mask) = masks.tree_mask {
-            self.branch_node_tree_masks.insert(path, tree_mask);
-        }
-        if let Some(hash_mask) = masks.hash_mask {
-            self.branch_node_hash_masks.insert(path, hash_mask);
+        if masks.tree_mask.is_some() || masks.hash_mask.is_some() {
+            self.branch_node_masks.insert(
+                path,
+                BranchNodeMasks {
+                    tree_mask: masks.tree_mask.unwrap_or_default(),
+                    hash_mask: masks.hash_mask.unwrap_or_default(),
+                },
+            );
         }
 
         match node {
@@ -959,8 +963,7 @@ impl SparseTrieInterface for SerialSparseTrie {
         self.nodes.clear();
         self.nodes.insert(Nibbles::default(), SparseNode::Empty);
 
-        self.branch_node_tree_masks.clear();
-        self.branch_node_hash_masks.clear();
+        self.branch_node_masks.clear();
         self.values.clear();
         self.prefix_set.clear();
         self.updates = None;
@@ -1087,8 +1090,7 @@ impl SparseTrieInterface for SerialSparseTrie {
 
     fn shrink_nodes_to(&mut self, size: usize) {
         self.nodes.shrink_to(size);
-        self.branch_node_tree_masks.shrink_to(size);
-        self.branch_node_hash_masks.shrink_to(size);
+        self.branch_node_masks.shrink_to(size);
     }
 
     fn shrink_values_to(&mut self, size: usize) {
@@ -1624,6 +1626,13 @@ impl SerialSparseTrie {
                     let mut tree_mask = TrieMask::default();
                     let mut hash_mask = TrieMask::default();
                     let mut hashes = Vec::new();
+
+                    // Lazy lookup for branch node masks - shared across loop iterations
+                    let mut path_masks_storage = None;
+                    let mut path_masks = || {
+                        *path_masks_storage.get_or_insert_with(|| self.branch_node_masks.get(&path))
+                    };
+
                     for (i, child_path) in buffers.branch_child_buf.iter().enumerate() {
                         if buffers.rlp_node_stack.last().is_some_and(|e| &e.path == child_path) {
                             let RlpNodeStackItem {
@@ -1647,9 +1656,9 @@ impl SerialSparseTrie {
                                 } else {
                                     // A blinded node has the tree mask bit set
                                     child_node_type.is_hash() &&
-                                        self.branch_node_tree_masks.get(&path).is_some_and(
-                                            |mask| mask.is_bit_set(last_child_nibble),
-                                        )
+                                        path_masks().is_some_and(|masks| {
+                                            masks.tree_mask.is_bit_set(last_child_nibble)
+                                        })
                                 };
                                 if should_set_tree_mask_bit {
                                     tree_mask.set_bit(last_child_nibble);
@@ -1661,11 +1670,9 @@ impl SerialSparseTrie {
                                 let hash = child.as_hash().filter(|_| {
                                     child_node_type.is_branch() ||
                                         (child_node_type.is_hash() &&
-                                            self.branch_node_hash_masks
-                                                .get(&path)
-                                                .is_some_and(|mask| {
-                                                    mask.is_bit_set(last_child_nibble)
-                                                }))
+                                            path_masks().is_some_and(|masks| {
+                                                masks.hash_mask.is_bit_set(last_child_nibble)
+                                            }))
                                 });
                                 if let Some(hash) = hash {
                                     hash_mask.set_bit(last_child_nibble);
@@ -1729,30 +1736,16 @@ impl SerialSparseTrie {
                                 hash.filter(|_| path.is_empty()),
                             );
                             updates.updated_nodes.insert(path, branch_node);
-                        } else if self
-                            .branch_node_tree_masks
-                            .get(&path)
-                            .is_some_and(|mask| !mask.is_empty()) ||
-                            self.branch_node_hash_masks
-                                .get(&path)
-                                .is_some_and(|mask| !mask.is_empty())
-                        {
-                            // If new tree and hash masks are empty, but previously they weren't, we
-                            // need to remove the node update and add the node itself to the list of
-                            // removed nodes.
+                        } else {
+                            // New tree and hash masks are empty - check previous state
+                            let prev_had_masks = path_masks().is_some_and(|m| {
+                                !m.tree_mask.is_empty() || !m.hash_mask.is_empty()
+                            });
                             updates.updated_nodes.remove(&path);
-                            updates.removed_nodes.insert(path);
-                        } else if self
-                            .branch_node_tree_masks
-                            .get(&path)
-                            .is_none_or(|mask| mask.is_empty()) &&
-                            self.branch_node_hash_masks
-                                .get(&path)
-                                .is_none_or(|mask| mask.is_empty())
-                        {
-                            // If new tree and hash masks are empty, and they were previously empty
-                            // as well, we need to remove the node update.
-                            updates.updated_nodes.remove(&path);
+                            if prev_had_masks {
+                                // Previously had masks, now empty - mark as removed
+                                updates.removed_nodes.insert(path);
+                            }
                         }
 
                         store_in_db_trie
@@ -2223,8 +2216,7 @@ mod find_leaf_tests {
 
         let sparse = SerialSparseTrie {
             nodes,
-            branch_node_tree_masks: Default::default(),
-            branch_node_hash_masks: Default::default(),
+            branch_node_masks: Default::default(),
             /* The value is not in the values map, or else it would early return */
             values: Default::default(),
             prefix_set: Default::default(),
@@ -2266,8 +2258,7 @@ mod find_leaf_tests {
 
         let sparse = SerialSparseTrie {
             nodes,
-            branch_node_tree_masks: Default::default(),
-            branch_node_hash_masks: Default::default(),
+            branch_node_masks: Default::default(),
             values,
             prefix_set: Default::default(),
             updates: None,
@@ -2384,6 +2375,24 @@ mod tests {
             B256::len_bytes() * 2 - nibbles.len()
         ]));
         nibbles
+    }
+
+    /// Extract only updated nodes (Some entries) from consolidated TrieUpdates account_nodes.
+    fn extract_updated_nodes(
+        updates: &TrieUpdates,
+    ) -> HashMap<Nibbles, BranchNodeCompact, alloy_primitives::map::DefaultHashBuilder> {
+        updates
+            .account_nodes
+            .iter()
+            .filter_map(|(k, v)| v.as_ref().map(|node| (*k, node.clone())))
+            .collect()
+    }
+
+    /// Extract only updated nodes from account_nodes HashMap, returning a BTreeMap.
+    fn extract_updated_nodes_btree(
+        account_nodes: alloy_primitives::map::HashMap<Nibbles, Option<BranchNodeCompact>>,
+    ) -> BTreeMap<Nibbles, BranchNodeCompact> {
+        account_nodes.into_iter().filter_map(|(k, v)| v.map(|node| (k, node))).collect()
     }
 
     /// Calculate the state root by feeding the provided state to the hash builder and retaining the
@@ -2533,7 +2542,7 @@ mod tests {
         let sparse_updates = sparse.take_updates();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(sparse_updates.updated_nodes, extract_updated_nodes(&hash_builder_updates));
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
@@ -2566,7 +2575,7 @@ mod tests {
         let sparse_updates = sparse.take_updates();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(sparse_updates.updated_nodes, extract_updated_nodes(&hash_builder_updates));
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
@@ -2597,7 +2606,7 @@ mod tests {
         let sparse_updates = sparse.take_updates();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(sparse_updates.updated_nodes, extract_updated_nodes(&hash_builder_updates));
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
@@ -2638,7 +2647,7 @@ mod tests {
         assert_eq!(sparse_root, hash_builder_root);
         pretty_assertions::assert_eq!(
             BTreeMap::from_iter(sparse_updates.updated_nodes),
-            BTreeMap::from_iter(hash_builder_updates.account_nodes)
+            BTreeMap::from_iter(extract_updated_nodes(&hash_builder_updates))
         );
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
@@ -2676,7 +2685,7 @@ mod tests {
         let sparse_updates = sparse.updates_ref();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(sparse_updates.updated_nodes, extract_updated_nodes(&hash_builder_updates));
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
 
         let (hash_builder_root, hash_builder_updates, hash_builder_proof_nodes, _, _) =
@@ -2694,7 +2703,7 @@ mod tests {
         let sparse_updates = sparse.take_updates();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(sparse_updates.updated_nodes, extract_updated_nodes(&hash_builder_updates));
         assert_eq_sparse_trie_proof_nodes(&sparse, hash_builder_proof_nodes);
     }
 
@@ -3072,8 +3081,9 @@ mod tests {
                             state.keys().copied(),
                         );
 
-                    // Extract account nodes before moving hash_builder_updates
-                    let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
+                    // Extract updated account nodes before moving hash_builder_updates
+                    let hash_builder_account_nodes =
+                        extract_updated_nodes_btree(hash_builder_updates.account_nodes.clone());
 
                     // Write trie updates to the database
                     let provider_rw = provider_factory.provider_rw().unwrap();
@@ -3085,7 +3095,7 @@ mod tests {
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         BTreeMap::from_iter(sparse_updates.updated_nodes),
-                        BTreeMap::from_iter(hash_builder_account_nodes)
+                        hash_builder_account_nodes
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_sparse_trie_proof_nodes(&updated_sparse, hash_builder_proof_nodes);
@@ -3117,8 +3127,9 @@ mod tests {
                             state.keys().copied(),
                         );
 
-                    // Extract account nodes before moving hash_builder_updates
-                    let hash_builder_account_nodes = hash_builder_updates.account_nodes.clone();
+                    // Extract updated account nodes before moving hash_builder_updates
+                    let hash_builder_account_nodes =
+                        extract_updated_nodes_btree(hash_builder_updates.account_nodes.clone());
 
                     // Write trie updates to the database
                     let provider_rw = provider_factory.provider_rw().unwrap();
@@ -3130,7 +3141,7 @@ mod tests {
                     // Assert that the sparse trie updates match the hash builder updates
                     pretty_assertions::assert_eq!(
                         BTreeMap::from_iter(sparse_updates.updated_nodes),
-                        BTreeMap::from_iter(hash_builder_account_nodes)
+                        hash_builder_account_nodes
                     );
                     // Assert that the sparse trie nodes match the hash builder proof nodes
                     assert_eq_sparse_trie_proof_nodes(&updated_sparse, hash_builder_proof_nodes);
@@ -3599,7 +3610,7 @@ mod tests {
         let sparse_updates = sparse.take_updates();
 
         assert_eq!(sparse_root, hash_builder_root);
-        assert_eq!(sparse_updates.updated_nodes, hash_builder_updates.account_nodes);
+        assert_eq!(sparse_updates.updated_nodes, extract_updated_nodes(&hash_builder_updates));
     }
 
     #[test]

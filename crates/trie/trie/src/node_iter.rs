@@ -376,7 +376,12 @@ mod tests {
         let mut trie_updates = TrieUpdates::default();
         trie_updates.finalize(hash_builder, Default::default(), Default::default());
 
-        trie_updates.account_nodes
+        // Extract only updated nodes (Some), not removed nodes (None)
+        trie_updates
+            .account_nodes
+            .into_iter()
+            .filter_map(|(k, v)| v.map(|node| (k, node)))
+            .collect()
     }
 
     #[test]

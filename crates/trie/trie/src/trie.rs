@@ -369,9 +369,13 @@ impl StateRootContext {
         K: AsRef<AddedRemovedKeys>,
     {
         let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
-        self.trie_updates.removed_nodes.extend(walker_deleted_keys);
+        // Add removed nodes as None entries
+        self.trie_updates.account_nodes.extend(walker_deleted_keys.into_iter().map(|k| (k, None)));
         let (hash_builder, hash_builder_updates) = hash_builder.split();
-        self.trie_updates.account_nodes.extend(hash_builder_updates);
+        // Add updated nodes as Some entries
+        self.trie_updates
+            .account_nodes
+            .extend(hash_builder_updates.into_iter().map(|(k, v)| (k, Some(v))));
 
         let account_state = IntermediateRootState { hash_builder, walker_stack, last_hashed_key };
 

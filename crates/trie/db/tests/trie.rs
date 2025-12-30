@@ -521,16 +521,17 @@ fn account_and_storage_trie() {
             .root_with_updates()
             .unwrap();
         assert_eq!(root, computed_expected_root);
-        assert_eq!(
-            trie_updates.account_nodes_ref().len() + trie_updates.removed_nodes_ref().len(),
-            1
-        );
-
+        // account_nodes now contains both updated (Some) and removed (None) entries
         assert_eq!(trie_updates.account_nodes_ref().len(), 1);
 
-        let entry = trie_updates.account_nodes_ref().iter().next().unwrap();
+        // Count only updated entries (Some)
+        let updated_count =
+            trie_updates.account_nodes_ref().iter().filter(|(_, v)| v.is_some()).count();
+        assert_eq!(updated_count, 1);
+
+        let entry = trie_updates.account_nodes_ref().iter().find(|(_, v)| v.is_some()).unwrap();
         assert_eq!(entry.0.to_vec(), vec![0xB]);
-        let node1c = entry.1;
+        let node1c = entry.1.as_ref().unwrap();
 
         assert_eq!(node1c.state_mask, TrieMask::new(0b1011));
         assert_eq!(node1c.tree_mask, TrieMask::new(0b0000));
@@ -576,20 +577,21 @@ fn account_and_storage_trie() {
             .root_with_updates()
             .unwrap();
         assert_eq!(root, computed_expected_root);
-        assert_eq!(
-            trie_updates.account_nodes_ref().len() + trie_updates.removed_nodes_ref().len(),
-            1
-        );
+        // account_nodes contains both updated (Some) and removed (None) entries
+        assert_eq!(trie_updates.account_nodes_ref().len(), 1);
         assert!(!trie_updates
             .storage_tries_ref()
             .iter()
-            .any(|(_, u)| !u.storage_nodes_ref().is_empty() || !u.removed_nodes_ref().is_empty())); // no storage root update
+            .any(|(_, u)| !u.storage_nodes.is_empty() || !u.removed_nodes.is_empty())); // no storage root update
 
-        assert_eq!(trie_updates.account_nodes_ref().len(), 1);
+        // Count only updated entries (Some)
+        let updated_count =
+            trie_updates.account_nodes_ref().iter().filter(|(_, v)| v.is_some()).count();
+        assert_eq!(updated_count, 1);
 
-        let entry = trie_updates.account_nodes_ref().iter().next().unwrap();
+        let entry = trie_updates.account_nodes_ref().iter().find(|(_, v)| v.is_some()).unwrap();
         assert_eq!(entry.0.to_vec(), vec![0xB]);
-        let node1d = entry.1;
+        let node1d = entry.1.as_ref().unwrap();
 
         assert_eq!(node1d.state_mask, TrieMask::new(0b1011));
         assert_eq!(node1d.tree_mask, TrieMask::new(0b0000));
@@ -629,11 +631,11 @@ fn account_trie_around_extension_node_with_dbtrie() {
     // read the account updates from the db
     let mut accounts_trie = tx.tx_ref().cursor_read::<tables::AccountsTrie>().unwrap();
     let walker = accounts_trie.walk(None).unwrap();
-    let account_updates = walker
+    let account_updates: HashMap<Nibbles, Option<BranchNodeCompact>> = walker
         .into_iter()
         .map(|item| {
             let (key, node) = item.unwrap();
-            (key.0, node)
+            (key.0, Some(node))
         })
         .collect();
     assert_trie_updates(&account_updates);
@@ -688,7 +690,7 @@ fn storage_trie_around_extension_node() {
         StorageRoot::from_tx_hashed(tx.tx_ref(), hashed_address).root_with_updates().unwrap();
     assert_eq!(expected_root, got);
     assert_eq!(expected_updates, updates);
-    assert_trie_updates(updates.storage_nodes_ref());
+    assert_storage_trie_updates(updates.storage_nodes_ref());
 }
 
 fn extension_node_storage_trie<N: ProviderNodeTypes>(
@@ -745,14 +747,38 @@ fn extension_node_trie<N: ProviderNodeTypes>(
     hb.root()
 }
 
-fn assert_trie_updates(account_updates: &HashMap<Nibbles, BranchNodeCompact>) {
-    assert_eq!(account_updates.len(), 2);
+fn assert_trie_updates(account_updates: &HashMap<Nibbles, Option<BranchNodeCompact>>) {
+    // Filter to only updated nodes (Some variants)
+    let updated_count = account_updates.values().filter(|v| v.is_some()).count();
+    assert_eq!(updated_count, 2);
 
-    let node = account_updates.get(&Nibbles::from_nibbles_unchecked([0x3])).unwrap();
+    let node = account_updates
+        .get(&Nibbles::from_nibbles_unchecked([0x3]))
+        .and_then(|v| v.as_ref())
+        .unwrap();
     let expected = BranchNodeCompact::new(0b0011, 0b0001, 0b0000, vec![], None);
     assert_eq!(node, &expected);
 
-    let node = account_updates.get(&Nibbles::from_nibbles_unchecked([0x3, 0x0, 0xA, 0xF])).unwrap();
+    let node = account_updates
+        .get(&Nibbles::from_nibbles_unchecked([0x3, 0x0, 0xA, 0xF]))
+        .and_then(|v| v.as_ref())
+        .unwrap();
+    assert_eq!(node.state_mask, TrieMask::new(0b101100000));
+    assert_eq!(node.tree_mask, TrieMask::new(0b000000000));
+    assert_eq!(node.hash_mask, TrieMask::new(0b001000000));
+
+    assert_eq!(node.root_hash, None);
+    assert_eq!(node.hashes.len(), 1);
+}
+
+fn assert_storage_trie_updates(storage_updates: &HashMap<Nibbles, BranchNodeCompact>) {
+    assert_eq!(storage_updates.len(), 2);
+
+    let node = storage_updates.get(&Nibbles::from_nibbles_unchecked([0x3])).unwrap();
+    let expected = BranchNodeCompact::new(0b0011, 0b0001, 0b0000, vec![], None);
+    assert_eq!(node, &expected);
+
+    let node = storage_updates.get(&Nibbles::from_nibbles_unchecked([0x3, 0x0, 0xA, 0xF])).unwrap();
     assert_eq!(node.state_mask, TrieMask::new(0b101100000));
     assert_eq!(node.tree_mask, TrieMask::new(0b000000000));
     assert_eq!(node.hash_mask, TrieMask::new(0b001000000));
