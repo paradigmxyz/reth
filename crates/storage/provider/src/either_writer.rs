@@ -754,7 +754,7 @@ mod rocksdb_tests {
         writer.put_transaction_hash_number(hash1, tx_num1, false).unwrap();
         writer.put_transaction_hash_number(hash2, tx_num2, false).unwrap();
 
-        // Extract and register the batch with provider for commit
+        // Extract the batch and register with provider for commit
         if let Some(batch) = writer.into_raw_rocksdb_batch() {
             provider.set_pending_rocksdb_batch(batch);
         }
@@ -792,7 +792,7 @@ mod rocksdb_tests {
         let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
         writer.delete_transaction_hash_number(hash).unwrap();
 
-        // Extract and register the batch, then commit via provider
+        // Extract the batch and commit via provider
         if let Some(batch) = writer.into_raw_rocksdb_batch() {
             provider.set_pending_rocksdb_batch(batch);
         }
