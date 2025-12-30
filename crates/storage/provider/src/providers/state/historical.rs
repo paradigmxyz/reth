@@ -570,6 +570,7 @@ fn needs_prev_shard_check(rank: u64, found_block: Option<u64>, block_number: Blo
 
 #[cfg(test)]
 mod tests {
+    use super::needs_prev_shard_check;
     use crate::{
         providers::state::historical::{HistoryInfo, LowestAvailableBlocks},
         test_utils::create_test_provider_factory,
@@ -870,5 +871,29 @@ mod tests {
             provider.storage_history_lookup(ADDRESS, STORAGE),
             Ok(HistoryInfo::MaybeInPlainState)
         ));
+    }
+
+    #[test]
+    fn test_history_info_from_lookup() {
+        // Before first write, no pruning → not yet written
+        assert_eq!(HistoryInfo::from_lookup(Some(10), true, None), HistoryInfo::NotYetWritten);
+        assert_eq!(HistoryInfo::from_lookup(None, true, None), HistoryInfo::NotYetWritten);
+
+        // Before first write WITH pruning → check changeset (pruning may have removed history)
+        assert_eq!(HistoryInfo::from_lookup(Some(10), true, Some(5)), HistoryInfo::InChangeset(10));
+        assert_eq!(HistoryInfo::from_lookup(None, true, Some(5)), HistoryInfo::NotYetWritten);
+
+        // Not before first write → check changeset or plain state
+        assert_eq!(HistoryInfo::from_lookup(Some(10), false, None), HistoryInfo::InChangeset(10));
+        assert_eq!(HistoryInfo::from_lookup(None, false, None), HistoryInfo::InPlainState);
+    }
+
+    #[test]
+    fn test_needs_prev_shard_check() {
+        // Only needs check when rank == 0 and found_block != block_number
+        assert!(needs_prev_shard_check(0, Some(10), 5));
+        assert!(needs_prev_shard_check(0, None, 5));
+        assert!(!needs_prev_shard_check(0, Some(5), 5)); // found_block == block_number
+        assert!(!needs_prev_shard_check(1, Some(10), 5)); // rank > 0
     }
 }
