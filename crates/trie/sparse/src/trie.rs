@@ -742,13 +742,15 @@ impl SparseTrieInterface for SerialSparseTrie {
             return Ok(())
         }
 
+        // Get the root node to start pointer-based traversal
+        let Some(mut node_id) = self.root else {
+            return Ok(());
+        };
+
         let mut current = Nibbles::default();
         loop {
-            let Some(node) = self.nodes.get(&current).cloned() else {
-                break;
-            };
-
-            match node {
+            // Read the node from arena via pointer
+            match *self.node(node_id) {
                 SparseNode::Empty => {
                     self.replace_node(current, SparseNode::new_leaf(full_path));
                     break
@@ -820,7 +822,7 @@ impl SparseTrieInterface for SerialSparseTrie {
 
                     break;
                 }
-                SparseNode::Extension { key, .. } => {
+                SparseNode::Extension { key, child, .. } => {
                     let ext_path = current;
                     current.extend(&key);
 
@@ -834,7 +836,12 @@ impl SparseTrieInterface for SerialSparseTrie {
                         // correctly.
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
-                            if self.nodes.get(&current).unwrap().is_hash() {
+                            let child_is_hash = child
+                                .map(|id| self.node(id).is_hash())
+                                .unwrap_or_else(|| {
+                                    self.nodes.get(&current).is_some_and(|n| n.is_hash())
+                                });
+                            if child_is_hash {
                                 debug!(
                                     target: "trie::sparse",
                                     leaf_full_path = ?full_path,
@@ -915,20 +922,30 @@ impl SparseTrieInterface for SerialSparseTrie {
 
                         break;
                     }
+
+                    // Follow the child pointer to continue traversal
+                    let Some(child_id) = child else {
+                        // No child pointer - fall back to path lookup for legacy compatibility
+                        if let Some(&id) = self.path_to_node_id.get(&current) {
+                            node_id = id;
+                            continue;
+                        }
+                        break;
+                    };
+                    node_id = child_id;
                 }
-                SparseNode::Branch { state_mask, .. } => {
+                SparseNode::Branch { state_mask, children, .. } => {
                     let branch_path = current;
                     let nibble = full_path.get_unchecked(current.len());
                     current.push_unchecked(nibble);
+
                     if !state_mask.is_bit_set(nibble) {
                         // Update the branch node's state mask in place, preserving children.
                         // We update both the HashMap and arena versions.
                         if let Some(node) = self.nodes.get_mut(&branch_path) {
                             node.set_state_mask_bit(nibble);
                         }
-                        if let Some(&node_id) = self.path_to_node_id.get(&branch_path) {
-                            self.arena.get_mut(node_id).set_state_mask_bit(nibble);
-                        }
+                        self.arena.get_mut(node_id).set_state_mask_bit(nibble);
 
                         // Insert new leaf
                         let new_leaf = SparseNode::new_leaf(full_path.slice(current.len()..));
@@ -938,6 +955,17 @@ impl SparseTrieInterface for SerialSparseTrie {
                         self.set_branch_child_pointer(&branch_path, nibble, &current);
                         break;
                     }
+
+                    // Follow the child pointer to continue traversal
+                    let Some(child_id) = children[nibble as usize] else {
+                        // No child pointer - fall back to path lookup for legacy compatibility
+                        if let Some(&id) = self.path_to_node_id.get(&current) {
+                            node_id = id;
+                            continue;
+                        }
+                        break;
+                    };
+                    node_id = child_id;
                 }
             };
         }
