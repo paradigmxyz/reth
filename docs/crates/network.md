@@ -284,11 +284,10 @@ The `FetchClient` struct, similar to `NetworkHandle`, can be shared across threa
 
 [File: crates/net/network/src/fetch/client.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/fetch/client.rs)
 ```rust,ignore
-pub struct FetchClient {
-    /// Sender half of the request channel.
-    pub(crate) request_tx: UnboundedSender<DownloadRequest>,
-    /// The handle to the peers
-    pub(crate) peers_handle: PeersHandle,
+pub struct FetchClient<N: NetworkPrimitives = EthNetworkPrimitives> {
+    request_tx: UnboundedSender<DownloadRequest<N>>,
+    peers_handle: PeersHandle,
+    num_active_peers: Arc<AtomicUsize>
 }
 ```
 
