@@ -319,6 +319,9 @@ impl RocksDBProvider {
     /// excess block range, then only deletes History entries for those specific slots.
     /// This is more efficient than iterating the whole table.
     ///
+    /// Includes a defensive check after the optimized path to ensure no entries are missed
+    /// (e.g., if MDBX doesn't have complete changeset data for all excess blocks in `RocksDB`).
+    ///
     /// If `max_block == 0`, falls back to clearing all entries (full table iteration).
     fn prune_storages_history_above<Provider>(
         &self,
@@ -375,6 +378,33 @@ impl RocksDBProvider {
                         let highest_block = key.sharded_key.highest_block_number;
                         if highest_block != u64::MAX && highest_block > max_block {
                             to_delete.push(key);
+                        }
+                    }
+                }
+            }
+
+            // Defensive check: after optimized path, verify no excess entries remain.
+            // This handles rare edge cases where MDBX doesn't have complete changeset data
+            // (e.g., if MDBX last_block < RocksDB max_highest_block due to data inconsistency).
+            if let Some((last_key, _)) = self.last::<tables::StoragesHistory>()? {
+                let remaining_max = last_key.sharded_key.highest_block_number;
+                if remaining_max != u64::MAX && remaining_max > max_block {
+                    // Some entries might have been missed. Fall back to full scan for remaining.
+                    tracing::debug!(
+                        target: "reth::providers::rocksdb",
+                        remaining_max,
+                        max_block,
+                        "Defensive check: found remaining entries, scanning for missed ones"
+                    );
+
+                    for result in self.iter::<tables::StoragesHistory>()? {
+                        let (key, _) = result?;
+                        let highest_block = key.sharded_key.highest_block_number;
+                        if highest_block != u64::MAX && highest_block > max_block {
+                            // Only add if not already in to_delete
+                            if !to_delete.contains(&key) {
+                                to_delete.push(key);
+                            }
                         }
                     }
                 }
@@ -519,6 +549,9 @@ impl RocksDBProvider {
     /// excess block range, then only deletes History entries for those specific accounts.
     /// This is more efficient than iterating the whole table.
     ///
+    /// Includes a defensive check after the optimized path to ensure no entries are missed
+    /// (e.g., if MDBX doesn't have complete changeset data for all excess blocks in `RocksDB`).
+    ///
     /// If `max_block == 0`, falls back to clearing all entries (full table iteration).
     fn prune_accounts_history_above<Provider>(
         &self,
@@ -575,6 +608,33 @@ impl RocksDBProvider {
                     let highest_block = key.highest_block_number;
                     if highest_block != u64::MAX && highest_block > max_block {
                         to_delete.push(key);
+                    }
+                }
+            }
+
+            // Defensive check: after optimized path, verify no excess entries remain.
+            // This handles rare edge cases where MDBX doesn't have complete changeset data
+            // (e.g., if MDBX last_block < RocksDB max_highest_block due to data inconsistency).
+            if let Some((last_key, _)) = self.last::<tables::AccountsHistory>()? {
+                let remaining_max = last_key.highest_block_number;
+                if remaining_max != u64::MAX && remaining_max > max_block {
+                    // Some entries might have been missed. Fall back to full scan for remaining.
+                    tracing::debug!(
+                        target: "reth::providers::rocksdb",
+                        remaining_max,
+                        max_block,
+                        "Defensive check: found remaining entries, scanning for missed ones"
+                    );
+
+                    for result in self.iter::<tables::AccountsHistory>()? {
+                        let (key, _) = result?;
+                        let highest_block = key.highest_block_number;
+                        if highest_block != u64::MAX && highest_block > max_block {
+                            // Only add if not already in to_delete
+                            if !to_delete.contains(&key) {
+                                to_delete.push(key);
+                            }
+                        }
                     }
                 }
             }
