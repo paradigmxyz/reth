@@ -1064,11 +1064,7 @@ mod tests {
 
         // Reveal multiproof and check that the state trie contains the leaf node and value
         sparse.reveal_decoded_multiproof(multiproof.clone().try_into().unwrap()).unwrap();
-        assert!(sparse
-            .state_trie_ref()
-            .unwrap()
-            .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])),);
+        assert!(sparse.state_trie_ref().unwrap().has_node_at_path(&Nibbles::from_nibbles([0x0])));
         assert_eq!(
             sparse.state_trie_ref().unwrap().get_leaf_value(&Nibbles::from_nibbles([0x0])),
             Some(&leaf_value)
@@ -1077,11 +1073,7 @@ mod tests {
         // Remove the leaf node and check that the state trie does not contain the leaf node and
         // value
         sparse.remove_account_leaf(&Nibbles::from_nibbles([0x0]), &provider_factory).unwrap();
-        assert!(!sparse
-            .state_trie_ref()
-            .unwrap()
-            .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])),);
+        assert!(!sparse.state_trie_ref().unwrap().has_node_at_path(&Nibbles::from_nibbles([0x0])));
         assert!(sparse
             .state_trie_ref()
             .unwrap()
@@ -1091,11 +1083,7 @@ mod tests {
         // Reveal multiproof again and check that the state trie still does not contain the leaf
         // node and value, because they were already revealed before
         sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
-        assert!(!sparse
-            .state_trie_ref()
-            .unwrap()
-            .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])));
+        assert!(!sparse.state_trie_ref().unwrap().has_node_at_path(&Nibbles::from_nibbles([0x0])));
         assert!(sparse
             .state_trie_ref()
             .unwrap()
@@ -1146,8 +1134,7 @@ mod tests {
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
-            .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])),);
+            .has_node_at_path(&Nibbles::from_nibbles([0x0])));
         assert_eq!(
             sparse
                 .storage_trie_ref(&B256::ZERO)
@@ -1164,8 +1151,7 @@ mod tests {
         assert!(!sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
-            .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])),);
+            .has_node_at_path(&Nibbles::from_nibbles([0x0])));
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
@@ -1178,8 +1164,7 @@ mod tests {
         assert!(!sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
-            .nodes_ref()
-            .contains_key(&Nibbles::from_nibbles([0x0])));
+            .has_node_at_path(&Nibbles::from_nibbles([0x0])));
         assert!(sparse
             .storage_trie_ref(&B256::ZERO)
             .unwrap()
