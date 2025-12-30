@@ -167,10 +167,11 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
+        let subkey = StoredNibblesSubKey(key);
         Ok(self
             .cursor
-            .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key))?
-            .filter(|e| e.nibbles == StoredNibblesSubKey(key))
+            .seek_by_key_subkey(self.hashed_address, subkey.clone())?
+            .filter(|e| e.nibbles == subkey)
             .map(|value| (value.nibbles.0, value.node)))
     }
 
