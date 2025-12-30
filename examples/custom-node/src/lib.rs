@@ -19,16 +19,18 @@ use chainspec::CustomChainSpec;
 use primitives::CustomNodePrimitives;
 use reth_ethereum::node::api::{FullNodeTypes, NodeTypes};
 use reth_node_builder::{
-    components::{BasicPayloadServiceBuilder, ComponentsBuilder},
+    components::{BasicPayloadServiceBuilder, ComponentsBuilder, NodeComponentsBuilder},
+    rpc::BasicEngineValidatorBuilder,
     Node, NodeAdapter,
 };
 use reth_op::{
     node::{
         node::{OpConsensusBuilder, OpNetworkBuilder, OpPayloadBuilder, OpPoolBuilder},
-        txpool, OpAddOns, OpNode,
+        OpAddOns, OpNode,
     },
     rpc::OpEthApiBuilder,
 };
+use reth_optimism_txpool::OpPooledTransaction as OpTxPooledTransaction;
 
 pub mod chainspec;
 pub mod engine;
@@ -56,7 +58,7 @@ where
 {
     type ComponentsBuilder = ComponentsBuilder<
         N,
-        OpPoolBuilder<txpool::OpPooledTransaction<CustomTransaction, CustomPooledTransaction>>,
+        OpPoolBuilder<OpTxPooledTransaction<CustomTransaction, CustomPooledTransaction>>,
         BasicPayloadServiceBuilder<OpPayloadBuilder>,
         OpNetworkBuilder,
         CustomExecutorBuilder,
@@ -64,16 +66,17 @@ where
     >;
 
     type AddOns = OpAddOns<
-        NodeAdapter<N>,
+        NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
         OpEthApiBuilder<CustomRpcTypes>,
         CustomEngineValidatorBuilder,
         CustomEngineApiBuilder,
+        BasicEngineValidatorBuilder<CustomEngineValidatorBuilder>,
     >;
 
     fn components_builder(&self) -> Self::ComponentsBuilder {
         ComponentsBuilder::default()
             .node_types::<N>()
-            .pool(OpPoolBuilder::default())
+            .pool(OpPoolBuilder::<OpTxPooledTransaction<CustomTransaction, CustomPooledTransaction>>::default())
             .executor(CustomExecutorBuilder::default())
             .payload(BasicPayloadServiceBuilder::new(OpPayloadBuilder::new(false)))
             .network(OpNetworkBuilder::new(false, false))
@@ -81,6 +84,13 @@ where
     }
 
     fn add_ons(&self) -> Self::AddOns {
-        self.inner.add_ons_builder().build()
+        self.inner
+            .add_ons_builder::<CustomRpcTypes>()
+            .build::<
+                NodeAdapter<N, <Self::ComponentsBuilder as NodeComponentsBuilder<N>>::Components>,
+                CustomEngineValidatorBuilder,
+                CustomEngineApiBuilder,
+                BasicEngineValidatorBuilder<CustomEngineValidatorBuilder>,
+            >()
     }
 }

@@ -18,6 +18,10 @@ const L1_BLOCK_ISTHMUS_SELECTOR: [u8; 4] = hex!("098999be");
 /// This is the first 4 bytes of `keccak256("setL1BlockValuesJovian()")`.
 const L1_BLOCK_JOVIAN_SELECTOR: [u8; 4] = hex!("3db6be2b");
 
+/// The function selector of the "setL1BlockValuesArsia" function in the `L1Block` contract.
+/// This is the first 4 bytes of `keccak256("setL1BlockValuesArsia()")`.
+const L1_BLOCK_ARSIA_SELECTOR: [u8; 4] = hex!("49e72383");
+
 /// Extracts the [`L1BlockInfo`] from the L2 block. The L1 info transaction is always the first
 /// transaction in the L2 block.
 ///
@@ -57,11 +61,11 @@ pub fn extract_l1_info_from_tx<T: Transaction>(
 pub fn parse_l1_info(input: &[u8]) -> Result<L1BlockInfo, OpBlockExecutionError> {
     // Parse the L1 info transaction into an L1BlockInfo struct, depending on the function selector.
     // There are currently 4 variants:
-    // - Jovian
+    // - Jovian|Arsia
     // - Isthmus
     // - Ecotone
     // - Bedrock
-    if input[0..4] == L1_BLOCK_JOVIAN_SELECTOR {
+    if input[0..4] == L1_BLOCK_JOVIAN_SELECTOR || input[0..4] == L1_BLOCK_ARSIA_SELECTOR {
         parse_l1_info_tx_jovian(input[4..].as_ref())
     } else if input[0..4] == L1_BLOCK_ISTHMUS_SELECTOR {
         parse_l1_info_tx_isthmus(input[4..].as_ref())

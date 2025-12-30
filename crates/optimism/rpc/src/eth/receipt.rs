@@ -92,7 +92,7 @@ where
         // receipt
         let state = self.provider.state_by_block_hash(block.hash()).unwrap();
         let token_ratio = state.storage(GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT.into()).unwrap();
-        l1_block_info.token_ratio = token_ratio;
+        l1_block_info.token_ratio = token_ratio.unwrap_or_default();
 
         let mut receipts = Vec::with_capacity(inputs.len());
 
@@ -226,7 +226,7 @@ impl OpReceiptFieldsBuilder {
         // }
 
         // self.da_footprint_gas_scalar = l1_block_info.da_footprint_gas_scalar;
-        self.token_ratio = l1_block_info.token_ratio.map(|ratio| ratio.saturating_to());
+        self.token_ratio = Some(l1_block_info.token_ratio.saturating_to());
 
         self.da_footprint_gas_scalar = l1_block_info.da_footprint_gas_scalar;
 

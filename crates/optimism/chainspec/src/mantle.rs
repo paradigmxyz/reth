@@ -34,13 +34,8 @@ pub(crate) struct MantleGenesisInfo {
     pub mantle_skadi_time: Option<u64>,
     /// Mantle Limb upgrade timestamp
     pub mantle_limb_time: Option<u64>,
-}
-
-impl MantleGenesisInfo {
-    /// Extract the Optimism-specific genesis info from a genesis file.
-    pub(crate) fn _extract_from(others: &OtherFields) -> Option<Self> {
-        Self::try_from(others).ok()
-    }
+    /// Mantle Arsia upgrade timestamp
+    pub mantle_arsia_time: Option<u64>,
 }
 
 #[cfg(feature = "serde")]
@@ -63,8 +58,14 @@ impl TryFrom<&OtherFields> for MantleGenesisInfo {
 
         let mantle_limb_time = others
             .get_deserialized("mantleLimbTime")
-            .transpose()?;
+            .transpose()
+            .unwrap_or(Some(0)); // default enable limb in genesis
 
-        Ok(Self { mantle_skadi_time, mantle_limb_time })
+        let mantle_arsia_time = others
+            .get_deserialized("mantleArsiaTime")
+            .transpose()
+            .unwrap_or(Some(0)); // default enable arsia in genesis
+
+        Ok(Self { mantle_skadi_time, mantle_limb_time, mantle_arsia_time })
     }
 }

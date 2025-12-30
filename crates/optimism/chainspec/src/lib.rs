@@ -408,17 +408,18 @@ impl From<Genesis> for OpChainSpec {
             (EthereumHardfork::Osaka.boxed(), mantle_genesis_info.mantle_limb_time),
             // OP
             (OpHardfork::Regolith.boxed(), genesis_info.regolith_time),
-            (OpHardfork::Canyon.boxed(), genesis_info.canyon_time),
-            (OpHardfork::Ecotone.boxed(), genesis_info.ecotone_time),
-            (OpHardfork::Fjord.boxed(), genesis_info.fjord_time),
-            (OpHardfork::Granite.boxed(), genesis_info.granite_time),
-            (OpHardfork::Holocene.boxed(), genesis_info.holocene_time),
-            (OpHardfork::Isthmus.boxed(), genesis_info.isthmus_time),
-            (OpHardfork::Jovian.boxed(), genesis_info.jovian_time),
+            (OpHardfork::Canyon.boxed(), mantle_genesis_info.mantle_arsia_time),
+            (OpHardfork::Ecotone.boxed(), mantle_genesis_info.mantle_arsia_time),
+            (OpHardfork::Fjord.boxed(), mantle_genesis_info.mantle_arsia_time),
+            (OpHardfork::Granite.boxed(), mantle_genesis_info.mantle_arsia_time),
+            (OpHardfork::Holocene.boxed(), mantle_genesis_info.mantle_arsia_time),
+            (OpHardfork::Isthmus.boxed(), mantle_genesis_info.mantle_arsia_time),
+            (OpHardfork::Jovian.boxed(), mantle_genesis_info.mantle_arsia_time),
             (OpHardfork::Interop.boxed(), genesis_info.interop_time),
             // Mantle
             (MantleHardfork::Skadi.boxed(), mantle_genesis_info.mantle_skadi_time),
             (MantleHardfork::Limb.boxed(), mantle_genesis_info.mantle_limb_time),
+            (MantleHardfork::Arsia.boxed(), mantle_genesis_info.mantle_arsia_time),
         ];
 
         let mut time_hardforks = time_hardfork_opts

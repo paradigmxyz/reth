@@ -37,10 +37,10 @@ use reth_revm::{
     cancelled::CancelOnDrop, database::StateProviderDatabase, db::State,
     witness::ExecutionWitnessRecord,
 };
-use reth_storage_api::{errors::ProviderError, StateProvider, StateProviderFactory};
+use reth_storage_api::{errors::ProviderError, DBProvider, StateProvider, StateProviderFactory, DatabaseProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::{Block, BlockEnv};
-use std::{marker::PhantomData, sync::Arc};
+use std::{io, marker::PhantomData, sync::Arc};
 use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder
@@ -156,7 +156,7 @@ impl<Pool, Client, Evm, Txs, Attrs> OpPayloadBuilder<Pool, Client, Evm, Txs, Att
 impl<Pool, Client, Evm, N, T, Attrs> OpPayloadBuilder<Pool, Client, Evm, T, Attrs>
 where
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks>,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks> + DatabaseProviderFactory,
     N: OpPayloadPrimitives,
     Evm: ConfigureEvm<
         Primitives = N,
@@ -196,12 +196,13 @@ where
 
         let state_provider = self.client.state_by_block_hash(ctx.parent().hash())?;
         let state = StateProviderDatabase::new(&state_provider);
+        let provider = self.client.database_provider_ro()?;
 
         if ctx.attributes().no_tx_pool() {
-            builder.build(state, &state_provider, ctx)
+            builder.build(state, &state_provider, ctx, provider)
         } else {
             // sequencer mode we can reuse cachedreads from previous runs
-            builder.build(cached_reads.as_db_mut(state), &state_provider, ctx)
+            builder.build(cached_reads.as_db_mut(state), &state_provider, ctx, provider)
         }
         .map(|out| out.with_cached_reads(cached_reads))
     }
@@ -240,7 +241,7 @@ impl<Pool, Client, Evm, N, Txs, Attrs> PayloadBuilder
     for OpPayloadBuilder<Pool, Client, Evm, Txs, Attrs>
 where
     N: OpPayloadPrimitives,
-    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks> + Clone,
+    Client: StateProviderFactory + ChainSpecProvider<ChainSpec: OpHardforks> + DatabaseProviderFactory + Clone,
     Pool: TransactionPool<Transaction: OpPooledTx<Consensus = N::SignedTx>>,
     Evm: ConfigureEvm<
         Primitives = N,
@@ -257,7 +258,9 @@ where
         args: BuildArguments<Self::Attributes, Self::BuiltPayload>,
     ) -> Result<BuildOutcome<Self::BuiltPayload>, PayloadBuilderError> {
         let pool = self.pool.clone();
-        self.build_payload(args, |attrs| self.best_transactions.best_transactions(pool, attrs))
+        let result =
+            self.build_payload(args, |attrs| self.best_transactions.best_transactions(pool, attrs));
+        result
     }
 
     fn on_missing_payload(
@@ -323,6 +326,7 @@ impl<Txs> OpBuilder<'_, Txs> {
         db: impl Database<Error = ProviderError>,
         state_provider: impl StateProvider,
         ctx: OpPayloadBuilderCtx<Evm, ChainSpec, Attrs>,
+        provider: impl DBProvider,
     ) -> Result<BuildOutcomeKind<OpBuiltPayload<N>>, PayloadBuilderError>
     where
         Evm: ConfigureEvm<
@@ -360,13 +364,13 @@ impl<Txs> OpBuilder<'_, Txs> {
         if !ctx.attributes().no_tx_pool() {
             let best_txs = best(ctx.best_transaction_attributes(builder.evm_mut().block()));
             if ctx.execute_best_transactions(&mut info, &mut builder, best_txs)?.is_some() {
-                return Ok(BuildOutcomeKind::Cancelled)
+                return Ok(BuildOutcomeKind::Cancelled);
             }
 
             // check if the new payload is even more valuable
             if !ctx.is_better_payload(info.total_fees) {
                 // can skip building the block
-                return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees })
+                return Ok(BuildOutcomeKind::Aborted { fees: info.total_fees });
             }
         }
 
@@ -382,6 +386,18 @@ impl<Txs> OpBuilder<'_, Txs> {
             block.number(),
             Vec::new(),
         );
+
+        // debug!(target: "payload_builder", block_number = ?block.number(),"====exporting full state for block=====");
+        use reth_mantle_forks::debug::state_export::export_full_state_with_bundle;
+        if block.number() == 108 || block.number() == 109 {
+            export_full_state_with_bundle(
+                &provider,
+                &execution_outcome.bundle,
+                &format!("full_state_{}.json", block.number()),
+                Some(block.state_root()),
+                true,
+            ).map_err(|e| PayloadBuilderError::other(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
+        }
 
         // create the executed block data
         let executed: ExecutedBlock<N> = ExecutedBlock {
@@ -634,7 +650,7 @@ where
             if sequencer_tx.value().is_eip4844() {
                 return Err(PayloadBuilderError::other(
                     OpPayloadBuilderError::BlobTransactionRejected,
-                ))
+                ));
             }
 
             // Convert the transaction to a [RecoveredTx]. This is
@@ -652,11 +668,11 @@ where
                     ..
                 })) => {
                     trace!(target: "payload_builder", %error, ?sequencer_tx, "Error in sequencer transaction, skipping.");
-                    continue
+                    continue;
                 }
                 Err(err) => {
                     // this is an error that we should treat as fatal for this attempt
-                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
                 }
             };
 
@@ -718,26 +734,26 @@ where
                 // invalid which also removes all dependent transaction from
                 // the iterator before we can continue
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
+                continue;
             }
 
             // A sequencer's block should never contain blob or deposit transactions from the pool.
             if tx.is_eip4844() || tx.is_deposit() {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
+                continue;
             }
 
             // We skip invalid cross chain txs, they would be removed on the next block update in
             // the maintenance job
-            if let Some(interop) = interop &&
-                !is_valid_interop(interop, self.config.attributes.timestamp())
+            if let Some(interop) = interop
+                && !is_valid_interop(interop, self.config.attributes.timestamp())
             {
                 best_txs.mark_invalid(tx.signer(), tx.nonce());
-                continue
+                continue;
             }
             // check if the job was cancelled, if so we can exit early
             if self.cancel.is_cancelled() {
-                return Ok(Some(()))
+                return Ok(Some(()));
             }
 
             let gas_used = match builder.execute_transaction(tx.clone()) {
@@ -755,11 +771,11 @@ where
                         trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
                         best_txs.mark_invalid(tx.signer(), tx.nonce());
                     }
-                    continue
+                    continue;
                 }
                 Err(err) => {
                     // this is an error that we should treat as fatal for this attempt
-                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)))
+                    return Err(PayloadBuilderError::EvmExecutionError(Box::new(err)));
                 }
             };
 

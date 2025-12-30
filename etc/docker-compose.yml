@@ -1,47 +1,45 @@
 name: reth
 
 services:
-  reth:
-    restart: unless-stopped
-    image: ghcr.io/paradigmxyz/reth
-    ports:
-      - "9001:9001" # metrics
-      - "30303:30303" # eth/66 peering
-      - "8545:8545" # rpc
-      - "8551:8551" # engine
-    volumes:
-      - mainnet_data:/root/.local/share/reth/mainnet
-      - sepolia_data:/root/.local/share/reth/sepolia
-      - holesky_data:/root/.local/share/reth/holesky
-      - hoodi_data:/root/.local/share/reth/hoodi
-      - logs:/root/logs
-      - ./jwttoken:/root/jwt/:ro
-    # https://paradigmxyz.github.io/reth/run/troubleshooting.html#concurrent-database-access-error-using-containersdocker
-    pid: host
-    # For Sepolia, replace `--chain mainnet` with `--chain sepolia`
-    # For Holesky, replace `--chain mainnet` with `--chain holesky`
-    # For Hoodi, replace `--chain mainnet` with `--chain hoodi`
-    command: >
-      node
-      --chain mainnet
-      --metrics 0.0.0.0:9001
-      --log.file.directory /root/logs
-      --authrpc.addr 0.0.0.0
-      --authrpc.port 8551
-      --authrpc.jwtsecret /root/jwt/jwt.hex
-      --http --http.addr 0.0.0.0 --http.port 8545
-      --http.api "eth,net,web3"
+  # Reth service is commented out - using local op-reth instead
+  # reth:
+  #   restart: unless-stopped
+  #   image: ghcr.io/paradigmxyz/reth
+  #   ports:
+  #     - "9001:9001" # metrics
+  #     - "30303:30303" # eth/66 peering
+  #     - "8545:8545" # rpc
+  #     - "8551:8551" # engine
+  #   volumes:
+  #     - mainnet_data:/root/.local/share/reth/mainnet
+  #     - sepolia_data:/root/.local/share/reth/sepolia
+  #     - holesky_data:/root/.local/share/reth/holesky
+  #     - hoodi_data:/root/.local/share/reth/hoodi
+  #     - logs:/root/logs
+  #     - ./jwttoken:/root/jwt/:ro
+  #   pid: host
+  #   command: >
+  #     node
+  #     --chain mainnet
+  #     --metrics 0.0.0.0:9001
+  #     --log.file.directory /root/logs
+  #     --authrpc.addr 0.0.0.0
+  #     --authrpc.port 8551
+  #     --authrpc.jwtsecret /root/jwt/jwt.hex
+  #     --http --http.addr 0.0.0.0 --http.port 8545
+  #     --http.api "eth,net,web3"
 
   prometheus:
     restart: unless-stopped
     image: prom/prometheus
-    depends_on:
-      - reth
+    # Removed depends_on: reth - connecting to local op-reth instead
     ports:
       - 9090:9090
     volumes:
       - ./prometheus/:/etc/prometheus/
       - prometheus_data:/prometheus
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
@@ -50,10 +48,9 @@ services:
     restart: unless-stopped
     image: grafana/grafana:latest
     depends_on:
-      - reth
       - prometheus
     ports:
-      - 3000:3000
+      - 3001:3000  # Changed to 3001 to avoid conflict with existing Grafana on 3000
     environment:
       PROMETHEUS_URL: ${PROMETHEUS_URL:-http://prometheus:9090}
     volumes:

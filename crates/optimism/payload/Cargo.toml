@@ -27,6 +27,7 @@ reth-payload-primitives = { workspace = true, features = ["op"] }
 reth-basic-payload-builder.workspace = true
 reth-chain-state.workspace = true
 reth-payload-validator.workspace = true
+reth-mantle-forks = { workspace = true, optional = true }
 
 # op-reth
 reth-optimism-evm.workspace = true
@@ -52,3 +53,6 @@ tracing.workspace = true
 thiserror.workspace = true
 sha2.workspace = true
 serde.workspace = true
+
+[features]
+mantle-debug = ["dep:reth-mantle-forks"]

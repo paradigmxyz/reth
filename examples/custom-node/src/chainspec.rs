@@ -4,6 +4,7 @@ use reth_ethereum::{
     chainspec::{EthChainSpec, EthereumHardforks, Hardfork, Hardforks},
     primitives::SealedHeader,
 };
+use reth_mantle_forks::MantleHardforks;
 use reth_network_peers::NodeRecord;
 use reth_op::chainspec::OpChainSpec;
 use reth_optimism_forks::OpHardforks;
@@ -113,5 +114,14 @@ impl OpHardforks for CustomChainSpec {
         fork: reth_optimism_forks::OpHardfork,
     ) -> reth_ethereum::chainspec::ForkCondition {
         self.inner.op_fork_activation(fork)
+    }
+}
+
+impl MantleHardforks for CustomChainSpec {
+    fn mantle_fork_activation(
+        &self,
+        fork: reth_mantle_forks::MantleHardfork,
+    ) -> reth_ethereum::chainspec::ForkCondition {
+        self.inner.mantle_fork_activation(fork)
     }
 }

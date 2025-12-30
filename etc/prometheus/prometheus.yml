@@ -1,11 +1,18 @@
 scrape_configs:
-  - job_name: reth
+  - job_name: op-reth
     metrics_path: "/"
     scrape_interval: 5s
     static_configs:
-      - targets: ['reth:9001', 'localhost:9001', 'host.docker.internal:9001']
-  - job_name: ethereum-metrics-exporter
-    metrics_path: "/metrics"
-    scrape_interval: 5s
-    static_configs:
-      - targets: ['metrics-exporter:9091']
+      # Connect to local op-reth running on host machine
+      # Metrics port is 29060 as configured in op-reth args
+      - targets: ['host.docker.internal:29060']
+        labels:
+          # Instance label for identification in Grafana
+          # Dashboard uses 'job' label by default, which will be 'op-reth'
+          instance: 'op-reth-rpc2'
+  # Optional: Keep ethereum-metrics-exporter if you use it
+  # - job_name: ethereum-metrics-exporter
+  #   metrics_path: "/metrics"
+  #   scrape_interval: 5s
+  #   static_configs:
+  #     - targets: ['metrics-exporter:9091']

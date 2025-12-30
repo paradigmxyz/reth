@@ -414,10 +414,10 @@ where
                 if !storage_is_empty {
                     writer.write_all(b"\n      ")?;
                 }
-                writer.write_all(b"}\n    }}")?;
+                writer.write_all(b"}\n    }")?;
             } else {
-                // For accounts not in bundle, omit storage details
-                writer.write_all(b"\"omitted\"}\n    }}")?;
+                // For accounts not in bundle, write empty storage object
+                writer.write_all(b"}\n    }")?;
             }
             
             if processed_count % 1000 == 0 {
