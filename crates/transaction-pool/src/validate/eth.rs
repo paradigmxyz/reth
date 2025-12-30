@@ -207,7 +207,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
+        state: &mut Option<Box<dyn AccountInfoReader + Send>>,
     ) -> TransactionValidationOutcome<Tx> {
         self.validate_one_with_provider(origin, transaction, state)
     }
@@ -219,7 +219,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        maybe_state: &mut Option<Box<dyn AccountInfoReader>>,
+        maybe_state: &mut Option<Box<dyn AccountInfoReader + Send>>,
     ) -> TransactionValidationOutcome<Tx> {
         match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {
@@ -245,6 +245,20 @@ where
             }
             Err(invalid_outcome) => invalid_outcome,
         }
+    }
+
+    /// Validates a single transaction with the provided state provider.
+    pub fn validate_one_with_state_provider(
+        &self,
+        origin: TransactionOrigin,
+        transaction: Tx,
+        state: impl AccountInfoReader,
+    ) -> TransactionValidationOutcome<Tx> {
+        let tx = match self.validate_one_no_state(origin, transaction) {
+            Ok(tx) => tx,
+            Err(invalid_outcome) => return invalid_outcome,
+        };
+        self.validate_one_against_state(origin, tx, state)
     }
 
     /// Performs stateless validation on single transaction. Returns unaltered input transaction
@@ -531,7 +545,9 @@ where
         };
 
         // Checks for nonce
-        if let Err(err) = self.validate_sender_nonce(&transaction, &account) {
+        if transaction.requires_nonce_check() &&
+            let Err(err) = self.validate_sender_nonce(&transaction, &account)
+        {
             return TransactionValidationOutcome::Invalid(transaction, err)
         }
 
@@ -1710,7 +1726,7 @@ mod tests {
             ExtendedAccount::new(transaction.nonce(), alloy_primitives::U256::ZERO),
         );
 
-        // Valdiate with balance check enabled
+        // Validate with balance check enabled
         let validator = EthTransactionValidatorBuilder::new(provider.clone())
             .build(InMemoryBlobStore::default());
 
@@ -1726,7 +1742,7 @@ mod tests {
             panic!("Expected Invalid outcome with InsufficientFunds error");
         }
 
-        // Valdiate with balance check disabled
+        // Validate with balance check disabled
         let validator = EthTransactionValidatorBuilder::new(provider)
             .disable_balance_check() // This should allow the transaction through despite zero balance
             .build(InMemoryBlobStore::default());

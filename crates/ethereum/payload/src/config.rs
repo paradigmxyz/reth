@@ -1,4 +1,5 @@
 use alloy_eips::eip1559::ETHEREUM_BLOCK_GAS_LIMIT_30M;
+use alloy_primitives::Bytes;
 use reth_primitives_traits::constants::GAS_LIMIT_BOUND_DIVISOR;
 
 /// Settings for the Ethereum builder.
@@ -13,6 +14,8 @@ pub struct EthereumBuilderConfig {
     ///
     /// If `None`, defaults to the protocol maximum.
     pub max_blobs_per_block: Option<u64>,
+    /// Extra data for built blocks.
+    pub extra_data: Bytes,
 }
 
 impl Default for EthereumBuilderConfig {
@@ -28,6 +31,7 @@ impl EthereumBuilderConfig {
             desired_gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             await_payload_on_missing: true,
             max_blobs_per_block: None,
+            extra_data: Bytes::new(),
         }
     }
 
@@ -47,6 +51,12 @@ impl EthereumBuilderConfig {
     /// Set the maximum number of blobs per block (EIP-7872).
     pub const fn with_max_blobs_per_block(mut self, max_blobs_per_block: Option<u64>) -> Self {
         self.max_blobs_per_block = max_blobs_per_block;
+        self
+    }
+
+    /// Set the extra data for built blocks.
+    pub fn with_extra_data(mut self, extra_data: Bytes) -> Self {
+        self.extra_data = extra_data;
         self
     }
 }

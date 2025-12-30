@@ -248,7 +248,7 @@ where
     }
 }
 
-impl std::fmt::Debug for IpcServer {
+impl<HttpMiddleware, RpcMiddleware> std::fmt::Debug for IpcServer<HttpMiddleware, RpcMiddleware> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IpcServer")
             .field("endpoint", &self.endpoint)

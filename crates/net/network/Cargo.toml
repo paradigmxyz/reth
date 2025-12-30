@@ -66,6 +66,7 @@ tracing.workspace = true
 rustc-hash.workspace = true
 thiserror.workspace = true
 parking_lot.workspace = true
+rayon.workspace = true
 rand.workspace = true
 rand_08.workspace = true
 secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"] }

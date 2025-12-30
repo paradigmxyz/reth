@@ -113,7 +113,22 @@ impl SessionError for EthStreamError {
                 P2PHandshakeError::HelloNotInHandshake |
                 P2PHandshakeError::NonHelloMessageInHandshake,
             )) => true,
-            Self::EthHandshakeError(err) => !matches!(err, EthHandshakeError::NoResponse),
+            Self::EthHandshakeError(err) => {
+                #[allow(clippy::match_same_arms)]
+                match err {
+                    EthHandshakeError::NoResponse => {
+                        // this happens when the conn simply stalled
+                        false
+                    }
+                    EthHandshakeError::InvalidFork(_) => {
+                        // this can occur when the remote or our node is running an outdated client,
+                        // we shouldn't treat this as fatal, because the node can come back online
+                        // with an updated version any time
+                        false
+                    }
+                    _ => true,
+                }
+            }
             _ => false,
         }
     }
@@ -144,7 +159,22 @@ impl SessionError for EthStreamError {
                         P2PStreamError::MismatchedProtocolVersion { .. }
                 )
             }
-            Self::EthHandshakeError(err) => !matches!(err, EthHandshakeError::NoResponse),
+            Self::EthHandshakeError(err) => {
+                #[allow(clippy::match_same_arms)]
+                match err {
+                    EthHandshakeError::NoResponse => {
+                        // this happens when the conn simply stalled
+                        false
+                    }
+                    EthHandshakeError::InvalidFork(_) => {
+                        // this can occur when the remote or our node is running an outdated client,
+                        // we shouldn't treat this as fatal, because the node can come back online
+                        // with an updated version any time
+                        false
+                    }
+                    _ => true,
+                }
+            }
             _ => false,
         }
     }
@@ -196,6 +226,11 @@ impl SessionError for EthStreamError {
                 P2PStreamError::PingerError(_) |
                 P2PStreamError::Snap(_),
             ) => Some(BackoffKind::Medium),
+            Self::EthHandshakeError(EthHandshakeError::InvalidFork(_)) => {
+                // the remote can come back online after updating client version, so we can back off
+                // for a bit
+                Some(BackoffKind::Medium)
+            }
             _ => None,
         }
     }

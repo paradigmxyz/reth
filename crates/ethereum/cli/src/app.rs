@@ -3,20 +3,18 @@ use eyre::{eyre, Result};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    common::{CliComponentsBuilder, CliHeader, CliNodeTypes},
+    common::{CliComponentsBuilder, CliNodeTypes, HeaderMut},
     launcher::{FnLauncher, Launcher},
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::args::OtlpInitStatus;
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
 use std::{fmt, sync::Arc};
-use tracing::{info, warn};
 
 /// A wrapper around a parsed CLI that handles command execution.
 #[derive(Debug)]
@@ -83,7 +81,7 @@ where
         ) -> Result<()>,
     ) -> Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let runner = match self.runner.take() {
@@ -107,26 +105,12 @@ where
 
     /// Initializes tracing with the configured options.
     ///
-    /// If file logging is enabled, this function stores guard to the struct.
-    /// For gRPC OTLP, it requires tokio runtime context.
+    /// See [`Cli::init_tracing`] for more information.
     pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
         if self.guard.is_none() {
-            let mut layers = self.layers.take().unwrap_or_default();
-
-            let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
-
-            self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
-            info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
-            match otlp_status {
-                OtlpInitStatus::Started(endpoint) => {
-                    info!(target: "reth::cli", "Started OTLP {:?} tracing export to {endpoint}", self.cli.traces.protocol);
-                }
-                OtlpInitStatus::NoFeature => {
-                    warn!(target: "reth::cli", "Provided OTLP tracing arguments do not have effect, compile with the `otlp` feature")
-                }
-                OtlpInitStatus::Disabled => {}
-            }
+            self.guard = self.cli.init_tracing(runner, self.layers.take().unwrap_or_default())?;
         }
+
         Ok(())
     }
 }
@@ -146,7 +130,7 @@ where
     C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     Ext: clap::Args + fmt::Debug,
     Rpc: RpcModuleValidator,
-    N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
+    N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
 {
     match cli.command {
         Commands::Node(command) => {
@@ -170,7 +154,9 @@ where
         Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
         Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
         Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::Db(command) => {
+            runner.run_blocking_command_until_exit(|ctx| command.execute::<N>(ctx))
+        }
         Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
         Commands::Stage(command) => {
             runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))

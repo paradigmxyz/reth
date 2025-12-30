@@ -12,6 +12,7 @@ env:
   CARGO_TERM_COLOR: always
   FROM_BLOCK: 0
   TO_BLOCK: 50000
+  RUSTC_WRAPPER: "sccache"
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
@@ -22,16 +23,16 @@ jobs:
     name: stage-run-test
     # Only run stage commands test in merge groups
     if: github.event_name == 'merge_group'
-    runs-on:
-      group: Reth
+    runs-on: depot-ubuntu-latest
     env:
       RUST_LOG: info,sync=error
       RUST_BACKTRACE: 1
     timeout-minutes: 60
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true

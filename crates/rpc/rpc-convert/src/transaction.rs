@@ -16,7 +16,6 @@ use reth_primitives_traits::{
     TxTy,
 };
 use std::{convert::Infallible, error::Error, fmt::Debug, marker::PhantomData};
-use thiserror::Error;
 
 /// Input for [`RpcConvert::convert_receipts`].
 #[derive(Debug, Clone)]
@@ -484,10 +483,16 @@ where
 }
 
 /// Conversion into transaction RPC response failed.
-#[derive(Debug, Clone, Error)]
-#[error("Failed to convert transaction into RPC response: {0}")]
-pub struct TransactionConversionError(String);
+#[derive(Debug, thiserror::Error)]
+pub enum TransactionConversionError {
+    /// Required fields are missing from the transaction request.
+    #[error("Failed to convert transaction into RPC response: {0}")]
+    FromTxReq(String),
 
+    /// Other conversion errors.
+    #[error("{0}")]
+    Other(String),
+}
 /// Generic RPC response object converter for `Evm` and network `Network`.
 ///
 /// The main purpose of this struct is to provide an implementation of [`RpcConvert`] for generic
@@ -826,7 +831,7 @@ where
         Ok(self
             .sim_tx_converter
             .convert_sim_tx(request)
-            .map_err(|e| TransactionConversionError(e.to_string()))?)
+            .map_err(|e| TransactionConversionError::FromTxReq(e.to_string()))?)
     }
 
     fn tx_env(

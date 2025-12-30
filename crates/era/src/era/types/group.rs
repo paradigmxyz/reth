@@ -3,9 +3,13 @@
 //! See also <https://github.com/eth-clients/e2store-format-specs/blob/main/formats/era.md>
 
 use crate::{
+    common::file_ops::{EraFileId, EraFileType},
     e2s::types::{Entry, IndexEntry, SLOT_INDEX},
     era::types::consensus::{CompressedBeaconState, CompressedSignedBeaconBlock},
 };
+
+/// Number of slots per historical root in ERA files
+pub const SLOTS_PER_HISTORICAL_ROOT: u64 = 8192;
 
 /// Era file content group
 ///
@@ -64,6 +68,28 @@ impl EraGroup {
     pub fn add_entry(&mut self, entry: Entry) {
         self.other_entries.push(entry);
     }
+
+    /// Get the starting slot and slot count.
+    pub const fn slot_range(&self) -> (u64, u32) {
+        if let Some(ref block_index) = self.slot_index {
+            // Non-genesis era: use block slot index
+            (block_index.starting_slot, block_index.slot_count() as u32)
+        } else {
+            // Genesis era: use state slot index, it should be slot 0
+            // Genesis has only the genesis state, no blocks
+            (self.state_slot_index.starting_slot, 0)
+        }
+    }
+
+    /// Get the starting slot number
+    pub const fn starting_slot(&self) -> u64 {
+        self.slot_range().0
+    }
+
+    /// Get the number of slots
+    pub const fn slot_count(&self) -> u32 {
+        self.slot_range().1
+    }
 }
 
 /// [`SlotIndex`] records store offsets to data at specific slots
@@ -119,6 +145,78 @@ impl IndexEntry for SlotIndex {
 
     fn offsets(&self) -> &[i64] {
         &self.offsets
+    }
+}
+
+/// Era file identifier
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EraId {
+    /// Network configuration name
+    pub network_name: String,
+
+    /// First slot number in file
+    pub start_slot: u64,
+
+    /// Number of slots in the file
+    pub slot_count: u32,
+
+    /// Optional hash identifier for this file
+    /// First 4 bytes of the last historical root in the last state in the era file
+    pub hash: Option<[u8; 4]>,
+
+    /// Whether to include era count in filename
+    /// It is used for custom exports when we don't use the max number of items per file
+    include_era_count: bool,
+}
+
+impl EraId {
+    /// Create a new [`EraId`]
+    pub fn new(network_name: impl Into<String>, start_slot: u64, slot_count: u32) -> Self {
+        Self {
+            network_name: network_name.into(),
+            start_slot,
+            slot_count,
+            hash: None,
+            include_era_count: false,
+        }
+    }
+
+    /// Add a hash identifier to  [`EraId`]
+    pub const fn with_hash(mut self, hash: [u8; 4]) -> Self {
+        self.hash = Some(hash);
+        self
+    }
+
+    /// Include era count in filename, for custom slot-per-file exports
+    pub const fn with_era_count(mut self) -> Self {
+        self.include_era_count = true;
+        self
+    }
+}
+
+impl EraFileId for EraId {
+    const FILE_TYPE: EraFileType = EraFileType::Era;
+
+    const ITEMS_PER_ERA: u64 = SLOTS_PER_HISTORICAL_ROOT;
+
+    fn network_name(&self) -> &str {
+        &self.network_name
+    }
+
+    fn start_number(&self) -> u64 {
+        self.start_slot
+    }
+
+    fn count(&self) -> u32 {
+        self.slot_count
+    }
+
+    fn hash(&self) -> Option<[u8; 4]> {
+        self.hash
+    }
+
+    fn include_era_count(&self) -> bool {
+        self.include_era_count
     }
 }
 
@@ -285,5 +383,41 @@ mod tests {
         let index = SlotIndex::from_entry(&entry).unwrap();
         let parsed_offset = index.offsets[0];
         assert_eq!(parsed_offset, -1024);
+    }
+
+    #[test_case::test_case(
+        EraId::new("mainnet", 0, 8192).with_hash([0x4b, 0x36, 0x3d, 0xb9]),
+        "mainnet-00000-4b363db9.era";
+        "Mainnet era 0"
+    )]
+    #[test_case::test_case(
+        EraId::new("mainnet", 8192, 8192).with_hash([0x40, 0xcf, 0x2f, 0x3c]),
+        "mainnet-00001-40cf2f3c.era";
+        "Mainnet era 1"
+    )]
+    #[test_case::test_case(
+        EraId::new("mainnet", 0, 8192),
+        "mainnet-00000-00000000.era";
+        "Without hash"
+    )]
+    fn test_era_id_file_naming(id: EraId, expected_file_name: &str) {
+        let actual_file_name = id.to_file_name();
+        assert_eq!(actual_file_name, expected_file_name);
+    }
+
+    // File naming with era-count, for custom exports
+    #[test_case::test_case(
+        EraId::new("mainnet", 0, 8192).with_hash([0x4b, 0x36, 0x3d, 0xb9]).with_era_count(),
+        "mainnet-00000-00001-4b363db9.era";
+        "Mainnet era 0 with count"
+    )]
+    #[test_case::test_case(
+        EraId::new("mainnet", 8000, 500).with_hash([0xab, 0xcd, 0xef, 0x12]).with_era_count(),
+        "mainnet-00000-00002-abcdef12.era";
+        "Spanning two eras with count"
+    )]
+    fn test_era_id_file_naming_with_era_count(id: EraId, expected_file_name: &str) {
+        let actual_file_name = id.to_file_name();
+        assert_eq!(actual_file_name, expected_file_name);
     }
 }

@@ -62,7 +62,8 @@ where
             ctx.provider().clone(),
             pool,
             evm_config,
-            EthereumBuilderConfig::new(),
+            EthereumBuilderConfig::new()
+                .with_extra_data(ctx.payload_builder_config().extra_data_bytes()),
         );
 
         let conf = ctx.payload_builder_config();

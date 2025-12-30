@@ -65,7 +65,7 @@ where
 
 impl<Provider, T> ImportService<Provider, T>
 where
-    Provider: BlockNumReader + Clone + 'static,
+    Provider: BlockNumReader + Sync + Clone + 'static,
     T: PayloadTypes,
 {
     /// Create a new block import service
@@ -198,7 +198,7 @@ where
 
 impl<Provider, T> Future for ImportService<Provider, T>
 where
-    Provider: BlockNumReader + BlockHashReader + Clone + 'static + Unpin,
+    Provider: BlockNumReader + BlockHashReader + Sync + Clone + 'static + Unpin,
     T: PayloadTypes,
 {
     type Output = Result<(), Box<dyn std::error::Error>>;

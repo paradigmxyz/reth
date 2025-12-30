@@ -5,10 +5,7 @@ use alloy_rpc_types_eth::Block;
 use reth_rpc_convert::{RpcConvert, SignableTxRequest};
 pub use reth_rpc_convert::{RpcTransaction, RpcTxReq, RpcTypes};
 use reth_storage_api::ProviderTx;
-use std::{
-    error::Error,
-    fmt::{self},
-};
+use std::error::Error;
 
 /// Network specific `eth` API types.
 ///
@@ -23,16 +20,17 @@ pub trait EthApiTypes: Send + Sync + Clone {
     type Error: Into<jsonrpsee_types::error::ErrorObject<'static>>
         + FromEthApiError
         + AsEthApiError
+        + From<<Self::RpcConvert as RpcConvert>::Error>
         + Error
         + Send
         + Sync;
     /// Blockchain primitive types, specific to network, e.g. block and transaction.
     type NetworkTypes: RpcTypes;
     /// Conversion methods for transaction RPC type.
-    type RpcConvert: Send + Sync + fmt::Debug;
+    type RpcConvert: RpcConvert<Network = Self::NetworkTypes>;
 
     /// Returns reference to transaction response builder.
-    fn tx_resp_builder(&self) -> &Self::RpcConvert;
+    fn converter(&self) -> &Self::RpcConvert;
 }
 
 /// Adapter for network specific block type.
@@ -55,11 +53,7 @@ where
             NetworkTypes: RpcTypes<
                 TransactionRequest: SignableTxRequest<ProviderTx<Self::Provider>>,
             >,
-            RpcConvert: RpcConvert<
-                Primitives = Self::Primitives,
-                Network = Self::NetworkTypes,
-                Error = RpcError<Self>,
-            >,
+            RpcConvert: RpcConvert<Primitives = Self::Primitives>,
         >,
 {
 }
@@ -70,11 +64,7 @@ impl<T> FullEthApiTypes for T where
             NetworkTypes: RpcTypes<
                 TransactionRequest: SignableTxRequest<ProviderTx<Self::Provider>>,
             >,
-            RpcConvert: RpcConvert<
-                Primitives = <Self as RpcNodeCore>::Primitives,
-                Network = Self::NetworkTypes,
-                Error = RpcError<T>,
-            >,
+            RpcConvert: RpcConvert<Primitives = Self::Primitives>,
         >
 {
 }

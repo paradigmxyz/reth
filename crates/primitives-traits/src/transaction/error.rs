@@ -66,6 +66,17 @@ pub enum InvalidTransactionError {
     GasLimitTooHigh,
 }
 
+impl InvalidTransactionError {
+    /// Returns true if this is [`InvalidTransactionError::NonceNotConsistent`] and the
+    /// transaction's nonce is lower than the state's.
+    pub fn is_nonce_too_low(&self) -> bool {
+        match self {
+            Self::NonceNotConsistent { tx, state } => tx < state,
+            _ => false,
+        }
+    }
+}
+
 /// Represents error variants that can happen when trying to convert a transaction to pooled
 /// transaction.
 #[derive(Debug, Clone, Eq, PartialEq, derive_more::Display, derive_more::Error)]

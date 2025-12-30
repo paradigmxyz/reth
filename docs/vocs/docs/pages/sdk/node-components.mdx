@@ -53,43 +53,55 @@ Provides external API access to the node:
 
 ## Component Customization
 
-Each component can be customized through Reth's builder pattern:
+Each component can be customized through Reth's builder pattern. You can replace individual components
+while keeping the defaults for others using `EthereumNode::components()`:
 
 ```rust
-use reth_ethereum::node::{EthereumNode, NodeBuilder};
+use reth_ethereum::{
+    cli::interface::Cli,
+    node::{
+        node::EthereumAddOns,
+        EthereumNode,
+    },
+};
 
-let node = NodeBuilder::new(config)
-    .with_types::<EthereumNode>()
-    .with_components(|ctx| {
-        // Use the ComponentBuilder to customize components
-        ctx.components_builder()
-            // Custom network configuration
-            .network(|network_builder| {
-                network_builder
-                    .peer_manager(custom_peer_manager)
-                    .build()
-            })
-            // Custom transaction pool
-            .pool(|pool_builder| {
-                pool_builder
-                    .validator(custom_validator)
-                    .ordering(custom_ordering)
-                    .build()
-            })
-            // Custom consensus
-            .consensus(custom_consensus)
-            // Custom EVM configuration
-            .evm(|evm_builder| {
-                evm_builder
-                    .with_precompiles(custom_precompiles)
-                    .build()
-            })
-            // Build all components
-            .build()
-    })
-    .build()
-    .await?;
+fn main() {
+    Cli::parse_args()
+        .run(|builder, _| async move {
+            let handle = builder
+                // Use the default ethereum node types
+                .with_types::<EthereumNode>()
+                // Configure the components of the node
+                // Use default ethereum components but replace specific ones
+                .with_components(
+                    EthereumNode::components()
+                        // Custom transaction pool
+                        .pool(CustomPoolBuilder::default())
+                        // Other customizable components:
+                        // .network(CustomNetworkBuilder::default())
+                        // .executor(CustomExecutorBuilder::default())
+                        // .consensus(CustomConsensusBuilder::default())
+                        // .payload(CustomPayloadBuilder::default())
+                )
+                .with_add_ons(EthereumAddOns::default())
+                .launch()
+                .await?;
+
+            handle.wait_for_node_exit().await
+        })
+        .unwrap();
+}
 ```
+
+Custom component builders must implement their respective traits (`PoolBuilder`, `NetworkBuilder`, 
+`ExecutorBuilder`, `ConsensusBuilder`, `PayloadServiceBuilder`). Each trait requires implementing 
+an async `build_*` method that receives a `BuilderContext` with access to node configuration, 
+providers, and task executors.
+
+For complete working examples with full trait implementations, see:
+- [custom-node-components](https://github.com/paradigmxyz/reth/tree/main/examples/custom-node-components) - Custom transaction pool
+- [custom-payload-builder](https://github.com/paradigmxyz/reth/tree/main/examples/custom-payload-builder) - Custom payload builder
+- [custom-evm](https://github.com/paradigmxyz/reth/tree/main/examples/custom-evm) - Custom EVM configuration
 
 ## Component Lifecycle
 

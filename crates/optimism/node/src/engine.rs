@@ -18,7 +18,7 @@ use reth_node_api::{
 use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpExecutionPayloadValidator, OpPayloadTypes};
-use reth_optimism_primitives::{OpBlock, ADDRESS_L2_TO_L1_MESSAGE_PASSER};
+use reth_optimism_primitives::{OpBlock, L2_TO_L1_MESSAGE_PASSER_ADDRESS};
 use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SignedTransaction};
 use reth_provider::StateProviderFactory;
 use reth_trie_common::{HashedPostState, KeyHasher};
@@ -76,7 +76,7 @@ pub struct OpEngineValidator<P, Tx, ChainSpec> {
 impl<P, Tx, ChainSpec> OpEngineValidator<P, Tx, ChainSpec> {
     /// Instantiates a new validator.
     pub fn new<KH: KeyHasher>(chain_spec: Arc<ChainSpec>, provider: P) -> Self {
-        let hashed_addr_l2tol1_msg_passer = KH::hash_key(ADDRESS_L2_TO_L1_MESSAGE_PASSER);
+        let hashed_addr_l2tol1_msg_passer = KH::hash_key(L2_TO_L1_MESSAGE_PASSER_ADDRESS);
         Self {
             inner: OpExecutionPayloadValidator::new(chain_spec),
             provider,
@@ -121,15 +121,6 @@ where
 {
     type Block = alloy_consensus::Block<Tx>;
 
-    fn ensure_well_formed_payload(
-        &self,
-        payload: OpExecutionData,
-    ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
-        let sealed_block =
-            self.inner.ensure_well_formed_payload(payload).map_err(NewPayloadError::other)?;
-        sealed_block.try_recover().map_err(|e| NewPayloadError::Other(e.into()))
-    }
-
     fn validate_block_post_execution_with_hashed_state(
         &self,
         state_updates: &HashedPostState,
@@ -158,6 +149,13 @@ where
         }
 
         Ok(())
+    }
+
+    fn convert_payload_to_block(
+        &self,
+        payload: OpExecutionData,
+    ) -> Result<SealedBlock<Self::Block>, NewPayloadError> {
+        self.inner.ensure_well_formed_payload(payload).map_err(NewPayloadError::other)
     }
 }
 
@@ -301,23 +299,16 @@ mod test {
     use super::*;
 
     use crate::engine;
+    use alloy_op_hardforks::BASE_SEPOLIA_JOVIAN_TIMESTAMP;
     use alloy_primitives::{b64, Address, B256, B64};
     use alloy_rpc_types_engine::PayloadAttributes;
-    use reth_chainspec::{ChainSpec, ForkCondition, Hardfork};
+    use reth_chainspec::ChainSpec;
     use reth_optimism_chainspec::{OpChainSpec, BASE_SEPOLIA};
-    use reth_optimism_forks::OpHardfork;
     use reth_provider::noop::NoopProvider;
     use reth_trie_common::KeccakKeyHasher;
 
-    const JOVIAN_TIMESTAMP: u64 = 1744909000;
-
     fn get_chainspec() -> Arc<OpChainSpec> {
-        let mut base_sepolia_spec = BASE_SEPOLIA.inner.clone();
-
-        // TODO: Remove this once we know the Jovian timestamp
-        base_sepolia_spec
-            .hardforks
-            .insert(OpHardfork::Jovian.boxed(), ForkCondition::Timestamp(JOVIAN_TIMESTAMP));
+        let base_sepolia_spec = BASE_SEPOLIA.inner.clone();
 
         Arc::new(OpChainSpec {
             inner: ChainSpec {
@@ -429,7 +420,8 @@ mod test {
     fn test_well_formed_attributes_jovian_valid() {
         let validator =
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
-        let attributes = get_attributes(Some(b64!("0000000000000000")), Some(1), JOVIAN_TIMESTAMP);
+        let attributes =
+            get_attributes(Some(b64!("0000000000000000")), Some(1), BASE_SEPOLIA_JOVIAN_TIMESTAMP);
 
         let result = <engine::OpEngineValidator<_, _, _> as EngineApiValidator<
             OpEngineTypes,
@@ -444,7 +436,7 @@ mod test {
     fn test_malformed_attributes_jovian_with_eip_1559_params_none() {
         let validator =
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
-        let attributes = get_attributes(None, Some(1), JOVIAN_TIMESTAMP);
+        let attributes = get_attributes(None, Some(1), BASE_SEPOLIA_JOVIAN_TIMESTAMP);
 
         let result = <engine::OpEngineValidator<_, _, _> as EngineApiValidator<
             OpEngineTypes,
@@ -474,7 +466,8 @@ mod test {
     fn test_malformed_attributes_post_jovian_with_min_base_fee_none() {
         let validator =
             OpEngineValidator::new::<KeccakKeyHasher>(get_chainspec(), NoopProvider::default());
-        let attributes = get_attributes(Some(b64!("0000000000000000")), None, JOVIAN_TIMESTAMP);
+        let attributes =
+            get_attributes(Some(b64!("0000000000000000")), None, BASE_SEPOLIA_JOVIAN_TIMESTAMP);
 
         let result = <engine::OpEngineValidator<_, _, _> as EngineApiValidator<
             OpEngineTypes,

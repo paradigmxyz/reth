@@ -41,9 +41,12 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     GetNodeData(RequestPair<GetNodeData>),
     NodeData(RequestPair<NodeData>),
     GetReceipts(RequestPair<GetReceipts>),
+    GetReceipts70(RequestPair<GetReceipts70>),
     Receipts(RequestPair<Receipts<N::Receipt>>),
     Receipts69(RequestPair<Receipts69<N::Receipt>>),
+    Receipts70(RequestPair<Receipts70<N::Receipt>>),
     BlockRangeUpdate(BlockRangeUpdate),
+    Other(RawCapabilityMessage),
 }
 
 /// Represents message IDs for eth protocol messages.
@@ -66,6 +69,7 @@ pub enum EthMessageID {
     GetReceipts = 0x0f,
     Receipts = 0x10,
     BlockRangeUpdate = 0x11,
+    Other(u8),
 }
 
 ```
@@ -413,3 +417,6 @@ additional "satellite" protocols (e.g. `snap`) using negotiated `SharedCapabilit
 - Starting with ETH69:
   - `BlockRangeUpdate (0x11)` announces the historical block range served.
   - Receipts omit bloom: encoded as `Receipts69` instead of `Receipts`.
+- Starting with ETH70 (EIP-7975):
+  - Status reuses the ETH69 format (no additional block range fields).
+  - Receipts continue to omit bloom; `GetReceipts`/`Receipts` add the eth/70 variants to support partial receipt ranges (`firstBlockReceiptIndex` and `lastBlockIncomplete`).

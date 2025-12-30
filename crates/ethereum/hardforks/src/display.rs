@@ -170,7 +170,7 @@ impl DisplayHardforks {
         let mut post_merge = Vec::new();
 
         for (fork, condition, metadata) in hardforks {
-            let mut display_fork = DisplayFork {
+            let display_fork = DisplayFork {
                 name: fork.name().to_string(),
                 activated_at: condition,
                 eip: None,
@@ -181,12 +181,7 @@ impl DisplayHardforks {
                 ForkCondition::Block(_) => {
                     pre_merge.push(display_fork);
                 }
-                ForkCondition::TTD { activation_block_number, total_difficulty, fork_block } => {
-                    display_fork.activated_at = ForkCondition::TTD {
-                        activation_block_number,
-                        fork_block,
-                        total_difficulty,
-                    };
+                ForkCondition::TTD { .. } => {
                     with_merge.push(display_fork);
                 }
                 ForkCondition::Timestamp(_) => {

@@ -25,6 +25,7 @@ use reth_op::{
     primitives::SignedTransaction,
 };
 use reth_rpc_api::eth::helpers::pending_block::BuildPendingEnv;
+use revm_primitives::Bytes;
 use std::sync::Arc;
 
 #[derive(Debug, Clone)]
@@ -126,13 +127,15 @@ impl ConfigureEngineEvm<CustomExecutionData> for CustomEvmConfig {
         &self,
         payload: &CustomExecutionData,
     ) -> Result<impl ExecutableTxIterator<Self>, Self::Error> {
-        Ok(payload.inner.payload.transactions().clone().into_iter().map(|encoded| {
+        let transactions = payload.inner.payload.transactions().clone();
+        let convert = |encoded: Bytes| {
             let tx = CustomTransaction::decode_2718_exact(encoded.as_ref())
                 .map_err(Into::into)
                 .map_err(PayloadError::Decode)?;
             let signer = tx.try_recover().map_err(NewPayloadError::other)?;
             Ok::<_, NewPayloadError>(WithEncoded::new(encoded, tx.with_signer(signer)))
-        }))
+        };
+        Ok((transactions, convert))
     }
 }
 

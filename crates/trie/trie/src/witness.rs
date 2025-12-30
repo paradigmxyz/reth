@@ -95,8 +95,8 @@ impl<T, H> TrieWitness<T, H> {
 
 impl<T, H> TrieWitness<T, H>
 where
-    T: TrieCursorFactory + Clone + Send + Sync,
-    H: HashedCursorFactory + Clone + Send + Sync,
+    T: TrieCursorFactory + Clone,
+    H: HashedCursorFactory + Clone,
 {
     /// Compute the state transition witness for the trie. Gather all required nodes
     /// to apply `state` on top of the current trie state.

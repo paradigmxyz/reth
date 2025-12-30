@@ -6,7 +6,6 @@ use alloy_consensus::{
 use alloy_eips::{eip2930::AccessList, eip7702::SignedAuthorization, Typed2718};
 use alloy_primitives::{Address, Bytes, ChainId, Signature, TxKind, B256, U256};
 use alloy_rlp::{BufMut, Decodable, Encodable};
-use core::mem;
 use reth_ethereum::primitives::{serde_bincode_compat::RlpBincode, InMemorySize};
 
 /// A transaction with a priority fee ([EIP-1559](https://eips.ethereum.org/EIPS/eip-1559)).
@@ -75,17 +74,10 @@ impl TxPayment {
         super::tx::TxTypeCustom::Payment
     }
 
-    /// Calculates a heuristic for the in-memory size of the [TxPayment]
-    /// transaction.
+    /// Calculates a heuristic for the in-memory size of the [TxPayment] transaction.
     #[inline]
     pub fn size(&self) -> usize {
-        mem::size_of::<ChainId>() + // chain_id
-        mem::size_of::<u64>() + // nonce
-        mem::size_of::<u64>() + // gas_limit
-        mem::size_of::<u128>() + // max_fee_per_gas
-        mem::size_of::<u128>() + // max_priority_fee_per_gas
-        mem::size_of::<Address>() + // to
-        mem::size_of::<U256>() // value
+        size_of::<Self>()
     }
 }
 

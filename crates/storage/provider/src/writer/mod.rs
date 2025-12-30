@@ -917,7 +917,7 @@ mod tests {
             assert_eq!(
                 StateRoot::overlay_root(
                     tx,
-                    provider_factory.hashed_post_state(&state.bundle_state)
+                    &provider_factory.hashed_post_state(&state.bundle_state).into_sorted()
                 )
                 .unwrap(),
                 state_root(expected.clone().into_iter().map(|(address, (account, storage))| (

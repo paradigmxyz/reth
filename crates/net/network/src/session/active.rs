@@ -25,10 +25,11 @@ use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
+    message::{EthBroadcastMessage, MessageError},
     eth_snap_stream::EthSnapMessage,
-    message::{EthBroadcastMessage, MessageError, RequestPair},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
+use reth_eth_wire_types::{message::RequestPair};
 use reth_eth_wire_types::{
     snap::{
         AccountRangeMessage, ByteCodesMessage, SnapProtocolMessage, StorageRangesMessage,
@@ -223,80 +224,83 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         }
 
         match msg {
-            EthSnapMessage::Eth(msg) => match msg {
-                message @ EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
-                    error: EthStreamError::EthHandshakeError(
-                        EthHandshakeError::StatusNotInHandshake,
-                    ),
-                    message,
-                },
-                EthMessage::NewBlockHashes(msg) => {
-                    self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
+            message @ EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
+                error: EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake),
+                message,
+            },
+            EthMessage::NewBlockHashes(msg) => {
+                self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
+            }
+            EthMessage::NewBlock(msg) => {
+                let block = NewBlockMessage {
+                    hash: msg.block().header().hash_slow(),
+                    block: Arc::new(*msg),
+                };
+                self.try_emit_broadcast(PeerMessage::NewBlock(block)).into()
+            }
+            EthMessage::Transactions(msg) => {
+                self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
+            }
+            EthMessage::NewPooledTransactionHashes66(msg) => {
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+            }
+            EthMessage::NewPooledTransactionHashes68(msg) => {
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+            }
+            EthMessage::GetBlockHeaders(req) => {
+                on_request!(req, BlockHeaders, GetBlockHeaders)
+            }
+            EthMessage::BlockHeaders(resp) => {
+                on_response!(resp, GetBlockHeaders)
+            }
+            EthMessage::GetBlockBodies(req) => {
+                on_request!(req, BlockBodies, GetBlockBodies)
+            }
+            EthMessage::BlockBodies(resp) => {
+                on_response!(resp, GetBlockBodies)
+            }
+            EthMessage::GetPooledTransactions(req) => {
+                on_request!(req, PooledTransactions, GetPooledTransactions)
+            }
+            EthMessage::PooledTransactions(resp) => {
+                on_response!(resp, GetPooledTransactions)
+            }
+            EthMessage::GetNodeData(req) => {
+                on_request!(req, NodeData, GetNodeData)
+            }
+            EthMessage::NodeData(resp) => {
+                on_response!(resp, GetNodeData)
+            }
+            EthMessage::GetReceipts(req) => {
+                if self.conn.version() >= EthVersion::Eth69 {
+                    on_request!(req, Receipts69, GetReceipts69)
+                } else {
+                    on_request!(req, Receipts, GetReceipts)
                 }
-                EthMessage::NewBlock(msg) => {
-                    let block: NewBlockMessage<N::NewBlockPayload> = NewBlockMessage {
-                        hash: msg.block().header().hash_slow(),
-                        block: Arc::new(*msg),
+            }
+            EthMessage::GetReceipts70(req) => {
+                on_request!(req, Receipts70, GetReceipts70)
+            }
+            EthMessage::Receipts(resp) => {
+                on_response!(resp, GetReceipts)
+            }
+            EthMessage::Receipts69(resp) => {
+                on_response!(resp, GetReceipts69)
+            }
+            EthMessage::Receipts70(resp) => {
+                on_response!(resp, GetReceipts70)
+            }
+            EthMessage::BlockRangeUpdate(msg) => {
+                // Validate that earliest <= latest according to the spec
+                if msg.earliest > msg.latest {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(format!(
+                            "invalid block range: earliest ({}) > latest ({})",
+                            msg.earliest, msg.latest
+                        ))),
+                        message: EthMessage::BlockRangeUpdate(msg),
                     };
-                    self.try_emit_broadcast(PeerMessage::NewBlock(block)).into()
                 }
-                EthMessage::Transactions(msg) => {
-                    self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
-                }
-                EthMessage::NewPooledTransactionHashes66(msg) => {
-                    self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
-                }
-                EthMessage::NewPooledTransactionHashes68(msg) => {
-                    self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
-                }
-                EthMessage::GetBlockHeaders(req) => {
-                    on_request!(req, BlockHeaders, GetBlockHeaders)
-                }
-                EthMessage::BlockHeaders(resp) => {
-                    on_response!(resp, GetBlockHeaders)
-                }
-                EthMessage::GetBlockBodies(req) => {
-                    on_request!(req, BlockBodies, GetBlockBodies)
-                }
-                EthMessage::BlockBodies(resp) => {
-                    on_response!(resp, GetBlockBodies)
-                }
-                EthMessage::GetPooledTransactions(req) => {
-                    on_request!(req, PooledTransactions, GetPooledTransactions)
-                }
-                EthMessage::PooledTransactions(resp) => {
-                    on_response!(resp, GetPooledTransactions)
-                }
-                EthMessage::GetNodeData(req) => {
-                    on_request!(req, NodeData, GetNodeData)
-                }
-                EthMessage::NodeData(resp) => {
-                    on_response!(resp, GetNodeData)
-                }
-                EthMessage::GetReceipts(req) => {
-                    if self.conn.version() >= EthVersion::Eth69 {
-                        on_request!(req, Receipts69, GetReceipts69)
-                    } else {
-                        on_request!(req, Receipts, GetReceipts)
-                    }
-                }
-                EthMessage::Receipts(resp) => {
-                    on_response!(resp, GetReceipts)
-                }
-                EthMessage::Receipts69(resp) => {
-                    on_response!(resp, GetReceipts69)
-                }
-                EthMessage::BlockRangeUpdate(msg) => {
-                    // Validate that earliest <= latest according to the spec
-                    if msg.earliest > msg.latest {
-                        return OnIncomingMessageOutcome::BadMessage {
-                            error: EthStreamError::InvalidMessage(MessageError::Other(format!(
-                                "invalid block range: earliest ({}) > latest ({})",
-                                msg.earliest, msg.latest
-                            ))),
-                            message: EthMessage::BlockRangeUpdate(msg),
-                        };
-                    }
 
                     // Validate that the latest hash is not zero
                     if msg.latest_hash.is_zero() {
@@ -464,52 +468,10 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle an internal peer request that will be sent to the remote.
     fn on_internal_peer_request(&mut self, request: PeerRequest<N>, deadline: Instant) {
         let request_id = self.next_id();
-
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let (outgoing, stored_request) = match request {
-            PeerRequest::SnapGetAccountRange { mut request, response } => {
-                request.request_id = request_id;
-                (
-                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                        SnapProtocolMessage::GetAccountRange(request.clone()),
-                    )),
-                    PeerRequest::SnapGetAccountRange { request, response },
-                )
-            }
-            PeerRequest::SnapGetStorageRanges { mut request, response } => {
-                request.request_id = request_id;
-                (
-                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                        SnapProtocolMessage::GetStorageRanges(request.clone()),
-                    )),
-                    PeerRequest::SnapGetStorageRanges { request, response },
-                )
-            }
-            PeerRequest::SnapGetByteCodes { mut request, response } => {
-                request.request_id = request_id;
-                (
-                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                        SnapProtocolMessage::GetByteCodes(request.clone()),
-                    )),
-                    PeerRequest::SnapGetByteCodes { request, response },
-                )
-            }
-            PeerRequest::SnapGetTrieNodes { mut request, response } => {
-                request.request_id = request_id;
-                (
-                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                        SnapProtocolMessage::GetTrieNodes(request.clone()),
-                    )),
-                    PeerRequest::SnapGetTrieNodes { request, response },
-                )
-            }
-            other => {
-                let msg = other.create_request_message(request_id);
-                (msg.into(), other)
-            }
-        };
+        let msg = request.create_request_message(request_id).map_versioned(self.conn.version());
 
-        self.queued_outgoing.push_back(outgoing);
+        self.queued_outgoing.push_back(msg.into());
         let req = InflightRequest {
             request: RequestState::Waiting(stored_request),
             timestamp: Instant::now(),

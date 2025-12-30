@@ -983,6 +983,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     #[should_panic(expected = "transaction already included")]
     fn test_handle_duplicates() {
         let mut f = MockTransactionFactory::default();

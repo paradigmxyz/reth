@@ -1,5 +1,7 @@
 //! Contains common `reth` arguments
 
+pub use reth_primitives_traits::header::HeaderMut;
+
 use alloy_primitives::B256;
 use clap::Parser;
 use reth_chainspec::EthChainSpec;
@@ -21,7 +23,10 @@ use reth_node_core::{
     dirs::{ChainPath, DataDirPath},
 };
 use reth_provider::{
-    providers::{BlockchainProvider, NodeTypesForProvider, StaticFileProvider},
+    providers::{
+        BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
+        StaticFileProviderBuilder,
+    },
     ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
@@ -73,10 +78,12 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let data_dir = self.datadir.clone().resolve_datadir(self.chain.chain());
         let db_path = data_dir.db();
         let sf_path = data_dir.static_files();
+        let rocksdb_path = data_dir.rocksdb();
 
         if access.is_read_write() {
             reth_fs_util::create_dir_all(&db_path)?;
             reth_fs_util::create_dir_all(&sf_path)?;
+            reth_fs_util::create_dir_all(&rocksdb_path)?;
         }
 
         let config_path = self.config.clone().unwrap_or_else(|| data_dir.config());
@@ -96,18 +103,32 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         }
 
         info!(target: "reth::cli", ?db_path, ?sf_path, "Opening storage");
+        let genesis_block_number = self.chain.genesis().number.unwrap_or_default();
         let (db, sfp) = match access {
             AccessRights::RW => (
                 Arc::new(init_db(db_path, self.db.database_args())?),
-                StaticFileProvider::read_write(sf_path)?,
+                StaticFileProviderBuilder::read_write(sf_path)?
+                    .with_genesis_block_number(genesis_block_number)
+                    .build()?,
             ),
-            AccessRights::RO | AccessRights::RoInconsistent => (
-                Arc::new(open_db_read_only(&db_path, self.db.database_args())?),
-                StaticFileProvider::read_only(sf_path, false)?,
-            ),
+            AccessRights::RO | AccessRights::RoInconsistent => {
+                (Arc::new(open_db_read_only(&db_path, self.db.database_args())?), {
+                    let provider = StaticFileProviderBuilder::read_only(sf_path)?
+                        .with_genesis_block_number(genesis_block_number)
+                        .build()?;
+                    provider.watch_directory();
+                    provider
+                })
+            }
         };
+        // TransactionDB only support read-write mode
+        let rocksdb_provider = RocksDBProvider::builder(data_dir.rocksdb())
+            .with_default_tables()
+            .with_database_log_level(self.db.log_level)
+            .build()?;
 
-        let provider_factory = self.create_provider_factory(&config, db, sfp, access)?;
+        let provider_factory =
+            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.static_files.to_settings())?;
@@ -126,6 +147,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         config: &Config,
         db: Arc<DatabaseEnv>,
         static_file_provider: StaticFileProvider<N::Primitives>,
+        rocksdb_provider: RocksDBProvider,
         access: AccessRights,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
     where
@@ -136,6 +158,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             db,
             self.chain.clone(),
             static_file_provider,
+            rocksdb_provider,
         )?
         .with_prune_modes(prune_modes.clone());
 
@@ -226,17 +249,6 @@ type FullTypesAdapter<T> = FullNodeTypesAdapter<
     Arc<DatabaseEnv>,
     BlockchainProvider<NodeTypesWithDBAdapter<T, Arc<DatabaseEnv>>>,
 >;
-
-/// Trait for block headers that can be modified through CLI operations.
-pub trait CliHeader {
-    fn set_number(&mut self, number: u64);
-}
-
-impl CliHeader for alloy_consensus::Header {
-    fn set_number(&mut self, number: u64) {
-        self.number = number;
-    }
-}
 
 /// Helper trait with a common set of requirements for the
 /// [`NodeTypes`] in CLI.

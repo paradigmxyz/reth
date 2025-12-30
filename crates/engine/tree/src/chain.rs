@@ -219,10 +219,19 @@ pub enum HandlerEvent<T> {
 }
 
 /// Internal events issued by the [`ChainOrchestrator`].
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub enum FromOrchestrator {
     /// Invoked when backfill sync finished
     BackfillSyncFinished(ControlFlow),
     /// Invoked when backfill sync started
     BackfillSyncStarted,
+    /// Gracefully terminate the engine service.
+    ///
+    /// When this variant is received, the engine will persist all remaining in-memory blocks
+    /// to disk before shutting down. Once persistence is complete, a signal is sent through
+    /// the oneshot channel to notify the caller.
+    Terminate {
+        /// Channel to signal termination completion.
+        tx: tokio::sync::oneshot::Sender<()>,
+    },
 }

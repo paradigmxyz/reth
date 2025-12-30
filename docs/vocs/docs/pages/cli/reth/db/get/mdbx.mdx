@@ -6,7 +6,7 @@ Gets the content of a database table for the given key
 $ reth db get mdbx --help
 ```
 ```txt
-Usage: reth db get mdbx [OPTIONS] <TABLE> <KEY> [SUBKEY]
+Usage: reth db get mdbx [OPTIONS] <TABLE> <KEY> [SUBKEY] [END_KEY] [END_SUBKEY]
 
 Arguments:
   <TABLE>
@@ -17,6 +17,12 @@ Arguments:
 
   [SUBKEY]
           The subkey to get content for
+
+  [END_KEY]
+          Optional end key for range query (exclusive upper bound)
+
+  [END_SUBKEY]
+          Optional end subkey for range query (exclusive upper bound)
 
 Options:
       --raw
@@ -149,4 +155,13 @@ Tracing:
           Defaults to TRACE if not specified.
 
           [default: debug]
+
+      --tracing-otlp.sample-ratio <RATIO>
+          Trace sampling ratio to control the percentage of traces to export.
+
+          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
+
+          Example: --tracing-otlp.sample-ratio=0.0.
+
+          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```

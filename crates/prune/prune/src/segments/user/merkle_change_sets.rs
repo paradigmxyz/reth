@@ -13,6 +13,7 @@ use reth_provider::{
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment, SegmentOutput, SegmentOutputCheckpoint,
 };
+use reth_stages_types::StageId;
 use tracing::{instrument, trace};
 
 #[derive(Debug)]
@@ -47,6 +48,10 @@ where
         PrunePurpose::User
     }
 
+    fn required_stage(&self) -> Option<StageId> {
+        Some(StageId::MerkleChangeSets)
+    }
+
     #[instrument(level = "trace", target = "pruner", skip(self, provider), ret)]
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let Some(block_range) = input.get_next_block_range() else {
@@ -66,10 +71,9 @@ where
 
         let mut last_storages_pruned_block = None;
         let (storages_pruned, done) =
-            provider.tx_ref().prune_table_with_range::<tables::StoragesTrieChangeSets>(
+            provider.tx_ref().prune_dupsort_table_with_range::<tables::StoragesTrieChangeSets>(
                 storage_range,
                 &mut limiter,
-                |_| false,
                 |(BlockNumberHashedAddress((block_number, _)), _)| {
                     last_storages_pruned_block = Some(block_number);
                 },
@@ -85,10 +89,9 @@ where
             .unwrap_or(block_range_end);
 
         let (accounts_pruned, done) =
-            provider.tx_ref().prune_table_with_range::<tables::AccountsTrieChangeSets>(
+            provider.tx_ref().prune_dupsort_table_with_range::<tables::AccountsTrieChangeSets>(
                 block_range,
                 &mut limiter,
-                |_| false,
                 |row| last_accounts_pruned_block = row.0,
             )?;
 

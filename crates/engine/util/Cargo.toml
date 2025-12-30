@@ -16,7 +16,7 @@ reth-primitives-traits.workspace = true
 reth-errors.workspace = true
 reth-chainspec.workspace = true
 reth-fs-util.workspace = true
-reth-engine-primitives.workspace = true
+reth-engine-primitives = { workspace = true, features = ["std"] }
 reth-engine-tree.workspace = true
 reth-evm.workspace = true
 reth-revm.workspace = true

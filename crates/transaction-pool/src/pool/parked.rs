@@ -180,17 +180,17 @@ impl<T: ParkedOrd> ParkedPool<T> {
             return Vec::new()
         }
 
-        let mut removed = Vec::new();
+        let mut removed = Vec::with_capacity(limit.tx_excess(self.len()).unwrap_or(1));
 
         while !self.last_sender_submission.is_empty() && limit.is_exceeded(self.len(), self.size())
         {
             // NOTE: This will not panic due to `!last_sender_transaction.is_empty()`
             let sender_id = self.last_sender_submission.last().unwrap().sender_id;
-            let list = self.get_txs_by_sender(sender_id);
 
             // Drop transactions from this sender until the pool is under limits
-            for txid in list.into_iter().rev() {
-                if let Some(tx) = self.remove_transaction(&txid) {
+            while let Some((tx_id, _)) = self.by_id.range(sender_id.range()).next_back() {
+                let tx_id = *tx_id;
+                if let Some(tx) = self.remove_transaction(&tx_id) {
                     removed.push(tx);
                 }
 

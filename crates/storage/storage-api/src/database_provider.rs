@@ -183,7 +183,8 @@ where
     }
 }
 
-fn range_size_hint(range: &impl RangeBounds<u64>) -> Option<usize> {
+/// Returns the length of the range if the range has a bounded end.
+pub fn range_size_hint(range: &impl RangeBounds<u64>) -> Option<usize> {
     let start = match range.start_bound().cloned() {
         Bound::Included(start) => start,
         Bound::Excluded(start) => start.checked_add(1)?,

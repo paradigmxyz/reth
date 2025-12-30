@@ -44,6 +44,11 @@ pub enum SetCommand {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
+    /// Store transaction senders in static files instead of the database
+    TransactionSendersInStaticFiles {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
 }
 
 impl Command {
@@ -83,8 +88,13 @@ impl Command {
             println!("No storage settings found, creating new settings.");
         }
 
-        let mut settings @ StorageSettings { receipts_in_static_files: _ } =
-            settings.unwrap_or_default();
+        let mut settings @ StorageSettings {
+            receipts_in_static_files: _,
+            transaction_senders_in_static_files: _,
+            storages_history_in_rocksdb: _,
+            transaction_hash_numbers_in_rocksdb: _,
+            account_history_in_rocksdb: _,
+        } = settings.unwrap_or_else(StorageSettings::legacy);
 
         // Update the setting based on the key
         match cmd {
@@ -95,6 +105,14 @@ impl Command {
                 }
                 settings.receipts_in_static_files = value;
                 println!("Set receipts_in_static_files = {}", value);
+            }
+            SetCommand::TransactionSendersInStaticFiles { value } => {
+                if settings.transaction_senders_in_static_files == value {
+                    println!("transaction_senders_in_static_files is already set to {}", value);
+                    return Ok(());
+                }
+                settings.transaction_senders_in_static_files = value;
+                println!("Set transaction_senders_in_static_files = {}", value);
             }
         }
 

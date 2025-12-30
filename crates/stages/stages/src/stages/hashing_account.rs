@@ -86,7 +86,7 @@ impl AccountHashingStage {
         );
 
         for block in blocks {
-            provider.insert_block(block.try_recover().unwrap()).unwrap();
+            provider.insert_block(&block.try_recover().unwrap()).unwrap();
         }
         provider
             .static_file_provider()

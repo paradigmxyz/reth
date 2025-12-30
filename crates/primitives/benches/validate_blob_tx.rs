@@ -42,13 +42,12 @@ fn validate_blob_tx(
             blob_sidecar.blobs.extend(blob_sidecar_ext.blobs);
             blob_sidecar.proofs.extend(blob_sidecar_ext.proofs);
             blob_sidecar.commitments.extend(blob_sidecar_ext.commitments);
-
-            if blob_sidecar.blobs.len() > num_blobs as usize {
-                blob_sidecar.blobs.truncate(num_blobs as usize);
-                blob_sidecar.proofs.truncate(num_blobs as usize);
-                blob_sidecar.commitments.truncate(num_blobs as usize);
-            }
         }
+
+        // ensure exactly num_blobs blobs
+        blob_sidecar.blobs.truncate(num_blobs as usize);
+        blob_sidecar.proofs.truncate(num_blobs as usize);
+        blob_sidecar.commitments.truncate(num_blobs as usize);
 
         tx.blob_versioned_hashes = blob_sidecar.versioned_hashes().collect();
 

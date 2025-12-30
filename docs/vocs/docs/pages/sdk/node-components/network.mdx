@@ -41,12 +41,25 @@ The network uses multiple discovery mechanisms to find and connect to peers:
 
 ### Protocol Support
 - **ETH Protocol**: Core Ethereum wire protocol for blocks and transactions
-
+ 
+### Network Mode
+- **PoS networks**: Block broadcasting is disabled and considered a protocol violation. New blocks are obtained from the consensus layer and requested over devp2p.
+- **PoW networks**: Block announcements are enabled to help propagate new blocks quickly.
+ 
 ### Message Broadcasting
 The network efficiently propagates new blocks and transactions to peers using:
 - Transaction pooling and deduplication
 - Block announcement strategies
 - Bandwidth management
+
+Note: In PoS networks, block broadcasting is disabled and considered a protocol violation. New blocks are obtained via the consensus layer (CL) and requested over devp2p. In PoW mode, block announcements are enabled.
+
+### Transaction Gossip Control
+- A `tx_gossip_disabled` flag can be used to disable transaction gossip end-to-end.
+- This is useful for private nodes, bandwidth-constrained deployments, or setups that rely on out-of-band transaction ingestion.
+
+### NAT and External IP Resolution
+- Optional NAT resolver support helps determine and advertise the correct external IP and port for discovery and inbound connectivity.
 
 ## Next Steps
 

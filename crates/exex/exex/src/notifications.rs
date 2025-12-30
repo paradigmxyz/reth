@@ -354,10 +354,10 @@ where
     /// canonical chain.
     ///
     /// Possible situations are:
-    /// - ExEx is behind the node head (`node_head.number < exex_head.number`). Backfill from the
+    /// - ExEx is behind the node head (`exex_head.number < node_head.number`). Backfill from the
     ///   node database.
-    /// - ExEx is at the same block number as the node head (`node_head.number ==
-    ///   exex_head.number`). Nothing to do.
+    /// - ExEx is at the same block number as the node head (`exex_head.number ==
+    ///   node_head.number`). Nothing to do.
     fn check_backfill(&mut self) -> eyre::Result<()> {
         let backfill_job_factory =
             BackfillJobFactory::new(self.evm_config.clone(), self.provider.clone());
@@ -481,12 +481,12 @@ mod tests {
             &mut rng,
             genesis_block.number + 1,
             BlockParams { parent: Some(genesis_hash), tx_count: Some(0), ..Default::default() },
-        );
-        let provider_rw = provider_factory.provider_rw()?;
-        provider_rw.insert_block(node_head_block.clone().try_recover()?)?;
-        provider_rw.commit()?;
-
+        )
+        .try_recover()?;
         let node_head = node_head_block.num_hash();
+        let provider_rw = provider_factory.provider_rw()?;
+        provider_rw.insert_block(&node_head_block)?;
+        provider_rw.commit()?;
         let exex_head =
             ExExHead { block: BlockNumHash { number: genesis_block.number, hash: genesis_hash } };
 
@@ -613,7 +613,7 @@ mod tests {
         .try_recover()?;
         let node_head = node_head_block.num_hash();
         let provider_rw = provider.database_provider_rw()?;
-        provider_rw.insert_block(node_head_block)?;
+        provider_rw.insert_block(&node_head_block)?;
         provider_rw.commit()?;
         let node_head_notification = ExExNotification::ChainCommitted {
             new: Arc::new(

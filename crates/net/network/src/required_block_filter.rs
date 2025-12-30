@@ -17,7 +17,7 @@ use tracing::{debug, info, trace};
 /// This task listens for new peer sessions and checks if they have the required
 /// block hashes. Peers that don't have these blocks are banned.
 ///
-/// This type is mainly used to connect peers on shadow forks (e.g. mainnet shadowfork=
+/// This type is mainly used to connect peers on shadow forks (e.g. mainnet shadowfork)
 pub struct RequiredBlockFilter<N> {
     /// Network handle for listening to events and managing peer reputation.
     network: N,
@@ -90,7 +90,7 @@ where
         for block_num_hash in block_num_hashes {
             // Skip if peer's block number is lower than required, peer might also be syncing and
             // still on the same chain.
-            if block_num_hash.number > 0 && latest_peer_block <= block_num_hash.number {
+            if block_num_hash.number > 0 && latest_peer_block < block_num_hash.number {
                 debug!(target: "net::filter", "Skipping check for block {} - peer {} only at block {}", 
                        block_num_hash.number, peer_id, latest_peer_block);
                 continue;

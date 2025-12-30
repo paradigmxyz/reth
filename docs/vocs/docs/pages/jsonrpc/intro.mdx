@@ -26,8 +26,14 @@ The methods are grouped into namespaces, which are listed below:
 | [`trace`](/jsonrpc/trace)   | The `trace` API provides several methods to inspect the Ethereum state, including Parity-style traces. | No        |
 | [`admin`](/jsonrpc/admin)   | The `admin` API allows you to configure your node.                                                     | **Yes**   |
 | [`rpc`](/jsonrpc/rpc)       | The `rpc` API provides information about the RPC server and its modules.                               | No        |
+| [`reth`](/jsonrpc/reth)     | The `reth` API provides reth-specific methods like balance changes and chain notifications.            | No        |
+| `ots`                       | The `ots` API provides Otterscan-compatible methods for block exploration.                             | No        |
+| `flashbots`                 | The `flashbots` API provides block submission validation methods for builders.                         | No        |
+| `miner`                     | The `miner` API allows you to configure miner/builder settings like extra data and gas limits.         | **Yes**   |
+| `mev`                       | The `mev` API provides MEV bundle submission and simulation methods.                                   | No        |
+| `testing`                   | The `testing` API provides methods for building blocks in a single call (testing only).                | **Yes**   |
 
-Note that some APIs are sensitive, since they can be used to configure your node (`admin`), or access accounts stored on the node (`eth`).
+Note that some APIs are sensitive, since they can be used to configure your node (`admin`, `miner`), access accounts stored on the node (`eth`), or perform testing operations (`testing`).
 
 Generally, it is advisable to not expose any JSONRPC namespace publicly, unless you know what you are doing.
 
@@ -61,7 +67,7 @@ To enable JSON-RPC namespaces on the HTTP server, pass each namespace separated 
 reth node --http --http.api eth,net,trace
 ```
 
-You can pass the `all` option, which is a convenient wrapper for all the JSON-RPC namespaces `admin,debug,eth,net,trace,txpool,web3,rpc` on the HTTP server:
+You can pass the `all` option, which is a convenient wrapper for all the JSON-RPC namespaces `admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev,testing` on the HTTP server:
 
 ```bash
 reth node --http --http.api all
@@ -70,6 +76,14 @@ reth node --http --http.api all
 ```bash
 reth node --http --http.api All
 ```
+
+Similarly, you can pass the `none` option (also case-insensitive) to start the HTTP server without exposing any JSON-RPC namespaces on that transport:
+
+```bash
+reth node --http --http.api none
+```
+
+The same options (`all` and `none`) are supported for the WebSocket transport via `--ws.api`.
 
 You can also restrict who can access the HTTP server by specifying a domain for Cross-Origin requests. This is important, since any application local to your node will be able to access the RPC server:
 
@@ -117,7 +131,7 @@ You can use `curl`, a programming language with a low-level library, or a tool l
 As a reminder, you need to run the command below to enable all of these APIs using an HTTP transport:
 
 ```bash
-reth node --http --http.api "admin,debug,eth,net,trace,txpool,web3,rpc"
+reth node --http --http.api "admin,debug,eth,net,trace,txpool,web3,rpc,reth,ots,flashbots,miner,mev,testing"
 ```
 
 This allows you to then call:

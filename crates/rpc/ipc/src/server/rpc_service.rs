@@ -107,18 +107,13 @@ impl RpcServiceT for RpcService {
 
     fn batch<'a>(&self, req: Batch<'a>) -> impl Future<Output = Self::BatchResponse> + Send + 'a {
         let entries: Vec<_> = req.into_iter().collect();
-
-        let mut got_notif = false;
         let mut batch_response = BatchResponseBuilder::new_with_limit(self.max_response_body_size);
 
         let mut pending_calls: FuturesOrdered<_> = entries
             .into_iter()
             .filter_map(|v| match v {
                 Ok(BatchEntry::Call(call)) => Some(Either::Right(self.call(call))),
-                Ok(BatchEntry::Notification(_n)) => {
-                    got_notif = true;
-                    None
-                }
+                Ok(BatchEntry::Notification(_n)) => None,
                 Err(_err) => Some(Either::Left(async {
                     MethodResponse::error(Id::Null, ErrorObject::from(ErrorCode::InvalidRequest))
                 })),

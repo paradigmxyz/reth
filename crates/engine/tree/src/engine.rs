@@ -11,7 +11,7 @@ use reth_chain_state::ExecutedBlock;
 use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::PayloadTypes;
-use reth_primitives_traits::{Block, NodePrimitives, RecoveredBlock};
+use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
 use std::{
     collections::HashSet,
     fmt::Display,
@@ -307,7 +307,7 @@ pub enum FromEngine<Req, B: Block> {
     /// Request from the engine.
     Request(Req),
     /// Downloaded blocks from the network.
-    DownloadedBlocks(Vec<RecoveredBlock<B>>),
+    DownloadedBlocks(Vec<SealedBlock<B>>),
 }
 
 impl<Req: Display, B: Block> Display for FromEngine<Req, B> {

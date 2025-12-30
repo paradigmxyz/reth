@@ -72,11 +72,14 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
 /// * If V4, this ensures that the payload timestamp is within the Prague timestamp.
 /// * If V5, this ensures that the payload timestamp is within the Osaka timestamp.
 ///
+/// Additionally, it ensures that `engine_getPayloadV4` is not used for an Osaka payload.
+///
 /// Otherwise, this will return [`EngineObjectValidationError::UnsupportedFork`].
 pub fn validate_payload_timestamp(
     chain_spec: impl EthereumHardforks,
     version: EngineApiMessageVersion,
     timestamp: u64,
+    kind: MessageValidationKind,
 ) -> Result<(), EngineObjectValidationError> {
     let is_cancun = chain_spec.is_cancun_active_at_timestamp(timestamp);
     if version.is_v2() && is_cancun {
@@ -154,6 +157,11 @@ pub fn validate_payload_timestamp(
         //
         // 1. Client software MUST return -38005: Unsupported fork error if the timestamp of the
         //    built payload does not fall within the time frame of the Osaka fork.
+        return Err(EngineObjectValidationError::UnsupportedFork)
+    }
+
+    // `engine_getPayloadV4` MUST reject payloads with a timestamp >= Osaka.
+    if version.is_v4() && kind == MessageValidationKind::GetPayload && is_osaka {
         return Err(EngineObjectValidationError::UnsupportedFork)
     }
 
@@ -301,7 +309,7 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
     //
     // 2. Client software **MUST** return `-38005: Unsupported fork` error if the `timestamp` of the
     //    payload does not fall within the time frame of the Cancun fork.
-    validate_payload_timestamp(chain_spec, version, timestamp)?;
+    validate_payload_timestamp(chain_spec, version, timestamp, validation_kind)?;
 
     Ok(())
 }
@@ -313,9 +321,14 @@ pub fn validate_parent_beacon_block_root_presence<T: EthereumHardforks>(
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageValidationKind {
     /// We are validating fields of a payload attributes.
+    /// This corresponds to `engine_forkchoiceUpdated`.
     PayloadAttributes,
     /// We are validating fields of a payload.
+    /// This corresponds to `engine_newPayload`.
     Payload,
+    /// We are validating a built payload.
+    /// This corresponds to `engine_getPayload`.
+    GetPayload,
 }
 
 impl MessageValidationKind {
@@ -326,7 +339,9 @@ impl MessageValidationKind {
         error: VersionSpecificValidationError,
     ) -> EngineObjectValidationError {
         match self {
-            Self::Payload => EngineObjectValidationError::Payload(error),
+            // Both NewPayload and GetPayload errors are treated as generic Payload validation
+            // errors
+            Self::Payload | Self::GetPayload => EngineObjectValidationError::Payload(error),
             Self::PayloadAttributes => EngineObjectValidationError::PayloadAttributes(error),
         }
     }
@@ -487,10 +502,39 @@ pub fn validate_execution_requests(requests: &[Bytes]) -> Result<(), EngineObjec
 mod tests {
     use super::*;
     use assert_matches::assert_matches;
+    use reth_chainspec::{ChainSpecBuilder, EthereumHardfork, ForkCondition};
 
     #[test]
     fn version_ord() {
         assert!(EngineApiMessageVersion::V4 > EngineApiMessageVersion::V3);
+    }
+
+    #[test]
+    fn validate_osaka_get_payload_restrictions() {
+        // Osaka activates at timestamp 1000
+        let osaka_activation = 1000;
+        let chain_spec = ChainSpecBuilder::mainnet()
+            .with_fork(EthereumHardfork::Prague, ForkCondition::Timestamp(0))
+            .with_fork(EthereumHardfork::Osaka, ForkCondition::Timestamp(osaka_activation))
+            .build();
+
+        // Osaka is Active + V4 + GetPayload
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V4,
+            osaka_activation,
+            MessageValidationKind::GetPayload,
+        );
+        assert_matches!(res, Err(EngineObjectValidationError::UnsupportedFork));
+
+        // Osaka is Active + V4 + Payload (NewPayload)
+        let res = validate_payload_timestamp(
+            &chain_spec,
+            EngineApiMessageVersion::V4,
+            osaka_activation,
+            MessageValidationKind::Payload,
+        );
+        assert_matches!(res, Ok(()));
     }
 
     #[test]

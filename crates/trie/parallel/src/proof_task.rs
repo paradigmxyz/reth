@@ -58,6 +58,7 @@ use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSet, PrefixSetMut},
     proof::{DecodedProofNodes, ProofRetainer},
+    BranchNodeMasks, BranchNodeMasksMap,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
@@ -1365,11 +1366,6 @@ where
                         match ctx.missed_leaves_storage_roots.entry(hashed_address) {
                             dashmap::Entry::Occupied(occ) => *occ.get(),
                             dashmap::Entry::Vacant(vac) => {
-                                let _guard = debug_span!(
-                                    target: "trie::proof_task",
-                                    "Waiting on missed leaf storage proof computation",
-                                    ?hashed_address,
-                                );
                                 let root =
                                     StorageProof::new_hashed(provider, provider, hashed_address)
                                         .with_prefix_set_mut(Default::default())
@@ -1413,11 +1409,6 @@ where
 
     // Consume remaining storage proof receivers for accounts not encountered during trie walk.
     for (hashed_address, receiver) in storage_proof_receivers {
-        let _guard = debug_span!(
-            target: "trie::proof_task",
-            "Blocking on final storage proof",
-            ?hashed_address,
-        );
         if let Ok(proof_msg) = receiver.recv() {
             // Extract storage proof from the result
             if let Ok(ProofResult::StorageProof { proof, .. }) = proof_msg.result {
@@ -1431,14 +1422,16 @@ where
     let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
     let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
 
-    let (branch_node_hash_masks, branch_node_tree_masks) = if ctx.collect_branch_node_masks {
+    let branch_node_masks = if ctx.collect_branch_node_masks {
         let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
-        (
-            updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
-            updated_branch_nodes.into_iter().map(|(path, node)| (path, node.tree_mask)).collect(),
-        )
+        updated_branch_nodes
+            .into_iter()
+            .map(|(path, node)| {
+                (path, BranchNodeMasks { hash_mask: node.hash_mask, tree_mask: node.tree_mask })
+            })
+            .collect()
     } else {
-        (Default::default(), Default::default())
+        BranchNodeMasksMap::default()
     };
 
     // Extend tracker with accumulated metrics from account cursors
@@ -1447,8 +1440,7 @@ where
 
     Ok(DecodedMultiProof {
         account_subtree: decoded_account_subtree,
-        branch_node_hash_masks,
-        branch_node_tree_masks,
+        branch_node_masks,
         storages: collected_decoded_storages,
     })
 }

@@ -36,7 +36,7 @@ use reth_network::{
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
-    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig,
+    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
@@ -118,6 +118,18 @@ pub struct NetworkArgs {
     /// Maximum number of inbound peers. default: 30
     #[arg(long)]
     pub max_inbound_peers: Option<usize>,
+
+    /// Maximum number of total peers (inbound + outbound).
+    ///
+    /// Splits peers using approximately 2:1 inbound:outbound ratio. Cannot be used together with
+    /// `--max-outbound-peers` or `--max-inbound-peers`.
+    #[arg(
+        long,
+        value_name = "COUNT",
+        conflicts_with = "max_outbound_peers",
+        conflicts_with = "max_inbound_peers"
+    )]
+    pub max_peers: Option<usize>,
 
     /// Max concurrent `GetPooledTransactions` requests.
     #[arg(long = "max-tx-reqs", value_name = "COUNT", default_value_t = DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS, verbatim_doc_comment)]
@@ -245,6 +257,34 @@ impl NetworkArgs {
             bootnodes.into_iter().filter_map(|node| node.resolve_blocking().ok()).collect()
         })
     }
+
+    /// Returns the max inbound peers (2:1 ratio).
+    pub fn resolved_max_inbound_peers(&self) -> Option<usize> {
+        if let Some(max_peers) = self.max_peers {
+            if max_peers == 0 {
+                Some(0)
+            } else {
+                let outbound = (max_peers / 3).max(1);
+                Some(max_peers.saturating_sub(outbound))
+            }
+        } else {
+            self.max_inbound_peers
+        }
+    }
+
+    /// Returns the max outbound peers (1:2 ratio).
+    pub fn resolved_max_outbound_peers(&self) -> Option<usize> {
+        if let Some(max_peers) = self.max_peers {
+            if max_peers == 0 {
+                Some(0)
+            } else {
+                Some((max_peers / 3).max(1))
+            }
+        } else {
+            self.max_outbound_peers
+        }
+    }
+
     /// Configures and returns a `TransactionsManagerConfig` based on the current settings.
     pub const fn transactions_manager_config(&self) -> TransactionsManagerConfig {
         TransactionsManagerConfig {
@@ -288,20 +328,18 @@ impl NetworkArgs {
         // Configure peer connections
         let ip_filter = self.ip_filter().unwrap_or_default();
         let peers_config = config
-            .peers
-            .clone()
-            .with_max_inbound_opt(self.max_inbound_peers)
-            .with_max_outbound_opt(self.max_outbound_peers)
+            .peers_config_with_basic_nodes_from_file(
+                self.persistent_peers_file(peers_file).as_deref(),
+            )
+            .with_max_inbound_opt(self.resolved_max_inbound_peers())
+            .with_max_outbound_opt(self.resolved_max_outbound_peers())
             .with_ip_filter(ip_filter);
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key)
-            .peer_config(config.peers_config_with_basic_nodes_from_file(
-                self.persistent_peers_file(peers_file).as_deref(),
-            ))
-            .external_ip_resolver(self.nat)
+            .external_ip_resolver(self.nat.clone())
             .sessions_config(
-                SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
+                config.sessions.clone().with_upscaled_event_buffer(peers_config.max_peers()),
             )
             .peer_config(peers_config)
             .boot_nodes(chain_bootnodes.clone())
@@ -361,7 +399,7 @@ impl NetworkArgs {
     }
 
     /// Configures the [`NatResolver`]
-    pub const fn with_nat_resolver(mut self, nat: NatResolver) -> Self {
+    pub fn with_nat_resolver(mut self, nat: NatResolver) -> Self {
         self.nat = nat;
         self
     }
@@ -436,6 +474,7 @@ impl Default for NetworkArgs {
             port: DEFAULT_DISCOVERY_PORT,
             max_outbound_peers: None,
             max_inbound_peers: None,
+            max_peers: None,
             max_concurrent_tx_requests: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS,
             max_concurrent_tx_requests_per_peer: DEFAULT_MAX_COUNT_CONCURRENT_REQUESTS_PER_PEER,
             soft_limit_byte_size_pooled_transactions_response:
@@ -674,6 +713,15 @@ fn parse_block_num_hash(s: &str) -> Result<BlockNumHash, String> {
 mod tests {
     use super::*;
     use clap::Parser;
+    use reth_chainspec::MAINNET;
+    use reth_config::Config;
+    use reth_network_peers::NodeRecord;
+    use secp256k1::SecretKey;
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
+
     /// A helper type to parse Args more easily
     #[derive(Parser)]
     struct CommandParser<T: Args> {
@@ -734,10 +782,11 @@ mod tests {
         let tests = vec![0, 10];
 
         for retries in tests {
+            let retries_str = retries.to_string();
             let args = CommandParser::<NetworkArgs>::parse_from([
                 "reth",
                 "--dns-retries",
-                retries.to_string().as_str(),
+                retries_str.as_str(),
             ])
             .args;
 
@@ -749,6 +798,96 @@ mod tests {
     fn parse_disable_tx_gossip_args() {
         let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--disable-tx-gossip"]).args;
         assert!(args.disable_tx_gossip);
+    }
+
+    #[test]
+    fn parse_max_peers_flag() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "90"]).args;
+
+        assert_eq!(args.max_peers, Some(90));
+        assert_eq!(args.max_outbound_peers, None);
+        assert_eq!(args.max_inbound_peers, None);
+        assert_eq!(args.resolved_max_outbound_peers(), Some(30));
+        assert_eq!(args.resolved_max_inbound_peers(), Some(60));
+    }
+
+    #[test]
+    fn max_peers_conflicts_with_outbound() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--max-peers",
+            "90",
+            "--max-outbound-peers",
+            "50",
+        ]);
+        assert!(
+            result.is_err(),
+            "Should fail when both --max-peers and --max-outbound-peers are used"
+        );
+    }
+
+    #[test]
+    fn max_peers_conflicts_with_inbound() {
+        let result = CommandParser::<NetworkArgs>::try_parse_from([
+            "reth",
+            "--max-peers",
+            "90",
+            "--max-inbound-peers",
+            "30",
+        ]);
+        assert!(
+            result.is_err(),
+            "Should fail when both --max-peers and --max-inbound-peers are used"
+        );
+    }
+
+    #[test]
+    fn max_peers_split_calculation() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "90"]).args;
+
+        assert_eq!(args.max_peers, Some(90));
+        assert_eq!(args.resolved_max_outbound_peers(), Some(30));
+        assert_eq!(args.resolved_max_inbound_peers(), Some(60));
+    }
+
+    #[test]
+    fn max_peers_small_values() {
+        let args1 = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "1"]).args;
+        assert_eq!(args1.resolved_max_outbound_peers(), Some(1));
+        assert_eq!(args1.resolved_max_inbound_peers(), Some(0));
+
+        let args2 = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "2"]).args;
+        assert_eq!(args2.resolved_max_outbound_peers(), Some(1));
+        assert_eq!(args2.resolved_max_inbound_peers(), Some(1));
+
+        let args3 = CommandParser::<NetworkArgs>::parse_from(["reth", "--max-peers", "3"]).args;
+        assert_eq!(args3.resolved_max_outbound_peers(), Some(1));
+        assert_eq!(args3.resolved_max_inbound_peers(), Some(2));
+    }
+
+    #[test]
+    fn resolved_peers_without_max_peers() {
+        let args = CommandParser::<NetworkArgs>::parse_from([
+            "reth",
+            "--max-outbound-peers",
+            "75",
+            "--max-inbound-peers",
+            "15",
+        ])
+        .args;
+
+        assert_eq!(args.max_peers, None);
+        assert_eq!(args.resolved_max_outbound_peers(), Some(75));
+        assert_eq!(args.resolved_max_inbound_peers(), Some(15));
+    }
+
+    #[test]
+    fn resolved_peers_with_defaults() {
+        let args = CommandParser::<NetworkArgs>::parse_from(["reth"]).args;
+
+        assert_eq!(args.max_peers, None);
+        assert_eq!(args.resolved_max_outbound_peers(), None);
+        assert_eq!(args.resolved_max_inbound_peers(), None);
     }
 
     #[test]
@@ -924,5 +1063,39 @@ mod tests {
                 .args;
 
         assert!(args.ip_filter().is_err());
+    }
+
+    #[test]
+    fn network_config_preserves_basic_nodes_from_peers_file() {
+        let enode = "enode://6f8a80d14311c39f35f516fa664deaaaa13e85b2f7493f37f6144d86991ec012937307647bd3b9a82abe2974e1407241d54947bbb39763a4cac9f77166ad92a0@10.3.58.6:30303?discport=30301";
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_nanos();
+
+        let peers_file = std::env::temp_dir().join(format!("reth_peers_test_{}.json", unique));
+        fs::write(&peers_file, format!("[\"{}\"]", enode)).expect("write peers file");
+
+        // Build NetworkArgs with peers_file set and no_persist_peers=false
+        let args = NetworkArgs {
+            peers_file: Some(peers_file.clone()),
+            no_persist_peers: false,
+            ..Default::default()
+        };
+
+        // Build the network config using a deterministic secret key
+        let secret_key = SecretKey::from_byte_array(&[1u8; 32]).unwrap();
+        let builder = args.network_config::<reth_network::EthNetworkPrimitives>(
+            &Config::default(),
+            MAINNET.clone(),
+            secret_key,
+            peers_file.clone(),
+        );
+
+        let net_cfg = builder.build_with_noop_provider(MAINNET.clone());
+
+        // Assert basic_nodes contains our node
+        let node: NodeRecord = enode.parse().unwrap();
+        assert!(net_cfg.peers_config.basic_nodes.contains(&node));
+
+        // Cleanup
+        let _ = fs::remove_file(&peers_file);
     }
 }

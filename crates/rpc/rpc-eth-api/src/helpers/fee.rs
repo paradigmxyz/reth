@@ -110,7 +110,8 @@ pub trait EthFees:
             // increasing and 0 <= p <= 100
             // Note: The types used ensure that the percentiles are never < 0
             if let Some(percentiles) = &reward_percentiles &&
-                percentiles.windows(2).any(|w| w[0] > w[1] || w[0] > 100.)
+                (percentiles.iter().any(|p| *p < 0.0 || *p > 100.0) ||
+                    percentiles.windows(2).any(|w| w[0] > w[1]))
             {
                 return Err(EthApiError::InvalidRewardPercentiles.into())
             }

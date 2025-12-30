@@ -42,14 +42,13 @@ pub struct UnboundedMeteredSender<T> {
 }
 
 impl<T> UnboundedMeteredSender<T> {
-    /// Creates a new [`MeteredSender`] wrapping around the provided  that updates metrics on send.
-    // #[derive(Debug)]
+    /// Creates a new [`UnboundedMeteredSender`] wrapping around the provided
+    /// [`mpsc::UnboundedSender`] that updates metrics on send.
     pub fn new(sender: mpsc::UnboundedSender<T>, scope: &'static str) -> Self {
         Self { sender, metrics: MeteredSenderMetrics::new(scope) }
     }
 
-    /// Calls the underlying  that updates metrics on send.
-    // #[derive(Debug)]'s `try_send`, incrementing the appropriate
+    /// Calls the underlying [`mpsc::UnboundedSender`]'s `send`, incrementing the appropriate
     /// metrics depending on the result.
     pub fn send(&self, message: T) -> Result<(), SendError<T>> {
         match self.sender.send(message) {
@@ -74,7 +73,7 @@ impl<T> Clone for UnboundedMeteredSender<T> {
 /// A wrapper type around [Receiver](mpsc::UnboundedReceiver) that updates metrics on receive.
 #[derive(Debug)]
 pub struct UnboundedMeteredReceiver<T> {
-    /// The [Sender](mpsc::Sender) that this wraps around
+    /// The [Receiver](mpsc::UnboundedReceiver) that this wraps around
     receiver: mpsc::UnboundedReceiver<T>,
     /// Holds metrics for this type
     metrics: MeteredReceiverMetrics,

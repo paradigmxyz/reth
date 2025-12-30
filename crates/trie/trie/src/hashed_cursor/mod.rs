@@ -10,7 +10,7 @@ pub use post_state::*;
 pub mod noop;
 
 /// Mock trie cursor implementations.
-#[cfg(test)]
+#[cfg(any(test, feature = "test-utils"))]
 pub mod mock;
 
 /// Metrics tracking hashed cursor implementations.

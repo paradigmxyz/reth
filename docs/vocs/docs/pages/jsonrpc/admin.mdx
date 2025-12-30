@@ -114,6 +114,54 @@ These include general information about the node itself, as well as what protoco
 }
 ```
 
+## `admin_peers`
+
+Returns information about peers currently known to the node.
+
+| Client | Method invocation              |
+| ------ | ------------------------------ |
+| RPC    | `{"method": "admin_peers", "params": []}` |
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"admin_peers","params":[]}
+{"jsonrpc":"2.0","id":1,"result":[
+  {
+    "id":"44826a5d6a55f88a18298bca4773fca...",
+    "name":"reth/v0.0.1/x86_64-unknown-linux-gnu",
+    "enode":"enode://44826a5d6a55f88a18298bca4773fca5749cdc3a5c9f308aa7d810e9b31123f3e7c5fba0b1d70aac5308426f47df2a128a6747040a3815cc7dd7167d03be320d@192.168.1.1:30303",
+    "enr":"enr:-IS4QHCYr...",
+    "caps":["eth/67"],
+    "network":{
+      "remoteAddress":"192.168.1.1:30303",
+      "localAddress":"127.0.0.1:30303",
+      "inbound":false,
+      "trusted":false,
+      "staticNode":false
+    },
+    "protocols":{
+      "eth":{"version":67}
+    }
+  }
+]}
+```
+
+## `admin_clearTxpool`
+
+Clears all transactions from the transaction pool. Returns the number of removed transactions.
+
+| Client | Method invocation                         |
+| ------ | ----------------------------------------- |
+| RPC    | `{"method": "admin_clearTxpool", "params": []}` |
+
+### Example
+
+```js
+// > {"jsonrpc":"2.0","id":1,"method":"admin_clearTxpool","params":[]}
+{"jsonrpc":"2.0","id":1,"result":42}
+```
+
 ## `admin_peerEvents`, `admin_peerEvents_unsubscribe`
 
 Subscribe to events received by peers over the network. This creates a subscription that emits notifications about peer connections and disconnections.

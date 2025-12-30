@@ -358,6 +358,17 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_invalid_block_args_none() {
+        let expected_args = DebugArgs {
+            invalid_block_hook: Some(InvalidBlockSelection::from(vec![])),
+            ..Default::default()
+        };
+        let args =
+            CommandParser::<DebugArgs>::parse_from(["reth", "--debug.invalid-block-hook", ""]).args;
+        assert_eq!(args, expected_args);
+    }
+
+    #[test]
     fn test_parse_invalid_block_args() {
         let expected_args = DebugArgs {
             invalid_block_hook: Some(InvalidBlockSelection::from([InvalidBlockHookType::Witness])),

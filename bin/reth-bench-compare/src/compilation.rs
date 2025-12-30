@@ -100,9 +100,9 @@ impl CompilationManager {
         let mut cmd = Command::new("cargo");
         cmd.arg("build").arg("--profile").arg("profiling");
 
-        // Add features
-        cmd.arg("--features").arg(&self.features);
-        info!("Using features: {}", self.features);
+        let features = &self.features;
+        cmd.arg("--features").arg(features);
+        info!("Using features: {features}");
 
         // Add bin-specific arguments for optimism
         if is_optimism {

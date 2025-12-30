@@ -2,7 +2,6 @@ use crate::{BlockNumber, Compression};
 use alloc::{format, string::String};
 use alloy_primitives::TxNumber;
 use core::{ops::RangeInclusive, str::FromStr};
-use derive_more::Display;
 use serde::{Deserialize, Serialize};
 use strum::{EnumIs, EnumString};
 
@@ -18,7 +17,7 @@ use strum::{EnumIs, EnumString};
     Deserialize,
     Serialize,
     EnumString,
-    Display,
+    derive_more::Display,
     EnumIs,
 )]
 #[strum(serialize_all = "kebab-case")]
@@ -32,10 +31,12 @@ pub enum StaticFileSegment {
     Transactions,
     /// Static File segment responsible for the `Receipts` table.
     Receipts,
+    /// Static File segment responsible for the `TransactionSenders` table.
+    TransactionSenders,
 }
 
 impl StaticFileSegment {
-    /// Returns the segment as a string.
+    /// Returns a string representation of the segment.
     pub const fn as_str(&self) -> &'static str {
         // `strum` doesn't generate a doc comment for `into_str` when using `IntoStaticStr` derive
         // macro, so we need to manually implement it.
@@ -46,13 +47,14 @@ impl StaticFileSegment {
             Self::Headers => "headers",
             Self::Transactions => "transactions",
             Self::Receipts => "receipts",
+            Self::TransactionSenders => "transaction-senders",
         }
     }
 
     /// Returns an iterator over all segments.
     pub fn iter() -> impl Iterator<Item = Self> {
         // The order of segments is significant and must be maintained to ensure correctness.
-        [Self::Headers, Self::Transactions, Self::Receipts].into_iter()
+        [Self::Headers, Self::Transactions, Self::Receipts, Self::TransactionSenders].into_iter()
     }
 
     /// Returns the default configuration of the segment.
@@ -64,7 +66,7 @@ impl StaticFileSegment {
     pub const fn columns(&self) -> usize {
         match self {
             Self::Headers => 3,
-            Self::Transactions | Self::Receipts => 1,
+            Self::Transactions | Self::Receipts | Self::TransactionSenders => 1,
         }
     }
 
@@ -125,7 +127,7 @@ impl StaticFileSegment {
     /// Returns `true` if a segment row is linked to a transaction.
     pub const fn is_tx_based(&self) -> bool {
         match self {
-            Self::Receipts | Self::Transactions => true,
+            Self::Receipts | Self::Transactions | Self::TransactionSenders => true,
             Self::Headers => false,
         }
     }
@@ -134,7 +136,7 @@ impl StaticFileSegment {
     pub const fn is_block_based(&self) -> bool {
         match self {
             Self::Headers => true,
-            Self::Receipts | Self::Transactions => false,
+            Self::Receipts | Self::Transactions | Self::TransactionSenders => false,
         }
     }
 }
@@ -450,6 +452,12 @@ mod tests {
                 tx_range: Some(SegmentRangeInclusive::new(0, 300)),
                 segment: StaticFileSegment::Receipts,
             },
+            SegmentHeader {
+                expected_block_range: SegmentRangeInclusive::new(0, 200),
+                block_range: Some(SegmentRangeInclusive::new(0, 100)),
+                tx_range: Some(SegmentRangeInclusive::new(0, 300)),
+                segment: StaticFileSegment::TransactionSenders,
+            },
         ];
         // Check that we test all segments
         assert_eq!(
@@ -481,6 +489,7 @@ mod tests {
                 StaticFileSegment::Headers => "headers",
                 StaticFileSegment::Transactions => "transactions",
                 StaticFileSegment::Receipts => "receipts",
+                StaticFileSegment::TransactionSenders => "transaction-senders",
             };
             assert_eq!(static_str, expected_str);
         }
@@ -497,6 +506,7 @@ mod tests {
                 StaticFileSegment::Headers => "Headers",
                 StaticFileSegment::Transactions => "Transactions",
                 StaticFileSegment::Receipts => "Receipts",
+                StaticFileSegment::TransactionSenders => "TransactionSenders",
             };
             assert_eq!(ser, format!("\"{expected_str}\""));
         }

@@ -118,8 +118,6 @@ where
             results.push(executor.execute_one(&block)?);
             execution_duration += execute_start.elapsed();
 
-            // TODO(alexey): report gas metrics using `block.header.gas_used`
-
             // Seal the block back and save it
             blocks.push(block);
             // Check if we should commit now

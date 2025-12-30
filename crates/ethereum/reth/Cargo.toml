@@ -79,7 +79,10 @@ arbitrary = [
     "alloy-rpc-types-engine?/arbitrary",
     "reth-codecs?/arbitrary",
 ]
-
+keccak-cache-global = [
+    "reth-node-ethereum?/keccak-cache-global",
+    "reth-node-core?/keccak-cache-global",
+]
 test-utils = [
     "reth-chainspec/test-utils",
     "reth-consensus?/test-utils",

@@ -1,15 +1,11 @@
 //! Test setup utilities for configuring the initial state.
 
-use crate::{
-    setup_engine_with_connection, testsuite::Environment, NodeBuilderHelper,
-    PayloadAttributesBuilder,
-};
+use crate::{setup_engine_with_connection, testsuite::Environment, NodeBuilderHelper};
 use alloy_eips::BlockNumberOrTag;
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::{ForkchoiceState, PayloadAttributes};
 use eyre::{eyre, Result};
 use reth_chainspec::ChainSpec;
-use reth_engine_local::LocalPayloadAttributesBuilder;
 use reth_ethereum_primitives::Block;
 use reth_network_p2p::sync::{NetworkSyncUpdater, SyncState};
 use reth_node_api::{EngineTypes, NodeTypes, PayloadTypes, TreeConfig};
@@ -138,28 +134,19 @@ where
     ) -> Result<()>
     where
         N: NodeBuilderHelper<Payload = I>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-        >,
     {
         // Note: this future is quite large so we box it
-        Box::pin(self.apply_with_import_::<N>(env, rlp_path)).await
+        Box::pin(self.apply_with_import_(env, rlp_path)).await
     }
 
     /// Apply setup using pre-imported chain data from RLP file
-    async fn apply_with_import_<N>(
+    async fn apply_with_import_(
         &mut self,
         env: &mut Environment<I>,
         rlp_path: &Path,
-    ) -> Result<()>
-    where
-        N: NodeBuilderHelper<Payload = I>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-        >,
-    {
+    ) -> Result<()> {
         // Create nodes with imported chain data
-        let import_result = self.create_nodes_with_import::<N>(rlp_path).await?;
+        let import_result = self.create_nodes_with_import(rlp_path).await?;
 
         // Extract node clients
         let mut node_clients = Vec::new();
@@ -186,9 +173,6 @@ where
     pub async fn apply<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
         N: NodeBuilderHelper<Payload = I>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-        >,
     {
         // Note: this future is quite large so we box it
         Box::pin(self.apply_::<N>(env)).await
@@ -198,9 +182,6 @@ where
     async fn apply_<N>(&mut self, env: &mut Environment<I>) -> Result<()>
     where
         N: NodeBuilderHelper<Payload = I>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-        >,
     {
         // If import_rlp_path is set, use apply_with_import instead
         if let Some(rlp_path) = self.import_rlp_path.take() {
@@ -259,16 +240,10 @@ where
     /// Note: Currently this only supports `EthereumNode` due to the import process
     /// being Ethereum-specific. The generic parameter N is kept for consistency
     /// with other methods but is not used.
-    async fn create_nodes_with_import<N>(
+    async fn create_nodes_with_import(
         &self,
         rlp_path: &Path,
-    ) -> Result<crate::setup_import::ChainImportResult>
-    where
-        N: NodeBuilderHelper<Payload = I>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-        >,
-    {
+    ) -> Result<crate::setup_import::ChainImportResult> {
         let chain_spec =
             self.chain_spec.clone().ok_or_else(|| eyre!("Chain specification is required"))?;
 
@@ -301,9 +276,6 @@ where
            + use<N, I>
     where
         N: NodeBuilderHelper<Payload = I>,
-        LocalPayloadAttributesBuilder<N::ChainSpec>: PayloadAttributesBuilder<
-            <<N as NodeTypes>::Payload as PayloadTypes>::PayloadAttributes,
-        >,
     {
         move |timestamp| {
             let attributes = PayloadAttributes {

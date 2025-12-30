@@ -135,6 +135,11 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound peers. default: 30
 
+      --max-peers <COUNT>
+          Maximum number of total peers (inbound + outbound).
+
+          Splits peers using approximately 2:1 inbound:outbound ratio. Cannot be used together with `--max-outbound-peers` or `--max-inbound-peers`.
+
       --max-tx-reqs <COUNT>
           Max concurrent `GetPooledTransactions` requests.
 
@@ -242,6 +247,9 @@ Datadir:
 
       --datadir.static-files <PATH>
           The absolute path to store static files in.
+
+      --datadir.rocksdb <PATH>
+          The absolute path to store `RocksDB` database in.
 
       --config <FILE>
           The path to the configuration file to use.
@@ -372,4 +380,13 @@ Tracing:
           Defaults to TRACE if not specified.
 
           [default: debug]
+
+      --tracing-otlp.sample-ratio <RATIO>
+          Trace sampling ratio to control the percentage of traces to export.
+
+          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
+
+          Example: --tracing-otlp.sample-ratio=0.0.
+
+          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```

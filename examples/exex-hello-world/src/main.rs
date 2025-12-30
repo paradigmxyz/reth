@@ -81,7 +81,7 @@ where
     let _eth_pubsub = rpc_handle.eth_handlers().pubsub.clone();
     // The TraceApi type that provides all the trace_ handlers
     let _trace_api = rpc_handle.trace_api();
-    // The DebugApi type that provides all the trace_ handlers
+    // The DebugApi type that provides all the debug_ handlers
     let _debug_api = rpc_handle.debug_api();
 
     while let Some(notification) = ctx.notifications.try_next().await? {

@@ -1,5 +1,4 @@
 use crate::metrics::PersistenceMetrics;
-use alloy_consensus::BlockHeader;
 use alloy_eips::BlockNumHash;
 use reth_chain_state::ExecutedBlock;
 use reth_errors::ProviderError;
@@ -142,27 +141,25 @@ where
         &self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
     ) -> Result<Option<BlockNumHash>, PersistenceError> {
-        let first_block_hash = blocks.first().map(|b| b.recovered_block.num_hash());
-        let last_block_hash = blocks.last().map(|b| b.recovered_block.num_hash());
-        debug!(target: "engine::persistence", first=?first_block_hash, last=?last_block_hash, "Saving range of blocks");
+        let first_block = blocks.first().map(|b| b.recovered_block.num_hash());
+        let last_block = blocks.last().map(|b| b.recovered_block.num_hash());
+        let block_count = blocks.len();
+        debug!(target: "engine::persistence", ?block_count, first=?first_block, last=?last_block, "Saving range of blocks");
 
         let start_time = Instant::now();
-        let last_block_hash_num = blocks.last().map(|block| BlockNumHash {
-            hash: block.recovered_block().hash(),
-            number: block.recovered_block().header().number(),
-        });
 
-        if last_block_hash_num.is_some() {
+        if last_block.is_some() {
             let provider_rw = self.provider.database_provider_rw()?;
 
             provider_rw.save_blocks(blocks)?;
             provider_rw.commit()?;
         }
 
-        debug!(target: "engine::persistence", first=?first_block_hash, last=?last_block_hash, "Saved range of blocks");
+        debug!(target: "engine::persistence", first=?first_block, last=?last_block, "Saved range of blocks");
 
+        self.metrics.save_blocks_block_count.record(block_count as f64);
         self.metrics.save_blocks_duration_seconds.record(start_time.elapsed());
-        Ok(last_block_hash_num)
+        Ok(last_block)
     }
 }
 

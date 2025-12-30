@@ -6,11 +6,12 @@ use reth_rpc_eth_api::{
     helpers::{EthState, LoadPendingBlock, LoadState},
     RpcNodeCore,
 };
+use reth_rpc_eth_types::EthApiError;
 
 impl<N, Rpc> EthState for EthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = EthApiError>,
     Self: LoadPendingBlock,
 {
     fn max_proof_window(&self) -> u64 {

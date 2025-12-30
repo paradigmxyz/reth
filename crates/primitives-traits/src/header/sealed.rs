@@ -94,7 +94,7 @@ impl<H: Sealable> SealedHeader<H> {
         *self.hash_ref()
     }
 
-    /// This is the inverse of [`Header::seal_slow`] which returns the raw header and hash.
+    /// This is the inverse of [`Self::seal_slow`] which returns the raw header and hash.
     pub fn split(self) -> (H, BlockHash) {
         let hash = self.hash();
         (self.header, hash)

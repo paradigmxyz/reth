@@ -65,7 +65,7 @@ macro_rules! impl_to_rpc_result {
             }
 
             #[inline]
-            fn map_internal_err<'a, F, M>(self, op: F) -> jsonrpsee_core::RpcResult<Ok>
+            fn map_internal_err<F, M>(self, op: F) -> jsonrpsee_core::RpcResult<Ok>
             where
                 F: FnOnce($err) -> M,
                 M: Into<String>,

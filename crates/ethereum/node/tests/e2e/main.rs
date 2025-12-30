@@ -1,6 +1,7 @@
 #![allow(missing_docs)]
 
 mod blobs;
+mod custom_genesis;
 mod dev;
 mod eth;
 mod p2p;

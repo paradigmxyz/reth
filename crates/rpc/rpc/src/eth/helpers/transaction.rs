@@ -332,7 +332,7 @@ mod tests {
         let tx_req = TransactionRequest {
             from: Some(address),
             to: Some(Address::random().into()),
-            sidecar: Some(builder.build().unwrap()),
+            sidecar: Some(builder.build().unwrap().into()),
             ..Default::default()
         };
 
@@ -370,7 +370,7 @@ mod tests {
             from: Some(address),
             to: Some(Address::random().into()),
             transaction_type: Some(3), // EIP-4844
-            sidecar: Some(builder.build().unwrap()),
+            sidecar: Some(builder.build().unwrap().into()),
             max_fee_per_blob_gas: Some(provided_blob_fee), // Already set
             ..Default::default()
         };
