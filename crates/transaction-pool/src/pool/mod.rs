@@ -309,18 +309,18 @@ where
 
     #[inline]
     fn has_event_listeners(&self) -> bool {
-        self.has_event_listeners.load(Ordering::Acquire)
+        self.has_event_listeners.load(Ordering::Relaxed)
     }
 
     #[inline]
     fn mark_event_listener_installed(&self) {
-        self.has_event_listeners.store(true, Ordering::Release);
+        self.has_event_listeners.store(true, Ordering::Relaxed);
     }
 
     #[inline]
     fn update_event_listener_state(&self, listener: &PoolEventBroadcast<T::Transaction>) {
         if listener.is_empty() {
-            self.has_event_listeners.store(false, Ordering::Release);
+            self.has_event_listeners.store(false, Ordering::Relaxed);
         }
     }
 
@@ -850,7 +850,7 @@ where
             for tx in &discarded {
                 listener.discarded(tx.hash());
             }
-        });
+        })
     }
 
     /// Notifies all listeners about the transaction movements.
