@@ -836,9 +836,8 @@ impl SparseTrieInterface for SerialSparseTrie {
                         // correctly.
                         if self.updates.is_some() {
                             // Check if the extension node child is a hash that needs to be revealed
-                            let child_is_hash = child
-                                .map(|id| self.node(id).is_hash())
-                                .unwrap_or_else(|| {
+                            let child_is_hash =
+                                child.map(|id| self.node(id).is_hash()).unwrap_or_else(|| {
                                     self.nodes.get(&current).is_some_and(|n| n.is_hash())
                                 });
                             if child_is_hash {
@@ -1338,7 +1337,8 @@ impl SparseTrieInterface for SerialSparseTrie {
 
                     // Follow the child pointer to continue traversal
                     let Some(child_id) = *child else {
-                        // Extension without child pointer - this shouldn't happen for revealed nodes
+                        // Extension without child pointer - this shouldn't happen for revealed
+                        // nodes
                         return Ok(LeafLookup::NonExistent);
                     };
                     node_id = child_id;
@@ -1628,7 +1628,11 @@ impl SerialSparseTrie {
 
                     let node_path = current;
                     current.extend(key);
-                    nodes.push(RemovedSparseNode { path: node_path, node, unset_branch_nibble: None });
+                    nodes.push(RemovedSparseNode {
+                        path: node_path,
+                        node,
+                        unset_branch_nibble: None,
+                    });
                 }
                 SparseNode::Branch { state_mask, .. } => {
                     let nibble = path.get_unchecked(current.len());
@@ -1828,7 +1832,14 @@ impl SerialSparseTrie {
         let mut targets = Vec::new();
 
         while let Some((mut path, level)) = paths.pop() {
-            match self.nodes.get(&path).unwrap() {
+            // Get node via pointer, falling back to HashMap
+            let node = self
+                .path_to_node_id
+                .get(&path)
+                .map(|&id| self.node(id))
+                .or_else(|| self.nodes.get(&path))
+                .unwrap();
+            match node {
                 SparseNode::Empty | SparseNode::Hash(_) => {}
                 SparseNode::Leaf { key: _, hash } => {
                     if hash.is_some() && !prefix_set.contains(&path) {
@@ -1916,7 +1927,12 @@ impl SerialSparseTrie {
         'main: while let Some(RlpNodePathStackItem { level, path, mut is_in_prefix_set }) =
             buffers.path_stack.pop()
         {
-            let node = self.nodes.get_mut(&path).unwrap();
+            // Get node via pointer, falling back to HashMap
+            let node = self
+                .path_to_node_id
+                .get(&path)
+                .map(|&id| self.arena.get_mut(id))
+                .unwrap_or_else(|| self.nodes.get_mut(&path).unwrap());
             trace!(
                 target: "trie::sparse",
                 ?_starting_path,
