@@ -189,6 +189,27 @@ impl<'a> EitherWriter<'a, (), ()> {
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
+    /// Extracts the raw `RocksDB` write batch from this writer, if it contains one.
+    ///
+    /// Returns `Some(WriteBatchWithTransaction)` for [`Self::RocksDB`] variant,
+    /// `None` for other variants.
+    ///
+    /// This is used to defer `RocksDB` commits to the provider level, ensuring all
+    /// storage commits (MDBX, static files, `RocksDB`) happen atomically in a single place.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pub fn into_raw_rocksdb_batch(self) -> Option<rocksdb::WriteBatchWithTransaction<true>> {
+        match self {
+            Self::Database(_) | Self::StaticFile(_) => None,
+            Self::RocksDB(batch) => Some(batch.into_inner()),
+        }
+    }
+
+    /// Stub version for non-RocksDB builds.
+    #[cfg(not(all(unix, feature = "rocksdb")))]
+    pub fn into_raw_rocksdb_batch(self) -> Option<()> {
+        None
+    }
+
     /// Increment the block number.
     ///
     /// Relevant only for [`Self::StaticFile`]. It is a no-op for [`Self::Database`].
@@ -214,27 +235,6 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
         }
-    }
-
-    /// Extracts the raw `RocksDB` write batch from this writer, if it contains one.
-    ///
-    /// Returns `Some(WriteBatchWithTransaction)` for [`Self::RocksDB`] variant,
-    /// `None` for other variants.
-    ///
-    /// This is used to defer `RocksDB` commits to the provider level, ensuring all
-    /// storage commits (MDBX, static files, `RocksDB`) happen atomically in a single place.
-    #[cfg(all(unix, feature = "rocksdb"))]
-    pub fn into_raw_rocksdb_batch(self) -> Option<rocksdb::WriteBatchWithTransaction<true>> {
-        match self {
-            Self::Database(_) | Self::StaticFile(_) => None,
-            Self::RocksDB(batch) => Some(batch.into_inner()),
-        }
-    }
-
-    /// Stub version for non-RocksDB builds.
-    #[cfg(not(all(unix, feature = "rocksdb")))]
-    pub fn into_raw_rocksdb_batch(self) -> Option<()> {
-        None
     }
 }
 
