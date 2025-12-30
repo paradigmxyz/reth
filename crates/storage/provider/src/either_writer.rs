@@ -63,9 +63,8 @@ pub enum EitherWriter<'a, CURSOR, N> {
     StaticFile(StaticFileProviderRWRefMut<'a, N>),
     /// Write to `RocksDB` using a write-only batch (historical tables).
     /// The batch is owned and extracted via `into_raw_rocksdb_batch()` after use.
-    /// Wrapped in `Option` to allow `take()` in extraction while supporting Drop.
     #[cfg(all(unix, feature = "rocksdb"))]
-    RocksDB(Option<RocksDBBatch>),
+    RocksDB(RocksDBBatch),
 }
 
 impl<'a> EitherWriter<'a, (), ()> {
@@ -146,7 +145,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(Some(_rocksdb_batch)));
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
         Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
@@ -163,7 +162,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(Some(_rocksdb_batch)));
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
         Ok(EitherWriter::Database(
@@ -182,7 +181,7 @@ impl<'a> EitherWriter<'a, (), ()> {
     {
         #[cfg(all(unix, feature = "rocksdb"))]
         if provider.cached_storage_settings().account_history_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(Some(_rocksdb_batch)));
+            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
         }
 
         Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::AccountsHistory>()?))
@@ -224,18 +223,11 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
     ///
     /// This is used to defer `RocksDB` commits to the provider level, ensuring all
     /// storage commits (MDBX, static files, `RocksDB`) happen atomically in a single place.
-    ///
-    /// # Important
-    ///
-    /// This method **must** be called for `RocksDB` writers to avoid data loss.
-    /// Dropping an `EitherWriter::RocksDB` without calling this method will panic
-    /// in debug builds and log an error in release builds.
     #[cfg(all(unix, feature = "rocksdb"))]
-    #[must_use = "the returned batch must be registered with the provider via set_pending_rocksdb_batch()"]
-    pub fn into_raw_rocksdb_batch(mut self) -> Option<rocksdb::WriteBatchWithTransaction<true>> {
-        match &mut self {
+    pub fn into_raw_rocksdb_batch(self) -> Option<rocksdb::WriteBatchWithTransaction<true>> {
+        match self {
             Self::Database(_) | Self::StaticFile(_) => None,
-            Self::RocksDB(batch) => batch.take().map(|b| b.into_inner()),
+            Self::RocksDB(batch) => Some(batch.into_inner()),
         }
     }
 
@@ -355,10 +347,7 @@ where
             }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => batch
-                .as_mut()
-                .expect("batch taken")
-                .put::<tables::TransactionHashNumbers>(hash, &tx_num),
+            Self::RocksDB(batch) => batch.put::<tables::TransactionHashNumbers>(hash, &tx_num),
         }
     }
 
@@ -373,9 +362,7 @@ where
             }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => {
-                batch.as_mut().expect("batch taken").delete::<tables::TransactionHashNumbers>(hash)
-            }
+            Self::RocksDB(batch) => batch.delete::<tables::TransactionHashNumbers>(hash),
         }
     }
 }
@@ -394,9 +381,7 @@ where
             Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => {
-                batch.as_mut().expect("batch taken").put::<tables::StoragesHistory>(key, value)
-            }
+            Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
         }
     }
 
@@ -411,9 +396,7 @@ where
             }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => {
-                batch.as_mut().expect("batch taken").delete::<tables::StoragesHistory>(key)
-            }
+            Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
         }
     }
 }
@@ -432,9 +415,7 @@ where
             Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => {
-                batch.as_mut().expect("batch taken").put::<tables::AccountsHistory>(key, value)
-            }
+            Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
         }
     }
 
@@ -449,37 +430,7 @@ where
             }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => {
-                batch.as_mut().expect("batch taken").delete::<tables::AccountsHistory>(key)
-            }
-        }
-    }
-}
-
-/// Drop implementation that detects non-empty `RocksDB` batches being dropped without extraction.
-///
-/// This catches bugs where callers forget to call `into_raw_rocksdb_batch()` on `RocksDB` writers,
-/// which would silently discard pending writes.
-#[cfg(all(unix, feature = "rocksdb"))]
-impl<CURSOR, N> Drop for EitherWriter<'_, CURSOR, N> {
-    fn drop(&mut self) {
-        if let Self::RocksDB(Some(batch)) = self &&
-            !batch.is_empty()
-        {
-            let count = batch.len();
-            // Debug builds: panic to catch the bug during development/testing
-            #[cfg(debug_assertions)]
-            panic!(
-                "EitherWriter::RocksDB dropped with {count} uncommitted writes. \
-                 Call into_raw_rocksdb_batch() to extract the batch."
-            );
-            // Release builds: log error but don't crash
-            #[cfg(not(debug_assertions))]
-            tracing::error!(
-                target: "reth::storage",
-                writes = count,
-                "EitherWriter::RocksDB dropped with uncommitted writes - data loss occurred"
-            );
+            Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
         }
     }
 }
@@ -1045,59 +996,5 @@ mod rocksdb_tests {
             Some(tx_num2),
             "Data should be visible after provider.commit()"
         );
-    }
-
-    /// Test that dropping an `EitherWriter::RocksDB` with uncommitted writes panics in debug
-    /// builds.
-    ///
-    /// This test documents the safety behavior: forgetting to call `into_raw_rocksdb_batch()`
-    /// will cause a panic in debug builds to catch bugs during development.
-    #[test]
-    #[should_panic(expected = "uncommitted writes")]
-    fn test_dropping_rocksdb_writer_with_writes_panics() {
-        let factory = create_test_provider_factory();
-
-        // Enable RocksDB for transaction hash numbers
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-        );
-
-        let hash = B256::from([1u8; 32]);
-        let tx_num = 100u64;
-
-        let rocksdb = factory.rocksdb_provider();
-        let batch = rocksdb.batch();
-
-        let provider = factory.database_provider_rw().unwrap();
-        let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
-
-        // Write data but intentionally forget to call into_raw_rocksdb_batch()
-        writer.put_transaction_hash_number(hash, tx_num, false).unwrap();
-
-        // Drop the writer without extracting the batch - should panic!
-        drop(writer);
-    }
-
-    /// Test that dropping an `EitherWriter::RocksDB` with NO writes does NOT panic.
-    ///
-    /// Empty batches are fine to drop without extraction.
-    #[test]
-    fn test_dropping_empty_rocksdb_writer_does_not_panic() {
-        let factory = create_test_provider_factory();
-
-        // Enable RocksDB for transaction hash numbers
-        factory.set_storage_settings_cache(
-            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
-        );
-
-        let rocksdb = factory.rocksdb_provider();
-        let batch = rocksdb.batch();
-
-        let provider = factory.database_provider_rw().unwrap();
-        let writer = EitherWriter::new_transaction_hash_numbers(&provider, batch).unwrap();
-
-        // Drop without writing anything or calling into_raw_rocksdb_batch()
-        // This should NOT panic because the batch is empty
-        drop(writer);
     }
 }
