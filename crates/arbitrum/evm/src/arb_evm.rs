@@ -42,24 +42,17 @@ impl FromRecoveredTx<ArbTransactionSigned> for ArbTransaction<TxEnv> {
                 tx.value = alloy_primitives::U256::ZERO;
                 tx.gas_price = 0;
             }
-            // CRITICAL FIX: Retry transactions MUST have their value set for ETH transfers to work
-            // Use max_fee_per_gas (which equals basefee) for gas accounting
+            // Arbitrum: Retry tx needs value set for ETH transfers
             reth_arbitrum_primitives::ArbTxType::Retry => {
                 tx.value = signed.value();
                 tx.gas_price = signed.max_fee_per_gas();
             }
-            // CRITICAL FIX: SubmitRetryable ends early (end_tx_now=true) but still goes through revm
-            // which pays (gas_price - basefee) * gas_used to the block beneficiary (coinbase).
-            // To prevent this unwanted coinbase tip, set gas_price = 0. The actual fee distribution
-            // is handled entirely by ArbOS hooks, not revm's standard fee mechanism.
-            // Without this fix, sequencer gets ~5 ETH per SubmitRetryable from coinbase tips!
+            // Arbitrum: SubmitRetryable uses gas_price=0 to prevent coinbase tips
             reth_arbitrum_primitives::ArbTxType::SubmitRetryable => {
                 tx.value = alloy_primitives::U256::ZERO;
                 tx.gas_price = 0;
             }
-            // CRITICAL FIX: EIP-1559, EIP-2930, EIP-4844, EIP-7702 transactions MUST have their
-            // value set for ETH transfers to work. Previously this was incorrectly set to ZERO,
-            // which caused value transfers to not execute (e.g., block 507's 0.01 ETH transfer).
+            // Arbitrum: typed txs need value set for ETH transfers
             _ => {
                 tx.value = signed.value();
                 tx.gas_price = signed.max_fee_per_gas();

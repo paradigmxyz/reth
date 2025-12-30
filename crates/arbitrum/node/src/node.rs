@@ -245,24 +245,22 @@ where
                     None => {
                         if attempts < 60 {
                             attempts += 1;
-                            reth_tracing::tracing::debug!(target: "arb-reth::follower", want_parent=%parent_hash, attempts, "parent header not yet available; waiting");
+                            reth_tracing::tracing::debug!(target: "arb::node::follower", want_parent=%parent_hash, attempts, "parent header not yet available; waiting");
                             std::thread::sleep(std::time::Duration::from_millis(250));
                             continue;
                         }
-                        reth_tracing::tracing::error!(target: "arb-reth::follower", want_parent=%parent_hash, "missing parent header after retries");
+                        reth_tracing::tracing::error!(target: "arb::node::follower", want_parent=%parent_hash, "missing parent header after retries");
                         return Err(eyre::eyre!("missing parent header"));
                     }
                 }
             }
         };
-        reth_tracing::tracing::info!(target: "arb-reth::follower", parent=%parent_hash, parent_gas_limit = sealed_parent.gas_limit(), "follower: loaded parent header");
+        reth_tracing::tracing::info!(target: "arb::node::follower", parent=%parent_hash, parent_gas_limit = sealed_parent.gas_limit(), "follower: loaded parent header");
 
         let l2_owned: Vec<u8> = l2msg_bytes.to_vec();
 
         let state_provider = provider.state_by_block_hash(parent_hash)?;
-        // CRITICAL FOR DETERMINISM: Must use .without_state_clear() to match validation!
-        // The validation code in payload_validator.rs uses this flag, so assembly must too.
-        // Otherwise empty accounts are handled differently, causing state root mismatch.
+        // Arbitrum: without_state_clear() for deterministic state root
         let mut db = State::builder()
             .with_database(StateProviderDatabase::new(&state_provider))
             .with_bundle_update()
@@ -272,7 +270,7 @@ where
         let mut attrs2 = attrs.clone();
         attrs2.prev_randao = sealed_parent.mix_hash().unwrap_or_default();
         reth_tracing::tracing::info!(
-            target: "arb-reth::follower",
+            target: "arb::node::follower",
             suggested_fee_recipient = %attrs2.suggested_fee_recipient,
             poster = %poster,
             "follower: attrs2 suggested_fee_recipient before build_next_env"
@@ -290,7 +288,7 @@ where
         )
         .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
         reth_tracing::tracing::info!(
-            target: "arb-reth::follower",
+            target: "arb::node::follower",
             suggested_fee_recipient = %next_env.suggested_fee_recipient,
             "follower: next_env suggested_fee_recipient after build_next_env"
         );
@@ -304,7 +302,7 @@ where
             const NITRO_BASE_FEE: u64 = 0x05f5e100;
             next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(NITRO_BASE_FEE));
         } else if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
-            reth_tracing::tracing::info!(target: "arb-reth::follower", l2_base_fee = bf, "using ArbOS L2 base fee for next block");
+            reth_tracing::tracing::info!(target: "arb::node::follower", l2_base_fee = bf, "using ArbOS L2 base fee for next block");
             next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(bf));
         } else {
             let parent_bf = sealed_parent.base_fee_per_gas().unwrap_or(0);
@@ -328,10 +326,10 @@ where
                     let change = if delta == 0 { 1 } else { delta };
                     next_bf = parent_bf.saturating_sub(change);
                 }
-                reth_tracing::tracing::info!(target: "arb-reth::follower", parent_base_fee = parent_bf, parent_gas_used = parent_gas_used, parent_gas_limit = parent_gas_limit, next_base_fee = next_bf, "computed next base fee via L2 EIP-1559 (fallback)");
+                reth_tracing::tracing::info!(target: "arb::node::follower", parent_base_fee = parent_bf, parent_gas_used = parent_gas_used, parent_gas_limit = parent_gas_limit, next_base_fee = next_bf, "computed next base fee via L2 EIP-1559 (fallback)");
                 next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(next_bf));
             } else {
-                reth_tracing::tracing::warn!(target: "arb-reth::follower", l1_base_fee = %l1_base_fee, "L2 base fee unavailable; falling back to L1 base fee");
+                reth_tracing::tracing::warn!(target: "arb::node::follower", l1_base_fee = %l1_base_fee, "L2 base fee unavailable; falling back to L1 base fee");
                 next_env.max_fee_per_gas = Some(l1_base_fee);
             }
         }
@@ -341,22 +339,22 @@ where
         if chain_id == 421_614 {
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
         } else if let Some(gl) = reth_arbitrum_evm::header::read_l2_per_block_gas_limit(&state_provider) {
-            reth_tracing::tracing::info!(target: "arb-reth::follower", derived_gas_limit = gl, "using ArbOS per-block gas limit for next block");
+            reth_tracing::tracing::info!(target: "arb::node::follower", derived_gas_limit = gl, "using ArbOS per-block gas limit for next block");
             next_env.gas_limit = gl;
         } else {
-            reth_tracing::tracing::warn!(target: "arb-reth::follower", "failed to read L2_PER_BLOCK_GAS_LIMIT; using Nitro default {}", INITIAL_PER_BLOCK_GAS_LIMIT_NITRO);
+            reth_tracing::tracing::warn!(target: "arb::node::follower", "failed to read L2_PER_BLOCK_GAS_LIMIT; using Nitro default {}", INITIAL_PER_BLOCK_GAS_LIMIT_NITRO);
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
         }
 
         let next_block_number = sealed_parent.number() + 1;
         reth_tracing::tracing::warn!(
-            target: "arb-reth::BLOCK_ASSEMBLY",
+            target: "arb::node::follower",
             "🔍 BLOCK_START: Creating block {} from message kind {}, delayed_messages_read {}",
             next_block_number,
             kind,
             delayed_messages_read
         );
-        reth_tracing::tracing::info!(target: "arb-reth::follower", poster = %poster, next_block_number, "follower: keeping suggested_fee_recipient from attrs");
+        reth_tracing::tracing::info!(target: "arb::node::follower", poster = %poster, next_block_number, "follower: keeping suggested_fee_recipient from attrs");
 
         let mut builder = evm_config
             .builder_for_next_block(&mut db, &sealed_parent, next_env)
@@ -426,7 +424,7 @@ where
             let l2_kind = bytes[0];
             let mut cur = &bytes[1..];
             reth_tracing::tracing::info!(
-                target: "arb-reth::decode",
+                target: "arb::node::decode",
                 l2_kind = l2_kind,
                 payload_len = cur.len(),
                 "parse_l2_message_to_txs: entering with l2_kind and payload size"
@@ -528,53 +526,21 @@ where
                     }
                 }
                 0x04 => {
-                    // ⚠️ CRITICAL FIX ENTRY POINT - SignedTx parsing (commit 81ba70691)
-                    reth_tracing::tracing::warn!(
-                        target: "arb-reth::FIX-VERIFICATION",
-                        "🔍 SIGNEDTX_FIX_CALLED: Processing 0x04 SignedTx message - SINGLE transaction (not loop)"
-                    );
-
-                    // SignedTx message contains a SINGLE transaction (not multiple like Batch)
-                    // The Go implementation reads all remaining bytes and unmarshals as one transaction
-                    // See: nitro/arbos/parse_l2.go:159-174
-
-                    // SignedTx messages can contain either:
-                    // 1. Legacy RLP transactions (first byte >= 0xc0) - no type byte
-                    // 2. Typed transactions (first byte 0x00-0x7f) - has type byte
+                    // Arbitrum: SignedTx contains exactly one transaction (not multiple)
                     let first_byte = if cur.len() >= 1 { cur[0] } else { 0xff };
                     let is_legacy_rlp = first_byte >= 0xc0;
 
-                    reth_tracing::tracing::warn!(
-                        target: "arb-reth::FIX-VERIFICATION",
-                        first_byte = format!("0x{:02x}", first_byte),
-                        is_legacy = is_legacy_rlp,
-                        data_len = cur.len(),
-                        "🔍 SIGNEDTX_FIX: Parsing SINGLE transaction (NO LOOP) - this is the fix"
-                    );
-
                     let mut s = cur;
                     let tx = if is_legacy_rlp {
-                        // Legacy RLP transaction - decode directly without type byte
                         use alloy_rlp::Decodable;
                         reth_arbitrum_primitives::ArbTransactionSigned::decode(&mut s)
                             .map_err(|e| eyre::eyre!("Failed to decode Legacy RLP transaction: {}", e))?
                     } else {
-                        // Typed transaction (EIP-2718) - use decode_2718
                         use alloy_eips::eip2718::Decodable2718;
                         reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                             .map_err(|e| eyre::eyre!("Failed to decode typed transaction: {:?}", e))?
                     };
 
-                    reth_tracing::tracing::warn!(
-                        target: "arb-reth::FIX-VERIFICATION",
-                        tx_type = ?tx.tx_type(),
-                        tx_hash = %tx.tx_hash(),
-                        consumed = cur.len() - s.len(),
-                        remaining = s.len(),
-                        "🔍 SIGNEDTX_FIX: Successfully parsed 1 transaction (NOT multiple) - fix applied"
-                    );
-
-                    // SignedTx contains exactly ONE transaction - push it to output
                     out.push(tx);
                 }
                 _ => {}
@@ -604,7 +570,7 @@ where
             const SELECTOR: [u8; 4] = [0x6b, 0xf6, 0xa4, 0x2d]; // startBlock(uint256,uint64,uint64,uint64)
             
             reth_tracing::tracing::info!(
-                target: "arb-reth::follower",
+                target: "arb::node::follower",
                 "encode_start_block_data: Using correct startBlock selector={:02x?}",
                 SELECTOR
             );
@@ -618,7 +584,7 @@ where
             let encoded_time_passed = abi_encode_u64(time_passed);
             
             reth_tracing::tracing::info!(
-                target: "arb-reth::follower",
+                target: "arb::node::follower",
                 "Encoding params: l1_base_fee={:02x?}, l1_block_number={:02x?}, l2_block_number={:02x?}, time_passed={:02x?}",
                 &encoded_l1_base_fee[..8],
                 &encoded_l1_block_number[..8],
@@ -632,7 +598,7 @@ where
             out.extend_from_slice(&encoded_time_passed);
             
             reth_tracing::tracing::info!(
-                target: "arb-reth::follower",
+                target: "arb::node::follower",
                 "Final encoded data first 8 bytes: {:02x?}",
                 &out[..std::cmp::min(8, out.len())]
             );
@@ -670,37 +636,21 @@ where
             13 => "BatchPostingReport",
             _ => "Unknown",
         };
-        reth_tracing::tracing::warn!(
-            target: "arb-reth::MESSAGE-TYPE-TRACKING",
-            kind = %kind,
-            kind_name = %kind_name,
-            data_len = l2_owned.len(),
-            "🔍 PROCESSING_MESSAGE_KIND: {} (0x{:02x}) with {} bytes",
-            kind_name, kind, l2_owned.len()
-        );
-
         let chain_id_u256 =
             alloy_primitives::U256::from(evm_config.chain_spec().chain().id());
-
-        reth_tracing::tracing::info!(
-            target: "arb-reth::follower",
-            "Before match: l2_owned len={}, l2_owned first bytes={:02x?}",
-            l2_owned.len(),
-            &l2_owned[..std::cmp::min(32, l2_owned.len())]
-        );
 
         let mut txs: Vec<reth_arbitrum_primitives::ArbTransactionSigned> = match kind {
             3 => {
                 let first = l2_owned.first().copied().unwrap_or(0xff);
                 let len = l2_owned.len();
-                reth_tracing::tracing::info!(target: "arb-reth::follower", l2_payload_len = len, l2_first_byte = first, "follower: L2_MESSAGE payload summary");
+                reth_tracing::tracing::info!(target: "arb::node::follower", l2_payload_len = len, l2_first_byte = first, "follower: L2_MESSAGE payload summary");
                 // Match Go behavior: if parsing fails, log warning and produce empty tx list
                 // See: nitro/arbos/block_processor.go:192-195
                 let parsed_txs = match parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id) {
                     Ok(txs) => txs,
                     Err(e) => {
                         reth_tracing::tracing::warn!(
-                            target: "arb-reth::follower",
+                            target: "arb::node::follower",
                             error = %e,
                             "error parsing incoming message - producing empty tx list (matching Go behavior)"
                         );
@@ -708,7 +658,7 @@ where
                     }
                 };
                 reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
+                    target: "arb::node::follower",
                     tx_count = parsed_txs.len(),
                     "L2_MESSAGE_PARSED: Derived {} transactions from L1 message",
                     parsed_txs.len()
@@ -862,7 +812,7 @@ where
                 );
                 
                 reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
+                    target: "arb::node::follower",
                     "Creating Retry transaction: retry_data_len={}, retry_data_prefix={:02x?}",
                     retry_data.len(),
                     &retry_data[..std::cmp::min(4, retry_data.len())]
@@ -871,7 +821,7 @@ where
                 let mut retry_enc = retry_env.encode_typed();
                 
                 reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
+                    target: "arb::node::follower",
                     "Retry envelope encoded: type_byte={:02x}, total_len={}, first_4_bytes={:02x?}",
                     retry_enc[0],
                     retry_enc.len(),
@@ -884,7 +834,7 @@ where
                 
                 use reth_primitives_traits::SignedTransaction;
                 reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
+                    target: "arb::node::follower",
                     "Decoded Retry transaction: tx_type={:?}, tx_hash={:?}",
                     retry_tx.tx_type(),
                     retry_tx.tx_hash()
@@ -897,27 +847,9 @@ where
                 Vec::new()
             }
             12 => {
-                reth_tracing::tracing::warn!(
-                    target: "arb-reth::ETHDEPOSIT-DEBUG",
-                    data_len = l2_owned.len(),
-                    "🔍 ETHDEPOSIT: Parsing message, data_len={} bytes",
-                    l2_owned.len()
-                );
                 let mut cur = &l2_owned[..];
                 let to = read_address20(&mut cur)?;
-                reth_tracing::tracing::warn!(
-                    target: "arb-reth::ETHDEPOSIT-DEBUG",
-                    to = %to,
-                    remaining = cur.len(),
-                    "🔍 ETHDEPOSIT: Read to address"
-                );
                 let balance = read_u256_be32(&mut cur)?;
-                reth_tracing::tracing::warn!(
-                    target: "arb-reth::ETHDEPOSIT-DEBUG",
-                    balance = %balance,
-                    remaining = cur.len(),
-                    "🔍 ETHDEPOSIT: Read balance"
-                );
                 let req = request_id.ok_or_else(|| {
                     eyre::eyre!("cannot issue deposit tx without L1 request id")
                 })?;
@@ -931,24 +863,9 @@ where
                     },
                 );
                 let mut enc = env.encode_typed();
-                reth_tracing::tracing::warn!(
-                    target: "arb-reth::ETHDEPOSIT-DEBUG",
-                    enc_len = enc.len(),
-                    "🔍 ETHDEPOSIT: Encoded deposit tx"
-                );
                 let mut s = enc.as_slice();
                 let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                     .map_err(|_| eyre::eyre!("decode deposit failed"))?;
-                use reth_primitives_traits::SignedTransaction;
-                reth_tracing::tracing::warn!(
-                    target: "arb-reth::ETHDEPOSIT-DEBUG",
-                    tx_hash = %tx.tx_hash(),
-                    tx_type = ?tx.tx_type(),
-                    from = %poster,
-                    to_addr = %to,
-                    value = %balance,
-                    "🔍 ETHDEPOSIT: Created deposit transaction"
-                );
                 vec![tx]
             }
             13 => {
@@ -998,7 +915,7 @@ where
                 let batch_data_gas = msg_batch_gas_cost.saturating_add(extra_gas);
                 
                 reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
+                    target: "arb::node::follower",
                     "BatchPostingReport: batch_timestamp={}, batch_poster={}, batch_num={}, batch_data_gas={} (msg_cost={} + extra={}), l1_base_fee={}",
                     batch_timestamp, batch_poster_addr, batch_num, batch_data_gas, msg_batch_gas_cost, extra_gas, l1_base_fee_report
                 );
@@ -1025,21 +942,21 @@ where
                     .map_err(|e| eyre::eyre!("decode BatchPostingReport internal tx failed: {}", e))?;
                 
                 reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
+                    target: "arb::node::follower",
                     "BatchPostingReport: created internal tx with selector 0xb6693771"
                 );
                 
                 vec![tx]
             }
             0xff => {
-                reth_tracing::tracing::info!(target: "arb-reth::follower", "follower: skipping invalid placeholder message kind=0xff");
+                reth_tracing::tracing::info!(target: "arb::node::follower", "follower: skipping invalid placeholder message kind=0xff");
                 Vec::new()
             }
             _ => return Err(eyre::eyre!("unknown L2 message kind")),
         };
         
         reth_tracing::tracing::info!(
-            target: "arb-reth::follower",
+            target: "arb::node::follower",
             "After match: txs.len()={}, tx_types={:?}",
             txs.len(),
             txs.iter().map(|tx| {
@@ -1053,7 +970,7 @@ where
             use alloy_consensus::Transaction;
             let input = tx.input();
             reth_tracing::tracing::info!(
-                target: "arb-reth::follower",
+                target: "arb::node::follower",
                 "TX[{}]: type={:?}, hash={:?}, input_len={}, input_prefix={:02x?}",
                 i,
                 tx.tx_type(),
@@ -1075,7 +992,7 @@ where
             }).unwrap_or(false);
 
             reth_tracing::tracing::info!(
-                target: "arb-reth::follower",
+                target: "arb::node::follower",
                 l2_block = next_block_number,
                 tx_count_before_startblock = txs.len(),
                 is_first_startblock = is_first_startblock,
@@ -1095,7 +1012,7 @@ where
                 );
                 
                 reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
+                    target: "arb::node::follower",
                     "Creating StartBlock: l1_base_fee={}, l1_block_number={}, l2_block_number={}, time_passed={}, start_data_len={}, start_data_prefix={:02x?}",
                     l1_base_fee,
                     l1_block_number,
@@ -1119,7 +1036,7 @@ where
                 use reth_primitives_traits::SignedTransaction;
                 use alloy_consensus::Transaction;
                 reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
+                    target: "arb::node::follower",
                     "Created StartBlock tx: type={:?}, hash={:?}, input_len={}, input_prefix={:02x?}",
                     start_tx.tx_type(),
                     start_tx.tx_hash(),
@@ -1130,7 +1047,7 @@ where
                 txs.insert(0, start_tx);
                 
                 reth_tracing::tracing::info!(
-                    target: "arb-reth::follower",
+                    target: "arb::node::follower",
                     "After StartBlock insertion: txs.len()={}, tx_types={:?}",
                     txs.len(),
                     txs.iter().map(|tx| format!("{:?}", tx.tx_type())).collect::<Vec<_>>()
@@ -1143,7 +1060,7 @@ where
             let tx_hashes: Vec<alloy_primitives::B256> = txs.iter().map(|t| *t.tx_hash()).collect();
             let tx_types: Vec<String> = txs.iter().map(|t| format!("{:?}", t.tx_type())).collect();
             reth_tracing::tracing::warn!(
-                target: "arb-reth::BLOCK_TX_FINAL",
+                target: "arb::node::follower",
                 "🔍 FINAL_TX_LIST: block={} kind={} tx_count={} types={:?} hashes={:?}",
                 next_block_number,
                 kind,
@@ -1153,9 +1070,9 @@ where
             );
         }
 
-        reth_tracing::tracing::info!(target: "arb-reth::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
+        reth_tracing::tracing::info!(target: "arb::node::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
 
-        reth_tracing::tracing::info!(target: "arb-reth::follower", tx_count = txs.len(), "follower: built tx list");
+        reth_tracing::tracing::info!(target: "arb::node::follower", tx_count = txs.len(), "follower: built tx list");
         use reth_primitives_traits::{Recovered, SignerRecoverable, SignedTransaction};
         
         // Use a VecDeque to allow adding scheduled transactions (like retry txs) during execution
@@ -1171,7 +1088,7 @@ where
             let gp = tx.max_fee_per_gas();
             let txh = *tx.tx_hash();
             reth_tracing::tracing::info!(
-                target: "arb-reth::follower",
+                target: "arb::node::follower",
                 tx_type = ?tx.tx_type(),
                 tx_hash = %txh,
                 sender = %sender,
@@ -1193,7 +1110,7 @@ where
                     let scheduled = reth_arbitrum_evm::scheduled_tx_sink::take();
                     if !scheduled.is_empty() {
                         reth_tracing::tracing::info!(
-                            target: "arb-reth::follower",
+                            target: "arb::node::follower",
                             scheduled_count = scheduled.len(),
                             "Found scheduled transactions after tx execution"
                         );
@@ -1203,7 +1120,7 @@ where
                             match reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut slice) {
                                 Ok(scheduled_tx) => {
                                     reth_tracing::tracing::info!(
-                                        target: "arb-reth::follower",
+                                        target: "arb::node::follower",
                                         scheduled_tx_hash = %scheduled_tx.tx_hash(),
                                         scheduled_tx_type = ?scheduled_tx.tx_type(),
                                         "Adding scheduled transaction to queue"
@@ -1212,7 +1129,7 @@ where
                                 }
                                 Err(e) => {
                                     reth_tracing::tracing::warn!(
-                                        target: "arb-reth::follower",
+                                        target: "arb::node::follower",
                                         error = %e,
                                         "Failed to decode scheduled transaction"
                                     );
@@ -1228,7 +1145,7 @@ where
                     } else {
                         // User transactions that fail are skipped (matching Go behavior)
                         reth_tracing::tracing::debug!(
-                            target: "arb-reth::follower",
+                            target: "arb::node::follower",
                             tx_hash = %txh,
                             error = %e,
                             "error applying transaction - skipping (matching Go behavior)"
@@ -1251,7 +1168,7 @@ where
                 fin_hashes.push(format!("{:#x}", t.tx_hash()));
             }
             reth_tracing::tracing::info!(
-                target: "arb-reth::follower",
+                target: "arb::node::follower",
                 finalized_txs = fin_types.len(),
                 finalized_tx_types = ?fin_types,
                 finalized_tx_hashes = ?fin_hashes,
@@ -1278,7 +1195,7 @@ where
 
         let prev_randao_hex = format!("{:#x}", attrs.prev_randao);
         reth_tracing::tracing::info!(
-            target: "arb-reth::follower",
+            target: "arb::node::follower",
             header_hash = %header_hash_hex,
             header_mix = %header_mix_hex,
             header_extra = %header_extra_hex,
@@ -1287,13 +1204,13 @@ where
             "follower: sealed header after finish"
         );
         reth_tracing::tracing::info!(
-            target: "arb-reth::follower",
+            target: "arb::node::follower",
             header_beneficiary = %header.beneficiary,
             header_nonce = ?header.nonce,
             "follower: sealed header fields"
         );
         reth_tracing::tracing::info!(
-            target: "arb-reth::follower",
+            target: "arb::node::follower",
             assembled_gas_limit = header.gas_limit,
             "follower: assembled block gas limit before import"
         );
@@ -1373,7 +1290,7 @@ where
 
             let hdr = sealed_block.header();
             reth_tracing::tracing::info!(
-                target: "arb-reth::follower",
+                target: "arb::node::follower",
                 number = hdr.number,
                 gas_limit = hdr.gas_limit,
                 base_fee = ?hdr.base_fee_per_gas,
@@ -1391,15 +1308,15 @@ where
             let np = match beacon.new_payload(payload).await {
                 Ok(res) => res,
                 Err(e) => {
-                    reth_tracing::tracing::error!(target: "arb-reth::follower", error=%e, %new_block_hash, "follower: newPayload RPC failed");
+                    reth_tracing::tracing::error!(target: "arb::node::follower", error=%e, %new_block_hash, "follower: newPayload RPC failed");
                     return Err(eyre::eyre!(e));
                 }
             };
             if !matches!(np.status, alloy_rpc_types_engine::PayloadStatusEnum::Valid | alloy_rpc_types_engine::PayloadStatusEnum::Syncing) {
-                reth_tracing::tracing::warn!(target: "arb-reth::follower", status=?np.status, %new_block_hash, "follower: newPayload not valid/syncing");
+                reth_tracing::tracing::warn!(target: "arb::node::follower", status=?np.status, %new_block_hash, "follower: newPayload not valid/syncing");
                 eyre::bail!("newPayload status not valid/syncing: {:?}", np.status);
             }
-            reth_tracing::tracing::info!(target: "arb-reth::follower", status=?np.status, latest_valid_hash=?np.latest_valid_hash, %new_block_hash, "follower: submitted newPayload for new head");
+            reth_tracing::tracing::info!(target: "arb::node::follower", status=?np.status, latest_valid_hash=?np.latest_valid_hash, %new_block_hash, "follower: submitted newPayload for new head");
 
             let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
                 head_block_hash: new_block_hash,
@@ -1407,7 +1324,7 @@ where
                 finalized_block_hash: new_block_hash,
             };
             reth_tracing::tracing::info!(
-                target: "arb-reth::follower",
+                target: "arb::node::follower",
                 head = %fcu_state.head_block_hash,
                 safe = %fcu_state.safe_block_hash,
                 finalized = %fcu_state.finalized_block_hash,
@@ -1422,15 +1339,15 @@ where
                 .await {
                 Ok(res) => res,
                 Err(e) => {
-                    reth_tracing::tracing::error!(target: "arb-reth::follower", error=%e, %new_block_hash, "follower: FCU RPC failed");
+                    reth_tracing::tracing::error!(target: "arb::node::follower", error=%e, %new_block_hash, "follower: FCU RPC failed");
                     return Err(eyre::eyre!(e));
                 }
             };
             if !matches!(fcu_resp.payload_status.status, alloy_rpc_types_engine::PayloadStatusEnum::Valid | alloy_rpc_types_engine::PayloadStatusEnum::Syncing) {
-                reth_tracing::tracing::warn!(target: "arb-reth::follower", status=?fcu_resp.payload_status.status, latest_valid_hash=?fcu_resp.payload_status.latest_valid_hash, %new_block_hash, "follower: FCU not valid/syncing");
+                reth_tracing::tracing::warn!(target: "arb::node::follower", status=?fcu_resp.payload_status.status, latest_valid_hash=?fcu_resp.payload_status.latest_valid_hash, %new_block_hash, "follower: FCU not valid/syncing");
                 eyre::bail!("forkchoiceUpdated status not valid/syncing: {:?}", fcu_resp.payload_status.status);
             }
-            reth_tracing::tracing::info!(target: "arb-reth::follower", status = ?fcu_resp.payload_status.status, latest_valid_hash=?fcu_resp.payload_status.latest_valid_hash, %new_block_hash, "follower: updated forkchoice to new head");
+            reth_tracing::tracing::info!(target: "arb::node::follower", status = ?fcu_resp.payload_status.status, latest_valid_hash=?fcu_resp.payload_status.latest_valid_hash, %new_block_hash, "follower: updated forkchoice to new head");
             Ok((new_block_hash, new_send_root))
         })
     }

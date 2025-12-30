@@ -27,11 +27,7 @@ fn storage_key_map(storage_key: &[u8], offset: u64) -> U256 {
 }
 
 /// Ensures the ArbOS account exists in bundle_state.state.
-///
-/// CRITICAL FOR DETERMINISM: We use state.database.basic() instead of state.basic()
-/// because the latter creates cache entries that can cause non-determinism between
-/// assembly and validation. By reading directly from the database, we get the correct
-/// account info (including nonce=1 from genesis) without polluting the cache.
+/// Arbitrum: use database.basic() instead of state.basic() to avoid cache non-determinism.
 fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State<D>) {
     use revm_database::{BundleAccount, AccountStatus};
     use revm_state::AccountInfo;
@@ -43,8 +39,8 @@ fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State
         // The ArbOS storage backing account has nonce=1 in genesis.
         let db_info = state.database.basic(ARBOS_STATE_ADDRESS).ok().flatten();
 
-        tracing::info!(
-            target: "arb-storage",
+        tracing::debug!(
+            target: "arb::evm::storage",
             "ensure_arbos_account_in_bundle: db_info={:?}",
             db_info.as_ref().map(|i| (i.nonce, i.balance, i.code_hash))
         );
@@ -68,22 +64,8 @@ fn ensure_arbos_account_in_bundle<D: Database>(state: &mut revm::database::State
     }
 }
 
-/// Helper function to write storage for the ArbOS account.
-///
-/// CRITICAL FIX: This now uses the proper transition mechanism instead of writing
-/// directly to bundle_state.state. The previous approach was causing storage to be
-/// lost because merge_transitions() creates bundle_state from transition_state,
-/// NOT from the existing bundle_state.state.
-///
-/// The correct flow is:
-/// 1. Load account into cache
-/// 2. Modify cache entry with storage change
-/// 3. Create TransitionAccount with storage changes
-/// 4. Call apply_transition() to register the transition
-///
-/// This ensures storage changes are properly tracked and persisted.
 /// Writes a storage slot to the ArbOS account using the proper transition mechanism.
-/// This is the correct way to persist storage changes that will survive merge_transitions().
+/// Arbitrum: uses transition mechanism for proper journaling that survives merge_transitions().
 pub fn write_arbos_storage<D: Database>(
     state: &mut revm::database::State<D>,
     slot: U256,
@@ -130,10 +112,7 @@ pub fn write_arbos_storage<D: Database>(
     // Get original value from database for proper tracking in StorageSlot
     let original_value = state.database.storage(ARBOS_STATE_ADDRESS, slot).unwrap_or(U256::ZERO);
     
-    // CRITICAL FIX: Skip no-op writes where value == current_value
-    // This matches Go nitro's SetState behavior which returns early if prev == value.
-    // We compare against current_value (including in-flight changes), not original_value.
-    // This prevents dirtying the state trie with unchanged slots.
+    // Arbitrum: skip no-op writes (value == current_value) to match Go nitro's SetState
     let prev_value = current_value.unwrap_or(original_value);
     if value == prev_value {
         return;
@@ -145,8 +124,8 @@ pub fn write_arbos_storage<D: Database>(
             Some(acc) => acc,
             None => {
                 tracing::error!(
-                    target: "arb-storage",
-                    "[STORAGE-WRITE] ArbOS account not found in cache after load_cache_account!"
+                    target: "arb::evm::storage",
+                    "ArbOS account not found in cache after load_cache_account"
                 );
                 return;
             }
@@ -194,9 +173,9 @@ pub fn write_arbos_storage<D: Database>(
 
     state.apply_transition(vec![(ARBOS_STATE_ADDRESS, transition)]);
 
-    tracing::warn!(
-        target: "arb-storage",
-        "[STORAGE-WRITE] write_arbos_storage: slot={:?} value={:?} original={:?} status={:?}",
+    tracing::debug!(
+        target: "arb::evm::storage",
+        "write_arbos_storage: slot={:?} value={:?} original={:?} status={:?}",
         slot, value, original_value, current_status
     );
 }
@@ -230,9 +209,9 @@ pub fn apply_arbsys_merkle_state<D: Database>(
     let size_slot = compute_send_merkle_slot(0);
     write_arbos_storage(state, size_slot, U256::from(new_size));
     
-    tracing::warn!(
-        target: "arb-storage",
-        "[ARBSYS-MERKLE] Applied size={} to slot={:?}",
+    tracing::debug!(
+        target: "arb::evm::storage",
+        "arbsys_merkle: applied size={} to slot={:?}",
         new_size, size_slot
     );
     
@@ -242,9 +221,9 @@ pub fn apply_arbsys_merkle_state<D: Database>(
         let value = U256::from_be_bytes(hash.0);
         write_arbos_storage(state, partial_slot, value);
         
-        tracing::warn!(
-            target: "arb-storage",
-            "[ARBSYS-MERKLE] Applied partial level={} hash={:?} to slot={:?}",
+        tracing::debug!(
+            target: "arb::evm::storage",
+            "arbsys_merkle: applied partial level={} hash={:?} to slot={:?}",
             level, hash, partial_slot
         );
     }
@@ -269,8 +248,8 @@ pub fn burn_arbsys_balance<D: Database>(
             Some(acc) => acc,
             None => {
                 tracing::error!(
-                    target: "arb-storage",
-                    "[BURN-ARBSYS] ArbSys account not found in cache after load_cache_account!"
+                    target: "arb::evm::storage",
+                    "ArbSys account not found in cache after load_cache_account"
                 );
                 return;
             }
@@ -283,9 +262,9 @@ pub fn burn_arbsys_balance<D: Database>(
         let old_balance = cached_acc.account.as_ref().map(|a| a.info.balance).unwrap_or(U256::ZERO);
         let new_balance = old_balance.saturating_sub(value_to_burn);
         
-        tracing::info!(
-            target: "arb-storage",
-            "[BURN-ARBSYS] Burning value from ArbSys: old_balance={:?} value_to_burn={:?} new_balance={:?}",
+        tracing::debug!(
+            target: "arb::evm::storage",
+            "burn_arbsys_balance: old={:?} burn={:?} new={:?}",
             old_balance, value_to_burn, new_balance
         );
         
@@ -319,9 +298,9 @@ pub fn burn_arbsys_balance<D: Database>(
 
     state.apply_transition(vec![(arbsys_address, transition)]);
 
-    tracing::info!(
-        target: "arb-storage",
-        "[BURN-ARBSYS] Applied balance burn transition: new_balance={:?} status={:?}",
+    tracing::debug!(
+        target: "arb::evm::storage",
+        "burn_arbsys_balance: applied transition new_balance={:?} status={:?}",
         current_info.map(|i| i.balance), current_status
     );
 }
@@ -381,28 +360,27 @@ pub fn read_send_merkle_partial<D: Database>(state: &mut revm::database::State<D
 }
 
 /// Logs the full ArbOS account state for debugging.
-/// Call this before state root computation to verify storage is being tracked.
 pub fn log_arbos_bundle_state<D: Database>(state: &revm::database::State<D>) {
     if let Some(acc) = state.bundle_state.state.get(&ARBOS_STATE_ADDRESS) {
-        tracing::warn!(
-            target: "arb-storage",
-            "[ARBOS-BUNDLE] ArbOS account status={:?} info_present={} storage_slots={} nonce={}",
+        tracing::debug!(
+            target: "arb::evm::storage",
+            "arbos_bundle_state: status={:?} info_present={} storage_slots={} nonce={}",
             acc.status,
             acc.info.is_some(),
             acc.storage.len(),
             acc.info.as_ref().map(|i| i.nonce).unwrap_or(0)
         );
         for (slot, slot_entry) in acc.storage.iter() {
-            tracing::warn!(
-                target: "arb-storage",
-                "[ARBOS-BUNDLE] slot={:?} present_value={:?} original={:?}",
+            tracing::debug!(
+                target: "arb::evm::storage",
+                "arbos_bundle_state: slot={:?} present={:?} original={:?}",
                 slot, slot_entry.present_value, slot_entry.previous_or_original_value
             );
         }
     } else {
-        tracing::warn!(
-            target: "arb-storage",
-            "[ARBOS-BUNDLE] ArbOS account NOT FOUND in bundle_state.state!"
+        tracing::debug!(
+            target: "arb::evm::storage",
+            "arbos_bundle_state: ArbOS account not found in bundle_state.state"
         );
     }
 }
@@ -419,9 +397,7 @@ impl<D: Database> Storage<D> {
     }
 
     pub fn open_sub_storage(&self, sub_key: &[u8]) -> Storage<D> {
-        // CRITICAL FIX: Go nitro uses empty slice for root storage, not 32 zero bytes!
-        // When base_key is B256::ZERO (root storage), use empty slice for keccak256
-        // This ensures subspace key computation matches Go nitro's storage.OpenSubStorage
+        // Arbitrum: use empty slice for root storage, not 32 zero bytes
         let base_slice: &[u8] = if self.base_key == B256::ZERO {
             &[]  // Empty slice for root storage
         } else {
@@ -584,7 +560,7 @@ impl<D: Database> StorageBackedUint64<D> {
             base_key.as_slice()
         };
         let slot = storage_key_map(storage_key, offset);
-        tracing::info!(target: "arb-storage", "StorageBackedUint64::new base_key={:?} offset={} => slot={}", base_key, offset, slot);
+        tracing::debug!(target: "arb::evm::storage", "StorageBackedUint64::new base_key={:?} offset={} => slot={}", base_key, offset, slot);
         Self { storage, slot }
     }
 
@@ -704,7 +680,7 @@ impl<D: Database> StorageBackedAddress<D> {
             base_key.as_slice()
         };
         let slot = storage_key_map(storage_key, offset);
-        tracing::warn!(target: "arb-storage", "[ITER118] StorageBackedAddress::new base_key={:?} offset={} -> slot={:?}", base_key, offset, slot);
+        tracing::debug!(target: "arb::evm::storage", "StorageBackedAddress::new base_key={:?} offset={} -> slot={:?}", base_key, offset, slot);
         Self { storage, slot }
     }
 
