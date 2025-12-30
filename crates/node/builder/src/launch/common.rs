@@ -66,8 +66,9 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
+    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -497,20 +498,54 @@ where
         )?
         .with_prune_modes(self.prune_modes());
 
-        // Check for consistency between database and static files. If it fails, it unwinds to
-        // the first block that's consistent between database and static files.
-        if let Some(unwind_target) =
-            factory.static_file_provider().check_consistency(&factory.provider()?)?
-        {
+        // Keep MDBX, static files, and RocksDB aligned. If any check fails, unwind to the
+        // earliest consistent block.
+        //
+        // Order matters:
+        // 1) heal static files (no pruning)
+        // 2) check RocksDB (needs static-file tx data)
+        // 3) check static-file checkpoints vs MDBX (may prune)
+        //
+        // Compute one unwind target and run a single unwind.
+
+        let provider_ro = factory.database_provider_ro()?;
+
+        // Step 1: heal file-level inconsistencies (no pruning)
+        factory.static_file_provider().check_file_consistency(&provider_ro)?;
+
+        // Step 2: RocksDB consistency check (needs static files tx data)
+        let rocksdb_unwind = factory.rocksdb_provider().check_consistency(&provider_ro)?;
+
+        // Step 3: Static file checkpoint consistency (may prune)
+        let static_file_unwind = factory
+            .static_file_provider()
+            .check_consistency(&provider_ro)?
+            .map(|target| match target {
+                PipelineTarget::Unwind(block) => block,
+                PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
+            });
+
+        // Take the minimum block number to ensure all storage layers are consistent.
+        let unwind_target = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
+
+        if let Some(unwind_block) = unwind_target {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
-            // instead.
+            // instead. Unwinding to 0 would leave MDBX with a huge free list size.
+            let inconsistency_source = match (rocksdb_unwind, static_file_unwind) {
+                (Some(_), Some(_)) => "RocksDB and static file",
+                (Some(_), None) => "RocksDB",
+                (None, Some(_)) => "static file",
+                (None, None) => unreachable!(),
+            };
             assert_ne!(
-                unwind_target,
-                PipelineTarget::Unwind(0),
-                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
+                unwind_block, 0,
+                "A {} inconsistency was found that would trigger an unwind to block 0",
+                inconsistency_source
             );
 
-            info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
+            let unwind_target = PipelineTarget::Unwind(unwind_block);
+
+            info!(target: "reth::cli", %unwind_target, %inconsistency_source, "Executing unwind after consistency check.");
 
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
@@ -544,7 +579,7 @@ where
                 }),
             );
             rx.await?.inspect_err(|err| {
-                error!(target: "reth::cli", unwind_target = %unwind_target, %err, "failed to run unwind")
+                error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
             })?;
         }
 
