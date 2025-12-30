@@ -131,7 +131,7 @@ pub trait TryIntoHistoricalStateProvider {
 /// Note: the `pending` block is considered the block that extends the canonical chain but one and
 /// has the `latest` block as its parent.
 ///
-/// All states are _inclusive_, meaning they include _all_ all changes made (executed transactions)
+/// All states are _inclusive_, meaning they include _all_ changes made (executed transactions)
 /// in their respective blocks. For example [`StateProviderFactory::history_by_block_number`] for
 /// block number `n` will return the state after block `n` was executed (transactions, withdrawals).
 /// In other words, all states point to the end of the state's respective block, which is equivalent
