@@ -33,51 +33,37 @@ Steps 5-6 are of interest to us as they consume items from the `network` crate:
 
 [File: bin/reth/src/node/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/bin/reth/src/node/mod.rs)
 ```rust,ignore
-let network = start_network(network_config(db.clone(), chain_id, genesis_hash)).await?;
+use futures::StreamExt;
+use reth_ethereum::{
+    network::{
+        config::rng_secret_key, NetworkConfig, NetworkEventListenerProvider, NetworkManager,
+    },
+    provider::test_utils::NoopProvider,
+};
 
-let fetch_client = Arc::new(network.fetch_client().await?);
-let mut pipeline = reth_stages::Pipeline::new()
-    .push(HeaderStage {
-        downloader: headers::reverse_headers::ReverseHeadersDownloaderBuilder::default()
-            .batch_size(config.stages.headers.downloader_batch_size)
-            .retries(config.stages.headers.downloader_retries)
-            .build(consensus.clone(), fetch_client.clone()),
-        consensus: consensus.clone(),
-        client: fetch_client.clone(),
-        network_handle: network.clone(),
-        commit_threshold: config.stages.headers.commit_threshold,
-        metrics: HeaderMetrics::default(),
-    })
-    .push(BodyStage {
-        downloader: Arc::new(
-            bodies::bodies::BodiesDownloader::new(
-                fetch_client.clone(),
-                consensus.clone(),
-            )
-            .with_batch_size(config.stages.bodies.downloader_batch_size)
-            .with_retries(config.stages.bodies.downloader_retries)
-            .with_concurrency(config.stages.bodies.downloader_concurrency),
-        ),
-        consensus: consensus.clone(),
-        commit_threshold: config.stages.bodies.commit_threshold,
-    })
-    .push(SenderRecoveryStage {
-        commit_threshold: config.stages.sender_recovery.commit_threshold,
-    })
-    .push(ExecutionStage { config: ExecutorConfig::new_ethereum() });
+// The block provider implementation (for testing/standalone usage)
+let client = NoopProvider::default();
 
-if let Some(tip) = self.tip {
-    debug!("Tip manually set: {}", tip);
-    consensus.notify_fork_choice_state(ForkchoiceState {
-        head_block_hash: tip,
-        safe_block_hash: tip,
-        finalized_block_hash: tip,
-    })?;
+// The key that's used for encrypting sessions and to identify our node
+let local_key = rng_secret_key();
+
+// Configure the network
+let config = NetworkConfig::builder(local_key).mainnet_boot_nodes().build(client);
+
+// Create the network instance
+let network = NetworkManager::eth(config).await?;
+
+// Get a handle to the network to interact with it
+let handle = network.handle().clone();
+
+// Spawn the network task
+tokio::task::spawn(network);
+
+// Interact with the network
+let mut events = handle.event_listener();
+while let Some(event) = events.next().await {
+    println!("Received event: {event:?}");
 }
-
-// Run pipeline
-info!("Starting pipeline");
-pipeline.run(db.clone()).await?;
 ```
 
 Let's begin by taking a look at the line where the network is started, with the call, unsurprisingly, to `start_network`. Sounds important, doesn't it?
