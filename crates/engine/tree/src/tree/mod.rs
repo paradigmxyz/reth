@@ -2274,8 +2274,8 @@ where
             trace!(target: "engine::tree", ?new_first, ?old_first, "Reorg detected, new and old first blocks");
 
             self.update_reorg_metrics(old.len());
-            self.reinsert_reorged_blocks(new.clone());
-            self.reinsert_reorged_blocks(old.clone());
+            self.reinsert_reorged_blocks(&new);
+            self.reinsert_reorged_blocks(&old);
         }
 
         // update the tracked in-memory state with the new chain
@@ -2302,7 +2302,7 @@ where
     }
 
     /// This reinserts any blocks in the new chain that do not already exist in the tree
-    fn reinsert_reorged_blocks(&mut self, new_chain: Vec<ExecutedBlock<N>>) {
+    fn reinsert_reorged_blocks(&mut self, new_chain: &[ExecutedBlock<N>]) {
         for block in new_chain {
             if self
                 .state
@@ -2311,7 +2311,7 @@ where
                 .is_none()
             {
                 trace!(target: "engine::tree", num=?block.recovered_block().number(), hash=?block.recovered_block().hash(), "Reinserting block into tree state");
-                self.state.tree_state.insert_executed(block);
+                self.state.tree_state.insert_executed(block.clone());
             }
         }
     }
