@@ -14,7 +14,8 @@ use reth_db_api::{tables, transaction::DbTx};
 use reth_stages_types::StageId;
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
-    DBProvider, StageCheckpointReader, StorageSettingsCache, TransactionsProvider,
+    AccountExtReader, BlockNumReader, DBProvider, StageCheckpointReader, StorageReader,
+    StorageSettingsCache, TransactionsProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 
@@ -51,7 +52,10 @@ impl RocksDBProvider {
             + StageCheckpointReader
             + StorageSettingsCache
             + StaticFileProviderFactory
-            + TransactionsProvider<Transaction: Encodable2718>,
+            + TransactionsProvider<Transaction: Encodable2718>
+            + StorageReader
+            + BlockNumReader
+            + AccountExtReader,
     {
         let mut unwind_target: Option<BlockNumber> = None;
 
@@ -239,7 +243,7 @@ impl RocksDBProvider {
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader,
+        Provider: DBProvider + StageCheckpointReader + StorageReader + BlockNumReader,
     {
         // Get the IndexStorageHistory stage checkpoint
         let checkpoint = provider
@@ -258,7 +262,7 @@ impl RocksDBProvider {
                         target: "reth::providers::rocksdb",
                         "StoragesHistory has data but checkpoint is 0, clearing all"
                     );
-                    self.prune_storages_history_above(0)?;
+                    self.prune_storages_history_above(provider, 0)?;
                     return Ok(None);
                 }
 
@@ -281,9 +285,12 @@ impl RocksDBProvider {
                         checkpoint,
                         "StoragesHistory ahead of checkpoint, pruning excess data"
                     );
-                    self.prune_storages_history_above(checkpoint)?;
-                } else if max_highest_block < checkpoint {
-                    // RocksDB is behind checkpoint, return highest block to signal unwind needed
+                    self.prune_storages_history_above(provider, checkpoint)?;
+                    return Ok(None);
+                }
+
+                // If RocksDB is behind the checkpoint, request an unwind to rebuild.
+                if max_highest_block < checkpoint {
                     tracing::warn!(
                         target: "reth::providers::rocksdb",
                         rocks_highest = max_highest_block,
@@ -308,20 +315,69 @@ impl RocksDBProvider {
 
     /// Prunes `StoragesHistory` entries where `highest_block_number` > `max_block`.
     ///
-    /// For `StoragesHistory`, the key contains `highest_block_number`, so we can iterate
-    /// and delete entries where `key.sharded_key.highest_block_number > max_block`.
+    /// Uses changeset-based pruning: queries MDBX for storage slots that changed in the
+    /// excess block range, then only deletes History entries for those specific slots.
+    /// This is more efficient than iterating the whole table.
     ///
-    /// TODO(<https://github.com/paradigmxyz/reth/issues/20417>): this iterates the whole table,
-    /// which is inefficient. Use changeset-based pruning instead.
-    fn prune_storages_history_above(&self, max_block: BlockNumber) -> ProviderResult<()> {
+    /// If `max_block == 0`, falls back to clearing all entries (full table iteration).
+    fn prune_storages_history_above<Provider>(
+        &self,
+        provider: &Provider,
+        max_block: BlockNumber,
+    ) -> ProviderResult<()>
+    where
+        Provider: StorageReader + BlockNumReader,
+    {
         use reth_db_api::models::storage_sharded_key::StorageShardedKey;
 
+        // Special case: clear all entries
+        if max_block == 0 {
+            return self.prune_storages_history_all();
+        }
+
         let mut to_delete: Vec<StorageShardedKey> = Vec::new();
-        for result in self.iter::<tables::StoragesHistory>()? {
-            let (key, _) = result?;
-            let highest_block = key.sharded_key.highest_block_number;
-            if max_block == 0 || (highest_block != u64::MAX && highest_block > max_block) {
-                to_delete.push(key);
+
+        // Try to get changesets for the optimized path.
+        // Get the last block number to determine the range for changeset query.
+        let last_block = provider.last_block_number()?;
+        let changed = if last_block > max_block {
+            provider.changed_storages_with_range((max_block + 1)..=last_block)?
+        } else {
+            Default::default()
+        };
+
+        if changed.is_empty() {
+            // Fallback: no changesets found (e.g., MDBX empty, already pruned, or test scenario).
+            // Use full table iteration to ensure correctness.
+            for result in self.iter::<tables::StoragesHistory>()? {
+                let (key, _) = result?;
+                let highest_block = key.sharded_key.highest_block_number;
+                if highest_block != u64::MAX && highest_block > max_block {
+                    to_delete.push(key);
+                }
+            }
+        } else {
+            // Optimized path: only check entries for changed (address, storage_key) pairs
+            for (address, storage_keys) in changed {
+                for storage_key in storage_keys {
+                    // Seek to entries starting from (address, storage_key, max_block + 1)
+                    let start_key = StorageShardedKey::new(address, storage_key, max_block + 1);
+
+                    for result in self.iter_from::<tables::StoragesHistory>(start_key)? {
+                        let (key, _) = result?;
+
+                        // Stop if we've moved past this (address, storage_key) pair
+                        if key.address != address || key.sharded_key.key != storage_key {
+                            break;
+                        }
+
+                        // Delete entries with highest_block > max_block (excluding sentinel)
+                        let highest_block = key.sharded_key.highest_block_number;
+                        if highest_block != u64::MAX && highest_block > max_block {
+                            to_delete.push(key);
+                        }
+                    }
+                }
             }
         }
 
@@ -331,7 +387,41 @@ impl RocksDBProvider {
                 target: "reth::providers::rocksdb",
                 deleted_count = deleted,
                 max_block,
-                "Pruning StoragesHistory entries"
+                "Pruning StoragesHistory entries (changeset-based)"
+            );
+
+            let mut batch = self.batch();
+            for key in to_delete {
+                batch.delete::<tables::StoragesHistory>(key)?;
+            }
+            batch.commit()?;
+        }
+
+        Ok(())
+    }
+
+    /// Clears all `StoragesHistory` entries.
+    ///
+    /// Used when `max_block == 0` to reset the table.
+    fn prune_storages_history_all(&self) -> ProviderResult<()> {
+        use reth_db_api::models::storage_sharded_key::StorageShardedKey;
+
+        let mut to_delete: Vec<StorageShardedKey> = Vec::new();
+        for result in self.iter::<tables::StoragesHistory>()? {
+            let (key, _) = result?;
+            let highest_block = key.sharded_key.highest_block_number;
+            // Delete all except sentinel entries
+            if highest_block != u64::MAX {
+                to_delete.push(key);
+            }
+        }
+
+        let deleted = to_delete.len();
+        if deleted > 0 {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                deleted_count = deleted,
+                "Clearing all StoragesHistory entries"
             );
 
             let mut batch = self.batch();
@@ -353,7 +443,7 @@ impl RocksDBProvider {
         provider: &Provider,
     ) -> ProviderResult<Option<BlockNumber>>
     where
-        Provider: DBProvider + StageCheckpointReader,
+        Provider: DBProvider + StageCheckpointReader + AccountExtReader + BlockNumReader,
     {
         // Get the IndexAccountHistory stage checkpoint
         let checkpoint = provider
@@ -372,7 +462,7 @@ impl RocksDBProvider {
                         target: "reth::providers::rocksdb",
                         "AccountsHistory has data but checkpoint is 0, clearing all"
                     );
-                    self.prune_accounts_history_above(0)?;
+                    self.prune_accounts_history_above(provider, 0)?;
                     return Ok(None);
                 }
 
@@ -395,7 +485,7 @@ impl RocksDBProvider {
                         checkpoint,
                         "AccountsHistory ahead of checkpoint, pruning excess data"
                     );
-                    self.prune_accounts_history_above(checkpoint)?;
+                    self.prune_accounts_history_above(provider, checkpoint)?;
                     return Ok(None);
                 }
 
@@ -425,22 +515,68 @@ impl RocksDBProvider {
 
     /// Prunes `AccountsHistory` entries where `highest_block_number` > `max_block`.
     ///
-    /// For `AccountsHistory`, the key is `ShardedKey<Address>` which contains
-    /// `highest_block_number`, so we can iterate and delete entries where
-    /// `key.highest_block_number > max_block`.
+    /// Uses changeset-based pruning: queries MDBX for accounts that changed in the
+    /// excess block range, then only deletes History entries for those specific accounts.
+    /// This is more efficient than iterating the whole table.
     ///
-    /// TODO(<https://github.com/paradigmxyz/reth/issues/20417>): this iterates the whole table,
-    /// which is inefficient. Use changeset-based pruning instead.
-    fn prune_accounts_history_above(&self, max_block: BlockNumber) -> ProviderResult<()> {
+    /// If `max_block == 0`, falls back to clearing all entries (full table iteration).
+    fn prune_accounts_history_above<Provider>(
+        &self,
+        provider: &Provider,
+        max_block: BlockNumber,
+    ) -> ProviderResult<()>
+    where
+        Provider: AccountExtReader + BlockNumReader,
+    {
         use alloy_primitives::Address;
         use reth_db_api::models::ShardedKey;
 
+        // Special case: clear all entries
+        if max_block == 0 {
+            return self.prune_accounts_history_all();
+        }
+
         let mut to_delete: Vec<ShardedKey<Address>> = Vec::new();
-        for result in self.iter::<tables::AccountsHistory>()? {
-            let (key, _) = result?;
-            let highest_block = key.highest_block_number;
-            if max_block == 0 || (highest_block != u64::MAX && highest_block > max_block) {
-                to_delete.push(key);
+
+        // Try to get changesets for the optimized path.
+        // Get the last block number to determine the range for changeset query.
+        let last_block = provider.last_block_number()?;
+        let changed = if last_block > max_block {
+            provider.changed_accounts_with_range((max_block + 1)..=last_block)?
+        } else {
+            Default::default()
+        };
+
+        if changed.is_empty() {
+            // Fallback: no changesets found (e.g., MDBX empty, already pruned, or test scenario).
+            // Use full table iteration to ensure correctness.
+            for result in self.iter::<tables::AccountsHistory>()? {
+                let (key, _) = result?;
+                let highest_block = key.highest_block_number;
+                if highest_block != u64::MAX && highest_block > max_block {
+                    to_delete.push(key);
+                }
+            }
+        } else {
+            // Optimized path: only check entries for changed addresses
+            for address in changed {
+                // Seek to entries starting from (address, max_block + 1)
+                let start_key = ShardedKey::new(address, max_block + 1);
+
+                for result in self.iter_from::<tables::AccountsHistory>(start_key)? {
+                    let (key, _) = result?;
+
+                    // Stop if we've moved past this address
+                    if key.key != address {
+                        break;
+                    }
+
+                    // Delete entries with highest_block > max_block (excluding sentinel)
+                    let highest_block = key.highest_block_number;
+                    if highest_block != u64::MAX && highest_block > max_block {
+                        to_delete.push(key);
+                    }
+                }
             }
         }
 
@@ -450,7 +586,42 @@ impl RocksDBProvider {
                 target: "reth::providers::rocksdb",
                 deleted_count = deleted,
                 max_block,
-                "Pruning AccountsHistory entries"
+                "Pruning AccountsHistory entries (changeset-based)"
+            );
+
+            let mut batch = self.batch();
+            for key in to_delete {
+                batch.delete::<tables::AccountsHistory>(key)?;
+            }
+            batch.commit()?;
+        }
+
+        Ok(())
+    }
+
+    /// Clears all `AccountsHistory` entries.
+    ///
+    /// Used when `max_block == 0` to reset the table.
+    fn prune_accounts_history_all(&self) -> ProviderResult<()> {
+        use alloy_primitives::Address;
+        use reth_db_api::models::ShardedKey;
+
+        let mut to_delete: Vec<ShardedKey<Address>> = Vec::new();
+        for result in self.iter::<tables::AccountsHistory>()? {
+            let (key, _) = result?;
+            let highest_block = key.highest_block_number;
+            // Delete all except sentinel entries
+            if highest_block != u64::MAX {
+                to_delete.push(key);
+            }
+        }
+
+        let deleted = to_delete.len();
+        if deleted > 0 {
+            tracing::info!(
+                target: "reth::providers::rocksdb",
+                deleted_count = deleted,
+                "Clearing all AccountsHistory entries"
             );
 
             let mut batch = self.batch();
