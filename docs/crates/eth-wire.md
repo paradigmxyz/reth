@@ -41,9 +41,12 @@ pub enum EthMessage<N: NetworkPrimitives = EthNetworkPrimitives> {
     GetNodeData(RequestPair<GetNodeData>),
     NodeData(RequestPair<NodeData>),
     GetReceipts(RequestPair<GetReceipts>),
+    GetReceipts70(RequestPair<GetReceipts70>),
     Receipts(RequestPair<Receipts<N::Receipt>>),
     Receipts69(RequestPair<Receipts69<N::Receipt>>),
+    Receipts70(RequestPair<Receipts70<N::Receipt>>),
     BlockRangeUpdate(BlockRangeUpdate),
+    Other(RawCapabilityMessage),
 }
 
 /// Represents message IDs for eth protocol messages.
@@ -66,6 +69,7 @@ pub enum EthMessageID {
     GetReceipts = 0x0f,
     Receipts = 0x10,
     BlockRangeUpdate = 0x11,
+    Other(u8),
 }
 
 ```
