@@ -671,6 +671,10 @@ impl<'db> RocksTx<'db> {
     }
 
     /// Lookup account history and return [`HistoryInfo`] directly.
+    ///
+    /// This is a thin wrapper around [`Self::history_info`] that:
+    /// - Builds the `ShardedKey` for the address + target block.
+    /// - Validates that the found shard belongs to the same address.
     pub fn account_history_info(
         &self,
         address: Address,
@@ -692,6 +696,10 @@ impl<'db> RocksTx<'db> {
     }
 
     /// Lookup storage history and return [`HistoryInfo`] directly.
+    ///
+    /// This is a thin wrapper around [`Self::history_info`] that:
+    /// - Builds the `StorageShardedKey` for address + storage key + target block.
+    /// - Validates that the found shard belongs to the same address and storage slot.
     pub fn storage_history_info(
         &self,
         address: Address,
@@ -731,6 +739,7 @@ impl<'db> RocksTx<'db> {
     where
         T: Table<Value = BlockNumberList>,
     {
+        // Raw iterator is needed for the backward check via `prev()`.
         let mut iter = self.raw_iterator_cf::<T>()?;
         iter.seek::<&[u8]>(encoded_key);
         Self::raw_iter_status_ok(&iter)?;
@@ -763,14 +772,16 @@ impl<'db> RocksTx<'db> {
         let chunk = T::Value::decompress(value_bytes)
             .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
 
-        // Get rank of first entry <= block_number, then adjust to get entry strictly before
+        // Get rank of first entry <= block_number, then adjust to get entry strictly before.
         let mut rank = chunk.rank(block_number);
         if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
             rank -= 1;
         }
         let found_block = chunk.select(rank);
 
-        // Lazy check for previous shard - only called when needed
+        // Lazy check for previous shard - only called when needed.
+        // If we can step to a previous shard for this same key, history already exists,
+        // so the target block is not before the first write.
         let is_before_first_write = if rank == 0 && found_block != Some(block_number) {
             iter.prev();
             Self::raw_iter_status_ok(&iter)?;
