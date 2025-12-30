@@ -324,6 +324,21 @@ where
         }
     }
 
+    #[inline]
+    fn with_event_listener<F>(&self, f: F)
+    where
+        F: FnOnce(&mut PoolEventBroadcast<T::Transaction>),
+    {
+        if !self.has_event_listeners() {
+            return
+        }
+        let mut listener = self.event_listener.write();
+        if !listener.is_empty() {
+            f(&mut listener);
+        }
+        self.update_event_listener_state(&listener);
+    }
+
     /// Returns a read lock to the pool's data.
     pub fn get_pool_data(&self) -> RwLockReadGuard<'_, TxPool<T>> {
         self.pool.read()
@@ -576,19 +591,11 @@ where
                 (Ok(AddedTransactionOutcome { hash, state }), Some(meta))
             }
             TransactionValidationOutcome::Invalid(tx, err) => {
-                if self.has_event_listeners() {
-                    let mut listener = self.event_listener.write();
-                    listener.invalid(tx.hash());
-                    self.update_event_listener_state(&listener);
-                }
+                self.with_event_listener(|listener| listener.invalid(tx.hash()));
                 (Err(PoolError::new(*tx.hash(), err)), None)
             }
             TransactionValidationOutcome::Error(tx_hash, err) => {
-                if self.has_event_listeners() {
-                    let mut listener = self.event_listener.write();
-                    listener.discarded(&tx_hash);
-                    self.update_event_listener_state(&listener);
-                }
+                self.with_event_listener(|listener| listener.discarded(&tx_hash));
                 (Err(PoolError::other(tx_hash, err)), None)
             }
         }
@@ -655,11 +662,7 @@ where
         if !discarded.is_empty() {
             // Delete any blobs associated with discarded blob transactions
             self.delete_discarded_blobs(discarded.iter());
-            if self.has_event_listeners() {
-                let mut listener = self.event_listener.write();
-                listener.discarded_many(&discarded);
-                self.update_event_listener_state(&listener);
-            }
+            self.with_event_listener(|listener| listener.discarded_many(&discarded));
 
             let discarded_hashes =
                 discarded.into_iter().map(|tx| *tx.hash()).collect::<HashSet<_>>();
@@ -837,21 +840,17 @@ where
         let OnNewCanonicalStateOutcome { mined, promoted, discarded, block_hash } = outcome;
 
         // broadcast specific transaction events
-        if self.has_event_listeners() {
-            let mut listener = self.event_listener.write();
-            if !listener.is_empty() {
-                for tx in &mined {
-                    listener.mined(tx, block_hash);
-                }
-                for tx in &promoted {
-                    listener.pending(tx.hash(), None);
-                }
-                for tx in &discarded {
-                    listener.discarded(tx.hash());
-                }
+        self.with_event_listener(|listener| {
+            for tx in &mined {
+                listener.mined(tx, block_hash);
             }
-            self.update_event_listener_state(&listener);
-        }
+            for tx in &promoted {
+                listener.pending(tx.hash(), None);
+            }
+            for tx in &discarded {
+                listener.discarded(tx.hash());
+            }
+        });
     }
 
     /// Notifies all listeners about the transaction movements.
@@ -912,20 +911,14 @@ where
             }
         }
 
-        {
-            if self.has_event_listeners() {
-                let mut listener = self.event_listener.write();
-                if !listener.is_empty() {
-                    for tx in &promoted {
-                        listener.pending(tx.hash(), None);
-                    }
-                    for tx in &discarded {
-                        listener.discarded(tx.hash());
-                    }
-                }
-                self.update_event_listener_state(&listener);
+        self.with_event_listener(|listener| {
+            for tx in &promoted {
+                listener.pending(tx.hash(), None);
             }
-        }
+            for tx in &discarded {
+                listener.discarded(tx.hash());
+            }
+        });
 
         if !discarded.is_empty() {
             // This deletes outdated blob txs from the blob store, based on the account's nonce.
@@ -943,17 +936,7 @@ where
     /// [`TransactionPool`](crate::TransactionPool) trait for a custom pool implementation
     /// [`TransactionPool::transaction_event_listener`](crate::TransactionPool).
     pub fn notify_event_listeners(&self, tx: &AddedTransaction<T::Transaction>) {
-        if !self.has_event_listeners() {
-            return
-        }
-        let mut listener = self.event_listener.write();
-        if listener.is_empty() {
-            // nothing to notify
-            self.update_event_listener_state(&listener);
-            return
-        }
-
-        match tx {
+        self.with_event_listener(|listener| match tx {
             AddedTransaction::Pending(tx) => {
                 let AddedPendingTransaction { transaction, promoted, discarded, replaced } = tx;
 
@@ -971,8 +954,7 @@ where
                     listener.replaced(replaced.clone(), *transaction.hash());
                 }
             }
-        }
-        self.update_event_listener_state(&listener);
+        });
     }
 
     /// Returns an iterator that yields transactions that are ready to be included in the block.
@@ -1035,11 +1017,7 @@ where
         }
         let removed = self.pool.write().remove_transactions(hashes);
 
-        if self.has_event_listeners() {
-            let mut listener = self.event_listener.write();
-            listener.discarded_many(&removed);
-            self.update_event_listener_state(&listener);
-        }
+        self.with_event_listener(|listener| listener.discarded_many(&removed));
 
         removed
     }
@@ -1055,13 +1033,11 @@ where
         }
         let removed = self.pool.write().remove_transactions_and_descendants(hashes);
 
-        if self.has_event_listeners() {
-            let mut listener = self.event_listener.write();
+        self.with_event_listener(|listener| {
             for tx in &removed {
                 listener.discarded(tx.hash());
             }
-            self.update_event_listener_state(&listener);
-        }
+        });
 
         removed
     }
@@ -1074,11 +1050,7 @@ where
         let sender_id = self.get_sender_id(sender);
         let removed = self.pool.write().remove_transactions_by_sender(sender_id);
 
-        if self.has_event_listeners() {
-            let mut listener = self.event_listener.write();
-            listener.discarded_many(&removed);
-            self.update_event_listener_state(&listener);
-        }
+        self.with_event_listener(|listener| listener.discarded_many(&removed));
 
         removed
     }
@@ -1213,13 +1185,9 @@ where
         if txs.0.is_empty() {
             return
         }
-        if self.has_event_listeners() {
-            let mut listener = self.event_listener.write();
-            if !listener.is_empty() {
-                txs.0.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers));
-            }
-            self.update_event_listener_state(&listener);
-        }
+        self.with_event_listener(|listener| {
+            txs.0.into_iter().for_each(|(hash, peers)| listener.propagated(&hash, peers));
+        });
     }
 
     /// Number of transactions in the entire pool
