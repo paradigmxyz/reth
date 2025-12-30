@@ -982,7 +982,14 @@ impl SparseTrieInterface for SerialSparseTrie {
         trace!(target: "trie::sparse", ?full_path, "remove_leaf called");
 
         if self.values.remove(full_path).is_none() {
-            if let Some(&SparseNode::Hash(hash)) = self.nodes.get(full_path) {
+            // Check if leaf is blinded - try pointer access first, fall back to HashMap
+            let is_blinded_hash = self
+                .path_to_node_id
+                .get(full_path)
+                .map(|&id| self.node(id))
+                .or_else(|| self.nodes.get(full_path));
+
+            if let Some(&SparseNode::Hash(hash)) = is_blinded_hash {
                 // Leaf is present in the trie, but it's blinded.
                 return Err(SparseTrieErrorKind::BlindedNode { path: *full_path, hash }.into())
             }
@@ -1619,9 +1626,9 @@ impl SerialSparseTrie {
                         );
                     }
 
-                    let path = current;
+                    let node_path = current;
                     current.extend(key);
-                    nodes.push(RemovedSparseNode { path, node, unset_branch_nibble: None });
+                    nodes.push(RemovedSparseNode { path: node_path, node, unset_branch_nibble: None });
                 }
                 SparseNode::Branch { state_mask, .. } => {
                     let nibble = path.get_unchecked(current.len());
@@ -1676,40 +1683,55 @@ impl SerialSparseTrie {
         remaining_child_path: &Nibbles,
         recurse_into_extension: bool,
     ) -> SparseTrieResult<SparseNode> {
-        let remaining_child_node = match self.nodes.get(remaining_child_path).unwrap() {
-            SparseNode::Hash(_) => {
-                debug!(
-                    target: "trie::parallel_sparse",
-                    child_path = ?remaining_child_path,
-                    leaf_full_path = ?full_path,
-                    "Node child not revealed in remove_leaf, falling back to db",
-                );
-                if let Some(RevealedNode { node, tree_mask, hash_mask }) =
-                    provider.trie_node(remaining_child_path)?
-                {
-                    let decoded = TrieNode::decode(&mut &node[..])?;
-                    trace!(
+        // Try to get the node via pointer first, fall back to HashMap
+        let remaining_child_node = {
+            let node = self
+                .path_to_node_id
+                .get(remaining_child_path)
+                .map(|&id| self.node(id).clone())
+                .or_else(|| self.nodes.get(remaining_child_path).cloned())
+                .expect("remaining child should exist");
+
+            match node {
+                SparseNode::Hash(_) => {
+                    debug!(
                         target: "trie::parallel_sparse",
-                        ?remaining_child_path,
-                        ?decoded,
-                        ?tree_mask,
-                        ?hash_mask,
-                        "Revealing remaining blinded branch child"
+                        child_path = ?remaining_child_path,
+                        leaf_full_path = ?full_path,
+                        "Node child not revealed in remove_leaf, falling back to db",
                     );
-                    self.reveal_node(
-                        *remaining_child_path,
-                        decoded,
-                        TrieMasks { hash_mask, tree_mask },
-                    )?;
-                    self.nodes.get(remaining_child_path).unwrap().clone()
-                } else {
-                    return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
-                        path: *remaining_child_path,
+                    if let Some(RevealedNode { node, tree_mask, hash_mask }) =
+                        provider.trie_node(remaining_child_path)?
+                    {
+                        let decoded = TrieNode::decode(&mut &node[..])?;
+                        trace!(
+                            target: "trie::parallel_sparse",
+                            ?remaining_child_path,
+                            ?decoded,
+                            ?tree_mask,
+                            ?hash_mask,
+                            "Revealing remaining blinded branch child"
+                        );
+                        self.reveal_node(
+                            *remaining_child_path,
+                            decoded,
+                            TrieMasks { hash_mask, tree_mask },
+                        )?;
+                        // After reveal, get the node via pointer
+                        self.path_to_node_id
+                            .get(remaining_child_path)
+                            .map(|&id| self.node(id).clone())
+                            .or_else(|| self.nodes.get(remaining_child_path).cloned())
+                            .expect("node should exist after reveal")
+                    } else {
+                        return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
+                            path: *remaining_child_path,
+                        }
+                        .into())
                     }
-                    .into())
                 }
+                node => node,
             }
-            node => node.clone(),
         };
 
         // If `recurse_into_extension` is true, and the remaining child is an extension node, then
