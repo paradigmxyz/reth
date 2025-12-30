@@ -52,7 +52,10 @@ impl Config {
         let path = path.as_ref();
         match std::fs::read_to_string(path) {
             Ok(cfg_string) => {
-                toml::from_str(&cfg_string).map_err(|e| eyre::eyre!("Failed to parse TOML: {e}"))
+                let config: Self = toml::from_str(&cfg_string)
+                    .map_err(|e| eyre::eyre!("Failed to parse TOML: {e}"))?;
+                config.static_files.validate()?;
+                Ok(config)
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
                 if let Some(parent) = path.parent() {
@@ -1165,6 +1168,95 @@ connect_trusted_nodes_only = true
         for enode in expected_enodes {
             let node = TrustedPeer::from_str(enode).unwrap();
             assert!(conf.peers.trusted_nodes.contains(&node));
+        }
+    }
+
+    #[test]
+    fn test_static_files_config_validation_on_load() {
+        // Create invalid configuration with headers blocks_per_file set to 0
+        let invalid_toml = r#"
+[static_files.blocks_per_file]
+headers = 0
+"#;
+
+        // Create a temporary directory for the config file
+        let config_dir = tempfile::tempdir().expect("creating test fixture failed");
+        let config_path =
+            config_dir.path().join("example-app").join("test-config").with_extension("toml");
+
+        // Create the parent directory if it doesn't exist
+        if let Some(parent) = config_path.parent() {
+            std::fs::create_dir_all(parent).expect("Failed to create directories");
+        }
+
+        // Write invalid TOML data to the file
+        std::fs::write(&config_path, invalid_toml).expect("Failed to write invalid config");
+
+        // Attempt to load the config should fail due to validation
+        let result = Config::from_path(&config_path);
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(
+            err.contains("Headers segment blocks per file must be greater than 0"),
+            "Expected validation error, got: {}",
+            err
+        );
+
+        config_dir.close().expect("removing test fixture failed");
+    }
+
+    #[test]
+    fn test_static_files_config_validation_all_segments() {
+        // Test that all segment validations work
+        let test_cases = vec![
+            (
+                r#"[static_files.blocks_per_file]
+headers = 0"#,
+                "Headers segment blocks per file must be greater than 0",
+            ),
+            (
+                r#"[static_files.blocks_per_file]
+transactions = 0"#,
+                "Transactions segment blocks per file must be greater than 0",
+            ),
+            (
+                r#"[static_files.blocks_per_file]
+receipts = 0"#,
+                "Receipts segment blocks per file must be greater than 0",
+            ),
+            (
+                r#"[static_files.blocks_per_file]
+transaction_senders = 0"#,
+                "Transaction senders segment blocks per file must be greater than 0",
+            ),
+        ];
+
+        for (invalid_toml, expected_error) in test_cases {
+            // Create a temporary directory for the config file
+            let config_dir = tempfile::tempdir().expect("creating test fixture failed");
+            let config_path =
+                config_dir.path().join("example-app").join("test-config").with_extension("toml");
+
+            // Create the parent directory if it doesn't exist
+            if let Some(parent) = config_path.parent() {
+                std::fs::create_dir_all(parent).expect("Failed to create directories");
+            }
+
+            // Write invalid TOML data to the file
+            std::fs::write(&config_path, invalid_toml).expect("Failed to write invalid config");
+
+            // Attempt to load the config should fail due to validation
+            let result = Config::from_path(&config_path);
+            assert!(result.is_err());
+            let err = result.unwrap_err().to_string();
+            assert!(
+                err.contains(expected_error),
+                "Expected '{}', got: {}",
+                expected_error,
+                err
+            );
+
+            config_dir.close().expect("removing test fixture failed");
         }
     }
 }
