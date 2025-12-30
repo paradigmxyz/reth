@@ -488,6 +488,7 @@ impl fmt::Debug for RocksDBBatch {
         f.debug_struct("RocksDBBatch")
             .field("provider", &self.provider)
             .field("batch", &"<WriteBatchWithTransaction>")
+            // Number of operations in this batch
             .field("length", &self.inner.len())
             // Total serialized size (encoded key + compressed value + metadata) of this batch
             // in bytes
