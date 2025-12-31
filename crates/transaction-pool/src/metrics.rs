@@ -148,7 +148,7 @@ pub struct TxPoolValidationMetrics {
 }
 
 /// Transaction pool validator task metrics
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "transaction_pool")]
 pub struct TxPoolValidatorMetrics {
     /// Number of in-flight validation job sends waiting for channel capacity
