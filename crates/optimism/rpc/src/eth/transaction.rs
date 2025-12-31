@@ -124,7 +124,8 @@ where
                                         tx,
                                         receipt,
                                         this.converter(),
-                                    )?
+                                    )
+                                    .transpose()?
                                 {
                                     return Ok(receipt);
                                 }
