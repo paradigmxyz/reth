@@ -7,8 +7,8 @@ use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_primitives_traits::{
-    transaction::signed::SignedTransaction, Block, BlockBody, NodePrimitives, RecoveredBlock,
-    SealedHeader,
+    transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
+    RecoveredBlock, SealedHeader,
 };
 use reth_trie_common::updates::TrieUpdates;
 use revm::database::BundleState;
@@ -40,6 +40,13 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     /// single-block chains that extend the canonical chain.
     trie_updates: Option<TrieUpdates>,
 }
+
+type ChainTxReceipt<'a, N> = (
+    &'a RecoveredBlock<<N as NodePrimitives>::Block>,
+    IndexedTx<'a, <N as NodePrimitives>::Block>,
+    &'a <N as NodePrimitives>::Receipt,
+    &'a [<N as NodePrimitives>::Receipt],
+);
 
 impl<N: NodePrimitives> Default for Chain<N> {
     fn default() -> Self {
@@ -183,6 +190,24 @@ impl<N: NodePrimitives> Chain<N> {
         &self,
     ) -> impl Iterator<Item = (&RecoveredBlock<N::Block>, &Vec<N::Receipt>)> + '_ {
         self.blocks_iter().zip(self.block_receipts_iter())
+    }
+
+    /// Finds a transaction by hash and returns it along with its corresponding receipt data.
+    ///
+    /// Returns `None` if the transaction is not found in this chain.
+    pub fn find_transaction_and_receipt_by_hash(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<ChainTxReceipt<'_, N>> {
+        for (block, receipts) in self.blocks_and_receipts() {
+            let Some(indexed_tx) = block.find_indexed(tx_hash) else {
+                continue;
+            };
+            let receipt = receipts.get(indexed_tx.index())?;
+            return Some((block, indexed_tx, receipt, receipts.as_slice()));
+        }
+
+        None
     }
 
     /// Get the block at which this chain forked.
