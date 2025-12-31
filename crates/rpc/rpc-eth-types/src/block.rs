@@ -62,13 +62,17 @@ impl<N: NodePrimitives> BlockAndReceipts<N> {
         C: RpcConvert<Primitives = N>,
     {
         let (tx, receipt) = self.find_transaction_and_receipt_by_hash(tx_hash)?;
-        Some(convert_transaction_receipt(
+        match convert_transaction_receipt(
             self.block.as_ref(),
             self.receipts.as_ref(),
             tx,
             receipt,
             converter,
-        ))
+        ) {
+            Ok(Some(receipt)) => Some(Ok(receipt)),
+            Ok(None) => None,
+            Err(err) => Some(Err(err)),
+        }
     }
 }
 
@@ -79,7 +83,7 @@ pub fn convert_transaction_receipt<N, C>(
     tx: IndexedTx<'_, BlockTy<N>>,
     receipt: &ReceiptTy<N>,
     converter: &C,
-) -> Result<<C::Network as RpcTypes>::Receipt, C::Error>
+) -> Result<Option<<C::Network as RpcTypes>::Receipt>, C::Error>
 where
     N: NodePrimitives,
     C: RpcConvert<Primitives = N>,
@@ -88,16 +92,16 @@ where
     let (gas_used, next_log_index) =
         calculate_gas_used_and_next_log_index(meta.index, all_receipts);
 
-    converter
-        .convert_receipts_with_block(
-            vec![ConvertReceiptInput {
-                tx: tx.recovered_tx(),
-                gas_used: receipt.cumulative_gas_used() - gas_used,
-                receipt: receipt.clone(),
-                next_log_index,
-                meta,
-            }],
-            block.sealed_block(),
-        )
-        .map(|mut receipts| receipts.pop().unwrap())
+    let mut receipts = converter.convert_receipts_with_block(
+        vec![ConvertReceiptInput {
+            tx: tx.recovered_tx(),
+            gas_used: receipt.cumulative_gas_used() - gas_used,
+            receipt: receipt.clone(),
+            next_log_index,
+            meta,
+        }],
+        block.sealed_block(),
+    )?;
+
+    Ok(receipts.pop())
 }

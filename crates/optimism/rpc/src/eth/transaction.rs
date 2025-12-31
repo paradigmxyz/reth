@@ -117,15 +117,15 @@ where
                             if let Some(notification) = canonical_notification {
                                 let chain = notification.committed();
                                 if let Some((block, tx, receipt, all_receipts)) =
-                                    chain.find_transaction_and_receipt_by_hash(hash)
-                                {
-                                    let receipt = convert_transaction_receipt(
+                                    chain.find_transaction_and_receipt_by_hash(hash) &&
+                                    let Some(receipt) = convert_transaction_receipt(
                                         block,
                                         all_receipts,
                                         tx,
                                         receipt,
                                         this.converter(),
-                                    )?;
+                                    )?
+                                {
                                     return Ok(receipt);
                                 }
                             } else {

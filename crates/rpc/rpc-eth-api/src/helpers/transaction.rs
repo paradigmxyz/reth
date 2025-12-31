@@ -111,16 +111,16 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
                 while let Some(notification) = stream.next().await {
                     let chain = notification.committed();
                     if let Some((block, tx, receipt, all_receipts)) =
-                        chain.find_transaction_and_receipt_by_hash(hash)
-                    {
-                        let receipt = convert_transaction_receipt(
+                        chain.find_transaction_and_receipt_by_hash(hash) &&
+                        let Some(receipt) = convert_transaction_receipt(
                             block,
                             all_receipts,
                             tx,
                             receipt,
                             this.converter(),
                         )
-                        .map_err(Self::Error::from)?;
+                        .map_err(Self::Error::from)?
+                    {
                         return Ok(receipt);
                     }
                 }
