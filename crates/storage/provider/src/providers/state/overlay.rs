@@ -14,7 +14,7 @@ use reth_trie::{
     hashed_cursor::{HashedCursorFactory, HashedPostStateCursorFactory},
     trie_cursor::{InMemoryTrieCursorFactory, TrieCursorFactory},
     updates::TrieUpdatesSorted,
-    HashedPostState, HashedPostStateSorted, KeccakKeyHasher,
+    HashedPostStateSorted, KeccakKeyHasher,
 };
 use reth_trie_db::{
     DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
@@ -234,13 +234,10 @@ where
                 let _guard = debug_span!(target: "providers::state::overlay", "Retrieving hashed state reverts").entered();
 
                 let start = Instant::now();
-                // TODO(mediocregopher) make from_reverts return sorted
-                // https://github.com/paradigmxyz/reth/issues/19382
-                let res = HashedPostState::from_reverts::<KeccakKeyHasher>(
+                let res = HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
                     provider.tx_ref(),
                     from_block + 1..,
-                )?
-                .into_sorted();
+                )?;
                 retrieve_hashed_state_reverts_duration = start.elapsed();
                 res
             };

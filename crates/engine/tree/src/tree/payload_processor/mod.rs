@@ -3,16 +3,17 @@
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
-        CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
-        SavedCache,
+        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache,
+        ExecutionCacheBuilder, SavedCache,
     },
     payload_processor::{
-        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmTaskEvent},
+        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
     },
     sparse_trie::SparseTrieTask,
     StateProviderBuilder, TreeConfig,
 };
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_evm::{block::StateChangeSource, ToTxEnv};
 use alloy_primitives::B256;
@@ -21,11 +22,13 @@ use executor::WorkloadExecutor;
 use multiproof::{SparseTrieUpdate, *};
 use parking_lot::RwLock;
 use prewarm::PrewarmMetrics;
-use reth_engine_primitives::ExecutableTxIterator;
+use rayon::prelude::*;
 use reth_evm::{
     execute::{ExecutableTxFor, WithTxEnv},
-    ConfigureEvm, EvmEnvFor, OnStateHook, SpecFor, TxEnvFor,
+    ConfigureEvm, EvmEnvFor, ExecutableTxIterator, ExecutableTxTuple, OnStateHook, SpecFor,
+    TxEnvFor,
 };
+use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
 use reth_revm::{db::BundleState, state::EvmState};
@@ -40,6 +43,7 @@ use reth_trie_sparse::{
 };
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
+    collections::BTreeMap,
     sync::{
         atomic::AtomicBool,
         mpsc::{self, channel},
@@ -49,6 +53,7 @@ use std::{
 };
 use tracing::{debug, debug_span, instrument, warn, Span};
 
+pub mod bal;
 mod configured_sparse_trie;
 pub mod executor;
 pub mod multiproof;
@@ -88,6 +93,13 @@ pub const SPARSE_TRIE_MAX_NODES_SHRINK_CAPACITY: usize = 1_000_000;
 /// 144MB.
 pub const SPARSE_TRIE_MAX_VALUES_SHRINK_CAPACITY: usize = 1_000_000;
 
+/// Type alias for [`PayloadHandle`] returned by payload processor spawn methods.
+type IteratorPayloadHandle<Evm, I, N> = PayloadHandle<
+    WithTxEnv<TxEnvFor<Evm>, <I as ExecutableTxTuple>::Tx>,
+    <I as ExecutableTxTuple>::Error,
+    <N as NodePrimitives>::Receipt,
+>;
+
 /// Entrypoint for executing the payload.
 #[derive(Debug)]
 pub struct PayloadProcessor<Evm>
@@ -104,6 +116,8 @@ where
     cross_block_cache_size: u64,
     /// Whether transactions should not be executed on prewarming task.
     disable_transaction_prewarming: bool,
+    /// Whether state cache should be disable
+    disable_state_cache: bool,
     /// Determines how to configure the evm for execution.
     evm_config: Evm,
     /// Whether precompile cache should be disabled.
@@ -147,6 +161,7 @@ where
             cross_block_cache_size: config.cross_block_cache_size(),
             disable_transaction_prewarming: config.disable_prewarming(),
             evm_config,
+            disable_state_cache: config.disable_state_cache(),
             precompile_cache_disabled: config.precompile_cache_disabled(),
             precompile_cache_map,
             sparse_state_trie: Arc::default(),
@@ -193,7 +208,6 @@ where
     ///
     /// This returns a handle to await the final state root and to interact with the tasks (e.g.
     /// canceling)
-    #[allow(clippy::type_complexity)]
     #[instrument(
         level = "debug",
         target = "engine::tree::payload_processor",
@@ -207,7 +221,8 @@ where
         provider_builder: StateProviderBuilder<N, P>,
         multiproof_provider_factory: F,
         config: &TreeConfig,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+        bal: Option<Arc<BlockAccessList>>,
+    ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
         F: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>
@@ -215,17 +230,44 @@ where
             + Send
             + 'static,
     {
+        let parent_hash = env.parent_hash;
+
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx, transaction_count_hint) =
             self.spawn_tx_iterator(transactions);
 
         let span = Span::current();
         let (to_sparse_trie, sparse_trie_rx) = channel();
+        let (to_multi_proof, from_multi_proof) = crossbeam_channel::unbounded();
 
-        // We rely on the cursor factory to provide whatever DB overlay is necessary to see a
-        // consistent view of the database, including the trie tables. Because of this there is no
-        // need for an overarching prefix set to invalidate any section of the trie tables, and so
-        // we use an empty prefix set.
+        // Handle BAL-based optimization if available
+        let prewarm_handle = if let Some(bal) = bal {
+            // When BAL is present, use BAL prewarming and send BAL to multiproof
+            debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
+
+            // Send BAL message immediately to MultiProofTask
+            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(Arc::clone(&bal)));
+
+            // Spawn with BAL prewarming
+            self.spawn_caching_with(
+                env,
+                prewarm_rx,
+                transaction_count_hint,
+                provider_builder.clone(),
+                None, // Don't send proof targets when BAL is present
+                Some(bal),
+            )
+        } else {
+            // Normal path: spawn with transaction prewarming
+            self.spawn_caching_with(
+                env,
+                prewarm_rx,
+                transaction_count_hint,
+                provider_builder.clone(),
+                Some(to_multi_proof.clone()),
+                None,
+            )
+        };
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
@@ -242,24 +284,26 @@ where
             proof_handle.clone(),
             to_sparse_trie,
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
+            to_multi_proof,
+            from_multi_proof,
         );
 
         // wire the multiproof task to the prewarm task
         let to_multi_proof = Some(multi_proof_task.state_root_message_sender());
 
-        let prewarm_handle = self.spawn_caching_with(
-            env,
-            prewarm_rx,
-            transaction_count_hint,
-            provider_builder,
-            to_multi_proof.clone(),
-        );
-
         // spawn multi-proof task
         let parent_span = span.clone();
-        self.executor.spawn_blocking(move || {
-            let _enter = parent_span.entered();
-            multi_proof_task.run();
+        self.executor.spawn_blocking({
+            let saved_cache = self.cache_for(parent_hash);
+            let cache = saved_cache.cache().clone();
+            let cache_metrics = saved_cache.metrics().clone();
+            move || {
+                let _enter = parent_span.entered();
+                // Build a state provider for the multiproof task
+                let provider = provider_builder.build().expect("failed to build provider");
+                let provider = CachedStateProvider::new(provider, cache, cache_metrics);
+                multi_proof_task.run(provider);
+            }
         });
 
         // wire the sparse trie to the state root response receiver
@@ -286,13 +330,14 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
-    ) -> PayloadHandle<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>
+        bal: Option<Arc<BlockAccessList>>,
+    ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
         let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None);
+            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -312,21 +357,46 @@ where
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Tx>, I::Error>>,
         usize,
     ) {
-        // Get the transaction count for prewarming task
-        // Use upper bound if available (more accurate), otherwise use lower bound
-        let (lower, upper) = transactions.size_hint();
-        let transaction_count_hint = upper.unwrap_or(lower);
+        let (transactions, convert) = transactions.into();
+        let transactions = transactions.into_par_iter();
+        let transaction_count_hint = transactions.len();
 
+        let (ooo_tx, ooo_rx) = mpsc::channel();
         let (prewarm_tx, prewarm_rx) = mpsc::channel();
         let (execute_tx, execute_rx) = mpsc::channel();
+
+        // Spawn a task that `convert`s all transactions in parallel and sends them out-of-order.
         self.executor.spawn_blocking(move || {
-            for tx in transactions {
+            transactions.enumerate().for_each_with(ooo_tx, |ooo_tx, (idx, tx)| {
+                let tx = convert(tx);
                 let tx = tx.map(|tx| WithTxEnv { tx_env: tx.to_tx_env(), tx: Arc::new(tx) });
-                // only send Ok(_) variants to prewarming task
+                // Only send Ok(_) variants to prewarming task.
                 if let Ok(tx) = &tx {
                     let _ = prewarm_tx.send(tx.clone());
                 }
-                let _ = execute_tx.send(tx);
+                let _ = ooo_tx.send((idx, tx));
+            });
+        });
+
+        // Spawn a task that processes out-of-order transactions from the task above and sends them
+        // to the execution task in order.
+        self.executor.spawn_blocking(move || {
+            let mut next_for_execution = 0;
+            let mut queue = BTreeMap::new();
+            while let Ok((idx, tx)) = ooo_rx.recv() {
+                if next_for_execution == idx {
+                    let _ = execute_tx.send(tx);
+                    next_for_execution += 1;
+
+                    while let Some(entry) = queue.first_entry() &&
+                        *entry.key() == next_for_execution
+                    {
+                        let _ = execute_tx.send(entry.remove());
+                        next_for_execution += 1;
+                    }
+                } else {
+                    queue.insert(idx, tx);
+                }
             }
         });
 
@@ -341,7 +411,8 @@ where
         transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
-    ) -> CacheTaskHandle
+        bal: Option<Arc<BlockAccessList>>,
+    ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
@@ -351,9 +422,15 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let saved_cache = self.cache_for(env.parent_hash);
-        let cache = saved_cache.cache().clone();
-        let cache_metrics = saved_cache.metrics().clone();
+        let (saved_cache, cache, cache_metrics) = if self.disable_state_cache {
+            (None, None, None)
+        } else {
+            let saved_cache = self.cache_for(env.parent_hash);
+            let cache = saved_cache.cache().clone();
+            let cache_metrics = saved_cache.metrics().clone();
+            (Some(saved_cache), Some(cache), Some(cache_metrics))
+        };
+
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
@@ -379,7 +456,12 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking(move || {
-                prewarm_task.run(transactions, to_prewarm_task);
+                let mode = if let Some(bal) = bal {
+                    PrewarmMode::BlockAccessList(bal)
+                } else {
+                    PrewarmMode::Transactions(transactions)
+                };
+                prewarm_task.run(mode, to_prewarm_task);
             });
         }
 
@@ -516,12 +598,15 @@ where
 }
 
 /// Handle to all the spawned tasks.
+///
+/// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
+/// caching task without cloning the expensive `BundleState`.
 #[derive(Debug)]
-pub struct PayloadHandle<Tx, Err> {
+pub struct PayloadHandle<Tx, Err, R> {
     /// Channel for evm state updates
     to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
     // must include the receiver of the state root wired to the sparse trie
-    prewarm_handle: CacheTaskHandle,
+    prewarm_handle: CacheTaskHandle<R>,
     /// Stream of block transactions
     transactions: mpsc::Receiver<Result<Tx, Err>>,
     /// Receiver for the state root
@@ -530,7 +615,7 @@ pub struct PayloadHandle<Tx, Err> {
     _span: Span,
 }
 
-impl<Tx, Err> PayloadHandle<Tx, Err> {
+impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
     /// Awaits the state root
     ///
     /// # Panics
@@ -559,18 +644,18 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 
         move |source: StateChangeSource, state: &EvmState| {
             if let Some(sender) = &to_multi_proof {
-                let _ = sender.send(MultiProofMessage::StateUpdate(source, state.clone()));
+                let _ = sender.send(MultiProofMessage::StateUpdate(source.into(), state.clone()));
             }
         }
     }
 
     /// Returns a clone of the caches used by prewarming
-    pub(super) fn caches(&self) -> StateExecutionCache {
+    pub(super) fn caches(&self) -> Option<StateExecutionCache> {
         self.prewarm_handle.cache.clone()
     }
 
     /// Returns a clone of the cache metrics used by prewarming
-    pub(super) fn cache_metrics(&self) -> CachedStateMetrics {
+    pub(super) fn cache_metrics(&self) -> Option<CachedStateMetrics> {
         self.prewarm_handle.cache_metrics.clone()
     }
 
@@ -583,9 +668,14 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 
     /// Terminates the entire caching task.
     ///
-    /// If the [`BundleState`] is provided it will update the shared cache.
-    pub(super) fn terminate_caching(&mut self, block_output: Option<&BundleState>) {
-        self.prewarm_handle.terminate_caching(block_output)
+    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// bundle state. Using `Arc<ExecutionOutcome>` allows sharing with the main execution
+    /// path without cloning the expensive `BundleState`.
+    pub(super) fn terminate_caching(
+        &mut self,
+        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
+    ) {
+        self.prewarm_handle.terminate_caching(execution_outcome)
     }
 
     /// Returns iterator yielding transactions from the stream.
@@ -597,17 +687,20 @@ impl<Tx, Err> PayloadHandle<Tx, Err> {
 }
 
 /// Access to the spawned [`PrewarmCacheTask`].
+///
+/// Generic over `R` (receipt type) to allow sharing `Arc<ExecutionOutcome<R>>` with the
+/// prewarm task without cloning the expensive `BundleState`.
 #[derive(Debug)]
-pub(crate) struct CacheTaskHandle {
+pub(crate) struct CacheTaskHandle<R> {
     /// The shared cache the task operates with.
-    cache: StateExecutionCache,
+    cache: Option<StateExecutionCache>,
     /// Metrics for the caches
-    cache_metrics: CachedStateMetrics,
+    cache_metrics: Option<CachedStateMetrics>,
     /// Channel to the spawned prewarm task if any
-    to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent>>,
+    to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
 }
 
-impl CacheTaskHandle {
+impl<R: Send + Sync + 'static> CacheTaskHandle<R> {
     /// Terminates the pre-warming transaction processing.
     ///
     /// Note: This does not terminate the task yet.
@@ -619,20 +712,25 @@ impl CacheTaskHandle {
 
     /// Terminates the entire pre-warming task.
     ///
-    /// If the [`BundleState`] is provided it will update the shared cache.
-    pub(super) fn terminate_caching(&mut self, block_output: Option<&BundleState>) {
+    /// If the [`ExecutionOutcome`] is provided it will update the shared cache using its
+    /// bundle state. Using `Arc<ExecutionOutcome>` avoids cloning the expensive `BundleState`.
+    pub(super) fn terminate_caching(
+        &mut self,
+        execution_outcome: Option<Arc<ExecutionOutcome<R>>>,
+    ) {
         if let Some(tx) = self.to_prewarm_task.take() {
-            // Only clone when we have an active task and a state to send
-            let event = PrewarmTaskEvent::Terminate { block_output: block_output.cloned() };
+            let event = PrewarmTaskEvent::Terminate { execution_outcome };
             let _ = tx.send(event);
         }
     }
 }
 
-impl Drop for CacheTaskHandle {
+impl<R> Drop for CacheTaskHandle<R> {
     fn drop(&mut self) {
-        // Ensure we always terminate on drop
-        self.terminate_caching(None);
+        // Ensure we always terminate on drop - send None without needing Send + Sync bounds
+        if let Some(tx) = self.to_prewarm_task.take() {
+            let _ = tx.send(PrewarmTaskEvent::Terminate { execution_outcome: None });
+        }
     }
 }
 
@@ -685,6 +783,8 @@ impl ExecutionCache {
 
         cache
             .as_ref()
+            // Check `is_available()` to ensure no other tasks (e.g., prewarming) currently hold
+            // a reference to this cache. We can only reuse it when we have exclusive access.
             .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())
             .cloned()
     }
@@ -1019,10 +1119,14 @@ mod tests {
 
         let mut handle = payload_processor.spawn(
             Default::default(),
-            core::iter::empty::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>(),
+            (
+                Vec::<Result<Recovered<TransactionSigned>, core::convert::Infallible>>::new(),
+                std::convert::identity,
+            ),
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
             OverlayStateProviderFactory::new(provider_factory),
             &TreeConfig::default(),
+            None, // No BAL for test
         );
 
         let mut state_hook = handle.state_hook();

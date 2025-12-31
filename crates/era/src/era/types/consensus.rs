@@ -1,11 +1,67 @@
 //! Consensus types for Era post-merge history files
+//!
+//! # Decoding
+//!
+//! This crate only handles compression/decompression.
+//! To decode the SSZ data into concrete beacon types, use the [Lighthouse `types`](https://github.com/sigp/lighthouse/tree/stable/consensus/types)
+//! crate or another SSZ-compatible library.
+//!
+//! # Examples
+//!
+//! ## Decoding a [`CompressedBeaconState`]
+//!
+//! ```ignore
+//! use types::{BeaconState, ChainSpec, MainnetEthSpec};
+//! use reth_era::era::types::consensus::CompressedBeaconState;
+//!
+//! fn decode_state(
+//!     compressed_state: &CompressedBeaconState,
+//! ) -> Result<(), Box<dyn std::error::Error>> {
+//!     let spec = ChainSpec::mainnet();
+//!
+//!     // Decompress to get SSZ bytes
+//!     let ssz_bytes = compressed_state.decompress()?;
+//!
+//!     // Decode with fork-aware method, chainSpec determines fork from slot in SSZ
+//!     let state = BeaconState::<MainnetEthSpec>::from_ssz_bytes(&ssz_bytes, &spec)
+//!         .map_err(|e| format!("{:?}", e))?;
+//!
+//!     println!("State slot: {}", state.slot());
+//!     println!("Fork: {:?}", state.fork_name_unchecked());
+//!     println!("Validators: {}", state.validators().len());
+//!     println!("Finalized checkpoint: {:?}", state.finalized_checkpoint());
+//!     Ok(())
+//! }
+//! ```
+//!
+//! ## Decoding a [`CompressedSignedBeaconBlock`]
+//!
+//! ```ignore
+//! use consensus_types::{ForkName, ForkVersionDecode, MainnetEthSpec, SignedBeaconBlock};
+//! use reth_era::era::types::consensus::CompressedSignedBeaconBlock;
+//!
+//! // Decode using fork-aware decoding, fork must be known beforehand
+//! fn decode_block(
+//!     compressed: &CompressedSignedBeaconBlock,
+//!     fork: ForkName,
+//! ) -> Result<(), Box<dyn std::error::Error>> {
+//!     // Decompress to get SSZ bytes
+//!     let ssz_bytes = compressed.decompress()?;
+//!
+//!     let block = SignedBeaconBlock::<MainnetEthSpec>::from_ssz_bytes_by_fork(&ssz_bytes, fork)
+//!         .map_err(|e| format!("{:?}", e))?;
+//!
+//!     println!("Block slot: {}", block.message().slot());
+//!     println!("Proposer index: {}", block.message().proposer_index());
+//!     println!("Parent root: {:?}", block.message().parent_root());
+//!     println!("State root: {:?}", block.message().state_root());
+//!
+//!     Ok(())
+//! }
+//! ```
 
-use crate::{
-    common::decode::DecodeCompressedSsz,
-    e2s::{error::E2sError, types::Entry},
-};
+use crate::e2s::{error::E2sError, types::Entry};
 use snap::{read::FrameDecoder, write::FrameEncoder};
-use ssz::Decode;
 use std::io::{Read, Write};
 
 /// `CompressedSignedBeaconBlock` record type: [0x01, 0x00]
@@ -76,20 +132,6 @@ impl CompressedSignedBeaconBlock {
 
         Ok(Self { data: entry.data.clone() })
     }
-
-    /// Decode the compressed signed beacon block into ssz bytes
-    pub fn decode_to_ssz(&self) -> Result<Vec<u8>, E2sError> {
-        self.decompress()
-    }
-}
-
-impl DecodeCompressedSsz for CompressedSignedBeaconBlock {
-    fn decode<T: Decode>(&self) -> Result<T, E2sError> {
-        let ssz_bytes = self.decompress()?;
-        T::from_ssz_bytes(&ssz_bytes).map_err(|e| {
-            E2sError::Ssz(format!("Failed to decode SSZ data into target type: {e:?}"))
-        })
-    }
 }
 
 /// Compressed beacon state
@@ -154,20 +196,6 @@ impl CompressedBeaconState {
 
         Ok(Self { data: entry.data.clone() })
     }
-
-    /// Decode the compressed beacon state into ssz bytes
-    pub fn decode_to_ssz(&self) -> Result<Vec<u8>, E2sError> {
-        self.decompress()
-    }
-}
-
-impl DecodeCompressedSsz for CompressedBeaconState {
-    fn decode<T: Decode>(&self) -> Result<T, E2sError> {
-        let ssz_bytes = self.decompress()?;
-        T::from_ssz_bytes(&ssz_bytes).map_err(|e| {
-            E2sError::Ssz(format!("Failed to decode SSZ data into target type: {e:?}"))
-        })
-    }
 }
 
 #[cfg(test)]
@@ -203,7 +231,7 @@ mod tests {
         assert_eq!(entry.entry_type, COMPRESSED_SIGNED_BEACON_BLOCK);
 
         let recovered = CompressedSignedBeaconBlock::from_entry(&entry).unwrap();
-        let recovered_ssz = recovered.decode_to_ssz().unwrap();
+        let recovered_ssz = recovered.decompress().unwrap();
 
         assert_eq!(recovered_ssz, ssz_data);
     }
@@ -217,7 +245,7 @@ mod tests {
         assert_eq!(entry.entry_type, COMPRESSED_BEACON_STATE);
 
         let recovered = CompressedBeaconState::from_entry(&entry).unwrap();
-        let recovered_ssz = recovered.decode_to_ssz().unwrap();
+        let recovered_ssz = recovered.decompress().unwrap();
 
         assert_eq!(recovered_ssz, ssz_data);
     }

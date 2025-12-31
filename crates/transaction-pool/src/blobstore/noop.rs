@@ -78,6 +78,13 @@ impl BlobStore for NoopBlobStore {
         Ok(None)
     }
 
+    fn get_by_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        Ok(vec![None; versioned_hashes.len()])
+    }
+
     fn data_size_hint(&self) -> Option<usize> {
         Some(0)
     }

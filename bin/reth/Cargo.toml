@@ -81,7 +81,7 @@ backon.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc", "otlp", "reth-revm/portable", "js-tracer"]
+default = ["jemalloc", "otlp", "reth-revm/portable", "js-tracer", "keccak-cache-global", "asm-keccak"]
 
 otlp = [
     "reth-ethereum-cli/otlp",
@@ -102,7 +102,10 @@ asm-keccak = [
     "reth-ethereum-cli/asm-keccak",
     "reth-node-ethereum/asm-keccak",
 ]
-
+keccak-cache-global = [
+    "reth-node-core/keccak-cache-global",
+    "reth-node-ethereum/keccak-cache-global",
+]
 jemalloc = [
     "reth-cli-util/jemalloc",
     "reth-node-core/jemalloc",

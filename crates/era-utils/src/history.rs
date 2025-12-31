@@ -116,7 +116,7 @@ where
 /// these stages that this work has already been done. Otherwise, there might be some conflict with
 /// database integrity.
 pub fn save_stage_checkpoints<P>(
-    provider: &P,
+    provider: P,
     from: BlockNumber,
     to: BlockNumber,
     processed: u64,
@@ -252,7 +252,7 @@ where
 
 /// Extracts block headers and bodies from `iter` and appends them using `writer` and `provider`.
 ///
-/// Adds on to `total_difficulty` and collects hash to height using `hash_collector`.
+/// Collects hash to height using `hash_collector`.
 ///
 /// Skips all blocks below the [`start_bound`] of `block_numbers` and stops when reaching past the
 /// [`end_bound`] or the end of the file.
@@ -309,7 +309,7 @@ where
         writer.append_header(&header, &hash)?;
 
         // Write bodies to database.
-        provider.append_block_bodies(vec![(header.number(), Some(body))])?;
+        provider.append_block_bodies(vec![(header.number(), Some(&body))])?;
 
         hash_collector.insert(hash, number)?;
     }
