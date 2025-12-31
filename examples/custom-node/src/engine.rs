@@ -6,7 +6,9 @@ use crate::{
     CustomNode,
 };
 use alloy_eips::eip2718::WithEncoded;
-use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
+use alloy_primitives::B256;
+use alloy_rpc_types_engine::{ExecutionPayloadV1, ExecutionPayloadV2, ExecutionPayloadV3};
+use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload, OpExecutionPayloadV4};
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum::{
     node::api::{
@@ -24,6 +26,7 @@ use reth_op::node::{
     engine::OpEngineValidator, payload::OpAttributes, OpBuiltPayload, OpEngineTypes,
     OpPayloadAttributes, OpPayloadBuilderAttributes,
 };
+use reth_optimism_flashblocks::FlashBlockCompleteSequence;
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -68,15 +71,83 @@ impl ExecutionPayload for CustomExecutionData {
     }
 }
 
-impl TryFrom<&reth_optimism_flashblocks::FlashBlockCompleteSequence<CustomFlashblockPayload>>
-    for CustomExecutionData
-{
+impl CustomExecutionData {
+    pub fn from_flashblocks_unchecked(flashblocks: &[CustomFlashblockPayload]) -> Self {
+        // Extract base from first flashblock
+        // SAFETY: Caller guarantees at least one flashblock exists with base payload
+        let first = flashblocks.first().expect("flashblocks must not be empty");
+        let base = first.base.as_ref().expect("first flashblock must have base payload");
+
+        // Get the final state from the last flashblock
+        // SAFETY: Caller guarantees at least one flashblock exists
+        let diff = &flashblocks.last().expect("flashblocks must not be empty").diff;
+
+        // Collect all transactions and withdrawals from all flashblocks
+        let (transactions, withdrawals) =
+            flashblocks.iter().fold((Vec::new(), Vec::new()), |(mut txs, mut withdrawals), p| {
+                txs.extend(p.diff.transactions.iter().cloned());
+                withdrawals.extend(p.diff.withdrawals.iter().cloned());
+                (txs, withdrawals)
+            });
+
+        let v3 = ExecutionPayloadV3 {
+            blob_gas_used: diff.blob_gas_used.unwrap_or(0),
+            excess_blob_gas: 0,
+            payload_inner: ExecutionPayloadV2 {
+                withdrawals,
+                payload_inner: ExecutionPayloadV1 {
+                    parent_hash: base.inner.parent_hash,
+                    fee_recipient: base.inner.fee_recipient,
+                    state_root: diff.state_root,
+                    receipts_root: diff.receipts_root,
+                    logs_bloom: diff.logs_bloom,
+                    prev_randao: base.inner.prev_randao,
+                    block_number: base.inner.block_number,
+                    gas_limit: base.inner.gas_limit,
+                    gas_used: diff.gas_used,
+                    timestamp: base.inner.timestamp,
+                    extra_data: base.inner.extra_data.clone(),
+                    base_fee_per_gas: base.inner.base_fee_per_gas,
+                    block_hash: diff.block_hash,
+                    transactions,
+                },
+            },
+        };
+
+        // Before Isthmus hardfork, withdrawals_root was not included.
+        // A zero withdrawals_root indicates a pre-Isthmus flashblock.
+        if diff.withdrawals_root == B256::ZERO {
+            let inner = OpExecutionData::v3(v3, Vec::new(), base.inner.parent_beacon_block_root);
+            return Self { inner, extension: base.extension };
+        }
+
+        let v4 = OpExecutionPayloadV4 { withdrawals_root: diff.withdrawals_root, payload_inner: v3 };
+        let inner =
+            OpExecutionData::v4(v4, Vec::new(), base.inner.parent_beacon_block_root, Default::default());
+
+        Self { inner, extension: base.extension }
+    }
+}
+
+impl TryFrom<&FlashBlockCompleteSequence<CustomFlashblockPayload>> for CustomExecutionData {
     type Error = &'static str;
 
     fn try_from(
-        _sequence: &reth_optimism_flashblocks::FlashBlockCompleteSequence<CustomFlashblockPayload>,
+        sequence: &FlashBlockCompleteSequence<CustomFlashblockPayload>,
     ) -> Result<Self, Self::Error> {
-        todo!("convert flashblock sequence to CustomExecutionData")
+        let mut data = Self::from_flashblocks_unchecked(sequence);
+
+        if let Some(execution_outcome) = sequence.execution_outcome() {
+            let payload = data.inner.payload.as_v1_mut();
+            payload.state_root = execution_outcome.state_root;
+            payload.block_hash = execution_outcome.block_hash;
+        }
+
+        if data.inner.payload.as_v1_mut().state_root == B256::ZERO {
+            return Err("No state_root available for payload");
+        }
+
+        Ok(data)
     }
 }
 

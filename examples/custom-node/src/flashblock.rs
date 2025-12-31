@@ -1,96 +1,51 @@
 use crate::primitives::CustomTransaction;
-use alloy_consensus::{crypto::RecoveryError, transaction::Recovered};
-use alloy_eips::{eip2718::WithEncoded, eip4895::Withdrawals};
-use alloy_primitives::{Bloom, Bytes, B256};
+use alloy_consensus::{
+    crypto::RecoveryError,
+    transaction::{Recovered, SignerRecoverable},
+};
+use alloy_eips::{eip2718::WithEncoded, Decodable2718};
+use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadId;
-use reth_optimism_flashblocks::{FlashblockDiff, FlashblockPayload, FlashblockPayloadBase};
-use serde::{Deserialize, Deserializer};
+use op_alloy_rpc_types_engine::{
+    OpFlashblockPayloadBase, OpFlashblockPayloadDelta, OpFlashblockPayloadMetadata,
+};
+use reth_optimism_flashblocks::{FlashblockPayload, FlashblockPayloadBase};
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct CustomFlashblockPayloadBase {
-    pub parent_hash: B256,
-    pub block_number: u64,
-    pub timestamp: u64,
+    #[serde(flatten)]
+    pub inner: OpFlashblockPayloadBase,
+    pub extension: u64,
 }
 
 impl FlashblockPayloadBase for CustomFlashblockPayloadBase {
     fn parent_hash(&self) -> B256 {
-        self.parent_hash
+        self.inner.parent_hash
     }
 
     fn block_number(&self) -> u64 {
-        self.block_number
+        self.inner.block_number
     }
 
     fn timestamp(&self) -> u64 {
-        self.timestamp
+        self.inner.timestamp
     }
 }
 
-#[derive(Debug, Clone, Default)]
-pub struct CustomFlashblockPayloadDiff {
-    pub block_hash: B256,
-    pub state_root: B256,
-    pub gas_used: u64,
-    pub logs_bloom: Bloom,
-    pub receipts_root: B256,
-    pub transactions: Vec<Bytes>,
-}
-
-impl FlashblockDiff for CustomFlashblockPayloadDiff {
-    fn block_hash(&self) -> B256 {
-        self.block_hash
-    }
-
-    fn state_root(&self) -> B256 {
-        self.state_root
-    }
-
-    fn gas_used(&self) -> u64 {
-        self.gas_used
-    }
-
-    fn logs_bloom(&self) -> &Bloom {
-        &self.logs_bloom
-    }
-
-    fn receipts_root(&self) -> B256 {
-        self.receipts_root
-    }
-
-    fn transactions_raw(&self) -> &[Bytes] {
-        &self.transactions
-    }
-
-    fn withdrawals(&self) -> Option<&Withdrawals> {
-        None
-    }
-
-    fn withdrawals_root(&self) -> Option<B256> {
-        None
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CustomFlashblockPayload {
-    pub index: u64,
     pub payload_id: PayloadId,
+    pub index: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub base: Option<CustomFlashblockPayloadBase>,
-    pub diff: CustomFlashblockPayloadDiff,
-}
-
-impl<'de> Deserialize<'de> for CustomFlashblockPayload {
-    fn deserialize<D>(_deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        todo!("implement deserialization")
-    }
+    pub diff: OpFlashblockPayloadDelta,
+    pub metadata: OpFlashblockPayloadMetadata,
 }
 
 impl FlashblockPayload for CustomFlashblockPayload {
     type Base = CustomFlashblockPayloadBase;
-    type Diff = CustomFlashblockPayloadDiff;
+    type Diff = OpFlashblockPayloadDelta;
     type SignedTx = CustomTransaction;
 
     fn index(&self) -> u64 {
@@ -110,12 +65,16 @@ impl FlashblockPayload for CustomFlashblockPayload {
     }
 
     fn block_number(&self) -> u64 {
-        self.base.as_ref().map(|b| b.block_number()).unwrap_or(0)
+        self.metadata.block_number
     }
 
     fn recover_transactions(
         &self,
     ) -> impl Iterator<Item = Result<WithEncoded<Recovered<Self::SignedTx>>, RecoveryError>> {
-        std::iter::from_fn(|| todo!("implement transaction recovery"))
+        self.diff.transactions.clone().into_iter().map(|raw| {
+            let tx = CustomTransaction::decode_2718(&mut raw.as_ref())
+                .map_err(RecoveryError::from_source)?;
+            tx.try_into_recovered().map(|tx| tx.into_encoded_with(raw.clone()))
+        })
     }
 }

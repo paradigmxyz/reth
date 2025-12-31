@@ -144,8 +144,18 @@ pub struct CustomNextBlockEnvAttributes {
 }
 
 impl From<CustomFlashblockPayloadBase> for CustomNextBlockEnvAttributes {
-    fn from(_value: CustomFlashblockPayloadBase) -> Self {
-        todo!("map CustomFlashblockPayloadBase fields to CustomNextBlockEnvAttributes")
+    fn from(value: CustomFlashblockPayloadBase) -> Self {
+        Self {
+            inner: OpNextBlockEnvAttributes {
+                timestamp: value.inner.timestamp,
+                suggested_fee_recipient: value.inner.fee_recipient,
+                prev_randao: value.inner.prev_randao,
+                gas_limit: value.inner.gas_limit,
+                parent_beacon_block_root: Some(value.inner.parent_beacon_block_root),
+                extra_data: value.inner.extra_data,
+            },
+            extension: value.extension,
+        }
     }
 }
 
