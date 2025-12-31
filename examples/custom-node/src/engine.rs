@@ -129,9 +129,14 @@ impl CustomExecutionData {
             return Self { inner, extension: base.extension };
         }
 
-        let v4 = OpExecutionPayloadV4 { withdrawals_root: diff.withdrawals_root, payload_inner: v3 };
-        let inner =
-            OpExecutionData::v4(v4, Vec::new(), base.inner.parent_beacon_block_root, Default::default());
+        let v4 =
+            OpExecutionPayloadV4 { withdrawals_root: diff.withdrawals_root, payload_inner: v3 };
+        let inner = OpExecutionData::v4(
+            v4,
+            Vec::new(),
+            base.inner.parent_beacon_block_root,
+            Default::default(),
+        );
 
         Self { inner, extension: base.extension }
     }
