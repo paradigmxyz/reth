@@ -648,7 +648,7 @@ where
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo { name: self.left().config.chain.chain().to_string() },
+                ChainSpecInfo { name: self.chain_id().to_string() },
                 self.task_executor().clone(),
                 Hooks::builder()
                     .with_hook({
