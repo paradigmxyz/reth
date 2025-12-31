@@ -4,7 +4,6 @@
 //! the core flashblock infrastructure.
 
 use alloy_consensus::crypto::RecoveryError;
-use alloy_eips::eip4895::Withdrawals;
 use alloy_primitives::{Bloom, Bytes, B256};
 use alloy_rpc_types_engine::PayloadId;
 
@@ -37,16 +36,6 @@ pub trait FlashblockDiff: Clone + Send + Sync + std::fmt::Debug + 'static {
     fn receipts_root(&self) -> B256;
     /// Raw encoded transactions in this flashblock.
     fn transactions_raw(&self) -> &[Bytes];
-
-    /// Withdrawals included in this flashblock.
-    fn withdrawals(&self) -> Option<&Withdrawals> {
-        None
-    }
-
-    /// Withdrawals root.
-    fn withdrawals_root(&self) -> Option<B256> {
-        None
-    }
 }
 
 /// A flashblock payload representing one slice of a block.
@@ -76,9 +65,7 @@ pub trait FlashblockPayload:
     fn diff(&self) -> &Self::Diff;
 
     /// Block number this flashblock belongs to.
-    fn block_number(&self) -> u64 {
-        self.base().map(|b| b.block_number()).unwrap_or(0)
-    }
+    fn block_number(&self) -> u64;
 
     /// Recovers transactions from the raw transaction bytes in this flashblock.
     ///

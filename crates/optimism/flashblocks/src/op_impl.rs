@@ -2,7 +2,7 @@
 
 use crate::traits::{FlashblockDiff, FlashblockPayload, FlashblockPayloadBase};
 use alloy_consensus::crypto::RecoveryError;
-use alloy_eips::{eip2718::WithEncoded, eip4895::Withdrawals};
+use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Bloom, Bytes, B256};
 use alloy_rpc_types_engine::PayloadId;
 use op_alloy_consensus::OpTxEnvelope;
@@ -48,16 +48,6 @@ impl FlashblockDiff for OpFlashblockPayloadDelta {
 
     fn transactions_raw(&self) -> &[Bytes] {
         &self.transactions
-    }
-
-    fn withdrawals(&self) -> Option<&Withdrawals> {
-        // TODO: Might not be needed as withdrawals aren't processed in a block except if at start
-        // or end
-        None
-    }
-
-    fn withdrawals_root(&self) -> Option<B256> {
-        Some(self.withdrawals_root)
     }
 }
 
