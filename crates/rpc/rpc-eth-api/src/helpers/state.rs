@@ -293,11 +293,7 @@ pub trait LoadState:
                     .sealed_header_by_id(at)
                     .map_err(Self::Error::from_eth_err)?
                     .ok_or_else(|| EthApiError::HeaderNotFound(at))?;
-                let evm_env = self
-                    .evm_config()
-                    .evm_env(&header)
-                    .map_err(RethError::other)
-                    .map_err(Self::Error::from_eth_err)?;
+                let evm_env = self.evm_env_for_header(&header)?;
 
                 Ok((evm_env, header.hash().into()))
             }
