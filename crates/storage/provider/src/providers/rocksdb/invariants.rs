@@ -1634,7 +1634,7 @@ mod tests {
         );
     }
 
-    /// Test Case 7: Defensive check catches entries missed by changeset-based pruning.
+    /// Test Case: Defensive check catches entries missed by changeset-based pruning.
     ///
     /// This tests the scenario where MDBX has changesets for some but not all of the
     /// entries that need to be pruned in `RocksDB`. The defensive check after the optimized
@@ -1769,7 +1769,7 @@ mod tests {
         );
     }
 
-    /// Test Case 7 for `AccountsHistory`: Defensive check catches entries missed by
+    /// Test Case for `AccountsHistory`: Defensive check catches entries missed by
     /// changeset-based pruning.
     #[test]
     fn test_accounts_history_defensive_check_catches_missed_entries() {
