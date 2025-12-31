@@ -387,17 +387,16 @@ impl<Txs> OpBuilder<'_, Txs> {
             Vec::new(),
         );
 
-        // debug!(target: "payload_builder", block_number = ?block.number(),"====exporting full state for block=====");
-        use reth_mantle_forks::debug::state_export::export_full_state_with_bundle;
-        if block.number() == 108 || block.number() == 109 {
-            export_full_state_with_bundle(
-                &provider,
-                &execution_outcome.bundle,
-                &format!("full_state_{}.json", block.number()),
-                Some(block.state_root()),
-                true,
-            ).map_err(|e| PayloadBuilderError::other(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
-        }
+        // use reth_mantle_forks::debug::state_export::export_full_state_with_bundle;
+        // if block.number() == 108 || block.number() == 109 {
+        //     export_full_state_with_bundle(
+        //         &provider,
+        //         &execution_outcome.bundle,
+        //         &format!("full_state_{}.json", block.number()),
+        //         Some(block.state_root()),
+        //         true,
+        //     ).map_err(|e| PayloadBuilderError::other(io::Error::new(io::ErrorKind::Other, e.to_string())))?;
+        // }
 
         // create the executed block data
         let executed: ExecutedBlock<N> = ExecutedBlock {

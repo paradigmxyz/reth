@@ -203,7 +203,7 @@ impl MantleChainHardforks {
 impl EthereumHardforks for MantleChainHardforks {
     fn ethereum_fork_activation(&self, fork: EthereumHardfork) -> ForkCondition {
         use EthereumHardfork::{Cancun, Osaka, Prague, Shanghai};
-        use MantleHardfork::Skadi;
+        use MantleHardfork::{Skadi, Arsia};
 
         if self.forks.is_empty() {
             return ForkCondition::Never;
