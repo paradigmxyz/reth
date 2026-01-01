@@ -39,12 +39,16 @@ reth-stages-api.workspace = true
 reth-static-file-types.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
+reth-trie-common.workspace = true
+reth-eth-wire-types.workspace = true
 
 reth-testing-utils = { workspace = true, optional = true }
 
 alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-consensus.workspace = true
+alloy-trie = { workspace = true, features = ["ethereum"] }
+alloy-rlp.workspace = true
 
 # async
 tokio = { workspace = true, features = ["sync"] }
