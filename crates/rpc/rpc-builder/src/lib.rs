@@ -51,7 +51,9 @@ use reth_rpc_eth_api::{
     RpcConverter, RpcHeader, RpcNodeCore, RpcReceipt, RpcTransaction, RpcTxReq,
 };
 use reth_rpc_eth_types::{receipt::EthReceiptConverter, EthConfig, EthSubscriptionIdProvider};
-use reth_rpc_layer::{AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret};
+use reth_rpc_layer::{
+    AllowedVHosts, AuthLayer, Claims, CompressionLayer, JwtAuthValidator, JwtSecret, VHostLayer,
+};
 pub use reth_rpc_server_types::RethRpcModule;
 use reth_storage_api::{
     AccountReader, BlockReader, ChangeSetReader, FullRpcProvider, NodePrimitivesProvider,
@@ -1052,6 +1054,8 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     http_server_config: Option<ServerConfigBuilder>,
     /// Allowed CORS Domains for http
     http_cors_domains: Option<String>,
+    /// Allowed virtual hostnames for http
+    http_vhosts: Option<String>,
     /// Address where to bind the http server to
     http_addr: Option<SocketAddr>,
     /// Control whether http responses should be compressed
@@ -1060,6 +1064,8 @@ pub struct RpcServerConfig<RpcMiddleware = Identity> {
     ws_server_config: Option<ServerConfigBuilder>,
     /// Allowed CORS Domains for ws.
     ws_cors_domains: Option<String>,
+    /// Allowed virtual hostnames for ws
+    ws_vhosts: Option<String>,
     /// Address where to bind the ws server to
     ws_addr: Option<SocketAddr>,
     /// Configs for JSON-RPC IPC server
@@ -1080,10 +1086,12 @@ impl Default for RpcServerConfig<Identity> {
         Self {
             http_server_config: None,
             http_cors_domains: None,
+            http_vhosts: None,
             http_addr: None,
             http_disable_compression: false,
             ws_server_config: None,
             ws_cors_domains: None,
+            ws_vhosts: None,
             ws_addr: None,
             ipc_server_config: None,
             ipc_endpoint: None,
@@ -1144,10 +1152,12 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         RpcServerConfig {
             http_server_config: self.http_server_config,
             http_cors_domains: self.http_cors_domains,
+            http_vhosts: self.http_vhosts,
             http_addr: self.http_addr,
             http_disable_compression: self.http_disable_compression,
             ws_server_config: self.ws_server_config,
             ws_cors_domains: self.ws_cors_domains,
+            ws_vhosts: self.ws_vhosts,
             ws_addr: self.ws_addr,
             ipc_server_config: self.ipc_server_config,
             ipc_endpoint: self.ipc_endpoint,
@@ -1176,6 +1186,18 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
     /// Configure the cors domains for HTTP
     pub fn with_http_cors(mut self, cors_domain: Option<String>) -> Self {
         self.http_cors_domains = cors_domain;
+        self
+    }
+
+    /// Configure the virtual hostnames for HTTP
+    pub fn with_http_vhosts(mut self, vhosts: Option<String>) -> Self {
+        self.http_vhosts = vhosts;
+        self
+    }
+
+    /// Configure the virtual hostnames for WS
+    pub fn with_ws_vhosts(mut self, vhosts: Option<String>) -> Self {
+        self.ws_vhosts = vhosts;
         self
     }
 
@@ -1292,6 +1314,11 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
         }
     }
 
+    /// Creates the [`VHostLayer`] if vhosts are configured
+    fn maybe_vhost_layer(vhosts: Option<String>) -> Option<VHostLayer> {
+        vhosts.map(|vhosts| VHostLayer::new(AllowedVHosts::parse(&vhosts)))
+    }
+
     /// Builds and starts the configured server(s): http, ws, ipc.
     ///
     /// If both http and ws are on the same port, they are combined into one server.
@@ -1346,6 +1373,9 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
             }
             .cloned();
 
+            // Merge vhosts for same port (prefer http, fallback to ws)
+            let vhosts = self.http_vhosts.as_ref().or(self.ws_vhosts.as_ref()).cloned();
+
             // we merge this into one server using the http setup
             modules.config.ensure_ws_http_identical()?;
 
@@ -1355,6 +1385,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                         tower::ServiceBuilder::new()
                             .option_layer(Self::maybe_cors_layer(cors)?)
                             .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
+                            .option_layer(Self::maybe_vhost_layer(vhosts))
                             .option_layer(Self::maybe_compression_layer(
                                 self.http_disable_compression,
                             )),
@@ -1408,7 +1439,8 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                 .set_http_middleware(
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.ws_cors_domains.clone())?)
-                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret)),
+                        .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
+                        .option_layer(Self::maybe_vhost_layer(self.ws_vhosts.clone())),
                 )
                 .set_rpc_middleware(
                     RpcServiceBuilder::default()
@@ -1434,6 +1466,7 @@ impl<RpcMiddleware> RpcServerConfig<RpcMiddleware> {
                     tower::ServiceBuilder::new()
                         .option_layer(Self::maybe_cors_layer(self.http_cors_domains.clone())?)
                         .option_layer(Self::maybe_jwt_layer(self.jwt_secret))
+                        .option_layer(Self::maybe_vhost_layer(self.http_vhosts.clone()))
                         .option_layer(Self::maybe_compression_layer(self.http_disable_compression)),
                 )
                 .set_rpc_middleware(
