@@ -81,18 +81,7 @@ impl CliRunner {
         // (including blocking pool) are shutdown. Since we want to exit as soon as possible, drop
         // it on a separate thread and wait for up to 5 seconds for this operation to
         // complete.
-        let (tx, rx) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("tokio-runtime-shutdown".to_string())
-            .spawn(move || {
-                drop(tokio_runtime);
-                let _ = tx.send(());
-            })
-            .unwrap();
-
-        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
-            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
-        });
+        shutdown_runtime_on_separate_thread(tokio_runtime, Duration::from_secs(5));
 
         command_res
     }
@@ -132,18 +121,7 @@ impl CliRunner {
         }
 
         // Shutdown the runtime on a separate thread
-        let (tx, rx) = mpsc::channel();
-        std::thread::Builder::new()
-            .name("tokio-runtime-shutdown".to_string())
-            .spawn(move || {
-                drop(tokio_runtime);
-                let _ = tx.send(());
-            })
-            .unwrap();
-
-        let _ = rx.recv_timeout(Duration::from_secs(5)).inspect_err(|err| {
-            debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
-        });
+        shutdown_runtime_on_separate_thread(tokio_runtime, Duration::from_secs(5));
 
         command_res
     }
@@ -237,6 +215,26 @@ where
         }
     }
     Ok(())
+}
+
+/// Shuts down the tokio runtime on a separate thread with a timeout.
+///
+/// `drop(tokio_runtime)` would block the current thread until its pools (including blocking pool)
+/// are shutdown. This function drops the runtime on a separate thread and waits for up to the
+/// specified timeout for the operation to complete.
+fn shutdown_runtime_on_separate_thread(tokio_runtime: tokio::runtime::Runtime, timeout: Duration) {
+    let (tx, rx) = mpsc::channel();
+    std::thread::Builder::new()
+        .name("tokio-runtime-shutdown".to_string())
+        .spawn(move || {
+            drop(tokio_runtime);
+            let _ = tx.send(());
+        })
+        .unwrap();
+
+    let _ = rx.recv_timeout(timeout).inspect_err(|err| {
+        debug!(target: "reth::cli", %err, "tokio runtime shutdown timed out");
+    });
 }
 
 /// Runs the future to completion or until:
