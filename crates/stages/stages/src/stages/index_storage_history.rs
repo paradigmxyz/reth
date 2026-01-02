@@ -97,7 +97,8 @@ where
         let mut range = input.next_block_range();
         // Check if the history table is empty to determine if this is the first sync.
         // We cannot use checkpoint == 0 because genesis block number might not be 0.
-        let first_sync = provider.tx_ref().cursor_read::<tables::StoragesHistory>()?.last()?.is_none();
+        let first_sync =
+            provider.tx_ref().cursor_read::<tables::StoragesHistory>()?.last()?.is_none();
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
