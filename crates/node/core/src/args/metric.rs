@@ -32,5 +32,4 @@ pub struct MetricArgs {
         help_heading = "Metrics"
     )]
     pub push_gateway_interval: Duration,
-
 }
