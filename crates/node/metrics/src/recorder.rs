@@ -72,6 +72,9 @@ pub fn set_metrics_init_with_builder(builder: PrometheusBuilder) -> eyre::Result
     }))
 }
 
+/// Runs the one-shot metrics initializer if one was registered.
+///
+/// Returns `true` if the initializer ran, otherwise `false`.
 fn run_metrics_init() -> eyre::Result<bool> {
     let Some(slot) = METRICS_INIT.get() else { return Ok(false) };
     let init = slot.lock().expect("metrics init lock poisoned").take();
@@ -82,6 +85,9 @@ fn run_metrics_init() -> eyre::Result<bool> {
     Ok(false)
 }
 
+/// Installs the default Prometheus recorder when none is configured.
+///
+/// If another call has already installed a recorder, returns the existing one.
 fn install_default_recorder() -> eyre::Result<&'static PrometheusRecorder> {
     match PrometheusRecorder::install(None) {
         Ok(recorder) => {
@@ -98,6 +104,7 @@ fn install_default_recorder() -> eyre::Result<&'static PrometheusRecorder> {
     }
 }
 
+/// Installs a recorder using a custom builder and sets the global handle.
 fn install_prometheus_recorder_with_builder_inner(
     builder: PrometheusBuilder,
 ) -> eyre::Result<&'static PrometheusRecorder> {
