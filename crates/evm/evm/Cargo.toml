@@ -37,7 +37,6 @@ rayon = { workspace = true, optional = true }
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
 reth-ethereum-forks.workspace = true
-reth-ethereum = { workspace = true }
 metrics-util = { workspace = true, features = ["debugging"] }
 revm-interpreter = { workspace = true }
 
@@ -67,6 +66,5 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
-    "reth-ethereum/test-utils",
 ]
 op = ["alloy-evm/op", "reth-primitives-traits/op"]
