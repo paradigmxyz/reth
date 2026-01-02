@@ -581,6 +581,9 @@ pub(super) struct MultiProofTask {
     fetched_proof_targets: MultiProofTargets,
     /// Tracks keys which have been added and removed throughout the entire block.
     multi_added_removed_keys: MultiAddedRemovedKeys,
+    /// Cached Arc for multi_added_removed_keys to avoid repeated cloning.
+    /// Regenerated only when multi_added_removed_keys is modified.
+    cached_multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
@@ -614,6 +617,7 @@ impl MultiProofTask {
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
             multi_added_removed_keys: MultiAddedRemovedKeys::new(),
+            cached_multi_added_removed_keys: None,
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
                 metrics.clone(),
@@ -628,6 +632,21 @@ impl MultiProofTask {
     /// Returns a sender that can be used to send arbitrary [`MultiProofMessage`]s to this task.
     pub(super) fn state_root_message_sender(&self) -> CrossbeamSender<MultiProofMessage> {
         self.tx.clone()
+    }
+
+    /// Returns a cached Arc of the multi_added_removed_keys, regenerating it only if the
+    /// underlying data has been modified since the last call.
+    fn get_cached_multi_added_removed_keys(&mut self) -> Arc<MultiAddedRemovedKeys> {
+        if self.cached_multi_added_removed_keys.is_none() {
+            self.cached_multi_added_removed_keys =
+                Some(Arc::new(self.multi_added_removed_keys.clone()));
+        }
+        Arc::clone(self.cached_multi_added_removed_keys.as_ref().unwrap())
+    }
+
+    /// Invalidates the cached Arc, forcing regeneration on next access.
+    fn invalidate_multi_added_removed_keys_cache(&mut self) {
+        self.cached_multi_added_removed_keys = None;
     }
 
     /// Handles request for proof prefetch.
@@ -647,9 +666,11 @@ impl MultiProofTask {
         // [`MultiAddedRemovedKeys`]. Even if there are not any known removed keys for the account,
         // we still want to optimistically fetch extension children for the leaf addition case.
         self.multi_added_removed_keys.touch_accounts(proof_targets.keys().copied());
+        // Invalidate cache since we modified the underlying data
+        self.invalidate_multi_added_removed_keys_cache();
 
-        // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        // Get cached Arc of MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
+        let multi_added_removed_keys = self.get_cached_multi_added_removed_keys();
 
         self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
         self.metrics
@@ -783,6 +804,8 @@ impl MultiProofTask {
     ) -> u64 {
         // Update removed keys based on the state update.
         self.multi_added_removed_keys.update_with_state(&hashed_state_update);
+        // Invalidate cache since we modified the underlying data
+        self.invalidate_multi_added_removed_keys_cache();
 
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
@@ -800,8 +823,8 @@ impl MultiProofTask {
             state_updates += 1;
         }
 
-        // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        // Get cached Arc of MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
+        let multi_added_removed_keys = self.get_cached_multi_added_removed_keys();
 
         let chunking_len = not_fetched_state_update.chunking_length();
         let mut spawned_proof_targets = MultiProofTargets::default();
