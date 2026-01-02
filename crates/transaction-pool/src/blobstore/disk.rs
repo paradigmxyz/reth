@@ -91,7 +91,7 @@ impl DiskFileBlobStore {
             if missing_count == 0 {
                 // since versioned_hashes may have duplicates, we double check here
                 if result.iter().all(|blob| blob.is_some()) {
-                    break;
+                    return Ok(result);
                 }
             }
         }
