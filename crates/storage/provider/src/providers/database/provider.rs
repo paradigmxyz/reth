@@ -1467,18 +1467,21 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
             return Ok(Vec::new());
         }
 
-        // find blocks with transactions to determine transaction range
-        let non_empty_blocks: Vec<_> =
-            block_body_indices.iter().filter(|indices| indices.tx_count > 0).collect();
+        let mut first_tx: TxNumber = u64::MAX;
+        let mut last_tx: TxNumber = 0;
+        for (_, indices) in block_body_indices.iter().enumerate() {
+            if indices.tx_count > 0 {
+                if first_tx == u64::MAX {
+                    first_tx = indices.first_tx_num();
+                }
+                last_tx = indices.last_tx_num();
+            }
+        }
 
-        if non_empty_blocks.is_empty() {
+        if first_tx == u64::MAX {
             // all blocks are empty
             return Ok(vec![Vec::new(); block_body_indices.len()]);
         }
-
-        // calculate the overall transaction range
-        let first_tx = non_empty_blocks[0].first_tx_num();
-        let last_tx = non_empty_blocks[non_empty_blocks.len() - 1].last_tx_num();
 
         // fetch all receipts in the transaction range
         let all_receipts = self.receipts_by_tx_range(first_tx..=last_tx)?;
