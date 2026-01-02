@@ -382,7 +382,7 @@ mod tests {
         let sstore_metric = snapshot
             .iter()
             .find(|(key, _, _, _)| key.key().name() == "sync.execution.sstore_count")
-            .expect("sstore_count metric should be recorded");
+            .expect("sstore_count metric should be recorded corectly");
 
         // Verify the counter was incremented to 1
         let (_, _, _, value) = sstore_metric;
