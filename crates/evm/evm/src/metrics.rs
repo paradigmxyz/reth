@@ -104,8 +104,8 @@ pub struct StorageMetricsInspector {
 }
 
 impl StorageMetricsInspector {
-    /// Create a new StorageMetricsInspector with the given metrics.
-    pub fn new(metrics: ExecutorMetrics) -> Self {
+    /// Create a new `StorageMetricsInspector` with the given metrics.
+    pub const fn new(metrics: ExecutorMetrics) -> Self {
         Self { metrics, operation_start: None, current_opcode: None }
     }
 }
