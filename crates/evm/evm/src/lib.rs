@@ -51,10 +51,7 @@ pub use engine::{ConfigureEngineEvm, ExecutableTxIterator, ExecutableTxTuple};
 
 #[cfg(feature = "metrics")]
 pub mod metrics;
-#[cfg(feature = "metrics")]
-use revm_bytecode as _;
-#[cfg(feature = "metrics")]
-use revm_interpreter as _;
+
 pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor

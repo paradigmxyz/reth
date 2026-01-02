@@ -251,7 +251,7 @@ mod tests {
             balance: U256::ZERO,
             nonce: 0,
             code_hash,
-            code: Some(Bytecode::new_raw(code.clone())),
+            code: Some(Bytecode::new_raw(code)),
         };
         db.insert_account_info(contract_address, account_info);
 
@@ -261,7 +261,7 @@ mod tests {
 
         // Create metrics and inspector
         let metrics = ExecutorMetrics::default();
-        let inspector = StorageMetricsInspector::new(metrics.clone());
+        let inspector = StorageMetricsInspector::new(metrics);
 
         // Set up EVM context
         // build_mainnet_with_inspector returns a handler that doesn't automatically enable
@@ -273,11 +273,13 @@ mod tests {
         let mut evm = EthEvm::new(handler, true);
 
         // Create transaction environment to call the contract
-        let mut tx_env = TxEnv::default();
-        tx_env.caller = address!("0x2000000000000000000000000000000000000000");
-        tx_env.kind = TxKind::Call(contract_address);
-        tx_env.gas_limit = 100000;
-        tx_env.value = U256::ZERO;
+        let tx_env = TxEnv {
+            caller: address!("0x2000000000000000000000000000000000000000"),
+            kind: TxKind::Call(contract_address),
+            gas_limit: 100000,
+            value: U256::ZERO,
+            ..Default::default()
+        };
 
         // Execute the code
         let _result = evm.transact(tx_env).unwrap();
@@ -318,7 +320,7 @@ mod tests {
                 // Verify that the histogram has recorded at least one value
                 // The histogram should have at least one recorded value after SLOAD execution
                 assert!(
-                    histogram_data.len() > 0,
+                    !histogram_data.is_empty(),
                     "sload_time_histogram should have recorded at least one value"
                 );
             }
@@ -345,13 +347,13 @@ mod tests {
             balance: U256::ZERO,
             nonce: 0,
             code_hash,
-            code: Some(Bytecode::new_raw(code.clone())),
+            code: Some(Bytecode::new_raw(code)),
         };
         db.insert_account_info(contract_address, account_info);
 
         // Create metrics and inspector
         let metrics = ExecutorMetrics::default();
-        let inspector = StorageMetricsInspector::new(metrics.clone());
+        let inspector = StorageMetricsInspector::new(metrics);
 
         // Set up EVM context
         // build_mainnet_with_inspector returns a handler that doesn't automatically enable
@@ -363,11 +365,13 @@ mod tests {
         let mut evm = EthEvm::new(handler, true);
 
         // Create transaction environment to call the contract
-        let mut tx_env = TxEnv::default();
-        tx_env.caller = address!("0x2000000000000000000000000000000000000000");
-        tx_env.kind = TxKind::Call(contract_address);
-        tx_env.gas_limit = 100000;
-        tx_env.value = U256::ZERO;
+        let tx_env = TxEnv {
+            caller: address!("0x2000000000000000000000000000000000000000"),
+            kind: TxKind::Call(contract_address),
+            gas_limit: 100000,
+            value: U256::ZERO,
+            ..Default::default()
+        };
 
         // Execute the code
         let _result = evm.transact(tx_env).unwrap();
@@ -404,7 +408,7 @@ mod tests {
             metrics_util::debugging::DebugValue::Histogram(histogram_data) => {
                 // Verify that the histogram has recorded at least one value
                 assert!(
-                    histogram_data.len() > 0,
+                    !histogram_data.is_empty(),
                     "sstore_time_histogram should have recorded at least one value"
                 );
             }

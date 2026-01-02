@@ -21,8 +21,6 @@ reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
-revm-bytecode = { workspace = true, optional = true }
-revm-interpreter = { workspace = true, optional = true }
 
 # alloy
 alloy-primitives.workspace = true
@@ -63,7 +61,7 @@ std = [
     "reth-trie-common/std",
     "reth-ethereum-primitives/std",
 ]
-metrics = ["std", "dep:metrics", "dep:reth-metrics", "dep:revm-bytecode", "dep:revm-interpreter"]
+metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",

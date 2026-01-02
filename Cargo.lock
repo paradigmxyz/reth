@@ -8757,7 +8757,6 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
- "revm-bytecode",
  "revm-interpreter",
 ]
 
