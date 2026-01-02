@@ -1,7 +1,9 @@
 use super::{collect_history_indices, load_history_indices};
 use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
-use reth_db_api::{models::ShardedKey, table::Decode, tables, transaction::DbTxMut};
+use reth_db_api::{
+    cursor::DbCursorRO, models::ShardedKey, table::Decode, tables, transaction::{DbTx, DbTxMut},
+};
 use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
@@ -91,13 +93,15 @@ where
         }
 
         let mut range = input.next_block_range();
-        let first_sync = input.checkpoint().block_number == 0;
+        // Check if the history table is empty to determine if this is the first sync.
+        // We cannot use checkpoint == 0 because genesis block number might not be 0.
+        let first_sync = provider.tx_ref().cursor_read::<tables::AccountsHistory>()?.last()?.is_none();
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
         if first_sync {
             provider.tx_ref().clear::<tables::AccountsHistory>()?;
-            range = 0..=*input.next_block_range().end();
+            range = input.checkpoint().block_number..=*input.next_block_range().end();
         }
 
         info!(target: "sync::stages::index_account_history::exec", ?first_sync, "Collecting indices");

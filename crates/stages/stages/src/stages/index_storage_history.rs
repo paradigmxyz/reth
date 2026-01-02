@@ -2,10 +2,11 @@ use super::{collect_history_indices, load_history_indices};
 use crate::{StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
+    cursor::DbCursorRO,
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
     table::Decode,
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
 use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
@@ -94,13 +95,15 @@ where
         }
 
         let mut range = input.next_block_range();
-        let first_sync = input.checkpoint().block_number == 0;
+        // Check if the history table is empty to determine if this is the first sync.
+        // We cannot use checkpoint == 0 because genesis block number might not be 0.
+        let first_sync = provider.tx_ref().cursor_read::<tables::StoragesHistory>()?.last()?.is_none();
 
         // On first sync we might have history coming from genesis. We clear the table since it's
         // faster to rebuild from scratch.
         if first_sync {
             provider.tx_ref().clear::<tables::StoragesHistory>()?;
-            range = 0..=*input.next_block_range().end();
+            range = input.checkpoint().block_number..=*input.next_block_range().end();
         }
 
         info!(target: "sync::stages::index_storage_history::exec", ?first_sync, "Collecting indices");
