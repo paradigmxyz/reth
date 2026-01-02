@@ -1469,7 +1469,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
 
         let mut first_tx: TxNumber = u64::MAX;
         let mut last_tx: TxNumber = 0;
-        for indices in block_body_indices {
+        for indices in &block_body_indices {
             if indices.tx_count > 0 {
                 if first_tx == u64::MAX {
                     first_tx = indices.first_tx_num();
