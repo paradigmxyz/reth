@@ -501,6 +501,8 @@ mod tests {
             excess_blob_gas: None,
             parent_beacon_block_root: None,
             requests_hash: None,
+            #[cfg(feature = "amsterdam")]
+            block_access_list_hash: None,
         };
 
         // Create a simple transaction

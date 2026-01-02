@@ -61,6 +61,8 @@ pub(crate) struct Header {
 #[add_arbitrary_tests(crate, compact)]
 pub(crate) struct HeaderExt {
     requests_hash: Option<B256>,
+    #[cfg(feature = "amsterdam")]
+    block_access_list_hash: Option<B256>,
 }
 
 impl HeaderExt {
@@ -81,7 +83,10 @@ impl Compact for AlloyHeader {
     where
         B: bytes::BufMut + AsMut<[u8]>,
     {
-        let extra_fields = HeaderExt { requests_hash: self.requests_hash };
+        let extra_fields = HeaderExt { requests_hash: self.requests_hash,
+            #[cfg(feature = "amsterdam")]
+            block_access_list_hash:self.block_access_list_hash 
+        };
 
         let header = Header {
             parent_hash: self.parent_hash,
@@ -132,6 +137,8 @@ impl Compact for AlloyHeader {
             excess_blob_gas: header.excess_blob_gas,
             parent_beacon_block_root: header.parent_beacon_block_root,
             requests_hash: header.extra_fields.as_ref().and_then(|h| h.requests_hash),
+            #[cfg(feature = "amsterdam")]
+            block_access_list_hash: header.extra_fields.as_ref().and_then(|h| h.block_access_list_hash),
             extra_data: header.extra_data,
         };
         (alloy_header, buf)
@@ -193,7 +200,10 @@ mod tests {
     #[test]
     fn test_extra_fields() {
         let mut header = HOLESKY_BLOCK;
-        header.extra_fields = Some(HeaderExt { requests_hash: Some(B256::random()) });
+        header.extra_fields = Some(HeaderExt { requests_hash: Some(B256::random()),
+            #[cfg(feature = "amsterdam")]
+            block_access_list_hash: None,
+         });
 
         let mut encoded_header = vec![];
         let len = header.to_compact(&mut encoded_header);

@@ -112,6 +112,8 @@ impl<ChainSpec: OpHardforks> OpBlockAssembler<ChainSpec> {
             blob_gas_used,
             excess_blob_gas,
             requests_hash,
+            #[cfg(feature = "amsterdam")]
+            block_access_list_hash: None,
         };
 
         Ok(Block::new(

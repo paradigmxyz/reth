@@ -89,3 +89,4 @@ serde = [
     "reth-ethereum-primitives/serde",
     "alloy-hardforks/serde",
 ]
+amsterdam = ["alloy-consensus/amsterdam"]

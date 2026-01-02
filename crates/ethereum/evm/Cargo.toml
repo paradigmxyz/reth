@@ -66,3 +66,4 @@ test-utils = [
     "reth-evm/test-utils",
     "reth-primitives-traits/test-utils",
 ]
+amsterdam = ["alloy-consensus/amsterdam"]

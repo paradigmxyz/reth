@@ -56,6 +56,8 @@ pub fn generate_test_blocks(chain_spec: &ChainSpec, count: u64) -> Vec<SealedBlo
             excess_blob_gas: None,
             parent_beacon_block_root: None,
             requests_hash: None,
+            #[cfg(feature = "amsterdam")]
+            block_access_list_hash: None,
         };
 
         // Set required fields based on chain spec
