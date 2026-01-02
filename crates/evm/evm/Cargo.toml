@@ -7,6 +7,7 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 metadata.cargo-udeps.ignore = ["reth-ethereum"]
+
 [lints]
 workspace = true
 
