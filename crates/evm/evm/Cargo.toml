@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 homepage.workspace = true
 repository.workspace = true
-
+metadata.cargo-udeps.ignore = ["reth-ethereum"]
 [lints]
 workspace = true
 
@@ -39,6 +39,7 @@ reth-ethereum-primitives.workspace = true
 reth-ethereum-forks.workspace = true
 metrics-util = { workspace = true, features = ["debugging"] }
 revm-interpreter = { workspace = true }
+reth-ethereum = { workspace = true }
 
 [features]
 default = ["std"]
@@ -66,5 +67,6 @@ test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "reth-ethereum/test-utils",
 ]
 op = ["alloy-evm/op", "reth-primitives-traits/op"]
