@@ -43,9 +43,19 @@ pub fn set_metrics_init(init: MetricsInit) -> eyre::Result<()> {
 /// Registers a custom metrics initializer that installs a Prometheus recorder with a builder.
 pub fn set_metrics_init_with_builder(builder: PrometheusBuilder) -> eyre::Result<()> {
     set_metrics_init(Box::new(move || {
-        install_prometheus_recorder_with_builder(builder)?;
+        install_prometheus_recorder_with_builder_inner(builder)?;
         Ok(())
     }))
+}
+
+/// Installs the Prometheus recorder with a custom builder.
+///
+/// This aligns with the issue request to pass a `PrometheusBuilder` to install the recorder.
+pub fn install_prometheus_recorder_with_builder(
+    builder: PrometheusBuilder,
+) -> eyre::Result<&'static PrometheusRecorder> {
+    set_metrics_init_with_builder(builder)?;
+    try_install_prometheus_recorder()
 }
 
 /// Installs the Prometheus recorder as the global recorder, running any registered initializer.
@@ -75,7 +85,7 @@ fn run_metrics_init() -> eyre::Result<bool> {
     Ok(false)
 }
 
-fn install_prometheus_recorder_with_builder(
+fn install_prometheus_recorder_with_builder_inner(
     builder: PrometheusBuilder,
 ) -> eyre::Result<&'static PrometheusRecorder> {
     let recorder = PrometheusRecorder::install_with_builder(builder)?;
