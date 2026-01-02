@@ -80,19 +80,16 @@ where
             .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.account_subtree.into_inner().remove(path);
         let masks = proof.branch_node_masks.remove(path);
-        let hash_mask = masks.map(|m| m.hash_mask);
-        let tree_mask = masks.map(|m| m.tree_mask);
 
         trace!(
             target: "trie::proof::blinded",
             elapsed = ?start.unwrap().elapsed(),
             ?path,
             ?node,
-            ?tree_mask,
-            ?hash_mask,
+            ?masks,
             "Blinded node for account trie"
         );
-        Ok(node.map(|node| RevealedNode { node, tree_mask, hash_mask }))
+        Ok(node.map(|node| RevealedNode { node, masks }))
     }
 }
 
@@ -133,8 +130,6 @@ where
         .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
         let node = proof.subtree.into_inner().remove(path);
         let masks = proof.branch_node_masks.remove(path);
-        let hash_mask = masks.map(|m| m.hash_mask);
-        let tree_mask = masks.map(|m| m.tree_mask);
 
         trace!(
             target: "trie::proof::blinded",
@@ -142,10 +137,9 @@ where
             elapsed = ?start.unwrap().elapsed(),
             ?path,
             ?node,
-            ?tree_mask,
-            ?hash_mask,
+            ?masks,
             "Blinded node for storage trie"
         );
-        Ok(node.map(|node| RevealedNode { node, tree_mask, hash_mask }))
+        Ok(node.map(|node| RevealedNode { node, masks }))
     }
 }

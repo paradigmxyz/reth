@@ -58,5 +58,6 @@ pub struct ProofTrieNode {
     /// The node itself.
     pub node: TrieNode,
     /// Tree and hash masks for the node, if known.
-    pub masks: TrieMasks,
+    /// Both masks are always set together (from database branch nodes).
+    pub masks: Option<BranchNodeMasks>,
 }
