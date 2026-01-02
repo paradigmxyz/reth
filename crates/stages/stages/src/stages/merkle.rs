@@ -228,8 +228,8 @@ where
             }
             .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (provider.count_entries::<tables::HashedAccounts>()?
-                    + provider.count_entries::<tables::HashedStorages>()?)
+                total: (provider.count_entries::<tables::HashedAccounts>()? +
+                    provider.count_entries::<tables::HashedStorages>()?)
                     as u64,
             });
 
@@ -323,8 +323,8 @@ where
                 "Incremental merkle hashing did not produce a final root".into(),
             ))?;
 
-            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()?
-                + provider.count_entries::<tables::HashedStorages>()?)
+            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
+                provider.count_entries::<tables::HashedStorages>()?)
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
@@ -366,8 +366,8 @@ where
         let mut entities_checkpoint =
             input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (tx.entries::<tables::HashedAccounts>()?
-                    + tx.entries::<tables::HashedStorages>()?) as u64,
+                total: (tx.entries::<tables::HashedAccounts>()? +
+                    tx.entries::<tables::HashedStorages>()?) as u64,
             });
 
         if input.unwind_to == 0 {
