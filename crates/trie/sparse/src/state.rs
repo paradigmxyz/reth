@@ -814,19 +814,46 @@ where
     }
 }
 
+/// Entry containing both the sparse trie and its revealed paths for a storage account.
+#[derive(Debug)]
+struct StorageTrieEntry<S> {
+    /// The sparse trie for this storage account.
+    trie: SparseTrie<S>,
+    /// Collection of revealed trie node paths.
+    revealed_paths: HashSet<Nibbles>,
+}
+
+impl<S: Default> Default for StorageTrieEntry<S> {
+    fn default() -> Self {
+        Self { trie: SparseTrie::default(), revealed_paths: HashSet::default() }
+    }
+}
+
+impl<S: SparseTrieInterface> StorageTrieEntry<S> {
+    /// Clears the entry, returning it for reuse.
+    fn clear(mut self) -> Self {
+        self.trie = self.trie.clear();
+        self.revealed_paths.clear();
+        self
+    }
+}
+
+impl<S: SparseTrieInterface + Clone> StorageTrieEntry<S> {
+    /// Creates a new entry from a default trie template.
+    fn new_from_default(default_trie: &SparseTrie<S>) -> Self {
+        Self { trie: default_trie.clone(), revealed_paths: HashSet::default() }
+    }
+}
+
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] both to help enforce allocation re-use and to allow us to implement
 /// methods like `get_trie_and_revealed_paths` which return multiple mutable borrows.
 #[derive(Debug, Default)]
 struct StorageTries<S = SerialSparseTrie> {
-    /// Sparse storage tries.
-    tries: B256Map<SparseTrie<S>>,
-    /// Cleared storage tries, kept for re-use.
-    cleared_tries: Vec<SparseTrie<S>>,
-    /// Collection of revealed storage trie paths, per account.
-    revealed_paths: B256Map<HashSet<Nibbles>>,
-    /// Cleared revealed storage trie path collections, kept for re-use.
-    cleared_revealed_paths: Vec<HashSet<Nibbles>>,
+    /// Sparse storage tries with their revealed paths.
+    entries: B256Map<StorageTrieEntry<S>>,
+    /// Cleared entries, kept for re-use.
+    cleared_entries: Vec<StorageTrieEntry<S>>,
     /// A default cleared trie instance, which will be cloned when creating new tries.
     default_trie: SparseTrie<S>,
 }
