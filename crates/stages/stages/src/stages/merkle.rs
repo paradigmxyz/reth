@@ -48,6 +48,27 @@ pub const MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD: u64 = 100_000;
 /// number.
 pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
 
+/// Settings for incremental trie building in [`MerkleStage`].
+#[derive(Debug, Clone, Copy)]
+pub struct IncrementalSettings {
+    /// The threshold (in number of blocks) for switching from incremental trie building
+    /// of changes to whole rebuild.
+    pub rebuild_threshold: u64,
+    /// The threshold (in number of blocks) to run the stage in incremental mode. The
+    /// incremental mode will calculate the state root by calculating the new state root for
+    /// some number of blocks, repeating until we reach the desired block number.
+    pub incremental_threshold: u64,
+}
+
+impl Default for IncrementalSettings {
+    fn default() -> Self {
+        Self {
+            rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
+            incremental_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
+        }
+    }
+}
+
 /// The merkle hashing stage uses input from
 /// [`AccountHashingStage`][crate::stages::AccountHashingStage] and
 /// [`StorageHashingStage`][crate::stages::StorageHashingStage] to calculate intermediate hashes
@@ -72,39 +93,18 @@ pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
 #[derive(Debug, Clone)]
 pub enum MerkleStage {
     /// The execution portion of the merkle stage.
-    Execution {
-        // TODO: make struct for holding incremental settings, for code reuse between `Execution`
-        // variant and `Both`
-        /// The threshold (in number of blocks) for switching from incremental trie building
-        /// of changes to whole rebuild.
-        rebuild_threshold: u64,
-        /// The threshold (in number of blocks) to run the stage in incremental mode. The
-        /// incremental mode will calculate the state root by calculating the new state root for
-        /// some number of blocks, repeating until we reach the desired block number.
-        incremental_threshold: u64,
-    },
+    Execution(IncrementalSettings),
     /// The unwind portion of the merkle stage.
     Unwind,
     /// Able to execute and unwind. Used for tests
     #[cfg(any(test, feature = "test-utils"))]
-    Both {
-        /// The threshold (in number of blocks) for switching from incremental trie building
-        /// of changes to whole rebuild.
-        rebuild_threshold: u64,
-        /// The threshold (in number of blocks) to run the stage in incremental mode. The
-        /// incremental mode will calculate the state root by calculating the new state root for
-        /// some number of blocks, repeating until we reach the desired block number.
-        incremental_threshold: u64,
-    },
+    Both(IncrementalSettings),
 }
 
 impl MerkleStage {
     /// Stage default for the [`MerkleStage::Execution`].
-    pub const fn default_execution() -> Self {
-        Self::Execution {
-            rebuild_threshold: MERKLE_STAGE_DEFAULT_REBUILD_THRESHOLD,
-            incremental_threshold: MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD,
-        }
+    pub fn default_execution() -> Self {
+        Self::Execution(IncrementalSettings::default())
     }
 
     /// Stage default for the [`MerkleStage::Unwind`].
@@ -114,7 +114,7 @@ impl MerkleStage {
 
     /// Create new instance of [`MerkleStage::Execution`].
     pub const fn new_execution(rebuild_threshold: u64, incremental_threshold: u64) -> Self {
-        Self::Execution { rebuild_threshold, incremental_threshold }
+        Self::Execution(IncrementalSettings { rebuild_threshold, incremental_threshold })
     }
 
     /// Gets the hashing progress
@@ -126,7 +126,7 @@ impl MerkleStage {
             provider.get_stage_checkpoint_progress(StageId::MerkleExecute)?.unwrap_or_default();
 
         if buf.is_empty() {
-            return Ok(None)
+            return Ok(None);
         }
 
         let (checkpoint, _) = MerkleCheckpoint::from_compact(&buf, buf.len());
@@ -164,27 +164,23 @@ where
     /// Return the id of the stage
     fn id(&self) -> StageId {
         match self {
-            Self::Execution { .. } => StageId::MerkleExecute,
+            Self::Execution(_) => StageId::MerkleExecute,
             Self::Unwind => StageId::MerkleUnwind,
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Both { .. } => StageId::Other("MerkleBoth"),
+            Self::Both(_) => StageId::Other("MerkleBoth"),
         }
     }
 
     /// Execute the stage.
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
-        let (threshold, incremental_threshold) = match self {
+        let settings = match self {
             Self::Unwind => {
                 info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
+                return Ok(ExecOutput::done(StageCheckpoint::new(input.target())));
             }
-            Self::Execution { rebuild_threshold, incremental_threshold } => {
-                (*rebuild_threshold, *incremental_threshold)
-            }
+            Self::Execution(settings) => settings,
             #[cfg(any(test, feature = "test-utils"))]
-            Self::Both { rebuild_threshold, incremental_threshold } => {
-                (*rebuild_threshold, *incremental_threshold)
-            }
+            Self::Both(settings) => settings,
         };
 
         let range = input.next_block_range();
@@ -198,7 +194,7 @@ where
 
         let (trie_root, entities_checkpoint) = if range.is_empty() {
             (target_block_root, input.checkpoint().entities_stage_checkpoint().unwrap_or_default())
-        } else if to_block - from_block > threshold || from_block == 1 {
+        } else if to_block - from_block > settings.rebuild_threshold || from_block == 1 {
             let mut checkpoint = self.get_execution_checkpoint(provider)?;
 
             // if there are more blocks than threshold it is faster to rebuild the trie
@@ -232,8 +228,8 @@ where
             }
             .unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (provider.count_entries::<tables::HashedAccounts>()? +
-                    provider.count_entries::<tables::HashedStorages>()?)
+                total: (provider.count_entries::<tables::HashedAccounts>()?
+                    + provider.count_entries::<tables::HashedStorages>()?)
                     as u64,
             });
 
@@ -287,7 +283,7 @@ where
                             .checkpoint()
                             .with_entities_stage_checkpoint(entities_checkpoint),
                         done: false,
-                    })
+                    });
                 }
                 StateRootProgress::Complete(root, hashed_entries_walked, updates) => {
                     provider.write_trie_updates(updates)?;
@@ -300,14 +296,15 @@ where
         } else {
             debug!(target: "sync::stages::merkle::exec", current = ?current_block_number, target = ?to_block, "Updating trie in chunks");
             let mut final_root = None;
-            for start_block in range.step_by(incremental_threshold as usize) {
-                let chunk_to = std::cmp::min(start_block + incremental_threshold, to_block);
+            for start_block in range.step_by(settings.incremental_threshold as usize) {
+                let chunk_to =
+                    std::cmp::min(start_block + settings.incremental_threshold, to_block);
                 let chunk_range = start_block..=chunk_to;
                 debug!(
                     target: "sync::stages::merkle::exec",
                     current = ?current_block_number,
                     target = ?to_block,
-                    incremental_threshold,
+                    incremental_threshold = settings.incremental_threshold,
                     chunk_range = ?chunk_range,
                     "Processing chunk"
                 );
@@ -326,8 +323,8 @@ where
                 "Incremental merkle hashing did not produce a final root".into(),
             ))?;
 
-            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()? +
-                provider.count_entries::<tables::HashedStorages>()?)
+            let total_hashed_entries = (provider.count_entries::<tables::HashedAccounts>()?
+                + provider.count_entries::<tables::HashedStorages>()?)
                 as u64;
 
             let entities_checkpoint = EntitiesCheckpoint {
@@ -361,16 +358,16 @@ where
     ) -> Result<UnwindOutput, StageError> {
         let tx = provider.tx_ref();
         let range = input.unwind_block_range();
-        if matches!(self, Self::Execution { .. }) {
+        if matches!(self, Self::Execution(_)) {
             info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) });
         }
 
         let mut entities_checkpoint =
             input.checkpoint.entities_stage_checkpoint().unwrap_or(EntitiesCheckpoint {
                 processed: 0,
-                total: (tx.entries::<tables::HashedAccounts>()? +
-                    tx.entries::<tables::HashedStorages>()?) as u64,
+                total: (tx.entries::<tables::HashedAccounts>()?
+                    + tx.entries::<tables::HashedStorages>()?) as u64,
             });
 
         if input.unwind_to == 0 {
@@ -382,7 +379,7 @@ where
             return Ok(UnwindOutput {
                 checkpoint: StageCheckpoint::new(input.unwind_to)
                     .with_entities_stage_checkpoint(entities_checkpoint),
-            })
+            });
         }
 
         // Unwind trie only if there are transitions
@@ -626,10 +623,10 @@ mod tests {
         }
 
         fn stage(&self) -> Self::S {
-            Self::S::Both {
+            Self::S::Both(IncrementalSettings {
                 rebuild_threshold: self.clean_threshold,
                 incremental_threshold: self.incremental_threshold,
-            }
+            })
         }
     }
 
@@ -778,7 +775,7 @@ mod tests {
                         rev_changeset_walker.next().transpose().unwrap()
                     {
                         if bn_address.block_number() < target_block {
-                            break
+                            break;
                         }
 
                         tree.entry(keccak256(bn_address.address()))
@@ -809,7 +806,7 @@ mod tests {
                         rev_changeset_walker.next().transpose().unwrap()
                     {
                         if block_number < target_block {
-                            break
+                            break;
                         }
 
                         if let Some(acc) = account_before_tx.info {
