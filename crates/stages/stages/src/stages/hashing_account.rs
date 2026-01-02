@@ -106,7 +106,8 @@ impl AccountHashingStage {
 
             let mut acc_changeset_cursor =
                 provider.tx_ref().cursor_write::<tables::AccountChangeSets>()?;
-            for (t, (addr, acc)) in opts.blocks.zip(&accounts) {
+            // Use cycle() to ensure all blocks get changesets, cycling through accounts if needed
+            for (t, (addr, acc)) in opts.blocks.zip(accounts.iter().cycle()) {
                 let Account { nonce, balance, .. } = acc;
                 let prev_acc = Account {
                     nonce: nonce - 1,
@@ -267,17 +268,8 @@ fn collect(
     Ok(())
 }
 
-// TODO: Rewrite this
-/// `SeedOpts` provides configuration parameters for calling `AccountHashingStage::seed`
-/// in unit tests or benchmarks to generate an initial database state for running the
-/// stage.
-///
-/// In order to check the "full hashing" mode of the stage you want to generate more
-/// transitions than `AccountHashingStage.clean_threshold`. This requires:
-/// 1. Creating enough blocks so there's enough transactions to generate the required transition
-///    keys in the `BlockTransitionIndex` (which depends on the `TxTransitionIndex` internally)
-/// 2. Setting `blocks.len() > clean_threshold` so that there's enough diffs to actually take the
-///    2nd codepath
+/// Configuration parameters for [`AccountHashingStage::seed`] to generate an initial
+/// database state for unit tests or benchmarks.
 #[derive(Clone, Debug)]
 pub struct SeedOpts {
     /// The range of blocks to be generated
