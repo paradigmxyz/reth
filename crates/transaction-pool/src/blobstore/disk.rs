@@ -910,7 +910,7 @@ mod tests {
 
         assert_ne!(versioned_hash, B256::ZERO);
 
-        let request = vec![versioned_hash, B256::ZERO, B256::ZERO];
+        let request = vec![versioned_hash, B256::ZERO];
         let v2 = store.get_by_versioned_hashes_v2(&request).unwrap();
         assert!(v2.is_none(), "v2 must return null if any requested blob is missing");
 
