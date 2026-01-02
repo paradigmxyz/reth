@@ -85,6 +85,10 @@ impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<Data
 
 impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
+    ///
+    /// Storage settings are loaded from the database if they exist, otherwise
+    /// legacy defaults are used. Settings are written to the database during
+    /// genesis initialization via `init_genesis_with_settings()`.
     pub fn new(
         db: N::DB,
         chain_spec: Arc<N::ChainSpec>,
@@ -96,7 +100,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         //
         // Both factory and all providers it creates should share these cached settings.
         let legacy_settings = StorageSettings::legacy();
-        let storage_settings = DatabaseProvider::<_, N>::new(
+        let provider = DatabaseProvider::<_, N>::new(
             db.tx()?,
             chain_spec.clone(),
             static_file_provider.clone(),
@@ -104,9 +108,9 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Default::default(),
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
-        )
-        .storage_settings()?
-        .unwrap_or(legacy_settings);
+        );
+
+        let storage_settings = provider.storage_settings()?.unwrap_or(legacy_settings);
 
         Ok(Self {
             db,
