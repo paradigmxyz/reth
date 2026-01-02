@@ -23,8 +23,8 @@ use reth_engine_primitives::{
 };
 use reth_errors::{BlockExecutionError, ProviderResult};
 use reth_evm::{
-    block::BlockExecutor, execute::ExecutableTxFor, ConfigureEvm, EvmEnvFor, ExecutionCtxFor,
-    SpecFor,
+    block::BlockExecutor, execute::ExecutableTxFor, metrics::StorageMetricsInspector, ConfigureEvm,
+    EvmEnvFor, ExecutionCtxFor, SpecFor,
 };
 use reth_payload_primitives::{
     BuiltPayload, InvalidPayloadAttributesError, NewPayloadError, PayloadTypes,
@@ -616,7 +616,10 @@ where
             .without_state_clear()
             .build();
 
-        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
+        // Create inspector to track SLOAD/SSTORE operations
+        let inspector = StorageMetricsInspector::new(self.metrics.executor.clone());
+        let evm =
+            self.evm_config.evm_with_env_and_inspector(&mut db, env.evm_env.clone(), inspector);
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let mut executor = self.evm_config.create_executor(evm, ctx);

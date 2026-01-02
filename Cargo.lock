@@ -8744,7 +8744,9 @@ dependencies = [
  "derive_more",
  "futures-util",
  "metrics",
+ "metrics-util",
  "rayon",
+ "reth-ethereum",
  "reth-ethereum-forks",
  "reth-ethereum-primitives",
  "reth-execution-errors",
@@ -8755,6 +8757,8 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
+ "revm-bytecode",
+ "revm-interpreter",
 ]
 
 [[package]]

@@ -21,6 +21,8 @@ reth-storage-errors.workspace = true
 reth-trie-common.workspace = true
 
 revm.workspace = true
+revm-bytecode.workspace = true
+revm-interpreter.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -37,6 +39,9 @@ rayon = { workspace = true, optional = true }
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
 reth-ethereum-forks.workspace = true
+reth-ethereum = { workspace = true }
+metrics-util = { workspace = true, features = ["debugging"] }
+revm-interpreter = { workspace = true }
 
 [features]
 default = ["std"]
