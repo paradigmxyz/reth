@@ -670,7 +670,12 @@ where
         let new_head_number = new_head_block.recovered_block().number();
         let mut current_canonical_number = self.state.tree_state.current_canonical_head.number;
 
-        let mut new_chain = vec![new_head_block.clone()];
+        // Pre-allocate with expected chain length to avoid reallocations during traversal.
+        // For simple extensions this is the exact size, for reorgs it may need to grow.
+        let expected_new_chain_len =
+            new_head_number.saturating_sub(current_canonical_number) as usize + 1;
+        let mut new_chain = Vec::with_capacity(expected_new_chain_len);
+        new_chain.push(new_head_block.clone());
         let mut current_hash = new_head_block.recovered_block().parent_hash();
         let mut current_number = new_head_number - 1;
 
@@ -702,7 +707,11 @@ where
         }
 
         // We have a reorg. Walk back both chains to find the fork point.
-        let mut old_chain = Vec::new();
+        // Pre-allocate with a reasonable estimate - the difference in heights gives us
+        // the minimum chain length needed.
+        let expected_old_chain_len =
+            current_canonical_number.saturating_sub(current_number) as usize + 1;
+        let mut old_chain = Vec::with_capacity(expected_old_chain_len);
         let mut old_hash = self.state.tree_state.current_canonical_head.hash;
 
         // If the canonical chain is ahead of the new chain,
