@@ -27,12 +27,15 @@ pub fn install_prometheus_recorder(
         return Ok(recorder);
     }
 
+    // If a custom init ran but didn't install a global recorder, fail fast to
+    // avoid silently falling back to defaults.
     if ran_init {
         return Err(eyre::eyre!(
             "Metrics init completed without installing the Prometheus recorder"
         ));
     }
 
+    // No init ran and no recorder is installed, so fall back to the default install path.
     install_default_recorder()
 }
 
