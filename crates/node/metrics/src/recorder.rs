@@ -32,7 +32,7 @@ pub fn install_prometheus_recorder(
         ));
     }
 
-    Ok(PROMETHEUS_RECORDER_HANDLE.get_or_init(|| PrometheusRecorder::install().unwrap()))
+    Ok(PROMETHEUS_RECORDER_HANDLE.get_or_init(|| PrometheusRecorder::install(None).unwrap()))
 }
 
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
@@ -81,7 +81,7 @@ fn run_metrics_init() -> eyre::Result<bool> {
 fn install_prometheus_recorder_with_builder_inner(
     builder: PrometheusBuilder,
 ) -> eyre::Result<&'static PrometheusRecorder> {
-    let recorder = PrometheusRecorder::install_with_builder(builder)?;
+    let recorder = PrometheusRecorder::install(Some(builder))?;
     PROMETHEUS_RECORDER_HANDLE
         .set(recorder)
         .map_err(|_| eyre::eyre!("Prometheus recorder already installed"))?;
@@ -142,8 +142,11 @@ impl PrometheusRecorder {
     ///
     /// Caution: This only configures the global recorder and does not spawn the exporter.
     /// Callers must run [`Self::spawn_upkeep`] manually.
-    pub fn install() -> eyre::Result<Self> {
-        Self::install_with_builder(PrometheusBuilder::new())
+    pub fn install(builder: Option<PrometheusBuilder>) -> eyre::Result<Self> {
+        match builder {
+            Some(builder) => Self::install_with_builder(builder),
+            None => Self::install_with_builder(PrometheusBuilder::new()),
+        }
     }
 
     fn install_with_builder(builder: PrometheusBuilder) -> eyre::Result<Self> {
