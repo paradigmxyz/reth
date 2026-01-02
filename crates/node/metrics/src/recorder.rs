@@ -11,8 +11,28 @@ use std::sync::{atomic::AtomicBool, Mutex, OnceLock};
 ///
 /// Caution: This only configures the global recorder and does not spawn the exporter.
 /// Callers must run [`PrometheusRecorder::spawn_upkeep`] manually.
-pub fn install_prometheus_recorder() -> &'static PrometheusRecorder {
-    try_install_prometheus_recorder().unwrap()
+///
+/// If a builder is provided, it is registered as the one-time initialization path.
+pub fn install_prometheus_recorder(
+    builder: Option<PrometheusBuilder>,
+) -> eyre::Result<&'static PrometheusRecorder> {
+    if let Some(builder) = builder {
+        set_metrics_init_with_builder(builder)?;
+    }
+
+    let ran_init = run_metrics_init()?;
+
+    if let Some(recorder) = PROMETHEUS_RECORDER_HANDLE.get() {
+        return Ok(recorder);
+    }
+
+    if ran_init {
+        return Err(eyre::eyre!(
+            "Metrics init completed without installing the Prometheus recorder"
+        ));
+    }
+
+    Ok(PROMETHEUS_RECORDER_HANDLE.get_or_init(|| PrometheusRecorder::install().unwrap()))
 }
 
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
@@ -46,33 +66,6 @@ pub fn set_metrics_init_with_builder(builder: PrometheusBuilder) -> eyre::Result
         install_prometheus_recorder_with_builder_inner(builder)?;
         Ok(())
     }))
-}
-
-/// Installs the Prometheus recorder with a custom builder.
-///
-/// This aligns with the issue request to pass a `PrometheusBuilder` to install the recorder.
-pub fn install_prometheus_recorder_with_builder(
-    builder: PrometheusBuilder,
-) -> eyre::Result<&'static PrometheusRecorder> {
-    set_metrics_init_with_builder(builder)?;
-    try_install_prometheus_recorder()
-}
-
-/// Installs the Prometheus recorder as the global recorder, running any registered initializer.
-pub fn try_install_prometheus_recorder() -> eyre::Result<&'static PrometheusRecorder> {
-    let ran_init = run_metrics_init()?;
-
-    if let Some(recorder) = PROMETHEUS_RECORDER_HANDLE.get() {
-        return Ok(recorder);
-    }
-
-    if ran_init {
-        return Err(eyre::eyre!(
-            "Metrics init completed without installing the Prometheus recorder"
-        ));
-    }
-
-    Ok(PROMETHEUS_RECORDER_HANDLE.get_or_init(|| PrometheusRecorder::install().unwrap()))
 }
 
 fn run_metrics_init() -> eyre::Result<bool> {
@@ -177,7 +170,7 @@ mod tests {
     // `metrics-exporter-prometheus` dependency version.
     #[test]
     fn process_metrics() {
-        let recorder = install_prometheus_recorder();
+        let recorder = install_prometheus_recorder(None).unwrap();
 
         let process = metrics_process::Collector::default();
         process.describe();

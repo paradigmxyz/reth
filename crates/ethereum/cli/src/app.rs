@@ -11,7 +11,7 @@ use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
-use reth_node_metrics::recorder::try_install_prometheus_recorder;
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
 use std::{fmt, sync::Arc};
@@ -98,7 +98,7 @@ where
         self.init_tracing(&runner)?;
 
         // Install the prometheus recorder to be sure to record all metrics
-        try_install_prometheus_recorder()?;
+        install_prometheus_recorder(None)?;
 
         run_commands_with::<C, Ext, Rpc, N>(self.cli, runner, components, launcher)
     }

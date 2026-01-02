@@ -4,7 +4,7 @@ use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::launcher::Launcher;
 use reth_cli_runner::CliRunner;
 use reth_node_core::args::OtlpInitStatus;
-use reth_node_metrics::recorder::try_install_prometheus_recorder;
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_optimism_chainspec::OpChainSpec;
 use reth_optimism_consensus::OpBeaconConsensus;
 use reth_optimism_node::{OpExecutorProvider, OpNode};
@@ -67,7 +67,7 @@ where
         self.init_tracing(&runner)?;
 
         // Install the prometheus recorder to be sure to record all metrics
-        try_install_prometheus_recorder()?;
+        install_prometheus_recorder(None)?;
 
         let components = |spec: Arc<OpChainSpec>| {
             (OpExecutorProvider::optimism(spec.clone()), Arc::new(OpBeaconConsensus::new(spec)))

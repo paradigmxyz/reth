@@ -22,7 +22,7 @@ use reth_node_core::{
     args::{LogArgs, OtlpInitStatus, TraceArgs},
     version::version_metadata,
 };
-use reth_node_metrics::recorder::try_install_prometheus_recorder;
+use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::{DefaultRpcModuleValidator, RpcModuleValidator};
 use reth_tracing::{FileWorkerGuard, Layers};
 use std::{ffi::OsString, fmt, future::Future, marker::PhantomData, sync::Arc};
@@ -205,7 +205,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
         let _guard = self.init_tracing(&runner, Layers::new())?;
 
         // Install the prometheus recorder to be sure to record all metrics
-        try_install_prometheus_recorder()?;
+        install_prometheus_recorder(None)?;
 
         // Use the shared standalone function to avoid duplication
         run_commands_with::<C, Ext, Rpc, N>(self, runner, components, launcher)
