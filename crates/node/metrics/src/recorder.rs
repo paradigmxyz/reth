@@ -153,7 +153,7 @@ impl PrometheusRecorder {
         Self::install_with_builder(PrometheusBuilder::new())
     }
 
-    fn install_with_builder(builder: PrometheusBuilder) -> eyre::Result<Self> {
+    pub fn install_with_builder(builder: PrometheusBuilder) -> eyre::Result<Self> {
         let recorder = builder.build_recorder();
         let handle = recorder.handle();
 
