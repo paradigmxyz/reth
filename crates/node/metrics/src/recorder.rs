@@ -13,6 +13,7 @@ use std::sync::{atomic::AtomicBool, Mutex, OnceLock};
 /// Callers must run [`PrometheusRecorder::spawn_upkeep`] manually.
 ///
 /// If a builder is provided, it is registered as the one-time initialization path.
+/// The default install path returns an error if the recorder cannot be installed.
 pub fn install_prometheus_recorder(
     builder: Option<PrometheusBuilder>,
 ) -> eyre::Result<&'static PrometheusRecorder> {
@@ -32,7 +33,7 @@ pub fn install_prometheus_recorder(
         ));
     }
 
-    Ok(PROMETHEUS_RECORDER_HANDLE.get_or_init(|| PrometheusRecorder::install(None).unwrap()))
+    PROMETHEUS_RECORDER_HANDLE.get_or_try_init(|| PrometheusRecorder::install(None))
 }
 
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
