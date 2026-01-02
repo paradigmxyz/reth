@@ -3,7 +3,7 @@
 use eyre::WrapErr;
 use metrics_exporter_prometheus::{PrometheusBuilder, PrometheusHandle};
 use metrics_util::layers::{PrefixLayer, Stack};
-use std::sync::{atomic::AtomicBool, LazyLock};
+use std::sync::{atomic::AtomicBool, Mutex, OnceLock};
 
 /// Installs the Prometheus recorder as the global recorder.
 ///
@@ -12,13 +12,78 @@ use std::sync::{atomic::AtomicBool, LazyLock};
 /// Caution: This only configures the global recorder and does not spawn the exporter.
 /// Callers must run [`PrometheusRecorder::spawn_upkeep`] manually.
 pub fn install_prometheus_recorder() -> &'static PrometheusRecorder {
-    &PROMETHEUS_RECORDER_HANDLE
+    try_install_prometheus_recorder().unwrap()
 }
 
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
 /// installed once.
-static PROMETHEUS_RECORDER_HANDLE: LazyLock<PrometheusRecorder> =
-    LazyLock::new(|| PrometheusRecorder::install().unwrap());
+static PROMETHEUS_RECORDER_HANDLE: OnceLock<PrometheusRecorder> = OnceLock::new();
+
+type MetricsInit = Box<dyn FnOnce() -> eyre::Result<()> + Send + 'static>;
+
+static METRICS_INIT: OnceLock<Mutex<Option<MetricsInit>>> = OnceLock::new();
+
+/// Registers a custom metrics initializer.
+///
+/// Returns an error if an initializer has already been set or the recorder is installed.
+pub fn set_metrics_init(init: MetricsInit) -> eyre::Result<()> {
+    if PROMETHEUS_RECORDER_HANDLE.get().is_some() {
+        return Err(eyre::eyre!("Prometheus recorder already installed"));
+    }
+
+    let slot = METRICS_INIT.get_or_init(|| Mutex::new(None));
+    let mut guard = slot.lock().expect("metrics init lock poisoned");
+    if guard.is_some() {
+        return Err(eyre::eyre!("Metrics init already set"));
+    }
+    *guard = Some(init);
+    Ok(())
+}
+
+/// Registers a custom metrics initializer that installs a Prometheus recorder with a builder.
+pub fn set_metrics_init_with_builder(builder: PrometheusBuilder) -> eyre::Result<()> {
+    set_metrics_init(Box::new(move || {
+        install_prometheus_recorder_with_builder(builder)?;
+        Ok(())
+    }))
+}
+
+/// Installs the Prometheus recorder as the global recorder, running any registered initializer.
+pub fn try_install_prometheus_recorder() -> eyre::Result<&'static PrometheusRecorder> {
+    let ran_init = run_metrics_init()?;
+
+    if let Some(recorder) = PROMETHEUS_RECORDER_HANDLE.get() {
+        return Ok(recorder);
+    }
+
+    if ran_init {
+        return Err(eyre::eyre!(
+            "Metrics init completed without installing the Prometheus recorder"
+        ));
+    }
+
+    Ok(PROMETHEUS_RECORDER_HANDLE.get_or_init(|| PrometheusRecorder::install().unwrap()))
+}
+
+fn run_metrics_init() -> eyre::Result<bool> {
+    let Some(slot) = METRICS_INIT.get() else { return Ok(false) };
+    let init = slot.lock().expect("metrics init lock poisoned").take();
+    if let Some(init) = init {
+        init()?;
+        return Ok(true);
+    }
+    Ok(false)
+}
+
+fn install_prometheus_recorder_with_builder(
+    builder: PrometheusBuilder,
+) -> eyre::Result<&'static PrometheusRecorder> {
+    let recorder = PrometheusRecorder::install_with_builder(builder)?;
+    PROMETHEUS_RECORDER_HANDLE
+        .set(recorder)
+        .map_err(|_| eyre::eyre!("Prometheus recorder already installed"))?;
+    Ok(PROMETHEUS_RECORDER_HANDLE.get().expect("recorder is set"))
+}
 
 /// A handle to the Prometheus recorder.
 ///
@@ -75,7 +140,11 @@ impl PrometheusRecorder {
     /// Caution: This only configures the global recorder and does not spawn the exporter.
     /// Callers must run [`Self::spawn_upkeep`] manually.
     pub fn install() -> eyre::Result<Self> {
-        let recorder = PrometheusBuilder::new().build_recorder();
+        Self::install_with_builder(PrometheusBuilder::new())
+    }
+
+    fn install_with_builder(builder: PrometheusBuilder) -> eyre::Result<Self> {
+        let recorder = builder.build_recorder();
         let handle = recorder.handle();
 
         // Build metrics stack
@@ -98,14 +167,13 @@ mod tests {
     // `metrics-exporter-prometheus` dependency version.
     #[test]
     fn process_metrics() {
-        // initialize the lazy handle
-        let _ = &*PROMETHEUS_RECORDER_HANDLE;
+        let recorder = install_prometheus_recorder();
 
         let process = metrics_process::Collector::default();
         process.describe();
         process.collect();
 
-        let metrics = PROMETHEUS_RECORDER_HANDLE.handle.render();
+        let metrics = recorder.handle().render();
         assert!(metrics.contains("process_cpu_seconds_total"), "{metrics:?}");
     }
 }
