@@ -3,21 +3,16 @@
 use std::time::Duration;
 
 use crate::EthApi;
-use alloy_consensus::BlobTransactionValidationError;
-use alloy_eips::{eip7594::BlobTransactionSidecarVariant, BlockId, Typed2718};
 use alloy_primitives::{hex, B256};
-use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_primitives_traits::{AlloyBlockHeader, Recovered, WithEncoded};
+use reth_primitives_traits::{Recovered, WithEncoded};
 use reth_rpc_convert::RpcConvert;
 use reth_rpc_eth_api::{
     helpers::{spec::SignersForRpc, EthTransactions, LoadTransaction},
     FromEvmError, RpcNodeCore,
 };
-use reth_rpc_eth_types::{error::RpcPoolError, EthApiError};
-use reth_storage_api::BlockReaderIdExt;
+use reth_rpc_eth_types::EthApiError;
 use reth_transaction_pool::{
-    error::Eip4844PoolTransactionError, AddedTransactionOutcome, EthBlobTransactionSidecar,
-    EthPoolTransaction, PoolPooledTx, PoolTransaction, TransactionPool,
+    AddedTransactionOutcome, PoolPooledTx, PoolTransaction, TransactionPool,
 };
 
 impl<N, Rpc> EthTransactions for EthApi<N, Rpc>
@@ -41,56 +36,7 @@ where
         tx: WithEncoded<Recovered<PoolPooledTx<Self::Pool>>>,
     ) -> Result<B256, Self::Error> {
         let (tx, recovered) = tx.split();
-        let mut pool_transaction =
-            <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
-
-        // TODO: remove this after Osaka transition
-        // Convert legacy blob sidecars to EIP-7594 format
-        if pool_transaction.is_eip4844() {
-            let EthBlobTransactionSidecar::Present(sidecar) = pool_transaction.take_blob() else {
-                return Err(EthApiError::PoolError(RpcPoolError::Eip4844(
-                    Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
-                )));
-            };
-
-            let sidecar = match sidecar {
-                BlobTransactionSidecarVariant::Eip4844(sidecar) => {
-                    let latest = self
-                        .provider()
-                        .latest_header()?
-                        .ok_or(EthApiError::HeaderNotFound(BlockId::latest()))?;
-                    // Convert to EIP-7594 if next block is Osaka
-                    if self
-                        .provider()
-                        .chain_spec()
-                        .is_osaka_active_at_timestamp(latest.timestamp().saturating_add(12))
-                    {
-                        BlobTransactionSidecarVariant::Eip7594(
-                            self.blob_sidecar_converter().convert(sidecar).await.ok_or_else(
-                                || {
-                                    RpcPoolError::Eip4844(
-                                        Eip4844PoolTransactionError::InvalidEip4844Blob(
-                                            BlobTransactionValidationError::InvalidProof,
-                                        ),
-                                    )
-                                },
-                            )?,
-                        )
-                    } else {
-                        BlobTransactionSidecarVariant::Eip4844(sidecar)
-                    }
-                }
-                sidecar => sidecar,
-            };
-
-            pool_transaction =
-                EthPoolTransaction::try_from_eip4844(pool_transaction.into_consensus(), sidecar)
-                    .ok_or_else(|| {
-                        RpcPoolError::Eip4844(
-                            Eip4844PoolTransactionError::MissingEip4844BlobSidecar,
-                        )
-                    })?;
-        }
+        let pool_transaction = <Self::Pool as TransactionPool>::Transaction::from_pooled(recovered);
 
         // forward the transaction to the specific endpoint if configured.
         if let Some(client) = self.raw_tx_forwarder() {
