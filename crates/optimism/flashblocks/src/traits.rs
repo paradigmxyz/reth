@@ -11,7 +11,7 @@ use alloy_rpc_types_engine::PayloadId;
 ///
 /// Contains all fields needed to configure EVM execution context for the next block.
 /// This is present only on the first flashblock (index 0) of a sequence.
-pub trait FlashblockPayloadBase: Clone + Send + Sync + std::fmt::Debug + 'static {
+pub trait FlashblockPayloadBase: Clone + Send + Sync + 'static {
     /// Parent block hash.
     fn parent_hash(&self) -> B256;
     /// Block number being built.
@@ -23,7 +23,7 @@ pub trait FlashblockPayloadBase: Clone + Send + Sync + std::fmt::Debug + 'static
 /// State diff from flashblock execution.
 ///
 /// Contains the cumulative state changes from executing transactions in this flashblock.
-pub trait FlashblockDiff: Clone + Send + Sync + std::fmt::Debug + 'static {
+pub trait FlashblockDiff: Clone + Send + Sync + 'static {
     /// Block hash after applying this flashblock.
     fn block_hash(&self) -> B256;
     /// State root after applying this flashblock.
@@ -43,7 +43,7 @@ pub trait FlashblockDiff: Clone + Send + Sync + std::fmt::Debug + 'static {
 /// Flashblocks are incremental updates to block state, allowing for faster
 /// pre-confirmations. A complete block is built from a sequence of flashblocks.
 pub trait FlashblockPayload:
-    Clone + Send + Sync + std::fmt::Debug + for<'de> serde::Deserialize<'de> + 'static
+    Clone + Send + Sync + 'static + for<'de> serde::Deserialize<'de>
 {
     /// The base payload type containing block environment configuration.
     type Base: FlashblockPayloadBase;
