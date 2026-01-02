@@ -33,7 +33,9 @@ pub fn install_prometheus_recorder(
         ));
     }
 
-    PROMETHEUS_RECORDER_HANDLE.get_or_try_init(|| PrometheusRecorder::install(None))
+    let recorder = PrometheusRecorder::install(None)?;
+    let _ = PROMETHEUS_RECORDER_HANDLE.set(recorder);
+    Ok(PROMETHEUS_RECORDER_HANDLE.get().expect("recorder is set"))
 }
 
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
