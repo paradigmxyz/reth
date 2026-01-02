@@ -88,4 +88,4 @@ arbitrary = [
     "alloy-trie?/arbitrary",
     "op-alloy-consensus?/arbitrary",
 ]
-amsterdam =["alloy-consensus/amsterdam"]
+amsterdam = ["alloy-consensus/amsterdam"]

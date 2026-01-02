@@ -81,4 +81,4 @@ portable = [
     "revm/portable",
 ]
 rpc = ["reth-rpc-eth-api", "reth-optimism-primitives/serde", "reth-optimism-primitives/reth-codec", "alloy-evm/rpc"]
-amsterdam = ["alloy-consensus/amsterdam","reth-optimism-primitives/amsterdam"]
+amsterdam = ["alloy-consensus/amsterdam", "reth-optimism-primitives/amsterdam"]
