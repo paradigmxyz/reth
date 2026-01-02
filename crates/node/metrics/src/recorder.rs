@@ -33,9 +33,7 @@ pub fn install_prometheus_recorder(
         ));
     }
 
-    let recorder = PrometheusRecorder::install(None)?;
-    let _ = PROMETHEUS_RECORDER_HANDLE.set(recorder);
-    Ok(PROMETHEUS_RECORDER_HANDLE.get().expect("recorder is set"))
+    install_default_recorder()
 }
 
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
@@ -79,6 +77,22 @@ fn run_metrics_init() -> eyre::Result<bool> {
         return Ok(true);
     }
     Ok(false)
+}
+
+fn install_default_recorder() -> eyre::Result<&'static PrometheusRecorder> {
+    match PrometheusRecorder::install(None) {
+        Ok(recorder) => {
+            let _ = PROMETHEUS_RECORDER_HANDLE.set(recorder);
+            Ok(PROMETHEUS_RECORDER_HANDLE.get().expect("recorder is set"))
+        }
+        Err(err) => {
+            if let Some(recorder) = PROMETHEUS_RECORDER_HANDLE.get() {
+                Ok(recorder)
+            } else {
+                Err(err)
+            }
+        }
+    }
 }
 
 fn install_prometheus_recorder_with_builder_inner(
