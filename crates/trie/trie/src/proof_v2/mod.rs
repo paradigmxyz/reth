@@ -1786,8 +1786,7 @@ mod tests {
         // Collect targets; partially from real keys, partially random keys which probably won't
         // exist.
         let num_real_targets = post_state.accounts.len() * 5;
-        let mut targets =
-            post_state.accounts.keys().copied().collect::<Vec<_>>();
+        let mut targets = post_state.accounts.keys().copied().collect::<Vec<_>>();
         for _ in 0..post_state.accounts.len() / 5 {
             targets.push(rand_b256());
         }
