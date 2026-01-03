@@ -64,8 +64,10 @@ pub fn set_metrics_init(init: MetricsInit) -> eyre::Result<()> {
     Ok(())
 }
 
-/// Registers a custom metrics initializer that installs a Prometheus recorder with a builder.
-pub fn set_metrics_init_with_builder(builder: PrometheusBuilder) -> eyre::Result<()> {
+/// Registers a custom metrics initializer that installs a `PrometheusBuilder`-backed recorder.
+///
+/// This is an internal helper used by [`install_prometheus_recorder`].
+fn set_metrics_init_with_builder(builder: PrometheusBuilder) -> eyre::Result<()> {
     set_metrics_init(Box::new(move || {
         install_prometheus_recorder_with_builder_inner(builder)?;
         Ok(())
