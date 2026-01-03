@@ -1787,7 +1787,7 @@ mod tests {
         // exist.
         let num_real_targets = post_state.accounts.len() * 5;
         let mut targets =
-            post_state.accounts.keys().copied().sorted().take(num_real_targets).collect::<Vec<_>>();
+            post_state.accounts.keys().copied().collect::<Vec<_>>();
         for _ in 0..post_state.accounts.len() / 5 {
             targets.push(rand_b256());
         }
