@@ -37,10 +37,11 @@ pub struct Cli<
     C: ChainSpecParser = EthereumChainSpecParser,
     Ext: clap::Args + fmt::Debug = NoArgs,
     Rpc: RpcModuleValidator = DefaultRpcModuleValidator,
+    SubCmd: Subcommand + fmt::Debug = NoSubCmd,
 > {
     /// The command to run
     #[command(subcommand)]
-    pub command: Commands<C, Ext>,
+    pub command: Commands<C, Ext, SubCmd>,
 
     /// The logging configuration for the CLI.
     #[command(flatten)]
@@ -71,12 +72,18 @@ impl Cli {
     }
 }
 
-impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> Cli<C, Ext, Rpc> {
+impl<
+        C: ChainSpecParser,
+        Ext: clap::Args + fmt::Debug,
+        Rpc: RpcModuleValidator,
+        SubCmd: crate::app::ExtendedCommand + Subcommand + fmt::Debug,
+    > Cli<C, Ext, Rpc, SubCmd>
+{
     /// Configures the CLI and returns a [`CliApp`] instance.
     ///
     /// This method is used to prepare the CLI for execution by wrapping it in a
     /// [`CliApp`] that can be further configured before running.
-    pub fn configure(self) -> CliApp<C, Ext, Rpc> {
+    pub fn configure(self) -> CliApp<C, Ext, Rpc, SubCmd> {
         CliApp::new(self)
     }
 
@@ -208,7 +215,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
         let _ = install_prometheus_recorder();
 
         // Use the shared standalone function to avoid duplication
-        run_commands_with::<C, Ext, Rpc, N>(self, runner, components, launcher)
+        run_commands_with::<C, Ext, Rpc, N, SubCmd>(self, runner, components, launcher)
     }
 
     /// Initializes tracing with the configured options.
@@ -242,7 +249,11 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
 
 /// Commands to be executed
 #[derive(Debug, Subcommand)]
-pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
+pub enum Commands<
+    C: ChainSpecParser,
+    Ext: clap::Args + fmt::Debug,
+    SubCmd: Subcommand + fmt::Debug = NoSubCmd,
+> {
     /// Start the node
     #[command(name = "node")]
     Node(Box<node::NodeCommand<C, Ext>>),
@@ -288,9 +299,27 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     /// Re-execute blocks in parallel to verify historical sync correctness.
     #[command(name = "re-execute")]
     ReExecute(re_execute::Command<C>),
+    /// Extension subcommands provided by consumers.
+    #[command(flatten)]
+    Ext(SubCmd),
 }
 
-impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
+/// A no-op subcommand type for when no extension subcommands are needed.
+///
+/// This is the default type parameter for `Commands` when consumers don't need
+/// to add custom subcommands.
+#[derive(Debug, Subcommand)]
+pub enum NoSubCmd {}
+
+impl crate::app::ExtendedCommand for NoSubCmd {
+    fn execute(self, _runner: CliRunner) -> eyre::Result<()> {
+        match self {}
+    }
+}
+
+impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, SubCmd: Subcommand + fmt::Debug>
+    Commands<C, Ext, SubCmd>
+{
     /// Returns the underlying chain being used for commands
     pub fn chain_spec(&self) -> Option<&Arc<C::ChainSpec>> {
         match self {
@@ -310,6 +339,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
             Self::Config(_) => None,
             Self::Prune(cmd) => cmd.chain_spec(),
             Self::ReExecute(cmd) => cmd.chain_spec(),
+            Self::Ext(_) => None,
         }
     }
 }
@@ -532,5 +562,101 @@ mod tests {
             },
             _ => panic!("Expected Stage command"),
         };
+    }
+
+    #[test]
+    fn test_extensible_subcommands() {
+        use crate::app::ExtendedCommand;
+        use reth_cli_runner::CliRunner;
+        use reth_rpc_server_types::DefaultRpcModuleValidator;
+        use std::sync::atomic::{AtomicBool, Ordering};
+
+        #[derive(Debug, Subcommand)]
+        enum CustomCommands {
+            /// A custom hello command
+            #[command(name = "hello")]
+            Hello {
+                /// Name to greet
+                #[arg(long)]
+                name: String,
+            },
+            /// Another custom command
+            #[command(name = "goodbye")]
+            Goodbye,
+        }
+
+        static EXECUTED: AtomicBool = AtomicBool::new(false);
+
+        impl ExtendedCommand for CustomCommands {
+            fn execute(self, _runner: CliRunner) -> eyre::Result<()> {
+                match self {
+                    Self::Hello { name } => {
+                        assert_eq!(name, "world");
+                        EXECUTED.store(true, Ordering::SeqCst);
+                        Ok(())
+                    }
+                    Self::Goodbye => Ok(()),
+                }
+            }
+        }
+
+        // Test parsing the custom "hello" command
+        let cli = Cli::<
+            EthereumChainSpecParser,
+            NoArgs,
+            DefaultRpcModuleValidator,
+            CustomCommands,
+        >::try_parse_from(["reth", "hello", "--name", "world"])
+        .unwrap();
+
+        match &cli.command {
+            Commands::Ext(CustomCommands::Hello { name }) => {
+                assert_eq!(name, "world");
+            }
+            _ => panic!("Expected Ext(Hello) command"),
+        }
+
+        // Test parsing the custom "goodbye" command
+        let cli = Cli::<
+            EthereumChainSpecParser,
+            NoArgs,
+            DefaultRpcModuleValidator,
+            CustomCommands,
+        >::try_parse_from(["reth", "goodbye"])
+        .unwrap();
+
+        match &cli.command {
+            Commands::Ext(CustomCommands::Goodbye) => {}
+            _ => panic!("Expected Ext(Goodbye) command"),
+        }
+
+        // Test that built-in commands still work alongside custom ones
+        let cli = Cli::<
+            EthereumChainSpecParser,
+            NoArgs,
+            DefaultRpcModuleValidator,
+            CustomCommands,
+        >::try_parse_from(["reth", "node"])
+        .unwrap();
+
+        match &cli.command {
+            Commands::Node(_) => {}
+            _ => panic!("Expected Node command"),
+        }
+
+        // Test executing the custom command
+        let cli = Cli::<
+            EthereumChainSpecParser,
+            NoArgs,
+            DefaultRpcModuleValidator,
+            CustomCommands,
+        >::try_parse_from(["reth", "hello", "--name", "world"])
+        .unwrap();
+
+        if let Commands::Ext(cmd) = cli.command {
+            let runner = CliRunner::try_default_runtime().unwrap();
+            cmd.execute(runner).unwrap();
+            assert!(EXECUTED.load(Ordering::SeqCst), "Custom command should have been executed");
+        }
     }
 }
