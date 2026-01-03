@@ -680,7 +680,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             .zip(headers)
             .collect::<Vec<_>>();
 
-        let mut inputs = Vec::new();
+        let mut inputs = Vec::with_capacity(present_headers.len());
         for (tx_range, header) in &present_headers {
             let transactions = if tx_range.is_empty() {
                 Vec::new()
