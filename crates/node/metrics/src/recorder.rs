@@ -104,7 +104,7 @@ fn install_default_recorder() -> eyre::Result<&'static PrometheusRecorder> {
     }
 }
 
-/// Installs a recorder using a custom builder and sets the global handle.
+/// Installs a recorder using a PrometheusBuilder and sets the global handle.
 fn install_prometheus_recorder_with_builder_inner(
     builder: PrometheusBuilder,
 ) -> eyre::Result<&'static PrometheusRecorder> {
