@@ -198,7 +198,7 @@ where
             inner.last_price.price
         } else {
             let k = (results.len() - 1) * self.oracle_config.percentile.min(100) as usize / 100;
-            (*results).select_nth_unstable(k).1
+            *(*results).select_nth_unstable(k).1
         };
 
         // constrain to the max price
