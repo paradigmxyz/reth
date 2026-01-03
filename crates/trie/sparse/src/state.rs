@@ -226,8 +226,7 @@ where
 
     /// Inserts storage trie for the provided address.
     pub fn insert_storage_trie(&mut self, address: B256, storage_trie: SparseTrie<S>) {
-        self.storage.entries.entry(address).or_insert_with(StorageTrieEntry::default).trie =
-            storage_trie;
+        self.storage.entries.entry(address).or_default().trie = storage_trie;
     }
 
     /// Reveal unknown trie paths from multiproof.
@@ -850,9 +849,14 @@ impl<S: SparseTrieInterface + Clone> StorageTrieEntry<S> {
 /// methods like `get_trie_and_revealed_paths` which return multiple mutable borrows.
 #[derive(Debug, Default)]
 struct StorageTries<S = SerialSparseTrie> {
-    /// Sparse storage tries with their revealed paths.
+    /// Sparse storage tries with their revealed paths, indexed by account address.
+    ///
+    /// Each entry contains both the trie and the set of revealed paths for that account,
+    /// enabling single-lookup access for paired operations.
     entries: B256Map<StorageTrieEntry<S>>,
     /// Cleared entries, kept for re-use.
+    ///
+    /// When `clear()` is called, entries are moved here instead of being dropped.
     cleared_entries: Vec<StorageTrieEntry<S>>,
     /// A default cleared trie instance, which will be cloned when creating new tries.
     default_trie: SparseTrie<S>,
@@ -904,7 +908,7 @@ impl<S: SparseTrieInterface + Clone> StorageTries<S> {
     /// Returns the `SparseTrie` and the set of already revealed trie node paths for an account's
     /// storage, creating them if they didn't previously exist.
     ///
-    /// Uses a single HashMap lookup instead of two separate lookups.
+    /// Uses a single `HashMap` lookup instead of two separate lookups.
     fn get_trie_and_revealed_paths_mut(
         &mut self,
         account: B256,
