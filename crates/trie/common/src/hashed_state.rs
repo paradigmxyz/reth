@@ -709,7 +709,10 @@ impl From<HashedStorageSorted> for HashedStorage {
 
 impl From<HashedPostStateSorted> for HashedPostState {
     fn from(sorted: HashedPostStateSorted) -> Self {
-        let mut accounts = B256Map::default();
+        let mut accounts = B256Map::with_capacity_and_hasher(
+            sorted.accounts.len(),
+            Default::default()
+        );
 
         // Add all accounts (Some for updated, None for destroyed)
         for (address, account) in sorted.accounts {
