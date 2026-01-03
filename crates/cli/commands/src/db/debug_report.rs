@@ -1,8 +1,7 @@
 //! `reth db debug-report` command
 //!
 //! This command generates a debug report for state root validation errors,
-//! collecting all necessary information for bug reports as described in
-//! [`INVALID_STATE_ROOT_ERROR_MESSAGE`](reth_stages::stages::merkle::INVALID_STATE_ROOT_ERROR_MESSAGE).
+//! collecting all necessary information for bug reports.
 
 use crate::common::CliNodeTypes;
 use alloy_consensus::BlockHeader;
@@ -269,13 +268,13 @@ impl Command {
             use reth_db_api::Tables;
 
             for table in Tables::ALL {
-                if let Ok(table_db) = tx.inner.open_db(Some(table.name()))
-                    && let Ok(table_stats) = tx.inner.db_stat(&table_db)
+                if let Ok(table_db) = tx.inner.open_db(Some(table.name())) &&
+                    let Ok(table_stats) = tx.inner.db_stat(&table_db)
                 {
                     let page_size = table_stats.page_size() as u64;
-                    let num_pages = (table_stats.leaf_pages()
-                        + table_stats.branch_pages()
-                        + table_stats.overflow_pages()) as u64;
+                    let num_pages = (table_stats.leaf_pages() +
+                        table_stats.branch_pages() +
+                        table_stats.overflow_pages()) as u64;
 
                     stats.push(TableStats {
                         name: table.name().to_string(),
