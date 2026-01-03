@@ -439,6 +439,19 @@ impl RocksDBProvider {
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
     }
 
+    /// Creates an iterator starting from the given key (inclusive).
+    ///
+    /// Returns decoded `(Key, Value)` pairs in key order, starting from the specified key.
+    pub fn iter_from<T: Table>(&self, key: T::Key) -> ProviderResult<RocksDBIter<'_, T>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let encoded_key = key.encode();
+        let iter = self
+            .0
+            .db
+            .iterator_cf(cf, IteratorMode::From(encoded_key.as_ref(), rocksdb::Direction::Forward));
+        Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
