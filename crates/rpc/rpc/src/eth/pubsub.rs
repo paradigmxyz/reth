@@ -193,7 +193,7 @@ where
                 Ok(())
             }
             _ => {
-                // TODO: implement once https://github.com/alloy-rs/alloy/pull/2974 is released
+                // TODO: implement once https://github.com/alloy-rs/alloy/pull/3410 is released
                 Err(invalid_params_rpc_err("Unsupported subscription kind"))
             }
         }
