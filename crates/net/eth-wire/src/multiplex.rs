@@ -20,6 +20,7 @@ use std::{
 use crate::{
     capability::{SharedCapabilities, SharedCapability, UnsupportedCapabilityError},
     errors::{EthStreamError, P2PStreamError},
+    eth_snap_stream::EthSnapStream,
     handshake::EthRlpxHandshake,
     p2pstream::DisconnectP2P,
     CanDisconnect, Capability, DisconnectReason, EthStream, P2PStream, UnifiedStatus,
@@ -177,16 +178,16 @@ impl<St> RlpxProtocolMultiplexer<St> {
                         return Err(P2PStreamError::EmptyProtocolMessage.into())
                     };
                     if let Some(cap) = self.shared_capabilities().find_by_relative_offset(offset).cloned() {
-                            if cap == shared_cap {
-                                // delegate to primary
-                                let _ = to_primary.send(msg);
-                            } else {
-                                // delegate to satellite
-                                self.inner.delegate_message(&cap, msg);
-                            }
+                        if self.inner.has_protocol_for_cap(&cap) {
+                            // delegate to satellite
+                            self.inner.delegate_message(&cap, msg);
                         } else {
-                           return Err(P2PStreamError::UnknownReservedMessageId(offset).into())
+                            // delegate to primary (eth or other non-multiplexed caps like snap)
+                            let _ = to_primary.send(msg);
                         }
+                    } else {
+                        return Err(P2PStreamError::UnknownReservedMessageId(offset).into())
+                    }
                 }
                 Some(msg) = from_primary.recv() => {
                     self.inner.conn.send(msg).await.map_err(Into::into)?;
@@ -236,6 +237,35 @@ impl<St> RlpxProtocolMultiplexer<St> {
         })
         .await
     }
+
+    /// Converts this multiplexer into a [`RlpxSatelliteStream`] using an `EthSnapStream` as primary
+    /// (eth + snap multiplexed in one stream) when snap is also shared.
+    pub async fn into_eth_snap_satellite_stream<N: NetworkPrimitives>(
+        self,
+        status: UnifiedStatus,
+        fork_filter: ForkFilter,
+        handshake: Arc<dyn EthRlpxHandshake>,
+    ) -> Result<
+        (RlpxSatelliteStream<St, EthSnapStream<ProtocolProxy, N>>, UnifiedStatus),
+        EthStreamError,
+    >
+    where
+        St: Stream<Item = io::Result<BytesMut>> + Sink<Bytes, Error = io::Error> + Unpin,
+    {
+        let eth_cap = self.inner.conn.shared_capabilities().eth_version()?;
+        self.into_satellite_stream_with_tuple_handshake(&Capability::eth(eth_cap), move |proxy| {
+            let handshake = handshake.clone();
+            async move {
+                let mut unauth = UnauthProxy { inner: proxy };
+                let their_status = handshake
+                    .handshake(&mut unauth, status, fork_filter, HANDSHAKE_TIMEOUT)
+                    .await?;
+                let stream = EthSnapStream::new(unauth.into_inner(), eth_cap);
+                Ok((stream, their_status))
+            }
+        })
+        .await
+    }
 }
 
 #[derive(Debug)]
@@ -251,6 +281,10 @@ struct MultiplexInner<St> {
 impl<St> MultiplexInner<St> {
     const fn shared_capabilities(&self) -> &SharedCapabilities {
         self.conn.shared_capabilities()
+    }
+
+    fn has_protocol_for_cap(&self, cap: &SharedCapability) -> bool {
+        self.protocols.iter().any(|proto| proto.shared_cap == *cap)
     }
 
     /// Delegates a message to the matching protocol.
