@@ -148,7 +148,7 @@ impl<D: Database> TimeoutQueue<D> {
         let value = slot_storage.get().unwrap_or(U256::ZERO);
         slot_storage.set(U256::ZERO)?;
         
-        tracing::info!(target: "arb-retryable", "TIMEOUT_QUEUE_GET: slot={} value={:?}", next_get, B256::from(value.to_be_bytes::<32>()));
+        tracing::debug!(target: "arb::evm::retryables", "TIMEOUT_QUEUE_GET: slot={} value={:?}", next_get, B256::from(value.to_be_bytes::<32>()));
         
         Ok(Some(B256::from(value.to_be_bytes::<32>())))
     }
@@ -166,7 +166,7 @@ impl<D: Database> TimeoutQueue<D> {
         let slot_storage = StorageBackedBigUint::new(state, self.storage.base_key, next_put);
         slot_storage.set(U256::from_be_bytes(ticket_id.0))?;
         
-        tracing::info!(target: "arb-retryable", "TIMEOUT_QUEUE_PUT: ticket_id={:?} slot={}", ticket_id, next_put);
+        tracing::debug!(target: "arb::evm::retryables", "TIMEOUT_QUEUE_PUT: ticket_id={:?} slot={}", ticket_id, next_put);
         
         Ok(())
     }
@@ -202,7 +202,7 @@ impl<D: Database> RetryableState<D> {
             None => return Ok(false), // Queue is empty
         };
         
-        tracing::info!(target: "arb-retryable", "TRY_TO_REAP: peeked ticket_id={:?}", id);
+        tracing::debug!(target: "arb::evm::retryables", "TRY_TO_REAP: peeked ticket_id={:?}", id);
         
         // Open the retryable's storage to check timeout
         let retryable_storage = self.storage.open_sub_storage(&id.0);
@@ -211,7 +211,7 @@ impl<D: Database> RetryableState<D> {
         
         if timeout == 0 {
             // The retryable has already been deleted, so discard the peeked entry
-            tracing::info!(target: "arb-retryable", "TRY_TO_REAP: retryable already deleted, discarding queue entry");
+            tracing::debug!(target: "arb::evm::retryables", "TRY_TO_REAP: retryable already deleted, discarding queue entry");
             let _ = queue.get(state)?;
             return Ok(true);
         }
@@ -231,14 +231,14 @@ impl<D: Database> RetryableState<D> {
         
         if windows_left == 0 {
             // The retryable has expired, time to reap
-            tracing::info!(target: "arb-retryable", "TRY_TO_REAP: retryable expired, deleting");
+            tracing::debug!(target: "arb::evm::retryables", "TRY_TO_REAP: retryable expired, deleting");
             let ticket_id = RetryableTicketId(id.0);
             self.delete_retryable(state, &ticket_id)?;
             return Ok(true);
         }
         
         // Consume a window, delaying the timeout one lifetime period
-        tracing::info!(target: "arb-retryable", "TRY_TO_REAP: consuming window, extending timeout");
+        tracing::debug!(target: "arb::evm::retryables", "TRY_TO_REAP: consuming window, extending timeout");
         timeout_storage.set(timeout + RETRYABLE_LIFETIME_SECONDS)?;
         windows_left_storage.set(windows_left - 1)?;
         
@@ -258,7 +258,7 @@ impl<D: Database> RetryableState<D> {
         let ticket_storage = self.storage.open_sub_storage(&ticket_id.0);
         let ticket_base_key = ticket_storage.base_key;
         
-        tracing::info!(target: "arb-retryable", "CREATE: ticket_id={:?} base_key={:?} parent_key={:?}", ticket_id, ticket_base_key, self.storage.base_key);
+        tracing::debug!(target: "arb::evm::retryables", "CREATE: ticket_id={:?} base_key={:?} parent_key={:?}", ticket_id, ticket_base_key, self.storage.base_key);
 
         let ticket = RetryableTicket {
             storage: ticket_storage.clone(),
@@ -295,7 +295,7 @@ impl<D: Database> RetryableState<D> {
         let _ = ticket.timeout.set(timeout);
         let _ = ticket.timeout_windows_left.set(0);
         
-        tracing::info!(target: "arb-retryable", "CREATE_RETRYABLE: ticket_id={:?} timeout={}", ticket_id, timeout);
+        tracing::debug!(target: "arb::evm::retryables", "CREATE_RETRYABLE: ticket_id={:?} timeout={}", ticket_id, timeout);
 
         // Insert into TimeoutQueue (rs.TimeoutQueue.Put(id))
         let queue = self.timeout_queue();
@@ -375,7 +375,7 @@ impl<D: Database> RetryableState<D> {
             return Ok(false);
         }
         
-        tracing::info!(target: "arb-retryable", "DELETE_RETRYABLE: ticket_id={:?}", ticket_id);
+        tracing::debug!(target: "arb::evm::retryables", "DELETE_RETRYABLE: ticket_id={:?}", ticket_id);
         
         // Clear all fields (matching Go nitro's order)
         // Go nitro ignores errors from ClearByUint64 and only checks ClearBytes error
@@ -385,9 +385,7 @@ impl<D: Database> RetryableState<D> {
         let from_storage = StorageBackedAddress::new(state, ticket_base_key, FROM_OFFSET);
         let _ = from_storage.set(Address::ZERO);
         
-        // CRITICAL: Go nitro uses ClearByUint64(toOffset) which sets to ZERO, not nil sentinel!
-        // StorageBackedAddressOrNil::set(None) would store 1<<255, which is WRONG for deletion.
-        // We must use StorageBackedBigUint to set the raw value to zero.
+        // Arbitrum: use zero not nil sentinel for deletion (matches Go's ClearByUint64)
         let to_storage = StorageBackedBigUint::new(state, ticket_base_key, TO_OFFSET);
         let _ = to_storage.set(U256::ZERO);
         
@@ -454,16 +452,16 @@ impl<D: Database> RetryableState<D> {
         let ticket_base_key = ticket_storage.base_key;
         let timeout_storage = StorageBackedUint64::new(state, ticket_base_key, TIMEOUT_OFFSET);
         
-        tracing::info!(target: "arb-retryable", "OPEN: ticket_id={:?} base_key={:?} parent_key={:?}", ticket_id, ticket_base_key, self.storage.base_key);
+        tracing::debug!(target: "arb::evm::retryables", "OPEN: ticket_id={:?} base_key={:?} parent_key={:?}", ticket_id, ticket_base_key, self.storage.base_key);
         
         if let Ok(timeout) = timeout_storage.get() {
             // Go nitro: if timeout == 0 || timeout < currentTimestamp || err != nil { return nil, err }
             if timeout == 0 || timeout < current_time {
-                tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: ticket expired or not found timeout={} current_time={}", timeout, current_time);
+                tracing::debug!(target: "arb::evm::retryables", "OPEN_RETRYABLE: ticket expired or not found timeout={} current_time={}", timeout, current_time);
                 return None;
             }
             
-            tracing::info!(target: "arb-retryable", "OPEN_RETRYABLE: found valid ticket timeout={} current_time={}", timeout, current_time);
+            tracing::debug!(target: "arb::evm::retryables", "OPEN_RETRYABLE: found valid ticket timeout={} current_time={}", timeout, current_time);
             return Some(RetryableTicket {
                 storage: ticket_storage,
                 ticket_id: RetryableTicketId(ticket_id.0),
@@ -477,7 +475,7 @@ impl<D: Database> RetryableState<D> {
             });
         }
         
-        tracing::warn!(target: "arb-retryable", "OPEN_RETRYABLE: timeout storage GET failed for ticket_id={:?}", ticket_id);
+        tracing::warn!(target: "arb::evm::retryables", "OPEN_RETRYABLE: timeout storage GET failed for ticket_id={:?}", ticket_id);
         None
     }
 }

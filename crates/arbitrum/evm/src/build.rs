@@ -83,7 +83,7 @@ impl ArbEthSpec {
             (EthereumHardfork::London, ForkCondition::Block(0)),
             (EthereumHardfork::ArrowGlacier, ForkCondition::Block(0)),
             (EthereumHardfork::GrayGlacier, ForkCondition::Block(0)),
-            // CRITICAL: Paris at block 0 disables block rewards!
+            // Arbitrum: Paris at block 0 disables block rewards
             (EthereumHardfork::Paris, ForkCondition::TTD {
                 activation_block_number: 0,
                 fork_block: Some(0),
@@ -213,7 +213,6 @@ where
             let state_db: &mut revm::database::State<_> = *db_ref;
             match crate::arbosstate::ArbosState::open(state_db as *mut _) {
                 Ok(arbos_state) => {
-                    tracing::warn!(target: "arb::build", "[ITER118] ArbosState::open succeeded, version={}", arbos_state.arbos_version);
                 // Load brotli compression level
                 if let Ok(level) = arbos_state.get_brotli_compression_level() {
                     self.tx_state.brotli_compression_level = level as u32;
@@ -221,15 +220,13 @@ where
                     self.tx_state.brotli_compression_level = 0;
                 }
 
-                // CRITICAL FIX: Load network fee account from ArbOS state
-                // If not set, fees were incorrectly going to address zero
+                // Arbitrum: load network_fee_account from ArbOS state
                 match arbos_state.get_network_fee_account() {
                     Ok(network_fee) => {
-                        tracing::warn!(target: "arb::build", "[ITER118] Loaded network_fee_account from ArbOS: {:?}", network_fee);
                         self.tx_state.network_fee_account = network_fee;
                     },
                     Err(_) => {
-                        tracing::error!(target: "arb::build", "[ITER118] FAILED to load network_fee_account from ArbOS!");
+                        tracing::error!(target: "arb::evm::build", "Failed to load network_fee_account from ArbOS");
                     }
                 }
 
@@ -247,7 +244,7 @@ where
                 }
                 },
                 Err(e) => {
-                    tracing::error!(target: "arb::build", "[ITER118] ArbosState::open FAILED: {}", e);
+                    tracing::error!(target: "arb::evm::build", "ArbosState::open failed: {}", e);
                     self.tx_state.brotli_compression_level = 0;
                 }
             }
@@ -298,11 +295,7 @@ where
         let is_submit_retryable = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::SubmitRetryable);
         let is_contract = matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Contract);
 
-        // CRITICAL: Skip EIP-3607 check for Arbitrum internal transaction types
-        // EIP-3607 rejects transactions from senders with deployed code.
-        // However, ArbOS precompiles (like ArbosActs at 0xa4b05) have code (0xfe)
-        // but must be able to send internal transactions.
-        // This matches Go Nitro's skipTransactionChecks() behavior in arb_types.go.
+        // Arbitrum: skip EIP-3607 for internal txs (precompiles have code but must send txs)
         let should_skip_eip3607 = is_internal || is_deposit || is_retry || is_submit_retryable || is_contract;
         if should_skip_eip3607 {
             self.evm_mut().cfg_mut().disable_eip3607 = true;
@@ -310,59 +303,17 @@ where
             self.evm_mut().cfg_mut().disable_eip3607 = false;
         }
 
-        // ITERATION 99: Capture sender balance BEFORE start_tx hook runs.
-        //
-        // For Internal, Deposit, SubmitRetryable transactions (end_tx_now=true):
-        // - These don't go through EVM, don't call end_tx hook
-        // - Balance restoration to pre-start_tx value is needed
-        //
-        // For Retry transactions (end_tx_now=false):
-        // - Goes through EVM with revm's gas accounting
-        // - end_tx hook at line 1270 ALREADY burns the gas_refund: burn_balance(sender, gas_refund)
-        // - DO NOT restore balance here - end_tx handles it correctly!
-        //
-        // The issue was: restoring balance to 0 BEFORE end_tx broke the burn logic,
-        // then end_tx's transfer_balance to sender added ETH back, resulting in 5 ETH.
+        // Arbitrum: capture balance for restoration (Internal/Deposit/SubmitRetryable only, NOT Retry)
         let needs_balance_restoration = is_internal || is_deposit || is_submit_retryable;
-        // NOTE: is_retry is EXCLUDED - end_tx hook handles gas refund burning
         let pre_start_tx_sender_balance = if needs_balance_restoration {
             let evm_temp = self.inner.evm_mut();
             let sender_info = evm_temp.db_mut().basic(sender).ok().flatten();
-            let balance = sender_info.map(|a| a.balance).unwrap_or_default();
-            tracing::warn!(
-                target: "arb-reth::gas-fix",
-                tx_type = ?tx.tx().tx_type(),
-                sender = ?sender,
-                pre_start_tx_balance = %balance,
-                "[ITER99] Captured sender balance BEFORE start_tx (Internal/Deposit/SubmitRetryable only)"
-            );
-            Some(balance)
+            Some(sender_info.map(|a| a.balance).unwrap_or_default())
         } else {
             None
         };
 
-        // ITERATION 82b: Pre-credit logic - NO pre-credit needed for special tx types
-        //
-        // ALL balance manipulation for these tx types is handled in start_tx hook:
-        //
-        // - Internal (0x6a): Returns endTxNow=true immediately. No EVM execution.
-        //   No pre-credit needed.
-        //
-        // - SubmitRetryable (0x69): Returns endTxNow=true. No EVM execution.
-        //   Hook mints deposit_value to sender. No pre-credit needed.
-        //
-        // - Retry (0x68): Goes through EVM but start_tx hook ALREADY mints prepaid gas:
-        //   Line 812-813 in execute.rs: `Self::mint_balance(state_db, ctx.sender, prepaid);`
-        //   where prepaid = basefee * gas_limit. No additional pre-credit needed!
-        //
-        // CRITICAL FIX: Both SubmitRetryable AND Retry were being double-credited:
-        // 1. start_tx hook mints balance (deposit_value or prepaid gas)
-        // 2. build.rs pre-credit adds more balance
-        // Result: sender ends up with excess balance that was never consumed.
-        //
-        // With this fix, only Legacy and other standard transaction types that go
-        // through normal EVM execution without start_tx balance minting will need
-        // pre-credit (and that's handled elsewhere in the EVM execution).
+        // Arbitrum: no pre-credit for special tx types (start_tx hook handles minting)
         let needs_precredit = false;
 
         let paid_gas_price = {
@@ -459,26 +410,7 @@ where
             result
         };
 
-        // ITER83: Debug logging for start_hook_result
-        tracing::info!(
-            target: "arb-reth::start_tx_debug",
-            tx_type = tx_type_u8,
-            tx_type_hex = format!("0x{:02x}", tx_type_u8),
-            end_tx_now = start_hook_result.end_tx_now,
-            gas_used = start_hook_result.gas_used,
-            has_error = start_hook_result.error.is_some(),
-            "[ITER83] build.rs received start_hook_result"
-        );
-
         let hook_gas_override = if start_hook_result.end_tx_now {
-            tracing::debug!(
-                target: "arb-reth::executor",
-                tx_type = ?tx.tx().tx_type(),
-                gas_used = start_hook_result.gas_used,
-                error = ?start_hook_result.error,
-                "Transaction ended early - will override EVM gas with hook gas"
-            );
-            
             if let Some(err_msg) = start_hook_result.error {
                 return Err(BlockExecutionError::msg(err_msg));
             }
@@ -594,103 +526,26 @@ where
                 Err(_) => 0,
             };
 
-            // ITERATION 42: Enhanced logging for nonce debugging
-            if is_internal || is_retry {
-                tracing::warn!(
-                    target: "reth::evm::execute",
-                    sender = ?sender,
-                    nonce = nonce,
-                    is_internal = is_internal,
-                    is_retry = is_retry,
-                    tx_type = ?tx_type,
-                    "[req-1] ITER42: Queried sender nonce BEFORE execution"
-                );
-            }
-
             nonce
         };
 
 
         let mut tx_env = tx.to_tx_env();
 
-        // CRITICAL FIX (Iteration 97): For all tx types, set gas_price = basefee.
-        // This prevents coinbase from receiving tips (since DropTip() returns true for ArbOS != v9).
-        //
-        // For special tx types (Internal, Deposit, SubmitRetryable, Retry), we will track the
-        // sender's balance BEFORE execution and restore it AFTER execution to undo any
-        // refunds that revm's reimburse_caller adds.
-        //
-        // revm's normal flow:
-        // 1. Pre-execution: deduct gas_limit * gas_price from caller (fails silently with disable_balance_check)
-        // 2. Post-execution: refund remaining_gas * effective_gas_price to caller
-        //
-        // With disable_balance_check=true and a non-zero gas_price:
-        // - Step 1 fails silently (saturating_sub from 0 = 0)
-        // - Step 2 STILL adds balance to caller! This gives caller FREE money!
-        //
-        // We can't set gas_price = 0 because revm's validation rejects gas_price < basefee.
-        // Instead, we will manually undo the refund after execution for special tx types.
-        // NOTE: skip_evm_gas_accounting is already defined earlier (line 207) for the balance capture
-
-        // Always set gas_price = basefee to pass validation
+        // Arbitrum: gas_price=basefee for all txs (DropTip=true for ArbOS!=v9)
         reth_evm::TransactionEnv::set_gas_price(&mut tx_env, block_basefee.to::<u128>());
-
-        // ITERATION 98: Removed old capture here - now using pre_start_tx_sender_balance captured earlier
 
         if is_deposit {
             // For Deposit transactions, set nonce
             reth_evm::TransactionEnv::set_nonce(&mut tx_env, current_nonce);
         }
-        // ITERATION 46: Removed tx_env nonce setting for Internal transactions
-        // This was interfering with nonce restoration. Internal transactions should
-        // use the nonce from the transaction itself, not override it.
-
-
-        // ITERATION 80: Nonce restoration logic
-        // - Internal (0x6a): ALWAYS restore to 0 (ArbOS should never have nonce > 0)
-        // - Retry (0x68): Restore to current_nonce (prevents increment for THIS tx)
-        // - Deposit (0x64): Restore to current_nonce (deposit txs don't increment nonce)
-        // - SubmitRetryable (0x69): NO RESTORATION - it SHOULD increment nonce!
-        //
-        // Key insight from official chain: After Block 1 with SubmitRetryable + Retry,
-        // the sender (0xb8787d8f...) has nonce=1, meaning:
-        // - SubmitRetryable DID increment nonce from 0 to 1
-        // - Retry did NOT increment nonce (stayed at 1)
-        //
-        // Previous iterations incorrectly restored SubmitRetryable nonce to 0,
-        // which caused state root mismatches starting from Block 1.
-        //
-        // ITERATION 82: Added Deposit (0x64) to nonce restoration
-        // Deposit transactions are fully handled in start_tx hook (end_tx_now=true)
-        // and should NOT increment the sender's nonce. Go nitro's state_transition.go
-        // only increments nonce in the EVM execution path, which deposits skip.
+        // Arbitrum: nonce restoration for special tx types
+        // Internal->0, Retry->current, Deposit->current, SubmitRetryable->no restoration
         let pre_exec_nonce = if is_internal {
-            tracing::info!(
-                target: "reth::evm::execute",
-                sender = ?sender,
-                current_nonce = current_nonce,
-                "[req-1] ITER80: Internal tx - will restore nonce to 0"
-            );
             Some(0)
-        } else if is_retry {
-            tracing::info!(
-                target: "reth::evm::execute",
-                sender = ?sender,
-                current_nonce = current_nonce,
-                "[req-1] ITER80: Retry tx - will restore nonce to current_nonce"
-            );
-            Some(current_nonce)
-        } else if is_deposit {
-            tracing::info!(
-                target: "reth::evm::execute",
-                sender = ?sender,
-                current_nonce = current_nonce,
-                "[req-1] ITER82: Deposit tx - will restore nonce to current_nonce"
-            );
+        } else if is_retry || is_deposit {
             Some(current_nonce)
         } else {
-            // SubmitRetryable and all other tx types: NO nonce restoration
-            // They should increment nonce normally
             None
         };
 
@@ -710,7 +565,7 @@ where
             };
             let needed_fee = alloy_primitives::U256::from(effective_gas_limit) * effective_gas_price;
             tracing::info!(
-                target: "arb-reth::executor",
+                target: "arb::evm::build",
                 tx_type = ?tx.tx().tx_type(),
                 is_sequenced = is_sequenced,
                 gas_limit = effective_gas_limit,
@@ -751,57 +606,7 @@ where
         let new_disable_nonce = true; // Trust sequencer mode: always disable nonce check
         evm.cfg_mut().disable_nonce_check = new_disable_nonce;
 
-        if is_submit_retryable {
-            tracing::warn!(
-                target: "reth::evm::execute",
-                sender = ?sender,
-                is_submit_retryable = is_submit_retryable,
-                new_disable_nonce = new_disable_nonce,
-                new_disable_balance = new_disable_balance,
-                "[req-1] ITER48: Setting disable_nonce_check and disable_balance_check for SubmitRetryable"
-            );
-        }
-
-        // Debug log for Legacy transactions to verify balance check is enabled
-        if matches!(tx.tx().tx_type(), reth_arbitrum_primitives::ArbTxType::Legacy) {
-            // Get sender's actual balance from state
-            let sender_balance_result = self.inner.evm_mut().db_mut().basic(sender);
-            let sender_balance = sender_balance_result.ok().flatten().map(|a| a.balance).unwrap_or_default();
-            let required_upfront = alloy_primitives::U256::from(gas_limit) * upfront_gas_price;
-            let has_sufficient = sender_balance >= required_upfront;
-            tracing::warn!(
-                target: "arb-reth::balance-check-debug",
-                tx_hash = ?tx_hash,
-                sender = ?sender,
-                sender_balance = %sender_balance,
-                is_internal = is_internal,
-                is_deposit = is_deposit,
-                is_submit_retryable = is_submit_retryable,
-                is_sequenced = is_sequenced,
-                new_disable_balance = new_disable_balance,
-                needs_precredit = needs_precredit,
-                gas_limit = gas_limit,
-                upfront_gas_price = %upfront_gas_price,
-                required_upfront = %required_upfront,
-                has_sufficient = has_sufficient,
-                "🔍 LEGACY TX: Balance check config"
-            );
-        }
-
-        // ITERATION 103: RESTORED balance validation for user transactions
-        //
-        // User transactions (Legacy, EIP-2930, EIP-1559, etc.) from DELAYED inbox messages
-        // are NOT validated by the sequencer - they are submitted directly to L1 by users.
-        // We MUST validate their balance and reject if insufficient.
-        //
-        // The Go implementation in block_processor.go applies transactions and if they fail
-        // validation (including insufficient balance), it reverts the state and continues
-        // to the next transaction. We match that behavior by returning an error here,
-        // which causes node.rs to skip the transaction.
-        //
-        // Key insight: Sequencer-submitted transactions (from batch data) ARE validated by
-        // the sequencer. But delayed inbox transactions ARE NOT - they go directly to L1.
-        // We cannot distinguish between these two sources at this layer, but by enabling
+        // Arbitrum: validate balance for user txs (delayed inbox txs bypass sequencer)
         // balance validation for ALL user transactions, we correctly handle both:
         // - Sequencer-validated txs: will always have sufficient balance (no rejection)
         // - Delayed inbox txs: may have insufficient balance (correctly rejected)
@@ -814,17 +619,6 @@ where
             let total_cost = gas_cost.saturating_add(tx_value);
 
             if sender_balance < total_cost {
-                tracing::warn!(
-                    target: "arb-reth::balance-check",
-                    tx_hash = ?tx_hash,
-                    sender = ?sender,
-                    sender_balance = %sender_balance,
-                    gas_cost = %gas_cost,
-                    tx_value = %tx_value,
-                    total_cost = %total_cost,
-                    tx_type = ?tx.tx().tx_type(),
-                    "⚠️ [ITER103] Rejecting user tx with insufficient balance (matching Go behavior)"
-                );
                 return Err(BlockExecutionError::msg(format!(
                     "insufficient funds for gas * price + value: address {} have {} want {}",
                     sender, sender_balance, total_cost
@@ -834,8 +628,7 @@ where
 
         let wrapped = WithTxEnv { tx_env, tx };
 
-        // ITERATION 116: Capture gas_used from EVM execution for end_tx hook
-        // The end_tx hook needs to know gas_left to properly burn the refund
+        // Arbitrum: capture gas_used from EVM for end_tx hook
         let captured_gas_used = std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0));
         let captured_gas_used_clone = captured_gas_used.clone();
 
@@ -850,32 +643,14 @@ where
             let evm_gas = exec_result.gas_used();
             let actual_gas = hook_gas_override.unwrap_or(evm_gas);
 
-            // CRITICAL: Add poster_gas (L1 data cost) to the gas used
-            // This matches Go's behavior where gasUsed includes both compute gas AND L1 data gas
+            // Arbitrum: add poster_gas (L1 data cost) to gas_used
             let total_gas_with_l1 = actual_gas.saturating_add(poster_gas_for_closure);
 
             // Internal transactions (type 0x6a) don't contribute to cumulative gas
             let gas_to_add = if is_internal { 0u64 } else { total_gas_with_l1 };
             let new_cumulative = self.cumulative_gas_used + gas_to_add;
 
-            // ITERATION 116: Store the gas used for end_tx hook
             captured_gas_used_clone.store(actual_gas, std::sync::atomic::Ordering::SeqCst);
-
-            tracing::debug!(
-                target: "arb-reth::executor",
-                tx_hash = ?tx_hash,
-                evm_gas = evm_gas,
-                actual_gas = actual_gas,
-                poster_gas = poster_gas_for_closure,
-                total_gas_with_l1 = total_gas_with_l1,
-                gas_to_add = gas_to_add,
-                current_cumulative = self.cumulative_gas_used,
-                new_cumulative = new_cumulative,
-                is_internal = is_internal,
-                is_override = hook_gas_override.is_some(),
-                end_tx_now = start_hook_result.end_tx_now,
-                "Storing cumulative gas before receipt creation (including L1 data cost)"
-            );
 
             // For internal txs, store 0 as the gas used in receipt
             // For other txs, include L1 data cost in gas_for_receipt
@@ -885,83 +660,15 @@ where
             f(exec_result)
         });
 
-        // ITERATION 116: Calculate gas_left for end_tx hook
         let actual_gas_used = captured_gas_used.load(std::sync::atomic::Ordering::SeqCst);
         let gas_left_for_end_tx = gas_limit.saturating_sub(actual_gas_used);
-
-        // DEBUG: Check if ArbSys precompile state changes are in the in-memory state
-        // This helps pinpoint where state is being lost
-        if let Some(call_to) = to_addr {
-            // Check if this is a call to ArbSys (0x64)
-            let arbsys_addr = alloy_primitives::Address::from([
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-                0x00, 0x00, 0x00, 0x64,
-            ]);
-            if call_to == arbsys_addr {
-                // Check the sendMerkle size slot in the in-memory state
-                let arbos_state_addr = alloy_primitives::Address::from([
-                    0xA4, 0xB0, 0x5F, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                    0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
-                    0xFF, 0xFF, 0xFF, 0xFF,
-                ]);
-                
-                // Use the EXACT same slot computation as arbsys_precompile.rs
-                // compute_substorage_key(&[], 5) -> keccak256([5])
-                let merkle_key = alloy_primitives::keccak256(&[5u8]).to_vec();
-                
-                // compute_storage_slot(&merkle_key, 0) - matches the complex boundary-based computation
-                let boundary = 31usize;
-                let offset = 0u64;
-                let mut key_bytes = [0u8; 32];
-                key_bytes[24..32].copy_from_slice(&offset.to_be_bytes());
-                let mut data = Vec::with_capacity(merkle_key.len() + boundary);
-                data.extend_from_slice(&merkle_key);
-                data.extend_from_slice(&key_bytes[..boundary]);
-                let h = alloy_primitives::keccak256(&data);
-                let mut mapped = [0u8; 32];
-                mapped[..boundary].copy_from_slice(&h.0[..boundary]);
-                mapped[boundary] = key_bytes[boundary];
-                let size_slot_u256 = alloy_primitives::U256::from_be_bytes(mapped);
-                
-                let evm = self.inner.evm_mut();
-                let (db_ref, _, _) = evm.components_mut();
-                let state: &mut revm::database::State<D> = *db_ref;
-                
-                // Check cache
-                let cache_value = state.cache.accounts.get(&arbos_state_addr)
-                    .and_then(|acc| acc.account.as_ref())
-                    .and_then(|acc| acc.storage.get(&size_slot_u256))
-                    .copied();
-                
-                // Check transition_state
-                let transition_value = state.transition_state.as_ref()
-                    .and_then(|ts| ts.transitions.get(&arbos_state_addr))
-                    .and_then(|ta| ta.storage.get(&size_slot_u256))
-                    .map(|sv| sv.present_value);
-                
-                tracing::warn!(
-                    target: "arb::arbsys_debug",
-                    tx_hash = ?tx_hash,
-                    arbos_state_addr = ?arbos_state_addr,
-                    size_slot = ?size_slot_u256,
-                    cache_value = ?cache_value,
-                    transition_value = ?transition_value,
-                    "DEBUG: Checking sendMerkle size slot AFTER execute_transaction_with_commit_condition"
-                );
-            }
-        }
 
         // Apply deferred ArbSys state changes using the proper transition mechanism.
         // This is the key fix: the precompile stores state changes in a thread-local sink,
         // and we apply them here using storage.rs which uses state.apply_transition().
         // This ensures the state changes survive merge_transitions() and end up in bundle_state.
         //
-        // CRITICAL: Only apply deferred state changes when the transaction is COMMITTED.
-        // The same transaction may be executed multiple times (simulation, validation, canonical),
-        // and we must only apply state changes on the canonical/committing pass.
-        // result = Ok(Some(gas)) means the transaction was committed.
-        // result = Ok(None) means the transaction was NOT committed (non-canonical pass).
+        // Arbitrum: only apply deferred state changes on committing pass
         let is_committing_pass = matches!(result, Ok(Some(_)));
         
         if let Some(arbsys_state) = take_arbsys_state() {
@@ -1020,37 +727,15 @@ where
             // Internal transactions don't contribute to cumulative gas
             let actual_gas = hook_gas_override.unwrap_or(evm_gas);
 
-            // CRITICAL: Add poster_gas (L1 data cost) to the gas used
-            // This matches Go's behavior where gasUsed includes both compute gas AND L1 data gas
-            // See: nitro/arbos/tx_processor.go GasChargingHook which subtracts posterGas from gasRemaining
-            //      and nitro/go-ethereum/core/state_transition.go gasUsed() = initialGas - gasRemaining
+            // Arbitrum: add poster_gas (L1 data cost) to gas_used
             let poster_gas = self.tx_state.poster_gas;
             let total_gas_with_l1 = actual_gas.saturating_add(poster_gas);
 
             let final_gas_to_add = if is_internal { 0u64 } else { total_gas_with_l1 };
             self.cumulative_gas_used += final_gas_to_add;
-
-            tracing::info!(
-                target: "arb-reth::executor",
-                tx_hash = ?tx_hash,
-                is_internal = is_internal,
-                evm_gas = evm_gas,
-                poster_gas = poster_gas,
-                total_gas_with_l1 = total_gas_with_l1,
-                final_gas_to_add = final_gas_to_add,
-                new_cumulative = self.cumulative_gas_used,
-                "Updated cumulative gas after transaction (including L1 data cost)"
-            );
         }
 
-        // ITERATION 81: Nonce restoration for Internal (0x6a) and Retry (0x68) transactions
-        //
-        // EVM increments nonce during execution even with disable_nonce_check=true.
-        // For Internal (ArbOS) and Retry transactions, we must restore the nonce to prevent increment.
-        //
-        // We defer all nonce restorations until finish() where we modify BOTH:
-        // - state.cache.accounts (for any reads within the block)
-        // - state.transition_state.transitions (for bundle_state creation via merge_transitions)
+        // Arbitrum: defer nonce restoration for special txs until finish()
         if let Some(pre_nonce) = pre_exec_nonce {
             // Access the EVM state to check current nonce after execution
             let evm = self.inner.evm_mut();
@@ -1067,36 +752,10 @@ where
                 0  // Should not happen
             };
 
-            // Add to pending restorations - will be applied in finish() before creating bundle_state
             self.pending_nonce_restorations.push((sender, pre_nonce));
-
-            tracing::info!(
-                target: "reth::evm::execute",
-                sender = ?sender,
-                nonce_after_exec = current_nonce_after_exec,
-                will_restore_to = pre_nonce,
-                is_internal = is_internal,
-                is_retry = is_retry,
-                tx_type = ?tx_type,
-                "[req-1] ITER81: Added nonce restoration to pending list (will update both cache AND transition_state in finish())"
-            );
         }
 
-        // ITERATION 99: Balance restoration for Internal/Deposit/SubmitRetryable only.
-        //
-        // These tx types have end_tx_now=true, meaning they don't go through EVM and
-        // don't call end_tx hook. We restore their balance to pre-start_tx value.
-        //
-        // CRITICAL: Retry transactions are EXCLUDED from this restoration!
-        // - Retry goes through EVM with revm's gas accounting (adds refund to sender)
-        // - end_tx hook at execute.rs:1270 burns the gas_refund: burn_balance(sender, gas_refund)
-        // - If we restore to 0 before end_tx, the burn fails (balance is 0)
-        // - Then end_tx's transfer_balance to sender adds ETH back, causing wrong balance
-        //
-        // By excluding Retry, we let end_tx handle it correctly:
-        // - revm adds refund to sender
-        // - end_tx burns that exact refund amount
-        // - end_tx handles proper gas distribution to refund_to and fee accounts
+        // Arbitrum: restore balance for special txs (NOT Retry - end_tx handles that)
         if let Some(expected_balance) = pre_start_tx_sender_balance {
             let evm = self.inner.evm_mut();
             let (db_ref, _, _) = evm.components_mut();
@@ -1114,21 +773,6 @@ where
             };
 
             if current_balance_after_exec != expected_balance {
-                let balance_diff = if current_balance_after_exec > expected_balance {
-                    current_balance_after_exec - expected_balance
-                } else {
-                    expected_balance - current_balance_after_exec
-                };
-                tracing::warn!(
-                    target: "arb-reth::gas-fix",
-                    tx_type = tx_type_u8,
-                    sender = ?sender,
-                    pre_start_tx_balance = %expected_balance,
-                    current_balance = %current_balance_after_exec,
-                    balance_diff = %balance_diff,
-                    "[ITER99] Restoring sender balance (Internal/Deposit/SubmitRetryable only)"
-                );
-
                 // Update the cache to restore the correct balance
                 if let Some(cached_acc) = state.cache.accounts.get_mut(&sender) {
                     if let Some(ref mut account) = cached_acc.account {
@@ -1136,7 +780,7 @@ where
                     }
                 }
 
-                // CRITICAL: Also update the transition_state for bundle_state creation
+                // Arbitrum: also update transition_state for bundle_state creation
                 if let Some(ref mut transition_state) = state.transition_state {
                     if let Some(transition_acc) = transition_state.transitions.get_mut(&sender) {
                         if let Some(ref mut info) = transition_acc.info {
@@ -1165,22 +809,8 @@ where
             ArbTxType::Eip7702 => 0x04,
         };
         
-        // ITERATION 82c: Skip end_tx hook for early-terminated transactions
-        //
-        // In Go, when start_tx returns endTxNow=true, the transaction is complete.
-        // No EVM execution, no end_tx hook. The end_tx hook handles gas fee
-        // distribution (minting to network_fee_account, infra_fee_account, etc).
-        //
-        // For Internal (0x6a), SubmitRetryable (0x69), and Deposit (0x64):
-        // - start_tx returns endTxNow=true
-        // - Go does NOT call end_tx hook
-        // - Gas fees should NOT be minted
-        //
-        // Calling end_tx for these tx types caused incorrect balance mints to
-        // network_fee_account (ArbOS), leading to state root mismatches.
+        // Arbitrum: skip end_tx for early-terminated txs (end_tx_now=true)
         if !start_hook_result.end_tx_now {
-            // ITERATION 116: Use actual gas_left from EVM execution, not hardcoded 0
-            // This is critical for end_tx to properly burn the gas refund from sender
             let end_ctx = ArbEndTxContext {
                 success: result.is_ok(),
                 gas_left: gas_left_for_end_tx,
@@ -1192,14 +822,6 @@ where
                 block_timestamp,
                 sender,
             };
-            tracing::info!(
-                target: "arb-reth::end_tx_debug",
-                tx_type = tx_type_u8,
-                gas_limit = gas_limit,
-                gas_left = gas_left_for_end_tx,
-                actual_gas_used = actual_gas_used,
-                "[ITER116] Calling end_tx with correct gas_left"
-            );
             {
                 let mut state = core::mem::take(&mut self.tx_state);
                 {
@@ -1211,7 +833,7 @@ where
             }
         } else {
             tracing::debug!(
-                target: "arb-reth::executor",
+                target: "arb::evm::build",
                 tx_type = ?tx_type,
                 tx_hash = ?tx_hash,
                 "Skipping end_tx hook for early-terminated transaction (end_tx_now=true)"
@@ -1330,200 +952,37 @@ where
     }
 
     fn finish(mut self) -> Result<(Self::Evm, RethBlockExecutionResult<reth_arbitrum_primitives::ArbReceipt>), BlockExecutionError> {
-        // ITERATION 81: Apply ALL pending nonce restorations NOW, before calling inner.finish()
-        //
-        // CRITICAL FIX: We must modify BOTH:
-        // 1. state.cache.accounts[sender].account.info.nonce - for subsequent tx reads (done in ITER47)
-        // 2. state.transition_state.transitions[sender].info.nonce - for bundle_state creation!
-        //
-        // The bundle_state is created via merge_transitions() which reads from transition_state,
-        // NOT from the cache. ITER47 only modified the cache, which is why nonces weren't persisting.
-        let restoration_count = self.pending_nonce_restorations.len();
-        if restoration_count > 0 {
-            tracing::info!(
-                target: "arb-reth::executor",
-                restoration_count = restoration_count,
-                "[req-1] ITER81: Applying {} pending nonce restorations to BOTH cache AND transition_state",
-                restoration_count
-            );
-
-            // Access the EVM state and apply all nonce restorations
+        // Arbitrum: apply nonce restorations to both cache and transition_state
+        if !self.pending_nonce_restorations.is_empty() {
             let evm = self.inner.evm_mut();
             let (db_ref, _, _) = evm.components_mut();
             let state: &mut revm::database::State<D> = *db_ref;
 
             for (sender, target_nonce) in &self.pending_nonce_restorations {
-                let mut cache_updated = false;
-                let mut transition_updated = false;
-
-                // 1. Update the cache (for any subsequent reads within this block)
+                // Update cache
                 if let Some(cached_acc) = state.cache.accounts.get_mut(sender) {
                     if let Some(ref mut account) = cached_acc.account {
-                        let wrong_nonce = account.info.nonce;
                         account.info.nonce = *target_nonce;
-                        cache_updated = true;
-
-                        tracing::info!(
-                            target: "arb-reth::executor",
-                            sender = ?sender,
-                            wrong_nonce = wrong_nonce,
-                            restored_nonce = target_nonce,
-                            "[req-1] ITER81: Updated cache nonce"
-                        );
                     }
                 }
 
-                // 2. CRITICAL: Update the transition_state (for bundle_state creation)
-                // This is what ITER47 was missing!
+                // Arbitrum: also update transition_state for bundle_state creation
                 if let Some(ref mut transition_state) = state.transition_state {
                     if let Some(transition_acc) = transition_state.transitions.get_mut(sender) {
                         if let Some(ref mut info) = transition_acc.info {
-                            let wrong_nonce = info.nonce;
                             info.nonce = *target_nonce;
-                            transition_updated = true;
-
-                            tracing::warn!(
-                                target: "arb-reth::executor",
-                                sender = ?sender,
-                                wrong_nonce = wrong_nonce,
-                                restored_nonce = target_nonce,
-                                "[req-1] ITER81: Updated transition_state nonce (THIS IS THE KEY FIX!)"
-                            );
                         }
                     }
-                }
-
-                if !cache_updated {
-                    tracing::warn!(
-                        target: "arb-reth::executor",
-                        sender = ?sender,
-                        "[req-1] ITER81: Sender not in cache or account is None"
-                    );
-                }
-
-                if !transition_updated {
-                    tracing::warn!(
-                        target: "arb-reth::executor",
-                        sender = ?sender,
-                        "[req-1] ITER81: Sender not in transition_state or info is None"
-                    );
                 }
             }
         }
 
-        // Log bundle_state before finish to see what we have
-        {
-            let evm = self.inner.evm_mut();
-            let (db_ref, _, _) = evm.components_mut();
-            let state: &mut revm::database::State<D> = *db_ref;
-            crate::storage::log_arbos_bundle_state(state);
-        }
-
-        // NOW call inner.finish() which will create bundle_state from the corrected transition_state
         let (mut evm, mut result) = self.inner.finish()?;
 
-        // ITER200: Log bundle_state contents after finish to debug state root issues
-        {
-            let (db_ref, _, _) = evm.components_mut();
-            let state: &mut revm::database::State<D> = *db_ref;
-
-            // Check if ArbOS account exists in bundle_state
-            let arbos_addr = Address::from([0xa4, 0xb0, 0x5f, 0xff, 0xff, 0xff, 0xff, 0xff,
-                                           0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
-                                           0xff, 0xff, 0xff, 0xff]);
-
-            if let Some(arbos_account) = state.bundle_state.state.get(&arbos_addr) {
-                tracing::warn!(
-                    target: "arb-reth::bundle_state_debug",
-                    "[ITER200] ArbOS account in bundle_state: storage_len={}, status={:?}, has_info={}",
-                    arbos_account.storage.len(),
-                    arbos_account.status,
-                    arbos_account.info.is_some()
-                );
-
-                // Log first 5 storage entries
-                for (i, (slot, value)) in arbos_account.storage.iter().take(5).enumerate() {
-                    tracing::warn!(
-                        target: "arb-reth::bundle_state_debug",
-                        "[ITER200] ArbOS storage[{}]: slot={} present_value={} original={}",
-                        i, slot, value.present_value, value.previous_or_original_value
-                    );
-                }
-            } else {
-                tracing::error!(
-                    target: "arb-reth::bundle_state_debug",
-                    "[ITER200] ArbOS account NOT FOUND in bundle_state!"
-                );
-            }
-
-            // Log total accounts in bundle_state
-            tracing::warn!(
-                target: "arb-reth::bundle_state_debug",
-                "[ITER200] Total accounts in bundle_state: {}",
-                state.bundle_state.state.len()
-            );
-            
-            // ZOMBIE DEBUG: Check if zombie accounts are in bundle_state
-            if !self.tx_state.zombie_accounts.is_empty() {
-                tracing::warn!(
-                    target: "arb-reth::zombie_debug",
-                    "[ZOMBIE] Block has {} zombie accounts to check",
-                    self.tx_state.zombie_accounts.len()
-                );
-                for zombie_addr in &self.tx_state.zombie_accounts {
-                    if let Some(zombie_account) = state.bundle_state.state.get(zombie_addr) {
-                        tracing::warn!(
-                            target: "arb-reth::zombie_debug",
-                            "[ZOMBIE] Zombie account {} IS in bundle_state: status={:?}, has_info={}, storage_len={}",
-                            zombie_addr,
-                            zombie_account.status,
-                            zombie_account.info.is_some(),
-                            zombie_account.storage.len()
-                        );
-                        if let Some(ref info) = zombie_account.info {
-                            tracing::warn!(
-                                target: "arb-reth::zombie_debug",
-                                "[ZOMBIE] Zombie account {} info: balance={}, nonce={}, code_hash={:?}",
-                                zombie_addr,
-                                info.balance,
-                                info.nonce,
-                                info.code_hash
-                            );
-                        }
-                    } else {
-                        tracing::error!(
-                            target: "arb-reth::zombie_debug",
-                            "[ZOMBIE] Zombie account {} NOT FOUND in bundle_state!",
-                            zombie_addr
-                        );
-                    }
-                }
-            }
-        }
-
-        tracing::info!(
-            target: "arb-reth::executor",
-            receipts_count = result.receipts.len(),
-            inner_gas_used = result.gas_used,
-            "Got result from inner executor"
-        );
-
-
+        // Arbitrum: correct gasUsed from cumulative gas in last receipt
         if let Some(last_receipt) = result.receipts.last() {
             use alloy_consensus::TxReceipt;
-            let correct_gas_used = last_receipt.cumulative_gas_used();
-            tracing::info!(
-                target: "arb-reth::executor",
-                inner_gas = result.gas_used,
-                correct_gas = correct_gas_used,
-                "Correcting block gasUsed from inner executor value to actual cumulative"
-            );
-            result.gas_used = correct_gas_used;
-        } else {
-            tracing::warn!(
-                target: "arb-reth::executor",
-                "No receipts in result - cannot correct gasUsed"
-            );
+            result.gas_used = last_receipt.cumulative_gas_used();
         }
 
         Ok((evm, result))

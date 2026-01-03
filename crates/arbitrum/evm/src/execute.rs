@@ -279,14 +279,6 @@ impl DefaultArbOsHooks {
         // Convert U256 to u128, panic if it doesn't fit (should never happen in practice)
         let amount_u128: u128 = amount.try_into().expect("mint amount exceeds u128::MAX");
 
-        // CRITICAL FIX MARKER - If you see this log, commit 3cdeeafe5 is ACTIVE
-        tracing::info!(
-            target: "arbitrum::balance",
-            ?address,
-            ?amount,
-            "mint_balance: CRITICAL FIX ACTIVE - using .expect() instead of .unwrap_or(u128::MAX)"
-        );
-
         let _ = state.increment_balances(core::iter::once((address, amount_u128)));
     }
 
@@ -328,16 +320,7 @@ impl DefaultArbOsHooks {
         let _ = state.load_cache_account(from);
         let _ = state.load_cache_account(to);
 
-        // CRITICAL: Match Go nitro's TransferBalance behavior for zero amounts.
-        // Go nitro's TransferBalance for zero amounts:
-        // 1. Calls CreateZombieIfDeleted on `from` (if arbos_version < 30)
-        // 2. Calls SubBalance on `from` (which does nothing for zero amounts)
-        // 3. Calls AddBalance on `to` (which calls getOrNewStateObject but doesn't mark dirty for zero)
-        // 
-        // IMPORTANT: We do NOT touch the `to` account for zero amounts because:
-        // - geth's AddBalance(0) only calls getOrNewStateObject, it doesn't mark the account dirty
-        // - Only the zombie mechanism (CreateZombieIfDeleted) should create empty accounts
-        // - Creating extra empty accounts would cause stateRoot mismatches
+        // Arbitrum: zero-value transfers only trigger zombie mechanism (pre-ArbOS 30), no state modification
         if amount.is_zero() {
             // Implement CreateZombieIfDeleted for pre-Stylus ArbOS versions.
             // This is called on the `from` address when amount is zero.
@@ -424,7 +407,7 @@ impl DefaultArbOsHooks {
         let was_deleted = tx_state.deleted_empty_accounts.contains(&addr);
         
         tracing::info!(
-            target: "arbitrum::zombie",
+            target: "arb::evm::execute",
             ?addr,
             account_exists,
             was_deleted,
@@ -439,14 +422,12 @@ impl DefaultArbOsHooks {
                 // Use zombie_sink from reth-trie-common to pass the address to the trie layer via thread-local
                 tx_state.zombie_accounts.insert(addr);
                 reth_trie_common::zombie_sink::push(addr);
-                eprintln!("[ZOMBIE-THREAD-DEBUG] zombie_sink::push called on thread {:?} for addr {:?}", 
-                    std::thread::current().id(), addr);
-                
+
                 // Also touch the account to ensure it exists in the state
                 Self::touch_account(state, addr);
                 
-                tracing::info!(
-                    target: "arbitrum::zombie",
+                tracing::debug!(
+                    target: "arb::evm::execute",
                     ?addr,
                     "CreateZombieIfDeleted: resurrected deleted account as zombie"
                 );
@@ -489,7 +470,7 @@ impl DefaultArbOsHooks {
         
         if !needs_touch {
             tracing::info!(
-                target: "arbitrum::zombie",
+                target: "arb::evm::execute",
                 ?address,
                 "touch_account: account already exists with data, skipping"
             );
@@ -524,7 +505,7 @@ impl DefaultArbOsHooks {
         state.apply_transition(vec![(address, transition)]);
         
         tracing::info!(
-            target: "arbitrum::zombie",
+            target: "arb::evm::execute",
             ?address,
             ?previous_status,
             "touch_account: created transition entry for zombie account"
@@ -690,18 +671,8 @@ impl DefaultArbOsHooks {
             return Err(());
         }
 
-        // CRITICAL FIX: When retry_value=0, the transfer_balance above is a no-op in revm
-        // (unlike Go geth where AddBalance(0) still creates a state object).
-        // We need to explicitly touch the escrow account so it appears in the transition_state
-        // and can be tracked as deleted via EIP-161 cleanup. This is necessary for the zombie
-        // mechanism to work correctly - when the retry tx executes and does a zero-value transfer
-        // FROM the escrow, CreateZombieIfDeleted needs to find the escrow in deleted_empty_accounts.
+        // Arbitrum: touch escrow for zombie tracking when retry_value=0
         if retry_value.is_zero() {
-            tracing::info!(
-                target: "arbitrum::zombie",
-                ?escrow,
-                "SubmitRetryable: touching escrow account with zero retry_value"
-            );
             Self::touch_account(state_db, escrow);
         }
 
@@ -742,16 +713,6 @@ impl ArbOsHooks for DefaultArbOsHooks {
         ctx: &ArbStartTxContext,
     ) -> StartTxHookResult {
         state.delayed_inbox = ctx.coinbase != Address::ZERO;
-
-        // ITER83: Debug logging for start_tx hook
-        tracing::debug!(
-            target: "arb-reth::start_tx_debug",
-            tx_type = ctx.tx_type,
-            tx_type_hex = format!("0x{:02x}", ctx.tx_type),
-            sender = ?ctx.sender,
-            data_len = ctx.data.as_ref().map(|d| d.len()).unwrap_or(0),
-            "[ITER83] start_tx hook received tx_type"
-        );
 
         match ctx.tx_type {
             0x64 => {
@@ -844,53 +805,29 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 let mut l1_block_number = internal_data.l1_block_number;
 
                 tracing::info!(
-                    target: "arb-evm::startblock",
+                    target: "arb::evm::execute",
                     "StartBlock internal tx: l1_block_number_raw={}, old_l1_block_number={}, arbos_version={}",
                     l1_block_number, old_l1_block_number, arbos_version
                 );
 
                 if arbos_version < 8 {
                     l1_block_number += 1;
-                    tracing::info!(
-                        target: "arb-evm::startblock",
-                        "Adjusted l1_block_number for arbos_version<8: new_value={}",
-                        l1_block_number
-                    );
                 }
 
-                // CRITICAL: Cache the l1_block_number for the ArbSys precompile to use.
-                // This ensures deterministic l1_block_number across all execution passes
-                // (follower + consensus validation), which is required for deterministic
-                // send_hash computation in SendTxToL1.
+                // Arbitrum: cache l1_block_number for ArbSys deterministic send_hash
                 crate::arbsys_precompile::set_cached_l1_block_number(
                     internal_data.l2_block_number,
                     l1_block_number,
                 );
 
                 if l1_block_number > old_l1_block_number {
-                    tracing::info!(
-                        target: "arb-evm::startblock",
-                        "Recording new L1 block: number={}, prev_hash={:?}",
-                        l1_block_number - 1, prev_hash
-                    );
                     if let Err(e) = blockhashes.record_new_l1_block(
                         l1_block_number - 1,
                         prev_hash,
                         arbos_version,
                     ) {
                         tracing::error!("Failed to record new L1 block: {:?}", e);
-                    } else {
-                        tracing::info!(
-                            target: "arb-evm::startblock",
-                            "Successfully recorded L1 block"
-                        );
                     }
-                } else {
-                    tracing::warn!(
-                        target: "arb-evm::startblock",
-                        "Skipping L1 block record: l1_block_number={} <= old_l1_block_number={}",
-                        l1_block_number, old_l1_block_number
-                    );
                 }
                 
                 let retryable_storage = crate::storage::Storage::new(
@@ -928,13 +865,6 @@ impl ArbOsHooks for DefaultArbOsHooks {
                         gas_used: 0,
                         error: None,
                     };
-                    tracing::info!(
-                        target: "arb-reth::start_tx_debug",
-                        tx_type = 0x6A,
-                        internal_type = "StartBlock",
-                        end_tx_now = result.end_tx_now,
-                        "[ITER83] Internal/StartBlock returning with end_tx_now=true"
-                    );
                     result
                 } else if selector == batch_report_v2_id.as_slice() {
                     let report_data = match unpack_internal_tx_data_batch_posting_report_v2(data) {
@@ -1155,11 +1085,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 use arb_alloy_util::retryables::escrow_address_from_ticket;
                 let escrow = Address::from_slice(&escrow_address_from_ticket(ticket_id.0));
                 
-                // CRITICAL: Use zombie-aware transfer for retry transactions.
-                // In block 143, the escrow account was created with zero value in tx1 (submit retryable),
-                // then deleted as empty during EIP-161 cleanup. In tx2 (retry), this zero-value transfer
-                // from escrow triggers CreateZombieIfDeleted, which resurrects the escrow as a zombie.
-                // The zombie entry prevents the escrow from being pruned in the final state trie.
+                // Arbitrum: zombie-aware transfer for retry (escrow may need resurrection)
                 if let Err(_) = Self::transfer_balance_with_zombie_tracking(state_db, escrow, ctx.sender, ctx.value, Some(state)) {
                     return StartTxHookResult {
                         end_tx_now: true,
@@ -1262,28 +1188,10 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     };
                 }
                 
-                // CRITICAL FIX: When retry_value=0, the transfer_balance above is a no-op in revm
-                // (unlike Go geth where AddBalance(0) still creates a state object).
-                // We need to explicitly touch the escrow account so it appears in the transition_state
-                // and can be tracked as deleted via EIP-161 cleanup. This is necessary for the zombie
-                // mechanism to work correctly - when the retry tx executes and does a zero-value transfer
-                // FROM the escrow, CreateZombieIfDeleted needs to find the escrow in deleted_empty_accounts.
+                // Arbitrum: touch escrow for zombie tracking when retry_value=0
                 if retry_value.is_zero() {
-                    tracing::info!(
-                        target: "arbitrum::zombie",
-                        ?escrow,
-                        "SubmitRetryable: touching escrow account with zero retry_value"
-                    );
                     Self::touch_account(state_db, escrow);
                 }
-                
-                tracing::info!(
-                    target: "arbitrum::zombie",
-                    ?escrow,
-                    ?retry_value,
-                    arbos_version = state.arbos_version,
-                    "SubmitRetryable: escrow created (deletion tracking happens in build.rs)"
-                );
                 
                 let balance = match state_db.basic(ctx.sender) {
                     Ok(Some(acc)) => U256::from(acc.balance),
@@ -1464,16 +1372,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 }
             }
             
-            _ => {
-                tracing::warn!(
-                    target: "arb-reth::start_tx_debug",
-                    tx_type = ctx.tx_type,
-                    tx_type_hex = format!("0x{:02x}", ctx.tx_type),
-                    sender = ?ctx.sender,
-                    "[ITER83] start_tx hook falling through to DEFAULT (end_tx_now=false)!"
-                );
-                StartTxHookResult::default()
-            },
+            _ => StartTxHookResult::default(),
         }
     }
 
@@ -1567,25 +1466,12 @@ impl ArbOsHooks for DefaultArbOsHooks {
         state: &mut ArbTxProcessorState,
         ctx: &ArbEndTxContext,
     ) {
-        // ITER84: Debug logging for end_tx hook
-        tracing::info!(
-            target: "arb-reth::end_tx_debug",
-            tx_type = ctx.tx_type,
-            tx_type_hex = format!("0x{:02x}", ctx.tx_type),
-            gas_left = ctx.gas_left,
-            gas_limit = ctx.gas_limit,
-            success = ctx.success,
-            "[ITER84] end_tx hook called"
-        );
-
         if ctx.tx_type == 0x68 {
             if ctx.gas_left > ctx.gas_limit {
                 tracing::error!("Tx refunds gas after computation - impossible");
                 return;
             }
-            // CRITICAL: In Go, gasLeft is already reduced by posterGas (via GasChargingHook line 480).
-            // In Rust, we don't modify revm's gas accounting, so ctx.gas_left is NOT reduced.
-            // We must adjust for this difference to match Go's behavior.
+            // Arbitrum: adjust gas_left for poster_gas (Go deducts in GasChargingHook, we don't)
             let gas_left_adjusted = ctx.gas_left.saturating_sub(state.poster_gas);
             let gas_used = ctx.gas_limit.saturating_sub(gas_left_adjusted);
 
@@ -1599,8 +1485,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     let _ = Self::burn_balance(state_db, retry_data.from, gas_refund);
                 }
 
-                // CRITICAL: Since revm refunded ctx.gas_left (not adjusted), we need to burn the extra.
-                // The extra refund is: (ctx.gas_left - gas_left_adjusted) * effective_gas_price = posterGas * effective_base_fee
+                // Arbitrum: burn extra refund for poster_gas (revm refunded too much)
                 if state.poster_gas > 0 {
                     let poster_gas_extra_refund = effective_base_fee.saturating_mul(U256::from(state.poster_gas));
                     if poster_gas_extra_refund > U256::ZERO {
@@ -1703,28 +1588,17 @@ impl ArbOsHooks for DefaultArbOsHooks {
             tracing::error!("Tx refunds gas after computation - impossible");
             return;
         }
-        // CRITICAL FIX: Include poster_gas in gas_used to match Go's behavior.
-        // In Go's GasChargingHook, posterGas is subtracted from gasRemaining (line 480 of tx_processor.go):
-        //   *gasRemaining -= gasNeededToStartEVM
-        // So when EndTxHook calculates gasUsed = gasLimit - gasLeft, it automatically includes posterGas.
-        //
-        // In Rust, we don't modify the EVM's gas accounting, so gas_left only reflects compute gas.
-        // We must add poster_gas here to get the correct total gas used (compute + L1 data cost).
+        // Arbitrum: add poster_gas to gas_used (Go deducts in GasChargingHook, we don't)
         let evm_gas_used = ctx.gas_limit.saturating_sub(ctx.gas_left);
         let gas_used = evm_gas_used.saturating_add(state.poster_gas);
 
-        // CRITICAL: Burn the extra refund that revm incorrectly gave to the sender.
-        // Since we didn't consume poster_gas from the EVM's gasRemaining, revm's reimburse_caller
-        // refunded sender for poster_gas * effective_gas_price that they should have paid.
-        // We must burn this amount to charge the correct fee.
-        //
-        // This mirrors what's done for Retry transactions at line 1306-1308.
+        // Arbitrum: burn extra refund for poster_gas (revm refunded too much)
         if state.poster_gas > 0 {
             let poster_gas_refund = ctx.basefee.saturating_mul(U256::from(state.poster_gas));
             if poster_gas_refund > U256::ZERO {
                 let _ = Self::burn_balance(state_db, ctx.sender, poster_gas_refund);
                 tracing::debug!(
-                    target: "arb-reth::end_tx",
+                    target: "arb::evm::execute",
                     sender = ?ctx.sender,
                     poster_gas = state.poster_gas,
                     poster_gas_refund = %poster_gas_refund,
@@ -1756,12 +1630,6 @@ impl ArbOsHooks for DefaultArbOsHooks {
         }
 
         if compute_cost > U256::ZERO {
-            tracing::warn!(
-                target: "arb-reth::end_tx_debug",
-                network_fee_account = ?state.network_fee_account,
-                compute_cost = %compute_cost,
-                "[ITER84] MINTING to network_fee_account (this is the ArbOS balance issue!)"
-            );
             Self::mint_balance(state_db, state.network_fee_account, compute_cost);
         }
 
@@ -1781,9 +1649,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
             }
         }
 
-        // Only update gas pool if gas_price is positive (matches Go's check for msg.GasPrice.Sign() > 0)
-        // CRITICAL: Use gas_price, not basefee! In Go, this checks the message's gas price,
-        // which can be 0 for certain tx types (like internal txs) even when basefee is positive.
+        // Arbitrum: update gas pool only when gas_price>0 (matches Go's msg.GasPrice.Sign()>0)
         if ctx.gas_price > U256::ZERO {
             let compute_gas = if gas_used > state.poster_gas {
                 // Don't include posterGas in computeGas as it doesn't represent processing time

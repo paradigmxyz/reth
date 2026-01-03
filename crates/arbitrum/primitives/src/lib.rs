@@ -1272,19 +1272,7 @@ impl ConsensusTx for ArbTransactionSigned {
     }
 
     fn effective_gas_price(&self, _base_fee: Option<u64>) -> u128 {
-        // CRITICAL FIX: On Arbitrum (ArbOS version != 9), DropTip() returns true for ALL transactions.
-        // This means the effective gas price is ALWAYS baseFee, not the calculated EIP-1559 price.
-        // See go-ethereum/core/state_transition.go lines 574-578:
-        //   if st.evm.ProcessingHook.DropTip() && st.msg.GasPrice.Cmp(st.evm.Context.BaseFee) > 0 {
-        //       st.msg.GasPrice = st.evm.Context.BaseFee
-        //       st.msg.GasTipCap = common.Big0
-        //   }
-        // And arbos/tx_processor.go lines 756-759:
-        //   func (p *TxProcessor) DropTip() bool {
-        //       version := p.state.ArbOSVersion()
-        //       return version != params.ArbosVersion_9 || p.delayedInbox
-        //   }
-        // Since Arbitrum Sepolia uses ArbOS version > 9, DropTip() is always true.
+        // Arbitrum: DropTip=true for ArbOS!=9, effective_gas_price=baseFee
         match &self.transaction {
             // Legacy and EIP-2930 use their gas_price directly (no tip to drop)
             ArbTypedTransaction::Legacy(tx) => tx.gas_price.into(),
