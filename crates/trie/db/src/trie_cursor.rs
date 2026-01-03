@@ -67,6 +67,7 @@ where
     C: DbCursorRO<tables::AccountsTrie> + Send + Sync,
 {
     /// Seeks an exact match for the provided key in the account trie.
+    #[inline]
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -75,6 +76,7 @@ where
     }
 
     /// Seeks a key in the account trie that matches or is greater than the provided key.
+    #[inline]
     fn seek(
         &mut self,
         key: Nibbles,
@@ -83,15 +85,18 @@ where
     }
 
     /// Move the cursor to the next entry and return it.
+    #[inline]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(self.0.next()?.map(|value| (value.0 .0, value.1)))
     }
 
     /// Retrieves the current key in the cursor.
+    #[inline]
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.0.current()?.map(|(k, _)| k.0))
     }
 
+    #[inline]
     fn reset(&mut self) {
         // No-op for database cursors
     }
@@ -163,6 +168,7 @@ where
     C: DbCursorRO<tables::StoragesTrie> + DbDupCursorRO<tables::StoragesTrie> + Send + Sync,
 {
     /// Seeks an exact match for the given key in the storage trie.
+    #[inline]
     fn seek_exact(
         &mut self,
         key: Nibbles,
@@ -175,6 +181,7 @@ where
     }
 
     /// Seeks the given key in the storage trie.
+    #[inline]
     fn seek(
         &mut self,
         key: Nibbles,
@@ -186,15 +193,18 @@ where
     }
 
     /// Move the cursor to the next entry and return it.
+    #[inline]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         Ok(self.cursor.next_dup()?.map(|(_, v)| (v.nibbles.0, v.node)))
     }
 
     /// Retrieves the current value in the storage trie cursor.
+    #[inline]
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
         Ok(self.cursor.current()?.map(|(_, v)| v.nibbles.0))
     }
 
+    #[inline]
     fn reset(&mut self) {
         // No-op for database cursors
     }
