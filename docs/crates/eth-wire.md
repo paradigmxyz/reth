@@ -130,14 +130,22 @@ And the corresponding transaction type is defined here:
 
 [File: crates/ethereum/primitives/src/transaction.rs](../../crates/ethereum/primitives/src/transaction.rs)
 ```rust, ignore
-#[reth_codec]
-#[derive(Debug, Clone, PartialEq, Eq, Hash, AsRef, Deref, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Eq, derive_more::AsRef, derive_more::Deref)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+#[cfg_attr(any(test, feature = "reth-codec"), reth_codecs::add_arbitrary_tests(rlp))]
+#[cfg_attr(feature = "test-utils", derive(derive_more::DerefMut))]
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
 pub struct TransactionSigned {
-    pub hash: TxHash,
-    pub signature: Signature,
+    /// Transaction hash
+    #[cfg_attr(feature = "serde", serde(skip))]
+    hash: OnceLock<TxHash>,
+    /// The transaction signature values
+    signature: Signature,
+    /// Raw transaction info
     #[deref]
     #[as_ref]
-    pub transaction: Transaction,
+    #[cfg_attr(feature = "test-utils", deref_mut)]
+    transaction: Transaction,
 }
 
 impl Encodable for TransactionSigned {
