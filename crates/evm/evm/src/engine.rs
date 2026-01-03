@@ -59,7 +59,17 @@ where
     type Convert = F;
 }
 
-/// Iterator over executable transactions.
+/// Iterator over executable transactions for a specific EVM configuration.
+///
+/// This trait is a marker trait that combines [`ExecutableTxTuple`] with the constraint that
+/// the transaction type must be [`ExecutableTxFor<Evm>`]. It provides type-safe iteration over
+/// transactions that are compatible with the given EVM configuration.
+///
+/// The trait is used in the engine to parallelize transaction processing (decoding, recovery)
+/// while ensuring type safety. Implementations are typically obtained through
+/// [`ConfigureEngineEvm::tx_iterator_for_payload`].
+///
+/// See [`ExecutableTxTuple`] for details on the underlying iterator structure and parallelization.
 pub trait ExecutableTxIterator<Evm: ConfigureEvm>:
     ExecutableTxTuple<Tx: ExecutableTxFor<Evm>>
 {
