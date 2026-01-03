@@ -1,7 +1,7 @@
 //! Configured sparse trie enum for switching between serial and parallel implementations.
 
 use alloy_primitives::B256;
-use reth_trie::{Nibbles, ProofTrieNode, TrieMasks, TrieNode};
+use reth_trie::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 use reth_trie_sparse::{
     errors::SparseTrieResult, provider::TrieNodeProvider, LeafLookup, LeafLookupError,
     SerialSparseTrie, SparseTrieInterface, SparseTrieUpdates,
@@ -44,7 +44,7 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
     fn with_root(
         self,
         root: TrieNode,
-        masks: TrieMasks,
+        masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<Self> {
         match self {
@@ -75,7 +75,7 @@ impl SparseTrieInterface for ConfiguredSparseTrie {
         &mut self,
         path: Nibbles,
         node: TrieNode,
-        masks: TrieMasks,
+        masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
         match self {
             Self::Serial(trie) => trie.reveal_node(path, node, masks),

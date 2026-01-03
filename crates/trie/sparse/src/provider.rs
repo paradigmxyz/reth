@@ -2,7 +2,7 @@
 
 use alloy_primitives::{Bytes, B256};
 use reth_execution_errors::SparseTrieError;
-use reth_trie_common::{Nibbles, TrieMask};
+use reth_trie_common::{BranchNodeMasks, Nibbles};
 
 /// Factory for instantiating trie node providers.
 #[auto_impl::auto_impl(&)]
@@ -24,10 +24,8 @@ pub trait TrieNodeProviderFactory {
 pub struct RevealedNode {
     /// Raw trie node.
     pub node: Bytes,
-    /// Branch node tree mask, if any.
-    pub tree_mask: Option<TrieMask>,
-    /// Branch node hash mask, if any.
-    pub hash_mask: Option<TrieMask>,
+    /// Branch node masks (hash_mask and tree_mask), if any.
+    pub masks: Option<BranchNodeMasks>,
 }
 
 /// Trie node provider for retrieving trie nodes.
