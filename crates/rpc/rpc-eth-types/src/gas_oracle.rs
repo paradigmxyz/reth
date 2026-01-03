@@ -193,10 +193,12 @@ where
         let mut price = if results.is_empty() {
             inner.last_price.price
         } else {
-            results.sort_unstable();
-            *results.get((results.len() - 1) * self.oracle_config.percentile as usize / 100).expect(
-                "gas price index is a percent of nonzero array length, so a value always exists",
-            )
+            // results.sort_unstable();
+            let k = (results.len() - 1) * self.oracle_config.percentile.min(100) as usize / 100;
+            *(&mut *results).select_nth_unstable(k).1
+            // *results.get((results.len() - 1) * self.oracle_config.percentile as usize /
+            // 100).expect(     "gas price index is a percent of nonzero array length,
+            // so a value always exists", )
         };
 
         // constrain to the max price
