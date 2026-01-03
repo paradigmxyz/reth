@@ -155,11 +155,7 @@ where
         let mut populated_blocks = 0;
 
         // we only check a maximum of 2 * max_block_history, or the number of blocks in the chain
-        let max_blocks = if self.oracle_config.max_block_history * 2 > header.number() {
-            header.number()
-        } else {
-            self.oracle_config.max_block_history * 2
-        };
+        let max_blocks = header.number().min(self.oracle_config.max_block_history * 2);
 
         for _ in 0..max_blocks {
             // Check if current hash is in cache
