@@ -7565,6 +7565,7 @@ dependencies = [
  "arb-alloy-util",
  "brotli",
  "hex",
+ "once_cell",
  "reth-arbitrum-chainspec",
  "reth-arbitrum-payload",
  "reth-arbitrum-primitives",

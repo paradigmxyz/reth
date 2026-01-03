@@ -14,13 +14,11 @@ use crate::{
 };
 use alloy_consensus::EMPTY_ROOT_HASH;
 use alloy_primitives::{keccak256, Address, B256};
-use core::str::FromStr;
 use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
 use tracing::{debug, instrument, trace};
-use std::sync::atomic::{AtomicU64, Ordering};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
 /// finishing the computation.
@@ -427,13 +425,6 @@ impl StateRootContext {
                     self.trie_updates.insert_storage_updates(hashed_address, updates);
                 }
 
-                // DEBUG: Log storage root for ArbOS address (hashed)
-                // ArbOS address: 0xa4b05fffffffffffffffffffffffffffffffffff
-                // keccak256(ArbOS) = 0x3c79da47d8c2e5a8a5a5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5 (approx)
-                // We log all storage roots for debugging
-                eprintln!("[STORAGE-ROOT-DEBUG] hashed_address={:?} storage_root={:?} slots_walked={} account_nonce={} account_balance={}",
-                    hashed_address, storage_root, storage_slots_walked, account.nonce, account.balance);
-
                 // Encode the account with the computed storage root
                 self.account_rlp.clear();
                 let trie_account = account.into_trie_account(storage_root);
@@ -664,13 +655,7 @@ where
         };
 
         let mut hashed_entries_walked = 0;
-        let mut prev_hashed_slot: Option<B256> = None;
-        let mut fingerprint = B256::ZERO;
-        let mut first_key: Option<B256> = None;
-        let mut last_key: Option<B256> = None;
-        let mut duplicate_count = 0u64;
-        let arbos_backing_hashed = B256::from_str("0xb4d14ec89c201c23aa60e231e3993b3966b33ff1f55d198ec25980957ab32065").unwrap();
-        
+
         while let Some(node) = storage_node_iter.try_next()? {
             match node {
                 TrieElement::Branch(node) => {
@@ -680,42 +665,9 @@ where
                 TrieElement::Leaf(hashed_slot, value) => {
                     tracker.inc_leaf();
                     hashed_entries_walked += 1;
-                    
-                    // Track first and last keys
-                    if first_key.is_none() {
-                        first_key = Some(hashed_slot);
-                    }
-                    last_key = Some(hashed_slot);
-                    
-                    // INVARIANT CHECK: Verify monotonic key order (no duplicates)
-                    if let Some(prev) = prev_hashed_slot {
-                        if hashed_slot <= prev {
-                            if hashed_slot == prev {
-                                duplicate_count += 1;
-                                if self.hashed_address == arbos_backing_hashed {
-                                    eprintln!("[STORAGE-TRIE-ERROR] DUPLICATE KEY! hashed_address={:?} slot_idx={} hashed_slot={:?}",
-                                        self.hashed_address, hashed_entries_walked, hashed_slot);
-                                }
-                            } else if self.hashed_address == arbos_backing_hashed {
-                                eprintln!("[STORAGE-TRIE-ERROR] NON-MONOTONIC KEY! hashed_address={:?} slot_idx={} prev={:?} curr={:?}",
-                                    self.hashed_address, hashed_entries_walked, prev, hashed_slot);
-                            }
-                        }
-                    }
-                    prev_hashed_slot = Some(hashed_slot);
-                    
-                    // Compute leaf-set fingerprint (XOR of keccak256(hashed_slot || rlp_value))
+
                     let rlp_value = alloy_rlp::encode_fixed_size(&value);
-                    let mut leaf_data = Vec::with_capacity(32 + rlp_value.len());
-                    leaf_data.extend_from_slice(hashed_slot.as_slice());
-                    leaf_data.extend_from_slice(rlp_value.as_ref());
-                    let leaf_hash = keccak256(&leaf_data);
-                    fingerprint = B256::from_slice(&fingerprint.iter().zip(leaf_hash.iter()).map(|(a, b)| a ^ b).collect::<Vec<_>>());
-                    
-                    hash_builder.add_leaf(
-                        Nibbles::unpack(hashed_slot),
-                        rlp_value.as_ref(),
-                    );
+                    hash_builder.add_leaf(Nibbles::unpack(hashed_slot), rlp_value.as_ref());
 
                     // Check if we need to return intermediate progress
                     let total_updates_len =
@@ -752,35 +704,6 @@ where
         #[cfg(feature = "metrics")]
         self.metrics.record(stats);
 
-        // DEBUG: Log storage root and fingerprint for ArbOS backing account
-        if self.hashed_address == arbos_backing_hashed {
-            let test_id = AB_TEST_COUNTER.fetch_add(1, Ordering::SeqCst);
-            eprintln!("[STORAGE-ROOT-SUMMARY] test_id={} hashed_address={:?} storage_root={:?} slots_walked={} fingerprint={:?} first_key={:?} last_key={:?} duplicates={}",
-                test_id, self.hashed_address, root, stats.leaves_added(), fingerprint, first_key, last_key, duplicate_count);
-            
-            // A/B TEST: Run full enumeration (no skipping) and compare results
-            // Only run for the first 5 computations to avoid excessive logging
-            if test_id < 5 {
-                match compute_storage_root_full_enumeration(&self.hashed_cursor_factory, self.hashed_address) {
-                    Ok((full_root, full_slots, zero_valued_slots, full_fingerprint)) => {
-                        let roots_match = root == full_root;
-                        let fingerprints_match = fingerprint == full_fingerprint;
-                        eprintln!("[A/B-TEST] test_id={} SKIP_ROOT={:?} FULL_ROOT={:?} ROOTS_MATCH={} skip_slots={} full_slots={} zero_valued_slots={} FINGERPRINTS_MATCH={}",
-                            test_id, root, full_root, roots_match, stats.leaves_added(), full_slots, zero_valued_slots, fingerprints_match);
-                        if zero_valued_slots > 0 {
-                            eprintln!("[A/B-TEST] test_id={} WARNING: {} zero-valued slots found! These should be deleted, not included in trie!", test_id, zero_valued_slots);
-                        }
-                        if !roots_match {
-                            eprintln!("[A/B-TEST] test_id={} MISMATCH DETECTED! Skip path and full enumeration produce different roots!", test_id);
-                        }
-                    }
-                    Err(e) => {
-                        eprintln!("[A/B-TEST] test_id={} ERROR computing full enumeration: {:?}", test_id, e);
-                    }
-                }
-            }
-        }
-
         trace!(
             target: "trie::storage_root",
             %root,
@@ -794,63 +717,6 @@ where
         let storage_slots_walked = stats.leaves_added() as usize;
         Ok(StorageRootProgress::Complete(root, storage_slots_walked, trie_updates))
     }
-}
-
-/// Global counter for A/B test to run only once
-static AB_TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-/// Computes storage root with full enumeration (no skipping) for A/B test comparison.
-/// This function iterates over all hashed storage slots directly from the cursor,
-/// without using the trie walker's skip optimization.
-/// Returns (root, total_slots, zero_valued_slots, fingerprint)
-pub fn compute_storage_root_full_enumeration<H: HashedCursorFactory>(
-    hashed_cursor_factory: &H,
-    hashed_address: B256,
-) -> Result<(B256, usize, usize, B256), StorageRootError> {
-    let mut hashed_storage_cursor = hashed_cursor_factory.hashed_storage_cursor(hashed_address)?;
-    
-    // Check if storage is empty
-    if hashed_storage_cursor.is_storage_empty()? {
-        return Ok((EMPTY_ROOT_HASH, 0, 0, B256::ZERO));
-    }
-    
-    let mut hash_builder = HashBuilder::default();
-    let mut slots_walked = 0usize;
-    let mut zero_valued_slots = 0usize;
-    let mut fingerprint = B256::ZERO;
-    
-    // Seek to the beginning
-    let mut current = hashed_storage_cursor.seek(B256::ZERO)?;
-    
-    while let Some((hashed_slot, value)) = current {
-        slots_walked += 1;
-        
-        // Count zero-valued slots
-        if value.is_zero() {
-            zero_valued_slots += 1;
-            // Log first few zero-valued slots for debugging
-            if zero_valued_slots <= 5 {
-                eprintln!("[ZERO-VALUED-SLOT] hashed_slot={:?} value={:?}", hashed_slot, value);
-            }
-        }
-        
-        // Compute fingerprint
-        let rlp_value = alloy_rlp::encode_fixed_size(&value);
-        let mut leaf_data = Vec::with_capacity(32 + rlp_value.len());
-        leaf_data.extend_from_slice(hashed_slot.as_slice());
-        leaf_data.extend_from_slice(rlp_value.as_ref());
-        let leaf_hash = keccak256(&leaf_data);
-        fingerprint = B256::from_slice(&fingerprint.iter().zip(leaf_hash.iter()).map(|(a, b)| a ^ b).collect::<Vec<_>>());
-        
-        // Add to hash builder
-        hash_builder.add_leaf(Nibbles::unpack(hashed_slot), rlp_value.as_ref());
-        
-        // Move to next
-        current = hashed_storage_cursor.next()?;
-    }
-    
-    let root = hash_builder.root();
-    Ok((root, slots_walked, zero_valued_slots, fingerprint))
 }
 
 /// Trie type for differentiating between various trie calculations.

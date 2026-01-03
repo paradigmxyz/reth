@@ -770,13 +770,6 @@ mod tests {
         verifier.next(&mut outputs, Nibbles::from_nibbles([0x3]), node3).unwrap();
         verifier.finalize(&mut outputs).unwrap();
 
-        // Should have two "extra" outputs for nodes in the trie that we skipped
-        if outputs.len() != 2 {
-            eprintln!("Expected 2 outputs, got {}:", outputs.len());
-            for inc in &outputs {
-                eprintln!("  {:?}", inc);
-            }
-        }
         assert_eq!(outputs.len(), 2);
         assert_matches!(
             &outputs[0],
@@ -911,16 +904,6 @@ mod tests {
         verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
         verifier.finalize(&mut outputs).unwrap();
 
-        // All should match, no outputs
-        if !outputs.is_empty() {
-            eprintln!(
-                "Test test_single_verifier_depth_first_ordering failed with {} outputs:",
-                outputs.len()
-            );
-            for inc in &outputs {
-                eprintln!("  {:?}", inc);
-            }
-        }
         assert!(outputs.is_empty());
     }
 
@@ -994,16 +977,6 @@ mod tests {
         verifier.next(&mut outputs, Nibbles::new(), node_root).unwrap();
         verifier.finalize(&mut outputs).unwrap();
 
-        // All should match, no outputs
-        if !outputs.is_empty() {
-            eprintln!(
-                "Test test_single_verifier_complex_depth_first failed with {} outputs:",
-                outputs.len()
-            );
-            for inc in &outputs {
-                eprintln!("  {:?}", inc);
-            }
-        }
         assert!(outputs.is_empty());
     }
 }

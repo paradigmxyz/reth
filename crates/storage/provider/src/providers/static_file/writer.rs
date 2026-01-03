@@ -344,7 +344,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
         let segment = self.writer.user_header().segment();
         
-        tracing::info!(
+        tracing::debug!(
             target: "reth::static_file",
             "increment_block called: segment={:?}, expected_block={}, current_next={}",
             segment,
@@ -378,7 +378,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         self.writer.user_header_mut().increment_block();
         
-        tracing::info!(
+        tracing::debug!(
             target: "reth::static_file",
             "increment_block completed: segment={:?}, block_range={:?}",
             segment,

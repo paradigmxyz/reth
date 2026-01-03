@@ -272,16 +272,6 @@ fn write_bytes(storage: &mut BTreeMap<B256, B256>, storage_key: &[u8], bytes: &[
         last[32 - rem.len()..].copy_from_slice(rem);
         let slot = map_slot(storage_key, be_u64(offset));
         let val = B256::from(last);
-        #[cfg(feature = "std")]
-        {
-            eprintln!(
-                "DBG write_bytes: len={} last_idx={} slot=0x{} val=0x{}",
-                bytes.len(),
-                offset,
-                hex::encode(slot.as_slice()),
-                hex::encode(val.as_slice())
-            );
-        }
         storage.insert(slot, val);
     }
 }
@@ -994,54 +984,19 @@ mod tests {
     #[test]
     fn check_arbos_address_in_alloc() {
         let (accounts_h, _) = embedded_alloc::load_sepolia_secure_alloc_hashed().expect("load");
-
-        // ArbosAddress = 0xa4b05
         let arbos_addr = alloy_primitives::address!("00000000000000000000000000000000000a4b05");
         let hashed = keccak256(arbos_addr);
-
-        eprintln!("ArbosAddress: {:?}", arbos_addr);
-        eprintln!("Hashed: {:?}", hashed);
-        eprintln!("Total accounts in alloc: {}", accounts_h.len());
-
-        if let Some(acct) = accounts_h.get(&hashed) {
-            eprintln!("Found ArbosAddress in alloc: nonce={}, code_hash={:?}", acct.nonce, acct.bytecode_hash);
-            // Check if it has the 0xfe code (keccak256(0xfe) = a specific hash)
-            let fe_code_hash = keccak256(&[0xfe]);
-            eprintln!("Expected code hash for 0xfe: {:?}", fe_code_hash);
-            assert_eq!(acct.bytecode_hash, Some(fe_code_hash), "ArbosAddress should have 0xfe code");
-        } else {
-            eprintln!("ArbosAddress NOT found in alloc!");
-            eprintln!("Listing all hashed addresses:");
-            for (h, a) in accounts_h.iter() {
-                eprintln!("  {:?}: nonce={} code_hash={:?}", h, a.nonce, a.bytecode_hash);
-            }
-            panic!("ArbosAddress (0xa4b05) not found in embedded alloc");
-        }
+        let acct = accounts_h.get(&hashed).expect("ArbosAddress (0xa4b05) not found in embedded alloc");
+        let fe_code_hash = keccak256(&[0xfe]);
+        assert_eq!(acct.bytecode_hash, Some(fe_code_hash), "ArbosAddress should have 0xfe code");
     }
 
     #[test]
     fn check_arbos_storage_backing_in_alloc() {
         let (accounts_h, _) = embedded_alloc::load_sepolia_secure_alloc_hashed().expect("load");
-
-        // ArbOS storage backing = 0xA4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF
         let arbos_storage_addr = alloy_primitives::address!("A4B05FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF");
         let hashed = keccak256(arbos_storage_addr);
-
-        eprintln!("ArbOS Storage Backing: {:?}", arbos_storage_addr);
-        eprintln!("Hashed: {:?}", hashed);
-        eprintln!("Total accounts in alloc: {}", accounts_h.len());
-
-        eprintln!("\nAll accounts in alloc:");
-        for (h, a) in accounts_h.iter() {
-            eprintln!("  {:?}: nonce={} balance={} code_hash={:?}", h, a.nonce, a.balance, a.bytecode_hash);
-        }
-
-        if let Some(acct) = accounts_h.get(&hashed) {
-            eprintln!("\nFound ArbOS Storage Backing in alloc: nonce={}, balance={}", acct.nonce, acct.balance);
-            assert_eq!(acct.nonce, 1, "ArbOS storage backing should have nonce=1");
-        } else {
-            eprintln!("\nArbOS Storage Backing NOT found in alloc!");
-            panic!("ArbOS Storage Backing (0xA4B05FFF...) not found in embedded alloc");
-        }
+        let acct = accounts_h.get(&hashed).expect("ArbOS Storage Backing not found in embedded alloc");
+        assert_eq!(acct.nonce, 1, "ArbOS storage backing should have nonce=1");
     }
 }
