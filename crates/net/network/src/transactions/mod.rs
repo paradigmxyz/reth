@@ -430,8 +430,7 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
     /// `false` if [`TransactionsManager`] is operating close to full capacity.
     fn has_capacity_for_fetching_pending_hashes(&self) -> bool {
         self.pending_pool_imports_info
-            .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports) &&
-            self.transaction_fetcher.has_capacity_for_fetching_pending_hashes()
+            .has_capacity(self.pending_pool_imports_info.max_pending_pool_imports)
     }
 
     fn report_peer_bad_transactions(&self, peer_id: PeerId) {
@@ -768,14 +767,18 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             );
 
             self.transaction_fetcher.buffer_hashes(hashes, Some(peer_id));
-
+            if self.has_capacity_for_fetching_pending_hashes() {
+                let _ = self.on_fetch_hashes_pending_fetch();
+            }
             return
         }
 
         let mut hashes_to_request =
             RequestTxHashes::with_capacity(valid_announcement_data.len() / 4);
-        let surplus_hashes =
-            self.transaction_fetcher.pack_request(&mut hashes_to_request, valid_announcement_data);
+        let surplus_hashes = {
+            let mut builder = self.transaction_fetcher.request_builder();
+            builder.pack_from_announcement(&mut hashes_to_request, valid_announcement_data)
+        };
 
         if !surplus_hashes.is_empty() {
             trace!(target: "net::tx",
@@ -786,6 +789,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
             );
 
             self.transaction_fetcher.buffer_hashes(surplus_hashes, Some(peer_id));
+            if self.has_capacity_for_fetching_pending_hashes() {
+                let _ = self.on_fetch_hashes_pending_fetch();
+            }
         }
 
         trace!(target: "net::tx",
@@ -812,6 +818,9 @@ impl<Pool: TransactionPool, N: NetworkPrimitives> TransactionsManager<Pool, N> {
                 "sending `GetPooledTransactions` request to peer's session failed, buffering hashes"
             );
             self.transaction_fetcher.buffer_hashes(failed_to_request_hashes, Some(peer_id));
+            if self.has_capacity_for_fetching_pending_hashes() {
+                let _ = self.on_fetch_hashes_pending_fetch();
+            }
         }
     }
 }
@@ -1480,6 +1489,9 @@ where
                 trace!(target: "net::tx", ?peer_id, "peer returned empty response");
             }
         }
+        if self.has_capacity_for_fetching_pending_hashes() {
+            let _ = self.on_fetch_hashes_pending_fetch();
+        }
     }
 }
 
@@ -1561,7 +1573,7 @@ where
         // Advance incoming transaction events (stream new txns/announcements from
         // network manager and queue for import to pool/fetch txns).
         //
-        // This will potentially remove hashes from hashes pending fetch, it the event
+        // This will potentially remove hashes from hashes pending fetch if the event
         // is an announcement (if same hashes are announced that didn't fit into a
         // previous request).
         //
@@ -1833,8 +1845,9 @@ impl<T: SignedTransaction> FullTransactionsBuilder<T> {
     /// Append a transaction to the list of full transaction if the total message bytes size doesn't
     /// exceed the soft maximum target byte size. The limit is soft, meaning if one single
     /// transaction goes over the limit, it will be broadcasted in its own [`Transactions`]
-    /// message. The same pattern is followed in filling a [`GetPooledTransactions`] request in
-    /// [`TransactionFetcher::fill_request_from_hashes_pending_fetch`].
+    /// message. The same pattern is followed when
+    /// [`RequestBuilder::fill_from_pending_fetch`](crate::transactions::fetcher::RequestBuilder::fill_from_pending_fetch)
+    /// assembles a [`GetPooledTransactions`] request.
     ///
     /// If the transaction is unsuitable for broadcast or would exceed the softlimit, it is appended
     /// to list of pooled transactions, (e.g. 4844 transactions).
