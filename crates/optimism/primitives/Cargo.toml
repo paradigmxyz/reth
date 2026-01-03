@@ -96,3 +96,4 @@ arbitrary = [
     "alloy-eips/arbitrary",
     "reth-codecs/arbitrary",
 ]
+amsterdam = ["alloy-consensus/amsterdam"]

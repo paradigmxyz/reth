@@ -452,6 +452,11 @@ impl<B: Block> BlockHeader for RecoveredBlock<B> {
     fn extra_data(&self) -> &Bytes {
         self.header().extra_data()
     }
+
+    #[cfg(feature = "amsterdam")]
+    fn block_access_list_hash(&self) -> Option<B256> {
+        self.header().block_access_list_hash()
+    }
 }
 
 impl<B: Block> Eq for RecoveredBlock<B> {}
