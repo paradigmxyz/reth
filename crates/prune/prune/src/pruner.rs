@@ -10,7 +10,7 @@ use reth_provider::{
     DBProvider, DatabaseProviderFactory, PruneCheckpointReader, PruneCheckpointWriter,
     StageCheckpointReader,
 };
-use reth_prune_types::{PruneProgress, PrunedSegmentInfo, PrunerOutput};
+use reth_prune_types::{PruneInterruptReason, PruneProgress, PrunedSegmentInfo, PrunerOutput};
 use reth_stages_types::StageId;
 use reth_tokio_util::{EventSender, EventStream};
 use std::time::{Duration, Instant};
@@ -191,6 +191,8 @@ where
 
         for segment in &self.segments {
             if limiter.is_limit_reached() {
+                output.progress =
+                    PruneProgress::HasMoreData(PruneInterruptReason::DeletedEntriesLimitReached);
                 break
             }
 
