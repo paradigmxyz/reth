@@ -2,10 +2,14 @@
 
 use std::sync::Arc;
 
+use alloy_consensus::TxReceipt;
 use alloy_primitives::TxHash;
 use reth_primitives_traits::{
     BlockTy, IndexedTx, NodePrimitives, ReceiptTy, RecoveredBlock, SealedBlock,
 };
+use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcTypes};
+
+use crate::utils::calculate_gas_used_and_next_log_index;
 
 /// A pair of an [`Arc`] wrapped [`RecoveredBlock`] and its corresponding receipts.
 ///
@@ -44,4 +48,57 @@ impl<N: NodePrimitives> BlockAndReceipts<N> {
     pub fn sealed_block(&self) -> &SealedBlock<BlockTy<N>> {
         self.block.sealed_block()
     }
+
+    /// Returns the rpc transaction receipt for the given transaction hash if it exists.
+    ///
+    /// This uses the given converter to turn [`Self::find_transaction_and_receipt_by_hash`] into
+    /// the rpc format.
+    pub fn find_and_convert_transaction_receipt<C>(
+        &self,
+        tx_hash: TxHash,
+        converter: &C,
+    ) -> Option<Result<<C::Network as RpcTypes>::Receipt, C::Error>>
+    where
+        C: RpcConvert<Primitives = N>,
+    {
+        let (tx, receipt) = self.find_transaction_and_receipt_by_hash(tx_hash)?;
+        convert_transaction_receipt(
+            self.block.as_ref(),
+            self.receipts.as_ref(),
+            tx,
+            receipt,
+            converter,
+        )
+    }
+}
+
+/// Converts a transaction and its receipt into the rpc receipt format using the given converter.
+pub fn convert_transaction_receipt<N, C>(
+    block: &RecoveredBlock<BlockTy<N>>,
+    all_receipts: &[ReceiptTy<N>],
+    tx: IndexedTx<'_, BlockTy<N>>,
+    receipt: &ReceiptTy<N>,
+    converter: &C,
+) -> Option<Result<<C::Network as RpcTypes>::Receipt, C::Error>>
+where
+    N: NodePrimitives,
+    C: RpcConvert<Primitives = N>,
+{
+    let meta = tx.meta();
+    let (gas_used, next_log_index) =
+        calculate_gas_used_and_next_log_index(meta.index, all_receipts);
+
+    converter
+        .convert_receipts_with_block(
+            vec![ConvertReceiptInput {
+                tx: tx.recovered_tx(),
+                gas_used: receipt.cumulative_gas_used() - gas_used,
+                receipt: receipt.clone(),
+                next_log_index,
+                meta,
+            }],
+            block.sealed_block(),
+        )
+        .map(|mut receipts| receipts.pop())
+        .transpose()
 }
