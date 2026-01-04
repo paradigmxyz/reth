@@ -414,6 +414,7 @@ fn handle_withdraw_eth(input: &mut PrecompileInput<'_>, exec_id: u64) -> Precomp
 /// Returns the current ArbOS version as a uint256.
 /// Go nitro returns: 55 + state.ArbOSVersion() (Nitro starts at version 56)
 fn handle_arbos_version(input: &mut PrecompileInput<'_>, exec_id: u64) -> PrecompileResult {
+    let gas_limit = input.gas;
     let internals = input.internals_mut();
     
     // Load the ArbOS state account first to ensure it's in the journal
@@ -451,8 +452,8 @@ fn handle_arbos_version(input: &mut PrecompileInput<'_>, exec_id: u64) -> Precom
     // Go nitro charges this via OpenArbosState (800) and resultCost (3) in precompile.go
     const SLOAD_GAS_EIP2200: u64 = 800;
     const COPY_GAS: u64 = 3; // params.CopyGas in Go
-    let gas_cost = SLOAD_GAS_EIP2200 + COPY_GAS;
-    
+    let gas_cost = (SLOAD_GAS_EIP2200 + COPY_GAS).min(gas_limit);
+
     Ok(PrecompileOutput::new(gas_cost, output.to_vec().into()))
 }
 
@@ -460,6 +461,7 @@ fn handle_arbos_version(input: &mut PrecompileInput<'_>, exec_id: u64) -> Precom
 /// Returns the current L2 block number as a uint256.
 /// Go nitro implementation: return evm.Context.BlockNumber, nil
 fn handle_arb_block_number(input: &mut PrecompileInput<'_>, exec_id: u64) -> PrecompileResult {
+    let gas_limit = input.gas;
     let internals = input.internals_mut();
     
     // Get the current block number from the EVM context
@@ -478,8 +480,8 @@ fn handle_arb_block_number(input: &mut PrecompileInput<'_>, exec_id: u64) -> Pre
     // Gas cost: just the base precompile cost (3 for CopyGas)
     // Go nitro doesn't charge any storage reads for this function
     const COPY_GAS: u64 = 3;
-    let gas_cost = COPY_GAS;
-    
+    let gas_cost = COPY_GAS.min(gas_limit);
+
     Ok(PrecompileOutput::new(gas_cost, output.to_vec().into()))
 }
 
@@ -492,6 +494,7 @@ fn execute_send_tx_to_l1(
 ) -> PrecompileResult {
     let caller = input.caller;
     let value = input.value;
+    let gas_limit = input.gas;  // Capture gas limit before consuming input
     let internals = input.internals_mut();
     
     // Get block info
@@ -606,8 +609,12 @@ fn execute_send_tx_to_l1(
     // Go nitro charges based on the precompile's gas model
     // Pass current_size (before increment) to determine if a partial read happened
     let current_size = new_size - 1;
-    let gas_used = calculate_gas_cost(calldata_for_l1.len(), merkle_events.len(), current_size);
-    
+    let calculated_gas = calculate_gas_cost(calldata_for_l1.len(), merkle_events.len(), current_size);
+    // Cap gas_used to available gas to prevent underflow panic in alloy-evm
+    // Arbitrum's gas model allows precompiles to charge from the transaction burner,
+    // but alloy-evm expects precompile gas <= call gas
+    let gas_used = calculated_gas.min(gas_limit);
+
     Ok(PrecompileOutput::new(gas_used, output.into()))
 }
 
