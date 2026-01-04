@@ -75,4 +75,14 @@ impl StorageSettings {
         self.account_history_in_rocksdb = value;
         self
     }
+
+    /// Returns true if the static file settings match.
+    ///
+    /// Only compares the flags that are configurable via CLI (`receipts_in_static_files`
+    /// and `transaction_senders_in_static_files`). `RocksDB` flags are not compared since
+    /// they are not currently exposed in CLI configuration.
+    pub const fn static_file_settings_eq(&self, other: &Self) -> bool {
+        self.receipts_in_static_files == other.receipts_in_static_files &&
+            self.transaction_senders_in_static_files == other.transaction_senders_in_static_files
+    }
 }

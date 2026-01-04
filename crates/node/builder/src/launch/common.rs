@@ -66,9 +66,9 @@ use reth_node_metrics::{
 };
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
-    BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
-    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory,
+    BlockHashReader, BlockNumReader, DatabaseProviderFactory, MetadataProvider, ProviderError,
+    ProviderFactory, ProviderResult, RocksDBProviderFactory, StageCheckpointReader,
+    StaticFileProviderBuilder, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -497,6 +497,20 @@ where
             rocksdb_provider,
         )?
         .with_prune_modes(self.prune_modes());
+
+        // Error if CLI settings differ from stored settings
+        let cli_settings = self.node_config().static_files.to_settings();
+        if let Some(stored_settings) = factory.storage_settings()? &&
+            !stored_settings.static_file_settings_eq(&cli_settings)
+        {
+            return Err(eyre::eyre!(
+                "Storage settings mismatch!\n\n\
+                 Stored in DB: {stored_settings:?}\n\
+                 From CLI:     {cli_settings:?}\n\n\
+                 Storage flags cannot be changed after genesis.\n\
+                 Either remove the conflicting CLI flags, or delete the database and re-sync."
+            ));
+        }
 
         // Keep MDBX, static files, and RocksDB aligned. If any check fails, unwind to the
         // earliest consistent block.

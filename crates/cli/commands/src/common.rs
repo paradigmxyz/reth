@@ -27,7 +27,7 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    ProviderFactory, StaticFileProviderFactory,
+    MetadataProvider, ProviderFactory, StaticFileProviderFactory,
 };
 use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
 use reth_static_file::StaticFileProducer;
@@ -161,6 +161,20 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             rocksdb_provider,
         )?
         .with_prune_modes(prune_modes.clone());
+
+        // Error if CLI settings differ from stored settings
+        let cli_settings = self.static_files.to_settings();
+        if let Some(stored_settings) = factory.storage_settings()? &&
+            !stored_settings.static_file_settings_eq(&cli_settings)
+        {
+            return Err(eyre::eyre!(
+                "Storage settings mismatch!\n\n\
+                 Stored in DB: {stored_settings:?}\n\
+                 From CLI:     {cli_settings:?}\n\n\
+                 Storage flags cannot be changed after genesis.\n\
+                 Either remove the conflicting CLI flags, or delete the database and re-sync."
+            ));
+        }
 
         // Check for consistency between database and static files.
         if !access.is_read_only_inconsistent() &&
