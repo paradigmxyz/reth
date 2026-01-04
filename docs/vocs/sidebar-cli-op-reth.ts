@@ -140,6 +140,10 @@ export const opRethCliSidebar: SidebarItem = {
                 {
                     text: "op-reth db account-storage",
                     link: "/cli/op-reth/db/account-storage"
+                },
+                {
+                    text: "op-reth db debug-report",
+                    link: "/cli/op-reth/db/debug-report"
                 }
             ]
         },
