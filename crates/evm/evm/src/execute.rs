@@ -214,7 +214,7 @@ pub struct BlockAssemblerInput<'a, 'b, F: BlockExecutorFactory, H = Header> {
     /// Output of block execution.
     pub output: &'b BlockExecutionResult<F::Receipt>,
     /// [`BundleState`] after the block execution.
-    pub bundle_state: &'a BundleState,
+    pub bundle_state: &'b BundleState,
     /// Provider with access to state.
     #[debug(skip)]
     pub state_provider: &'b dyn StateProvider,
@@ -234,7 +234,7 @@ impl<'a, 'b, F: BlockExecutorFactory, H> BlockAssemblerInput<'a, 'b, F, H> {
         parent: &'a SealedHeader<H>,
         transactions: Vec<F::Transaction>,
         output: &'b BlockExecutionResult<F::Receipt>,
-        bundle_state: &'a BundleState,
+        bundle_state: &'b BundleState,
         state_provider: &'b dyn StateProvider,
         state_root: B256,
     ) -> Self {
@@ -374,6 +374,13 @@ pub trait BlockBuilder {
         self,
         state_provider: impl StateProvider,
     ) -> Result<BlockBuilderOutcome<Self::Primitives>, BlockExecutionError>;
+
+    /// Complete the block building process but skip calculating the state root, and returns the
+    /// [`BlockBuilderOutcome`] with empty state root and trie updates.
+    fn finish_no_state_root(
+        self,
+        state_provider: impl StateProvider,
+    ) -> Result<(BlockBuilderOutcome<Self::Primitives>, BundleState), BlockExecutionError>;
 
     /// Provides mutable access to the inner [`BlockExecutor`].
     fn executor_mut(&mut self) -> &mut Self::Executor;
@@ -536,6 +543,46 @@ where
         let block = RecoveredBlock::new_unhashed(block, senders);
 
         Ok(BlockBuilderOutcome { execution_result: result, hashed_state, trie_updates, block })
+    }
+
+    fn finish_no_state_root(
+        self,
+        state: impl StateProvider,
+    ) -> Result<(BlockBuilderOutcome<N>, BundleState), BlockExecutionError> {
+        let (evm, result) = self.executor.finish()?;
+        let (db, evm_env) = evm.finish();
+
+        // merge all transitions into bundle state
+        db.merge_transitions(BundleRetention::Reverts);
+
+        // calculate the state root
+        let bundle_state = db.take_bundle();
+        let hashed_state = state.hashed_post_state(&bundle_state);
+        let (transactions, senders) =
+            self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();
+
+        let block = self.assembler.assemble_block(BlockAssemblerInput {
+            evm_env,
+            execution_ctx: self.ctx,
+            parent: self.parent,
+            transactions,
+            output: &result,
+            bundle_state: &bundle_state,
+            state_provider: &state,
+            state_root: B256::default(),
+        })?;
+
+        let block = RecoveredBlock::new_unhashed(block, senders);
+
+        Ok((
+            BlockBuilderOutcome {
+                execution_result: result,
+                hashed_state,
+                trie_updates: TrieUpdates::default(),
+                block,
+            },
+            bundle_state,
+        ))
     }
 
     fn executor_mut(&mut self) -> &mut Self::Executor {
