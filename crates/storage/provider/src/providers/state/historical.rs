@@ -26,8 +26,8 @@ use reth_trie::{
     TrieInputSorted,
 };
 use reth_trie_db::{
-    DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof, DatabaseStateRoot,
-    DatabaseStorageProof, DatabaseStorageRoot, DatabaseTrieWitness,
+    storage_overlay_root, DatabaseHashedPostState, DatabaseHashedStorage, DatabaseProof,
+    DatabaseStateRoot, DatabaseStorageProof, DatabaseTrieWitness,
 };
 
 use std::fmt::Debug;
@@ -335,7 +335,7 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
     ) -> ProviderResult<B256> {
         let mut revert_storage = self.revert_storage(address)?;
         revert_storage.extend(&hashed_storage);
-        StorageRoot::overlay_root(self.tx(), address, revert_storage)
+        storage_overlay_root(self.tx(), address, revert_storage)
             .map_err(|err| ProviderError::Database(err.into()))
     }
 
