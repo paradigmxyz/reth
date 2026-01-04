@@ -285,9 +285,12 @@ The `FetchClient` struct, similar to `NetworkHandle`, can be shared across threa
 [File: crates/net/network/src/fetch/client.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/fetch/client.rs)
 ```rust,ignore
 pub struct FetchClient<N: NetworkPrimitives = EthNetworkPrimitives> {
-    request_tx: UnboundedSender<DownloadRequest<N>>,
-    peers_handle: PeersHandle,
-    num_active_peers: Arc<AtomicUsize>
+    /// Sender half of the request channel.
+    pub(crate) request_tx: UnboundedSender<DownloadRequest<N>>,
+    /// The handle to the peers
+    pub(crate) peers_handle: PeersHandle,
+    /// Number of active peer sessions the node's currently handling.
+    pub(crate) num_active_peers: Arc<AtomicUsize>,
 }
 ```
 
@@ -299,23 +302,23 @@ The fields `request_tx` and `peers_handle` are cloned off of the `StateFetcher` 
 
 [File: crates/net/network/src/fetch/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/fetch/mod.rs)
 ```rust,ignore
-pub struct StateFetcher {
+pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests:
-        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<Header>>>>,
+    inflight_headers_requests: HashMap<PeerId, InflightHeadersRequest<N::BlockHeader>>,
     /// Currently active [`GetBlockBodies`] requests
-    inflight_bodies_requests:
-        HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<BlockBody>>>>,
+    inflight_bodies_requests: HashMap<PeerId, InflightBodiesRequest<N::BlockBody>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
     /// The handle to the peers manager
     peers_handle: PeersHandle,
+    /// Number of active peer sessions the node's currently handling.
+    num_active_peers: Arc<AtomicUsize>,
     /// Requests queued for processing
-    queued_requests: VecDeque<DownloadRequest>,
+    queued_requests: VecDeque<DownloadRequest<N>>,
     /// Receiver for new incoming download requests
-    download_requests_rx: UnboundedReceiverStream<DownloadRequest>,
+    download_requests_rx: UnboundedReceiverStream<DownloadRequest<N>>,
     /// Sender for download requests, used to detach a [`FetchClient`]
-    download_requests_tx: UnboundedSender<DownloadRequest>,
+    download_requests_tx: UnboundedSender<DownloadRequest<N>>,
 }
 ```
 
@@ -323,24 +326,26 @@ This struct itself is nested deeply within the `NetworkManager`: its `Swarm` str
 
 [File: crates/net/network/src/state.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/state.rs)
 ```rust,ignore
-pub struct NetworkState<C> {
+pub struct NetworkState<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// All active peers and their state.
-    active_peers: HashMap<PeerId, ActivePeer>,
+    active_peers: HashMap<PeerId, ActivePeer<N>>,
     /// Manages connections to peers.
     peers_manager: PeersManager,
     /// Buffered messages until polled.
-    queued_messages: VecDeque<StateAction>,
+    queued_messages: VecDeque<StateAction<N>>,
     /// The client type that can interact with the chain.
-    client: Arc<C>,
+    ///
+    /// This type is used to fetch the block number after we established a session and received the
+    /// [`UnifiedStatus`] block hash.
+    client: BlockNumReader,
     /// Network discovery.
     discovery: Discovery,
-    /// The genesis hash of the network we're on
-    genesis_hash: B256,
     /// The type that handles requests.
     ///
-    /// The fetcher streams ``RLPx`` related requests on a per-peer basis to this type. This type will
-    /// then queue in the request and notify the fetcher once the result has been received.
-    state_fetcher: StateFetcher,
+    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type
+    /// will then queue in the request and notify the fetcher once the result has been
+    /// received.
+    state_fetcher: StateFetcher<N>,
 }
 ```
 
@@ -483,14 +488,16 @@ Similar to the network management task, it's implemented as an endless future, b
 
 [File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/eth_requests.rs)
 ```rust,ignore
-pub struct EthRequestHandler<C> {
+pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
-    client: Arc<C>,
+    client: C,
     /// Used for reporting peers.
     #[expect(dead_code)]
     peers: PeersHandle,
-    /// Incoming request from the [NetworkManager](crate::NetworkManager).
-    incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
+    /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
+    incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
+    /// Metrics for the eth request handler.
+    metrics: EthRequestHandlerMetrics,
 }
 ```
 
@@ -988,16 +995,16 @@ After `TransactionsCommand`s, it's time to take care of transactions-related req
 
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
 ```rust,ignore
-pub enum NetworkTransactionEvent {
+pub enum NetworkTransactionEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
     /// Received list of transactions from the given peer.
-    IncomingTransactions { peer_id: PeerId, msg: Transactions },
+    IncomingTransactions { peer_id: PeerId, msg: Transactions<N::BroadcastedTransaction> },
     /// Received list of transactions hashes to the given peer.
     IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
     /// Incoming `GetPooledTransactions` request from a peer.
     GetPooledTransactions {
         peer_id: PeerId,
         request: GetPooledTransactions,
-        response: oneshot::Sender<RequestResult<PooledTransactions>>,
+        response: oneshot::Sender<RequestResult<PooledTransactions<N::PooledTransaction>>>,
     },
 }
 ```
