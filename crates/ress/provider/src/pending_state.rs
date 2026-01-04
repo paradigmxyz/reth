@@ -123,7 +123,8 @@ pub async fn maintain_pending_state<P>(
             }
             // ignore
             ConsensusEngineEvent::CanonicalChainCommitted(_, _) |
-            ConsensusEngineEvent::BlockReceived(_) => (),
+            ConsensusEngineEvent::BlockReceived(_) |
+            ConsensusEngineEvent::LatestPersistedBlock(_) => (),
         }
     }
 }

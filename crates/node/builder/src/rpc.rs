@@ -25,7 +25,7 @@ use reth_node_core::{
 };
 use reth_payload_builder::{PayloadBuilderHandle, PayloadStore};
 use reth_rpc::{
-    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer},
+    eth::{core::EthRpcConverterFor, DevSigner, EthApiTypes, FullEthApiServer, RpcNodeCore},
     AdminApi,
 };
 use reth_rpc_api::{eth::helpers::EthTransactions, IntoEngineApiRpcModule};
@@ -1197,7 +1197,8 @@ impl<'a, N: FullNodeComponents<Types: NodeTypes<ChainSpec: Hardforks + EthereumH
 /// A `EthApi` that knows how to build `eth` namespace API from [`FullNodeComponents`].
 pub trait EthApiBuilder<N: FullNodeComponents>: Default + Send + 'static {
     /// The Ethapi implementation this builder will build.
-    type EthApi: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>;
+    type EthApi: FullEthApiServer<Provider = N::Provider, Pool = N::Pool>
+        + RpcNodeCore<Primitives = PrimitivesTy<N::Types>>;
 
     /// Builds the [`EthApiServer`](reth_rpc_api::eth::EthApiServer) from the given context.
     fn build_eth_api(
