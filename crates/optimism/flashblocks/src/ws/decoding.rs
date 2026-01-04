@@ -3,7 +3,7 @@ use alloy_primitives::bytes::Bytes;
 use std::io;
 
 /// A trait for decoding flashblocks from bytes.
-pub trait FlashBlockDecoder: Send + 'static {
+pub trait FlashBlockDecoder: Send + Sync + 'static {
     /// Decodes `bytes` into a [`FlashBlock`].
     fn decode(&self, bytes: Bytes) -> eyre::Result<FlashBlock>;
 }
