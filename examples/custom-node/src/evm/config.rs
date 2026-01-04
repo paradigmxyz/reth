@@ -2,6 +2,7 @@ use crate::{
     chainspec::CustomChainSpec,
     engine::{CustomExecutionData, CustomPayloadBuilderAttributes},
     evm::{alloy::CustomEvmFactory, executor::CustomBlockExecutionCtx, CustomBlockAssembler},
+    flashblock::CustomFlashblockPayloadBase,
     primitives::{Block, CustomHeader, CustomNodePrimitives, CustomTransaction},
 };
 use alloy_consensus::BlockHeader;
@@ -9,7 +10,6 @@ use alloy_eips::{eip2718::WithEncoded, Decodable2718};
 use alloy_evm::EvmEnv;
 use alloy_op_evm::OpBlockExecutionCtx;
 use alloy_rpc_types_engine::PayloadError;
-use op_alloy_rpc_types_engine::flashblock::OpFlashblockPayloadBase;
 use op_revm::OpSpecId;
 use reth_engine_primitives::ExecutableTxIterator;
 use reth_ethereum::{
@@ -146,9 +146,19 @@ pub struct CustomNextBlockEnvAttributes {
     extension: u64,
 }
 
-impl From<OpFlashblockPayloadBase> for CustomNextBlockEnvAttributes {
-    fn from(value: OpFlashblockPayloadBase) -> Self {
-        Self { inner: value.into(), extension: 0 }
+impl From<CustomFlashblockPayloadBase> for CustomNextBlockEnvAttributes {
+    fn from(value: CustomFlashblockPayloadBase) -> Self {
+        Self {
+            inner: OpNextBlockEnvAttributes {
+                timestamp: value.inner.timestamp,
+                suggested_fee_recipient: value.inner.fee_recipient,
+                prev_randao: value.inner.prev_randao,
+                gas_limit: value.inner.gas_limit,
+                parent_beacon_block_root: Some(value.inner.parent_beacon_block_root),
+                extra_data: value.inner.extra_data,
+            },
+            extension: value.extension,
+        }
     }
 }
 
