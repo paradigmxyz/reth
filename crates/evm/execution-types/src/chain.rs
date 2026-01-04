@@ -41,7 +41,7 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     trie_updates: Option<TrieUpdates>,
 }
 
-type ChainTxReceipt<'a, N> = (
+type ChainTxReceiptMeta<'a, N> = (
     &'a RecoveredBlock<<N as NodePrimitives>::Block>,
     IndexedTx<'a, <N as NodePrimitives>::Block>,
     &'a <N as NodePrimitives>::Receipt,
@@ -198,7 +198,7 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn find_transaction_and_receipt_by_hash(
         &self,
         tx_hash: TxHash,
-    ) -> Option<ChainTxReceipt<'_, N>> {
+    ) -> Option<ChainTxReceiptMeta<'_, N>> {
         for (block, receipts) in self.blocks_and_receipts() {
             let Some(indexed_tx) = block.find_indexed(tx_hash) else {
                 continue;
