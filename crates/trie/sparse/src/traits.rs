@@ -9,7 +9,7 @@ use alloy_primitives::{
 };
 use alloy_trie::BranchNodeCompact;
 use reth_execution_errors::SparseTrieResult;
-use reth_trie_common::{Nibbles, ProofTrieNode, TrieMasks, TrieNode};
+use reth_trie_common::{BranchNodeMasks, Nibbles, ProofTrieNode, TrieNode};
 
 use crate::provider::TrieNodeProvider;
 
@@ -37,7 +37,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
     fn with_root(
         self,
         root: TrieNode,
-        masks: TrieMasks,
+        masks: Option<BranchNodeMasks>,
         retain_updates: bool,
     ) -> SparseTrieResult<Self>;
 
@@ -72,7 +72,7 @@ pub trait SparseTrieInterface: Sized + Debug + Send + Sync {
         &mut self,
         path: Nibbles,
         node: TrieNode,
-        masks: TrieMasks,
+        masks: Option<BranchNodeMasks>,
     ) -> SparseTrieResult<()> {
         self.reveal_nodes(vec![ProofTrieNode { path, node, masks }])
     }
