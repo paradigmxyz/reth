@@ -51,6 +51,7 @@ pub use engine::{ConfigureEngineEvm, ExecutableTxIterator, ExecutableTxTuple};
 
 #[cfg(feature = "metrics")]
 pub mod metrics;
+
 pub mod noop;
 #[cfg(any(test, feature = "test-utils"))]
 /// test helpers for mocking executor
