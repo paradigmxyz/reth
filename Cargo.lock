@@ -8293,6 +8293,7 @@ dependencies = [
 name = "reth-engine-service"
 version = "1.9.3"
 dependencies = [
+ "crossbeam-channel",
  "futures",
  "pin-project",
  "reth-chainspec",

@@ -18,6 +18,7 @@ use alloy_rpc_types_engine::{
     ExecutionData, ExecutionPayloadSidecar, ExecutionPayloadV1, ForkchoiceState,
 };
 use assert_matches::assert_matches;
+use crossbeam_channel::Sender as CrossbeamSender;
 use reth_chain_state::{test_utils::TestBlockBuilder, BlockState, ComputedTrieData};
 use reth_chainspec::{ChainSpec, HOLESKY, MAINNET};
 use reth_engine_primitives::{EngineApiValidator, ForkchoiceStatus, NoopInvalidBlockHook};
@@ -143,7 +144,7 @@ struct TestHarness {
         BasicEngineValidator<MockEthProvider, MockEvmConfig, MockEngineValidator>,
         MockEvmConfig,
     >,
-    to_tree_tx: Sender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
+    to_tree_tx: CrossbeamSender<FromEngine<EngineApiRequest<EthEngineTypes, EthPrimitives>, Block>>,
     from_tree_rx: UnboundedReceiver<EngineApiEvent>,
     blocks: Vec<ExecutedBlock>,
     action_rx: Receiver<PersistenceAction>,
@@ -197,6 +198,7 @@ impl TestHarness {
             Box::new(NoopInvalidBlockHook::default()),
         );
 
+        let (_, persistence_complete_rx) = crossbeam_channel::bounded(1);
         let tree = EngineApiTreeHandler::new(
             provider.clone(),
             consensus,
@@ -211,6 +213,7 @@ impl TestHarness {
             TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
             EngineApiKind::Ethereum,
             evm_config,
+            persistence_complete_rx,
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
