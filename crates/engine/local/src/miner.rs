@@ -217,8 +217,10 @@ where
             eyre::bail!("No payload")
         };
 
-        let header = payload.block().sealed_header().clone();
-        let payload = T::block_to_payload(payload.block().clone());
+        // Clone the block once and extract header from it to avoid double cloning
+        let block = payload.block().clone();
+        let header = block.sealed_header().clone();
+        let payload = T::block_to_payload(block);
         let res = self.to_engine.new_payload(payload).await?;
 
         if !res.is_valid() {
