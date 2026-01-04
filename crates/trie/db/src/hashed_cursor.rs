@@ -62,14 +62,17 @@ where
 {
     type Value = Account;
 
+    #[inline]
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         self.0.seek(key)
     }
 
+    #[inline]
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         self.0.next()
     }
 
+    #[inline]
     fn reset(&mut self) {
         // Database cursors are stateless, no reset needed
     }
@@ -99,14 +102,17 @@ where
 {
     type Value = U256;
 
+    #[inline]
     fn seek(&mut self, subkey: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         Ok(self.cursor.seek_by_key_subkey(self.hashed_address, subkey)?.map(|e| (e.key, e.value)))
     }
 
+    #[inline]
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         Ok(self.cursor.next_dup_val()?.map(|e| (e.key, e.value)))
     }
 
+    #[inline]
     fn reset(&mut self) {
         // Database cursors are stateless, no reset needed
     }
