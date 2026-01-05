@@ -273,7 +273,7 @@ pub(crate) fn clear_rocksdb_table<T: Table>(
 /// `u64::MAX` as the highest block number sentinel.
 ///
 /// Note: For `RocksDB`, when `append_only == false`, this function reads existing shards
-/// from `RocksDB` and merges them with new indices, matching the MDBX behavior.
+/// from `RocksDB` and merges them with new indices.
 #[cfg(all(unix, feature = "rocksdb"))]
 pub(crate) fn load_storage_history_indices_via_writer<CURSOR, N, Provider>(
     writer: &mut EitherWriter<'_, CURSOR, N>,
@@ -360,8 +360,7 @@ where
 
         let mut iter = chunks.into_iter().peekable();
         while let Some(chunk) = iter.next() {
-            let mut highest =
-                *chunk.last().expect("BlockNumberList shard chunk must be non-empty");
+            let mut highest = *chunk.last().expect("BlockNumberList shard chunk must be non-empty");
 
             if !flush_all && iter.peek().is_none() {
                 *list = chunk;
@@ -383,7 +382,7 @@ where
 /// database or `RocksDB`.
 ///
 /// Note: For `RocksDB`, when `append_only == false`, this function reads existing shards
-/// from `RocksDB` and merges them with new indices, matching the MDBX behavior.
+/// from `RocksDB` and merges them with new indices.
 #[cfg(all(unix, feature = "rocksdb"))]
 pub(crate) fn load_account_history_indices_via_writer<CURSOR, N, Provider>(
     writer: &mut EitherWriter<'_, CURSOR, N>,
