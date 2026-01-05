@@ -812,5 +812,40 @@ mod tests {
                 .collect();
             assert_eq!(blocks, (0..=5).collect::<Vec<_>>());
         }
+
+        /// Verifies unwind correctly handles indices spanning multiple shards.
+        ///
+        /// Creates enough blocks to fill one complete shard plus overflow, then unwinds
+        /// to a point inside the first shard. Verifies:
+        /// - Sentinel shard contains only blocks < unwind_to
+        /// - The old full shard (keyed by its max block) is deleted
+        #[tokio::test]
+        async fn unwind_crosses_shard_boundary() {
+            let db = TestStageDB::default();
+            let max_block = NUM_OF_INDICES_IN_SHARD as u64 + 10;
+            let unwind_to = NUM_OF_INDICES_IN_SHARD as u64 - 10;
+
+            setup_with_changesets(&db, 0..=max_block);
+            run(&db, max_block, None);
+            unwind(&db, max_block, unwind_to);
+
+            let rocksdb = db.factory.rocksdb_provider();
+
+            // Sentinel shard should contain only blocks 0..=unwind_to
+            let blocks: Vec<u64> = rocksdb
+                .get::<tables::AccountsHistory>(shard(u64::MAX))
+                .unwrap()
+                .unwrap()
+                .iter()
+                .collect();
+            assert_eq!(blocks, (0..=unwind_to).collect::<Vec<_>>());
+
+            // The old full shard should be deleted
+            let full_shard_max = NUM_OF_INDICES_IN_SHARD as u64 - 1;
+            assert!(rocksdb
+                .get::<tables::AccountsHistory>(shard(full_shard_max))
+                .unwrap()
+                .is_none());
+        }
     }
 }
