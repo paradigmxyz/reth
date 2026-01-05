@@ -9,7 +9,7 @@ This crate aims to copy this data from the current database to multiple static f
 Below are four diagrams illustrating how data is served from static files to the provider. A glossary is also provided to explain the different (linked) components involved in these processes.
 
 
-### Query Diagrams ([`Provider`](../../storage/provider/src/providers/database/mod.rs#L41))
+### Query Diagrams ([`Provider`](../../storage/provider/src/providers/database/mod.rs#L62))
 
 <details>
   <summary>By block number</summary>
@@ -106,9 +106,9 @@ In descending order of abstraction hierarchy:
 
 [`StaticFileProducer`](../../static-file/static-file/src/static_file_producer.rs#L25): A `reth` hook service that when triggered, **copies** finalized data from the database to the latest static file. Upon completion, it updates the internal index at `StaticFileProvider` with the new highest block and transaction on each specific segment.
 
-[`StaticFileProvider`](../../storage/provider/src/providers/static_file/manager.rs#L44) A provider similar to `DatabaseProvider`, **managing all existing static files** and selecting the optimal one (by range and segment type) to fulfill a request. **A single instance is shared across all components and should be instantiated only once within `ProviderFactory`**. An immutable reference is given every time `ProviderFactory` creates a new `DatabaseProvider`.
+[`StaticFileProvider`](../../storage/provider/src/providers/static_file/manager.rs#L86) A provider similar to `DatabaseProvider`, **managing all existing static files** and selecting the optimal one (by range and segment type) to fulfill a request. **A single instance is shared across all components and should be instantiated only once within `ProviderFactory`**. An immutable reference is given every time `ProviderFactory` creates a new `DatabaseProvider`.
 
-[`StaticFileJarProvider`](../../storage/provider/src/providers/static_file/jar.rs#L42) A provider similar to `DatabaseProvider` that provides access to a **single static file segment data** on a specific block range.
+[`StaticFileJarProvider`](../../storage/provider/src/providers/static_file/jar.rs#L29) A provider similar to `DatabaseProvider` that provides access to a **single static file segment data** on a specific block range.
 
 [`StaticFileCursor`](../../storage/db/src/static_file/cursor.rs#L11) An elevated abstraction of `NippyJarCursor` for simplified access. It associates the bitmasks with type decoding. For instance, `cursor.get_two::<TransactionMask<Tx, Signature>>(tx_number)` would yield `Tx` and `Signature`, eliminating the need to manage masks or invoke a decoder/decompressor.
 
