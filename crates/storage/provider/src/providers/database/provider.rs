@@ -1453,7 +1453,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         }
 
         // collect block body indices for each block in the range
-        let mut block_body_indices = Vec::new();
+        let range_len = block_range.end().saturating_sub(*block_range.start()) as usize + 1;
+        let mut block_body_indices = Vec::with_capacity(range_len);
         for block_num in block_range {
             if let Some(indices) = self.block_body_indices(block_num)? {
                 block_body_indices.push(indices);
