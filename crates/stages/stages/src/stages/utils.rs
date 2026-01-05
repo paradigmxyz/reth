@@ -300,6 +300,8 @@ where
     let total_entries = collector.len();
     let interval = (total_entries / 10).max(1);
 
+    let rocksdb = rocksdb_provider.rocksdb_provider();
+
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
         let sharded_key = StorageShardedKey::decode_owned(k)?;
@@ -319,7 +321,6 @@ where
             // If it's not the first sync, there might be an existing shard already in RocksDB,
             // so we need to merge it with the one coming from the collector
             if !append_only {
-                let rocksdb = rocksdb_provider.rocksdb_provider();
                 let key = StorageShardedKey::new(partial_key.0, partial_key.1, u64::MAX);
                 if let Some(existing_list) =
                     rocksdb.get::<reth_db_api::tables::StoragesHistory>(key)?
@@ -344,7 +345,7 @@ fn flush_storage_shards<CURSOR, N>(
     partial_key: (alloy_primitives::Address, alloy_primitives::B256),
     list: &mut Vec<BlockNumber>,
     append_only: bool,
-    flush: bool,
+    flush_all: bool,
 ) -> Result<(), StageError>
 where
     CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
@@ -353,15 +354,16 @@ where
 {
     use reth_db_api::models::storage_sharded_key::StorageShardedKey;
 
-    if list.len() > NUM_OF_INDICES_IN_SHARD || flush {
+    if list.len() > NUM_OF_INDICES_IN_SHARD || flush_all {
         let chunks =
             list.chunks(NUM_OF_INDICES_IN_SHARD).map(|c| c.to_vec()).collect::<Vec<Vec<u64>>>();
 
         let mut iter = chunks.into_iter().peekable();
         while let Some(chunk) = iter.next() {
-            let mut highest = *chunk.last().expect("at least one index");
+            let mut highest =
+                *chunk.last().expect("BlockNumberList shard chunk must be non-empty");
 
-            if !flush && iter.peek().is_none() {
+            if !flush_all && iter.peek().is_none() {
                 *list = chunk;
             } else {
                 if iter.peek().is_none() {
@@ -406,6 +408,8 @@ where
     let total_entries = collector.len();
     let interval = (total_entries / 10).max(1);
 
+    let rocksdb = rocksdb_provider.rocksdb_provider();
+
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
         let sharded_key = ShardedKey::<alloy_primitives::Address>::decode_owned(k)?;
@@ -425,7 +429,6 @@ where
             // If it's not the first sync, there might be an existing shard already in RocksDB,
             // so we need to merge it with the one coming from the collector
             if !append_only {
-                let rocksdb = rocksdb_provider.rocksdb_provider();
                 let key = ShardedKey::new(partial_key, u64::MAX);
                 if let Some(existing_list) =
                     rocksdb.get::<reth_db_api::tables::AccountsHistory>(key)?
