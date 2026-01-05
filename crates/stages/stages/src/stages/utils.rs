@@ -302,6 +302,7 @@ where
 
     let rocksdb = rocksdb_provider.rocksdb_provider();
 
+    // Group block numbers by (address, storage_key) and write them as shards to RocksDB.
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
         let sharded_key = StorageShardedKey::decode_owned(k)?;
@@ -313,13 +314,13 @@ where
 
         let partial_key: PartialKey = (sharded_key.address, sharded_key.sharded_key.key);
 
+        // When we encounter a new (address, storage_key) pair, flush the previous one
         if current_partial != partial_key {
             flush_storage_shards(writer, current_partial, &mut current_list, append_only, true)?;
             current_partial = partial_key;
             current_list.clear();
 
-            // If it's not the first sync, there might be an existing shard already in RocksDB,
-            // so we need to merge it with the one coming from the collector
+            // For incremental sync, merge with existing sentinel shard from RocksDB
             if !append_only {
                 let key = StorageShardedKey::new(partial_key.0, partial_key.1, u64::MAX);
                 if let Some(existing_list) =
@@ -409,6 +410,7 @@ where
 
     let rocksdb = rocksdb_provider.rocksdb_provider();
 
+    // Group block numbers by address and write them as shards to RocksDB.
     for (index, element) in collector.iter()?.enumerate() {
         let (k, v) = element?;
         let sharded_key = ShardedKey::<alloy_primitives::Address>::decode_owned(k)?;
@@ -420,13 +422,13 @@ where
 
         let partial_key = sharded_key.key;
 
+        // When we encounter a new address, flush the previous one
         if current_partial != partial_key {
             flush_account_shards(writer, current_partial, &mut current_list, append_only, true)?;
             current_partial = partial_key;
             current_list.clear();
 
-            // If it's not the first sync, there might be an existing shard already in RocksDB,
-            // so we need to merge it with the one coming from the collector
+            // For incremental sync, merge with existing sentinel shard from RocksDB
             if !append_only {
                 let key = ShardedKey::new(partial_key, u64::MAX);
                 if let Some(existing_list) =
