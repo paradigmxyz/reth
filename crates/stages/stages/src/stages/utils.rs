@@ -510,10 +510,10 @@ fn unwind_history_via_rocksdb<Provider, T, PartialKey, K, SK>(
     provider: &Provider,
     affected_keys: impl IntoIterator<Item = PartialKey>,
     first_block_to_remove: BlockNumber,
-    mk_start_key: impl Fn(&PartialKey) -> K,
-    mk_sentinel_key: impl Fn(&PartialKey) -> K,
+    lowest_shard_key: impl Fn(&PartialKey) -> K,
+    sentinel_shard_key: impl Fn(&PartialKey) -> K,
     shard_belongs_to_key: impl Fn(&K, &PartialKey) -> bool,
-) -> Result<usize, StageError>
+) -> Result<(), StageError>
 where
     Provider: DBProvider + reth_provider::RocksDBProviderFactory,
     T: reth_db_api::table::Table<Key = K, Value = BlockNumberList>,
@@ -522,10 +522,9 @@ where
     let rocksdb = provider.rocksdb_provider();
     let tx = rocksdb.tx();
     let mut batch = rocksdb.batch();
-    let mut count = 0;
 
     for partial_key in affected_keys {
-        let start_key = mk_start_key(&partial_key);
+        let start_key = lowest_shard_key(&partial_key);
         let mut shards = Vec::<(K, BlockNumberList)>::new();
 
         for entry in tx.iter_from::<T>(start_key)? {
@@ -540,9 +539,10 @@ where
             continue;
         }
 
-        count += 1;
         let mut reinsert: Option<Vec<u64>> = None;
 
+        // Walk shards from highest to lowest. Delete shards above threshold,
+        // filter the boundary shard, and stop at the first shard fully below threshold.
         for (key, list) in shards.iter().rev() {
             let first = list.iter().next().expect("BlockNumberList shard must be non-empty");
             let highest = key.as_ref().highest_block_number;
@@ -568,14 +568,14 @@ where
         }
 
         if let Some(indices) = reinsert {
-            let sentinel_key = mk_sentinel_key(&partial_key);
+            let sentinel_key = sentinel_shard_key(&partial_key);
             let new_list = BlockNumberList::new_pre_sorted(indices);
             batch.put::<T>(sentinel_key, &new_list)?;
         }
     }
 
     provider.set_pending_rocksdb_batch(batch.into_inner());
-    Ok(count)
+    Ok(())
 }
 
 /// Unwind storage history indices using `RocksDB`.
@@ -587,7 +587,7 @@ pub(crate) fn unwind_storage_history_via_rocksdb<Provider>(
     provider: &Provider,
     affected_keys: std::collections::BTreeSet<(alloy_primitives::Address, alloy_primitives::B256)>,
     first_block_to_remove: BlockNumber,
-) -> Result<usize, StageError>
+) -> Result<(), StageError>
 where
     Provider: DBProvider + reth_provider::RocksDBProviderFactory,
 {
@@ -615,7 +615,7 @@ pub(crate) fn unwind_account_history_via_rocksdb<Provider>(
     provider: &Provider,
     affected_addresses: std::collections::BTreeSet<alloy_primitives::Address>,
     first_block_to_remove: BlockNumber,
-) -> Result<usize, StageError>
+) -> Result<(), StageError>
 where
     Provider: DBProvider + reth_provider::RocksDBProviderFactory,
 {
