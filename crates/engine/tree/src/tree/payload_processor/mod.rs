@@ -30,7 +30,9 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
+use reth_provider::{
+    BlockReader, DatabaseProviderROFactory, StateProvider, StateProviderFactory, StateReader,
+};
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
@@ -231,8 +233,6 @@ where
             + Send
             + 'static,
     {
-        let parent_hash = env.parent_hash;
-
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx, transaction_count_hint) =
             self.spawn_tx_iterator(transactions);
@@ -295,15 +295,18 @@ where
         // spawn multi-proof task
         let parent_span = span.clone();
         self.executor.spawn_blocking({
-            let saved_cache =
-                prewarm_handle.saved_cache.clone().unwrap_or_else(|| self.cache_for(parent_hash));
-            let cache = saved_cache.cache().clone();
-            let cache_metrics = saved_cache.metrics().clone();
+            let saved_cache = prewarm_handle.saved_cache.clone();
             move || {
                 let _enter = parent_span.entered();
                 // Build a state provider for the multiproof task
                 let provider = provider_builder.build().expect("failed to build provider");
-                let provider = CachedStateProvider::new(provider, cache, cache_metrics);
+                let provider = if let Some(saved_cache) = saved_cache {
+                    let (cache, metrics) = saved_cache.split();
+                    Box::new(CachedStateProvider::new(provider, cache, metrics))
+                        as Box<dyn StateProvider>
+                } else {
+                    Box::new(provider)
+                };
                 multi_proof_task.run(provider);
             }
         });
