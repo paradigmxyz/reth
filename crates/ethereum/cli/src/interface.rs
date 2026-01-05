@@ -205,7 +205,7 @@ impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> 
         let _guard = self.init_tracing(&runner, Layers::new())?;
 
         // Install the prometheus recorder to be sure to record all metrics
-        install_prometheus_recorder(None)?;
+        install_prometheus_recorder();
 
         // Use the shared standalone function to avoid duplication
         run_commands_with::<C, Ext, Rpc, N>(self, runner, components, launcher)

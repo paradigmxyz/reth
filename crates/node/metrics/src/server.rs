@@ -137,8 +137,7 @@ impl MetricServer {
                         }
                     };
 
-                    let handle = install_prometheus_recorder(None)
-                        .expect("Prometheus recorder install failed");
+                    let handle = install_prometheus_recorder();
                     let hook = hook.clone();
                     let service = tower::service_fn(move |_| {
                         (hook)();
@@ -181,8 +180,7 @@ impl MetricServer {
         task_executor.spawn_with_graceful_shutdown_signal(move |mut signal| {
             Box::pin(async move {
                 tracing::info!(url = %url, interval = ?interval, "Starting task to push metrics to gateway");
-                let handle = install_prometheus_recorder(None)
-                    .expect("Prometheus recorder install failed");
+                let handle = install_prometheus_recorder();
                 loop {
                     tokio::select! {
                         _ = &mut signal => {

@@ -67,7 +67,7 @@ where
         self.init_tracing(&runner)?;
 
         // Install the prometheus recorder to be sure to record all metrics
-        install_prometheus_recorder(None)?;
+        install_prometheus_recorder();
 
         let components = |spec: Arc<OpChainSpec>| {
             (OpExecutorProvider::optimism(spec.clone()), Arc::new(OpBeaconConsensus::new(spec)))

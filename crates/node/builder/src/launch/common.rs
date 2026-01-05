@@ -634,7 +634,7 @@ where
     /// Starts the prometheus endpoint.
     pub async fn start_prometheus_endpoint(&self) -> eyre::Result<()> {
         // ensure recorder runs upkeep periodically
-        install_prometheus_recorder(None)?.spawn_upkeep();
+        install_prometheus_recorder().spawn_upkeep();
 
         let listen_addr = self.node_config().metrics.prometheus;
         if let Some(addr) = listen_addr {
