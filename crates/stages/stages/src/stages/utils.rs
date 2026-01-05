@@ -8,14 +8,20 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_db_api::{
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    table::Decode,
+};
 use reth_etl::Collector;
-#[cfg(all(unix, feature = "rocksdb"))]
-use reth_provider::providers::{RocksDBBatch, RocksDBProvider};
-#[cfg(all(unix, feature = "rocksdb"))]
-use reth_provider::EitherWriter;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
     StaticFileProviderFactory,
+};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::{
+    providers::{RocksDBBatch, RocksDBProvider},
+    EitherWriter,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
@@ -290,8 +296,6 @@ where
     N: reth_primitives_traits::NodePrimitives,
     Provider: reth_provider::RocksDBProviderFactory,
 {
-    use reth_db_api::{models::storage_sharded_key::StorageShardedKey, table::Decode};
-
     type PartialKey = (alloy_primitives::Address, alloy_primitives::B256);
 
     let mut current_partial = PartialKey::default();
@@ -358,8 +362,8 @@ where
         + DbCursorRO<reth_db_api::tables::StoragesHistory>,
     N: reth_primitives_traits::NodePrimitives,
 {
-    use reth_db_api::models::storage_sharded_key::StorageShardedKey;
-
+    // Write full shards keyed by highest block; last shard uses u64::MAX sentinel.
+    // If !flush_all, keep the last chunk in memory for further accumulation.
     if list.len() > NUM_OF_INDICES_IN_SHARD || flush_all {
         let chunks =
             list.chunks(NUM_OF_INDICES_IN_SHARD).map(|c| c.to_vec()).collect::<Vec<Vec<u64>>>();
@@ -405,8 +409,6 @@ where
     N: reth_primitives_traits::NodePrimitives,
     Provider: reth_provider::RocksDBProviderFactory,
 {
-    use reth_db_api::{models::ShardedKey, table::Decode};
-
     let mut current_partial = alloy_primitives::Address::default();
     let mut current_list = Vec::<u64>::new();
 
@@ -471,8 +473,8 @@ where
         + DbCursorRO<reth_db_api::tables::AccountsHistory>,
     N: reth_primitives_traits::NodePrimitives,
 {
-    use reth_db_api::models::ShardedKey;
-
+    // Write full shards keyed by highest block; last shard uses u64::MAX sentinel.
+    // If !flush_all, keep the last chunk in memory for further accumulation.
     if list.len() > NUM_OF_INDICES_IN_SHARD || flush_all {
         let chunks =
             list.chunks(NUM_OF_INDICES_IN_SHARD).map(|c| c.to_vec()).collect::<Vec<Vec<u64>>>();
@@ -591,8 +593,6 @@ pub(crate) fn unwind_storage_history_via_rocksdb<Provider>(
 where
     Provider: DBProvider + reth_provider::RocksDBProviderFactory,
 {
-    use reth_db_api::models::storage_sharded_key::StorageShardedKey;
-
     unwind_history_via_rocksdb::<_, reth_db_api::tables::StoragesHistory, _, _, _>(
         provider,
         affected_keys,
@@ -619,8 +619,6 @@ pub(crate) fn unwind_account_history_via_rocksdb<Provider>(
 where
     Provider: DBProvider + reth_provider::RocksDBProviderFactory,
 {
-    use reth_db_api::models::ShardedKey;
-
     unwind_history_via_rocksdb::<_, reth_db_api::tables::AccountsHistory, _, _, _>(
         provider,
         affected_addresses,
