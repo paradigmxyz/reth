@@ -466,22 +466,22 @@ Every time the `StateFetcher` is polled, it finds the next idle peer available t
 ```rust,ignore
 /// Returns the next action to return
 fn poll_action(&mut self) -> PollAction {
-    // we only check and not pop here since we don't know yet whether a peer is available.
-    if self.queued_requests.is_empty() {
-        return PollAction::NoRequests
+        // we only check and not pop here since we don't know yet whether a peer is available.
+        if self.queued_requests.is_empty() {
+            return PollAction::NoRequests
+        }
+
+        let request = self.queued_requests.pop_front().expect("not empty");
+        let Some(peer_id) = self.next_best_peer(request.best_peer_requirements()) else {
+            // need to put back the request
+            self.queued_requests.push_front(request);
+            return PollAction::NoPeersAvailable
+        };
+
+        let request = self.prepare_block_request(peer_id, request);
+
+        PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
     }
-
-    let peer_id = if let Some(peer_id) = self.next_peer() {
-        peer_id
-    } else {
-        return PollAction::NoPeersAvailable
-    };
-
-    let request = self.queued_requests.pop_front().expect("not empty");
-    let request = self.prepare_block_request(peer_id, request);
-
-    PollAction::Ready(FetchAction::BlockRequest { peer_id, request })
-}
 ```
 
 ---
