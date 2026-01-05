@@ -742,12 +742,12 @@ mod tests {
         }
     }
 
-    /// RocksDB-specific tests for storage history indexing.
+    /// `RocksDB`-specific tests for storage history indexing.
     ///
     /// These tests verify that when `storages_history_in_rocksdb` is enabled:
-    /// - Execute writes indices to RocksDB instead of MDBX
-    /// - Incremental syncs properly merge with existing RocksDB data
-    /// - Unwind correctly removes indices from RocksDB
+    /// - Execute writes indices to `RocksDB` instead of MDBX
+    /// - Incremental syncs properly merge with existing `RocksDB` data
+    /// - Unwind correctly removes indices from `RocksDB`
     #[cfg(all(unix, feature = "rocksdb"))]
     mod rocksdb_tests {
         use super::*;
@@ -775,7 +775,7 @@ mod tests {
             .unwrap();
         }
 
-        /// Verifies execute writes to RocksDB (not MDBX) when enabled.
+        /// Verifies execute writes to `RocksDB` (not MDBX) when enabled.
         #[tokio::test]
         async fn execute_writes_to_rocksdb() {
             let db = TestStageDB::default();
@@ -789,7 +789,7 @@ mod tests {
             assert!(rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().is_some());
         }
 
-        /// Verifies incremental sync merges new indices with existing RocksDB data.
+        /// Verifies incremental sync merges new indices with existing `RocksDB` data.
         /// This is critical: without proper merging, we'd lose previously indexed blocks.
         #[tokio::test]
         async fn incremental_sync_merges_indices() {
@@ -827,7 +827,7 @@ mod tests {
             assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
         }
 
-        /// Verifies unwind removes indices >= unwind_to from RocksDB.
+        /// Verifies unwind removes indices >= `unwind_to` from `RocksDB`.
         #[tokio::test]
         async fn unwind_removes_indices() {
             let db = TestStageDB::default();
@@ -851,7 +851,7 @@ mod tests {
         ///
         /// Creates enough blocks to fill one complete shard plus overflow, then unwinds
         /// to a point inside the first shard. Verifies:
-        /// - Sentinel shard contains only blocks < unwind_to
+        /// - Sentinel shard contains only blocks < `unwind_to`
         /// - The old full shard (keyed by its max block) is deleted
         #[tokio::test]
         async fn unwind_crosses_shard_boundary() {
