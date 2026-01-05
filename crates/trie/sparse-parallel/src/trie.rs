@@ -2289,7 +2289,7 @@ impl SparseSubtrieInner {
 
                 let mut tree_mask = TrieMask::default();
                 let mut hash_mask = TrieMask::default();
-                let mut hashes = Vec::new();
+                self.buffers.branch_hashes_buf.clear();
 
                 // Lazy lookup for branch node masks - shared across loop iterations
                 let mut path_masks_storage = None;
@@ -2339,7 +2339,7 @@ impl SparseSubtrieInner {
                             });
                             if let Some(hash) = hash {
                                 hash_mask.set_bit(last_child_nibble);
-                                hashes.push(hash);
+                                self.buffers.branch_hashes_buf.push(hash);
                             }
                         }
 
@@ -2392,12 +2392,12 @@ impl SparseSubtrieInner {
                     if store_in_db_trie {
                         // Store in DB trie if there are either any children that are stored in
                         // the DB trie, or any children represent hashed values
-                        hashes.reverse();
+                        self.buffers.branch_hashes_buf.reverse();
                         let branch_node = BranchNodeCompact::new(
                             *state_mask,
                             tree_mask,
                             hash_mask,
-                            hashes,
+                            core::mem::take(&mut self.buffers.branch_hashes_buf),
                             hash.filter(|_| path.is_empty()),
                         );
                         update_actions
@@ -2558,6 +2558,8 @@ pub struct SparseSubtrieBuffers {
     branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
     /// Reusable RLP buffer
     rlp_buf: Vec<u8>,
+    /// Reusable buffer for collecting branch node hashes
+    branch_hashes_buf: Vec<B256>,
 }
 
 impl SparseSubtrieBuffers {
@@ -2577,6 +2579,9 @@ impl SparseSubtrieBuffers {
 
         self.rlp_buf.clear();
         self.rlp_buf.shrink_to_fit();
+
+        self.branch_hashes_buf.clear();
+        self.branch_hashes_buf.shrink_to_fit();
     }
 }
 
