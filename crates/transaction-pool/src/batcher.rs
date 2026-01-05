@@ -469,7 +469,7 @@ mod tests {
         let pool = testing_pool();
         let config =
             BatchConfig { max_batch_size: 10, batch_timeout: Some(Duration::from_secs(60)) };
-        let (processor, _request_tx) = BatchTxProcessor::new(pool.clone(), config);
+        let (processor, _request_tx) = BatchTxProcessor::new(pool, config);
 
         let mut processor = Box::pin(processor);
 
@@ -527,7 +527,7 @@ mod tests {
         let max_batch_size = 10;
         // Long timeout - batch should NOT flush immediately
         let config = BatchConfig { max_batch_size, batch_timeout: Some(Duration::from_secs(3600)) };
-        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+        let (processor, request_tx) = BatchTxProcessor::new(pool, config);
 
         let mut processor = Box::pin(processor);
 
