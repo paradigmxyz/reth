@@ -385,15 +385,46 @@ In the pipeline used by the main Reth binary, the `HeaderStage` uses a `ReverseH
 
 [File: crates/net/downloaders/src/headers/reverse_headers.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/downloaders/src/headers/reverse_headers.rs)
 ```rust,ignore
-pub struct ReverseHeadersDownloader<C, H> {
-    /// The consensus client
-    consensus: Arc<C>,
-    /// The headers client
+pub struct ReverseHeadersDownloader<H: HeadersClient> {
+    /// Consensus client used to validate headers
+    consensus: Arc<dyn HeaderValidator<H::Header>>,
+    /// Client used to download headers.
     client: Arc<H>,
+    /// The local head of the chain.
+    local_head: Option<SealedHeader<H::Header>>,
+    /// Block we want to close the gap to.
+    sync_target: Option<SyncTargetBlock>,
+    /// The block number to use for requests.
+    next_request_block_number: u64,
+    /// Keeps track of the block we need to validate next.
+    lowest_validated_header: Option<SealedHeader<H::Header>>,
+    /// Tip block number to start validating from (in reverse)
+    next_chain_tip_block_number: u64,
     /// The batch size per one request
-    pub batch_size: u64,
-    /// The number of retries for downloading
-    pub request_retries: usize,
+    request_limit: u64,
+    /// Minimum amount of requests to handle concurrently.
+    min_concurrent_requests: usize,
+    /// Maximum amount of requests to handle concurrently.
+    max_concurrent_requests: usize,
+    /// The number of block headers to return at once
+    stream_batch_size: usize,
+    /// Maximum amount of received headers to buffer internally.
+    max_buffered_responses: usize,
+    /// Contains the request to retrieve the headers for the sync target
+    ///
+    /// This will give us the block number of the `sync_target`, after which we can send multiple
+    /// requests at a time.
+    sync_target_request: Option<HeadersRequestFuture<H::Output>>,
+    /// requests in progress
+    in_progress_queue: FuturesUnordered<HeadersRequestFuture<H::Output>>,
+    /// Buffered, unvalidated responses
+    buffered_responses: BinaryHeap<OrderedHeadersResponse<H::Header>>,
+    /// Buffered, _sorted_ and validated headers ready to be returned.
+    ///
+    /// Note: headers are sorted from high to low
+    queued_validated_headers: Vec<SealedHeader<H::Header>>,
+    /// Header downloader metrics.
+    metrics: HeaderDownloaderMetrics,
 }
 ```
 
