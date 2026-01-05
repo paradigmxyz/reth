@@ -294,7 +294,8 @@ where
         // spawn multi-proof task
         let parent_span = span.clone();
         self.executor.spawn_blocking({
-            let saved_cache = self.cache_for(parent_hash);
+            let saved_cache =
+                prewarm_handle.saved_cache.clone().unwrap_or_else(|| self.cache_for(parent_hash));
             let cache = saved_cache.cache().clone();
             let cache_metrics = saved_cache.metrics().clone();
             move || {
@@ -435,7 +436,7 @@ where
         let prewarm_ctx = PrewarmContext {
             env,
             evm_config: self.evm_config.clone(),
-            saved_cache,
+            saved_cache: saved_cache.clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
@@ -465,7 +466,12 @@ where
             });
         }
 
-        CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
+        CacheTaskHandle {
+            saved_cache,
+            cache,
+            to_prewarm_task: Some(to_prewarm_task),
+            cache_metrics,
+        }
     }
 
     /// Returns the cache for the given parent hash.
@@ -692,6 +698,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 /// prewarm task without cloning the expensive `BundleState`.
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle<R> {
+    saved_cache: Option<SavedCache>,
     /// The shared cache the task operates with.
     cache: Option<StateExecutionCache>,
     /// Metrics for the caches
