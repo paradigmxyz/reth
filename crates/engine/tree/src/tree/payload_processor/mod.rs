@@ -3,8 +3,8 @@
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
-        CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
-        SavedCache,
+        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache,
+        ExecutionCacheBuilder, SavedCache,
     },
     payload_processor::{
         prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
@@ -30,7 +30,9 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
+use reth_provider::{
+    BlockReader, DatabaseProviderROFactory, StateProvider, StateProviderFactory, StateReader,
+};
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
@@ -293,10 +295,18 @@ where
         // spawn multi-proof task
         let parent_span = span.clone();
         self.executor.spawn_blocking({
+            let saved_cache = prewarm_handle.saved_cache.clone();
             move || {
                 let _enter = parent_span.entered();
                 // Build a state provider for the multiproof task
                 let provider = provider_builder.build().expect("failed to build provider");
+                let provider = if let Some(saved_cache) = saved_cache {
+                    let (cache, metrics) = saved_cache.split();
+                    Box::new(CachedStateProvider::new(provider, cache, metrics))
+                        as Box<dyn StateProvider>
+                } else {
+                    Box::new(provider)
+                };
                 multi_proof_task.run(provider);
             }
         });
