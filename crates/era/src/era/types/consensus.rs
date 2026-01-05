@@ -77,9 +77,8 @@ fn decompress_snappy_bounded(
     let mut decoder = FrameDecoder::new(compressed).take(max_decompressed_bytes as u64);
     let mut decompressed = Vec::new();
 
-    Read::read_to_end(&mut decoder, &mut decompressed).map_err(|e| {
-        E2sError::SnappyDecompression(format!("Failed to decompress {what}: {e}"))
-    })?;
+    Read::read_to_end(&mut decoder, &mut decompressed)
+        .map_err(|e| E2sError::SnappyDecompression(format!("Failed to decompress {what}: {e}")))?;
 
     if decompressed.len() >= max_decompressed_bytes {
         return Err(E2sError::SnappyDecompression(format!(
@@ -288,8 +287,8 @@ mod tests {
         let ssz_data = vec![42u8; 1024];
         let compressed = CompressedBeaconState::from_ssz(&ssz_data).unwrap();
 
-        let err = decompress_snappy_bounded(compressed.data.as_slice(), 100, "beacon state")
-            .unwrap_err();
+        let err =
+            decompress_snappy_bounded(compressed.data.as_slice(), 100, "beacon state").unwrap_err();
 
         assert!(format!("{err:?}").contains("exceeded limit"));
     }
