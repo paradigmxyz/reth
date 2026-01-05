@@ -178,6 +178,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::Storage;
+    use alloy_consensus::BlockHeader;
     use alloy_primitives::{
         map::{HashMap, HashSet},
         B256, U256,
@@ -214,34 +215,20 @@ mod tests {
     // wal with 1 block and tx (new 4-field format with trie updates and hashed state)
     #[test]
     fn decode_notification_wal_new_format() {
-        use alloy_consensus::BlockHeader;
-
         let wal = include_bytes!("../../test-data/new_format.wal");
         let notification: reth_exex_types::serde_bincode_compat::ExExNotification<
             '_,
             reth_ethereum_primitives::EthPrimitives,
         > = rmp_serde::decode::from_slice(wal.as_slice()).unwrap();
         let notification: ExExNotification = notification.into();
-        match notification {
-            ExExNotification::ChainCommitted { new } => {
-                // Check blocks
-                assert_eq!(new.blocks().len(), 1);
-                let block_number = new.tip().header().number();
 
-                // The key thing is that this WAL was created with the new 4-field format
-                // (blocks, execution_outcome, trie_updates, hashed_state)
-                // Even if the maps are empty, they should be present in the serialized data
-                assert!(
-                    new.trie_updates().contains_key(&block_number),
-                    "trie updates map should contain entry for block"
-                );
-                assert!(
-                    new.hashed_state().contains_key(&block_number),
-                    "hashed state map should contain entry for block"
-                );
-            }
-            _ => panic!("unexpected notification"),
-        }
+        // Get expected data
+        let expected_notification = get_test_notification_data().unwrap();
+        assert_eq!(
+            &notification,
+            &expected_notification,
+            "Decoded notification should match expected static data"
+        );
     }
 
     #[test]
@@ -290,17 +277,42 @@ mod tests {
     #[test]
     #[ignore]
     fn generate_test_wal() -> eyre::Result<()> {
-        use alloy_consensus::BlockHeader;
         use std::io::Write;
 
-        let mut rng = generators::rng();
+        let notification = get_test_notification_data()?;
 
+        // Serialize the notification
+        let notification_compat =
+            reth_exex_types::serde_bincode_compat::ExExNotification::from(&notification);
+        let encoded = rmp_serde::encode::to_vec(&notification_compat)?;
+
+        // Write to test-data directory
+        let test_data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data");
+        std::fs::create_dir_all(&test_data_dir)?;
+
+        let output_path = test_data_dir.join("new_format.wal");
+        let mut file = File::create(&output_path)?;
+        file.write_all(&encoded)?;
+
+        println!("Generated WAL file at: {}", output_path.display());
+        println!("File size: {} bytes", encoded.len());
+        println!("✓ WAL file created successfully!");
+
+        Ok(())
+    }
+
+    /// Helper function to generate deterministic test data for WAL tests
+    fn get_test_notification_data() -> eyre::Result<ExExNotification<reth_ethereum_primitives::EthPrimitives>> {
+        use reth_ethereum_primitives::Block;
+        use reth_primitives_traits::Block as _;
+        
         // Create a block with a transaction
-        let block = random_block(&mut rng, 0, Default::default()).try_recover()?;
+        let block = Block::default().seal_slow().try_recover()?;
         let block_number = block.header().number();
 
-        // Create some non-empty trie updates and hashed state to ensure the 4-field format is used
         let hashed_address = B256::from([1; 32]);
+        let storage_key = B256::from([2; 32]);
+
         let trie_updates = TrieUpdates {
             account_nodes: HashMap::from_iter([
                 (Nibbles::from_nibbles_unchecked([0x01]), BranchNodeCompact::default()),
@@ -329,7 +341,7 @@ mod tests {
                 hashed_address,
                 HashedStorage {
                     wiped: false,
-                    storage: HashMap::from_iter([(B256::random(), U256::from(101))]),
+                    storage: HashMap::from_iter([(storage_key, U256::from(101))]),
                 },
             )]),
         };
@@ -343,25 +355,7 @@ mod tests {
                     BTreeMap::from([(block_number, Arc::new(hashed_state.into_sorted()))]),
                 )),
             };
-
-        // Serialize the notification
-        let notification_compat =
-            reth_exex_types::serde_bincode_compat::ExExNotification::from(&notification);
-        let encoded = rmp_serde::encode::to_vec(&notification_compat)?;
-
-        // Write to test-data directory
-        let test_data_dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("test-data");
-        std::fs::create_dir_all(&test_data_dir)?;
-
-        let output_path = test_data_dir.join("new_format.wal");
-        let mut file = File::create(&output_path)?;
-        file.write_all(&encoded)?;
-
-        println!("Generated WAL file at: {}", output_path.display());
-        println!("File size: {} bytes", encoded.len());
-        println!("✓ WAL file created successfully!");
-
-        Ok(())
+        return Ok(notification);
     }
 
     #[test]
