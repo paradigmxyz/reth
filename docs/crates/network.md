@@ -132,13 +132,13 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub discovery_v4_config: Option<Discv4Config>,
     /// How to set up discovery version 5.
     pub discovery_v5_config: Option<reth_discv5::Config>,
-    /// Address to listen for incoming connections
+    /// The address to listen for incoming connections.
     pub listener_addr: SocketAddr,
     /// How to instantiate peer manager.
     pub peers_config: PeersConfig,
     /// How to configure the [`SessionManager`](crate::session::SessionManager).
     pub sessions_config: SessionsConfig,
-    /// The chain id
+    /// The chain ID.
     pub chain_id: u64,
     /// The [`ForkFilter`] to use at launch for authenticating sessions.
     ///
@@ -155,15 +155,15 @@ pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     pub executor: Box<dyn TaskSpawner>,
     /// The `Status` message to send to peers at the beginning.
     pub status: UnifiedStatus,
-    /// Sets the hello message for the p2p handshake in `RLPx`
+    /// Sets the hello message for the p2p handshake in `RLPx`.
     pub hello_message: HelloMessageWithProtocols,
-    /// Additional protocols to announce and handle in `RLPx`
+    /// Additional protocols to announce and handle in `RLPx`.
     pub extra_protocols: RlpxSubProtocols,
-    /// Whether to disable transaction gossip
+    /// Whether to disable transaction gossip.
     pub tx_gossip_disabled: bool,
     /// How to instantiate transactions manager.
     pub transactions_manager_config: TransactionsManagerConfig,
-    /// The NAT resolver for external IP
+    /// The NAT resolver for external IP.
     pub nat: Option<NatResolver>,
     /// The Ethereum P2P handshake, see also:
     /// <https://github.com/ethereum/devp2p/blob/master/rlpx.md#initial-handshake>.
@@ -218,9 +218,9 @@ struct NetworkInner {
     listener_address: Arc<Mutex<SocketAddr>>,
     /// The identifier used by this node.
     local_peer_id: PeerId,
-    /// Access to all the nodes
+    /// Access to all nodes.
     peers: PeersHandle,
-    /// The mode of the network
+    /// The mode of the network.
     network_mode: NetworkMode,
 }
 ```
@@ -234,7 +234,7 @@ pub struct NetworkManager<C> {
     swarm: Swarm<C>,
     /// Underlying network handle that can be shared.
     handle: NetworkHandle,
-    /// Receiver half of the command channel set up between this type and the [`NetworkHandle`]
+    /// Receiver half of the command channel set up between this type and the [`NetworkHandle`].
     from_handle_rx: UnboundedReceiverStream<NetworkHandleMessage>,
     /// Handles block imports according to the `eth` protocol.
     block_import: Box<dyn BlockImport>,
@@ -248,7 +248,7 @@ pub struct NetworkManager<C> {
     to_eth_request_handler: Option<mpsc::UnboundedSender<IncomingEthRequest>>,
     /// Tracks the number of active sessions (connected peers).
     ///
-    /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`]
+    /// This is updated via internal events and shared via `Arc` with the [`NetworkHandle`].
     /// Updated by the `NetworkWorker` and loaded by the `NetworkService`.
     num_active_peers: Arc<AtomicUsize>,
 }
@@ -285,12 +285,9 @@ The `FetchClient` struct, similar to `NetworkHandle`, can be shared across threa
 [File: crates/net/network/src/fetch/client.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/fetch/client.rs)
 ```rust,ignore
 pub struct FetchClient<N: NetworkPrimitives = EthNetworkPrimitives> {
-    /// Sender half of the request channel.
-    pub(crate) request_tx: UnboundedSender<DownloadRequest<N>>,
-    /// The handle to the peers
-    pub(crate) peers_handle: PeersHandle,
-    /// Number of active peer sessions the node's currently handling.
-    pub(crate) num_active_peers: Arc<AtomicUsize>,
+    request_tx: UnboundedSender<DownloadRequest<N>>,
+    peers_handle: PeersHandle,
+    num_active_peers: Arc<AtomicUsize>
 }
 ```
 
@@ -298,27 +295,27 @@ The `request_tx` field is a handle to a channel that can be used to send request
 
 #### Instantiating the `FetchClient`
 
-The fields `request_tx` and `peers_handle` are cloned off of the `StateFetcher` struct when instantiating the `FetchClient`, which is the lower-level struct responsible for managing data fetching operations over the network:
+The fields `request_tx` and `peers_handle` are cloned from the `StateFetcher` struct when instantiating the `FetchClient`, which is the lower-level struct responsible for managing data fetching operations over the network:
 
 [File: crates/net/network/src/fetch/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/fetch/mod.rs)
 ```rust,ignore
-pub struct StateFetcher<N: NetworkPrimitives = EthNetworkPrimitives> {
-    /// Currently active [`GetBlockHeaders`] requests
-    inflight_headers_requests: HashMap<PeerId, InflightHeadersRequest<N::BlockHeader>>,
-    /// Currently active [`GetBlockBodies`] requests
-    inflight_bodies_requests: HashMap<PeerId, InflightBodiesRequest<N::BlockBody>>,
+pub struct StateFetcher {
+    /// Currently active [`GetBlockHeaders`] requests.
+    inflight_headers_requests:
+        HashMap<PeerId, Request<HeadersRequest, PeerRequestResult<Vec<Header>>>>,
+    /// Currently active [`GetBlockBodies`] requests.
+    inflight_bodies_requests:
+        HashMap<PeerId, Request<Vec<B256>, PeerRequestResult<Vec<BlockBody>>>>,
     /// The list of _available_ peers for requests.
     peers: HashMap<PeerId, Peer>,
-    /// The handle to the peers manager
+    /// The handle to the peers manager.
     peers_handle: PeersHandle,
-    /// Number of active peer sessions the node's currently handling.
-    num_active_peers: Arc<AtomicUsize>,
-    /// Requests queued for processing
-    queued_requests: VecDeque<DownloadRequest<N>>,
-    /// Receiver for new incoming download requests
-    download_requests_rx: UnboundedReceiverStream<DownloadRequest<N>>,
-    /// Sender for download requests, used to detach a [`FetchClient`]
-    download_requests_tx: UnboundedSender<DownloadRequest<N>>,
+    /// Requests queued for processing.
+    queued_requests: VecDeque<DownloadRequest>,
+    /// Receiver for new incoming download requests.
+    download_requests_rx: UnboundedReceiverStream<DownloadRequest>,
+    /// Sender for download requests, used to detach a [`FetchClient`].
+    download_requests_tx: UnboundedSender<DownloadRequest>,
 }
 ```
 
@@ -326,26 +323,24 @@ This struct itself is nested deeply within the `NetworkManager`: its `Swarm` str
 
 [File: crates/net/network/src/state.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/state.rs)
 ```rust,ignore
-pub struct NetworkState<N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct NetworkState<C> {
     /// All active peers and their state.
-    active_peers: HashMap<PeerId, ActivePeer<N>>,
+    active_peers: HashMap<PeerId, ActivePeer>,
     /// Manages connections to peers.
     peers_manager: PeersManager,
     /// Buffered messages until polled.
-    queued_messages: VecDeque<StateAction<N>>,
+    queued_messages: VecDeque<StateAction>,
     /// The client type that can interact with the chain.
-    ///
-    /// This type is used to fetch the block number after we established a session and received the
-    /// [`UnifiedStatus`] block hash.
-    client: BlockNumReader,
+    client: Arc<C>,
     /// Network discovery.
     discovery: Discovery,
+    /// The genesis hash of the network we're on.
+    genesis_hash: B256,
     /// The type that handles requests.
     ///
-    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type
-    /// will then queue in the request and notify the fetcher once the result has been
-    /// received.
-    state_fetcher: StateFetcher<N>,
+    /// The fetcher streams `RLPx` related requests on a per-peer basis to this type. This type will
+    /// then queue the request and notify the fetcher once the result has been received.
+    state_fetcher: StateFetcher,
 }
 ```
 
@@ -380,13 +375,13 @@ In the pipeline used by the main Reth binary, the `HeaderStage` uses a `ReverseH
 [File: crates/net/downloaders/src/headers/reverse_headers.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/downloaders/src/headers/reverse_headers.rs)
 ```rust,ignore
 pub struct ReverseHeadersDownloader<C, H> {
-    /// The consensus client
+    /// The consensus client.
     consensus: Arc<C>,
-    /// The headers client
+    /// The headers client.
     client: Arc<H>,
-    /// The batch size per one request
+    /// The batch size per request.
     pub batch_size: u64,
-    /// The number of retries for downloading
+    /// The number of retries for downloading.
     pub request_retries: usize,
 }
 ```
@@ -398,7 +393,7 @@ A `FetchClient` is passed in to the `client` field, and the `get_headers` method
 fn get_or_init_fut(&mut self) -> HeadersRequestFuture {
     match self.request.take() {
         None => {
-            // queue in the first request
+            // queue the first request
             let client = Arc::clone(&self.client);
             let req = self.headers_request();
             tracing::trace!(
@@ -422,13 +417,13 @@ In the `BodyStage` configured by the main binary, a `BodiesDownloader` is used:
 [File: crates/net/downloaders/src/bodies/bodies.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/downloaders/src/bodies/bodies.rs)
 ```rust,ignore
 pub struct BodiesDownloader<Client, Consensus> {
-    /// The bodies client
+    /// The bodies client.
     client: Arc<Client>,
-    /// The consensus client
+    /// The consensus client.
     consensus: Arc<Consensus>,
     /// The number of retries for each request.
     retries: usize,
-    /// The batch size per one request
+    /// The batch size per request.
     batch_size: usize,
     /// The maximum number of requests to send concurrently.
     concurrency: usize,
@@ -458,7 +453,7 @@ Every time the `StateFetcher` is polled, it finds the next idle peer available t
 
 [File: crates/net/network/src/fetch/mod.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/fetch/mod.rs)
 ```rust,ignore
-/// Returns the next action to return
+/// Returns the next action to process.
 fn poll_action(&mut self) -> PollAction {
     // we only check and not pop here since we don't know yet whether a peer is available.
     if self.queued_requests.is_empty() {
@@ -488,16 +483,14 @@ Similar to the network management task, it's implemented as an endless future, b
 
 [File: crates/net/network/src/eth_requests.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/eth_requests.rs)
 ```rust,ignore
-pub struct EthRequestHandler<C, N: NetworkPrimitives = EthNetworkPrimitives> {
+pub struct EthRequestHandler<C> {
     /// The client type that can interact with the chain.
-    client: C,
+    client: Arc<C>,
     /// Used for reporting peers.
     #[expect(dead_code)]
     peers: PeersHandle,
-    /// Incoming request from the [`NetworkManager`](crate::NetworkManager).
-    incoming_requests: ReceiverStream<IncomingEthRequest<N>>,
-    /// Metrics for the eth request handler.
-    metrics: EthRequestHandlerMetrics,
+    /// Incoming request from the [NetworkManager](crate::NetworkManager).
+    incoming_requests: UnboundedReceiverStream<IncomingEthRequest>,
 }
 ```
 
@@ -682,7 +675,7 @@ fn on_bodies_request(
 
 ## Transactions Task
 
-The transactions task listens for, requests, and propagates transactions both from the node's peers, and those that are added locally (e.g., submitted via RPC). Note that this task focuses solely on the network communication involved with Ethereum transactions, we will talk more about the structure of the transaction pool itself
+The transactions task listens for, requests, and propagates transactions both from the node's peers, and those that are added locally (e.g., submitted via RPC). Note that this task focuses solely on the network communication involved with Ethereum transactions; we will talk more about the structure of the transaction pool itself
 in the [transaction-pool](https://reth.rs/docs/reth_transaction_pool/index.html) chapter.
 
 Again, like the network management and ETH requests tasks, the transactions task is implemented as an endless future that runs as a background task on a standalone `tokio::task`. It's represented by the `TransactionsManager` struct:
@@ -703,9 +696,9 @@ pub struct TransactionsManager<Pool> {
     /// All currently pending transactions grouped by peers.
     ///
     /// This way we can track incoming transactions and prevent multiple pool imports for the same
-    /// transaction
+    /// transaction.
     transactions_by_peers: HashMap<TxHash, Vec<PeerId>>,
-    /// Transactions that are currently imported into the `Pool`
+    /// Transactions that are currently imported into the `Pool`.
     pool_imports: FuturesUnordered<PoolImportFuture>,
     /// All the connected peers.
     peers: HashMap<PeerId, Peer>,
@@ -725,7 +718,7 @@ Unlike the ETH requests task, but like the network management task's `NetworkHan
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
 ```rust,ignore
 pub struct TransactionsHandle {
-    /// Command channel to the [`TransactionsManager`]
+    /// Command channel to the [`TransactionsManager`].
     manager_tx: mpsc::UnboundedSender<TransactionsCommand>,
 }
 ```
@@ -734,9 +727,9 @@ pub struct TransactionsHandle {
 
 We'll touch on most of the fields in the `TransactionsManager` as the chapter continues, but some worth noting now are the 4 streams from which inputs to the task are fed:
 - `transaction_events`: A listener for `NetworkTransactionEvent`s sent from the `NetworkManager`, which consists solely of events related to transactions emitted by the network.
-- `network_events`: A listener for `NetworkEvent`s sent from the `NetworkManager`, which consist of other "meta" events such as sessions with peers being established or closed.
-- `command_rx`: A listener for `TransactionsCommand`s sent from the `TransactionsHandle`
-- `pending`: A listener for new pending transactions added to the `TransactionPool`
+- `network_events`: A listener for `NetworkEvent`s sent from the `NetworkManager`, which consists of other "meta" events such as sessions with peers being established or closed.
+- `command_rx`: A listener for `TransactionsCommand`s sent from the `TransactionsHandle`.
+- `pending_transactions`: A listener for new pending transactions added to the `TransactionPool`.
 
 Let's get a view into the transactions task's operation by walking through the `TransactionManager::poll` method.
 
@@ -828,7 +821,7 @@ pub enum NetworkEvent<R = PeerRequest> {
     Peer(PeerEvent),
     /// Session established with requests.
     ActivePeerSession {
-        /// Session information
+        /// Session information.
         info: SessionInfo,
         /// A request channel to the session task.
         messages: PeerRequestSender<R>,
@@ -836,21 +829,22 @@ pub enum NetworkEvent<R = PeerRequest> {
 }
 ```
 
-and with  
+and
+
 ```rust,ignore
 pub enum PeerEvent {
     /// Closed the peer session.
     SessionClosed {
         /// The identifier of the peer to which a session was closed.
         peer_id: PeerId,
-        /// Why the disconnect was triggered
+        /// Why the disconnect was triggered.
         reason: Option<DisconnectReason>,
     },
     /// Established a new session with the given peer.
     SessionEstablished(SessionInfo),
-    /// Event emitted when a new peer is added
+    /// Event emitted when a new peer is added.
     PeerAdded(PeerId),
-    /// Event emitted when a new peer is removed
+    /// Event emitted when a new peer is removed.
     PeerRemoved(PeerId),
 }
 ```
@@ -903,8 +897,8 @@ fn on_network_event(&mut self, event_result: NetworkEvent) {
         }
         NetworkEvent::Peer(PeerEvent::SessionEstablished(info)) => {
             let peer_id = info.peer_id;
-            // get messages from existing peer
-             let messages = match self.peers.get(&peer_id) {
+            // get messages from the existing peer
+            let messages = match self.peers.get(&peer_id) {
                 Some(p) => p.request_tx.clone(),
                 None => {
                     debug!(target: "net::tx", ?peer_id, "No peer request sender found");
@@ -995,16 +989,16 @@ After `TransactionsCommand`s, it's time to take care of transactions-related req
 
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
 ```rust,ignore
-pub enum NetworkTransactionEvent<N: NetworkPrimitives = EthNetworkPrimitives> {
+pub enum NetworkTransactionEvent {
     /// Received list of transactions from the given peer.
-    IncomingTransactions { peer_id: PeerId, msg: Transactions<N::BroadcastedTransaction> },
+    IncomingTransactions { peer_id: PeerId, msg: Transactions },
     /// Received list of transactions hashes to the given peer.
     IncomingPooledTransactionHashes { peer_id: PeerId, msg: NewPooledTransactionHashes },
     /// Incoming `GetPooledTransactions` request from a peer.
     GetPooledTransactions {
         peer_id: PeerId,
         request: GetPooledTransactions,
-        response: oneshot::Sender<RequestResult<PooledTransactions<N::PooledTransaction>>>,
+        response: oneshot::Sender<RequestResult<PooledTransactions>>,
     },
 }
 ```
@@ -1015,7 +1009,7 @@ These events are handled with the `on_network_tx_event` method, which responds t
 
 This event is generated from the [`Transactions` protocol message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#transactions-0x02), and is handled by the `import_transactions` method.
 
-Here, for each transaction in the variant's `msg` field, we attempt to recover the signer, insert the transaction into LRU cache of the `Peer` identified by the variant's `peer_id` field, and add the `peer_id` to the vector of peer IDs keyed by the transaction's hash in `TransactionsManager.transactions_by_peers`. If an entry does not already exist for the transaction hash, then it begins importing the transaction object into the node's transaction pool, adding a `PoolImportFuture` to `TransactionsManager.pool_imports`. If there was an issue recovering the signer, `report_bad_message` is called for the `peer_id`, which decreases the peer's reputation.
+Here, for each transaction in the variant's `msg` field, we attempt to recover the signer, insert the transaction into the LRU cache of the `Peer` identified by the variant's `peer_id` field, and add the `peer_id` to the vector of peer IDs keyed by the transaction's hash in `TransactionsManager.transactions_by_peers`. If an entry does not already exist for the transaction hash, then it begins importing the transaction object into the node's transaction pool, adding a `PoolImportFuture` to `TransactionsManager.pool_imports`. If there was an issue recovering the signer, `report_bad_message` is called for the `peer_id`, which decreases the peer's reputation.
 
 To understand this a bit better, let's double back and examine what `TransactionsManager.transactions_by_peers` and `TransactionsManager.pool_imports` are used for.
 
@@ -1071,7 +1065,7 @@ fn import_transactions(&mut self, peer_id: PeerId, transactions: Vec<Transaction
 
 This event is generated from the [`NewPooledTransactionHashes` protocol message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#newpooledtransactionhashes-0x08), and is handled by the `on_new_pooled_transactions` method.
 
-Here, it begins by adding the transaction hashes included in the `NewPooledTransactionHashes` payload to the LRU cache for the `Peer` identified by `peer_id` in `TransactionsManager.peers`. Next, it filters the list of hashes to those that are not already present in the transaction pool, and for each such hash, requests its full transaction object from the peer by sending it a [`GetPooledTransactions` protocol message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09) through the `Peer.request_tx` channel. If the request was successfully sent, a `GetPooledTxRequest` gets added to `TransactionsManager.inflight_requests` vector:
+Here, it begins by adding the transaction hashes included in the `NewPooledTransactionHashes` payload to the LRU cache for the `Peer` identified by `peer_id` in `TransactionsManager.peers`. Next, it filters the list of hashes to those that are not already present in the transaction pool, and for each such hash, requests its full transaction object from the peer by sending it a [`GetPooledTransactions` protocol message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09) through the `Peer.request_tx` channel. If the request was successfully sent, a `GetPooledTxRequest` gets added to the `TransactionsManager.inflight_requests` vector:
 
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
 ```rust,ignore
@@ -1117,7 +1111,7 @@ fn on_new_pooled_transactions(&mut self, peer_id: PeerId, msg: NewPooledTransact
 
 This event is generated from the [`GetPooledTransactions` protocol message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#getpooledtransactions-0x09), and is handled by the `on_get_pooled_transactions` method.
 
-Here, it collects _all_ the transactions in the node's transaction pool, recovers their signers, adds their hashes to the LRU cache of the requesting peer, and sends them to the peer in a [`PooledTransactions` protocol message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#pooledtransactions-0x0a). This is sent through the `response` channel that's stored as a field of the `NetworkTransaction::GetPooledTransactions` variant itself.
+Here, it collects _all_ the transactions in the node's transaction pool, recovers their signers, adds their hashes to the LRU cache of the requesting peer, and sends them to the peer in a [`PooledTransactions` protocol message](https://github.com/ethereum/devp2p/blob/master/caps/eth.md#pooledtransactions-0x0a). This is sent through the `response` channel that's stored as a field of the `NetworkTransactionEvent::GetPooledTransactions` variant itself.
 
 [File: crates/net/network/src/transactions.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/transactions.rs)
 ```rust,ignore
