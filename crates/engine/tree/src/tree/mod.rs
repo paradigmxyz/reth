@@ -39,6 +39,7 @@ use revm::state::EvmState;
 use state::TreeState;
 use std::{
     fmt::Debug,
+    ops,
     sync::{
         mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
         Arc,
@@ -54,7 +55,7 @@ use tracing::*;
 mod block_buffer;
 mod cached_state;
 pub mod error;
-mod instrumented_state;
+pub mod instrumented_state;
 mod invalid_headers;
 mod metrics;
 mod payload_processor;
@@ -63,7 +64,6 @@ mod persistence_state;
 pub mod precompile_cache;
 #[cfg(test)]
 mod tests;
-// TODO(alexey): compare trie updates in `insert_block_inner`
 #[expect(unused)]
 mod trie_updates;
 
@@ -426,9 +426,13 @@ where
             match self.try_recv_engine_message() {
                 Ok(Some(msg)) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
-                    if let Err(fatal) = self.on_engine_message(msg) {
-                        error!(target: "engine::tree", %fatal, "insert block fatal error");
-                        return
+                    match self.on_engine_message(msg) {
+                        Ok(ops::ControlFlow::Break(())) => return,
+                        Ok(ops::ControlFlow::Continue(())) => {}
+                        Err(fatal) => {
+                            error!(target: "engine::tree", %fatal, "insert block fatal error");
+                            return
+                        }
                     }
                 }
                 Ok(None) => {
@@ -454,7 +458,7 @@ where
     /// block request processing isn't blocked for a long time.
     fn on_downloaded(
         &mut self,
-        mut blocks: Vec<RecoveredBlock<N::Block>>,
+        mut blocks: Vec<SealedBlock<N::Block>>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         if blocks.is_empty() {
             // nothing to execute
@@ -615,7 +619,7 @@ where
             Err(error) => match error {
                 InsertPayloadError::Block(error) => Ok(self.on_insert_block_error(error)?),
                 InsertPayloadError::Payload(error) => {
-                    Ok(self.on_new_payload_error(error, parent_hash)?)
+                    Ok(self.on_new_payload_error(error, num_hash, parent_hash)?)
                 }
             },
         }
@@ -634,8 +638,9 @@ where
         payload: T::ExecutionData,
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
         let parent_hash = payload.parent_hash();
+        let num_hash = payload.num_hash();
 
-        match self.payload_validator.ensure_well_formed_payload(payload) {
+        match self.payload_validator.convert_payload_to_block(payload) {
             // if the block is well-formed, buffer it for later
             Ok(block) => {
                 if let Err(error) = self.buffer_block(block) {
@@ -644,7 +649,7 @@ where
                     Ok(PayloadStatus::from_status(PayloadStatusEnum::Syncing))
                 }
             }
-            Err(error) => Ok(self.on_new_payload_error(error, parent_hash)?),
+            Err(error) => Ok(self.on_new_payload_error(error, num_hash, parent_hash)?),
         }
     }
 
@@ -820,7 +825,8 @@ where
         new_head_number: u64,
         current_head_number: u64,
     ) -> Vec<ExecutedBlock<N>> {
-        let mut old_blocks = Vec::new();
+        let mut old_blocks =
+            Vec::with_capacity((current_head_number.saturating_sub(new_head_number)) as usize);
 
         for block_num in (new_head_number + 1)..=current_head_number {
             if let Some(block_state) = self.canonical_in_memory_state.state_by_number(block_num) {
@@ -923,48 +929,6 @@ where
         }
 
         Ok(())
-    }
-
-    /// Determines if the given block is part of a fork by checking that these
-    /// conditions are true:
-    /// * walking back from the target hash to verify that the target hash is not part of an
-    ///   extension of the canonical chain.
-    /// * walking back from the current head to verify that the target hash is not already part of
-    ///   the canonical chain.
-    ///
-    /// The header is required as an arg, because we might be checking that the header is a fork
-    /// block before it's in the tree state and before it's in the database.
-    fn is_fork(&self, target: BlockWithParent) -> ProviderResult<bool> {
-        let target_hash = target.block.hash;
-        // verify that the given hash is not part of an extension of the canon chain.
-        let canonical_head = self.state.tree_state.canonical_head();
-        let mut current_hash;
-        let mut current_block = target;
-        loop {
-            if current_block.block.hash == canonical_head.hash {
-                return Ok(false)
-            }
-            // We already passed the canonical head
-            if current_block.block.number <= canonical_head.number {
-                break
-            }
-            current_hash = current_block.parent;
-
-            let Some(next_block) = self.sealed_header_by_hash(current_hash)? else { break };
-            current_block = next_block.block_with_parent();
-        }
-
-        // verify that the given hash is not already part of canonical chain stored in memory
-        if self.canonical_in_memory_state.header_by_hash(target_hash).is_some() {
-            return Ok(false)
-        }
-
-        // verify that the given hash is not already part of persisted canonical chain
-        if self.provider.block_number(target_hash)?.is_some() {
-            return Ok(false)
-        }
-
-        Ok(true)
     }
 
     /// Invoked when we receive a new forkchoice update message. Calls into the blockchain tree
@@ -1301,22 +1265,7 @@ where
             // Check if persistence has complete
             match rx.try_recv() {
                 Ok(last_persisted_hash_num) => {
-                    self.metrics.engine.persistence_duration.record(start_time.elapsed());
-                    let Some(BlockNumHash {
-                        hash: last_persisted_block_hash,
-                        number: last_persisted_block_number,
-                    }) = last_persisted_hash_num
-                    else {
-                        // if this happened, then we persisted no blocks because we sent an
-                        // empty vec of blocks
-                        warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
-                        return Ok(())
-                    };
-
-                    debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
-                    self.persistence_state
-                        .finish(last_persisted_block_hash, last_persisted_block_number);
-                    self.on_new_persisted_block()?;
+                    self.on_persistence_complete(last_persisted_hash_num, start_time)?;
                 }
                 Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
                 Err(TryRecvError::Empty) => {
@@ -1329,7 +1278,8 @@ where
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
             } else if self.should_persist() {
-                let blocks_to_persist = self.get_canonical_blocks_to_persist()?;
+                let blocks_to_persist =
+                    self.get_canonical_blocks_to_persist(PersistTarget::Threshold)?;
                 self.persist_blocks(blocks_to_persist);
             }
         }
@@ -1337,11 +1287,72 @@ where
         Ok(())
     }
 
+    /// Finishes termination by persisting all remaining blocks and signaling completion.
+    ///
+    /// This blocks until all persistence is complete. Always signals completion,
+    /// even if an error occurs.
+    fn finish_termination(
+        &mut self,
+        pending_termination: oneshot::Sender<()>,
+    ) -> Result<(), AdvancePersistenceError> {
+        trace!(target: "engine::tree", "finishing termination, persisting remaining blocks");
+        let result = self.persist_until_complete();
+        let _ = pending_termination.send(());
+        result
+    }
+
+    /// Persists all remaining blocks until none are left.
+    fn persist_until_complete(&mut self) -> Result<(), AdvancePersistenceError> {
+        loop {
+            // Wait for any in-progress persistence to complete (blocking)
+            if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
+                let result = rx.blocking_recv().map_err(|_| TryRecvError::Closed)?;
+                self.on_persistence_complete(result, start_time)?;
+            }
+
+            let blocks_to_persist = self.get_canonical_blocks_to_persist(PersistTarget::Head)?;
+
+            if blocks_to_persist.is_empty() {
+                debug!(target: "engine::tree", "persistence complete, signaling termination");
+                return Ok(())
+            }
+
+            debug!(target: "engine::tree", count = blocks_to_persist.len(), "persisting remaining blocks before shutdown");
+            self.persist_blocks(blocks_to_persist);
+        }
+    }
+
+    /// Handles a completed persistence task.
+    fn on_persistence_complete(
+        &mut self,
+        last_persisted_hash_num: Option<BlockNumHash>,
+        start_time: Instant,
+    ) -> Result<(), AdvancePersistenceError> {
+        self.metrics.engine.persistence_duration.record(start_time.elapsed());
+
+        let Some(BlockNumHash {
+            hash: last_persisted_block_hash,
+            number: last_persisted_block_number,
+        }) = last_persisted_hash_num
+        else {
+            // if this happened, then we persisted no blocks because we sent an empty vec of blocks
+            warn!(target: "engine::tree", "Persistence task completed but did not persist any blocks");
+            return Ok(())
+        };
+
+        debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
+        self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
+        self.on_new_persisted_block()?;
+        Ok(())
+    }
+
     /// Handles a message from the engine.
+    ///
+    /// Returns `ControlFlow::Break(())` if the engine should terminate.
     fn on_engine_message(
         &mut self,
         msg: FromEngine<EngineApiRequest<T, N>, N::Block>,
-    ) -> Result<(), InsertBlockFatalError> {
+    ) -> Result<ops::ControlFlow<()>, InsertBlockFatalError> {
         match msg {
             FromEngine::Event(event) => match event {
                 FromOrchestrator::BackfillSyncStarted => {
@@ -1351,6 +1362,13 @@ where
                 FromOrchestrator::BackfillSyncFinished(ctrl) => {
                     self.on_backfill_sync_finished(ctrl)?;
                 }
+                FromOrchestrator::Terminate { tx } => {
+                    debug!(target: "engine::tree", "received terminate request");
+                    if let Err(err) = self.finish_termination(tx) {
+                        error!(target: "engine::tree", %err, "Termination failed");
+                    }
+                    return Ok(ops::ControlFlow::Break(()))
+                }
             },
             FromEngine::Request(request) => {
                 match request {
@@ -1358,7 +1376,7 @@ where
                         let block_num_hash = block.recovered_block().num_hash();
                         if block_num_hash.number <= self.state.tree_state.canonical_block_number() {
                             // outdated block that can be skipped
-                            return Ok(())
+                            return Ok(ops::ControlFlow::Continue(()))
                         }
 
                         debug!(target: "engine::tree", block=?block_num_hash, "inserting already executed block");
@@ -1424,12 +1442,13 @@ where
                                         .engine
                                         .failed_forkchoice_updated_response_deliveries
                                         .increment(1);
-                                    error!(target: "engine::tree", elapsed=?start.elapsed(), "Failed to send event: {err:?}");
+                                    error!(target: "engine::tree", ?state, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
                                 }
                             }
                             BeaconEngineMessage::NewPayload { payload, tx } => {
                                 let start = Instant::now();
                                 let gas_used = payload.gas_used();
+                                let num_hash = payload.num_hash();
                                 let mut output = self.on_new_payload(payload);
                                 self.metrics
                                     .engine
@@ -1445,7 +1464,7 @@ where
                                         BeaconOnNewPayloadError::Internal(Box::new(e))
                                     }))
                                 {
-                                    error!(target: "engine::tree", "Failed to send event: {err:?}");
+                                    error!(target: "engine::tree", payload=?num_hash, elapsed=?start.elapsed(), "Failed to send event: {err:?}");
                                     self.metrics
                                         .engine
                                         .failed_new_payload_response_deliveries
@@ -1465,7 +1484,7 @@ where
                 }
             }
         }
-        Ok(())
+        Ok(ops::ControlFlow::Continue(()))
     }
 
     /// Invoked if the backfill sync has finished to target.
@@ -1699,10 +1718,10 @@ where
     }
 
     /// Returns a batch of consecutive canonical blocks to persist in the range
-    /// `(last_persisted_number .. canonical_head - threshold]`. The expected
-    /// order is oldest -> newest.
+    /// `(last_persisted_number .. target]`. The expected order is oldest -> newest.
     fn get_canonical_blocks_to_persist(
         &self,
+        target: PersistTarget,
     ) -> Result<Vec<ExecutedBlock<N>>, AdvancePersistenceError> {
         // We will calculate the state root using the database, so we need to be sure there are no
         // changes
@@ -1713,9 +1732,12 @@ where
         let last_persisted_number = self.persistence_state.last_persisted_block.number;
         let canonical_head_number = self.state.tree_state.canonical_block_number();
 
-        // Persist only up to block buffer target
-        let target_number =
-            canonical_head_number.saturating_sub(self.config.memory_block_buffer_target());
+        let target_number = match target {
+            PersistTarget::Head => canonical_head_number,
+            PersistTarget::Threshold => {
+                canonical_head_number.saturating_sub(self.config.memory_block_buffer_target())
+            }
+        };
 
         debug!(
             target: "engine::tree",
@@ -1769,11 +1791,10 @@ where
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.
     ///
-    /// NOTE: This cannot fetch [`ExecutedBlock`]s for _finalized_ blocks, instead it can only
-    /// fetch [`ExecutedBlock`]s for _canonical_ blocks, or blocks from sidechains that the node
-    /// has in memory.
-    ///
-    /// For finalized blocks, this will return `None`.
+    /// Note: This function attempts to fetch the `ExecutedBlock` from either in-memory state
+    /// or the database. If the required historical data (such as trie change sets) has been
+    /// pruned for a given block, this operation will return an error. On archive nodes, it
+    /// can retrieve any block.
     fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
@@ -1900,6 +1921,16 @@ where
         false
     }
 
+    /// Returns true if the given hash is part of the last received sync target fork choice update.
+    ///
+    /// See [`ForkchoiceStateTracker::sync_target_state`]
+    fn is_any_sync_target(&self, block_hash: B256) -> bool {
+        if let Some(target) = self.state.forkchoice_state_tracker.sync_target_state() {
+            return target.contains(block_hash)
+        }
+        false
+    }
+
     /// Checks if the given `check` hash points to an invalid header, inserting the given `head`
     /// block into the invalid header cache if the `check` hash has a known invalid ancestor.
     ///
@@ -1969,18 +2000,19 @@ where
         invalid: BlockWithParent,
     ) -> Result<PayloadStatus, InsertBlockFatalError> {
         let parent_hash = payload.parent_hash();
+        let num_hash = payload.num_hash();
 
         // Here we might have 2 cases
         // 1. the block is well formed and indeed links to an invalid header, meaning we should
         //    remember it as invalid
         // 2. the block is not well formed (i.e block hash is incorrect), and we should just return
         //    an error and forget it
-        let block = match self.payload_validator.ensure_well_formed_payload(payload) {
+        let block = match self.payload_validator.convert_payload_to_block(payload) {
             Ok(block) => block,
-            Err(error) => return Ok(self.on_new_payload_error(error, parent_hash)?),
+            Err(error) => return Ok(self.on_new_payload_error(error, num_hash, parent_hash)?),
         };
 
-        Ok(self.on_invalid_new_payload(block.into_sealed_block(), invalid)?)
+        Ok(self.on_invalid_new_payload(block, invalid)?)
     }
 
     /// Checks if the given `head` points to an invalid header, which requires a specific response
@@ -2004,13 +2036,13 @@ where
 
     /// Validate if block is correct and satisfies all the consensus rules that concern the header
     /// and block body itself.
-    fn validate_block(&self, block: &RecoveredBlock<N::Block>) -> Result<(), ConsensusError> {
+    fn validate_block(&self, block: &SealedBlock<N::Block>) -> Result<(), ConsensusError> {
         if let Err(e) = self.consensus.validate_header(block.sealed_header()) {
             error!(target: "engine::tree", ?block, "Failed to validate header {}: {e}", block.hash());
             return Err(e)
         }
 
-        if let Err(e) = self.consensus.validate_block_pre_execution(block.sealed_block()) {
+        if let Err(e) = self.consensus.validate_block_pre_execution(block) {
             error!(target: "engine::tree", ?block, "Failed to validate block {}: {e}", block.hash());
             return Err(e)
         }
@@ -2038,9 +2070,12 @@ where
             match self.insert_block(child) {
                 Ok(res) => {
                     debug!(target: "engine::tree", child =?child_num_hash, ?res, "connected buffered block");
-                    if self.is_sync_target_head(child_num_hash.hash) &&
+                    if self.is_any_sync_target(child_num_hash.hash) &&
                         matches!(res, InsertPayloadOk::Inserted(BlockStatus::Valid))
                     {
+                        debug!(target: "engine::tree", child =?child_num_hash, "connected sync target block");
+                        // we just inserted a block that we know is part of the canonical chain, so
+                        // we can make it canonical
                         self.make_canonical(child_num_hash.hash)?;
                     }
                 }
@@ -2063,10 +2098,10 @@ where
     /// Pre-validates the block and inserts it into the buffer.
     fn buffer_block(
         &mut self,
-        block: RecoveredBlock<N::Block>,
+        block: SealedBlock<N::Block>,
     ) -> Result<(), InsertBlockError<N::Block>> {
         if let Err(err) = self.validate_block(&block) {
-            return Err(InsertBlockError::consensus_error(err, block.into_sealed_block()))
+            return Err(InsertBlockError::consensus_error(err, block))
         }
         self.state.buffer.insert_block(block);
         Ok(())
@@ -2331,14 +2366,11 @@ where
     #[instrument(level = "debug", target = "engine::tree", skip_all, fields(block_hash = %block.hash(), block_num = %block.number()))]
     fn on_downloaded_block(
         &mut self,
-        block: RecoveredBlock<N::Block>,
+        block: SealedBlock<N::Block>,
     ) -> Result<Option<TreeEvent>, InsertBlockFatalError> {
         let block_num_hash = block.num_hash();
         let lowest_buffered_ancestor = self.lowest_buffered_ancestor_or(block_num_hash.hash);
-        if self
-            .check_invalid_ancestor_with_head(lowest_buffered_ancestor, block.sealed_block())?
-            .is_some()
-        {
+        if self.check_invalid_ancestor_with_head(lowest_buffered_ancestor, &block)?.is_some() {
             return Ok(None)
         }
 
@@ -2349,11 +2381,15 @@ where
         // try to append the block
         match self.insert_block(block) {
             Ok(InsertPayloadOk::Inserted(BlockStatus::Valid)) => {
-                if self.is_sync_target_head(block_num_hash.hash) {
-                    trace!(target: "engine::tree", "appended downloaded sync target block");
+                // check if we just inserted a block that's part of sync targets,
+                // i.e. head, safe, or finalized
+                if let Some(sync_target) = self.state.forkchoice_state_tracker.sync_target_state() &&
+                    sync_target.contains(block_num_hash.hash)
+                {
+                    debug!(target: "engine::tree", ?sync_target, "appended downloaded sync target block");
 
-                    // we just inserted the current sync target block, we can try to make it
-                    // canonical
+                    // we just inserted a block that we know is part of the canonical chain, so we
+                    // can make it canonical
                     return Ok(Some(TreeEvent::TreeAction(TreeAction::MakeCanonical {
                         sync_target_head: block_num_hash.hash,
                     })))
@@ -2402,13 +2438,13 @@ where
             payload.block_with_parent(),
             payload,
             |validator, payload, ctx| validator.validate_payload(payload, ctx),
-            |this, payload| Ok(this.payload_validator.ensure_well_formed_payload(payload)?),
+            |this, payload| Ok(this.payload_validator.convert_payload_to_block(payload)?),
         )
     }
 
     fn insert_block(
         &mut self,
-        block: RecoveredBlock<N::Block>,
+        block: SealedBlock<N::Block>,
     ) -> Result<InsertPayloadOk, InsertPayloadError<N::Block>> {
         self.insert_block_or_payload(
             block.block_with_parent(),
@@ -2440,7 +2476,7 @@ where
         block_id: BlockWithParent,
         input: Input,
         execute: impl FnOnce(&mut V, Input, TreeCtx<'_, N>) -> Result<ExecutedBlock<N>, Err>,
-        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<RecoveredBlock<N::Block>, Err>,
+        convert_to_block: impl FnOnce(&mut Self, Input) -> Result<SealedBlock<N::Block>, Err>,
     ) -> Result<InsertPayloadOk, Err>
     where
         Err: From<InsertBlockError<N::Block>>,
@@ -2452,7 +2488,7 @@ where
         match self.sealed_header_by_hash(block_num_hash.hash) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
+                return Err(InsertBlockError::new(block, err.into()).into());
             }
             Ok(Some(_)) => {
                 // We now assume that we already have this block in the tree. However, we need to
@@ -2467,7 +2503,7 @@ where
         match self.state_provider_builder(block_id.parent) {
             Err(err) => {
                 let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
+                return Err(InsertBlockError::new(block, err.into()).into());
             }
             Ok(None) => {
                 let block = convert_to_block(self, input)?;
@@ -2491,14 +2527,11 @@ where
             Ok(Some(_)) => {}
         }
 
-        // determine whether we are on a fork chain
-        let is_fork = match self.is_fork(block_id) {
-            Err(err) => {
-                let block = convert_to_block(self, input)?;
-                return Err(InsertBlockError::new(block.into_sealed_block(), err.into()).into());
-            }
-            Ok(is_fork) => is_fork,
-        };
+        // determine whether we are on a fork chain by comparing the block number with the
+        // canonical head. This is a simple check that is sufficient for the event emission below.
+        // A block is considered a fork if its number is less than or equal to the canonical head,
+        // as this indicates there's already a canonical block at that height.
+        let is_fork = block_id.block.number <= self.state.tree_state.current_canonical_head.number;
 
         let ctx = TreeCtx::new(&mut self.state, &self.canonical_in_memory_state);
 
@@ -2576,9 +2609,10 @@ where
     fn on_new_payload_error(
         &mut self,
         error: NewPayloadError,
+        payload_num_hash: NumHash,
         parent_hash: B256,
     ) -> ProviderResult<PayloadStatus> {
-        error!(target: "engine::tree", %error, "Invalid payload");
+        error!(target: "engine::tree", payload=?payload_num_hash, %error, "Invalid payload");
         // we need to convert the error to a payload status (response to the CL)
 
         let latest_valid_hash =
@@ -2842,4 +2876,13 @@ pub enum InsertPayloadOk {
     AlreadySeen(BlockStatus),
     /// The payload was valid and inserted into the tree.
     Inserted(BlockStatus),
+}
+
+/// Target for block persistence.
+#[derive(Debug, Clone, Copy)]
+enum PersistTarget {
+    /// Persist up to `canonical_head - memory_block_buffer_target`.
+    Threshold,
+    /// Persist all blocks up to and including the canonical head.
+    Head,
 }

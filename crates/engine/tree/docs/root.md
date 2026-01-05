@@ -128,12 +128,12 @@ we send them along with the state updates to the [Sparse Trie Task](#sparse-trie
 
 ### Finishing the calculation
 
-Once all transactions are executed, the [Engine](#engine) sends a `StateRootMessage::FinishStateUpdates` message
+Once all transactions are executed, the [Engine](#engine) sends a `StateRootMessage::FinishedStateUpdates` message
 to the State Root Task, marking the end of receiving state updates.
 
 Every time we receive a new proof from the [MultiProof Manager](#multiproof-manager), we also check
 the following conditions:
-1. Are all updates received? (`StateRootMessage::FinishStateUpdates` was sent)
+1. Are all updates received? (`StateRootMessage::FinishedStateUpdates` was sent)
 2. Is `ProofSequencer` empty? (no proofs are pending for sequencing)
 3. Are all proofs that were sent to the [`MultiProofManager::spawn_or_queue`](#multiproof-manager) finished
 calculating and were sent to the [Sparse Trie Task](#sparse-trie-task)?

@@ -6,7 +6,7 @@ Gets the content of a database table for the given key
 $ reth db get mdbx --help
 ```
 ```txt
-Usage: reth db get mdbx [OPTIONS] <TABLE> <KEY> [SUBKEY]
+Usage: reth db get mdbx [OPTIONS] <TABLE> <KEY> [SUBKEY] [END_KEY] [END_SUBKEY]
 
 Arguments:
   <TABLE>
@@ -17,6 +17,12 @@ Arguments:
 
   [SUBKEY]
           The subkey to get content for
+
+  [END_KEY]
+          Optional end key for range query (exclusive upper bound)
+
+  [END_SUBKEY]
+          Optional end subkey for range query (exclusive upper bound)
 
 Options:
       --raw

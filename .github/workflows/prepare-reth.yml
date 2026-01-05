@@ -26,8 +26,7 @@ jobs:
   prepare-reth:
     if: github.repository == 'paradigmxyz/reth'
     timeout-minutes: 45
-    runs-on:
-      group: Reth
+    runs-on: depot-ubuntu-latest
     steps:
       - uses: actions/checkout@v6
       - run: mkdir artifacts
@@ -51,7 +50,7 @@ jobs:
 
       - name: Upload reth image
         id: upload
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: artifacts
           path: ./artifacts

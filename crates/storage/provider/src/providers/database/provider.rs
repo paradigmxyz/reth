@@ -4,6 +4,7 @@ use crate::{
     },
     providers::{
         database::{chain::ChainStorage, metrics},
+        rocksdb::RocksDBProvider,
         static_file::StaticFileWriter,
         NodeTypesForProvider, StaticFileProvider,
     },
@@ -16,10 +17,10 @@ use crate::{
     DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, StageCheckpointReader,
-    StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader, StorageReader,
-    StorageTrieWriter, TransactionVariant, TransactionsProvider, TransactionsProviderExt,
-    TrieReader, TrieWriter,
+    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, RocksDBProviderFactory,
+    StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
+    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
+    TransactionsProviderExt, TrieReader, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -150,7 +151,6 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
 
 /// A provider struct that fetches data from the database.
 /// Wrapper around [`DbTx`] and [`DbTxMut`]. Example: [`HeaderProvider`] [`BlockHashReader`]
-#[derive(Debug)]
 pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// Database transaction.
     tx: TX,
@@ -164,8 +164,29 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage: Arc<N::Storage>,
     /// Storage configuration settings for this node
     storage_settings: Arc<RwLock<StorageSettings>>,
+    /// `RocksDB` provider
+    rocksdb_provider: RocksDBProvider,
+    /// Pending `RocksDB` batches to be committed at provider commit time.
+    #[cfg(all(unix, feature = "rocksdb"))]
+    pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
+}
+
+impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut s = f.debug_struct("DatabaseProvider");
+        s.field("tx", &self.tx)
+            .field("chain_spec", &self.chain_spec)
+            .field("static_file_provider", &self.static_file_provider)
+            .field("prune_modes", &self.prune_modes)
+            .field("storage", &self.storage)
+            .field("storage_settings", &self.storage_settings)
+            .field("rocksdb_provider", &self.rocksdb_provider);
+        #[cfg(all(unix, feature = "rocksdb"))]
+        s.field("pending_rocksdb_batches", &"<pending batches>");
+        s.field("minimum_pruning_distance", &self.minimum_pruning_distance).finish()
+    }
 }
 
 impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
@@ -251,7 +272,19 @@ impl<TX, N: NodeTypes> StaticFileProviderFactory for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
+impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
+    /// Returns the `RocksDB` provider.
+    fn rocksdb_provider(&self) -> RocksDBProvider {
+        self.rocksdb_provider.clone()
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn set_pending_rocksdb_batch(&self, batch: rocksdb::WriteBatchWithTransaction<true>) {
+        self.pending_rocksdb_batches.lock().push(batch);
+    }
+}
+
+impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
     for DatabaseProvider<TX, N>
 {
     type ChainSpec = N::ChainSpec;
@@ -270,6 +303,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
+        rocksdb_provider: RocksDBProvider,
     ) -> Self {
         Self {
             tx,
@@ -278,6 +312,9 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             prune_modes,
             storage,
             storage_settings,
+            rocksdb_provider,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
     }
@@ -319,7 +356,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let trie_data = block.trie_data();
             let ExecutedBlock { recovered_block, execution_output, .. } = block;
             let block_number = recovered_block.number();
-            self.insert_block(Arc::unwrap_or_clone(recovered_block))?;
+            self.insert_block(&recovered_block)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
@@ -523,6 +560,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         prune_modes: PruneModes,
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
+        rocksdb_provider: RocksDBProvider,
     ) -> Self {
         Self {
             tx,
@@ -531,6 +569,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             prune_modes,
             storage,
             storage_settings,
+            rocksdb_provider,
+            #[cfg(all(unix, feature = "rocksdb"))]
+            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
         }
     }
@@ -639,7 +680,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             .zip(headers)
             .collect::<Vec<_>>();
 
-        let mut inputs = Vec::new();
+        let mut inputs = Vec::with_capacity(present_headers.len());
         for (tx_range, header) in &present_headers {
             let transactions = if tx_range.is_empty() {
                 Vec::new()
@@ -789,30 +830,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
-    /// Load shard and remove it. If list is empty, last shard was full or
-    /// there are no shards at all.
-    fn take_shard<T>(
-        &self,
-        cursor: &mut <TX as DbTxMut>::CursorMut<T>,
-        key: T::Key,
-    ) -> ProviderResult<Vec<u64>>
-    where
-        T: Table<Value = BlockNumberList>,
-    {
-        if let Some((_, list)) = cursor.seek_exact(key)? {
-            // delete old shard so new one can be inserted.
-            cursor.delete_current()?;
-            let list = list.iter().collect::<Vec<_>>();
-            return Ok(list)
-        }
-        Ok(Vec::new())
-    }
-
     /// Insert history index to the database.
     ///
-    /// For each updated partial key, this function removes the last shard from
-    /// the database (if any), appends the new indices to it, chunks the resulting integer list and
-    /// inserts the new shards back into the database.
+    /// For each updated partial key, this function retrieves the last shard from the database
+    /// (if any), appends the new indices to it, chunks the resulting list if needed, and upserts
+    /// the shards back into the database.
     ///
     /// This function is used by history indexing stages.
     fn append_history_index<P, T>(
@@ -824,26 +846,44 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         P: Copy,
         T: Table<Value = BlockNumberList>,
     {
+        // This function cannot be used with DUPSORT tables because `upsert` on DUPSORT tables
+        // will append duplicate entries instead of updating existing ones, causing data corruption.
+        assert!(!T::DUPSORT, "append_history_index cannot be used with DUPSORT tables");
+
         let mut cursor = self.tx.cursor_write::<T>()?;
+
         for (partial_key, indices) in index_updates {
-            let mut last_shard =
-                self.take_shard::<T>(&mut cursor, sharded_key_factory(partial_key, u64::MAX))?;
-            last_shard.extend(indices);
-            // Chunk indices and insert them in shards of N size.
-            let mut chunks = last_shard.chunks(sharded_key::NUM_OF_INDICES_IN_SHARD).peekable();
-            while let Some(list) = chunks.next() {
-                let highest_block_number = if chunks.peek().is_some() {
-                    *list.last().expect("`chunks` does not return empty list")
+            let last_key = sharded_key_factory(partial_key, u64::MAX);
+            let mut last_shard = cursor
+                .seek_exact(last_key.clone())?
+                .map(|(_, list)| list)
+                .unwrap_or_else(BlockNumberList::empty);
+
+            last_shard.append(indices).map_err(ProviderError::other)?;
+
+            // fast path: all indices fit in one shard
+            if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
+                cursor.upsert(last_key, &last_shard)?;
+                continue;
+            }
+
+            // slow path: rechunk into multiple shards
+            let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
+            let mut chunks_peekable = chunks.into_iter().peekable();
+
+            while let Some(chunk) = chunks_peekable.next() {
+                let shard = BlockNumberList::new_pre_sorted(chunk);
+                let highest_block_number = if chunks_peekable.peek().is_some() {
+                    shard.iter().next_back().expect("`chunks` does not return empty list")
                 } else {
                     // Insert last list with `u64::MAX`.
                     u64::MAX
                 };
-                cursor.insert(
-                    sharded_key_factory(partial_key, highest_block_number),
-                    &BlockNumberList::new_pre_sorted(list.iter().copied()),
-                )?;
+
+                cursor.upsert(sharded_key_factory(partial_key, highest_block_number), &shard)?;
             }
         }
+
         Ok(())
     }
 }
@@ -1413,7 +1453,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         }
 
         // collect block body indices for each block in the range
-        let mut block_body_indices = Vec::new();
+        let range_len = block_range.end().saturating_sub(*block_range.start()) as usize + 1;
+        let mut block_body_indices = Vec::with_capacity(range_len);
         for block_num in block_range {
             if let Some(indices) = self.block_body_indices(block_num)? {
                 block_body_indices.push(indices);
@@ -2834,7 +2875,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
     fn insert_block(
         &self,
-        block: RecoveredBlock<Self::Block>,
+        block: &RecoveredBlock<Self::Block>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number();
         let tx_count = block.body().transaction_count() as u64;
@@ -2874,7 +2915,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
         }
 
-        self.append_block_bodies(vec![(block_number, Some(block.into_body()))])?;
+        self.append_block_bodies(vec![(block_number, Some(block.body()))])?;
 
         debug!(
             target: "providers::db",
@@ -2888,7 +2929,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
     fn append_block_bodies(
         &self,
-        bodies: Vec<(BlockNumber, Option<BodyTy<N>>)>,
+        bodies: Vec<(BlockNumber, Option<&BodyTy<N>>)>,
     ) -> ProviderResult<()> {
         let Some(from_block) = bodies.first().map(|(block, _)| *block) else { return Ok(()) };
 
@@ -3040,7 +3081,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         // Insert the blocks
         for block in blocks {
-            self.insert_block(block)?;
+            self.insert_block(&block)?;
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 
@@ -3164,7 +3205,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         self.prune_modes_ref()
     }
 
-    /// Commit database transaction and static files.
+    /// Commit database transaction, static files, and pending `RocksDB` batches.
     fn commit(self) -> ProviderResult<bool> {
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just
@@ -3172,9 +3213,27 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         // checkpoints on the next start-up.
         if self.static_file_provider.has_unwind_queued() {
             self.tx.commit()?;
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+                for batch in batches {
+                    self.rocksdb_provider.commit_batch(batch)?;
+                }
+            }
+
             self.static_file_provider.commit()?;
         } else {
             self.static_file_provider.commit()?;
+
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
+                for batch in batches {
+                    self.rocksdb_provider.commit_batch(batch)?;
+                }
+            }
+
             self.tx.commit()?;
         }
 
@@ -3194,7 +3253,7 @@ impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: Send + Sync, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
+impl<TX: Send, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
     fn cached_storage_settings(&self) -> StorageSettings {
         *self.storage_settings.read()
     }
@@ -3243,14 +3302,14 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
             )
             .unwrap();
-        provider_rw.insert_block(data.blocks[0].0.clone()).unwrap();
+        provider_rw.insert_block(&data.blocks[0].0).unwrap();
         provider_rw.write_state(&data.blocks[0].1, crate::OriginalValuesKnown::No).unwrap();
         provider_rw.commit().unwrap();
 
@@ -3269,7 +3328,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3277,7 +3336,7 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3299,7 +3358,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3309,7 +3368,7 @@ mod tests {
 
         // insert blocks 1-3 with receipts
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3330,7 +3389,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3338,7 +3397,7 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3374,7 +3433,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         for block in blocks {
-            provider_rw.insert_block(block.try_recover().unwrap()).unwrap();
+            provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -3393,7 +3452,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3401,7 +3460,7 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4701,7 +4760,7 @@ mod tests {
                         block_num,
                         BlockParams { tx_count: Some(tx_count), ..Default::default() },
                     );
-                    provider_rw.insert_block(block.try_recover().unwrap()).unwrap();
+                    provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
                 }
             };
 

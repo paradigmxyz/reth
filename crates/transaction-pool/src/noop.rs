@@ -155,6 +155,14 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         vec![]
     }
 
+    fn append_pooled_transaction_elements(
+        &self,
+        _tx_hashes: &[TxHash],
+        _limit: GetPooledTransactionLimit,
+        _out: &mut Vec<<Self::Transaction as PoolTransaction>::Pooled>,
+    ) {
+    }
+
     fn get_pooled_transaction_element(
         &self,
         _tx_hash: TxHash,
@@ -344,6 +352,13 @@ impl<T: EthPoolTransaction> TransactionPool for NoopTransactionPool<T> {
         _versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError> {
         Ok(None)
+    }
+
+    fn get_blobs_for_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError> {
+        Ok(vec![None; versioned_hashes.len()])
     }
 }
 

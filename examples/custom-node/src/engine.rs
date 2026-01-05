@@ -5,6 +5,7 @@ use crate::{
     CustomNode,
 };
 use alloy_eips::eip2718::WithEncoded;
+use alloy_primitives::Bytes;
 use op_alloy_rpc_types_engine::{OpExecutionData, OpExecutionPayload};
 use reth_engine_primitives::EngineApiValidator;
 use reth_ethereum::{
@@ -54,6 +55,10 @@ impl ExecutionPayload for CustomExecutionData {
         None
     }
 
+    fn block_access_list(&self) -> Option<&Bytes> {
+        None
+    }
+
     fn parent_beacon_block_root(&self) -> Option<revm_primitives::B256> {
         self.inner.parent_beacon_block_root()
     }
@@ -64,6 +69,10 @@ impl ExecutionPayload for CustomExecutionData {
 
     fn gas_used(&self) -> u64 {
         self.inner.gas_used()
+    }
+
+    fn transaction_count(&self) -> usize {
+        self.inner.payload.as_v1().transactions.len()
     }
 }
 

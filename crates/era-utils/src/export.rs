@@ -150,6 +150,12 @@ where
         let era1_id = Era1Id::new(&config.network, start_block, block_count as u32)
             .with_hash(historical_root);
 
+        let era1_id = if config.max_blocks_per_file == MAX_BLOCKS_PER_ERA1 as u64 {
+            era1_id
+        } else {
+            era1_id.with_era_count()
+        };
+
         debug!("Final file name {}", era1_id.to_file_name());
         let file_path = config.dir.join(era1_id.to_file_name());
         let file = std::fs::File::create(&file_path)?;

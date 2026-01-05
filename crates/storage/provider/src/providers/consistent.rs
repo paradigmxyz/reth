@@ -26,7 +26,7 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, DatabaseProviderFactory, NodePrimitivesProvider, StateProvider,
-    StorageChangeSetReader, TryIntoHistoricalStateProvider,
+    StateProviderBox, StorageChangeSetReader, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::updates::TrieUpdatesSorted;
@@ -596,9 +596,9 @@ impl<N: ProviderNodeTypes> ConsistentProvider<N> {
     pub(crate) fn into_state_provider_at_block_hash(
         self,
         block_hash: BlockHash,
-    ) -> ProviderResult<Box<dyn StateProvider>> {
+    ) -> ProviderResult<StateProviderBox> {
         let Self { storage_provider, head_block, .. } = self;
-        let into_history_at_block_hash = |block_hash| -> ProviderResult<Box<dyn StateProvider>> {
+        let into_history_at_block_hash = |block_hash| -> ProviderResult<StateProviderBox> {
             let block_number = storage_provider
                 .block_number(block_hash)?
                 .ok_or(ProviderError::BlockHashNotFound(block_hash))?;
@@ -1046,7 +1046,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
             id.into(),
             |provider| provider.receipt(id),
             |tx_index, _, block_state| {
-                Ok(block_state.executed_block_receipts().get(tx_index).cloned())
+                Ok(block_state.executed_block_receipts_ref().get(tx_index).cloned())
             },
         )
     }
@@ -1055,7 +1055,7 @@ impl<N: ProviderNodeTypes> ReceiptProvider for ConsistentProvider<N> {
         for block_state in self.head_block.iter().flat_map(|b| b.chain()) {
             let executed_block = block_state.block_ref();
             let block = executed_block.recovered_block();
-            let receipts = block_state.executed_block_receipts();
+            let receipts = block_state.executed_block_receipts_ref();
 
             // assuming 1:1 correspondence between transactions and receipts
             debug_assert_eq!(
@@ -1566,7 +1566,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_block(
-                block.clone().try_recover().expect("failed to seal block with senders"),
+                &block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;
@@ -1677,7 +1677,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_block(
-                block.clone().try_recover().expect("failed to seal block with senders"),
+                &block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;
