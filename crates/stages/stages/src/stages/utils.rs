@@ -193,7 +193,7 @@ where
 }
 
 /// Shard and insert the indices list according to [`LoadMode`] and its length.
-pub(crate) fn load_indices<H, C, P>(
+fn load_indices<H, C, P>(
     cursor: &mut C,
     partial_key: P,
     list: &mut Vec<BlockNumber>,
@@ -238,7 +238,7 @@ where
 }
 
 /// Mode on how to load index shards into the database.
-pub(crate) enum LoadMode {
+enum LoadMode {
     /// Keep the last shard in memory and don't flush it to the database.
     KeepLast,
     /// Flush all shards into the database.
