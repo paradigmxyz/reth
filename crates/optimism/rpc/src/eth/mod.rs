@@ -132,38 +132,42 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         self.inner.flashblocks.as_ref().map(|f| f.flashblocks_sequence.subscribe())
     }
 
-    /// Returns a stream of flashblock receipts, if any.
-    pub fn flashblock_receipts_stream(&self, filter: Filter) -> Option<impl Stream<Item = Log>> {
+    /// Returns a stream of matching flashblock receipts, if any.
+    ///
+    /// This will yield all new matching receipts received from _new_ flashblocks.
+    pub fn flashblock_receipts_stream(
+        &self,
+        filter: Filter,
+    ) -> Option<impl Stream<Item = Log> + Send + Unpin> {
         self.subscribe_received_flashblocks().map(|rx| {
             BroadcastStream::new(rx)
                 .scan(
-                    (0u64, 0u64), // state buffers base block number and timestamp
+                    None::<(u64, u64)>, // state buffers base block number and timestamp
                     move |state, result| {
                         let fb = match result.ok() {
                             Some(fb) => fb,
                             None => return futures::future::ready(None),
                         };
 
-                        // Update state from base flashblock (index 0)
-                        if let Some(base) = &fb.base &&
-                            fb.index == 0
-                        {
-                            state.0 = base.block_number;
-                            state.1 = base.timestamp;
+                        // Update state from base flashblock for block level meta data.
+                        if let Some(base) = &fb.base {
+                            *state = Some((base.block_number, base.timestamp));
                         }
 
-                        let receipts = fb
-                            .metadata
-                            .receipts
-                            .iter()
-                            .map(|(tx, receipt)| (*tx, receipt.clone()))
-                            .collect::<Vec<_>>();
+                        let Some((block_number, timestamp)) = *state else {
+                            // we haven't received a new flashblock sequence yet, so we can skip
+                            // until we receive the first index 0 (base)
+                            return futures::future::ready(Some(Vec::new()))
+                        };
+
+                        let receipts =
+                            fb.metadata.receipts.iter().map(|(tx, receipt)| (*tx, receipt));
 
                         let all_logs = matching_block_logs_with_tx_hashes(
                             &filter,
-                            BlockNumHash::new(state.0, fb.diff.block_hash),
-                            state.1,
-                            receipts.iter().map(|(tx, receipt)| (*tx, receipt)),
+                            BlockNumHash::new(block_number, fb.diff.block_hash),
+                            timestamp,
+                            receipts,
                             false,
                         );
 
