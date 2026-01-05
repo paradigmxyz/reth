@@ -340,6 +340,11 @@ where
     Ok(())
 }
 
+/// Writes block number indices as shards to storage history.
+///
+/// Splits `list` into chunks of `NUM_OF_INDICES_IN_SHARD` and writes each as a separate shard.
+/// When `flush_all` is false, keeps the last chunk in memory for further accumulation.
+/// The final shard uses `u64::MAX` as the sentinel key.
 #[cfg(all(unix, feature = "rocksdb"))]
 fn flush_storage_shards<CURSOR, N>(
     writer: &mut EitherWriter<'_, CURSOR, N>,
