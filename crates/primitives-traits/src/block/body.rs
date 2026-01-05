@@ -190,13 +190,12 @@ pub trait BlockBody:
     /// Recovers signers for all transactions in the block body and returns a vector of
     /// [`Recovered`].
     fn recover_transactions(&self) -> Result<Vec<Recovered<Self::Transaction>>, RecoveryError> {
-        self.recover_signers().map(|signers| {
-            self.transactions()
-                .iter()
-                .zip(signers)
-                .map(|(tx, signer)| tx.clone().with_signer(signer))
-                .collect()
-        })
+        let mut recovered = Vec::with_capacity(self.transactions().len());
+        for tx in self.transactions() {
+            let signer = tx.recover_signer()?;
+            recovered.push(tx.clone().with_signer(signer));
+        }
+        Ok(recovered)
     }
 
     /// Returns an iterator over `Recovered<&Transaction>` for all transactions in the block body.
