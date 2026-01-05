@@ -506,7 +506,7 @@ where
 /// 3. Preserves earlier shards unchanged
 /// 4. If no indices remain after filtering, the key is fully removed
 #[cfg(all(unix, feature = "rocksdb"))]
-fn unwind_history_via_rocksdb_generic<Provider, T, PartialKey, K, SK>(
+fn unwind_history_via_rocksdb<Provider, T, PartialKey, K, SK>(
     provider: &Provider,
     affected_keys: impl IntoIterator<Item = PartialKey>,
     first_block_to_remove: BlockNumber,
@@ -593,7 +593,7 @@ where
 {
     use reth_db_api::models::storage_sharded_key::StorageShardedKey;
 
-    unwind_history_via_rocksdb_generic::<_, reth_db_api::tables::StoragesHistory, _, _, _>(
+    unwind_history_via_rocksdb::<_, reth_db_api::tables::StoragesHistory, _, _, _>(
         provider,
         affected_keys,
         first_block_to_remove,
@@ -621,7 +621,7 @@ where
 {
     use reth_db_api::models::ShardedKey;
 
-    unwind_history_via_rocksdb_generic::<_, reth_db_api::tables::AccountsHistory, _, _, _>(
+    unwind_history_via_rocksdb::<_, reth_db_api::tables::AccountsHistory, _, _, _>(
         provider,
         affected_addresses,
         first_block_to_remove,
