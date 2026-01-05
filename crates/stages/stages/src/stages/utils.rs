@@ -494,13 +494,13 @@ where
 /// 3. Preserves earlier shards unchanged
 /// 4. If no indices remain after filtering, the key is fully removed
 #[cfg(all(unix, feature = "rocksdb"))]
-fn unwind_history_via_rocksdb_generic<Provider, T, PK, K, SK>(
+fn unwind_history_via_rocksdb_generic<Provider, T, PartialKey, K, SK>(
     provider: &Provider,
-    affected_keys: impl IntoIterator<Item = PK>,
+    affected_keys: impl IntoIterator<Item = PartialKey>,
     first_block_to_remove: BlockNumber,
-    mk_start_key: impl Fn(&PK) -> K,
-    mk_sentinel_key: impl Fn(&PK) -> K,
-    shard_belongs_to_key: impl Fn(&K, &PK) -> bool,
+    mk_start_key: impl Fn(&PartialKey) -> K,
+    mk_sentinel_key: impl Fn(&PartialKey) -> K,
+    shard_belongs_to_key: impl Fn(&K, &PartialKey) -> bool,
 ) -> Result<usize, StageError>
 where
     Provider: DBProvider + reth_provider::RocksDBProviderFactory,
@@ -512,13 +512,13 @@ where
     let mut batch = rocksdb.batch();
     let mut count = 0;
 
-    for pk in affected_keys {
-        let start_key = mk_start_key(&pk);
+    for partial_key in affected_keys {
+        let start_key = mk_start_key(&partial_key);
         let mut shards = Vec::<(K, BlockNumberList)>::new();
 
         for entry in tx.iter_from::<T>(start_key)? {
             let (key, list) = entry?;
-            if !shard_belongs_to_key(&key, &pk) {
+            if !shard_belongs_to_key(&key, &partial_key) {
                 break;
             }
             shards.push((key, list));
@@ -556,7 +556,7 @@ where
         }
 
         if let Some(indices) = reinsert {
-            let sentinel_key = mk_sentinel_key(&pk);
+            let sentinel_key = mk_sentinel_key(&partial_key);
             let new_list = BlockNumberList::new_pre_sorted(indices);
             batch.put::<T>(sentinel_key, &new_list)?;
         }
