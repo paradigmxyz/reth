@@ -718,7 +718,7 @@ mod tests {
     ///
     /// These tests verify that when `account_history_in_rocksdb` is enabled:
     /// - Execute writes indices to RocksDB instead of MDBX
-    /// - Incremental syncs properly merge with existing RocksDB data  
+    /// - Incremental syncs properly merge with existing RocksDB data
     /// - Unwind correctly removes indices from RocksDB
     #[cfg(all(unix, feature = "rocksdb"))]
     mod rocksdb_tests {
