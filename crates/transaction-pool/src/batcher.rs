@@ -172,45 +172,61 @@ where
         let mut this = self.project();
 
         loop {
-            // 1. Collect available requests (non-blocking)
-            while this.buf.len() < *this.max_batch_size {
-                match this.request_rx.as_mut().poll_recv(cx) {
-                    Poll::Ready(Some(req)) => this.buf.push(req),
-                    Poll::Ready(None) => {
+            // 1. Collect available requests using poll_recv_many (non-blocking)
+            let remaining_capacity = this.max_batch_size.saturating_sub(this.buf.len());
+            if remaining_capacity > 0 {
+                match this.request_rx.as_mut().poll_recv_many(cx, this.buf, remaining_capacity) {
+                    Poll::Ready(0) => {
                         // Channel closed, flush remaining and exit
                         Self::spawn_batch(this.pool, this.buf);
                         return Poll::Ready(())
                     }
-                    Poll::Pending => break,
+                    Poll::Ready(_n) => {
+                        // Received some items, continue to check conditions
+                    }
+                    Poll::Pending => {
+                        // No items immediately available
+                    }
                 }
             }
 
-            // 2. Check flush conditions
-            let batch_full = this.buf.len() >= *this.max_batch_size;
-            let timeout_ready = if let Some(mut interval) = this.interval.as_mut().as_pin_mut() {
-                // If we have items and interval ticked, we should flush
-                !this.buf.is_empty() && interval.as_mut().poll_tick(cx).is_ready()
-            } else {
-                // Immediate mode: always flush if we have items
-                // This corresponds to "zero cost" greedy processing
-                !this.buf.is_empty()
-            };
+            // 2. Early return if buffer is empty
+            if this.buf.is_empty() {
+                return Poll::Pending
+            }
 
-            if batch_full || timeout_ready {
+            // 3. If batch is full, spawn immediately and continue (skip interval polling)
+            if this.buf.len() >= *this.max_batch_size {
                 Self::spawn_batch(this.pool, this.buf);
-                this.buf.reserve(*this.max_batch_size);
-
                 // Reset interval if present
                 if let Some(mut interval) = this.interval.as_mut().as_pin_mut() {
                     interval.as_mut().reset();
                 }
-                continue // check for more without returning Pending
+                continue
             }
 
-            // 3. Nothing to do
-            // Wakers logic:
-            // - request_rx.poll_recv returned Pending (registered waker)
-            // - interval.poll_tick returned Pending (registered waker)
+            // 4. Batch not full - check if we should flush based on mode
+            let should_flush = if let Some(mut interval) = this.interval.as_mut().as_pin_mut() {
+                // Batch-and-timeout mode: flush only if interval ticked
+                interval.as_mut().poll_tick(cx).is_ready()
+            } else {
+                // Immediate mode: always flush if we have items (greedy processing)
+                true
+            };
+
+            if should_flush {
+                Self::spawn_batch(this.pool, this.buf);
+                // Reset interval if present
+                if let Some(mut interval) = this.interval.as_mut().as_pin_mut() {
+                    interval.as_mut().reset();
+                }
+                continue
+            }
+
+            // 5. Batch not full and interval not ready - wait for more items or timeout
+            // Wakers are registered by:
+            // - poll_recv_many returning Pending
+            // - interval.poll_tick returning Pending
             return Poll::Pending
         }
     }
@@ -441,5 +457,162 @@ mod tests {
         assert!(result.is_ok());
 
         handle.abort();
+    }
+
+    // ===== Manual Poll Tests =====
+
+    /// Test that polling with empty buffer returns Pending
+    #[tokio::test]
+    async fn test_poll_empty_returns_pending() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let config =
+            BatchConfig { max_batch_size: 10, batch_timeout: Some(Duration::from_secs(60)) };
+        let (processor, _request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let mut processor = Box::pin(processor);
+
+        // Poll once - should return Pending since no items
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Empty buffer should return Pending");
+    }
+
+    /// Test that full batch spawns immediately without waiting for interval
+    #[tokio::test]
+    async fn test_poll_full_batch_spawns_immediately() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let max_batch_size = 5;
+        // Very long timeout - should NOT be needed for full batch
+        let config = BatchConfig { max_batch_size, batch_timeout: Some(Duration::from_secs(3600)) };
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let mut processor = Box::pin(processor);
+
+        // Send exactly max_batch_size items
+        let mut responses = Vec::new();
+        for i in 0..max_batch_size {
+            let tx = MockTransaction::legacy().with_nonce(i as u64).with_gas_price(100);
+            let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+            request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("send failed");
+            responses.push(response_rx);
+        }
+
+        // Poll once - should process the full batch immediately
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Should return Pending after spawning batch");
+
+        // Give spawned task time to complete
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // All responses should be ready
+        for mut rx in responses {
+            let result = rx.try_recv();
+            assert!(result.is_ok(), "Response should be ready after batch spawned");
+        }
+    }
+
+    /// Test that partial batch with interval waits for timeout (does not flush immediately)
+    #[tokio::test]
+    async fn test_poll_partial_batch_with_interval_waits() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let max_batch_size = 10;
+        // Long timeout - batch should NOT flush immediately
+        let config = BatchConfig { max_batch_size, batch_timeout: Some(Duration::from_secs(3600)) };
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let mut processor = Box::pin(processor);
+
+        // Send fewer items than max_batch_size
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("send failed");
+
+        // Poll once - should return Pending (waiting for interval)
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Partial batch with interval should return Pending");
+
+        // Response should NOT be ready yet (batch not flushed)
+        let try_result = response_rx.try_recv();
+        assert!(try_result.is_err(), "Partial batch should not be flushed immediately");
+    }
+
+    /// Test that partial batch in immediate mode (no interval) flushes right away
+    #[tokio::test]
+    async fn test_poll_partial_batch_immediate_mode_flushes() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let max_batch_size = 10;
+        // No timeout = immediate mode
+        let config = BatchConfig { max_batch_size, batch_timeout: None };
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let mut processor = Box::pin(processor);
+
+        // Send a single item (partial batch)
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("send failed");
+
+        // Poll once - should spawn batch immediately in immediate mode
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_pending(), "Should return Pending after spawning");
+
+        // Give spawned task time to complete
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Response should be ready
+        let result = response_rx.try_recv();
+        assert!(result.is_ok(), "Immediate mode should flush partial batch right away");
+    }
+
+    /// Test that channel close flushes remaining items
+    #[tokio::test]
+    async fn test_poll_channel_close_flushes_remaining() {
+        use std::future::Future;
+
+        let pool = testing_pool();
+        let max_batch_size = 10;
+        let config = BatchConfig { max_batch_size, batch_timeout: Some(Duration::from_secs(3600)) };
+        let (processor, request_tx) = BatchTxProcessor::new(pool.clone(), config);
+
+        let mut processor = Box::pin(processor);
+
+        // Send a partial batch
+        let tx = MockTransaction::legacy().with_nonce(0).with_gas_price(100);
+        let (response_tx, mut response_rx) = tokio::sync::oneshot::channel();
+        request_tx.send(BatchTxRequest::new(tx, response_tx)).expect("send failed");
+
+        // Poll once to receive the item
+        let waker = futures::task::noop_waker();
+        let mut cx = Context::from_waker(&waker);
+        let _ = processor.as_mut().poll(&mut cx);
+
+        // Drop sender to close channel
+        drop(request_tx);
+
+        // Poll again - should flush remaining and return Ready
+        let result = processor.as_mut().poll(&mut cx);
+        assert!(result.is_ready(), "Should return Ready when channel closes");
+
+        // Give spawned task time to complete
+        tokio::time::sleep(Duration::from_millis(50)).await;
+
+        // Response should be ready
+        let result = response_rx.try_recv();
+        assert!(result.is_ok(), "Channel close should flush remaining items");
     }
 }
