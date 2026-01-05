@@ -342,7 +342,7 @@ impl<T> ExecutionOutcome<T> {
     /// Prepends present the state with the given `BundleState`.
     /// It adds changes from the given state but does not override any existing changes.
     ///
-    /// Reverts  and receipts are not updated.
+    /// Reverts and receipts are not updated.
     pub fn prepend_state(&mut self, mut other: BundleState) {
         let other_len = other.reverts.len();
         // take this bundle
