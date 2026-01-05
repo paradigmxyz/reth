@@ -40,6 +40,16 @@ fn is_unimplemented(err: jsonrpsee::core::client::Error) -> bool {
     }
 }
 
+fn is_pow_rpc_err(err: jsonrpsee::core::client::Error) -> bool {
+    match err {
+        jsonrpsee::core::client::Error::Call(error_obj) => {
+            error_obj.code() == ErrorCode::InternalError.code() &&
+                error_obj.message().contains("Proof-of-Work mining")
+        }
+        _ => false,
+    }
+}
+
 async fn test_rpc_call_ok<R>(client: &HttpClient, method_name: &str, params: ArrayParams)
 where
     R: DeserializeOwned,
@@ -388,22 +398,19 @@ where
         )
     );
     assert!(
-        is_unimplemented(
-            EthApiClient::<
-                TransactionRequest,
-                Transaction,
-                Block,
-                Receipt,
-                Header,
-                TransactionSigned,
-            >::is_mining(client)
-            .await
-            .err()
-            .unwrap()
-        )
+        !EthApiClient::<
+            TransactionRequest,
+            Transaction,
+            Block,
+            Receipt,
+            Header,
+            TransactionSigned,
+        >::is_mining(client)
+        .await
+        .unwrap()
     );
     assert!(
-        is_unimplemented(
+        is_pow_rpc_err(
             EthApiClient::<
                 TransactionRequest,
                 Transaction,
@@ -418,7 +425,7 @@ where
         )
     );
     assert!(
-        is_unimplemented(
+        is_pow_rpc_err(
             EthApiClient::<
                 TransactionRequest,
                 Transaction,
