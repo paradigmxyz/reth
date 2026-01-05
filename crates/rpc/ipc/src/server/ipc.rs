@@ -66,7 +66,7 @@ where
 
         while let Some(response) = pending_calls.next().await {
             if let Err(too_large) = batch_response.append(response) {
-                return Some(too_large.to_json().to_string())
+                return Some(too_large.to_json().to_string());
             }
         }
 
@@ -138,7 +138,7 @@ where
         return Some(
             batch_response_error(Id::Null, reject_too_big_request(max_request_body_size as u32))
                 .to_string(),
-        )
+        );
     }
 
     // Single request or notification

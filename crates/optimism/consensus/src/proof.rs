@@ -33,7 +33,7 @@ pub(crate) fn calculate_receipt_root_optimism<R: DepositReceipt>(
             })
             .collect::<Vec<_>>();
 
-        return ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| r.encode_2718(buf))
+        return ordered_trie_root_with_encoder(receipts.as_slice(), |r, buf| r.encode_2718(buf));
     }
 
     ordered_trie_root_with_encoder(receipts, |r, buf| r.encode_2718(buf))
@@ -68,7 +68,7 @@ pub fn calculate_receipt_root_no_memo_optimism<R: DepositReceipt>(
 
         return ordered_trie_root_with_encoder(&receipts, |r, buf| {
             r.with_bloom_ref().encode_2718(buf);
-        })
+        });
     }
 
     ordered_trie_root_with_encoder(receipts, |r, buf| {

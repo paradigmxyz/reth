@@ -70,7 +70,7 @@ where
         if let Some((hash, number)) = self.tip &&
             provider_ro.sealed_header(number)?.is_none_or(|header| header.hash() != hash)
         {
-            return Err(ConsistentViewError::Reorged { block: hash }.into())
+            return Err(ConsistentViewError::Reorged { block: hash }.into());
         }
 
         Ok(provider_ro)

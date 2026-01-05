@@ -160,7 +160,7 @@ where
         // If the requested block is the DB tip then there won't be any reverts necessary, and we
         // can simply return Ok.
         if db_tip_block == requested_block {
-            return Ok(false)
+            return Ok(false);
         }
 
         // Get the MerkleChangeSets prune checkpoints, which will be used to determine the lower
@@ -320,7 +320,7 @@ where
                 .hashed_state_overlay
                 .clone()
                 .unwrap_or_else(|| Arc::new(HashedPostStateSorted::default()));
-            return Ok(Overlay { trie_updates, hashed_post_state })
+            return Ok(Overlay { trie_updates, hashed_post_state });
         }
 
         let db_tip_block = self.get_db_tip_block_number(provider)?;

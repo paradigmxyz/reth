@@ -203,7 +203,7 @@ impl PrefixSet {
     #[inline]
     pub fn contains(&mut self, prefix: &Nibbles) -> bool {
         if self.all {
-            return true
+            return true;
         }
 
         while self.index > 0 && &self.keys[self.index] > prefix {
@@ -213,12 +213,12 @@ impl PrefixSet {
         for (idx, key) in self.keys[self.index..].iter().enumerate() {
             if key.starts_with(prefix) {
                 self.index += idx;
-                return true
+                return true;
             }
 
             if key > prefix {
                 self.index += idx;
-                return false
+                return false;
             }
         }
 

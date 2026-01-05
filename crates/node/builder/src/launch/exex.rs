@@ -47,7 +47,7 @@ impl<Node: FullNodeComponents + Clone> ExExLauncher<Node> {
 
         if extensions.is_empty() {
             // nothing to launch
-            return Ok(None)
+            return Ok(None);
         }
 
         info!(target: "reth::cli", "Loading ExEx Write-Ahead Log...");

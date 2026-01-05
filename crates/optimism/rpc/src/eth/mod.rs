@@ -145,7 +145,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         parent_hash: B256,
     ) -> eyre::Result<Option<PendingBlock<N::Primitives>>> {
         let Some(rx) = self.inner.flashblocks.as_ref().map(|f| &f.pending_block_rx) else {
-            return Ok(None)
+            return Ok(None);
         };
 
         // Check if a flashblock is being built

@@ -161,7 +161,7 @@ pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primiti
                 return Ok(self
                     .converter()
                     .convert_receipts_with_block(inputs, block.sealed_block())
-                    .map(Some)?)
+                    .map(Some)?);
             }
 
             Ok(None)

@@ -397,18 +397,16 @@ where
             .unwrap()
         )
     );
-    assert!(
-        !EthApiClient::<
-            TransactionRequest,
-            Transaction,
-            Block,
-            Receipt,
-            Header,
-            TransactionSigned,
-        >::is_mining(client)
-        .await
-        .unwrap()
-    );
+    assert!(!EthApiClient::<
+        TransactionRequest,
+        Transaction,
+        Block,
+        Receipt,
+        Header,
+        TransactionSigned,
+    >::is_mining(client)
+    .await
+    .unwrap());
     assert!(
         is_pow_rpc_err(
             EthApiClient::<

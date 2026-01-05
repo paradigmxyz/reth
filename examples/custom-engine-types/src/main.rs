@@ -236,7 +236,7 @@ impl EngineApiValidator<CustomEngineTypes> for CustomEngineValidator {
         if attributes.custom == 0 {
             return Err(EngineObjectValidationError::invalid_params(
                 CustomError::CustomFieldIsNotZero,
-            ))
+            ));
         }
 
         Ok(())

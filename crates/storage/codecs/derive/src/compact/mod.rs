@@ -179,7 +179,7 @@ fn should_use_alt_impl(ftype: &str, segment: &syn::PathSegment) -> bool {
             .iter()
             .any(|&s| path.ident == s)
     {
-        return true
+        return true;
     }
     false
 }

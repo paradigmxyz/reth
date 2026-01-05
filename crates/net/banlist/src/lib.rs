@@ -16,7 +16,7 @@ use std::{collections::HashMap, net::IpAddr, str::FromStr, time::Instant};
 /// Should be replaced with [`IpAddr::is_global`](std::net::IpAddr::is_global) once it is stable.
 pub const fn is_global(ip: &IpAddr) -> bool {
     if ip.is_unspecified() || ip.is_loopback() {
-        return false
+        return false;
     }
 
     match ip {
@@ -63,7 +63,7 @@ impl BanList {
                 now > *until
             {
                 evicted.push(*peer);
-                return false
+                return false;
             }
             true
         });
@@ -78,7 +78,7 @@ impl BanList {
                 now > *until
             {
                 evicted.push(*peer);
-                return false
+                return false;
             }
             true
         });
@@ -239,7 +239,7 @@ impl IpFilter {
     /// Returns an error if any of the CIDR strings cannot be parsed.
     pub fn from_cidr_string(cidrs: &str) -> Result<Self, ipnet::AddrParseError> {
         if cidrs.is_empty() {
-            return Ok(Self::allow_all())
+            return Ok(Self::allow_all());
         }
 
         let networks = cidrs
@@ -264,7 +264,7 @@ impl IpFilter {
     pub fn is_allowed(&self, ip: &IpAddr) -> bool {
         // If no restrictions are set, allow all IPs
         if self.allowed_networks.is_empty() {
-            return true
+            return true;
         }
 
         // Check if the IP is within any of the allowed networks

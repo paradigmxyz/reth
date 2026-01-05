@@ -56,7 +56,7 @@ where
     fn prune(&self, provider: &Provider, input: PruneInput) -> Result<SegmentOutput, PrunerError> {
         let Some(block_range) = input.get_next_block_range() else {
             trace!(target: "pruner", "No change sets to prune");
-            return Ok(SegmentOutput::done())
+            return Ok(SegmentOutput::done());
         };
 
         let block_range_end = *block_range.end();

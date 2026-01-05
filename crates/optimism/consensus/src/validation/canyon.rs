@@ -34,7 +34,7 @@ pub fn ensure_empty_shanghai_withdrawals<T: BlockBody>(body: &T) -> Result<(), O
 
     //  Canyon rule
     if !withdrawals.as_ref().is_empty() {
-        return Err(OpConsensusError::WithdrawalsNonEmpty)
+        return Err(OpConsensusError::WithdrawalsNonEmpty);
     }
 
     Ok(())
