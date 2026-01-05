@@ -44,6 +44,7 @@ use reth_trie_sparse::{
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
+    ops::Not,
     sync::{
         atomic::AtomicBool,
         mpsc::{self, channel},
@@ -423,14 +424,7 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let (saved_cache, cache, cache_metrics) = if self.disable_state_cache {
-            (None, None, None)
-        } else {
-            let saved_cache = self.cache_for(env.parent_hash);
-            let cache = saved_cache.cache().clone();
-            let cache_metrics = saved_cache.metrics().clone();
-            (Some(saved_cache), Some(cache), Some(cache_metrics))
-        };
+        let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
@@ -466,12 +460,7 @@ where
             });
         }
 
-        CacheTaskHandle {
-            saved_cache,
-            cache,
-            to_prewarm_task: Some(to_prewarm_task),
-            cache_metrics,
-        }
+        CacheTaskHandle { saved_cache, to_prewarm_task: Some(to_prewarm_task) }
     }
 
     /// Returns the cache for the given parent hash.
@@ -657,12 +646,12 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns a clone of the caches used by prewarming
     pub(super) fn caches(&self) -> Option<StateExecutionCache> {
-        self.prewarm_handle.cache.clone()
+        self.prewarm_handle.saved_cache.clone().map(|cache| cache.cache().clone())
     }
 
     /// Returns a clone of the cache metrics used by prewarming
     pub(super) fn cache_metrics(&self) -> Option<CachedStateMetrics> {
-        self.prewarm_handle.cache_metrics.clone()
+        self.prewarm_handle.saved_cache.clone().map(|cache| cache.metrics().clone())
     }
 
     /// Terminates the pre-warming transaction processing.
@@ -698,11 +687,8 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 /// prewarm task without cloning the expensive `BundleState`.
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle<R> {
-    saved_cache: Option<SavedCache>,
     /// The shared cache the task operates with.
-    cache: Option<StateExecutionCache>,
-    /// Metrics for the caches
-    cache_metrics: Option<CachedStateMetrics>,
+    saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
 }
