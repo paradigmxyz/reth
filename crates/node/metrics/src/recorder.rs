@@ -21,8 +21,8 @@ pub fn install_prometheus_recorder() -> &'static PrometheusRecorder {
 
 /// Installs the provided recorder as the global recorder.
 ///
-/// To customize the builder, construct a recorder with
-/// [`PrometheusRecorder::install_with_builder`] and pass it here.
+/// To customize the builder, first construct a recorder with
+/// [`PrometheusRecorder::install_with_builder`], then pass it here.
 ///
 /// # Panics
 ///
@@ -35,6 +35,19 @@ pub fn init_prometheus_recorder(recorder: PrometheusRecorder) -> &'static Promet
 /// The default Prometheus recorder handle. We use a global static to ensure that it is only
 /// installed once.
 static PROMETHEUS_RECORDER_HANDLE: OnceLock<PrometheusRecorder> = OnceLock::new();
+
+/// Installs the Prometheus recorder with a custom builder.
+///
+/// Returns an error if a recorder has already been installed.
+pub fn try_install_prometheus_recorder_with_builder(
+    builder: PrometheusBuilder,
+) -> eyre::Result<&'static PrometheusRecorder> {
+    let recorder = PrometheusRecorder::install_with_builder(builder)?;
+    PROMETHEUS_RECORDER_HANDLE
+        .set(recorder)
+        .map_err(|_| eyre::eyre!("Prometheus recorder already installed"))?;
+    Ok(PROMETHEUS_RECORDER_HANDLE.get().expect("recorder is set"))
+}
 
 /// A handle to the Prometheus recorder.
 ///
