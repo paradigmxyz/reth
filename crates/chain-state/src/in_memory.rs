@@ -1467,7 +1467,6 @@ mod tests {
         assert_eq!(parents[0].block().recovered_block().number, 2);
         assert_eq!(parents[1].block().recovered_block().number, 1);
 
-        let parents: Vec<_> = chain[0].parent_state_chain();
         assert_eq!(chain[0].parent_state_chain().count(), 0);
     }
 
