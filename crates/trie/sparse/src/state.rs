@@ -728,7 +728,8 @@ where
         let nibbles = Nibbles::unpack(address);
         self.account_rlp_buf.clear();
         account.into_trie_account(storage_root).encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+        let rlp_encoded_account = core::mem::take(&mut self.account_rlp_buf);
+        self.update_account_leaf(nibbles, rlp_encoded_account, provider_factory)?;
 
         Ok(true)
     }
@@ -781,7 +782,8 @@ where
         let nibbles = Nibbles::unpack(address);
         self.account_rlp_buf.clear();
         trie_account.encode(&mut self.account_rlp_buf);
-        self.update_account_leaf(nibbles, self.account_rlp_buf.clone(), provider_factory)?;
+        let rlp_encoded_account = core::mem::take(&mut self.account_rlp_buf);
+        self.update_account_leaf(nibbles, rlp_encoded_account, provider_factory)?;
 
         Ok(true)
     }
