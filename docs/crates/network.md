@@ -427,17 +427,39 @@ In the `BodyStage` configured by the main binary, a `BodiesDownloader` is used:
 
 [File: crates/net/downloaders/src/bodies/bodies.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/downloaders/src/bodies/bodies.rs)
 ```rust,ignore
-pub struct BodiesDownloader<Client, Consensus> {
+pub struct BodiesDownloader<
+    B: Block,
+    C: BodiesClient<Body = B::Body>,
+    Provider: HeaderProvider<Header = B::Header>,
+> {
     /// The bodies client
-    client: Arc<Client>,
+    client: Arc<C>,
     /// The consensus client
-    consensus: Arc<Consensus>,
-    /// The number of retries for each request.
-    retries: usize,
-    /// The batch size per one request
-    batch_size: usize,
-    /// The maximum number of requests to send concurrently.
-    concurrency: usize,
+    consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+    /// The database handle
+    provider: Provider,
+    /// The maximum number of non-empty blocks per one request
+    request_limit: u64,
+    /// The maximum number of block bodies returned at once from the stream
+    stream_batch_size: usize,
+    /// The allowed range for number of concurrent requests.
+    concurrent_requests_range: RangeInclusive<usize>,
+    /// Maximum number of bytes of received blocks to buffer internally.
+    max_buffered_blocks_size_bytes: usize,
+    /// Current estimated size of buffered blocks in bytes.
+    buffered_blocks_size_bytes: usize,
+    /// The range of block numbers for body download.
+    download_range: RangeInclusive<BlockNumber>,
+    /// The latest block number returned.
+    latest_queued_block_number: Option<BlockNumber>,
+    /// Requests in progress
+    in_progress_queue: BodiesRequestQueue<B, C>,
+    /// Buffered responses
+    buffered_responses: BinaryHeap<OrderedBodiesResponse<B>>,
+    /// Queued body responses that can be returned for insertion into the database.
+    queued_bodies: Vec<BlockResponse<B>>,
+    /// The bodies downloader metrics.
+    metrics: BodyDownloaderMetrics,
 }
 ```
 
