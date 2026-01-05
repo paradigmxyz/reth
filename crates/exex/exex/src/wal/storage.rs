@@ -225,8 +225,7 @@ mod tests {
         // Get expected data
         let expected_notification = get_test_notification_data().unwrap();
         assert_eq!(
-            &notification,
-            &expected_notification,
+            &notification, &expected_notification,
             "Decoded notification should match expected static data"
         );
     }
@@ -302,10 +301,11 @@ mod tests {
     }
 
     /// Helper function to generate deterministic test data for WAL tests
-    fn get_test_notification_data() -> eyre::Result<ExExNotification<reth_ethereum_primitives::EthPrimitives>> {
+    fn get_test_notification_data(
+    ) -> eyre::Result<ExExNotification<reth_ethereum_primitives::EthPrimitives>> {
         use reth_ethereum_primitives::Block;
         use reth_primitives_traits::Block as _;
-        
+
         // Create a block with a transaction
         let block = Block::default().seal_slow().try_recover()?;
         let block_number = block.header().number();
@@ -355,7 +355,7 @@ mod tests {
                     BTreeMap::from([(block_number, Arc::new(hashed_state.into_sorted()))]),
                 )),
             };
-        return Ok(notification);
+        Ok(notification)
     }
 
     #[test]
