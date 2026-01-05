@@ -212,7 +212,7 @@ impl<
         let _guard = self.init_tracing(&runner, Layers::new())?;
 
         // Install the prometheus recorder to be sure to record all metrics
-        let _ = install_prometheus_recorder();
+        install_prometheus_recorder();
 
         // Use the shared standalone function to avoid duplication
         run_commands_with::<C, Ext, Rpc, N, SubCmd>(self, runner, components, launcher)
