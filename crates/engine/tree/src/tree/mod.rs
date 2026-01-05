@@ -1341,6 +1341,13 @@ where
 
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
+
+        // Update the persisted block in the canonical in-memory state
+        self.canonical_in_memory_state.set_persisted(BlockNumHash::new(
+            last_persisted_block_number,
+            last_persisted_block_hash,
+        ));
+
         self.on_new_persisted_block()?;
         Ok(())
     }

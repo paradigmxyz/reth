@@ -444,6 +444,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         self.inner.chain_info_tracker.set_finalized(header);
     }
 
+    /// Persisted block setter.
+    pub fn set_persisted(&self, num_hash: BlockNumHash) {
+        self.inner.chain_info_tracker.set_persisted(num_hash);
+    }
+
     /// Canonical head getter.
     pub fn get_canonical_head(&self) -> SealedHeader<N::BlockHeader> {
         self.inner.chain_info_tracker.get_canonical_head()
@@ -457,6 +462,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// Safe header getter.
     pub fn get_safe_header(&self) -> Option<SealedHeader<N::BlockHeader>> {
         self.inner.chain_info_tracker.get_safe_header()
+    }
+
+    /// Persisted block `BlockNumHash` getter.
+    pub fn get_persisted_num_hash(&self) -> Option<BlockNumHash> {
+        self.inner.chain_info_tracker.get_persisted_num_hash()
     }
 
     /// Returns the `SealedHeader` corresponding to the pending state.
@@ -509,6 +519,11 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
         &self,
     ) -> watch::Receiver<Option<SealedHeader<N::BlockHeader>>> {
         self.inner.chain_info_tracker.subscribe_finalized_block()
+    }
+
+    /// Subscribe to new persisted block events.
+    pub fn subscribe_persisted_block(&self) -> watch::Receiver<Option<BlockNumHash>> {
+        self.inner.chain_info_tracker.subscribe_persisted_block()
     }
 
     /// Attempts to send a new [`CanonStateNotification`] to all active Receiver handles.
