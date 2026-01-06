@@ -256,16 +256,44 @@ impl DeferredTrieData {
     /// Merge all ancestors into a single overlay.
     ///
     /// This is the slow path used when the parent's overlay cannot be reused
-    /// (e.g., after persist when anchor changes). Iterates ancestors oldest -> newest
-    /// so newer state takes precedence.
+    /// (e.g., after persist when anchor changes).
     ///
-    /// Note: We intentionally do NOT reuse ancestor cached overlays here because
-    /// those overlays were built with a different anchor_hash. The slow path is
-    /// triggered precisely because the anchor changed, so we must rebuild from
-    /// each ancestor's per-block state changes.
+    /// # Optimization
+    /// Instead of iterating all ancestors from scratch, we find the most recent
+    /// ancestor that has a cached `anchored_trie_input` and use that as the base.
+    /// This reduces O(N) work to O(N - M) work where M is the cached depth.
+    ///
+    /// # Why This Is Correct
+    /// The overlay data (`nodes` and `state`) is anchor-independent - it contains
+    /// cumulative changes from all in-memory blocks. The `anchor_hash` is just
+    /// metadata indicating which persisted base the overlay sits on top of.
+    /// When we construct the final `ComputedTrieData`, we set the caller's
+    /// `anchor_hash` regardless of what anchor the reused overlay had.
     fn merge_ancestors_into_overlay(ancestors: &[Self]) -> TrieInputSorted {
+        // Find the most recent ancestor (searching from newest to oldest) that has
+        // a cached trie_input overlay. We can use that as our base and only merge
+        // the remaining ancestors.
+        let mut base_idx = 0;
         let mut overlay = TrieInputSorted::default();
-        for ancestor in ancestors {
+
+        for (idx, ancestor) in ancestors.iter().enumerate().rev() {
+            let ancestor_data = ancestor.wait_cloned();
+            if let Some(anchored) = &ancestor_data.anchored_trie_input {
+                // Found a cached overlay! Use it as our base.
+                // The overlay data is anchor-independent, so this is correct
+                // even though the ancestor's anchor_hash may differ from ours.
+                overlay = TrieInputSorted::new(
+                    Arc::clone(&anchored.trie_input.nodes),
+                    Arc::clone(&anchored.trie_input.state),
+                    Default::default(),
+                );
+                base_idx = idx + 1; // Start merging from the next ancestor
+                break;
+            }
+        }
+
+        // Merge only the ancestors after the cached base (if any)
+        for ancestor in &ancestors[base_idx..] {
             let ancestor_data = ancestor.wait_cloned();
             {
                 let will_clone = Arc::strong_count(&overlay.state) > 1;
