@@ -73,6 +73,8 @@ struct DeferredTrieMetrics {
     deferred_trie_overlay_reused: Counter,
     /// Number of times the trie overlay was rebuilt from all ancestors (O(N) slow path).
     deferred_trie_overlay_rebuilt: Counter,
+    /// Number of times Arc::make_mut triggered a clone (strong_count > 1).
+    deferred_trie_arc_clone_triggered: Counter,
 }
 
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
@@ -224,12 +226,21 @@ impl DeferredTrieData {
             TrieInputSorted::default()
         };
 
-        // Extend overlay with current block's sorted data
+        // Extend overlay with current block's sorted data.
+        // Track if Arc::make_mut triggers a clone (strong_count > 1 means parent still holds ref).
         {
+            let will_clone = Arc::strong_count(&overlay.state) > 1;
+            if will_clone {
+                DEFERRED_TRIE_METRICS.deferred_trie_arc_clone_triggered.increment(1);
+            }
             let state_mut = Arc::make_mut(&mut overlay.state);
             state_mut.extend_ref(sorted_hashed_state.as_ref());
         }
         {
+            let will_clone = Arc::strong_count(&overlay.nodes) > 1;
+            if will_clone {
+                DEFERRED_TRIE_METRICS.deferred_trie_arc_clone_triggered.increment(1);
+            }
             let nodes_mut = Arc::make_mut(&mut overlay.nodes);
             nodes_mut.extend_ref(sorted_trie_updates.as_ref());
         }
@@ -245,17 +256,50 @@ impl DeferredTrieData {
     /// Merge all ancestors into a single overlay.
     ///
     /// This is the slow path used when the parent's overlay cannot be reused
-    /// (e.g., after persist when anchor changes). Iterates ancestors oldest -> newest
-    /// so newer state takes precedence.
+    /// (e.g., after persist when anchor changes).
+    ///
+    /// # Optimization
+    /// Instead of iterating all ancestors from scratch, we find the most recent
+    /// ancestor that has a cached `anchored_trie_input` and use that as the base.
+    /// This reduces O(N) work to O(N - cached_depth) work.
     fn merge_ancestors_into_overlay(ancestors: &[Self]) -> TrieInputSorted {
+        // Find the most recent ancestor (searching from newest to oldest) that has
+        // a cached trie_input overlay. We can use that as our base and only merge
+        // the remaining ancestors.
+        let mut base_idx = 0;
         let mut overlay = TrieInputSorted::default();
-        for ancestor in ancestors {
+
+        for (idx, ancestor) in ancestors.iter().enumerate().rev() {
+            let ancestor_data = ancestor.wait_cloned();
+            if let Some(anchored) = &ancestor_data.anchored_trie_input {
+                // Found a cached overlay! Use it as our base.
+                // We only need to merge ancestors after this one.
+                overlay = TrieInputSorted::new(
+                    Arc::clone(&anchored.trie_input.nodes),
+                    Arc::clone(&anchored.trie_input.state),
+                    Default::default(),
+                );
+                base_idx = idx + 1; // Start merging from the next ancestor
+                break;
+            }
+        }
+
+        // Merge only the ancestors after the cached base (if any)
+        for ancestor in &ancestors[base_idx..] {
             let ancestor_data = ancestor.wait_cloned();
             {
+                let will_clone = Arc::strong_count(&overlay.state) > 1;
+                if will_clone {
+                    DEFERRED_TRIE_METRICS.deferred_trie_arc_clone_triggered.increment(1);
+                }
                 let state_mut = Arc::make_mut(&mut overlay.state);
                 state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
             }
             {
+                let will_clone = Arc::strong_count(&overlay.nodes) > 1;
+                if will_clone {
+                    DEFERRED_TRIE_METRICS.deferred_trie_arc_clone_triggered.increment(1);
+                }
                 let nodes_mut = Arc::make_mut(&mut overlay.nodes);
                 nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
             }
