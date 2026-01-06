@@ -325,7 +325,8 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
             // If the persisted hash is not in the canonical in memory state, do nothing, because it
             // means canonical blocks were not actually persisted.
             //
-            // This can happen if the persistence task takes a long time, while a reorg is happening.
+            // This can happen if the persistence task takes a long time, while a reorg is 
+            // happening.
             if blocks.get(&persisted_num_hash.hash).is_none() {
                 // do nothing
                 return
