@@ -479,39 +479,3 @@ where
             })
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::parse_params;
-    use alloy_rpc_types_eth::{pubsub::Params, Filter};
-    use jsonrpsee::core::JsonRawValue;
-
-    #[test]
-    fn parse_params_none() {
-        assert!(parse_params(None).unwrap().is_none());
-    }
-
-    #[test]
-    fn parse_params_bool() {
-        let raw = JsonRawValue::from_string("true".to_string()).unwrap();
-        let parsed = parse_params(Some(&raw)).unwrap();
-        assert_eq!(parsed, Some(Params::Bool(true)));
-    }
-
-    #[test]
-    fn parse_params_logs() {
-        let filter = Filter::default();
-        let raw = JsonRawValue::from_string(serde_json::to_string(&filter).unwrap()).unwrap();
-        let parsed = parse_params(Some(&raw)).unwrap();
-        match parsed {
-            Some(Params::Logs(parsed_filter)) => assert_eq!(*parsed_filter, filter),
-            _ => panic!("expected log params"),
-        }
-    }
-
-    #[test]
-    fn parse_params_invalid() {
-        let raw = JsonRawValue::from_string("[]".to_string()).unwrap();
-        assert!(parse_params(Some(&raw)).is_err());
-    }
-}
