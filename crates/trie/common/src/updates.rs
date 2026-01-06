@@ -180,7 +180,7 @@ impl TrieUpdates {
         account_nodes.extend(
             self.removed_nodes
                 .iter()
-                .filter(|path| !self.account_nodes.contains_key(path))
+                .filter(|path| !self.account_nodes.contains_key(*path))
                 .map(|path| (*path, None)),
         );
         account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
@@ -379,7 +379,7 @@ impl StorageTrieUpdates {
         storage_nodes.extend(
             self.removed_nodes
                 .iter()
-                .filter(|path| !self.storage_nodes.contains_key(path))
+                .filter(|path| !self.storage_nodes.contains_key(*path))
                 .map(|path| (*path, None)),
         );
         storage_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
