@@ -113,13 +113,11 @@ impl BenchContext {
         let mut benchmark_mode = BenchMode::new(from, to, latest_block.into_inner().number())?;
 
         let first_block = match benchmark_mode {
-            BenchMode::Continuous(start) => block_provider
-                .get_block_by_number(start.into())
-                .full()
-                .await?
-                .ok_or_else(|| {
+            BenchMode::Continuous(start) => {
+                block_provider.get_block_by_number(start.into()).full().await?.ok_or_else(|| {
                     eyre::eyre!("Failed to fetch block {} from RPC for continuous mode", start)
-                })?,
+                })?
+            }
             BenchMode::Range(ref mut range) => {
                 match range.next() {
                     Some(block_number) => {
