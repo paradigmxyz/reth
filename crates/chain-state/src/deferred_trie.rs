@@ -73,7 +73,7 @@ struct DeferredTrieMetrics {
     deferred_trie_overlay_reused: Counter,
     /// Number of times the trie overlay was rebuilt from all ancestors (O(N) slow path).
     deferred_trie_overlay_rebuilt: Counter,
-    /// Number of times Arc::make_mut triggered a clone (strong_count > 1).
+    /// Number of times `Arc::make_mut` triggered a clone (`strong_count` > 1).
     deferred_trie_arc_clone_triggered: Counter,
 }
 
@@ -261,7 +261,7 @@ impl DeferredTrieData {
     /// # Optimization
     /// Instead of iterating all ancestors from scratch, we find the most recent
     /// ancestor that has a cached `anchored_trie_input` and use that as the base.
-    /// This reduces O(N) work to O(N - cached_depth) work.
+    /// This reduces O(N) work to O(N - M) work where M is the cached depth.
     fn merge_ancestors_into_overlay(ancestors: &[Self]) -> TrieInputSorted {
         // Find the most recent ancestor (searching from newest to oldest) that has
         // a cached trie_input overlay. We can use that as our base and only merge
