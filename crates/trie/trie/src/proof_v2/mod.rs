@@ -90,7 +90,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     /// Free-list of re-usable buffers of [`RlpNode`]s, used for encoding branch nodes to RLP.
     ///
     /// We are generally able to re-use these buffers across different branch nodes for the
-    /// duration of a proof calculation, but occasionally we will lose one when when a branch
+    /// duration of a proof calculation, but occasionally we will lose one when a branch
     /// node is returned as a `ProofTrieNode`.
     rlp_nodes_bufs: Vec<Vec<RlpNode>>,
     /// Re-usable byte buffer, used for RLP encoding.
