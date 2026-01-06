@@ -508,8 +508,7 @@ mod tests {
         anchor_hash: B256,
         accounts: Vec<(B256, Option<Account>)>,
     ) -> DeferredTrieData {
-        let hashed_state =
-            Arc::new(HashedPostStateSorted::new(accounts.clone(), B256Map::default()));
+        let hashed_state = Arc::new(HashedPostStateSorted::new(accounts, B256Map::default()));
         let trie_updates = Arc::default();
         let mut overlay = TrieInputSorted::default();
         Arc::make_mut(&mut overlay.state).extend_ref(hashed_state.as_ref());
@@ -610,7 +609,7 @@ mod tests {
         assert_eq!(found_account.unwrap().nonce, 50);
     }
 
-    /// Verifies that parent without anchored_trie_input triggers rebuild path.
+    /// Verifies that parent without `anchored_trie_input` triggers rebuild path.
     #[test]
     fn rebuilds_when_parent_has_no_anchored_input() {
         let anchor = B256::with_last_byte(1);
@@ -726,7 +725,7 @@ mod tests {
         let overlay = result.anchored_trie_input.as_ref().unwrap();
         // Note: extend_ref may result in duplicate keys; check the last occurrence
         let accounts = &overlay.trie_input.state.accounts;
-        let last_account = accounts.iter().filter(|(k, _)| *k == key).last().unwrap();
+        let last_account = accounts.iter().filter(|(k, _)| *k == key).next_back().unwrap();
         assert_eq!(last_account.1.unwrap().nonce, 99);
     }
 
