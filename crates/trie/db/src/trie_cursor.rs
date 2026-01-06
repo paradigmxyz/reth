@@ -98,18 +98,25 @@ where
 }
 
 /// A cursor over the storage tries stored in the database.
+///
+/// This cursor implements locality optimization: when seeking forward from the current position,
+/// it uses `next_dup` (O(1)) to walk forward instead of `seek_by_key_subkey` (O(log N)) when
+/// the target key is close to the current position.
 #[derive(Debug)]
 pub struct DatabaseStorageTrieCursor<C> {
     /// The underlying cursor.
     pub cursor: C,
     /// Hashed address used for cursor positioning.
     hashed_address: B256,
+    /// The last key returned by the cursor, used for locality optimization.
+    /// When seeking forward from this position, we can use `next_dup` instead of re-seeking.
+    last_key: Option<Nibbles>,
 }
 
 impl<C> DatabaseStorageTrieCursor<C> {
     /// Create a new storage trie cursor.
     pub const fn new(cursor: C, hashed_address: B256) -> Self {
-        Self { cursor, hashed_address }
+        Self { cursor, hashed_address, last_key: None }
     }
 }
 
@@ -167,27 +174,63 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self
+        let result = self
             .cursor
             .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key))?
             .filter(|e| e.nibbles == StoredNibblesSubKey(key))
-            .map(|value| (value.nibbles.0, value.node)))
+            .map(|value| (value.nibbles.0, value.node));
+
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     /// Seeks the given key in the storage trie.
+    ///
+    /// This method implements a locality optimization: if the cursor is already positioned
+    /// and the target key is >= the current position, we use `next_dup` to walk forward
+    /// instead of performing an expensive `seek_by_key_subkey` operation.
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self
+        // Locality optimization: if cursor is positioned and target is ahead,
+        // walk forward using next_dup instead of seeking
+        if let Some(last) = self.last_key {
+            if key > last {
+                // Walk forward using next_dup until we find a key >= target
+                while let Some((_, entry)) = self.cursor.next_dup()? {
+                    if entry.nibbles.0 >= key {
+                        self.last_key = Some(entry.nibbles.0);
+                        return Ok(Some((entry.nibbles.0, entry.node)));
+                    }
+                }
+                // Exhausted the duplicates, no match found
+                self.last_key = None;
+                return Ok(None);
+            } else if key == last &&
+                let Some((_, entry)) = self.cursor.current()? &&
+                entry.nibbles.0 == key
+            {
+                // Re-seeking the same key, return current position if still valid
+                return Ok(Some((entry.nibbles.0, entry.node)));
+            }
+        }
+
+        // Fall back to seek_by_key_subkey for backward seeks or when cursor is not positioned
+        let result = self
             .cursor
             .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key))?
-            .map(|value| (value.nibbles.0, value.node)))
+            .map(|value| (value.nibbles.0, value.node));
+
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.cursor.next_dup()?.map(|(_, v)| (v.nibbles.0, v.node)))
+        let result = self.cursor.next_dup()?.map(|(_, v)| (v.nibbles.0, v.node));
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     /// Retrieves the current value in the storage trie cursor.
@@ -196,7 +239,7 @@ where
     }
 
     fn reset(&mut self) {
-        // No-op for database cursors
+        self.last_key = None;
     }
 }
 
@@ -206,6 +249,8 @@ where
 {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;
+        // Reset cursor position tracking when switching to a different storage trie
+        self.last_key = None;
     }
 }
 
