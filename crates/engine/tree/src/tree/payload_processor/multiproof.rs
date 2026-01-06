@@ -1,8 +1,6 @@
 //! Multiproof task related functionality.
 
-use crate::tree::{
-    cached_state::CachedStateProvider, payload_processor::bal::bal_to_hashed_post_state,
-};
+use crate::tree::payload_processor::bal::bal_to_hashed_post_state;
 use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
@@ -879,7 +877,7 @@ impl MultiProofTask {
         msg: MultiProofMessage,
         ctx: &mut MultiproofBatchCtx,
         batch_metrics: &mut MultiproofBatchMetrics,
-        provider: &CachedStateProvider<P>,
+        provider: &P,
     ) -> bool
     where
         P: AccountReader,
@@ -1184,7 +1182,7 @@ impl MultiProofTask {
         target = "engine::tree::payload_processor::multiproof",
         skip_all
     )]
-    pub(crate) fn run<P>(mut self, provider: CachedStateProvider<P>)
+    pub(crate) fn run<P>(mut self, provider: P)
     where
         P: AccountReader,
     {
@@ -1501,7 +1499,7 @@ fn estimate_evm_state_targets(state: &EvmState) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::cached_state::ExecutionCacheBuilder;
+    use crate::tree::cached_state::{CachedStateProvider, ExecutionCacheBuilder};
     use alloy_eip7928::{AccountChanges, BalanceChange};
     use alloy_primitives::{map::B256Set, Address};
     use reth_provider::{
