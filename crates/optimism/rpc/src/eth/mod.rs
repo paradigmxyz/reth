@@ -1,5 +1,6 @@
 //! OP-Reth `eth_` endpoint implementation.
 
+use reth_optimism_flashblocks::FlashblockPayloadBase;
 pub mod ext;
 pub mod receipt;
 pub mod transaction;
@@ -28,8 +29,8 @@ use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
     FlashBlockBuildInfo, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
-    FlashBlockConsensusClient, FlashBlockService, FlashblockPayload, FlashblocksListeners,
-    PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
+    FlashBlockConsensusClient, FlashBlockService, FlashblockDiff, FlashblockPayload,
+    FlashblocksListeners, PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc::eth::core::EthApiInner;
@@ -163,8 +164,8 @@ impl<N: RpcNodeCore, Rpc: RpcConvert, F: FlashblockPayload> OpEthApi<N, Rpc, F> 
                         };
 
                         // Update state from base flashblock for block level meta data.
-                        if let Some(base) = &fb.base {
-                            *state = Some((base.block_number, base.timestamp));
+                        if let Some(base) = &fb.base() {
+                            *state = Some((base.block_number(), base.timestamp()));
                         }
 
                         let Some((block_number, timestamp)) = *state else {
@@ -174,11 +175,11 @@ impl<N: RpcNodeCore, Rpc: RpcConvert, F: FlashblockPayload> OpEthApi<N, Rpc, F> 
                         };
 
                         let receipts =
-                            fb.metadata.receipts.iter().map(|(tx, receipt)| (*tx, receipt));
+                            fb.metadata().receipts.iter().map(|(tx, receipt)| (*tx, receipt));
 
                         let all_logs = matching_block_logs_with_tx_hashes(
                             &filter,
-                            BlockNumHash::new(block_number, fb.diff.block_hash),
+                            BlockNumHash::new(block_number, fb.diff().block_hash()),
                             timestamp,
                             receipts,
                             false,
