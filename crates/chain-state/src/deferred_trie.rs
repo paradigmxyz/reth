@@ -190,13 +190,25 @@ impl DeferredTrieData {
 
             match &parent_data.anchored_trie_input {
                 // Fast path: reuse parent's already-merged overlay if anchors match.
-                // Parent's overlay already contains all ancestors merged, so we just clone it.
-                // This is O(1) since TrieInputSorted uses Arc internally.
+                // Parent's overlay already contains all ancestors merged, so we just clone
+                // the Arc-wrapped nodes and state (O(1)).
+                //
+                // IMPORTANT: We do NOT clone prefix_sets from the parent overlay.
+                // Prefix sets only need to represent the current block's changes, not
+                // cumulative ancestor changes. The incremental state root algorithms
+                // use prefix_sets to identify which trie branches changed since the
+                // last root computation - ancestors' changes are already embodied in
+                // the trie nodes. This matches the pattern in merkle_changesets.rs
+                // which explicitly uses per-block prefix sets.
                 Some(AnchoredTrieInput { anchor_hash: parent_anchor, trie_input })
                     if *parent_anchor == anchor_hash =>
                 {
                     DEFERRED_TRIE_METRICS.deferred_trie_overlay_reused.increment(1);
-                    (**trie_input).clone()
+                    TrieInputSorted::new(
+                        Arc::clone(&trie_input.nodes),
+                        Arc::clone(&trie_input.state),
+                        Default::default(), // Fresh prefix_sets - will be set by caller
+                    )
                 }
 
                 // Slow path: no matching parent overlay -> rebuild from all ancestors.
