@@ -4,12 +4,13 @@ use std::sync::Arc;
 
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
-    pubsub::{Params, PubSubSyncStatus, SubscriptionKind, SyncStatusMetadata},
+    pubsub::{Params, PubSubSyncStatus, SyncStatusMetadata},
     Filter, Log,
 };
 use futures::StreamExt;
 use jsonrpsee::{
-    server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink, SubscriptionSink,
+    core::JsonRawValue, server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink,
+    SubscriptionSink,
 };
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
@@ -38,6 +39,13 @@ pub struct EthPubSub<Eth> {
     inner: Arc<EthPubSubInner<Eth>>,
 }
 
+type PubSubStream = Box<dyn Stream<Item = Box<JsonRawValue>> + Send + Unpin>;
+type FallbackHandler = Arc<
+    dyn Fn(String, Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>>
+        + Send
+        + Sync,
+>;
+
 // === impl EthPubSub ===
 
 impl<Eth> EthPubSub<Eth> {
@@ -50,7 +58,35 @@ impl<Eth> EthPubSub<Eth> {
 
     /// Creates a new, shareable instance.
     pub fn with_spawner(eth_api: Eth, subscription_task_spawner: Box<dyn TaskSpawner>) -> Self {
-        let inner = EthPubSubInner { eth_api, subscription_task_spawner };
+        Self::with_spawner_and_fallback(eth_api, subscription_task_spawner, None)
+    }
+
+    /// Creates a new, shareable instance with a fallback handler for unknown subscription kinds or
+    /// params.
+    pub fn with_spawner_and_fallback_handler<F>(
+        eth_api: Eth,
+        subscription_task_spawner: Box<dyn TaskSpawner>,
+        fallback_handler: F,
+    ) -> Self
+    where
+        F: Fn(String, Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        Self::with_spawner_and_fallback(
+            eth_api,
+            subscription_task_spawner,
+            Some(Arc::new(fallback_handler)),
+        )
+    }
+
+    fn with_spawner_and_fallback(
+        eth_api: Eth,
+        subscription_task_spawner: Box<dyn TaskSpawner>,
+        fallback_handler: Option<FallbackHandler>,
+    ) -> Self {
+        let inner = EthPubSubInner { eth_api, subscription_task_spawner, fallback_handler };
         Self { inner: Arc::new(inner) }
     }
 }
@@ -90,27 +126,59 @@ where
     pub async fn handle_accepted(
         &self,
         accepted_sink: SubscriptionSink,
-        kind: SubscriptionKind,
-        params: Option<Params>,
+        kind: String,
+        raw_params: Option<Box<JsonRawValue>>,
     ) -> Result<(), ErrorObject<'static>> {
-        #[allow(unreachable_patterns)]
-        match kind {
-            SubscriptionKind::NewHeads => {
-                pipe_from_stream(accepted_sink, self.new_headers_stream()).await
-            }
-            SubscriptionKind::Logs => {
-                // if no params are provided, used default filter params
-                let filter = match params {
+        match kind.as_str() {
+            "newHeads" => pipe_from_stream(accepted_sink, self.new_headers_stream()).await,
+            "logs" => {
+                let parsed_params = match parse_params(raw_params.as_deref()) {
+                    Ok(params) => params,
+                    Err(_) => {
+                        return self
+                            .handle_fallback_or_invalid(
+                                accepted_sink,
+                                kind,
+                                raw_params,
+                                "Invalid params for logs",
+                            )
+                            .await
+                    }
+                };
+
+                // if no params are provided, use default filter params
+                let filter = match parsed_params {
                     Some(Params::Logs(filter)) => *filter,
                     Some(Params::Bool(_)) => {
-                        return Err(invalid_params_rpc_err("Invalid params for logs"))
+                        return self
+                            .handle_fallback_or_invalid(
+                                accepted_sink,
+                                kind,
+                                raw_params,
+                                "Invalid params for logs",
+                            )
+                            .await
                     }
                     _ => Default::default(),
                 };
                 pipe_from_stream(accepted_sink, self.log_stream(filter)).await
             }
-            SubscriptionKind::NewPendingTransactions => {
-                if let Some(params) = params {
+            "newPendingTransactions" => {
+                let parsed_params = match parse_params(raw_params.as_deref()) {
+                    Ok(params) => params,
+                    Err(_) => {
+                        return self
+                            .handle_fallback_or_invalid(
+                                accepted_sink,
+                                kind,
+                                raw_params,
+                                "Invalid params for newPendingTransactions",
+                            )
+                            .await
+                    }
+                };
+
+                if let Some(params) = parsed_params {
                     match params {
                         Params::Bool(true) => {
                             // full transaction objects requested
@@ -138,16 +206,21 @@ where
                             // only hashes requested
                         }
                         _ => {
-                            return Err(invalid_params_rpc_err(
-                                "Invalid params for newPendingTransactions",
-                            ))
+                            return self
+                                .handle_fallback_or_invalid(
+                                    accepted_sink,
+                                    kind,
+                                    raw_params,
+                                    "Invalid params for newPendingTransactions",
+                                )
+                                .await
                         }
                     }
                 }
 
                 pipe_from_stream(accepted_sink, self.pending_transaction_hashes_stream()).await
             }
-            SubscriptionKind::Syncing => {
+            "syncing" => {
                 // get new block subscription
                 let mut canon_state = BroadcastStream::new(
                     self.inner.eth_api.provider().subscribe_to_canonical_state(),
@@ -193,10 +266,30 @@ where
                 Ok(())
             }
             _ => {
-                // TODO: implement once https://github.com/alloy-rs/alloy/pull/3410 is released
-                Err(invalid_params_rpc_err("Unsupported subscription kind"))
+                self.handle_fallback_or_invalid(
+                    accepted_sink,
+                    kind,
+                    raw_params,
+                    "Unsupported subscription kind",
+                )
+                .await
             }
         }
+    }
+
+    async fn handle_fallback_or_invalid(
+        &self,
+        accepted_sink: SubscriptionSink,
+        kind: String,
+        params: Option<Box<JsonRawValue>>,
+        err_msg: &'static str,
+    ) -> Result<(), ErrorObject<'static>> {
+        if let Some(fallback_handler) = &self.inner.fallback_handler {
+            let stream = (fallback_handler)(kind, params)?;
+            return pipe_from_stream(accepted_sink, stream).await
+        }
+
+        Err(invalid_params_rpc_err(err_msg))
     }
 }
 
@@ -209,8 +302,8 @@ where
     async fn subscribe(
         &self,
         pending: PendingSubscriptionSink,
-        kind: SubscriptionKind,
-        params: Option<Params>,
+        kind: String,
+        params: Option<Box<JsonRawValue>>,
     ) -> jsonrpsee::core::SubscriptionResult {
         let sink = pending.accept().await?;
         let pubsub = self.clone();
@@ -276,6 +369,10 @@ where
     }
 }
 
+fn parse_params(raw_params: Option<&JsonRawValue>) -> Result<Option<Params>, serde_json::Error> {
+    raw_params.map(|raw| serde_json::from_str::<Params>(raw.get())).transpose()
+}
+
 impl<Eth> std::fmt::Debug for EthPubSub<Eth> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("EthPubSub").finish_non_exhaustive()
@@ -289,6 +386,8 @@ struct EthPubSubInner<EthApi> {
     eth_api: EthApi,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Box<dyn TaskSpawner>,
+    /// Fallback handler for unknown subscription kinds or params.
+    fallback_handler: Option<FallbackHandler>,
 }
 
 // == impl EthPubSubInner ===
@@ -378,5 +477,41 @@ where
                 );
                 futures::stream::iter(all_logs)
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_params;
+    use alloy_rpc_types_eth::{pubsub::Params, Filter};
+    use jsonrpsee::core::JsonRawValue;
+
+    #[test]
+    fn parse_params_none() {
+        assert!(parse_params(None).unwrap().is_none());
+    }
+
+    #[test]
+    fn parse_params_bool() {
+        let raw = JsonRawValue::from_string("true".to_string()).unwrap();
+        let parsed = parse_params(Some(&raw)).unwrap();
+        assert_eq!(parsed, Some(Params::Bool(true)));
+    }
+
+    #[test]
+    fn parse_params_logs() {
+        let filter = Filter::default();
+        let raw = JsonRawValue::from_string(serde_json::to_string(&filter).unwrap()).unwrap();
+        let parsed = parse_params(Some(&raw)).unwrap();
+        match parsed {
+            Some(Params::Logs(parsed_filter)) => assert_eq!(*parsed_filter, filter),
+            _ => panic!("expected log params"),
+        }
+    }
+
+    #[test]
+    fn parse_params_invalid() {
+        let raw = JsonRawValue::from_string("[]".to_string()).unwrap();
+        assert!(parse_params(Some(&raw)).is_err());
     }
 }
