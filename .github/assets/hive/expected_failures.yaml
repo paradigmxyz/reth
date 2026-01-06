@@ -39,6 +39,43 @@ engine-cancun:
   # in hive or its dependencies
   - Blob Transaction Ordering, Multiple Clients (Cancun) (reth)
 
+  # Fork ID tests failing since mid-December 2025 - tests complete in <2s indicating peering issues
+  # These tests verify DevP2P peer connections with Fork ID validation
+  # TODO: investigate root cause (likely related to eth/69-70 protocol changes or hive test infrastructure)
+  - Fork ID: Genesis=0, Cancun=0 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=0, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=1 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=1, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=1, Shanghai=1 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=1, Shanghai=1, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=2 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=2, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=2, Shanghai=1 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=2, Shanghai=1, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=2, Shanghai=2 (Cancun) (reth)
+  - Fork ID: Genesis=0, Cancun=2, Shanghai=2, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=0 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=0, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=1 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=1, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=1, Shanghai=1 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=1, Shanghai=1, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=2 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=2, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=2, Shanghai=1 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=2, Shanghai=1, BlocksBeforePeering=1 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=2, Shanghai=2 (Cancun) (reth)
+  - Fork ID: Genesis=1, Cancun=2, Shanghai=2, BlocksBeforePeering=1 (Cancun) (reth)
+
+  # Request Blob Pooled Transactions tests - failing since mid-December 2025
+  - Request Blob Pooled Transactions Single (Cancun) (reth)
+  - Request Blob Pooled Transactions Multiple (Cancun) (reth)
+
+  # Invalid Missing Ancestor tests - timing-sensitive syncing tests
+  - Invalid Missing Ancestor ReOrg, StateRoot, EmptyTxs=False, Invalid P9 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=False, Invalid P8 (Cancun) (reth)
+  - Invalid Missing Ancestor Syncing ReOrg, Timestamp, EmptyTxs=False, CanonicalReOrg=True, Invalid P8 (Cancun) (reth)
+
 sync: [ ]
 
 engine-auth: [ ]
