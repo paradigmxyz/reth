@@ -131,7 +131,7 @@ arbitrary = [
     "reth-codecs/arbitrary",
     "alloy-rpc-types-eth?/arbitrary",
 ]
-rayon = ["dep:rayon"]
+rayon = ["dep:rayon", "alloy-primitives/rayon"]
 
 [[bench]]
 name = "prefix_set"
