@@ -272,7 +272,7 @@ mod tests {
             .map(|i| {
                 let mut bytes = [0u8; 8];
                 bytes.copy_from_slice(&i.to_be_bytes());
-                Nibbles::unpack(&bytes)
+                Nibbles::unpack(bytes)
             })
             .collect()
     }
