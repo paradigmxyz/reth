@@ -299,7 +299,7 @@ where
             // Build a state provider for the multiproof task
             let provider = provider_builder.build().expect("failed to build provider");
             let provider = if let Some(saved_cache) = saved_cache {
-                let (cache, metrics) = saved_cache.split();
+                let (cache, metrics, _) = saved_cache.split();
                 Box::new(CachedStateProvider::new(provider, cache, metrics))
                     as Box<dyn StateProvider>
             } else {
