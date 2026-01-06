@@ -323,7 +323,9 @@ The EthStream wraps a stream and handles eth message (RLP) encoding/decoding wit
 [File: crates/net/eth-wire/src/ethstream.rs](../../crates/net/eth-wire/src/ethstream.rs)
 ```rust,ignore
 #[pin_project]
-pub struct EthStream<S> {
+pub struct EthStream<S, N = EthNetworkPrimitives> {
+    /// Eth-specific logic
+    eth: EthStreamInner<N>,
     #[pin]
     inner: S,
 }
@@ -386,7 +388,7 @@ pub struct UnauthedP2PStream<S> {
 
 impl<S> UnauthedP2PStream<S> {
     // ...
-    pub async fn handshake(mut self, hello: HelloMessageWithProtocols) -> Result<(P2PStream<S>, HelloMessage), Error> {
+    pub async fn handshake(mut self, hello: HelloMessageWithProtocols) -> Result<(P2PStream<S>, HelloMessage), P2PStreamError> {
         self.inner.send(alloy_rlp::encode(P2PMessage::Hello(hello.message())).into()).await?;
         let first_message_bytes = tokio::time::timeout(HANDSHAKE_TIMEOUT, self.inner.next()).await;
 

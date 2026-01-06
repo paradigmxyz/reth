@@ -85,12 +85,12 @@ where
         }
     }
 
-    /// Returns the sender half to the received flashblocks.
+    /// Returns the sender half for the received flashblocks broadcast channel.
     pub const fn flashblocks_broadcaster(&self) -> &broadcast::Sender<Arc<P>> {
         &self.received_flashblocks_tx
     }
 
-    /// Returns the sender half to the flashblock sequence.
+    /// Returns the sender half for the flashblock sequence broadcast channel.
     pub const fn block_sequence_broadcaster(
         &self,
     ) -> &broadcast::Sender<FlashBlockCompleteSequence<P>> {
