@@ -167,6 +167,32 @@ impl TrieUpdates {
         TrieUpdatesSorted { account_nodes, storage_tries }
     }
 
+    /// Creates a sorted copy without consuming self.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning HashMap metadata.
+    pub fn clone_into_sorted(&self) -> TrieUpdatesSorted {
+        let mut account_nodes = self
+            .account_nodes
+            .iter()
+            .map(|(path, node)| (*path, Some(node.clone())))
+            .collect::<Vec<_>>();
+
+        // Add removed nodes that aren't already updated (updated nodes take precedence)
+        account_nodes.extend(
+            self.removed_nodes
+                .iter()
+                .filter(|path| !self.account_nodes.contains_key(path))
+                .map(|path| (*path, None)),
+        );
+        account_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        let storage_tries = self
+            .storage_tries
+            .iter()
+            .map(|(&hashed_address, updates)| (hashed_address, updates.clone_into_sorted()))
+            .collect();
+        TrieUpdatesSorted { account_nodes, storage_tries }
+    }
+
     /// Converts trie updates into [`TrieUpdatesSortedRef`].
     pub fn into_sorted_ref<'a>(&'a self) -> TrieUpdatesSortedRef<'a> {
         let mut account_nodes = self.account_nodes.iter().collect::<Vec<_>>();
@@ -335,6 +361,27 @@ impl StorageTrieUpdates {
             .collect::<Vec<_>>();
 
         storage_nodes.extend(self.removed_nodes.into_iter().map(|path| (path, None)));
+        storage_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
+    }
+
+    /// Creates a sorted copy without consuming self.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning HashMap metadata.
+    pub fn clone_into_sorted(&self) -> StorageTrieUpdatesSorted {
+        let mut storage_nodes = self
+            .storage_nodes
+            .iter()
+            .map(|(path, node)| (*path, Some(node.clone())))
+            .collect::<Vec<_>>();
+
+        // Add removed nodes that aren't already updated (updated nodes take precedence)
+        storage_nodes.extend(
+            self.removed_nodes
+                .iter()
+                .filter(|path| !self.storage_nodes.contains_key(path))
+                .map(|path| (*path, None)),
+        );
         storage_nodes.sort_unstable_by(|a, b| a.0.cmp(&b.0));
 
         StorageTrieUpdatesSorted { is_deleted: self.is_deleted, storage_nodes }
