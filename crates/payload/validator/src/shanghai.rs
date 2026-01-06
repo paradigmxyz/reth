@@ -12,11 +12,11 @@ pub fn ensure_well_formed_fields<T: BlockBody>(
     if is_shanghai_active {
         if block_body.withdrawals().is_none() {
             // shanghai active but no withdrawals present
-            return Err(PayloadError::PostShanghaiBlockWithoutWithdrawals)
+            return Err(PayloadError::PostShanghaiBlockWithoutWithdrawals);
         }
     } else if block_body.withdrawals().is_some() {
         // shanghai not active but withdrawals present
-        return Err(PayloadError::PreShanghaiBlockWithWithdrawals)
+        return Err(PayloadError::PreShanghaiBlockWithWithdrawals);
     }
 
     Ok(())

@@ -233,7 +233,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                                 notify::EventKind::Create(_) |
                                 notify::EventKind::Remove(_)
                         ) {
-                            continue
+                            continue;
                         }
 
                         // We only trigger a re-initialization if a configuration file was
@@ -246,7 +246,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                                 .extension()
                                 .is_none_or(|s| s.to_str() != Some(CONFIG_FILE_EXTENSION))
                             {
-                                continue
+                                continue;
                             }
 
                             // Ensure it's well formatted static file name
@@ -255,7 +255,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                             )
                             .is_none()
                             {
-                                continue
+                                continue;
                             }
 
                             // If we can read the metadata and modified timestamp, ensure this is
@@ -266,7 +266,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                                 if last_event_timestamp.is_some_and(|last_timestamp| {
                                     last_timestamp >= current_modified_timestamp
                                 }) {
-                                    continue
+                                    continue;
                                 }
                                 last_event_timestamp = Some(current_modified_timestamp);
                             }
@@ -275,7 +275,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                             if let Err(err) = provider.initialize_index() {
                                 warn!(target: "providers::static_file", "failed to re-initialize index: {err}");
                             }
-                            break
+                            break;
                         }
                     }
 
@@ -385,7 +385,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             if let Some((_, range)) = block_index.iter().find(|(max_block, _)| block <= **max_block)
             {
                 // Found matching range for an existing file using block index
-                return *range
+                return *range;
             } else if let Some((_, range)) = block_index.last_key_value() {
                 // Didn't find matching range for an existing file, derive a new range from the end
                 // of the last existing file range.
@@ -395,7 +395,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
                 let blocks_after_last_range = block - range.end();
                 let segments_to_skip = (blocks_after_last_range - 1) / blocks_per_file;
                 let start = range.end() + 1 + segments_to_skip * blocks_per_file;
-                return SegmentRangeInclusive::new(start, start + blocks_per_file - 1)
+                return SegmentRangeInclusive::new(start, start + blocks_per_file - 1);
             }
         }
         // No block index is available, derive a new range using the fixed number of blocks,
@@ -577,7 +577,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             )
             .and_then(|(parsed_segment, block_range)| {
                 if parsed_segment == segment {
-                    return Some(block_range)
+                    return Some(block_range);
                 }
                 None
             }),
@@ -586,7 +586,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // Return cached `LoadedJar` or insert it for the first time, and then, return it.
         if let Some(block_range) = block_range {
-            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?))
+            return Ok(Some(self.get_or_create_jar_provider(segment, &block_range)?));
         }
 
         Ok(None)
@@ -641,7 +641,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ) -> ProviderResult<Vec<SegmentHeader>> {
         // Nothing to delete if block is 0.
         if block == 0 {
-            return Ok(Vec::new())
+            return Ok(Vec::new());
         }
 
         let highest_block = self.get_highest_static_file_block(segment);
@@ -649,12 +649,12 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         loop {
             let Some(block_height) = self.get_lowest_range_end(segment) else {
-                return Ok(deleted_headers)
+                return Ok(deleted_headers);
             };
 
             // Stop if we've reached the target block or the highest static file
             if block_height >= block || Some(block_height) == highest_block {
-                return Ok(deleted_headers)
+                return Ok(deleted_headers);
             }
 
             debug!(
@@ -777,7 +777,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         while let Some((tx_end, block_range)) = static_files_rev_iter.next() {
             if tx > *tx_end {
                 // request tx is higher than highest static file tx
-                return None
+                return None;
             }
             let tx_start = static_files_rev_iter.peek().map(|(tx_end, _)| *tx_end + 1).unwrap_or(0);
             if tx_start <= tx {
@@ -785,7 +785,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     segment,
                     Some(&index.expected_block_ranges_by_max_block),
                     block_range.end(),
-                ))
+                ));
             }
         }
         None
@@ -1040,7 +1040,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 info!(target: "reth::cli",
                     "Skipping storage verification for OP mainnet, expected inconsistency in OVM chain"
                 );
-                return Ok(None)
+                return Ok(None);
             }
         }
 
@@ -1090,18 +1090,18 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     if let Some(indices) = provider.block_body_indices(last_block)? {
                         debug!(target: "reth::providers::static_file", ?segment, last_block, last_tx_num = indices.last_tx_num(), highest_tx, "Found block body indices");
                         if indices.last_tx_num() <= highest_tx {
-                            break
+                            break;
                         }
                     } else {
                         debug!(target: "reth::providers::static_file", ?segment, last_block, "Block body indices not found, static files ahead of database");
                         // If the block body indices can not be found, then it means that static
                         // files is ahead of database, and the `ensure_invariants` check will fix
                         // it by comparing with stage checkpoints.
-                        break
+                        break;
                     }
                     if last_block == 0 {
                         debug!(target: "reth::providers::static_file", ?segment, "Reached block 0 in verification loop");
-                        break
+                        break;
                     }
                     last_block -= 1;
 
@@ -1203,7 +1203,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     // Old pruned nodes (including full node) do not store receipts as static
                     // files.
                     debug!(target: "reth::providers::static_file", ?segment, "Skipping receipts segment: receipts stored in database");
-                    return false
+                    return false;
                 }
 
                 if NamedChain::Gnosis == provider.chain_spec().chain_id() ||
@@ -1330,7 +1330,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         ?segment,
                         "Setting unwind target."
                     );
-                    return Ok(Some(highest_block))
+                    return Ok(Some(highest_block));
                 }
             }
 
@@ -1339,7 +1339,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     .is_none_or(|highest_entry| db_last_entry > highest_entry)
             {
                 debug!(target: "reth::providers::static_file", ?segment, db_last_entry, ?highest_static_file_entry, "Database has entries beyond static files, no unwind needed");
-                return Ok(None)
+                return Ok(None);
             }
         } else {
             debug!(target: "reth::providers::static_file", ?segment, "No database entries found");
@@ -1369,7 +1369,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 ?segment,
                 "Setting unwind target."
             );
-            return Ok(Some(highest_static_file_block))
+            return Ok(Some(highest_static_file_block));
         }
 
         // If the checkpoint is behind, then we failed to do a database commit **but committed** to
@@ -1498,7 +1498,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             // Iterate through all ranges in reverse order (highest to lowest)
             for range in ranges.values().rev() {
                 if let Some(res) = func(self.get_or_create_jar_provider(segment, range)?)? {
-                    return Ok(Some(res))
+                    return Ok(Some(res));
                 }
             }
         }
@@ -1555,14 +1555,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 match get_fn(&mut cursor, number)? {
                     Some(res) => {
                         if !predicate(&res) {
-                            break 'outer
+                            break 'outer;
                         }
                         result.push(res);
-                        break 'inner
+                        break 'inner;
                     }
                     None => {
                         if retrying {
-                            return Ok(result)
+                            return Ok(result);
                         }
                         // There is a very small chance of hitting a deadlock if two consecutive
                         // static files share the same bucket in the
@@ -1656,7 +1656,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         if static_file_upper_bound
             .is_some_and(|static_file_upper_bound| static_file_upper_bound >= number)
         {
-            return fetch_from_static_file(self)
+            return fetch_from_static_file(self);
         }
         fetch_from_database()
     }
@@ -1803,7 +1803,7 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
         segment: StaticFileSegment,
     ) -> ProviderResult<StaticFileProviderRWRefMut<'_, Self::Primitives>> {
         if self.access.is_read_only() {
-            return Err(ProviderError::ReadOnlyStaticFileAccess)
+            return Err(ProviderError::ReadOnlyStaticFileAccess);
         }
 
         trace!(target: "provider::static_file", ?block, ?segment, "Getting static file writer.");
@@ -1842,7 +1842,7 @@ impl<N: NodePrimitives<BlockHeader: Value>> HeaderProvider for StaticFileProvide
                 .get_two::<HeaderWithHashMask<Self::Header>>((&block_hash).into())?
                 .and_then(|(header, hash)| {
                     if hash == block_hash {
-                        return Some(header)
+                        return Some(header);
                     }
                     None
                 }))
@@ -1952,7 +1952,7 @@ impl<N: NodePrimitives<SignedTx: Value + SignedTransaction, Receipt: Value>> Rec
 
     fn receipt_by_hash(&self, hash: TxHash) -> ProviderResult<Option<Self::Receipt>> {
         if let Some(num) = self.transaction_id(hash)? {
-            return self.receipt(num)
+            return self.receipt(num);
         }
         Ok(None)
     }

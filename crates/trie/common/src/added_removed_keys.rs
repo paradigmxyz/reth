@@ -47,7 +47,7 @@ impl MultiAddedRemovedKeys {
                 if account.is_empty() {
                     self.account.insert_removed(*hashed_address);
                 }
-                continue
+                continue;
             }
 
             let storage_removed_keys =

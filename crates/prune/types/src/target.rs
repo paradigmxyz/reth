@@ -200,7 +200,7 @@ impl PruneModes {
                             target_block,
                             history_type: history_type.clone(),
                             limit: *limit,
-                        })
+                        });
                     }
                 }
             }

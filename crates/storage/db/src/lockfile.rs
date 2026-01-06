@@ -55,7 +55,7 @@ impl StorageLock {
                 start_time = process_lock.start_time,
                 "Storage lock already taken."
             );
-            return Err(StorageLockError::Taken(process_lock.pid))
+            return Err(StorageLockError::Taken(process_lock.pid));
         }
 
         Ok(Self(Arc::new(StorageLockInner::new(file_path)?)))

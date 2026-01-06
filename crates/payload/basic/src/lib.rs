@@ -377,7 +377,7 @@ where
         // check if the deadline is reached
         if this.deadline.as_mut().poll(cx).is_ready() {
             trace!(target: "payload_builder", "payload building deadline reached");
-            return Poll::Ready(Ok(()))
+            return Poll::Ready(Ok(()));
         }
 
         // check if the interval is reached
@@ -595,13 +595,13 @@ where
                 |err| warn!(target: "payload_builder", %err, "failed to resolve pending payload"),
             ) {
                 debug!(target: "payload_builder", "resolving better payload");
-                return Poll::Ready(Ok(payload))
+                return Poll::Ready(Ok(payload));
             }
         }
 
         if let Some(best) = this.best_payload.take() {
             debug!(target: "payload_builder", "resolving best payload");
-            return Poll::Ready(Ok(best))
+            return Poll::Ready(Ok(best));
         }
 
         if let Some(fut) = Pin::new(&mut this.empty_payload).as_pin_mut() &&
@@ -618,11 +618,11 @@ where
                     Poll::Ready(res)
                 }
                 Err(err) => Poll::Ready(Err(err.into())),
-            }
+            };
         }
 
         if this.is_empty() {
-            return Poll::Ready(Err(PayloadBuilderError::MissingPayload))
+            return Poll::Ready(Err(PayloadBuilderError::MissingPayload));
         }
 
         Poll::Pending

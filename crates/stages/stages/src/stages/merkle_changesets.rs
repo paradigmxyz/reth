@@ -63,7 +63,7 @@ impl MerkleChangeSets {
             // the computed data
             .map(|block_number| block_number + 1)
         else {
-            return Ok(0..0)
+            return Ok(0..0);
         };
 
         Ok(from..to + 1)
@@ -149,7 +149,7 @@ impl MerkleChangeSets {
                     GotExpected { got, expected }.into(),
                 )),
                 block: Box::new(header.block_with_parent()),
-            })
+            });
         }
 
         Ok(trie_updates)
@@ -317,7 +317,7 @@ where
             .unwrap_or(0);
 
         if input.target.is_none_or(|target| merkle_checkpoint != target) {
-            return Err(StageError::Fatal(eyre::eyre!("Cannot sync stage to block {:?} when MerkleExecute is at block {merkle_checkpoint:?}", input.target).into()))
+            return Err(StageError::Fatal(eyre::eyre!("Cannot sync stage to block {:?} when MerkleExecute is at block {merkle_checkpoint:?}", input.target).into()));
         }
 
         let mut target_range = self.determine_target_range(provider)?;
@@ -431,7 +431,7 @@ where
             provider.clear_trie_changesets()?;
             provider
                 .save_stage_checkpoint(StageId::MerkleChangeSets, StageCheckpoint::default())?;
-            return Ok(UnwindOutput { checkpoint: StageCheckpoint::default() })
+            return Ok(UnwindOutput { checkpoint: StageCheckpoint::default() });
         }
 
         // `computed_range.end` is exclusive

@@ -75,7 +75,7 @@ where
     async fn process_batch(pool: &Pool, mut batch: Vec<BatchTxRequest<Pool::Transaction>>) {
         if batch.len() == 1 {
             Self::process_request(pool, batch.remove(0)).await;
-            return
+            return;
         }
 
         let (pool_transactions, response_tx): (Vec<_>, Vec<_>) =

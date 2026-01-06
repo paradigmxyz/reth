@@ -33,7 +33,7 @@ where
 {
     if EitherWriter::receipts_destination(provider).is_static_file() {
         debug!(target: "pruner", "Pruning receipts from static files.");
-        return segments::prune_static_files(provider, input, StaticFileSegment::Receipts)
+        return segments::prune_static_files(provider, input, StaticFileSegment::Receipts);
     }
     debug!(target: "pruner", "Pruning receipts from database.");
 
@@ -42,7 +42,7 @@ where
         Some(range) => range,
         None => {
             trace!(target: "pruner", "No receipts to prune");
-            return Ok(SegmentOutput::done())
+            return Ok(SegmentOutput::done());
         }
     };
     let tx_range_end = *tx_range.end();

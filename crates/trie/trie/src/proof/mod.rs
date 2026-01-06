@@ -358,7 +358,7 @@ where
 
         // short circuit on empty storage
         if hashed_storage_cursor.is_storage_empty()? {
-            return Ok(StorageMultiProof::empty())
+            return Ok(StorageMultiProof::empty());
         }
 
         let mut discard_trie_cursor_metrics = TrieCursorMetricsCache::default();

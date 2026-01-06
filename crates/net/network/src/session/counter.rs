@@ -83,7 +83,7 @@ impl SessionCounter {
         if let Some(limit) = limit &&
             current >= limit
         {
-            return Err(ExceedsSessionLimit(limit))
+            return Err(ExceedsSessionLimit(limit));
         }
         Ok(())
     }

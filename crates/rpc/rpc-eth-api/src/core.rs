@@ -18,7 +18,7 @@ use alloy_serde::JsonStorageKey;
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
 use reth_primitives_traits::TxTy;
 use reth_rpc_convert::RpcTxReq;
-use reth_rpc_eth_types::FillTransaction;
+use reth_rpc_eth_types::{EthApiError, FillTransaction};
 use reth_rpc_server_types::{result::internal_rpc_err, ToRpcResult};
 use tracing::trace;
 
@@ -797,21 +797,25 @@ where
 
     /// Handler for: `eth_mining`
     async fn is_mining(&self) -> RpcResult<bool> {
-        Err(internal_rpc_err("unimplemented"))
+        trace!(target: "rpc::eth", "Serving eth_mining");
+        Ok(false)
     }
 
     /// Handler for: `eth_hashrate`
     async fn hashrate(&self) -> RpcResult<U256> {
+        trace!(target: "rpc::eth", "Serving eth_hashrate");
         Ok(U256::ZERO)
     }
 
     /// Handler for: `eth_getWork`
     async fn get_work(&self) -> RpcResult<Work> {
-        Err(internal_rpc_err("unimplemented"))
+        trace!(target: "rpc::eth", "Serving eth_getWork");
+        Err(pow_rpc_unavailable("eth_getWork").into())
     }
 
     /// Handler for: `eth_submitHashrate`
     async fn submit_hashrate(&self, _hashrate: U256, _id: B256) -> RpcResult<bool> {
+        trace!(target: "rpc::eth", "Serving eth_submitHashrate");
         Ok(false)
     }
 
@@ -822,7 +826,8 @@ where
         _pow_hash: B256,
         _mix_digest: B256,
     ) -> RpcResult<bool> {
-        Err(internal_rpc_err("unimplemented"))
+        trace!(target: "rpc::eth", "Serving eth_submitWork");
+        Err(pow_rpc_unavailable("eth_submitWork").into())
     }
 
     /// Handler for: `eth_sendTransaction`
@@ -881,4 +886,8 @@ where
         trace!(target: "rpc::eth", "Serving eth_getAccountInfo");
         Ok(EthState::get_account_info(self, address, block).await?)
     }
+}
+
+fn pow_rpc_unavailable(_method: &str) -> EthApiError {
+    EthApiError::Unsupported("Proof-of-Work mining RPCs are not supported by this node.")
 }

@@ -34,7 +34,7 @@ pub fn calculate_gas_used_and_next_log_index(
 /// See [`alloy_eips::eip2718::Decodable2718::decode_2718_exact`]
 pub fn recover_raw_transaction<T: SignedTransaction>(data: &[u8]) -> EthResult<Recovered<T>> {
     if data.is_empty() {
-        return Err(EthApiError::EmptyRawTransactionData)
+        return Err(EthApiError::EmptyRawTransactionData);
     }
 
     let transaction =

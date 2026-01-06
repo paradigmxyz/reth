@@ -109,7 +109,7 @@ impl<Cons, Pooled> MaybeInteropTransaction for OpPooledTransaction<Cons, Pooled>
     fn interop_deadline(&self) -> Option<u64> {
         let interop = self.interop.load(Ordering::Relaxed);
         if interop > NO_INTEROP_TX {
-            return Some(interop)
+            return Some(interop);
         }
         None
     }

@@ -189,7 +189,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             if let Some(tx) =
                 self.pool().get_pooled_transaction_element(hash).map(|tx| tx.encoded_2718().into())
             {
-                return Ok(Some(tx))
+                return Ok(Some(tx));
             }
 
             self.spawn_blocking_io(move |ref this| {
@@ -300,7 +300,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
 
                     return Ok(Some(
                         self.converter().fill(tx.clone().with_signer(*signer), tx_info)?,
-                    ))
+                    ));
                 }
             }
 
@@ -396,7 +396,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             if let Some(block) = self.recovered_block(block_id).await? &&
                 let Some(tx) = block.body().transactions().get(index)
             {
-                return Ok(Some(tx.encoded_2718().into()))
+                return Ok(Some(tx.encoded_2718().into()));
             }
 
             Ok(None)
@@ -419,7 +419,7 @@ pub trait EthTransactions: LoadTransaction<Provider: BlockReaderIdExt> {
             };
 
             if self.find_signer(&from).is_err() {
-                return Err(SignError::NoAccount.into_eth_err())
+                return Err(SignError::NoAccount.into_eth_err());
             }
 
             // set nonce if not already set before

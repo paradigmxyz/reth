@@ -48,7 +48,7 @@ pub enum DatabaseVersionError {
 pub fn check_db_version_file<P: AsRef<Path>>(db_path: P) -> Result<(), DatabaseVersionError> {
     let version = get_db_version(db_path)?;
     if version != DB_VERSION {
-        return Err(DatabaseVersionError::VersionMismatch { version })
+        return Err(DatabaseVersionError::VersionMismatch { version });
     }
 
     Ok(())

@@ -80,13 +80,13 @@ impl reth_codecs::Compact for TrieChangeSetsEntry {
             return (
                 Self { nibbles: StoredNibblesSubKey::from(super::Nibbles::default()), node: None },
                 buf,
-            )
+            );
         }
 
         let (nibbles, buf) = StoredNibblesSubKey::from_compact(buf, 65);
 
         if len <= 65 {
-            return (Self { nibbles, node: None }, buf)
+            return (Self { nibbles, node: None }, buf);
         }
 
         let (node, buf) = BranchNodeCompact::from_compact(buf, len - 65);

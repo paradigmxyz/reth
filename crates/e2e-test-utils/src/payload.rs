@@ -61,7 +61,7 @@ impl<T: PayloadTypes> PayloadTestContext<T> {
                 self.payload_builder.best_payload(payload_id).await.transpose().ok().flatten();
             if payload.is_none_or(|p| p.block().body().transactions().is_empty()) {
                 tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-                continue
+                continue;
             }
             // Resolve payload once its built
             self.payload_builder

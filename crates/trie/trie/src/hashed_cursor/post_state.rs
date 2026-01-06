@@ -247,7 +247,7 @@ where
                 {
                     // If overlay returns a value prior to the DB's value, or the DB is exhausted,
                     // then we return the overlay's value.
-                    return Ok(Some((mem_key, value)))
+                    return Ok(Some((mem_key, value)));
                 }
                 // All other cases:
                 // - mem_key > db_key

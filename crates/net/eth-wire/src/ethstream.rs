@@ -284,7 +284,7 @@ where
             // but we can start the disconnect process. The actual disconnect will be handled
             // asynchronously by the caller or the stream's poll methods.
             let _disconnect_future = this.inner.disconnect(DisconnectReason::ProtocolBreach);
-            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake))
+            return Err(EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake));
         }
 
         self.project()

@@ -80,7 +80,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
 
         if self.row as usize >= self.jar.rows {
             // Has reached the end
-            return Ok(None)
+            return Ok(None);
         }
 
         let mut row = Vec::with_capacity(self.jar.columns);
@@ -120,7 +120,7 @@ impl<'a, H: NippyJarHeader> NippyJarCursor<'a, H> {
 
         if self.row as usize >= self.jar.rows {
             // Has reached the end
-            return Ok(None)
+            return Ok(None);
         }
 
         let columns = self.jar.columns;

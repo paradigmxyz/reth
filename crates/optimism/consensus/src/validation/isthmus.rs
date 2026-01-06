@@ -86,7 +86,7 @@ where
         return Err(OpConsensusError::L2WithdrawalsRootMismatch {
             header: header_storage_root,
             exec_res: storage_root,
-        })
+        });
     }
 
     Ok(())
@@ -118,7 +118,7 @@ where
         return Err(OpConsensusError::L2WithdrawalsRootMismatch {
             header: header_storage_root,
             exec_res: storage_root,
-        })
+        });
     }
 
     Ok(())

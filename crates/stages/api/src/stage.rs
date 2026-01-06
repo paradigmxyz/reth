@@ -101,7 +101,7 @@ impl ExecInput {
         let Some(lowest_transactions_block) =
             provider.static_file_provider().get_lowest_range_start(StaticFileSegment::Transactions)
         else {
-            return Ok(None)
+            return Ok(None);
         };
 
         // We can only process transactions that have associated static files, so we cap the start
@@ -117,7 +117,7 @@ impl ExecInput {
         // and we return early. It's possible to trigger this scenario when running `reth
         // stage run` manually for a range of transactions that doesn't exist.
         if start_block > target_block {
-            return Ok(None)
+            return Ok(None);
         }
 
         let start_block_body = provider
@@ -134,7 +134,7 @@ impl ExecInput {
 
         if all_tx_cnt == 0 {
             // if there is no more transaction return back.
-            return Ok(None)
+            return Ok(None);
         }
 
         // get block of this tx

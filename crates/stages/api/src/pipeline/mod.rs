@@ -159,14 +159,14 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     PipelineTarget::Sync(tip) => self.set_tip(tip),
                     PipelineTarget::Unwind(target) => {
                         if let Err(err) = self.move_to_static_files() {
-                            return (self, Err(err.into()))
+                            return (self, Err(err.into()));
                         }
                         if let Err(err) = self.unwind(target, None) {
-                            return (self, Err(err))
+                            return (self, Err(err));
                         }
                         self.progress.update(target);
 
-                        return (self, Ok(ControlFlow::Continue { block_number: target }))
+                        return (self, Ok(ControlFlow::Continue { block_number: target }));
                     }
                 }
             }
@@ -186,7 +186,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
             let next_action = self.run_loop().await?;
 
             if next_action.is_unwind() && self.fail_on_unwind {
-                return Err(PipelineError::UnexpectedUnwind)
+                return Err(PipelineError::UnexpectedUnwind);
             }
 
             // Terminate the loop early if it's reached the maximum user
@@ -204,7 +204,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     max_block = ?self.max_block,
                     "Terminating pipeline."
                 );
-                return Ok(())
+                return Ok(());
             }
         }
     }
@@ -242,7 +242,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 ControlFlow::Continue { block_number } => self.progress.update(block_number),
                 ControlFlow::Unwind { target, bad_block } => {
                     self.unwind(target, Some(bad_block.block.number))?;
-                    return Ok(ControlFlow::Unwind { target, bad_block })
+                    return Ok(ControlFlow::Unwind { target, bad_block });
                 }
             }
 
@@ -333,7 +333,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 );
                 self.event_sender.notify(PipelineEvent::Skipped { stage_id });
 
-                continue
+                continue;
             }
 
             info!(
@@ -401,7 +401,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     Err(err) => {
                         self.event_sender.notify(PipelineEvent::Error { stage_id });
 
-                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))))
+                        return Err(PipelineError::Stage(StageError::Fatal(Box::new(err))));
                     }
                 }
             }
@@ -440,7 +440,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                 // We reached the maximum block, so we skip the stage
                 return Ok(ControlFlow::NoProgress {
                     block_number: prev_checkpoint.map(|progress| progress.block_number),
-                })
+                });
             }
 
             let exec_input = ExecInput { target, checkpoint: prev_checkpoint };
@@ -513,7 +513,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                             ControlFlow::Continue { block_number }
                         } else {
                             ControlFlow::NoProgress { block_number: Some(block_number) }
-                        })
+                        });
                     }
                 }
                 Err(err) => {
@@ -521,7 +521,7 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
                     self.event_sender.notify(PipelineEvent::Error { stage_id });
 
                     if let Some(ctrl) = self.on_stage_error(stage_id, prev_checkpoint, err)? {
-                        return Ok(ctrl)
+                        return Ok(ctrl);
                     }
                 }
             }
