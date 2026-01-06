@@ -1,13 +1,14 @@
 //! Optimism implementation of flashblock traits.
 
-use crate::traits::{FlashblockDiff, FlashblockPayload, FlashblockPayloadBase};
+use crate::traits::{FlashblockDiff, FlashblockMetadata, FlashblockPayload, FlashblockPayloadBase};
 use alloy_consensus::crypto::RecoveryError;
 use alloy_eips::eip2718::WithEncoded;
 use alloy_primitives::{Bloom, Bytes, B256};
 use alloy_rpc_types_engine::PayloadId;
-use op_alloy_consensus::OpTxEnvelope;
+use op_alloy_consensus::{OpReceipt, OpTxEnvelope};
 use op_alloy_rpc_types_engine::{
     OpFlashblockPayload, OpFlashblockPayloadBase, OpFlashblockPayloadDelta,
+    OpFlashblockPayloadMetadata,
 };
 use reth_primitives_traits::Recovered;
 
@@ -51,10 +52,19 @@ impl FlashblockDiff for OpFlashblockPayloadDelta {
     }
 }
 
+impl FlashblockMetadata for OpFlashblockPayloadMetadata {
+    type Receipt = OpReceipt;
+
+    fn receipts(&self) -> impl Iterator<Item = (B256, &Self::Receipt)> {
+        self.receipts.iter().map(|(k, v)| (*k, v))
+    }
+}
+
 impl FlashblockPayload for OpFlashblockPayload {
     type Base = OpFlashblockPayloadBase;
     type Diff = OpFlashblockPayloadDelta;
     type SignedTx = OpTxEnvelope;
+    type Metadata = OpFlashblockPayloadMetadata;
 
     fn index(&self) -> u64 {
         self.index
@@ -70,6 +80,10 @@ impl FlashblockPayload for OpFlashblockPayload {
 
     fn diff(&self) -> &Self::Diff {
         &self.diff
+    }
+
+    fn metadata(&self) -> &Self::Metadata {
+        &self.metadata
     }
 
     fn block_number(&self) -> u64 {

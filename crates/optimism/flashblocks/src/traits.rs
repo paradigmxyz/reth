@@ -3,7 +3,7 @@
 //! These traits enable chain-specific flashblock implementations while sharing
 //! the core flashblock infrastructure.
 
-use alloy_consensus::crypto::RecoveryError;
+use alloy_consensus::{crypto::RecoveryError, TxReceipt};
 use alloy_primitives::{Bloom, Bytes, B256};
 use alloy_rpc_types_engine::PayloadId;
 
@@ -38,6 +38,15 @@ pub trait FlashblockDiff: Clone + Send + Sync + 'static {
     fn transactions_raw(&self) -> &[Bytes];
 }
 
+/// Metadata associated with a flashblock payload.
+pub trait FlashblockMetadata: Clone + Send + Sync + 'static {
+    /// The receipt type for this chain.
+    type Receipt: TxReceipt<Log = alloy_primitives::Log>;
+
+    /// Returns an iterator over receipts.
+    fn receipts(&self) -> impl Iterator<Item = (B256, &Self::Receipt)>;
+}
+
 /// A flashblock payload representing one slice of a block.
 ///
 /// Flashblocks are incremental updates to block state, allowing for faster
@@ -51,6 +60,8 @@ pub trait FlashblockPayload:
     type Diff: FlashblockDiff;
     /// The signed transaction type for this chain.
     type SignedTx: reth_primitives_traits::SignedTransaction;
+    /// The metadata type containing chain-specific information like receipts.
+    type Metadata: FlashblockMetadata;
 
     /// Sequential index of this flashblock within the current block's sequence.
     fn index(&self) -> u64;
@@ -63,6 +74,9 @@ pub trait FlashblockPayload:
 
     /// State diff for this flashblock.
     fn diff(&self) -> &Self::Diff;
+
+    /// Metadata for this flashblock (receipts, balance changes, etc).
+    fn metadata(&self) -> &Self::Metadata;
 
     /// Block number this flashblock belongs to.
     fn block_number(&self) -> u64;

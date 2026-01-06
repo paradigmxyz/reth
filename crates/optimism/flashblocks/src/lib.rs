@@ -15,7 +15,7 @@ use std::sync::Arc;
 use reth_optimism_primitives as _;
 
 pub mod traits;
-pub use traits::{FlashblockDiff, FlashblockPayload, FlashblockPayloadBase};
+pub use traits::{FlashblockDiff, FlashblockMetadata, FlashblockPayload, FlashblockPayloadBase};
 
 mod op_impl;
 

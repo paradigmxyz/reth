@@ -47,6 +47,7 @@ impl FlashblockPayload for CustomFlashblockPayload {
     type Base = CustomFlashblockPayloadBase;
     type Diff = OpFlashblockPayloadDelta;
     type SignedTx = CustomTransaction;
+    type Metadata = OpFlashblockPayloadMetadata;
 
     fn index(&self) -> u64 {
         self.index
@@ -62,6 +63,10 @@ impl FlashblockPayload for CustomFlashblockPayload {
 
     fn diff(&self) -> &Self::Diff {
         &self.diff
+    }
+
+    fn metadata(&self) -> &Self::Metadata {
+        &self.metadata
     }
 
     fn block_number(&self) -> u64 {

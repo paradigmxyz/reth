@@ -29,8 +29,8 @@ use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
 use reth_optimism_flashblocks::{
     FlashBlockBuildInfo, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
-    FlashBlockConsensusClient, FlashBlockService, FlashblockDiff, FlashblockPayload,
-    FlashblocksListeners, PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
+    FlashBlockConsensusClient, FlashBlockService, FlashblockDiff, FlashblockMetadata,
+    FlashblockPayload, FlashblocksListeners, PendingBlockRx, PendingFlashBlock, WsFlashBlockStream,
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc::eth::core::EthApiInner;
@@ -174,8 +174,7 @@ impl<N: RpcNodeCore, Rpc: RpcConvert, F: FlashblockPayload> OpEthApi<N, Rpc, F> 
                             return futures::future::ready(Some(Vec::new()))
                         };
 
-                        let receipts =
-                            fb.metadata().receipts.iter().map(|(tx, receipt)| (*tx, receipt));
+                        let receipts = fb.metadata().receipts();
 
                         let all_logs = matching_block_logs_with_tx_hashes(
                             &filter,
