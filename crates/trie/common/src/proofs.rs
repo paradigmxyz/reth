@@ -16,7 +16,7 @@ use alloy_trie::{
 };
 use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
-use rayon::iter::{IntoParallelIterator, FromParallelIterator, ParallelIterator};
+use rayon::iter::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::Account;
 
 /// Proof targets map.
