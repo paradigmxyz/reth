@@ -57,7 +57,7 @@ use std::{
     time::Duration,
 };
 use tokio::sync::{mpsc::error::TrySendError, oneshot, oneshot::error::RecvError};
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// The type responsible for fetching missing transactions from peers.
 ///
@@ -449,7 +449,10 @@ impl<N: NetworkPrimitives> TransactionFetcher<N> {
         );
 
         // peer should always exist since `is_session_active` already checked
-        let Some(peer) = peers.get(&peer_id) else { return false };
+        let Some(peer) = peers.get(&peer_id) else {
+            debug!(target: "net::tx", ?peer_id, "peer not found after is_session_active check, possible race condition");
+            return false
+        };
         let conn_eth_version = peer.version;
 
         // fill the request with more hashes pending fetch that have been announced by the peer.
