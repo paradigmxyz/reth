@@ -116,7 +116,7 @@ where
 /// these stages that this work has already been done. Otherwise, there might be some conflict with
 /// database integrity.
 pub fn save_stage_checkpoints<P>(
-    provider: &P,
+    provider: P,
     from: BlockNumber,
     to: BlockNumber,
     processed: u64,
@@ -170,18 +170,14 @@ where
     <P as NodePrimitivesProvider>::Primitives: NodePrimitives<BlockHeader = BH, BlockBody = BB>,
 {
     let reader = open(meta)?;
-    let iter =
-        reader
-            .iter()
-            .map(Box::new(decode)
-                as Box<dyn Fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>);
+    let iter = reader.iter().map(decode as fn(_) -> _);
     let iter = ProcessIter { iter, era: meta };
 
     process_iter(iter, writer, provider, hash_collector, block_numbers)
 }
 
 type ProcessInnerIter<R, BH, BB> =
-    Map<BlockTupleIterator<R>, Box<dyn Fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>>;
+    Map<BlockTupleIterator<R>, fn(Result<BlockTuple, E2sError>) -> eyre::Result<(BH, BB)>>;
 
 /// An iterator that wraps era file extraction. After the final item [`EraMeta::mark_as_processed`]
 /// is called to ensure proper cleanup.
@@ -309,7 +305,7 @@ where
         writer.append_header(&header, &hash)?;
 
         // Write bodies to database.
-        provider.append_block_bodies(vec![(header.number(), Some(body))])?;
+        provider.append_block_bodies(vec![(header.number(), Some(&body))])?;
 
         hash_collector.insert(hash, number)?;
     }

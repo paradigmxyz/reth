@@ -107,7 +107,7 @@ where
             debug!(
                 target: "consensus::debug-client",
                 url=%self.url,
-                "Re-estbalishing block subscription",
+                "Re-establishing block subscription",
             );
         }
     }

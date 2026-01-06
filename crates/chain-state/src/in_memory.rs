@@ -86,14 +86,20 @@ impl<N: NodePrimitives> InMemoryState<N> {
     ///
     /// This tries to acquire a read lock. Drop any write locks before calling this.
     pub(crate) fn update_metrics(&self) {
-        let numbers = self.numbers.read();
-        if let Some((earliest_block_number, _)) = numbers.first_key_value() {
-            self.metrics.earliest_block.set(*earliest_block_number as f64);
+        let (count, earliest, latest) = {
+            let numbers = self.numbers.read();
+            let count = numbers.len();
+            let earliest = numbers.first_key_value().map(|(number, _)| *number);
+            let latest = numbers.last_key_value().map(|(number, _)| *number);
+            (count, earliest, latest)
+        };
+        if let Some(earliest_block_number) = earliest {
+            self.metrics.earliest_block.set(earliest_block_number as f64);
         }
-        if let Some((latest_block_number, _)) = numbers.last_key_value() {
-            self.metrics.latest_block.set(*latest_block_number as f64);
+        if let Some(latest_block_number) = latest {
+            self.metrics.latest_block.set(latest_block_number as f64);
         }
-        self.metrics.num_blocks.set(numbers.len() as f64);
+        self.metrics.num_blocks.set(count as f64);
     }
 
     /// Returns the state for a given block hash.
@@ -664,22 +670,14 @@ impl<N: NodePrimitives> BlockState<N> {
         receipts.first().map(|receipts| receipts.deref()).unwrap_or_default()
     }
 
-    /// Returns a vector of __parent__ `BlockStates`.
+    /// Returns an iterator over __parent__ `BlockStates`.
     ///
-    /// The block state order in the output vector is newest to oldest (highest to lowest):
+    /// The block state order is newest to oldest (highest to lowest):
     /// `[5,4,3,2,1]`
     ///
     /// Note: This does not include self.
-    pub fn parent_state_chain(&self) -> Vec<&Self> {
-        let mut parents = Vec::new();
-        let mut current = self.parent.as_deref();
-
-        while let Some(parent) = current {
-            parents.push(parent);
-            current = parent.parent.as_deref();
-        }
-
-        parents
+    pub fn parent_state_chain(&self) -> impl Iterator<Item = &Self> + '_ {
+        std::iter::successors(self.parent.as_deref(), |state| state.parent.as_deref())
     }
 
     /// Returns a vector of `BlockStates` representing the entire in memory chain.
@@ -690,6 +688,11 @@ impl<N: NodePrimitives> BlockState<N> {
     }
 
     /// Appends the parent chain of this [`BlockState`] to the given vector.
+    ///
+    /// Parents are appended in order from newest to oldest (highest to lowest).
+    /// This does not include self, only the parent states.
+    ///
+    /// This is a convenience method equivalent to `chain.extend(self.parent_state_chain())`.
     pub fn append_parent_chain<'a>(&'a self, chain: &mut Vec<&'a Self>) {
         chain.extend(self.parent_state_chain());
     }
@@ -1453,19 +1456,18 @@ mod tests {
         let mut test_block_builder: TestBlockBuilder = TestBlockBuilder::default();
         let chain = create_mock_state_chain(&mut test_block_builder, 4);
 
-        let parents = chain[3].parent_state_chain();
+        let parents: Vec<_> = chain[3].parent_state_chain().collect();
         assert_eq!(parents.len(), 3);
         assert_eq!(parents[0].block().recovered_block().number, 3);
         assert_eq!(parents[1].block().recovered_block().number, 2);
         assert_eq!(parents[2].block().recovered_block().number, 1);
 
-        let parents = chain[2].parent_state_chain();
+        let parents: Vec<_> = chain[2].parent_state_chain().collect();
         assert_eq!(parents.len(), 2);
         assert_eq!(parents[0].block().recovered_block().number, 2);
         assert_eq!(parents[1].block().recovered_block().number, 1);
 
-        let parents = chain[0].parent_state_chain();
-        assert_eq!(parents.len(), 0);
+        assert_eq!(chain[0].parent_state_chain().count(), 0);
     }
 
     #[test]
@@ -1476,7 +1478,7 @@ mod tests {
             create_mock_state(&mut test_block_builder, single_block_number, B256::random());
         let single_block_hash = single_block.block().recovered_block().hash();
 
-        let parents = single_block.parent_state_chain();
+        let parents: Vec<_> = single_block.parent_state_chain().collect();
         assert_eq!(parents.len(), 0);
 
         let block_state_chain = single_block.chain().collect::<Vec<_>>();

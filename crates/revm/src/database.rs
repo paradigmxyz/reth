@@ -9,7 +9,7 @@ use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
 /// A helper trait responsible for providing state necessary for EVM execution.
 ///
 /// This serves as the data layer for [`Database`].
-pub trait EvmStateProvider: Send + Sync {
+pub trait EvmStateProvider {
     /// Get basic account information.
     ///
     /// Returns [`None`] if the account doesn't exist.

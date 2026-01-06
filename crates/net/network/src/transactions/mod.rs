@@ -860,9 +860,8 @@ where
         peer_id: PeerId,
         propagation_mode: PropagationMode,
     ) -> Option<PropagatedTransactions> {
-        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
-
         let peer = self.peers.get_mut(&peer_id)?;
+        trace!(target: "net::tx", ?peer_id, "Propagating transactions to peer");
         let mut propagated = PropagatedTransactions::default();
 
         // filter all transactions unknown to the peer
@@ -1932,8 +1931,14 @@ impl PooledTransactionsHashesBuilder {
 
     fn build(self) -> NewPooledTransactionHashes {
         match self {
-            Self::Eth66(msg) => msg.into(),
-            Self::Eth68(msg) => msg.into(),
+            Self::Eth66(mut msg) => {
+                msg.0.shrink_to_fit();
+                msg.into()
+            }
+            Self::Eth68(mut msg) => {
+                msg.shrink_to_fit();
+                msg.into()
+            }
         }
     }
 }

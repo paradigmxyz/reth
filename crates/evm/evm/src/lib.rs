@@ -61,8 +61,6 @@ pub use alloy_evm::{
     *,
 };
 
-pub use alloy_evm::block::state_changes as state_change;
-
 /// A complete configuration of EVM for Reth.
 ///
 /// This trait encapsulates complete configuration required for transaction execution and block
@@ -258,7 +256,7 @@ pub trait ConfigureEvm: Clone + Debug + Send + Sync + Unpin {
         attributes: Self::NextBlockEnvCtx,
     ) -> Result<ExecutionCtxFor<'_, Self>, Self::Error>;
 
-    /// Returns a [`TxEnv`] from a transaction and [`Address`].
+    /// Returns a [`TxEnv`] from a transaction.
     fn tx_env(&self, transaction: impl IntoTxEnv<TxEnvFor<Self>>) -> TxEnvFor<Self> {
         transaction.into_tx_env()
     }
