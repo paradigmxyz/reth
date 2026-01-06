@@ -89,8 +89,8 @@ where
                 match res {
                     Ok(block) => {
                         if tx.send((self.convert)(block)).await.is_err() {
-                            // Channel closed.
-                            break;
+                            // Channel closed - receiver dropped, exit completely.
+                            return;
                         }
                     }
                     Err(err) => {
