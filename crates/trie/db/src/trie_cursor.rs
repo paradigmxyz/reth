@@ -120,7 +120,11 @@ where
         + DbDupCursorRO<tables::StoragesTrie>
         + DbDupCursorRW<tables::StoragesTrie>,
 {
-    /// Writes storage updates that are already sorted
+    /// Writes storage updates that are already sorted.
+    ///
+    /// This method implements a locality optimization: since updates are sorted, it tracks
+    /// the cursor position and uses `next_dup` (O(1)) to advance to the next entry instead
+    /// of performing expensive `seek_by_key_subkey` operations (O(log N)) for each update.
     pub fn write_storage_trie_updates_sorted(
         &mut self,
         updates: &StorageTrieUpdatesSorted,
@@ -131,25 +135,61 @@ where
         }
 
         let mut num_entries = 0;
+
+        // Track cursor position for locality optimization
+        // This stores the current DB entry the cursor is pointing at (or None if
+        // exhausted/unpositioned)
+        let mut current_db_entry: Option<StorageTrieEntry> = None;
+        let mut cursor_positioned = false;
+
         for (nibbles, maybe_updated) in updates.storage_nodes.iter().filter(|(n, _)| !n.is_empty())
         {
             num_entries += 1;
-            let nibbles = StoredNibblesSubKey(*nibbles);
-            // Delete the old entry if it exists.
-            if self
-                .cursor
-                .seek_by_key_subkey(self.hashed_address, nibbles.clone())?
-                .filter(|e| e.nibbles == nibbles)
-                .is_some()
-            {
-                self.cursor.delete_current()?;
+            let target_nibbles = StoredNibblesSubKey(*nibbles);
+
+            // Locality optimization: advance cursor to find the target key
+            // Since updates are sorted, we only need to move forward
+            loop {
+                if !cursor_positioned {
+                    // First iteration: seek to the target
+                    current_db_entry = self
+                        .cursor
+                        .seek_by_key_subkey(self.hashed_address, target_nibbles.clone())?;
+                    cursor_positioned = true;
+                    break;
+                }
+
+                match &current_db_entry {
+                    None => {
+                        // DB cursor exhausted, no more entries to check
+                        break;
+                    }
+                    Some(entry) if entry.nibbles < target_nibbles => {
+                        // Current DB entry is before target, advance using next_dup
+                        current_db_entry = self.cursor.next_dup()?.map(|(_, v)| v);
+                    }
+                    Some(entry) if entry.nibbles >= target_nibbles => {
+                        // Found entry at or past target, stop advancing
+                        break;
+                    }
+                    _ => break,
+                }
             }
 
-            // There is an updated version of this node, insert new entry.
+            // Check if we need to delete an existing entry (exact match)
+            if let Some(entry) = &current_db_entry &&
+                entry.nibbles == target_nibbles
+            {
+                self.cursor.delete_current()?;
+                // After deletion, advance to next entry
+                current_db_entry = self.cursor.next_dup()?.map(|(_, v)| v);
+            }
+
+            // Insert the new entry if there's an update
             if let Some(node) = maybe_updated {
                 self.cursor.upsert(
                     self.hashed_address,
-                    &StorageTrieEntry { nibbles, node: node.clone() },
+                    &StorageTrieEntry { nibbles: target_nibbles, node: node.clone() },
                 )?;
             }
         }
