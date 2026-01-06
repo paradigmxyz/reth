@@ -1,19 +1,23 @@
 use super::LaunchNode;
 use crate::{rpc::RethRpcAddOns, EngineNodeLauncher, Node, NodeHandle};
-use alloy_consensus::transaction::Either;
-use alloy_provider::network::AnyNetwork;
+use alloy_provider::{network::AnyNetwork, Network};
 use jsonrpsee::core::{DeserializeOwned, Serialize};
-use reth_chainspec::EthChainSpec;
-use reth_consensus_debug_client::{DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider};
+use reth_consensus_debug_client::{
+    BlockProvider, DebugConsensusClient, EtherscanBlockProvider, RpcBlockProvider,
+};
 use reth_engine_local::LocalMiner;
 use reth_node_api::{
-    BlockTy, FullNodeComponents, HeaderTy, PayloadAttrTy, PayloadAttributesBuilder, PayloadTypes,
+    BlockTy, FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes, PayloadAttrTy,
+    PayloadAttributesBuilder, PayloadTypes,
 };
+use reth_node_core::node_config::NodeConfig;
 use std::{
+    any::Any,
     future::{Future, IntoFuture},
     pin::Pin,
     sync::Arc,
 };
+use tokio::sync::mpsc::Sender;
 use tracing::info;
 
 /// [`Node`] extension with support for debugging utilities.
@@ -74,6 +78,173 @@ pub trait DebugNode<N: FullNodeComponents>: Node<N> {
     fn local_payload_attributes_builder(
         chain_spec: &Self::ChainSpec,
     ) -> impl PayloadAttributesBuilder<<Self::Payload as PayloadTypes>::PayloadAttributes, HeaderTy<Self>>;
+
+    /// Converts network block response into the RPC block type.
+    ///
+    /// Override this to avoid serde round-trips when the response type already matches `RpcBlock`.
+    fn rpc_block_from_response(response: <AnyNetwork as Network>::BlockResponse) -> Self::RpcBlock {
+        // Fast path: when the response type already matches RpcBlock, avoid serialization.
+        if std::any::TypeId::of::<Self::RpcBlock>() ==
+            std::any::TypeId::of::<<AnyNetwork as Network>::BlockResponse>()
+        {
+            let boxed: Box<dyn Any> = Box::new(response);
+            let block = boxed
+                .downcast::<Self::RpcBlock>()
+                .expect("TypeId matches RpcBlock; downcast cannot fail");
+            return *block;
+        }
+
+        // Fallback: deserialize via JSON when types differ.
+        let json =
+            serde_json::to_value(response).expect("Block serialization cannot fail for debug");
+        serde_json::from_value(json).expect("Block deserialization cannot fail for debug")
+    }
+
+    /// Default RPC-block-to-primitive converter used by the debug consensus client.
+    fn default_rpc_convert() -> RpcConsensusConvert<N>
+    where
+        N: FullNodeComponents<Types = Self>,
+    {
+        Arc::new(|rpc_block: Self::RpcBlock| Self::rpc_to_primitive_block(rpc_block))
+    }
+
+    /// Constructs a block provider for the debug consensus client.
+    ///
+    /// Default implementation wires either RPC or Etherscan provider based on debug config,
+    /// falling back to an error if none are configured.
+    fn block_provider<'a>(ctx: DebugBlockProviderContext<'a, N>) -> DebugBlockProviderFuture<'a, N>
+    where
+        N: FullNodeComponents<Types = Self>,
+    {
+        Box::pin(async move {
+            let config = ctx.config;
+            if let Some(url) = config.debug.rpc_consensus_url.clone() {
+                let block_provider = RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), {
+                    let convert_rpc_block = ctx.convert_rpc.clone();
+                    move |block_response| {
+                        let rpc_block =
+                            <N::Types as DebugNode<N>>::rpc_block_from_response(block_response);
+                        convert_rpc_block(rpc_block)
+                    }
+                })
+                .await?;
+                let block_provider: DynBlockProvider<N> = Arc::new(block_provider);
+                return Ok(block_provider)
+            }
+
+            if let Some(maybe_custom_etherscan_url) = config.debug.etherscan.clone() {
+                let chain = reth_chainspec::EthChainSpec::chain(config.chain.as_ref());
+                let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
+                    chain.etherscan_urls().map(|urls| urls.0.to_string()).ok_or_else(|| {
+                        eyre::eyre!("failed to get etherscan url for chain: {chain}")
+                    })
+                })?;
+
+                let block_provider = EtherscanBlockProvider::new(
+                    etherscan_url,
+                    chain.etherscan_api_key().ok_or_else(|| {
+                        eyre::eyre!(
+                            "etherscan api key not found for rpc consensus client for chain: {chain}"
+                        )
+                    })?,
+                    chain.id(),
+                    Self::rpc_to_primitive_block,
+                );
+                let block_provider: DynBlockProvider<N> = Arc::new(block_provider);
+                return Ok(block_provider)
+            }
+
+            Err(eyre::eyre!("no debug consensus block provider configured"))
+        })
+    }
+}
+
+/// Converts an RPC block into the node's primitive block representation.
+pub(crate) type RpcConsensusConvert<N> = Arc<
+    dyn Fn(
+            <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock,
+        ) -> BlockTy<<N as FullNodeTypes>::Types>
+        + Send
+        + Sync
+        + 'static,
+>;
+
+/// Context passed to construct a debug block provider.
+#[expect(missing_debug_implementations)]
+pub struct DebugBlockProviderContext<'a, N>
+where
+    N: FullNodeComponents<Types: DebugNode<N>>,
+{
+    /// Node configuration for accessing debug settings.
+    pub config: &'a NodeConfig<<N::Types as NodeTypes>::ChainSpec>,
+    /// Converter used to map RPC responses into primitive blocks.
+    pub convert_rpc: RpcConsensusConvert<N>,
+}
+
+type DynBlockProvider<N> =
+    Arc<dyn BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + Send + Sync + 'static>;
+
+#[derive(Clone)]
+struct ArcBlockProvider<N: FullNodeComponents> {
+    inner: DynBlockProvider<N>,
+}
+
+impl<N: FullNodeComponents> ArcBlockProvider<N> {
+    fn new(inner: DynBlockProvider<N>) -> Self {
+        Self { inner }
+    }
+}
+
+impl<N> BlockProvider for ArcBlockProvider<N>
+where
+    N: FullNodeComponents,
+{
+    type Block = BlockTy<<N as FullNodeTypes>::Types>;
+
+    fn subscribe_blocks(
+        &self,
+        tx: Sender<Self::Block>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
+        self.inner.subscribe_blocks(tx)
+    }
+
+    fn get_block(
+        &self,
+        block_number: u64,
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<Self::Block>> + Send + '_>> {
+        self.inner.get_block(block_number)
+    }
+}
+
+/// Future returning a dynamic block provider.
+pub(crate) type DebugBlockProviderFuture<'a, N> =
+    Pin<Box<dyn Future<Output = eyre::Result<DynBlockProvider<N>>> + Send + 'a>>;
+
+/// Returns true if debug consensus block provider is configured via RPC or Etherscan flags.
+const fn debug_block_provider_configured<ChainSpec>(config: &NodeConfig<ChainSpec>) -> bool {
+    config.debug.rpc_consensus_url.is_some() || config.debug.etherscan.is_some()
+}
+
+type PayloadAttrMapper<N> = Box<
+    dyn Fn(PayloadAttrTy<<N as FullNodeTypes>::Types>) -> PayloadAttrTy<<N as FullNodeTypes>::Types>
+        + Send
+        + Sync
+        + 'static,
+>;
+
+fn spawn_consensus_client<N, AddOns>(handle: &NodeHandle<N, AddOns>, provider: DynBlockProvider<N>)
+where
+    N: FullNodeComponents<Types: DebugNode<N>>,
+    AddOns: RethRpcAddOns<N>,
+{
+    let client = DebugConsensusClient::new(
+        handle.node.add_ons_handle.beacon_engine_handle.clone(),
+        ArcBlockProvider::<N>::new(provider),
+    );
+    handle
+        .node
+        .task_executor
+        .spawn_critical("debug consensus client", async move { client.run().await });
 }
 
 /// Node launcher with support for launching various debugging utilities.
@@ -119,8 +290,10 @@ where
     target: Target,
     local_payload_attributes_builder:
         Option<Box<dyn PayloadAttributesBuilder<PayloadAttrTy<N::Types>, HeaderTy<N::Types>>>>,
-    map_attributes:
-        Option<Box<dyn Fn(PayloadAttrTy<N::Types>) -> PayloadAttrTy<N::Types> + Send + Sync>>,
+    map_attributes: Option<PayloadAttrMapper<N>>,
+    rpc_consensus_convert: Option<RpcConsensusConvert<N>>,
+    debug_consensus_client:
+        Option<Box<dyn BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + Send + Sync>>,
 }
 
 impl<L, Target, N, AddOns> DebugNodeLauncherFuture<L, Target, N>
@@ -138,6 +311,8 @@ where
             target: self.target,
             local_payload_attributes_builder: Some(Box::new(builder)),
             map_attributes: None,
+            rpc_consensus_convert: self.rpc_consensus_convert,
+            debug_consensus_client: self.debug_consensus_client,
         }
     }
 
@@ -150,67 +325,83 @@ where
             target: self.target,
             local_payload_attributes_builder: None,
             map_attributes: Some(Box::new(f)),
+            rpc_consensus_convert: self.rpc_consensus_convert,
+            debug_consensus_client: self.debug_consensus_client,
+        }
+    }
+
+    /// Overrides the RPC block-to-primitive conversion used by the debug RPC consensus client.
+    pub fn with_rpc_consensus_convert(
+        self,
+        convert: impl Fn(
+                <<N as FullNodeTypes>::Types as DebugNode<N>>::RpcBlock,
+            ) -> BlockTy<<N as FullNodeTypes>::Types>
+            + Send
+            + Sync
+            + 'static,
+    ) -> Self {
+        Self {
+            inner: self.inner,
+            target: self.target,
+            local_payload_attributes_builder: self.local_payload_attributes_builder,
+            map_attributes: self.map_attributes,
+            rpc_consensus_convert: Some(Arc::new(convert)),
+            debug_consensus_client: self.debug_consensus_client,
+        }
+    }
+
+    /// Provides an already constructed block provider for the debug consensus client.
+    ///
+    /// ```ignore
+    /// let handle = builder
+    ///     .launch_with_debug_capabilities()
+    ///     .with_debug_consensus(provider)
+    ///     .await?;
+    /// ```
+    pub fn with_debug_consensus(
+        self,
+        provider: impl BlockProvider<Block = BlockTy<<N as FullNodeTypes>::Types>> + 'static,
+    ) -> Self {
+        Self {
+            inner: self.inner,
+            target: self.target,
+            local_payload_attributes_builder: self.local_payload_attributes_builder,
+            map_attributes: self.map_attributes,
+            rpc_consensus_convert: self.rpc_consensus_convert,
+            debug_consensus_client: Some(Box::new(provider)),
         }
     }
 
     async fn launch_node(self) -> eyre::Result<NodeHandle<N, AddOns>> {
-        let Self { inner, target, local_payload_attributes_builder, map_attributes } = self;
+        let Self {
+            inner,
+            target,
+            local_payload_attributes_builder,
+            map_attributes,
+            rpc_consensus_convert,
+            debug_consensus_client,
+        } = self;
 
         let handle = inner.launch_node(target).await?;
 
         let config = &handle.node.config;
-        if let Some(url) = config.debug.rpc_consensus_url.clone() {
-            info!(target: "reth::cli", "Using RPC consensus client: {}", url);
+        if let Some(provider) = debug_consensus_client {
+            let provider = Arc::from(provider);
+            spawn_consensus_client(&handle, provider);
+        } else if debug_block_provider_configured(config) {
+            let convert_rpc = rpc_consensus_convert
+                .unwrap_or_else(<N as FullNodeTypes>::Types::default_rpc_convert);
 
             let block_provider =
-                RpcBlockProvider::<AnyNetwork, _>::new(url.as_str(), |block_response| {
-                    let json = serde_json::to_value(block_response)
-                        .expect("Block serialization cannot fail");
-                    let rpc_block =
-                        serde_json::from_value(json).expect("Block deserialization cannot fail");
-                    N::Types::rpc_to_primitive_block(rpc_block)
+                <N as FullNodeTypes>::Types::block_provider(DebugBlockProviderContext {
+                    config,
+                    convert_rpc,
                 })
                 .await?;
 
-            let rpc_consensus_client = DebugConsensusClient::new(
-                handle.node.add_ons_handle.beacon_engine_handle.clone(),
-                Arc::new(block_provider),
-            );
-
-            handle.node.task_executor.spawn_critical("rpc-ws consensus client", async move {
-                rpc_consensus_client.run().await
-            });
-        }
-
-        if let Some(maybe_custom_etherscan_url) = config.debug.etherscan.clone() {
-            info!(target: "reth::cli", "Using etherscan as consensus client");
-
-            let chain = config.chain.chain();
-            let etherscan_url = maybe_custom_etherscan_url.map(Ok).unwrap_or_else(|| {
-                // If URL isn't provided, use default Etherscan URL for the chain if it is known
-                chain
-                    .etherscan_urls()
-                    .map(|urls| urls.0.to_string())
-                    .ok_or_else(|| eyre::eyre!("failed to get etherscan url for chain: {chain}"))
-            })?;
-
-            let block_provider = EtherscanBlockProvider::new(
-                etherscan_url,
-                chain.etherscan_api_key().ok_or_else(|| {
-                    eyre::eyre!(
-                        "etherscan api key not found for rpc consensus client for chain: {chain}"
-                    )
-                })?,
-                chain.id(),
-                N::Types::rpc_to_primitive_block,
-            );
-            let rpc_consensus_client = DebugConsensusClient::new(
-                handle.node.add_ons_handle.beacon_engine_handle.clone(),
-                Arc::new(block_provider),
-            );
-            handle.node.task_executor.spawn_critical("etherscan consensus client", async move {
-                rpc_consensus_client.run().await
-            });
+            spawn_consensus_client(&handle, block_provider);
+        } else {
+            info!(target: "reth::cli", "Debug consensus client not configured; skipping");
         }
 
         if config.dev.dev {
@@ -222,16 +413,21 @@ where
             let pool = handle.node.pool.clone();
             let payload_builder_handle = handle.node.payload_builder_handle.clone();
 
-            let builder = if let Some(builder) = local_payload_attributes_builder {
-                Either::Left(builder)
+            let builder: Box<
+                dyn PayloadAttributesBuilder<
+                    PayloadAttrTy<<N as FullNodeTypes>::Types>,
+                    HeaderTy<<N as FullNodeTypes>::Types>,
+                >,
+            > = if let Some(builder) = local_payload_attributes_builder {
+                builder
+            } else if let Some(map) = map_attributes {
+                let local =
+                    <N as FullNodeTypes>::Types::local_payload_attributes_builder(&chain_spec);
+                Box::new(move |parent| map(local.build(&parent)))
             } else {
-                let local = N::Types::local_payload_attributes_builder(&chain_spec);
-                let builder = if let Some(f) = map_attributes {
-                    Either::Left(move |parent| f(local.build(&parent)))
-                } else {
-                    Either::Right(local)
-                };
-                Either::Right(builder)
+                let local =
+                    <N as FullNodeTypes>::Types::local_payload_attributes_builder(&chain_spec);
+                Box::new(local)
             };
 
             let dev_mining_mode = handle.node.config.dev_mining_mode(pool);
@@ -283,6 +479,8 @@ where
             target,
             local_payload_attributes_builder: None,
             map_attributes: None,
+            rpc_consensus_convert: None,
+            debug_consensus_client: None,
         }
     }
 }

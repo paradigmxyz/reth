@@ -7,7 +7,7 @@ use reth_node_api::{
 use reth_primitives_traits::{Block, SealedBlock};
 use reth_tracing::tracing::warn;
 use ringbuffer::{AllocRingBuffer, RingBuffer};
-use std::future::Future;
+use std::{future::Future, pin::Pin};
 use tokio::sync::mpsc;
 
 /// Supplies consensus client with new blocks sent in `tx` and a callback to find specific blocks
@@ -21,23 +21,26 @@ pub trait BlockProvider: Send + Sync + 'static {
     ///
     /// Note: This is expected to be spawned in a separate task, and as such it should ignore
     /// errors.
-    fn subscribe_blocks(&self, tx: mpsc::Sender<Self::Block>) -> impl Future<Output = ()> + Send;
+    fn subscribe_blocks(
+        &self,
+        tx: mpsc::Sender<Self::Block>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 
     /// Get a past block by number.
     fn get_block(
         &self,
         block_number: u64,
-    ) -> impl Future<Output = eyre::Result<Self::Block>> + Send;
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<Self::Block>> + Send + '_>>;
 
     /// Get previous block hash using previous block hash buffer. If it isn't available (buffer
     /// started more recently than `offset`), fetch it using `get_block`.
-    fn get_or_fetch_previous_block(
-        &self,
-        previous_block_hashes: &AllocRingBuffer<B256>,
+    fn get_or_fetch_previous_block<'a>(
+        &'a self,
+        previous_block_hashes: &'a AllocRingBuffer<B256>,
         current_block_number: u64,
         offset: usize,
-    ) -> impl Future<Output = eyre::Result<B256>> + Send {
-        async move {
+    ) -> Pin<Box<dyn Future<Output = eyre::Result<B256>> + Send + 'a>> {
+        Box::pin(async move {
             let stored_hash = previous_block_hashes
                 .len()
                 .checked_sub(offset)
@@ -53,7 +56,7 @@ pub trait BlockProvider: Send + Sync + 'static {
             };
             let block = self.get_block(previous_block_number).await?;
             Ok(block.header().hash_slow())
-        }
+        })
     }
 }
 
