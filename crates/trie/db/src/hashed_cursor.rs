@@ -111,6 +111,7 @@ where
     /// This method implements a locality optimization: if the cursor is already positioned
     /// and the target key is >= the current position, we use `next_dup_val` to walk forward
     /// instead of performing an expensive `seek_by_key_subkey` operation.
+    #[allow(clippy::collapsible_if)]
     fn seek(&mut self, subkey: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         // Locality optimization: if cursor is positioned and target is ahead,
         // walk forward using next_dup_val instead of seeking
@@ -126,12 +127,13 @@ where
                 // Exhausted the duplicates, no match found
                 self.last_key = None;
                 return Ok(None);
-            } else if subkey == last &&
-                let Some((_, entry)) = self.cursor.current()? &&
-                entry.key == subkey
-            {
+            } else if subkey == last {
                 // Re-seeking the same key, return current position if still valid
-                return Ok(Some((entry.key, entry.value)));
+                if let Some((_, entry)) = self.cursor.current()? {
+                    if entry.key == subkey {
+                        return Ok(Some((entry.key, entry.value)));
+                    }
+                }
             }
         }
 
@@ -316,10 +318,7 @@ mod tests {
                 provider.tx_ref().cursor_dup_write::<tables::HashedStorages>().unwrap();
             for (i, key) in keys.iter().enumerate() {
                 cursor
-                    .upsert(
-                        address1,
-                        &StorageEntry { key: *key, value: U256::from(i as u64) },
-                    )
+                    .upsert(address1, &StorageEntry { key: *key, value: U256::from(i as u64) })
                     .unwrap();
                 cursor
                     .upsert(

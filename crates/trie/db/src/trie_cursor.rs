@@ -192,6 +192,7 @@ where
     /// This method implements a locality optimization: if the cursor is already positioned
     /// and the target key is >= the current position, we use `next_dup` to walk forward
     /// instead of performing an expensive `seek_by_key_subkey` operation.
+    #[allow(clippy::collapsible_if)]
     fn seek(
         &mut self,
         key: Nibbles,
@@ -210,12 +211,13 @@ where
                 // Exhausted the duplicates, no match found
                 self.last_key = None;
                 return Ok(None);
-            } else if key == last &&
-                let Some((_, entry)) = self.cursor.current()? &&
-                entry.nibbles.0 == key
-            {
+            } else if key == last {
                 // Re-seeking the same key, return current position if still valid
-                return Ok(Some((entry.nibbles.0, entry.node)));
+                if let Some((_, entry)) = self.cursor.current()? {
+                    if entry.nibbles.0 == key {
+                        return Ok(Some((entry.nibbles.0, entry.node)));
+                    }
+                }
             }
         }
 
@@ -346,13 +348,15 @@ mod tests {
 
         // Insert test data
         {
-            let mut cursor =
-                provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
             for key in &keys {
                 cursor
                     .upsert(
                         hashed_address,
-                        &StorageTrieEntry { nibbles: StoredNibblesSubKey(*key), node: create_test_node() },
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
                     )
                     .unwrap();
             }
@@ -381,13 +385,15 @@ mod tests {
 
         // Insert test data
         {
-            let mut cursor =
-                provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
             for key in &keys {
                 cursor
                     .upsert(
                         hashed_address,
-                        &StorageTrieEntry { nibbles: StoredNibblesSubKey(*key), node: create_test_node() },
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
                     )
                     .unwrap();
             }
@@ -417,13 +423,15 @@ mod tests {
 
         // Insert test data
         {
-            let mut cursor =
-                provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
             for key in &keys {
                 cursor
                     .upsert(
                         hashed_address,
-                        &StorageTrieEntry { nibbles: StoredNibblesSubKey(*key), node: create_test_node() },
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
                     )
                     .unwrap();
             }
@@ -463,19 +471,24 @@ mod tests {
 
         // Insert test data for both addresses
         {
-            let mut cursor =
-                provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
             for key in &keys {
                 cursor
                     .upsert(
                         address1,
-                        &StorageTrieEntry { nibbles: StoredNibblesSubKey(*key), node: node1.clone() },
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: node1.clone(),
+                        },
                     )
                     .unwrap();
                 cursor
                     .upsert(
                         address2,
-                        &StorageTrieEntry { nibbles: StoredNibblesSubKey(*key), node: node2.clone() },
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: node2.clone(),
+                        },
                     )
                     .unwrap();
             }
@@ -507,13 +520,15 @@ mod tests {
 
         // Insert test data
         {
-            let mut cursor =
-                provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
             for key in &keys {
                 cursor
                     .upsert(
                         hashed_address,
-                        &StorageTrieEntry { nibbles: StoredNibblesSubKey(*key), node: create_test_node() },
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
                     )
                     .unwrap();
             }
@@ -543,13 +558,15 @@ mod tests {
 
         // Insert test data
         {
-            let mut cursor =
-                provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
             for key in &keys {
                 cursor
                     .upsert(
                         hashed_address,
-                        &StorageTrieEntry { nibbles: StoredNibblesSubKey(*key), node: create_test_node() },
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
                     )
                     .unwrap();
             }
@@ -579,13 +596,15 @@ mod tests {
 
         // Insert test data
         {
-            let mut cursor =
-                provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
             for key in &keys {
                 cursor
                     .upsert(
                         hashed_address,
-                        &StorageTrieEntry { nibbles: StoredNibblesSubKey(*key), node: create_test_node() },
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
                     )
                     .unwrap();
             }
