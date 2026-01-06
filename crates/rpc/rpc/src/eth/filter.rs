@@ -1252,7 +1252,7 @@ impl<
             let filter_inner = self.filter_inner.clone();
             let chunk_task = Box::pin(async move {
                 let chunk_task = tokio::task::spawn_blocking(move || {
-                    let mut chunk_results = Vec::new();
+                    let mut chunk_results = Vec::with_capacity(chunk_headers.len());
 
                     for header in chunk_headers {
                         // Fetch directly from provider - RangeMode is used for older blocks
