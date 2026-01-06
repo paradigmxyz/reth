@@ -391,9 +391,15 @@ where
 
             self.wal.finalize(lowest_finished_height)?;
             if self.wal.num_blocks() > WAL_BLOCKS_WARNING {
+                let slowest_exex = exex_finished_heights
+                    .iter()
+                    .filter_map(|(id, num_hash, _)| num_hash.map(|nh| (*id, nh)))
+                    .min_by_key(|(_, num_hash)| num_hash.number);
+
                 warn!(
                     target: "exex::manager",
                     blocks = ?self.wal.num_blocks(),
+                    slowest_exex = ?slowest_exex,
                     "WAL contains too many blocks and is not getting cleared. That will lead to increased disk space usage. Check that you emit the FinishedHeight event from your ExExes."
                 );
             }
