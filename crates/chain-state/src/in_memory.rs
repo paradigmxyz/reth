@@ -317,57 +317,54 @@ impl<N: NodePrimitives> CanonicalInMemoryState<N> {
     /// This will update the links between blocks and remove all blocks that are [..
     /// `persisted_height`].
     pub fn remove_persisted_blocks(&self, persisted_num_hash: BlockNumHash) {
-        // if the persisted hash is not in the canonical in memory state, do nothing, because it
+        // Acquire locks first, starting with the numbers lock, to prevent TOCTOU race condition
+        let mut numbers = self.inner.in_memory_state.numbers.write();
+        let mut blocks = self.inner.in_memory_state.blocks.write();
+
+        // If the persisted hash is not in the canonical in memory state, do nothing, because it
         // means canonical blocks were not actually persisted.
         //
         // This can happen if the persistence task takes a long time, while a reorg is happening.
-        {
-            if self.inner.in_memory_state.blocks.read().get(&persisted_num_hash.hash).is_none() {
-                // do nothing
-                return
-            }
+        if blocks.get(&persisted_num_hash.hash).is_none() {
+            // do nothing
+            return
         }
 
-        {
-            // acquire locks, starting with the numbers lock
-            let mut numbers = self.inner.in_memory_state.numbers.write();
-            let mut blocks = self.inner.in_memory_state.blocks.write();
+        let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
 
-            let BlockNumHash { number: persisted_height, hash: _ } = persisted_num_hash;
+        // clear all numbers
+        numbers.clear();
 
-            // clear all numbers
-            numbers.clear();
+        // drain all blocks and only keep the ones that are not persisted (below the persisted
+        // height)
+        let mut old_blocks = blocks
+            .drain()
+            .filter(|(_, b)| b.block_ref().recovered_block().number() > persisted_height)
+            .map(|(_, b)| b.block.clone())
+            .collect::<Vec<_>>();
 
-            // drain all blocks and only keep the ones that are not persisted (below the persisted
-            // height)
-            let mut old_blocks = blocks
-                .drain()
-                .filter(|(_, b)| b.block_ref().recovered_block().number() > persisted_height)
-                .map(|(_, b)| b.block.clone())
-                .collect::<Vec<_>>();
+        // sort the blocks by number so we can insert them back in natural order (low -> high)
+        old_blocks.sort_unstable_by_key(|block| block.recovered_block().number());
 
-            // sort the blocks by number so we can insert them back in natural order (low -> high)
-            old_blocks.sort_unstable_by_key(|block| block.recovered_block().number());
+        // re-insert the blocks in natural order and connect them to their parent blocks
+        for block in old_blocks {
+            let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
+            let block_state = BlockState::with_parent(block, parent);
+            let hash = block_state.hash();
+            let number = block_state.number();
 
-            // re-insert the blocks in natural order and connect them to their parent blocks
-            for block in old_blocks {
-                let parent = blocks.get(&block.recovered_block().parent_hash()).cloned();
-                let block_state = BlockState::with_parent(block, parent);
-                let hash = block_state.hash();
-                let number = block_state.number();
-
-                // append new blocks
-                blocks.insert(hash, Arc::new(block_state));
-                numbers.insert(number, hash);
-            }
-
-            // also shift the pending state if it exists
-            self.inner.in_memory_state.pending.send_modify(|p| {
-                if let Some(p) = p.as_mut() {
-                    p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
-                }
-            });
+            // append new blocks
+            blocks.insert(hash, Arc::new(block_state));
+            numbers.insert(number, hash);
         }
+
+        // also shift the pending state if it exists
+        self.inner.in_memory_state.pending.send_modify(|p| {
+            if let Some(p) = p.as_mut() {
+                p.parent = blocks.get(&p.block_ref().recovered_block().parent_hash()).cloned();
+            }
+        });
+
         self.inner.in_memory_state.update_metrics();
     }
 
