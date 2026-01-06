@@ -45,10 +45,10 @@ pub struct ComputedTrieData {
 /// # Invariants
 ///
 /// For correctness of overlay reuse optimizations:
-/// - The `ancestors` passed to [`DeferredTrieData::pending`] must form a true ancestor chain
-///   (each entry's parent is the previous entry, oldest to newest order)
-/// - When `anchor_hash` matches the parent's `anchor_hash`, the parent's `trie_input`
-///   already contains all ancestors in that chain, enabling O(1) reuse
+/// - The `ancestors` passed to [`DeferredTrieData::pending`] must form a true ancestor chain (each
+///   entry's parent is the previous entry, oldest to newest order)
+/// - When `anchor_hash` matches the parent's `anchor_hash`, the parent's `trie_input` already
+///   contains all ancestors in that chain, enabling O(1) reuse
 /// - A given `anchor_hash` uniquely identifies a persisted base state
 #[derive(Clone, Debug)]
 pub struct AnchoredTrieInput {
@@ -508,7 +508,8 @@ mod tests {
         anchor_hash: B256,
         accounts: Vec<(B256, Option<Account>)>,
     ) -> DeferredTrieData {
-        let hashed_state = Arc::new(HashedPostStateSorted::new(accounts.clone(), B256Map::default()));
+        let hashed_state =
+            Arc::new(HashedPostStateSorted::new(accounts.clone(), B256Map::default()));
         let trie_updates = Arc::default();
         let mut overlay = TrieInputSorted::default();
         Arc::make_mut(&mut overlay.state).extend_ref(hashed_state.as_ref());
@@ -617,10 +618,8 @@ mod tests {
         let account = Account { nonce: 25, balance: U256::ZERO, bytecode_hash: None };
 
         // Create parent WITHOUT anchored trie input (e.g., from without_trie_input constructor)
-        let parent_state = HashedPostStateSorted::new(
-            vec![(key, Some(account))],
-            B256Map::default(),
-        );
+        let parent_state =
+            HashedPostStateSorted::new(vec![(key, Some(account))], B256Map::default());
         let parent = DeferredTrieData::ready(ComputedTrieData {
             hashed_state: Arc::new(parent_state),
             trie_updates: Arc::default(),
@@ -658,9 +657,10 @@ mod tests {
         );
 
         // Block 2: adds account at key2, ancestor is block1
-        let block2_hashed = HashedPostState::default().with_accounts([
-            (key2, Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }))
-        ]);
+        let block2_hashed = HashedPostState::default().with_accounts([(
+            key2,
+            Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
         let block2 = DeferredTrieData::pending(
             Arc::new(block2_hashed),
             Arc::new(TrieUpdates::default()),
@@ -672,9 +672,10 @@ mod tests {
         let block2_ready = DeferredTrieData::ready(block2_computed);
 
         // Block 3: adds account at key3, ancestor is block2 (which includes block1)
-        let block3_hashed = HashedPostState::default().with_accounts([
-            (key3, Some(Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None }))
-        ]);
+        let block3_hashed = HashedPostState::default().with_accounts([(
+            key3,
+            Some(Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
         let block3 = DeferredTrieData::pending(
             Arc::new(block3_hashed),
             Arc::new(TrieUpdates::default()),
@@ -708,9 +709,10 @@ mod tests {
         );
 
         // Child overwrites nonce to 99
-        let child_hashed = HashedPostState::default().with_accounts([
-            (key, Some(Account { nonce: 99, balance: U256::ZERO, bytecode_hash: None }))
-        ]);
+        let child_hashed = HashedPostState::default().with_accounts([(
+            key,
+            Some(Account { nonce: 99, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
         let child = DeferredTrieData::pending(
             Arc::new(child_hashed),
             Arc::new(TrieUpdates::default()),
