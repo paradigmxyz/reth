@@ -11098,6 +11098,7 @@ dependencies = [
  "alloy-consensus",
  "alloy-primitives",
  "alloy-rlp",
+ "codspeed-criterion-compat",
  "proptest",
  "proptest-arbitrary-interop",
  "reth-chainspec",

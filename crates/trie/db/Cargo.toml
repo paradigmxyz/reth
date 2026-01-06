@@ -46,6 +46,11 @@ proptest.workspace = true
 proptest-arbitrary-interop.workspace = true
 serde_json.workspace = true
 similar-asserts.workspace = true
+criterion.workspace = true
+
+[[bench]]
+name = "trie_write_batching"
+harness = false
 
 [features]
 metrics = ["reth-trie/metrics"]
