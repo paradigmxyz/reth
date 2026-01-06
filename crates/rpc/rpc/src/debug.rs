@@ -180,14 +180,13 @@ where
             .map_err(Eth::Error::from_eth_err)?;
 
         // Depending on EIP-2 we need to recover the transactions differently
-        // Use BlockBody's recover methods which utilize parallel recovery when rayon feature is
-        // enabled
         let senders =
             if self.provider().chain_spec().is_homestead_active_at_block(block.header().number()) {
-                block.body().recover_signers().map_err(Eth::Error::from_eth_err)?
+                block.body().recover_signers()
             } else {
-                block.body().recover_signers_unchecked().map_err(Eth::Error::from_eth_err)?
-            };
+                block.body().recover_signers_unchecked()
+            }
+            .map_err(Eth::Error::from_eth_err)?;
 
         self.trace_block(Arc::new(block.into_recovered_with_signers(senders)), evm_env, opts).await
     }
