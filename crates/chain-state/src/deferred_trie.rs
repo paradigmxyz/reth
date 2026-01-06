@@ -725,7 +725,7 @@ mod tests {
         let overlay = result.anchored_trie_input.as_ref().unwrap();
         // Note: extend_ref may result in duplicate keys; check the last occurrence
         let accounts = &overlay.trie_input.state.accounts;
-        let last_account = accounts.iter().filter(|(k, _)| *k == key).next_back().unwrap();
+        let last_account = accounts.iter().rfind(|(k, _)| *k == key).unwrap();
         assert_eq!(last_account.1.unwrap().nonce, 99);
     }
 
