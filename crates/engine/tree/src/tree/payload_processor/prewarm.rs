@@ -619,7 +619,8 @@ where
                 let _enter =
                     debug_span!(target: "engine::tree::payload_processor::prewarm", "prewarm outcome", index, tx_hash=%tx.tx().tx_hash())
                         .entered();
-                let (targets, storage_targets) = multiproof_targets_from_state(res.state);
+                let targets = multiproof_targets_from_state(res.state);
+                let storage_targets = targets.storage_targets_count();
                 metrics.prefetch_storage_targets.record(storage_targets as f64);
                 let _ = sender.send(PrewarmTaskEvent::Outcome { proof_targets: Some(targets) });
                 drop(_enter);
@@ -766,46 +767,26 @@ where
 
 /// Returns a set of [`MultiProofTargets`] and the total amount of storage targets, based on the
 /// given state.
-fn multiproof_targets_from_state(state: EvmState) -> (MultiProofTargets, usize) {
-    let results: Vec<_> = state
+fn multiproof_targets_from_state(state: EvmState) -> MultiProofTargets {
+    state
         .into_par_iter()
         .filter_map(|(address, account)| {
-            // if the account was not touched, or if the account was selfdestructed, do not
-            // fetch proofs for it
-            //
-            // Since selfdestruct can only happen in the same transaction, we can skip
-            // prefetching proofs for selfdestructed accounts
-            //
-            // See: https://eips.ethereum.org/EIPS/eip-6780
             if !account.is_touched() || account.is_selfdestructed() {
                 return None;
             }
 
             let hashed_address = keccak256(address);
 
-            let mut storage_set =
-                B256Set::with_capacity_and_hasher(account.storage.len(), Default::default());
-            storage_set.extend(
-                account
-                    .storage
-                    .into_iter()
-                    .filter(|(_, slot)| slot.is_changed())
-                    .map(|(key, _)| keccak256(B256::new(key.to_be_bytes()))),
-            );
+            let storage_set: B256Set = account
+                .storage
+                .into_iter()
+                .filter(|(_, slot)| slot.is_changed())
+                .map(|(key, _)| keccak256(B256::new(key.to_be_bytes())))
+                .collect();
 
             Some((hashed_address, storage_set))
         })
-        .collect();
-
-    let mut targets = MultiProofTargets::default();
-    let mut storage_targets = 0usize;
-
-    for (hashed_address, storage_set) in results {
-        storage_targets += storage_set.len();
-        targets.insert(hashed_address, storage_set);
-    }
-
-    (targets, storage_targets)
+        .collect()
 }
 
 /// The events the pre-warm task can handle.

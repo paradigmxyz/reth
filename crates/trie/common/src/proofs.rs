@@ -17,6 +17,7 @@ use alloy_trie::{
 use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
 use reth_primitives_traits::Account;
+use rayon::iter::{IntoParallelIterator, FromParallelIterator, ParallelIterator};
 
 /// Proof targets map.
 #[derive(Deref, DerefMut, IntoIterator, Clone, PartialEq, Eq, Default, Debug)]
@@ -25,6 +26,15 @@ pub struct MultiProofTargets(B256Map<B256Set>);
 impl FromIterator<(B256, B256Set)> for MultiProofTargets {
     fn from_iter<T: IntoIterator<Item = (B256, B256Set)>>(iter: T) -> Self {
         Self(B256Map::from_iter(iter))
+    }
+}
+
+impl FromParallelIterator<(B256, B256Set)> for MultiProofTargets {
+    fn from_par_iter<I>(par_iter: I) -> Self
+    where
+        I: IntoParallelIterator<Item = (B256, B256Set)>,
+    {
+        Self(par_iter.into_par_iter().collect())
     }
 }
 
@@ -93,6 +103,11 @@ impl MultiProofTargets {
     /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
     pub fn chunking_length(&self) -> usize {
         self.values().map(|slots| 1 + slots.len().saturating_sub(1)).sum::<usize>()
+    }
+
+    /// Returns the total count of storage slot targets across all accounts.
+    pub fn storage_targets_count(&self) -> usize {
+        self.values().map(|slots| slots.len()).sum()
     }
 }
 
