@@ -168,7 +168,7 @@ impl TrieUpdates {
     }
 
     /// Creates a sorted copy without consuming self.
-    /// More efficient than `.clone().into_sorted()` as it avoids cloning HashMap metadata.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> TrieUpdatesSorted {
         let mut account_nodes = self
             .account_nodes
@@ -367,7 +367,7 @@ impl StorageTrieUpdates {
     }
 
     /// Creates a sorted copy without consuming self.
-    /// More efficient than `.clone().into_sorted()` as it avoids cloning HashMap metadata.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
     pub fn clone_into_sorted(&self) -> StorageTrieUpdatesSorted {
         let mut storage_nodes = self
             .storage_nodes
