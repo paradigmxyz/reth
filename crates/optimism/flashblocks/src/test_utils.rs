@@ -7,7 +7,7 @@
 //! ## Simple: Create a flashblock sequence for the same block
 //!
 //! ```ignore
-//! let factory = TestFlashBlockFactory::new(); // Default 2 second block time
+//! let factory = TestFlashBlockFactory::new().with_block_time(2); // 2 second block time
 //! let fb0 = factory.flashblock_at(0).build();
 //! let fb1 = factory.flashblock_after(&fb0).build();
 //! let fb2 = factory.flashblock_after(&fb1).build();
