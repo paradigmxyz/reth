@@ -771,6 +771,13 @@ fn multiproof_targets_from_state(state: EvmState) -> MultiProofTargets {
     state
         .into_par_iter()
         .filter_map(|(address, account)| {
+            // if the account was not touched, or if the account was selfdestructed, do not
+            // fetch proofs for it
+            //
+            // Since selfdestruct can only happen in the same transaction, we can skip
+            // prefetching proofs for selfdestructed accounts
+            //
+            // See: https://eips.ethereum.org/EIPS/eip-6780
             if !account.is_touched() || account.is_selfdestructed() {
                 return None;
             }

@@ -16,6 +16,7 @@ use alloy_trie::{
 };
 use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
+#[cfg(feature = "rayon")]
 use rayon::iter::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::Account;
 
@@ -29,6 +30,7 @@ impl FromIterator<(B256, B256Set)> for MultiProofTargets {
     }
 }
 
+#[cfg(feature = "rayon")]
 impl FromParallelIterator<(B256, B256Set)> for MultiProofTargets {
     fn from_par_iter<I>(par_iter: I) -> Self
     where
