@@ -294,21 +294,19 @@ where
 
         // spawn multi-proof task
         let parent_span = span.clone();
-        self.executor.spawn_blocking({
-            let saved_cache = prewarm_handle.saved_cache.clone();
-            move || {
-                let _enter = parent_span.entered();
-                // Build a state provider for the multiproof task
-                let provider = provider_builder.build().expect("failed to build provider");
-                let provider = if let Some(saved_cache) = saved_cache {
-                    let (cache, metrics) = saved_cache.split();
-                    Box::new(CachedStateProvider::new(provider, cache, metrics))
-                        as Box<dyn StateProvider>
-                } else {
-                    Box::new(provider)
-                };
-                multi_proof_task.run(provider);
-            }
+        let saved_cache = prewarm_handle.saved_cache.clone();
+        self.executor.spawn_blocking(move || {
+            let _enter = parent_span.entered();
+            // Build a state provider for the multiproof task
+            let provider = provider_builder.build().expect("failed to build provider");
+            let provider = if let Some(saved_cache) = saved_cache {
+                let (cache, metrics) = saved_cache.split();
+                Box::new(CachedStateProvider::new(provider, cache, metrics))
+                    as Box<dyn StateProvider>
+            } else {
+                Box::new(provider)
+            };
+            multi_proof_task.run(provider);
         });
 
         // wire the sparse trie to the state root response receiver
@@ -649,12 +647,12 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns a clone of the caches used by prewarming
     pub(super) fn caches(&self) -> Option<StateExecutionCache> {
-        self.prewarm_handle.saved_cache.clone().map(|cache| cache.cache().clone())
+        self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
     }
 
     /// Returns a clone of the cache metrics used by prewarming
     pub(super) fn cache_metrics(&self) -> Option<CachedStateMetrics> {
-        self.prewarm_handle.saved_cache.clone().map(|cache| cache.metrics().clone())
+        self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.metrics().clone())
     }
 
     /// Terminates the pre-warming transaction processing.
