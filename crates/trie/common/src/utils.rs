@@ -5,7 +5,9 @@ use core::cmp::Ordering;
 ///
 /// Both `target` and `other` must be sorted by key. For duplicate keys, `other` takes
 /// precedence (conceptually appended after `target`). Within each slice, later entries
-/// override earlier ones. The result replaces `target` with the merged, deduplicated vector.
+/// override earlier ones. The result replaces `target` with the merged vector, deduplicated
+/// with respect to keys encountered during the merge. When `other` is empty, `target` is
+/// returned unchanged (no deduplication is performed).
 pub(crate) fn extend_sorted_vec<K, V>(target: &mut Vec<(K, V)>, other: &[(K, V)])
 where
     K: Clone + Ord,
@@ -33,8 +35,10 @@ where
         let other_key = &other[other_idx].0;
 
         match target_key.cmp(other_key) {
-            // Target key is smaller: take from target
-            Ordering::Less => {
+            // Target key is smaller or equal: take from target.
+            // For equal keys, we advance target_idx only; other_idx stays so other's value
+            // overwrites in the next iteration (other takes precedence).
+            Ordering::Less | Ordering::Equal => {
                 push_or_update(&mut merged, &target[target_idx]);
                 target_idx += 1;
             }
@@ -42,12 +46,6 @@ where
             Ordering::Greater => {
                 push_or_update(&mut merged, &other[other_idx]);
                 other_idx += 1;
-            }
-            // Keys match: push target first, other will overwrite next iteration.
-            // We only advance target_idx; other_idx stays so other's value overwrites.
-            Ordering::Equal => {
-                push_or_update(&mut merged, &target[target_idx]);
-                target_idx += 1;
             }
         }
     }
