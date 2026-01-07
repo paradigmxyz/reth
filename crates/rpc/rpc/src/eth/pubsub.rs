@@ -104,7 +104,7 @@ impl<Eth> EthPubSub<Eth> {
         let inner = EthPubSubInner {
             eth_api,
             subscription_task_spawner,
-            additional_handlers: RwLock::new(HashMap::new()),
+            additional_handlers: Arc::new(RwLock::new(HashMap::new())),
             fallback_handler,
         };
         Self { inner: Arc::new(inner) }
@@ -412,7 +412,7 @@ struct EthPubSubInner<EthApi> {
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Box<dyn TaskSpawner>,
     /// Additional handlers keyed by subscription kind.
-    additional_handlers: RwLock<HashMap<String, SubscriptionHandler>>,
+    additional_handlers: Arc<RwLock<HashMap<String, SubscriptionHandler>>>,
     /// Fallback handler for unknown subscription kinds or params.
     fallback_handler: Option<FallbackHandler>,
 }
