@@ -37,27 +37,19 @@ pub struct ComputedTrieData {
 
 /// Trie input bundled with its anchor hash.
 ///
-/// This is used to store the trie input and anchor hash for a block together.
-/// The `trie_input` contains the **cumulative** overlay of all in-memory ancestor blocks
-/// since the anchor, not just this block's changes. This enables O(1) overlay reuse
-/// when building child blocks with the same anchor.
+/// The `trie_input` contains the **cumulative** overlay of all in-memory ancestor blocks,
+/// not just this block's changes. Child blocks reuse the parent's overlay in O(1) by
+/// cloning the Arc-wrapped data.
 ///
-/// # Invariants
-///
-/// For correctness of overlay reuse optimizations:
-/// - The `ancestors` passed to [`DeferredTrieData::pending`] must form a true ancestor chain (each
-///   entry's parent is the previous entry, oldest to newest order)
-/// - When `anchor_hash` matches the parent's `anchor_hash`, the parent's `trie_input` already
-///   contains all ancestors in that chain, enabling O(1) reuse
-/// - A given `anchor_hash` uniquely identifies a persisted base state
+/// The `anchor_hash` is metadata indicating which persisted base state this overlay
+/// sits on top of. It does NOT affect overlay reuse decisions - the overlay data is
+/// anchor-independent because persisted blocks are removed from memory before new
+/// blocks are validated.
 #[derive(Clone, Debug)]
 pub struct AnchoredTrieInput {
-    /// The persisted ancestor hash this trie input is anchored to.
+    /// The persisted ancestor hash this overlay sits on top of (metadata for consumers).
     pub anchor_hash: B256,
-    /// Cumulative trie input overlay from all in-memory ancestors since the anchor.
-    /// Note: This is the merged overlay, not just this block's changes.
-    /// The per-block changes are in [`ComputedTrieData::hashed_state`] and
-    /// [`ComputedTrieData::trie_updates`].
+    /// Cumulative trie input overlay from all in-memory ancestors.
     pub trie_input: Arc<TrieInputSorted>,
 }
 
@@ -69,9 +61,9 @@ struct DeferredTrieMetrics {
     deferred_trie_async_ready: Counter,
     /// Number of times deferred trie data required synchronous computation (fallback path).
     deferred_trie_sync_fallback: Counter,
-    /// Number of times the parent's trie overlay was reused (O(1) fast path).
+    /// Number of times the parent's trie overlay was reused (O(1)).
     deferred_trie_overlay_reused: Counter,
-    /// Number of times the trie overlay was rebuilt from all ancestors (O(N) slow path).
+    /// Number of times the trie overlay was rebuilt from ancestors (rare fallback).
     deferred_trie_overlay_rebuilt: Counter,
     /// Number of times `Arc::make_mut` triggered a clone (`strong_count` > 1).
     deferred_trie_arc_clone_triggered: Counter,
@@ -95,9 +87,9 @@ struct PendingInputs {
     hashed_state: Arc<HashedPostState>,
     /// Unsorted trie updates from state root computation.
     trie_updates: Arc<TrieUpdates>,
-    /// The persisted ancestor hash this trie input is anchored to.
+    /// The persisted ancestor hash (metadata for the final result).
     anchor_hash: B256,
-    /// Deferred trie data from ancestor blocks for merging.
+    /// Deferred trie data from ancestor blocks.
     ancestors: Vec<DeferredTrieData>,
 }
 
@@ -124,8 +116,8 @@ impl DeferredTrieData {
     /// # Arguments
     /// * `hashed_state` - Unsorted hashed post-state from execution
     /// * `trie_updates` - Unsorted trie updates from state root computation
-    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
-    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
+    /// * `anchor_hash` - The persisted ancestor hash (metadata for the result)
+    /// * `ancestors` - Deferred trie data from ancestor blocks
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
