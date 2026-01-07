@@ -7,7 +7,12 @@ use reth_db_api::{
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::EitherWriter;
+use reth_provider::{
+    DBProvider, HistoryWriter, NodePrimitivesProvider, PruneCheckpointReader,
+    PruneCheckpointWriter, RocksDBProviderFactory, StorageSettingsCache,
+};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
 use std::fmt::Debug;
@@ -46,8 +51,13 @@ impl Default for IndexStorageHistoryStage {
 
 impl<Provider> Stage<Provider> for IndexStorageHistoryStage
 where
-    Provider:
-        DBProvider<Tx: DbTxMut> + PruneCheckpointWriter + HistoryWriter + PruneCheckpointReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointWriter
+        + HistoryWriter
+        + PruneCheckpointReader
+        + StorageSettingsCache
+        + RocksDBProviderFactory
+        + NodePrimitivesProvider,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -115,17 +125,57 @@ where
                 &self.etl_config,
             )?;
 
-        info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::StoragesHistory, _>(
-            provider,
-            collector,
-            first_sync,
-            |AddressStorageKey((address, storage_key)), highest_block_number| {
-                StorageShardedKey::new(address, storage_key, highest_block_number)
-            },
-            StorageShardedKey::decode_owned,
-            |key| AddressStorageKey((key.address, key.sharded_key.key)),
-        )?;
+        // Check if RocksDB is enabled for storage history
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let use_rocksdb = false;
+
+        info!(target: "sync::stages::index_storage_history::exec", ?use_rocksdb, "Loading indices into database");
+
+        if use_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                // Create RocksDB batch
+                let rocksdb = provider.rocksdb_provider();
+                let mut rocksdb_batch = rocksdb.batch();
+
+                if first_sync {
+                    super::clear_rocksdb_table::<tables::StoragesHistory>(
+                        &rocksdb,
+                        &mut rocksdb_batch,
+                    )?;
+                }
+
+                // Create writer that routes to RocksDB
+                let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+
+                // Load indices using the RocksDB path
+                super::load_storage_history_indices_via_writer(
+                    &mut writer,
+                    collector,
+                    first_sync,
+                    provider,
+                )?;
+
+                // Extract and register RocksDB batch for commit at provider level
+                if let Some(batch) = writer.into_raw_rocksdb_batch() {
+                    provider.set_pending_rocksdb_batch(batch);
+                }
+            }
+        } else {
+            // Keep existing MDBX path unchanged
+            load_history_indices::<_, tables::StoragesHistory, _>(
+                provider,
+                collector,
+                first_sync,
+                |AddressStorageKey((address, storage_key)), highest_block_number| {
+                    StorageShardedKey::new(address, storage_key, highest_block_number)
+                },
+                StorageShardedKey::decode_owned,
+                |key| AddressStorageKey((key.address, key.sharded_key.key)),
+            )?;
+        }
 
         Ok(ExecOutput { checkpoint: StageCheckpoint::new(*range.end()), done: true })
     }
@@ -139,7 +189,35 @@ where
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_storage_history_indices_range(BlockNumberAddress::range(range))?;
+        // Check if RocksDB is enabled for storage history
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let use_rocksdb = provider.cached_storage_settings().storages_history_in_rocksdb;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let use_rocksdb = false;
+
+        if use_rocksdb {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            {
+                use reth_db_api::{cursor::DbCursorRO, transaction::DbTx};
+                use std::collections::BTreeSet;
+
+                // Stream changesets directly into a set of affected (address, storage_key) pairs
+                let mut affected_keys = BTreeSet::new();
+                for entry in provider
+                    .tx_ref()
+                    .cursor_read::<tables::StorageChangeSets>()?
+                    .walk_range(BlockNumberAddress::range(range.clone()))?
+                {
+                    let (block_address, storage_entry) = entry?;
+                    affected_keys.insert((block_address.address(), storage_entry.key));
+                }
+
+                // Unwind using RocksDB
+                super::unwind_storage_history_via_rocksdb(provider, affected_keys, *range.start())?;
+            }
+        } else {
+            provider.unwind_storage_history_indices_range(BlockNumberAddress::range(range))?;
+        }
 
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
     }
@@ -661,6 +739,147 @@ mod tests {
             let table = self.db.table::<tables::StoragesHistory>().unwrap();
             assert!(table.is_empty());
             Ok(())
+        }
+    }
+
+    /// `RocksDB`-specific tests for storage history indexing.
+    ///
+    /// These tests verify that when `storages_history_in_rocksdb` is enabled:
+    /// - Execute writes indices to `RocksDB` instead of MDBX
+    /// - Incremental syncs properly merge with existing `RocksDB` data
+    /// - Unwind correctly removes indices from `RocksDB`
+    #[cfg(all(unix, feature = "rocksdb"))]
+    mod rocksdb_tests {
+        use super::*;
+        use reth_provider::RocksDBProviderFactory;
+        use reth_storage_api::StorageSettings;
+
+        /// Helper to setup RocksDB-enabled test environment with storage changesets.
+        fn setup_with_changesets(db: &TestStageDB, block_range: std::ops::RangeInclusive<u64>) {
+            db.factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+            );
+            db.commit(|tx| {
+                for block in block_range {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                    tx.put::<tables::StorageChangeSets>(
+                        block_number_address(block),
+                        storage(STORAGE_KEY),
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+        }
+
+        /// Verifies execute writes to `RocksDB` (not MDBX) when enabled.
+        #[tokio::test]
+        async fn execute_writes_to_rocksdb() {
+            let db = TestStageDB::default();
+            setup_with_changesets(&db, 0..=5);
+
+            run(&db, 5, None);
+
+            // MDBX should be empty, RocksDB should have data
+            assert_eq!(db.table::<tables::StoragesHistory>().unwrap().len(), 0);
+            let rocksdb = db.factory.rocksdb_provider();
+            assert!(rocksdb.get::<tables::StoragesHistory>(shard(u64::MAX)).unwrap().is_some());
+        }
+
+        /// Verifies incremental sync merges new indices with existing `RocksDB` data.
+        /// This is critical: without proper merging, we'd lose previously indexed blocks.
+        #[tokio::test]
+        async fn incremental_sync_merges_indices() {
+            let db = TestStageDB::default();
+            setup_with_changesets(&db, 0..=5);
+
+            // First sync: blocks 0-5
+            run(&db, 5, None);
+
+            // Add more changesets and run incremental sync
+            db.commit(|tx| {
+                for block in 6..=10u64 {
+                    tx.put::<tables::BlockBodyIndices>(
+                        block,
+                        StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                    )?;
+                    tx.put::<tables::StorageChangeSets>(
+                        block_number_address(block),
+                        storage(STORAGE_KEY),
+                    )?;
+                }
+                Ok(())
+            })
+            .unwrap();
+            run(&db, 10, Some(5));
+
+            // Should have all blocks 0-10 merged
+            let rocksdb = db.factory.rocksdb_provider();
+            let blocks: Vec<u64> = rocksdb
+                .get::<tables::StoragesHistory>(shard(u64::MAX))
+                .unwrap()
+                .unwrap()
+                .iter()
+                .collect();
+            assert_eq!(blocks, (0..=10).collect::<Vec<_>>());
+        }
+
+        /// Verifies unwind removes indices >= `unwind_to` from `RocksDB`.
+        #[tokio::test]
+        async fn unwind_removes_indices() {
+            let db = TestStageDB::default();
+            setup_with_changesets(&db, 0..=10);
+
+            run(&db, 10, None);
+            unwind(&db, 10, 5);
+
+            // Should only have blocks 0-5 remaining
+            let rocksdb = db.factory.rocksdb_provider();
+            let blocks: Vec<u64> = rocksdb
+                .get::<tables::StoragesHistory>(shard(u64::MAX))
+                .unwrap()
+                .unwrap()
+                .iter()
+                .collect();
+            assert_eq!(blocks, (0..=5).collect::<Vec<_>>());
+        }
+
+        /// Verifies unwind correctly handles indices spanning multiple shards.
+        ///
+        /// Creates enough blocks to fill one complete shard plus overflow, then unwinds
+        /// to a point inside the first shard. Verifies:
+        /// - Sentinel shard contains only blocks < `unwind_to`
+        /// - The old full shard (keyed by its max block) is deleted
+        #[tokio::test]
+        async fn unwind_crosses_shard_boundary() {
+            let db = TestStageDB::default();
+            let max_block = NUM_OF_INDICES_IN_SHARD as u64 + 10;
+            let unwind_to = NUM_OF_INDICES_IN_SHARD as u64 - 10;
+
+            setup_with_changesets(&db, 0..=max_block);
+            run(&db, max_block, None);
+            unwind(&db, max_block, unwind_to);
+
+            let rocksdb = db.factory.rocksdb_provider();
+
+            // Sentinel shard should contain only blocks 0..=unwind_to
+            let blocks: Vec<u64> = rocksdb
+                .get::<tables::StoragesHistory>(shard(u64::MAX))
+                .unwrap()
+                .unwrap()
+                .iter()
+                .collect();
+            assert_eq!(blocks, (0..=unwind_to).collect::<Vec<_>>());
+
+            // The old full shard should be deleted
+            let full_shard_max = NUM_OF_INDICES_IN_SHARD as u64 - 1;
+            assert!(rocksdb
+                .get::<tables::StoragesHistory>(shard(full_shard_max))
+                .unwrap()
+                .is_none());
         }
     }
 }

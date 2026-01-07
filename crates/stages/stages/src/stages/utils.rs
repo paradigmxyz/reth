@@ -8,10 +8,20 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_db_api::{
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    table::Decode,
+};
 use reth_etl::Collector;
 use reth_provider::{
     providers::StaticFileProvider, BlockReader, DBProvider, ProviderError,
     StaticFileProviderFactory,
+};
+#[cfg(all(unix, feature = "rocksdb"))]
+use reth_provider::{
+    providers::{RocksDBBatch, RocksDBProvider},
+    EitherWriter,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
@@ -189,7 +199,7 @@ where
 }
 
 /// Shard and insert the indices list according to [`LoadMode`] and its length.
-pub(crate) fn load_indices<H, C, P>(
+fn load_indices<H, C, P>(
     cursor: &mut C,
     partial_key: P,
     list: &mut Vec<BlockNumber>,
@@ -234,7 +244,7 @@ where
 }
 
 /// Mode on how to load index shards into the database.
-pub(crate) enum LoadMode {
+enum LoadMode {
     /// Keep the last shard in memory and don't flush it to the database.
     KeepLast,
     /// Flush all shards into the database.
@@ -245,6 +255,378 @@ impl LoadMode {
     const fn is_flush(&self) -> bool {
         matches!(self, Self::Flush)
     }
+}
+
+/// Deletes all entries in a `RocksDB` table by enqueuing delete operations in the provided batch.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub(crate) fn clear_rocksdb_table<T: Table>(
+    rocksdb: &RocksDBProvider,
+    batch: &mut RocksDBBatch<'_>,
+) -> Result<(), StageError> {
+    for entry in rocksdb.iter::<T>()? {
+        let (key, _value) = entry?;
+        batch.delete::<T>(key)?;
+    }
+    Ok(())
+}
+
+/// Load storage history indices through an [`EitherWriter`] which routes writes to either
+/// database or `RocksDB`.
+///
+/// This is similar to [`load_history_indices`] but uses `EitherWriter` for flexible storage
+/// backend routing. The sharding logic is identical: indices are grouped by partial keys,
+/// shards are created when reaching `NUM_OF_INDICES_IN_SHARD`, and the last shard uses
+/// `u64::MAX` as the highest block number sentinel.
+///
+/// Note: For `RocksDB`, when `append_only == false`, this function reads existing shards
+/// from `RocksDB` and merges them with new indices.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub(crate) fn load_storage_history_indices_via_writer<CURSOR, N, Provider>(
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+    mut collector: reth_etl::Collector<
+        reth_db_api::models::storage_sharded_key::StorageShardedKey,
+        BlockNumberList,
+    >,
+    append_only: bool,
+    rocksdb_provider: &Provider,
+) -> Result<(), StageError>
+where
+    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
+        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+    N: reth_primitives_traits::NodePrimitives,
+    Provider: reth_provider::RocksDBProviderFactory,
+{
+    type PartialKey = (alloy_primitives::Address, alloy_primitives::B256);
+
+    let mut current_partial = PartialKey::default();
+    let mut current_list = Vec::<u64>::new();
+
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    let rocksdb = rocksdb_provider.rocksdb_provider();
+
+    // Group block numbers by (address, storage_key) and write them as shards to RocksDB.
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let sharded_key = StorageShardedKey::decode_owned(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_storage_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices via EitherWriter");
+        }
+
+        let partial_key: PartialKey = (sharded_key.address, sharded_key.sharded_key.key);
+
+        // When we encounter a new (address, storage_key) pair, flush the previous one
+        if current_partial != partial_key {
+            flush_storage_shards(writer, current_partial, &mut current_list, append_only, true)?;
+            current_partial = partial_key;
+            current_list.clear();
+
+            // For incremental sync, merge with existing sentinel shard from RocksDB
+            if !append_only {
+                let key = StorageShardedKey::new(partial_key.0, partial_key.1, u64::MAX);
+                if let Some(existing_list) =
+                    rocksdb.get::<reth_db_api::tables::StoragesHistory>(key)?
+                {
+                    current_list.extend(existing_list.iter());
+                }
+            }
+        }
+
+        current_list.extend(new_list.iter());
+        flush_storage_shards(writer, current_partial, &mut current_list, append_only, false)?;
+    }
+
+    flush_storage_shards(writer, current_partial, &mut current_list, append_only, true)?;
+
+    Ok(())
+}
+
+/// Writes block number indices as shards to storage history.
+///
+/// Splits `list` into chunks of `NUM_OF_INDICES_IN_SHARD` and writes each as a separate shard.
+/// When `flush_all` is false, keeps the last chunk in memory for further accumulation.
+/// The final shard uses `u64::MAX` as the sentinel key.
+#[cfg(all(unix, feature = "rocksdb"))]
+fn flush_storage_shards<CURSOR, N>(
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+    partial_key: (alloy_primitives::Address, alloy_primitives::B256),
+    list: &mut Vec<BlockNumber>,
+    append_only: bool,
+    flush_all: bool,
+) -> Result<(), StageError>
+where
+    CURSOR: DbCursorRW<reth_db_api::tables::StoragesHistory>
+        + DbCursorRO<reth_db_api::tables::StoragesHistory>,
+    N: reth_primitives_traits::NodePrimitives,
+{
+    // Write full shards keyed by highest block; last shard uses u64::MAX sentinel.
+    // If !flush_all, keep the last chunk in memory for further accumulation.
+    if list.len() > NUM_OF_INDICES_IN_SHARD || flush_all {
+        let chunks =
+            list.chunks(NUM_OF_INDICES_IN_SHARD).map(|c| c.to_vec()).collect::<Vec<Vec<u64>>>();
+
+        let mut iter = chunks.into_iter().peekable();
+        while let Some(chunk) = iter.next() {
+            let mut highest = *chunk.last().expect("BlockNumberList shard chunk must be non-empty");
+
+            if !flush_all && iter.peek().is_none() {
+                *list = chunk;
+            } else {
+                if iter.peek().is_none() {
+                    highest = u64::MAX;
+                }
+                let key = StorageShardedKey::new(partial_key.0, partial_key.1, highest);
+                let value = BlockNumberList::new_pre_sorted(chunk);
+                writer.put_storage_history(key, &value, append_only)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Load account history indices through an [`EitherWriter`] which routes writes to either
+/// database or `RocksDB`.
+///
+/// Note: For `RocksDB`, when `append_only == false`, this function reads existing shards
+/// from `RocksDB` and merges them with new indices.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub(crate) fn load_account_history_indices_via_writer<CURSOR, N, Provider>(
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+    mut collector: reth_etl::Collector<
+        reth_db_api::models::ShardedKey<alloy_primitives::Address>,
+        BlockNumberList,
+    >,
+    append_only: bool,
+    rocksdb_provider: &Provider,
+) -> Result<(), StageError>
+where
+    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
+        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
+    N: reth_primitives_traits::NodePrimitives,
+    Provider: reth_provider::RocksDBProviderFactory,
+{
+    let mut current_partial = alloy_primitives::Address::default();
+    let mut current_list = Vec::<u64>::new();
+
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    let rocksdb = rocksdb_provider.rocksdb_provider();
+
+    // Group block numbers by address and write them as shards to RocksDB.
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let sharded_key = ShardedKey::<alloy_primitives::Address>::decode_owned(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_account_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing indices via EitherWriter");
+        }
+
+        let partial_key = sharded_key.key;
+
+        // When we encounter a new address, flush the previous one
+        if current_partial != partial_key {
+            flush_account_shards(writer, current_partial, &mut current_list, append_only, true)?;
+            current_partial = partial_key;
+            current_list.clear();
+
+            // For incremental sync, merge with existing sentinel shard from RocksDB
+            if !append_only {
+                let key = ShardedKey::new(partial_key, u64::MAX);
+                if let Some(existing_list) =
+                    rocksdb.get::<reth_db_api::tables::AccountsHistory>(key)?
+                {
+                    current_list.extend(existing_list.iter());
+                }
+            }
+        }
+
+        current_list.extend(new_list.iter());
+        flush_account_shards(writer, current_partial, &mut current_list, append_only, false)?;
+    }
+
+    flush_account_shards(writer, current_partial, &mut current_list, append_only, true)?;
+
+    Ok(())
+}
+
+/// Writes block number indices as shards to account history.
+///
+/// Splits `list` into chunks of `NUM_OF_INDICES_IN_SHARD` and writes each as a separate shard.
+/// When `flush_all` is false, keeps the last chunk in memory for further accumulation.
+/// The final shard uses `u64::MAX` as the sentinel key.
+#[cfg(all(unix, feature = "rocksdb"))]
+fn flush_account_shards<CURSOR, N>(
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+    partial_key: alloy_primitives::Address,
+    list: &mut Vec<BlockNumber>,
+    append_only: bool,
+    flush_all: bool,
+) -> Result<(), StageError>
+where
+    CURSOR: DbCursorRW<reth_db_api::tables::AccountsHistory>
+        + DbCursorRO<reth_db_api::tables::AccountsHistory>,
+    N: reth_primitives_traits::NodePrimitives,
+{
+    // Write full shards keyed by highest block; last shard uses u64::MAX sentinel.
+    // If !flush_all, keep the last chunk in memory for further accumulation.
+    if list.len() > NUM_OF_INDICES_IN_SHARD || flush_all {
+        let chunks =
+            list.chunks(NUM_OF_INDICES_IN_SHARD).map(|c| c.to_vec()).collect::<Vec<Vec<u64>>>();
+
+        let mut iter = chunks.into_iter().peekable();
+        while let Some(chunk) = iter.next() {
+            let mut highest = *chunk.last().expect("BlockNumberList shard chunk must be non-empty");
+
+            if !flush_all && iter.peek().is_none() {
+                *list = chunk;
+            } else {
+                if iter.peek().is_none() {
+                    highest = u64::MAX;
+                }
+                let key = ShardedKey::new(partial_key, highest);
+                let value = BlockNumberList::new_pre_sorted(chunk);
+                writer.put_account_history(key, &value, append_only)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Generic helper to unwind history indices using `RocksDB`.
+///
+/// For each affected partial key, iterates shards in reverse order and:
+/// 1. Deletes shards where all indices are `>= first_block_to_remove`
+/// 2. For the boundary shard (contains indices both above and below the threshold), filters to keep
+///    only indices `< first_block_to_remove` and rewrites as sentinel
+/// 3. Preserves earlier shards unchanged
+/// 4. If no indices remain after filtering, the key is fully removed
+#[cfg(all(unix, feature = "rocksdb"))]
+fn unwind_history_via_rocksdb<Provider, T, PartialKey, K, SK>(
+    provider: &Provider,
+    affected_keys: impl IntoIterator<Item = PartialKey>,
+    first_block_to_remove: BlockNumber,
+    lowest_shard_key: impl Fn(&PartialKey) -> K,
+    sentinel_shard_key: impl Fn(&PartialKey) -> K,
+    shard_belongs_to_key: impl Fn(&K, &PartialKey) -> bool,
+) -> Result<(), StageError>
+where
+    Provider: DBProvider + reth_provider::RocksDBProviderFactory,
+    T: reth_db_api::table::Table<Key = K, Value = BlockNumberList>,
+    K: Clone + AsRef<reth_db_api::models::ShardedKey<SK>>,
+{
+    let rocksdb = provider.rocksdb_provider();
+    let tx = rocksdb.tx();
+    let mut batch = rocksdb.batch();
+
+    for partial_key in affected_keys {
+        let start_key = lowest_shard_key(&partial_key);
+        let mut shards = Vec::<(K, BlockNumberList)>::new();
+
+        for entry in tx.iter_from::<T>(start_key)? {
+            let (key, list) = entry?;
+            if !shard_belongs_to_key(&key, &partial_key) {
+                break;
+            }
+            shards.push((key, list));
+        }
+
+        if shards.is_empty() {
+            continue;
+        }
+
+        let mut reinsert: Option<Vec<u64>> = None;
+
+        // Walk shards from highest to lowest. Delete shards above threshold,
+        // filter the boundary shard, and stop at the first shard fully below threshold.
+        for (key, list) in shards.iter().rev() {
+            let first = list.iter().next().expect("BlockNumberList shard must be non-empty");
+            let highest = key.as_ref().highest_block_number;
+
+            if first >= first_block_to_remove {
+                // Entire shard is above threshold - delete it
+                batch.delete::<T>(key.clone())?;
+                continue;
+            }
+
+            // This shard has indices below the threshold
+            if first_block_to_remove <= highest {
+                // Boundary shard: filter and rewrite as sentinel
+                batch.delete::<T>(key.clone())?;
+                let filtered: Vec<u64> =
+                    list.iter().take_while(|block| *block < first_block_to_remove).collect();
+                if !filtered.is_empty() {
+                    reinsert = Some(filtered);
+                }
+            }
+            // Earlier shards are entirely below threshold - keep them unchanged
+            break;
+        }
+
+        if let Some(indices) = reinsert {
+            let sentinel_key = sentinel_shard_key(&partial_key);
+            let new_list = BlockNumberList::new_pre_sorted(indices);
+            batch.put::<T>(sentinel_key, &new_list)?;
+        }
+    }
+
+    provider.set_pending_rocksdb_batch(batch.into_inner());
+    Ok(())
+}
+
+/// Unwind storage history indices using `RocksDB`.
+///
+/// Takes a set of affected (address, `storage_key`) pairs and removes all block numbers
+/// >= `first_block_to_remove` from the history indices across ALL shards.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub(crate) fn unwind_storage_history_via_rocksdb<Provider>(
+    provider: &Provider,
+    affected_keys: std::collections::BTreeSet<(alloy_primitives::Address, alloy_primitives::B256)>,
+    first_block_to_remove: BlockNumber,
+) -> Result<(), StageError>
+where
+    Provider: DBProvider + reth_provider::RocksDBProviderFactory,
+{
+    unwind_history_via_rocksdb::<_, reth_db_api::tables::StoragesHistory, _, _, _>(
+        provider,
+        affected_keys,
+        first_block_to_remove,
+        |(address, storage_key)| StorageShardedKey::new(*address, *storage_key, 0),
+        |(address, storage_key)| StorageShardedKey::new(*address, *storage_key, u64::MAX),
+        |storage_sharded_key, (address, storage_key)| {
+            storage_sharded_key.address == *address &&
+                storage_sharded_key.sharded_key.key == *storage_key
+        },
+    )
+}
+
+/// Unwind account history indices using `RocksDB`.
+///
+/// Takes a set of affected addresses and removes all block numbers
+/// >= `first_block_to_remove` from the history indices across ALL shards.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub(crate) fn unwind_account_history_via_rocksdb<Provider>(
+    provider: &Provider,
+    affected_addresses: std::collections::BTreeSet<alloy_primitives::Address>,
+    first_block_to_remove: BlockNumber,
+) -> Result<(), StageError>
+where
+    Provider: DBProvider + reth_provider::RocksDBProviderFactory,
+{
+    unwind_history_via_rocksdb::<_, reth_db_api::tables::AccountsHistory, _, _, _>(
+        provider,
+        affected_addresses,
+        first_block_to_remove,
+        |address| ShardedKey::new(*address, 0),
+        |address| ShardedKey::new(*address, u64::MAX),
+        |sharded_key, address| sharded_key.key == *address,
+    )
 }
 
 /// Called when database is ahead of static files. Attempts to find the first block we are missing
