@@ -510,7 +510,8 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 )
             }
             other => {
-                let msg = other.create_request_message(request_id).map_versioned(self.conn.version());
+                let msg =
+                    other.create_request_message(request_id).map_versioned(self.conn.version());
                 (msg.into(), other)
             }
         };
