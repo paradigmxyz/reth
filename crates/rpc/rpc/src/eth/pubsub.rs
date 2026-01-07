@@ -296,7 +296,8 @@ where
         params: Option<Box<JsonRawValue>>,
         err_msg: &'static str,
     ) -> Result<(), ErrorObject<'static>> {
-        if let Some(handler) = self.inner.additional_handlers.read().get(kind.as_str()).cloned() {
+        let handler = self.inner.additional_handlers.read().get(kind.as_str()).cloned();
+        if let Some(handler) = handler {
             let stream = (handler)(params)?;
             return pipe_from_stream(accepted_sink, stream).await
         }
