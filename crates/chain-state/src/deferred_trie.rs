@@ -61,16 +61,6 @@ struct DeferredTrieMetrics {
     deferred_trie_async_ready: Counter,
     /// Number of times deferred trie data required synchronous computation (fallback path).
     deferred_trie_sync_fallback: Counter,
-    /// Number of times the parent's trie overlay was reused.
-    deferred_trie_overlay_reused: Counter,
-    /// Number of times the trie overlay was rebuilt from ancestors (rare fallback).
-    deferred_trie_overlay_rebuilt: Counter,
-    /// Number of times `Arc::make_mut` triggered a clone (should be 0 with deep-copy approach).
-    deferred_trie_arc_clone_triggered: Counter,
-    /// Number of accounts in the parent overlay being copied.
-    deferred_trie_overlay_accounts_count: reth_metrics::metrics::Gauge,
-    /// Number of trie nodes in the parent overlay being copied.
-    deferred_trie_overlay_nodes_count: reth_metrics::metrics::Gauge,
 }
 
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
