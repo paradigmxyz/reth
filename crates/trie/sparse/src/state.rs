@@ -907,8 +907,6 @@ impl<S: SparseTrieInterface + Clone> StorageTries<S> {
 
     /// Returns the `SparseTrie` and the set of already revealed trie node paths for an account's
     /// storage, creating them if they didn't previously exist.
-    ///
-    /// Uses a single `HashMap` lookup instead of two separate lookups.
     fn get_trie_and_revealed_paths_mut(
         &mut self,
         account: B256,
