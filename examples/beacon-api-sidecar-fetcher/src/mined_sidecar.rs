@@ -106,12 +106,13 @@ where
             .map(|tx| (tx.clone(), tx.blob_count().unwrap_or(0) as usize))
             .collect();
 
+        // FIX: Optimization to skip processing for blocks with no blob transactions
+        if txs.is_empty() {
+            return;
+        }
+
         let mut all_blobs_available = true;
         let mut actions_to_queue: Vec<BlobTransactionEvent> = Vec::new();
-
-        if txs.is_empty() {
-            return
-        }
 
         match self.pool.get_all_blobs_exact(txs.iter().map(|(tx, _)| *tx.tx_hash()).collect()) {
             Ok(blobs) => {
