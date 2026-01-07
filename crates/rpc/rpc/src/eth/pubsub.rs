@@ -180,6 +180,7 @@ where
         raw_params: Option<Box<JsonRawValue>>,
         parsed: Result<ParsedSubscription, ParseSubscriptionError>,
     ) -> Result<(), ErrorObject<'static>> {
+        // Parse at the callsite; only unknown kinds fall back.
         match parsed {
             Ok(parsed) => self.handle_parsed(accepted_sink, parsed).await,
             Err(ParseSubscriptionError::UnsupportedKind) => {
@@ -202,6 +203,7 @@ where
         accepted_sink: SubscriptionSink,
         parsed: ParsedSubscription,
     ) -> Result<(), ErrorObject<'static>> {
+        // Standard subscription handlers operate on validated params.
         match parsed.kind {
             SubscriptionKind::NewHeads => {
                 pipe_from_stream(accepted_sink, self.new_headers_stream()).await
@@ -391,6 +393,7 @@ fn parse_subscription(
     kind: &str,
     raw_params: Option<&JsonRawValue>,
 ) -> Result<ParsedSubscription, ParseSubscriptionError> {
+    // Decode kind first; only known kinds accept standard params.
     let kind = parse_subscription_kind(kind).ok_or(ParseSubscriptionError::UnsupportedKind)?;
     let params = match kind {
         SubscriptionKind::Logs => {
@@ -417,6 +420,7 @@ fn parse_subscription(
 }
 
 fn parse_subscription_kind(kind: &str) -> Option<SubscriptionKind> {
+    // Match the JSON-RPC wire representation.
     match kind {
         "newHeads" => Some(SubscriptionKind::NewHeads),
         "logs" => Some(SubscriptionKind::Logs),
@@ -430,6 +434,7 @@ fn parse_params_or_error(
     raw_params: Option<&JsonRawValue>,
     err_msg: &'static str,
 ) -> Result<Option<Params>, ParseSubscriptionError> {
+    // Normalize serde errors into a stable RPC message.
     raw_params
         .map(|raw| serde_json::from_str::<Params>(raw.get()))
         .transpose()
