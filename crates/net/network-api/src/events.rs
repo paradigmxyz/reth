@@ -1,5 +1,6 @@
 //! API related to listening for network events.
 
+use reth_eth_wire::eth_snap_stream::EthSnapMessage;
 use reth_eth_wire_types::{
     message::RequestPair,
     snap::{
@@ -9,8 +10,8 @@ use reth_eth_wire_types::{
     },
     BlockBodies, BlockHeaders, Capabilities, DisconnectReason, EthMessage, EthNetworkPrimitives,
     EthVersion, GetBlockBodies, GetBlockHeaders, GetNodeData, GetPooledTransactions, GetReceipts,
-    GetReceipts70, NetworkPrimitives, NodeData, PooledTransactions, RawCapabilityMessage, Receipts,
-    Receipts69, Receipts70, UnifiedStatus,
+    GetReceipts70, NetworkPrimitives, NodeData, PooledTransactions, Receipts, Receipts69,
+    Receipts70, UnifiedStatus,
 };
 use reth_ethereum_forks::ForkId;
 use reth_network_p2p::error::{RequestError, RequestResult};
@@ -308,63 +309,52 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
         };
     }
 
-    /// Returns the [`EthMessage`] for this type
-    pub fn create_request_message(&self, request_id: u64) -> EthMessage<N> {
+    /// Returns the [`EthSnapMessage`] for this type.
+    pub fn create_request_message(&self, request_id: u64) -> EthSnapMessage<N> {
         match self {
-            Self::GetBlockHeaders { request, .. } => {
-                EthMessage::GetBlockHeaders(RequestPair { request_id, message: *request })
-            }
-            Self::GetBlockBodies { request, .. } => {
-                EthMessage::GetBlockBodies(RequestPair { request_id, message: request.clone() })
-            }
-            Self::GetPooledTransactions { request, .. } => {
+            Self::GetBlockHeaders { request, .. } => EthSnapMessage::Eth(
+                EthMessage::GetBlockHeaders(RequestPair { request_id, message: *request }),
+            ),
+            Self::GetBlockBodies { request, .. } => EthSnapMessage::Eth(
+                EthMessage::GetBlockBodies(RequestPair { request_id, message: request.clone() }),
+            ),
+            Self::GetPooledTransactions { request, .. } => EthSnapMessage::Eth(
                 EthMessage::GetPooledTransactions(RequestPair {
                     request_id,
                     message: request.clone(),
-                })
-            }
-            Self::GetNodeData { request, .. } => {
-                EthMessage::GetNodeData(RequestPair { request_id, message: request.clone() })
-            }
+                }),
+            ),
+            Self::GetNodeData { request, .. } => EthSnapMessage::Eth(EthMessage::GetNodeData(
+                RequestPair { request_id, message: request.clone() },
+            )),
             Self::GetReceipts { request, .. } | Self::GetReceipts69 { request, .. } => {
-                EthMessage::GetReceipts(RequestPair { request_id, message: request.clone() })
+                EthSnapMessage::Eth(EthMessage::GetReceipts(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                }))
             }
-            Self::GetReceipts70 { request, .. } => {
-                EthMessage::GetReceipts70(RequestPair { request_id, message: request.clone() })
-            }
-            // Snap requests are encoded via EthSnapMessage in the session layer; this path should
-            // not be used. We still return a raw capability message for compatibility.
+            Self::GetReceipts70 { request, .. } => EthSnapMessage::Eth(EthMessage::GetReceipts70(
+                RequestPair { request_id, message: request.clone() },
+            )),
             Self::SnapGetAccountRange { request, .. } => {
-                let msg = SnapProtocolMessage::GetAccountRange(request.clone());
-                let encoded = msg.encode();
-                EthMessage::Other(RawCapabilityMessage::new(
-                    msg.message_id() as usize,
-                    encoded.slice(1..).to_vec().into(),
-                ))
+                let mut request = request.clone();
+                request.request_id = request_id;
+                EthSnapMessage::Snap(SnapProtocolMessage::GetAccountRange(request))
             }
             Self::SnapGetStorageRanges { request, .. } => {
-                let msg = SnapProtocolMessage::GetStorageRanges(request.clone());
-                let encoded = msg.encode();
-                EthMessage::Other(RawCapabilityMessage::new(
-                    msg.message_id() as usize,
-                    encoded.slice(1..).to_vec().into(),
-                ))
+                let mut request = request.clone();
+                request.request_id = request_id;
+                EthSnapMessage::Snap(SnapProtocolMessage::GetStorageRanges(request))
             }
             Self::SnapGetByteCodes { request, .. } => {
-                let msg = SnapProtocolMessage::GetByteCodes(request.clone());
-                let encoded = msg.encode();
-                EthMessage::Other(RawCapabilityMessage::new(
-                    msg.message_id() as usize,
-                    encoded.slice(1..).to_vec().into(),
-                ))
+                let mut request = request.clone();
+                request.request_id = request_id;
+                EthSnapMessage::Snap(SnapProtocolMessage::GetByteCodes(request))
             }
             Self::SnapGetTrieNodes { request, .. } => {
-                let msg = SnapProtocolMessage::GetTrieNodes(request.clone());
-                let encoded = msg.encode();
-                EthMessage::Other(RawCapabilityMessage::new(
-                    msg.message_id() as usize,
-                    encoded.slice(1..).to_vec().into(),
-                ))
+                let mut request = request.clone();
+                request.request_id = request_id;
+                EthSnapMessage::Snap(SnapProtocolMessage::GetTrieNodes(request))
             }
         }
     }
@@ -421,10 +411,10 @@ impl<R> fmt::Debug for PeerRequestSender<R> {
 mod tests {
     use super::*;
     use alloy_primitives::B256;
-    use reth_eth_wire_types::snap::{GetAccountRangeMessage, GetByteCodesMessage, SnapMessageId};
+    use reth_eth_wire_types::snap::{GetAccountRangeMessage, GetByteCodesMessage};
 
     #[test]
-    fn snap_account_range_request_is_encoded_as_raw_capability() {
+    fn snap_account_range_request_is_encoded_as_snap_message() {
         let req = GetAccountRangeMessage {
             request_id: 0,
             root_hash: B256::ZERO,
@@ -437,14 +427,15 @@ mod tests {
             PeerRequest::SnapGetAccountRange { request: req.clone(), response: tx };
         let msg = peer_req.create_request_message(42);
 
-        let EthMessage::Other(raw) = msg else { panic!("expected raw capability message") };
-        let encoded = SnapProtocolMessage::GetAccountRange(req).encode();
-        assert_eq!(raw.id, SnapMessageId::GetAccountRange as usize);
-        assert_eq!(raw.payload.as_ref(), encoded.slice(1..).as_ref());
+        let EthSnapMessage::Snap(actual) = msg else { panic!("expected snap protocol message") };
+        let mut expected_req = req;
+        expected_req.request_id = 42;
+        let expected = SnapProtocolMessage::GetAccountRange(expected_req);
+        assert_eq!(actual, expected);
     }
 
     #[test]
-    fn snap_bytecodes_request_is_encoded_as_raw_capability() {
+    fn snap_bytecodes_request_is_encoded_as_snap_message() {
         let req =
             GetByteCodesMessage { request_id: 0, hashes: vec![B256::ZERO], response_bytes: 10 };
         let (tx, _rx) = oneshot::channel();
@@ -452,14 +443,15 @@ mod tests {
             PeerRequest::SnapGetByteCodes { request: req.clone(), response: tx };
         let msg = peer_req.create_request_message(7);
 
-        let EthMessage::Other(raw) = msg else { panic!("expected raw capability message") };
-        let encoded = SnapProtocolMessage::GetByteCodes(req).encode();
-        assert_eq!(raw.id, SnapMessageId::GetByteCodes as usize);
-        assert_eq!(raw.payload.as_ref(), encoded.slice(1..).as_ref());
+        let EthSnapMessage::Snap(actual) = msg else { panic!("expected snap protocol message") };
+        let mut expected_req = req;
+        expected_req.request_id = 7;
+        let expected = SnapProtocolMessage::GetByteCodes(expected_req);
+        assert_eq!(actual, expected);
     }
 
     #[test]
-    fn snap_storage_ranges_request_is_encoded_as_raw_capability() {
+    fn snap_storage_ranges_request_is_encoded_as_snap_message() {
         let req = GetStorageRangesMessage {
             request_id: 3,
             root_hash: B256::ZERO,
@@ -473,14 +465,15 @@ mod tests {
             PeerRequest::SnapGetStorageRanges { request: req.clone(), response: tx };
         let msg = peer_req.create_request_message(11);
 
-        let EthMessage::Other(raw) = msg else { panic!("expected raw capability message") };
-        let encoded = SnapProtocolMessage::GetStorageRanges(req).encode();
-        assert_eq!(raw.id, SnapMessageId::GetStorageRanges as usize);
-        assert_eq!(raw.payload.as_ref(), encoded.slice(1..).as_ref());
+        let EthSnapMessage::Snap(actual) = msg else { panic!("expected snap protocol message") };
+        let mut expected_req = req;
+        expected_req.request_id = 11;
+        let expected = SnapProtocolMessage::GetStorageRanges(expected_req);
+        assert_eq!(actual, expected);
     }
 
     #[test]
-    fn snap_trie_nodes_request_is_encoded_as_raw_capability() {
+    fn snap_trie_nodes_request_is_encoded_as_snap_message() {
         let req = GetTrieNodesMessage {
             request_id: 9,
             root_hash: B256::ZERO,
@@ -492,9 +485,10 @@ mod tests {
             PeerRequest::SnapGetTrieNodes { request: req.clone(), response: tx };
         let msg = peer_req.create_request_message(19);
 
-        let EthMessage::Other(raw) = msg else { panic!("expected raw capability message") };
-        let encoded = SnapProtocolMessage::GetTrieNodes(req).encode();
-        assert_eq!(raw.id, SnapMessageId::GetTrieNodes as usize);
-        assert_eq!(raw.payload.as_ref(), encoded.slice(1..).as_ref());
+        let EthSnapMessage::Snap(actual) = msg else { panic!("expected snap protocol message") };
+        let mut expected_req = req;
+        expected_req.request_id = 19;
+        let expected = SnapProtocolMessage::GetTrieNodes(expected_req);
+        assert_eq!(actual, expected);
     }
 }

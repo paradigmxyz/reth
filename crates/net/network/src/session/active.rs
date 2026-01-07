@@ -475,48 +475,42 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         let (outgoing, stored_request) = match request {
             PeerRequest::SnapGetAccountRange { mut request, response } => {
                 request.request_id = request_id;
-                (
-                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                        SnapProtocolMessage::GetAccountRange(request.clone()),
-                    )),
-                    PeerRequest::SnapGetAccountRange { request, response },
-                )
+                let stored_request = PeerRequest::SnapGetAccountRange { request, response };
+                let outgoing = stored_request.create_request_message(request_id);
+                (outgoing, stored_request)
             }
             PeerRequest::SnapGetStorageRanges { mut request, response } => {
                 request.request_id = request_id;
-                (
-                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                        SnapProtocolMessage::GetStorageRanges(request.clone()),
-                    )),
-                    PeerRequest::SnapGetStorageRanges { request, response },
-                )
+                let stored_request = PeerRequest::SnapGetStorageRanges { request, response };
+                let outgoing = stored_request.create_request_message(request_id);
+                (outgoing, stored_request)
             }
             PeerRequest::SnapGetByteCodes { mut request, response } => {
                 request.request_id = request_id;
-                (
-                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                        SnapProtocolMessage::GetByteCodes(request.clone()),
-                    )),
-                    PeerRequest::SnapGetByteCodes { request, response },
-                )
+                let stored_request = PeerRequest::SnapGetByteCodes { request, response };
+                let outgoing = stored_request.create_request_message(request_id);
+                (outgoing, stored_request)
             }
             PeerRequest::SnapGetTrieNodes { mut request, response } => {
                 request.request_id = request_id;
-                (
-                    OutgoingMessage::SnapProtocolMessage(EthSnapMessage::Snap(
-                        SnapProtocolMessage::GetTrieNodes(request.clone()),
-                    )),
-                    PeerRequest::SnapGetTrieNodes { request, response },
-                )
+                let stored_request = PeerRequest::SnapGetTrieNodes { request, response };
+                let outgoing = stored_request.create_request_message(request_id);
+                (outgoing, stored_request)
             }
             other => {
-                let msg =
-                    other.create_request_message(request_id).map_versioned(self.conn.version());
-                (msg.into(), other)
+                let outgoing = other.create_request_message(request_id);
+                (outgoing, other)
             }
         };
 
-        self.queued_outgoing.push_back(outgoing);
+        let outgoing = match outgoing {
+            EthSnapMessage::Eth(msg) => {
+                EthSnapMessage::Eth(msg.map_versioned(self.conn.version()))
+            }
+            other => other,
+        };
+
+        self.queued_outgoing.push_back(outgoing.into());
         let req = InflightRequest {
             request: RequestState::Waiting(stored_request),
             timestamp: Instant::now(),
