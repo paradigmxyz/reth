@@ -618,6 +618,7 @@ async fn run_benchmark_workflow(
     for (i, &git_ref) in refs.iter().enumerate() {
         let ref_type = ref_types[i];
         let commit = commits[i];
+        let is_last = i == refs.len() - 1;
         info!("=== Processing {} reference: {} ===", ref_type, git_ref);
 
         // Switch to target reference
@@ -680,8 +681,12 @@ async fn run_benchmark_workflow(
         // Stop node
         node_manager.stop_node(&mut node_process).await?;
 
-        // Unwind back to original tip
-        node_manager.unwind_to_block(original_tip).await?;
+        // Skip final unwind - it's unnecessary since this is the last benchmark
+        if !is_last {
+            node_manager.unwind_to_block(original_tip).await?;
+        } else {
+            info!("Skipping final unwind (last benchmark run)");
+        }
 
         // Store results for comparison
         comparison_generator.add_ref_results(ref_type, &output_dir)?;
