@@ -153,6 +153,11 @@ impl ProofSequencer {
             self.pending_proofs.insert(sequence, update);
         }
 
+        // return early if we don't have the next expected proof to avoid unnecessary allocation
+        if self.pending_proofs.is_empty() {
+            return Vec::new()
+        }
+
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
         let mut current_sequence = self.next_to_deliver;
 
