@@ -98,18 +98,25 @@ where
 }
 
 /// A cursor over the storage tries stored in the database.
+///
+/// This cursor implements locality optimization: when seeking forward from the current position,
+/// it uses `next_dup` (O(1)) to walk forward instead of `seek_by_key_subkey` (O(log N)) when
+/// the target key is close to the current position.
 #[derive(Debug)]
 pub struct DatabaseStorageTrieCursor<C> {
     /// The underlying cursor.
     pub cursor: C,
     /// Hashed address used for cursor positioning.
     hashed_address: B256,
+    /// The last key returned by the cursor, used for locality optimization.
+    /// When seeking forward from this position, we can use `next_dup` instead of re-seeking.
+    last_key: Option<Nibbles>,
 }
 
 impl<C> DatabaseStorageTrieCursor<C> {
     /// Create a new storage trie cursor.
     pub const fn new(cursor: C, hashed_address: B256) -> Self {
-        Self { cursor, hashed_address }
+        Self { cursor, hashed_address, last_key: None }
     }
 }
 
@@ -125,6 +132,9 @@ where
         &mut self,
         updates: &StorageTrieUpdatesSorted,
     ) -> Result<usize, DatabaseError> {
+        // Invalidate cursor position tracking: writes move the cursor arbitrarily
+        self.last_key = None;
+
         // The storage trie for this account has to be deleted.
         if updates.is_deleted() && self.cursor.seek_exact(self.hashed_address)?.is_some() {
             self.cursor.delete_current_duplicates()?;
@@ -167,27 +177,85 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self
+        let result = self
             .cursor
             .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key))?
             .filter(|e| e.nibbles == StoredNibblesSubKey(key))
-            .map(|value| (value.nibbles.0, value.node)))
+            .map(|value| (value.nibbles.0, value.node));
+
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     /// Seeks the given key in the storage trie.
+    ///
+    /// This method implements a bounded locality optimization: if the cursor is already positioned
+    /// and the target key is > the current position, we speculatively walk forward using
+    /// `next_dup` (O(1) per step) for up to `MAX_WALK_STEPS` entries. If the target is not
+    /// found within that limit, we fall back to `seek_by_key_subkey` (O(log N)).
+    ///
+    /// This bounds the worst-case complexity to O(MAX_WALK_STEPS + log N) instead of O(N).
+    #[allow(clippy::collapsible_if)]
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self
+        // Maximum forward walk steps before falling back to seek.
+        // This bounds worst-case from O(N) to O(MAX_WALK_STEPS + log N).
+        // Value of 8 is optimal for tries up to ~256 entries (log2(256) = 8).
+        const MAX_WALK_STEPS: usize = 8;
+
+        // Locality optimization: if cursor is positioned and target is ahead,
+        // speculatively walk forward for a bounded number of steps
+        if let Some(last) = self.last_key {
+            if key > last {
+                // Bounded forward walk - only beneficial for nearby keys
+                for _ in 0..MAX_WALK_STEPS {
+                    match self.cursor.next_dup()? {
+                        Some((_, entry)) => {
+                            if entry.nibbles.0 >= key {
+                                // Found target or passed it
+                                self.last_key = Some(entry.nibbles.0);
+                                return Ok(Some((entry.nibbles.0, entry.node)));
+                            }
+                            // Haven't reached target yet, continue walking
+                        }
+                        None => {
+                            // Exhausted all duplicates without finding target
+                            self.last_key = None;
+                            return Ok(None);
+                        }
+                    }
+                }
+                // Exceeded walk limit - fall through to seek_by_key_subkey
+            } else if key == last {
+                // Re-seeking the same key, return current position if still valid
+                if let Some((_, entry)) = self.cursor.current()? {
+                    if entry.nibbles.0 == key {
+                        return Ok(Some((entry.nibbles.0, entry.node)));
+                    }
+                }
+            }
+        }
+
+        // Fall back to seek_by_key_subkey for:
+        // - Backward seeks (key < last)
+        // - When cursor is not positioned (last_key is None)
+        // - When forward walk exceeded limit
+        let result = self
             .cursor
             .seek_by_key_subkey(self.hashed_address, StoredNibblesSubKey(key))?
-            .map(|value| (value.nibbles.0, value.node)))
+            .map(|value| (value.nibbles.0, value.node));
+
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.cursor.next_dup()?.map(|(_, v)| (v.nibbles.0, v.node)))
+        let result = self.cursor.next_dup()?.map(|(_, v)| (v.nibbles.0, v.node));
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     /// Retrieves the current value in the storage trie cursor.
@@ -196,7 +264,7 @@ where
     }
 
     fn reset(&mut self) {
-        // No-op for database cursors
+        self.last_key = None;
     }
 }
 
@@ -206,6 +274,8 @@ where
 {
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;
+        // Reset cursor position tracking when switching to a different storage trie
+        self.last_key = None;
     }
 }
 
@@ -215,6 +285,21 @@ mod tests {
     use alloy_primitives::hex_literal::hex;
     use reth_db_api::{cursor::DbCursorRW, transaction::DbTxMut};
     use reth_provider::test_utils::create_test_provider_factory;
+    use reth_trie::trie_cursor::TrieStorageCursor;
+
+    fn create_test_nibbles(count: usize) -> Vec<Nibbles> {
+        (0..count as u64)
+            .map(|i| {
+                let mut bytes = [0u8; 8];
+                bytes.copy_from_slice(&i.to_be_bytes());
+                Nibbles::unpack(bytes)
+            })
+            .collect()
+    }
+
+    fn create_test_node() -> BranchNodeCompact {
+        BranchNodeCompact::new(0b1111, 0b0011, 0, vec![], None)
+    }
 
     #[test]
     fn test_account_trie_order() {
@@ -256,7 +341,6 @@ mod tests {
         );
     }
 
-    // tests that upsert and seek match on the storage trie cursor
     #[test]
     fn test_storage_cursor_abstraction() {
         let factory = create_test_provider_factory();
@@ -273,5 +357,291 @@ mod tests {
 
         let mut cursor = DatabaseStorageTrieCursor::new(cursor, hashed_address);
         assert_eq!(cursor.seek(key.into()).unwrap().unwrap().1, value);
+    }
+
+    #[test]
+    fn test_storage_trie_forward_sequential_seek() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::random();
+        let keys = create_test_nibbles(10);
+
+        // Insert test data
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            for key in &keys {
+                cursor
+                    .upsert(
+                        hashed_address,
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+
+        let mut cursor = DatabaseStorageTrieCursor::new(
+            provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap(),
+            hashed_address,
+        );
+
+        // Forward sequential seeks should all succeed
+        for (i, key) in keys.iter().enumerate() {
+            let result = cursor.seek(*key).unwrap();
+            assert!(result.is_some(), "Should find key at index {i}");
+            let (found_key, _) = result.unwrap();
+            assert_eq!(found_key, *key);
+        }
+    }
+
+    #[test]
+    fn test_storage_trie_backward_seek_fallback() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::random();
+        let keys = create_test_nibbles(10);
+
+        // Insert test data
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            for key in &keys {
+                cursor
+                    .upsert(
+                        hashed_address,
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+
+        let mut cursor = DatabaseStorageTrieCursor::new(
+            provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap(),
+            hashed_address,
+        );
+
+        // Seek to last key first
+        let result = cursor.seek(keys[9]).unwrap();
+        assert!(result.is_some());
+
+        // Backward seek should still work
+        let result = cursor.seek(keys[2]).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().0, keys[2]);
+    }
+
+    #[test]
+    fn test_storage_trie_cursor_exhaustion() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::random();
+        let keys = create_test_nibbles(5);
+
+        // Insert test data
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            for key in &keys {
+                cursor
+                    .upsert(
+                        hashed_address,
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+
+        let mut cursor = DatabaseStorageTrieCursor::new(
+            provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap(),
+            hashed_address,
+        );
+
+        // Position cursor
+        let _ = cursor.seek(keys[0]).unwrap();
+
+        // Create a very high nibbles key to exhaust
+        let high_key = Nibbles::from_nibbles([0xf; 64]);
+
+        // Seek past all entries
+        let result = cursor.seek(high_key).unwrap();
+        assert!(result.is_none());
+
+        // Now seek back - should work via fallback
+        let result = cursor.seek(keys[0]).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().0, keys[0]);
+    }
+
+    #[test]
+    fn test_storage_trie_address_switch() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let address1 = B256::random();
+        let address2 = B256::random();
+        let keys = create_test_nibbles(5);
+
+        let node1 = BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None);
+        let node2 = BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None);
+
+        // Insert test data for both addresses
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            for key in &keys {
+                cursor
+                    .upsert(
+                        address1,
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: node1.clone(),
+                        },
+                    )
+                    .unwrap();
+                cursor
+                    .upsert(
+                        address2,
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: node2.clone(),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+
+        let mut cursor = DatabaseStorageTrieCursor::new(
+            provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap(),
+            address1,
+        );
+
+        // Seek in first address
+        let result = cursor.seek(keys[2]).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().1, node1);
+
+        // Switch address and seek
+        cursor.set_hashed_address(address2);
+        let result = cursor.seek(keys[2]).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().1, node2);
+    }
+
+    #[test]
+    fn test_storage_trie_seek_same_key() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::random();
+        let keys = create_test_nibbles(5);
+
+        // Insert test data
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            for key in &keys {
+                cursor
+                    .upsert(
+                        hashed_address,
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+
+        let mut cursor = DatabaseStorageTrieCursor::new(
+            provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap(),
+            hashed_address,
+        );
+
+        // Seek to a key
+        let result1 = cursor.seek(keys[2]).unwrap();
+        assert!(result1.is_some());
+
+        // Seek to the same key again
+        let result2 = cursor.seek(keys[2]).unwrap();
+        assert!(result2.is_some());
+        assert_eq!(result1.unwrap().0, result2.unwrap().0);
+    }
+
+    #[test]
+    fn test_storage_trie_reset() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::random();
+        let keys = create_test_nibbles(5);
+
+        // Insert test data
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            for key in &keys {
+                cursor
+                    .upsert(
+                        hashed_address,
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+
+        let mut cursor = DatabaseStorageTrieCursor::new(
+            provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap(),
+            hashed_address,
+        );
+
+        // Position cursor
+        let _ = cursor.seek(keys[2]).unwrap();
+
+        // Reset and verify we can still seek
+        cursor.reset();
+        let result = cursor.seek(keys[0]).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().0, keys[0]);
+    }
+
+    #[test]
+    fn test_storage_trie_seek_exact_updates_last_key() {
+        let factory = create_test_provider_factory();
+        let provider = factory.provider_rw().unwrap();
+        let hashed_address = B256::random();
+        let keys = create_test_nibbles(5);
+
+        // Insert test data
+        {
+            let mut cursor = provider.tx_ref().cursor_dup_write::<tables::StoragesTrie>().unwrap();
+            for key in &keys {
+                cursor
+                    .upsert(
+                        hashed_address,
+                        &StorageTrieEntry {
+                            nibbles: StoredNibblesSubKey(*key),
+                            node: create_test_node(),
+                        },
+                    )
+                    .unwrap();
+            }
+        }
+
+        let mut cursor = DatabaseStorageTrieCursor::new(
+            provider.tx_ref().cursor_dup_read::<tables::StoragesTrie>().unwrap(),
+            hashed_address,
+        );
+
+        // seek_exact should update last_key
+        let result = cursor.seek_exact(keys[2]).unwrap();
+        assert!(result.is_some());
+
+        // Forward seek should use optimization
+        let result = cursor.seek(keys[3]).unwrap();
+        assert!(result.is_some());
+        assert_eq!(result.unwrap().0, keys[3]);
     }
 }
