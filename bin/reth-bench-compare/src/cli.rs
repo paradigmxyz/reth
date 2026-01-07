@@ -681,11 +681,12 @@ async fn run_benchmark_workflow(
         // Stop node
         node_manager.stop_node(&mut node_process).await?;
 
+        // Unwind back to original tip
         // Skip final unwind - it's unnecessary since this is the last benchmark
-        if !is_last {
-            node_manager.unwind_to_block(original_tip).await?;
-        } else {
+        if is_last {
             info!("Skipping final unwind (last benchmark run)");
+        } else {
+            node_manager.unwind_to_block(original_tip).await?;
         }
 
         // Store results for comparison
