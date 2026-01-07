@@ -307,12 +307,14 @@ where
 {
     type Block = B;
 
-    /// Set a new download range (exclusive).
+    /// Set a new download range (inclusive).
     ///
-    /// This method will drain all queued bodies, filter out ones outside the range and put them
-    /// back into the buffer.
-    /// If there are any bodies between the range start and last queued body that have not been
-    /// downloaded or are not in progress, they will be re-requested.
+    /// If the provided range is a suffix of the current range with the same end block, the
+    /// existing download already covers it and the call is a no-op.
+    /// If the range starts immediately after the current range, it is treated as the next
+    /// consecutive range and appended without resetting the in-flight state.
+    /// For all other ranges, the downloader state is cleared and the new range replaces the old
+    /// one.
     fn set_download_range(&mut self, range: RangeInclusive<BlockNumber>) -> DownloadResult<()> {
         // Check if the range is valid.
         if range.is_empty() {
