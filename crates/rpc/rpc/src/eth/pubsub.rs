@@ -170,8 +170,7 @@ where
         raw_params: Option<Box<JsonRawValue>>,
     ) -> Result<(), ErrorObject<'static>> {
         let parsed = parse_subscription(kind.as_str(), raw_params.as_deref());
-        self.handle_parsed_or_fallback(accepted_sink, kind, raw_params, parsed)
-            .await
+        self.handle_parsed_or_fallback(accepted_sink, kind, raw_params, parsed).await
     }
 
     async fn handle_parsed_or_fallback(
@@ -402,7 +401,8 @@ fn parse_subscription(
             params
         }
         SubscriptionKind::NewPendingTransactions => {
-            let params = parse_params_or_error(raw_params, "Invalid params for newPendingTransactions")?;
+            let params =
+                parse_params_or_error(raw_params, "Invalid params for newPendingTransactions")?;
             if matches!(params, Some(Params::Logs(_))) {
                 return Err(ParseSubscriptionError::InvalidParams(
                     "Invalid params for newPendingTransactions",
