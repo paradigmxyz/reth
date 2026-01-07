@@ -135,7 +135,7 @@ pub enum ConsensusError {
         /// The gas limit in the block header.
         gas_limit: u64,
     },
-    /// Error when the gas the gas limit is more than the maximum allowed.
+    /// Error when the gas limit is more than the maximum allowed.
     #[error(
         "header gas limit ({gas_limit}) exceed the maximum allowed gas limit ({MAXIMUM_GAS_LIMIT_BLOCK})"
     )]

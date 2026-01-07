@@ -408,7 +408,7 @@ impl NodeManager {
 
     /// Stop the reth node gracefully
     pub(crate) async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
-        let pid = child.id().expect("Child process ID should be available");
+        let pid = child.id().ok_or_eyre("Child process ID should be available")?;
 
         // Check if the process has already exited
         match child.try_wait() {
