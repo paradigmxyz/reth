@@ -173,6 +173,7 @@ where
         self.handle_parsed_or_fallback(accepted_sink, kind, raw_params, parsed).await
     }
 
+    /// Routes the parsed subscription request to the built-in handler or a fallback path.
     async fn handle_parsed_or_fallback(
         &self,
         accepted_sink: SubscriptionSink,
@@ -180,7 +181,7 @@ where
         raw_params: Option<Box<JsonRawValue>>,
         parsed: Result<ParsedSubscription, ParseSubscriptionError>,
     ) -> Result<(), ErrorObject<'static>> {
-        // Parse at the callsite; only unknown kinds fall back.
+        // Parse at the callsite; only unknown kinds fall back to custom handlers.
         match parsed {
             Ok(parsed) => self.handle_parsed(accepted_sink, parsed).await,
             Err(ParseSubscriptionError::UnsupportedKind) => {
@@ -198,6 +199,7 @@ where
         }
     }
 
+    /// Dispatches validated subscription kinds to their concrete stream implementations.
     async fn handle_parsed(
         &self,
         accepted_sink: SubscriptionSink,
@@ -290,6 +292,7 @@ where
         }
     }
 
+    /// Uses additional handlers or a fallback handler for unknown kinds, else returns invalid params.
     async fn handle_fallback_or_invalid(
         &self,
         accepted_sink: SubscriptionSink,
@@ -297,12 +300,14 @@ where
         params: Option<Box<JsonRawValue>>,
         err_msg: &'static str,
     ) -> Result<(), ErrorObject<'static>> {
+        // Prefer explicit additional handlers over the fallback handler.
         let handler = self.inner.additional_handlers.read().get(kind.as_str()).cloned();
         if let Some(handler) = handler {
             let stream = (handler)(params)?;
             return pipe_from_stream(accepted_sink, stream).await
         }
 
+        // Defer to the fallback handler for unknown kinds if configured.
         if let Some(fallback_handler) = &self.inner.fallback_handler {
             let stream = (fallback_handler)(kind, params)?;
             return pipe_from_stream(accepted_sink, stream).await
