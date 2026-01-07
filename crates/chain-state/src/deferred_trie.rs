@@ -91,9 +91,9 @@ struct PendingInputs {
     hashed_state: Arc<HashedPostState>,
     /// Unsorted trie updates from state root computation.
     trie_updates: Arc<TrieUpdates>,
-    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
+    /// The persisted ancestor hash this trie input is anchored to
     anchor_hash: B256,
-    /// Deferred trie data from ancestor blocks.
+    /// Deferred trie data from ancestor blocks for merging
     ancestors: Vec<DeferredTrieData>,
 }
 
