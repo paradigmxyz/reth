@@ -83,8 +83,8 @@ fn push_or_update<K: Clone + Eq, V: Clone>(merged: &mut Vec<(K, V)>, entry: &(K,
 
 /// Deduplicates a sorted vector in-place, keeping the last value for each key.
 ///
-/// Uses a classic compaction pattern with read/write pointers. Runs in O(n) time
-/// with O(1) extra space.
+/// Iterates with a read pointer while a write pointer tracks the compacted output.
+/// Runs in O(n) time with O(1) extra space.
 #[inline]
 fn dedup_sorted_by_key<K: Eq, V>(vec: &mut Vec<(K, V)>) {
     if vec.len() <= 1 {
