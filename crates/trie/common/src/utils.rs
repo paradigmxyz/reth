@@ -71,8 +71,8 @@ where
 /// 2. We process entries in sorted order during the merge
 #[inline]
 fn push_or_update<K: Clone + Eq, V: Clone>(merged: &mut Vec<(K, V)>, entry: &(K, V)) {
-    if let Some((last_key, last_value)) = merged.last_mut()
-        && *last_key == entry.0
+    if let Some((last_key, last_value)) = merged.last_mut() &&
+        *last_key == entry.0
     {
         // Duplicate key: overwrite value (last one wins)
         *last_value = entry.1.clone();
