@@ -112,7 +112,7 @@ It gets the handles for the network management, transactions, and ETH requests t
 
 The `NetworkManager::builder` constructor requires a `NetworkConfig` struct to be passed in as a parameter, which can be used as the main entrypoint for setting up the entire network layer:
 
-[File: crates/net/network/src/config.rs](https://github.com/paradigmxyz/reth/blob/1563506aea09049a85e5cc72c2894f3f7a371581/crates/net/network/src/config.rs)
+[File: crates/net/network/src/config.rs](https://github.com/paradigmxyz/reth/blob/5fa1b99bb65be3a574f10d7afc8e0a748238df54/crates/net/network/src/config.rs)
 ```rust,ignore
 pub struct NetworkConfig<C, N: NetworkPrimitives = EthNetworkPrimitives> {
     /// The client type that can interact with the chain.
