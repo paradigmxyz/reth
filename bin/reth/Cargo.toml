@@ -116,6 +116,7 @@ jemalloc-prof = [
     "reth-cli-util/jemalloc",
     "reth-cli-util/jemalloc-prof",
     "reth-ethereum-cli/jemalloc-prof",
+    "reth-node-metrics/jemalloc-prof",
 ]
 jemalloc-symbols = [
     "jemalloc-prof",

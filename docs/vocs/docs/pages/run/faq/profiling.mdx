@@ -164,7 +164,7 @@ Now that we have the heap snapshots, we can analyze them using `jeprof`. An exam
 
 ### HTTP pprof endpoint
 
-When built with the `jemalloc-prof` feature and started with the `--debug.heap-profiling` flag, reth exposes a heap profiling endpoint on the metrics server (default port 9001) at `/debug/pprof/heap`. This endpoint returns heap profiles in [pprof format](https://github.com/google/pprof), which is compatible with the standard `pprof` toolchain.
+When built with the `jemalloc-prof` feature, reth exposes a heap profiling endpoint on the metrics server (default port 9001) at `/debug/pprof/heap`. This endpoint returns heap profiles in [pprof format](https://github.com/google/pprof), which is compatible with the standard `pprof` toolchain.
 
 By default, the pprof output contains raw addresses that require external symbolization. You need either `addr2line` or `llvm-addr2line` in your PATH for `pprof` to resolve function names.
 

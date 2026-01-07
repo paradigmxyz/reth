@@ -25,7 +25,6 @@ pub struct MetricServerConfig {
     hooks: Hooks,
     push_gateway_url: Option<String>,
     push_gateway_interval: Duration,
-    heap_profiling_enabled: bool,
 }
 
 impl MetricServerConfig {
@@ -45,7 +44,6 @@ impl MetricServerConfig {
             chain_spec_info,
             push_gateway_url: None,
             push_gateway_interval: Duration::from_secs(5),
-            heap_profiling_enabled: false,
         }
     }
 
@@ -53,12 +51,6 @@ impl MetricServerConfig {
     pub fn with_push_gateway(mut self, url: Option<String>, interval: Duration) -> Self {
         self.push_gateway_url = url;
         self.push_gateway_interval = interval;
-        self
-    }
-
-    /// Enable the `/debug/pprof/heap` endpoint for heap profiling
-    pub const fn with_heap_profiling(mut self, enabled: bool) -> Self {
-        self.heap_profiling_enabled = enabled;
         self
     }
 }
@@ -85,7 +77,6 @@ impl MetricServer {
             chain_spec_info,
             push_gateway_url,
             push_gateway_interval,
-            heap_profiling_enabled,
         } = &self.config;
 
         let hooks_for_endpoint = hooks.clone();
@@ -93,7 +84,6 @@ impl MetricServer {
             *listen_addr,
             Arc::new(move || hooks_for_endpoint.iter().for_each(|hook| hook())),
             task_executor.clone(),
-            *heap_profiling_enabled,
         )
         .await
         .wrap_err_with(|| format!("Could not start Prometheus endpoint at {listen_addr}"))?;
@@ -126,7 +116,6 @@ impl MetricServer {
         listen_addr: SocketAddr,
         hook: Arc<F>,
         task_executor: TaskExecutor,
-        heap_profiling_enabled: bool,
     ) -> eyre::Result<()> {
         let listener = tokio::net::TcpListener::bind(listen_addr)
             .await
@@ -153,12 +142,7 @@ impl MetricServer {
                     let handle = install_prometheus_recorder();
                     let hook = hook.clone();
                     let service = tower::service_fn(move |req: Request<_>| {
-                        let response = handle_request(
-                            req.uri().path(),
-                            &*hook,
-                            handle,
-                            heap_profiling_enabled,
-                        );
+                        let response = handle_request(req.uri().path(), &*hook, handle);
                         async move { Ok::<_, Infallible>(response) }
                     });
 
@@ -304,10 +288,9 @@ fn handle_request(
     path: &str,
     hook: impl Fn(),
     handle: &crate::recorder::PrometheusRecorder,
-    heap_profiling_enabled: bool,
 ) -> Response<Full<Bytes>> {
     match path {
-        "/debug/pprof/heap" if heap_profiling_enabled => handle_pprof_heap(),
+        "/debug/pprof/heap" => handle_pprof_heap(),
         _ => {
             hook();
             let metrics = handle.handle().render();
