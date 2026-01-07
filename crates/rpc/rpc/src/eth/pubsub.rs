@@ -292,7 +292,8 @@ where
         }
     }
 
-    /// Uses additional handlers or a fallback handler for unknown kinds, else returns invalid params.
+    /// Uses additional handlers or a fallback handler for unknown kinds, else returns invalid
+    /// params.
     async fn handle_fallback_or_invalid(
         &self,
         accepted_sink: SubscriptionSink,
