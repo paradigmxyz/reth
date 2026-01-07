@@ -458,7 +458,6 @@ dependencies = [
  "proptest-derive 0.6.0",
  "rand 0.9.2",
  "rapidhash",
- "rayon",
  "ruint",
  "rustc-hash",
  "serde",
@@ -4565,7 +4564,6 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash 0.2.0",
- "rayon",
  "serde",
  "serde_core",
 ]
@@ -5069,7 +5067,6 @@ dependencies = [
  "arbitrary",
  "equivalent",
  "hashbrown 0.16.1",
- "rayon",
  "serde",
  "serde_core",
 ]
