@@ -47,7 +47,7 @@ pub struct ComputedTrieData {
 /// blocks are validated.
 #[derive(Clone, Debug)]
 pub struct AnchoredTrieInput {
-    /// The persisted ancestor hash this overlay sits on top of (metadata for consumers).
+    /// The persisted ancestor hash this trie input is anchored to.
     pub anchor_hash: B256,
     /// Cumulative trie input overlay from all in-memory ancestors.
     pub trie_input: Arc<TrieInputSorted>,
@@ -61,12 +61,16 @@ struct DeferredTrieMetrics {
     deferred_trie_async_ready: Counter,
     /// Number of times deferred trie data required synchronous computation (fallback path).
     deferred_trie_sync_fallback: Counter,
-    /// Number of times the parent's trie overlay was reused (O(1)).
+    /// Number of times the parent's trie overlay was reused.
     deferred_trie_overlay_reused: Counter,
     /// Number of times the trie overlay was rebuilt from ancestors (rare fallback).
     deferred_trie_overlay_rebuilt: Counter,
-    /// Number of times `Arc::make_mut` triggered a clone (`strong_count` > 1).
+    /// Number of times `Arc::make_mut` triggered a clone (should be 0 with deep-copy approach).
     deferred_trie_arc_clone_triggered: Counter,
+    /// Number of accounts in the parent overlay being copied.
+    deferred_trie_overlay_accounts_count: reth_metrics::metrics::Gauge,
+    /// Number of trie nodes in the parent overlay being copied.
+    deferred_trie_overlay_nodes_count: reth_metrics::metrics::Gauge,
 }
 
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
@@ -87,7 +91,7 @@ struct PendingInputs {
     hashed_state: Arc<HashedPostState>,
     /// Unsorted trie updates from state root computation.
     trie_updates: Arc<TrieUpdates>,
-    /// The persisted ancestor hash (metadata for the final result).
+    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
     anchor_hash: B256,
     /// Deferred trie data from ancestor blocks.
     ancestors: Vec<DeferredTrieData>,
@@ -188,12 +192,29 @@ impl DeferredTrieData {
 
             match &parent_data.anchored_trie_input {
                 Some(AnchoredTrieInput { trie_input, .. }) => {
-                    // O(1): Clone parent's already-merged overlay.
+                    // O(N): Deep copy parent's already-merged overlay.
+                    // This is the same cost as main branch's iterative extend, but we
+                    // get the benefit of not re-walking ancestors on every block.
                     // We do NOT clone prefix_sets - they are per-block, not cumulative.
+                    //
+                    // IMPORTANT: We deep-copy (Arc::new + clone) instead of Arc::clone.
+                    // This ensures strong_count = 1 so Arc::make_mut in the extend step
+                    // below never triggers a clone. Arc::clone would share the data with
+                    // the parent's cached overlay, causing strong_count > 1.
                     DEFERRED_TRIE_METRICS.deferred_trie_overlay_reused.increment(1);
+
+                    // Track overlay size for diagnostics
+                    DEFERRED_TRIE_METRICS
+                        .deferred_trie_overlay_accounts_count
+                        .set(trie_input.state.accounts.len() as f64);
+                    DEFERRED_TRIE_METRICS
+                        .deferred_trie_overlay_nodes_count
+                        .set(trie_input.nodes.total_len() as f64);
+
+                    // Deep copy parent's overlay into fresh Arcs with strong_count=1.
                     TrieInputSorted::new(
-                        Arc::clone(&trie_input.nodes),
-                        Arc::clone(&trie_input.state),
+                        Arc::new((*trie_input.nodes).clone()),
+                        Arc::new((*trie_input.state).clone()),
                         Default::default(),
                     )
                 }
@@ -212,18 +233,10 @@ impl DeferredTrieData {
         // Extend overlay with current block's sorted data.
         // Track if Arc::make_mut triggers a clone (strong_count > 1 means parent still holds ref).
         {
-            let will_clone = Arc::strong_count(&overlay.state) > 1;
-            if will_clone {
-                DEFERRED_TRIE_METRICS.deferred_trie_arc_clone_triggered.increment(1);
-            }
             let state_mut = Arc::make_mut(&mut overlay.state);
             state_mut.extend_ref(sorted_hashed_state.as_ref());
         }
         {
-            let will_clone = Arc::strong_count(&overlay.nodes) > 1;
-            if will_clone {
-                DEFERRED_TRIE_METRICS.deferred_trie_arc_clone_triggered.increment(1);
-            }
             let nodes_mut = Arc::make_mut(&mut overlay.nodes);
             nodes_mut.extend_ref(sorted_trie_updates.as_ref());
         }
