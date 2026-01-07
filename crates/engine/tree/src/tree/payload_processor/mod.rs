@@ -775,12 +775,34 @@ impl ExecutionCache {
             warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
         }
 
-        cache
-            .as_ref()
+        if let Some(c) = cache.as_ref() {
+            let cached_hash = c.executed_block_hash();
+            // Check that the cache hash matches the parent hash of the current block. It won't
+            // match in case it's a fork block.
+            let hash_matches = cached_hash == parent_hash;
             // Check `is_available()` to ensure no other tasks (e.g., prewarming) currently hold
             // a reference to this cache. We can only reuse it when we have exclusive access.
-            .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())
-            .cloned()
+            let available = c.is_available();
+            let usage_count = c.usage_count();
+
+            debug!(
+                target: "engine::caching",
+                %cached_hash,
+                %parent_hash,
+                hash_matches,
+                available,
+                usage_count,
+                "Existing cache found"
+            );
+
+            if hash_matches && available {
+                return Some(c.clone());
+            }
+        } else {
+            debug!(target: "engine::caching", %parent_hash, "No cache found");
+        }
+
+        None
     }
 
     /// Clears the tracked cache
