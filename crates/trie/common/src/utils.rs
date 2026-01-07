@@ -33,28 +33,32 @@ where
         let other_key = &other[other_idx].0;
 
         match target_key.cmp(other_key) {
+            // Target key is smaller: take from target
             Ordering::Less => {
                 push_or_update(&mut merged, &target[target_idx]);
                 target_idx += 1;
             }
+            // Other key is smaller: take from other
             Ordering::Greater => {
                 push_or_update(&mut merged, &other[other_idx]);
                 other_idx += 1;
             }
+            // Keys match: push target first, other will overwrite next iteration.
+            // We only advance target_idx; other_idx stays so other's value overwrites.
             Ordering::Equal => {
-                // Keys match: push target first, other will overwrite next iteration.
-                // We only advance target_idx; other_idx stays so other's value overwrites.
                 push_or_update(&mut merged, &target[target_idx]);
                 target_idx += 1;
             }
         }
     }
 
+    // Drain remaining target entries
     while target_idx < target.len() {
         push_or_update(&mut merged, &target[target_idx]);
         target_idx += 1;
     }
 
+    // Drain remaining other entries
     while other_idx < other.len() {
         push_or_update(&mut merged, &other[other_idx]);
         other_idx += 1;
@@ -94,8 +98,10 @@ fn dedup_sorted_by_key<K: Eq, V>(vec: &mut Vec<(K, V)>) {
     let mut write_idx = 0;
     for read_idx in 1..vec.len() {
         if vec[write_idx].0 == vec[read_idx].0 {
+            // Same key: swap to keep the later value (last wins)
             vec.swap(write_idx, read_idx);
         } else {
+            // New key: advance write pointer and move entry into place
             write_idx += 1;
             if write_idx != read_idx {
                 vec.swap(write_idx, read_idx);
