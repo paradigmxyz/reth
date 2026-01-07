@@ -42,6 +42,27 @@ pub struct StaticFilesArgs {
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
     #[arg(long = "static-files.transaction-senders")]
     pub transaction_senders: bool,
+
+    /// Store `TransactionHashNumbers` table in `RocksDB` instead of MDBX.
+    ///
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
+    #[arg(long = "storage.tx-hash-numbers-in-rocksdb")]
+    pub tx_hash_numbers_in_rocksdb: bool,
+
+    /// Store `StoragesHistory` table in `RocksDB` instead of MDBX.
+    ///
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
+    #[arg(long = "storage.storages-history-in-rocksdb")]
+    pub storages_history_in_rocksdb: bool,
+
+    /// Store `AccountsHistory` table in `RocksDB` instead of MDBX.
+    ///
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
+    #[arg(long = "storage.account-history-in-rocksdb")]
+    pub account_history_in_rocksdb: bool,
 }
 
 impl StaticFilesArgs {
@@ -67,5 +88,8 @@ impl StaticFilesArgs {
         StorageSettings::legacy()
             .with_receipts_in_static_files(self.receipts)
             .with_transaction_senders_in_static_files(self.transaction_senders)
+            .with_transaction_hash_numbers_in_rocksdb(self.tx_hash_numbers_in_rocksdb)
+            .with_storages_history_in_rocksdb(self.storages_history_in_rocksdb)
+            .with_account_history_in_rocksdb(self.account_history_in_rocksdb)
     }
 }
