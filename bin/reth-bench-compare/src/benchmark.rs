@@ -96,12 +96,8 @@ impl BenchmarkRunner {
             &from_block.to_string(),
             "--to",
             &to_block.to_string(),
+            "--wait-time=0ms", // We just want to warm up caches.
         ]);
-
-        // Add wait-time argument if provided
-        if let Some(ref wait_time) = self.wait_time {
-            cmd.args(["--wait-time", wait_time]);
-        }
 
         cmd.env("RUST_LOG_STYLE", "never")
             .stdout(std::process::Stdio::piped())
