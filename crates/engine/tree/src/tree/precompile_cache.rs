@@ -131,30 +131,6 @@ where
         })
             .into()
     }
-
-    fn increment_by_one_precompile_cache_hits(&self) {
-        if let Some(metrics) = &self.metrics {
-            metrics.precompile_cache_hits.increment(1);
-        }
-    }
-
-    fn increment_by_one_precompile_cache_misses(&self) {
-        if let Some(metrics) = &self.metrics {
-            metrics.precompile_cache_misses.increment(1);
-        }
-    }
-
-    fn set_precompile_cache_size_metric(&self, to: f64) {
-        if let Some(metrics) = &self.metrics {
-            metrics.precompile_cache_size.set(to);
-        }
-    }
-
-    fn increment_by_one_precompile_errors(&self) {
-        if let Some(metrics) = &self.metrics {
-            metrics.precompile_errors.increment(1);
-        }
-    }
 }
 
 impl<S> Precompile for CachedPrecompile<S>
@@ -167,7 +143,9 @@ where
 
     fn call(&self, input: PrecompileInput<'_>) -> PrecompileResult {
         if let Some(entry) = &self.cache.get(input.data, self.spec_id.clone()) {
-            self.increment_by_one_precompile_cache_hits();
+            if let Some(metrics) = &self.metrics {
+                metrics.precompile_cache_hits.increment(1);
+            }
             if input.gas >= entry.gas_used() {
                 return entry.to_precompile_result()
             }
@@ -182,11 +160,15 @@ where
                     Bytes::copy_from_slice(calldata),
                     CacheEntry { output: output.clone(), spec: self.spec_id.clone() },
                 );
-                self.set_precompile_cache_size_metric(size as f64);
-                self.increment_by_one_precompile_cache_misses();
+                if let Some(metrics) = &self.metrics {
+                    metrics.precompile_cache_size.set(size as f64);
+                    metrics.precompile_cache_misses.increment(1);
+                }
             }
             _ => {
-                self.increment_by_one_precompile_errors();
+                if let Some(metrics) = &self.metrics {
+                    metrics.precompile_errors.increment(1);
+                }
             }
         }
         result
