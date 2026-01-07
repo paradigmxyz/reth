@@ -512,6 +512,7 @@ async fn run_compilation_phase(
     Ok((baseline_commit, feature_commit))
 }
 
+#[allow(clippy::too_many_arguments)]
 /// Run warmup phase to warm up caches before benchmarking
 async fn run_warmup_phase(
     git_manager: &GitManager,
