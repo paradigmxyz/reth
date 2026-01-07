@@ -7,6 +7,9 @@ license.workspace = true
 homepage.workspace = true
 repository.workspace = true
 
+[package.metadata.cargo-udeps.ignore]
+development = ["reth-ethereum"]
+
 [lints]
 workspace = true
 
@@ -37,6 +40,9 @@ rayon = { workspace = true, optional = true }
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
 reth-ethereum-forks.workspace = true
+metrics-util = { workspace = true, features = ["debugging"] }
+revm-interpreter = { workspace = true }
+reth-ethereum = { workspace = true }
 
 [features]
 default = ["std"]
@@ -57,11 +63,13 @@ std = [
     "reth-storage-api/std",
     "reth-trie-common/std",
     "reth-ethereum-primitives/std",
+    "revm-interpreter/std",
 ]
 metrics = ["std", "dep:metrics", "dep:reth-metrics"]
 test-utils = [
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
     "reth-ethereum-primitives/test-utils",
+    "reth-ethereum/test-utils",
 ]
 op = ["alloy-evm/op", "reth-primitives-traits/op"]
