@@ -216,12 +216,13 @@ pub trait LoadPendingBlock:
         }
     }
 
-    /// Builds a pending block using the configured provider and pool.
+    /// Builds a locally derived pending block using the configured provider and pool.
     ///
-    /// If the origin is the actual pending block, the block is built with withdrawals.
+    /// This is used when no execution-layer pending block is available and a pending block is
+    /// derived from the latest canonical header, using the provided parent.
     ///
-    /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
-    /// block contract call using the parent beacon block root received from the CL.
+    /// Withdrawals and any fork-specific behavior (such as EIP-4788 pre-block contract calls) are
+    /// determined by the EVM environment and chain specification used during construction.
     fn build_block(
         &self,
         parent: &SealedHeader<ProviderHeader<Self::Provider>>,
