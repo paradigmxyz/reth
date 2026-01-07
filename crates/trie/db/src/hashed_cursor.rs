@@ -30,7 +30,7 @@ impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        Ok(DatabaseHashedAccountCursor(self.0.cursor_read::<tables::HashedAccounts>()?))
+        Ok(DatabaseHashedAccountCursor::new(self.0.cursor_read::<tables::HashedAccounts>()?))
     }
 
     fn hashed_storage_cursor(
@@ -46,13 +46,22 @@ impl<TX: DbTx> HashedCursorFactory for DatabaseHashedCursorFactory<&TX> {
 
 /// A struct wrapping database cursor over hashed accounts implementing [`HashedCursor`] for
 /// iterating over accounts.
+///
+/// This cursor implements a locality optimization: when seeking forward, it first tries
+/// `next()` (O(1)) before falling back to `seek()` (O(log N)). This is effective because
+/// trie traversal often accesses accounts in lexicographic order of their hashed addresses.
 #[derive(Debug)]
-pub struct DatabaseHashedAccountCursor<C>(C);
+pub struct DatabaseHashedAccountCursor<C> {
+    /// The underlying database cursor.
+    cursor: C,
+    /// The last key returned by this cursor, used to detect forward seeks.
+    last_key: Option<B256>,
+}
 
 impl<C> DatabaseHashedAccountCursor<C> {
     /// Create new database hashed account cursor.
     pub const fn new(cursor: C) -> Self {
-        Self(cursor)
+        Self { cursor, last_key: None }
     }
 }
 
@@ -62,16 +71,38 @@ where
 {
     type Value = Account;
 
+    /// Seeks a key in the hashed accounts table that matches or is greater than the provided key.
+    ///
+    /// Uses locality optimization: when seeking forward from the last position, tries `next()`
+    /// first. If `next()` returns a key >= target, we avoid an O(log N) seek.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.0.seek(key)
+        // Locality optimization: if we're seeking forward, try next() first
+        if let Some(last) = self.last_key {
+            if key > last {
+                if let Some((found_key, value)) = self.cursor.next()? {
+                    if found_key >= key {
+                        // next() gave us a key >= target, we're done
+                        self.last_key = Some(found_key);
+                        return Ok(Some((found_key, value)));
+                    }
+                    // next() returned a key < target, need to seek
+                }
+            }
+        }
+
+        let result = self.cursor.seek(key)?;
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
-        self.0.next()
+        let result = self.cursor.next()?;
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     fn reset(&mut self) {
-        // Database cursors are stateless, no reset needed
+        self.last_key = None;
     }
 }
 

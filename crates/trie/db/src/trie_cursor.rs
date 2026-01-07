@@ -52,13 +52,23 @@ where
 }
 
 /// A cursor over the account trie.
+///
+/// This cursor implements a locality optimization: when seeking forward, it first tries
+/// `next()` (O(1)) before falling back to `seek()` (O(log N)). This is effective because
+/// the trie walker traverses in lexicographic order, and consecutive seeks are often to
+/// adjacent entries in the database.
 #[derive(Debug)]
-pub struct DatabaseAccountTrieCursor<C>(pub(crate) C);
+pub struct DatabaseAccountTrieCursor<C> {
+    /// The underlying database cursor.
+    cursor: C,
+    /// The last key returned by this cursor, used to detect forward seeks.
+    last_key: Option<Nibbles>,
+}
 
 impl<C> DatabaseAccountTrieCursor<C> {
     /// Create a new account trie cursor.
     pub const fn new(cursor: C) -> Self {
-        Self(cursor)
+        Self { cursor, last_key: None }
     }
 }
 
@@ -71,29 +81,66 @@ where
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+        // For exact seeks, we can use the locality optimization when seeking forward:
+        // try next() first, and if it returns exactly the key we want, we're done.
+        if let Some(last) = self.last_key {
+            if key > last {
+                if let Some((found_key, value)) = self.cursor.next()?.map(|v| (v.0 .0, v.1)) {
+                    if found_key == key {
+                        self.last_key = Some(found_key);
+                        return Ok(Some((found_key, value)));
+                    }
+                    // next() didn't give us the exact key, fall through to seek_exact
+                }
+            }
+        }
+
+        let result = self.cursor.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1));
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     /// Seeks a key in the account trie that matches or is greater than the provided key.
+    ///
+    /// Uses locality optimization: when seeking forward from the last position, tries `next()`
+    /// first. If `next()` returns a key >= target, we avoid an O(log N) seek.
     fn seek(
         &mut self,
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1)))
+        // Locality optimization: if we're seeking forward, try next() first
+        if let Some(last) = self.last_key {
+            if key > last {
+                if let Some((found_key, value)) = self.cursor.next()?.map(|v| (v.0 .0, v.1)) {
+                    if found_key >= key {
+                        // next() gave us a key >= target, we're done
+                        self.last_key = Some(found_key);
+                        return Ok(Some((found_key, value)));
+                    }
+                    // next() returned a key < target, need to seek
+                }
+            }
+        }
+
+        let result = self.cursor.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1));
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     /// Move the cursor to the next entry and return it.
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        Ok(self.0.next()?.map(|value| (value.0 .0, value.1)))
+        let result = self.cursor.next()?.map(|value| (value.0 .0, value.1));
+        self.last_key = result.as_ref().map(|(k, _)| *k);
+        Ok(result)
     }
 
     /// Retrieves the current key in the cursor.
     fn current(&mut self) -> Result<Option<Nibbles>, DatabaseError> {
-        Ok(self.0.current()?.map(|(k, _)| k.0))
+        Ok(self.cursor.current()?.map(|(k, _)| k.0))
     }
 
     fn reset(&mut self) {
-        // No-op for database cursors
+        self.last_key = None;
     }
 }
 
