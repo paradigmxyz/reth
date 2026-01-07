@@ -521,8 +521,12 @@ async fn run_warmup_phase(
     args: &Args,
     is_optimism: bool,
     baseline_commit: &str,
+    starting_tip: u64,
 ) -> Result<()> {
     info!("=== Running warmup phase ===");
+
+    // Unwind to starting block before warmup
+    node_manager.unwind_to_block(starting_tip).await?;
 
     // Use baseline for warmup
     let warmup_ref = &args.baseline_ref;
@@ -555,9 +559,6 @@ async fn run_warmup_phase(
     let current_tip = node_manager.wait_for_node_ready_and_get_tip().await?;
     info!("Warmup node is ready at tip: {}", current_tip);
 
-    // Store the tip we'll unwind back to
-    let original_tip = current_tip;
-
     // Clear filesystem caches before warmup run only (unless disabled)
     if args.no_clear_cache {
         info!("Skipping filesystem cache clearing (--no-clear-cache flag set)");
@@ -568,11 +569,8 @@ async fn run_warmup_phase(
     // Run warmup to warm up caches
     benchmark_runner.run_warmup(current_tip).await?;
 
-    // Stop node before unwinding (node must be stopped to release database lock)
+    // Stop node after warmup
     node_manager.stop_node(&mut node_process).await?;
-
-    // Unwind back to starting block after warmup
-    node_manager.unwind_to_block(original_tip).await?;
 
     info!("Warmup phase completed");
     Ok(())
@@ -595,6 +593,27 @@ async fn run_benchmark_workflow(
     let (baseline_commit, feature_commit) =
         run_compilation_phase(git_manager, compilation_manager, args, is_optimism).await?;
 
+    // Switch to baseline reference and get the starting tip
+    git_manager.switch_ref(&args.baseline_ref)?;
+    let binary_path =
+        compilation_manager.get_cached_binary_path_for_commit(&baseline_commit, is_optimism);
+    if !binary_path.exists() {
+        return Err(eyre!(
+            "Cached baseline binary not found at {:?}. Compilation phase should have created it.",
+            binary_path
+        ));
+    }
+
+    // Start node briefly to get the current tip, then stop it
+    info!("=== Determining initial block height ===");
+    let additional_args = args.build_additional_args("baseline", args.baseline_args.as_ref());
+    let (mut node_process, _) = node_manager
+        .start_node(&binary_path, &args.baseline_ref, "baseline", &additional_args)
+        .await?;
+    let starting_tip = node_manager.wait_for_node_ready_and_get_tip().await?;
+    info!("Node starting tip: {}", starting_tip);
+    node_manager.stop_node(&mut node_process).await?;
+
     // Run warmup phase before benchmarking (skip if warmup_blocks is 0)
     if args.get_warmup_blocks() > 0 {
         run_warmup_phase(
@@ -605,6 +624,7 @@ async fn run_benchmark_workflow(
             args,
             is_optimism,
             &baseline_commit,
+            starting_tip,
         )
         .await?;
     } else {
@@ -619,6 +639,9 @@ async fn run_benchmark_workflow(
         let ref_type = ref_types[i];
         let commit = commits[i];
         info!("=== Processing {} reference: {} ===", ref_type, git_ref);
+
+        // Unwind to starting block before running this benchmark
+        node_manager.unwind_to_block(starting_tip).await?;
 
         // Switch to target reference
         git_manager.switch_ref(git_ref)?;
@@ -656,14 +679,11 @@ async fn run_benchmark_workflow(
         let current_tip = node_manager.wait_for_node_ready_and_get_tip().await?;
         info!("Node is ready at tip: {}", current_tip);
 
-        // Store the tip we'll unwind back to
-        let original_tip = current_tip;
-
         // Calculate benchmark range
         // Note: reth-bench has an off-by-one error where it consumes the first block
         // of the range, so we add 1 to compensate and get exactly args.blocks blocks
-        let from_block = original_tip;
-        let to_block = original_tip + args.blocks;
+        let from_block = current_tip;
+        let to_block = current_tip + args.blocks;
 
         // Run benchmark
         let output_dir = comparison_generator.get_ref_output_dir(ref_type);
@@ -679,9 +699,6 @@ async fn run_benchmark_workflow(
 
         // Stop node
         node_manager.stop_node(&mut node_process).await?;
-
-        // Unwind back to original tip
-        node_manager.unwind_to_block(original_tip).await?;
 
         // Store results for comparison
         comparison_generator.add_ref_results(ref_type, &output_dir)?;
