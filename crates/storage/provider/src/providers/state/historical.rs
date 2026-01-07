@@ -1,6 +1,7 @@
 use crate::{
-    providers::state::cursor_reuse::ReusableStateCursors, AccountReader, BlockHashReader,
-    ChangeSetReader, HashedPostStateProvider, ProviderError, StateProvider, StateRootProvider,
+    providers::state::cursor_reuse::{CursorCache, ReusableStateCursors},
+    AccountReader, BlockHashReader, ChangeSetReader, HashedPostStateProvider, ProviderError,
+    StateProvider, StateRootProvider,
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
@@ -52,7 +53,7 @@ pub struct HistoricalStateProviderRef<'b, Provider: DBProvider> {
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
     /// Reusable cursors for state lookups
-    cursors: ReusableStateCursors<Provider::Tx>,
+    cursors: CursorCache<'b, Provider::Tx>,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -70,13 +71,13 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             provider,
             block_number,
             lowest_available_blocks: Default::default(),
-            cursors: ReusableStateCursors::new(),
+            cursors: CursorCache::Owned(Box::new(ReusableStateCursors::new())),
         }
     }
 
     /// Create new `StateProvider` for historical block number and lowest block numbers at which
     /// account & storage histories are available.
-    pub const fn new_with_lowest_available_blocks(
+    pub fn new_with_lowest_available_blocks(
         provider: &'b Provider,
         block_number: BlockNumber,
         lowest_available_blocks: LowestAvailableBlocks,
@@ -85,7 +86,22 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             provider,
             block_number,
             lowest_available_blocks,
-            cursors: ReusableStateCursors::new(),
+            cursors: CursorCache::Owned(Box::new(ReusableStateCursors::new())),
+        }
+    }
+
+    /// Create new `StateProvider` with borrowed cursor cache
+    const fn new_with_cursors(
+        provider: &'b Provider,
+        block_number: BlockNumber,
+        lowest_available_blocks: LowestAvailableBlocks,
+        cursors: &'b ReusableStateCursors<Provider::Tx>,
+    ) -> Self {
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks,
+            cursors: CursorCache::Borrowed(cursors),
         }
     }
 
@@ -468,19 +484,26 @@ impl<Provider: DBProvider + BlockNumReader> BytecodeReader
 /// State provider for a given block number.
 /// For more detailed description, see [`HistoricalStateProviderRef`].
 #[derive(Debug)]
-pub struct HistoricalStateProvider<Provider> {
+pub struct HistoricalStateProvider<Provider: DBProvider> {
     /// Database provider.
     provider: Provider,
     /// State at the block number is the main indexer of the state.
     block_number: BlockNumber,
     /// Lowest blocks at which different parts of the state are available.
     lowest_available_blocks: LowestAvailableBlocks,
+    /// Reusable cursors for state lookups
+    cursors: ReusableStateCursors<Provider::Tx>,
 }
 
 impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: Provider, block_number: BlockNumber) -> Self {
-        Self { provider, block_number, lowest_available_blocks: Default::default() }
+        Self {
+            provider,
+            block_number,
+            lowest_available_blocks: Default::default(),
+            cursors: ReusableStateCursors::new(),
+        }
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -504,10 +527,11 @@ impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     const fn as_ref(&self) -> HistoricalStateProviderRef<'_, Provider> {
-        HistoricalStateProviderRef::new_with_lowest_available_blocks(
+        HistoricalStateProviderRef::new_with_cursors(
             &self.provider,
             self.block_number,
             self.lowest_available_blocks,
+            &self.cursors,
         )
     }
 }

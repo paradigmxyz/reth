@@ -1,6 +1,6 @@
 use crate::{
-    providers::state::cursor_reuse::ReusableStateCursors, AccountReader, BlockHashReader,
-    HashedPostStateProvider, StateProvider, StateRootProvider,
+    providers::state::cursor_reuse::{CursorCache, ReusableStateCursors},
+    AccountReader, BlockHashReader, HashedPostStateProvider, StateProvider, StateRootProvider,
 };
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
 use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
@@ -26,13 +26,21 @@ use reth_trie_db::{
 pub struct LatestStateProviderRef<'b, Provider: DBProvider> {
     provider: &'b Provider,
     /// Reusable cursors for state lookups
-    cursors: ReusableStateCursors<Provider::Tx>,
+    cursors: CursorCache<'b, Provider::Tx>,
 }
 
 impl<'b, Provider: DBProvider> LatestStateProviderRef<'b, Provider> {
     /// Create new state provider
-    pub const fn new(provider: &'b Provider) -> Self {
-        Self { provider, cursors: ReusableStateCursors::new() }
+    pub fn new(provider: &'b Provider) -> Self {
+        Self { provider, cursors: CursorCache::Owned(Box::new(ReusableStateCursors::new())) }
+    }
+
+    /// Create new state provider with borrowed cursor cache
+    const fn new_with_cursors(
+        provider: &'b Provider,
+        cursors: &'b ReusableStateCursors<Provider::Tx>,
+    ) -> Self {
+        Self { provider, cursors: CursorCache::Borrowed(cursors) }
     }
 
     fn tx(&self) -> &Provider::Tx {
@@ -189,18 +197,21 @@ impl<Provider: DBProvider + BlockHashReader> BytecodeReader
 
 /// State provider for the latest state.
 #[derive(Debug)]
-pub struct LatestStateProvider<Provider>(Provider);
+pub struct LatestStateProvider<Provider: DBProvider> {
+    provider: Provider,
+    cursors: ReusableStateCursors<Provider::Tx>,
+}
 
 impl<Provider: DBProvider> LatestStateProvider<Provider> {
     /// Create new state provider
-    pub const fn new(db: Provider) -> Self {
-        Self(db)
+    pub const fn new(provider: Provider) -> Self {
+        Self { provider, cursors: ReusableStateCursors::new() }
     }
 
     /// Returns a new provider that takes the `TX` as reference
     #[inline(always)]
     const fn as_ref(&self) -> LatestStateProviderRef<'_, Provider> {
-        LatestStateProviderRef::new(&self.0)
+        LatestStateProviderRef::new_with_cursors(&self.provider, &self.cursors)
     }
 }
 

@@ -108,3 +108,38 @@ impl<TX: DbTx> Default for ReusableStateCursors<TX> {
         Self::new()
     }
 }
+
+/// A Cow-like type for cursor caches that can either own or borrow the cache.
+///
+/// This allows state providers to either:
+/// - Own their cursor cache (standalone `*Ref` construction)
+/// - Borrow from an owned wrapper type (via `as_ref()` delegation)
+///
+/// Uses `Box` for the owned variant to keep the enum pointer-sized, optimizing
+/// for the common `Borrowed` case used in macro delegation.
+pub(crate) enum CursorCache<'a, TX: DbTx> {
+    /// Cursor cache is owned by this instance (boxed to keep enum small).
+    Owned(Box<ReusableStateCursors<TX>>),
+    /// Cursor cache is borrowed from an owned wrapper.
+    Borrowed(&'a ReusableStateCursors<TX>),
+}
+
+impl<TX: DbTx> std::fmt::Debug for CursorCache<'_, TX> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Owned(c) => f.debug_tuple("Owned").field(c).finish(),
+            Self::Borrowed(c) => f.debug_tuple("Borrowed").field(c).finish(),
+        }
+    }
+}
+
+impl<TX: DbTx> std::ops::Deref for CursorCache<'_, TX> {
+    type Target = ReusableStateCursors<TX>;
+
+    fn deref(&self) -> &Self::Target {
+        match self {
+            Self::Owned(c) => c.as_ref(),
+            Self::Borrowed(c) => c,
+        }
+    }
+}
