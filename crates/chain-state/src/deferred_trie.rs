@@ -149,13 +149,6 @@ impl DeferredTrieData {
     /// 3. Otherwise, rebuild overlay from ancestors (rare fallback)
     /// 4. Extend the overlay with this block's sorted data
     ///
-    /// # Why `anchor_hash` mismatch is safe
-    /// The parent's overlay can be reused even when `anchor_hash` differs because:
-    /// - Persisted blocks are removed from memory BEFORE new blocks are validated
-    /// - The `ancestors` slice only contains unpersisted blocks
-    /// - Parent's overlay only has data from blocks still in the ancestors list
-    /// - The `anchor_hash` is just metadata, not a correctness constraint for the overlay data
-    ///
     /// Used by both the async background task and the synchronous fallback path.
     ///
     /// # Arguments
