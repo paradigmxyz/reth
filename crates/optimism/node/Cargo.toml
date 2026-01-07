@@ -34,7 +34,7 @@ reth-rpc-api.workspace = true
 
 # op-reth
 reth-optimism-payload-builder.workspace = true
-reth-optimism-evm = { workspace = true, features = ["rpc"] }
+reth-optimism-evm = { workspace = true, features = ["std", "rpc"] }
 reth-optimism-rpc.workspace = true
 reth-optimism-storage.workspace = true
 reth-optimism-txpool.workspace = true
@@ -80,8 +80,10 @@ reth-payload-util.workspace = true
 reth-revm = { workspace = true, features = ["std"] }
 reth-rpc.workspace = true
 reth-rpc-eth-types.workspace = true
+reth-stages-types.workspace = true
 
 alloy-network.workspace = true
+alloy-op-hardforks.workspace = true
 futures.workspace = true
 op-alloy-network.workspace = true
 
@@ -92,6 +94,11 @@ asm-keccak = [
     "reth-optimism-node/asm-keccak",
     "reth-node-core/asm-keccak",
     "revm/asm-keccak",
+]
+keccak-cache-global = [
+    "alloy-primitives/keccak-cache-global",
+    "reth-node-core/keccak-cache-global",
+    "reth-optimism-node/keccak-cache-global",
 ]
 js-tracer = [
     "reth-node-builder/js-tracer",
@@ -118,6 +125,7 @@ test-utils = [
     "reth-optimism-primitives/arbitrary",
     "reth-primitives-traits/test-utils",
     "reth-trie-common/test-utils",
+    "reth-stages-types/test-utils",
 ]
 reth-codec = ["reth-optimism-primitives/reth-codec"]
 

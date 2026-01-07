@@ -71,6 +71,9 @@ Datadir:
       --datadir.static-files <PATH>
           The absolute path to store static files in.
 
+      --datadir.rocksdb <PATH>
+          The absolute path to store `RocksDB` database in.
+
 Networking:
   -d, --disable-discovery
           Disable the discovery service
@@ -189,6 +192,11 @@ Networking:
       --max-inbound-peers <MAX_INBOUND_PEERS>
           Maximum number of inbound peers. default: 30
 
+      --max-peers <COUNT>
+          Maximum number of total peers (inbound + outbound).
+
+          Splits peers using approximately 2:1 inbound:outbound ratio. Cannot be used together with `--max-outbound-peers` or `--max-inbound-peers`.
+
       --max-tx-reqs <COUNT>
           Max concurrent `GetPooledTransactions` requests.
 
@@ -302,7 +310,7 @@ RPC:
       --http.api <HTTP_API>
           Rpc Modules to be configured for the HTTP server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner, mev]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner, mev, testing]
 
       --http.corsdomain <HTTP_CORSDOMAIN>
           Http Corsdomain to allow request from
@@ -326,7 +334,7 @@ RPC:
       --ws.api <WS_API>
           Rpc Modules to be configured for the WS server
 
-          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner, mev]
+          [possible values: admin, debug, eth, net, trace, txpool, web3, rpc, reth, ots, flashbots, miner, mev, testing]
 
       --ipcdisable
           Disable the IPC-RPC server
@@ -403,6 +411,13 @@ RPC:
           By default this chooses a sensible value based on the number of available cores. Tracing requests are generally CPU bound. Choosing a value that is higher than the available CPU cores can have a negative impact on the performance of the node and affect the node's ability to maintain sync.
 
           [default: <NUM CPU CORES-2>]
+
+      --rpc.max-blocking-io-requests <COUNT>
+          Maximum number of concurrent blocking IO requests.
+
+          Blocking IO requests include `eth_call`, `eth_estimateGas`, and similar methods that require EVM execution. These are spawned as blocking tasks to avoid blocking the async runtime.
+
+          [default: 256]
 
       --rpc.max-trace-filter-blocks <COUNT>
           Maximum number of blocks for `trace_filter` requests
@@ -871,7 +886,9 @@ Pruning:
 
 Engine:
       --engine.persistence-threshold <PERSISTENCE_THRESHOLD>
-          Configure persistence threshold for engine experimental
+          Configure persistence threshold for the engine. This determines how many canonical blocks must be in-memory, ahead of the last persisted block, before flushing canonical blocks to disk again.
+
+          To persist blocks as fast as the node receives them, set this value to zero. This will cause more frequent DB writes.
 
           [default: 2]
 
@@ -882,6 +899,9 @@ Engine:
 
       --engine.legacy-state-root
           Enable legacy state root
+
+      --engine.disable-state-cache
+          Disable state cache
 
       --engine.disable-prewarming
           Disable parallel prewarming
@@ -961,10 +981,20 @@ Static Files:
       --static-files.blocks-per-file.receipts <BLOCKS_PER_FILE_RECEIPTS>
           Number of blocks per file for the receipts segment
 
+      --static-files.blocks-per-file.transaction-senders <BLOCKS_PER_FILE_TRANSACTION_SENDERS>
+          Number of blocks per file for the transaction senders segment
+
       --static-files.receipts
           Store receipts in static files instead of the database.
 
           When enabled, receipts will be written to static files on disk instead of the database.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
+      --static-files.transaction-senders
+          Store transaction senders in static files instead of the database.
+
+          When enabled, transaction senders will be written to static files on disk instead of the database.
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
@@ -1106,4 +1136,13 @@ Tracing:
           Defaults to TRACE if not specified.
 
           [default: debug]
+
+      --tracing-otlp.sample-ratio <RATIO>
+          Trace sampling ratio to control the percentage of traces to export.
+
+          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
+
+          Example: --tracing-otlp.sample-ratio=0.0.
+
+          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```

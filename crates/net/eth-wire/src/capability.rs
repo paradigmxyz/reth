@@ -430,6 +430,8 @@ mod tests {
             Capability::new_static("eth", 66),
             Capability::new_static("eth", 67),
             Capability::new_static("eth", 68),
+            Capability::new_static("eth", 69),
+            Capability::new_static("eth", 70),
         ]
         .into();
 
@@ -437,6 +439,8 @@ mod tests {
         assert!(capabilities.supports_eth_v66());
         assert!(capabilities.supports_eth_v67());
         assert!(capabilities.supports_eth_v68());
+        assert!(capabilities.supports_eth_v69());
+        assert!(capabilities.supports_eth_v70());
     }
 
     #[test]

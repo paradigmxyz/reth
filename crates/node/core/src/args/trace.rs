@@ -78,6 +78,23 @@ pub struct TraceArgs {
         help_heading = "Tracing"
     )]
     pub service_name: String,
+
+    /// Trace sampling ratio to control the percentage of traces to export.
+    ///
+    /// Valid range: 0.0 to 1.0
+    /// - 1.0, default: Sample all traces
+    /// - 0.01: Sample 1% of traces
+    /// - 0.0: Disable sampling
+    ///
+    /// Example: --tracing-otlp.sample-ratio=0.0.
+    #[arg(
+        long = "tracing-otlp.sample-ratio",
+        env = "OTEL_TRACES_SAMPLER_ARG",
+        global = true,
+        value_name = "RATIO",
+        help_heading = "Tracing"
+    )]
+    pub sample_ratio: Option<f64>,
 }
 
 impl Default for TraceArgs {
@@ -86,6 +103,7 @@ impl Default for TraceArgs {
             otlp: None,
             protocol: OtlpProtocol::Http,
             otlp_filter: EnvFilter::from_default_env(),
+            sample_ratio: None,
             service_name: "reth".to_string(),
         }
     }
@@ -111,13 +129,18 @@ impl TraceArgs {
 
             #[cfg(feature = "otlp")]
             {
-                _layers.with_span_layer(
-                    self.service_name.clone(),
-                    endpoint.clone(),
-                    self.otlp_filter.clone(),
-                    self.protocol,
-                )?;
-                Ok(OtlpInitStatus::Started(endpoint.clone()))
+                {
+                    let config = reth_tracing_otlp::OtlpConfig::new(
+                        self.service_name.clone(),
+                        endpoint.clone(),
+                        self.protocol,
+                        self.sample_ratio,
+                    )?;
+
+                    _layers.with_span_layer(config.clone(), self.otlp_filter.clone())?;
+
+                    Ok(OtlpInitStatus::Started(config.endpoint().clone()))
+                }
             }
             #[cfg(not(feature = "otlp"))]
             {

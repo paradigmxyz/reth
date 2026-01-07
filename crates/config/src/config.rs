@@ -22,7 +22,6 @@ pub const DEFAULT_BLOCK_INTERVAL: usize = 5;
 #[cfg_attr(feature = "serde", serde(default))]
 pub struct Config {
     /// Configuration for each stage in the pipeline.
-    // TODO(onbjerg): Can we make this easier to maintain when we add/remove stages?
     pub stages: StageConfig,
     /// Configuration for pruning.
     #[cfg_attr(feature = "serde", serde(default))]
@@ -436,6 +435,8 @@ pub struct BlocksPerFileConfig {
     pub transactions: Option<u64>,
     /// Number of blocks per file for the receipts segment.
     pub receipts: Option<u64>,
+    /// Number of blocks per file for the transaction senders segment.
+    pub transaction_senders: Option<u64>,
 }
 
 impl StaticFilesConfig {
@@ -443,7 +444,8 @@ impl StaticFilesConfig {
     ///
     /// Returns an error if any blocks per file value is zero.
     pub fn validate(&self) -> eyre::Result<()> {
-        let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
+        let BlocksPerFileConfig { headers, transactions, receipts, transaction_senders } =
+            self.blocks_per_file;
         eyre::ensure!(headers != Some(0), "Headers segment blocks per file must be greater than 0");
         eyre::ensure!(
             transactions != Some(0),
@@ -453,12 +455,17 @@ impl StaticFilesConfig {
             receipts != Some(0),
             "Receipts segment blocks per file must be greater than 0"
         );
+        eyre::ensure!(
+            transaction_senders != Some(0),
+            "Transaction senders segment blocks per file must be greater than 0"
+        );
         Ok(())
     }
 
     /// Converts the blocks per file configuration into a [`HashMap`] per segment.
     pub fn as_blocks_per_file_map(&self) -> HashMap<StaticFileSegment, u64> {
-        let BlocksPerFileConfig { headers, transactions, receipts } = self.blocks_per_file;
+        let BlocksPerFileConfig { headers, transactions, receipts, transaction_senders } =
+            self.blocks_per_file;
 
         let mut map = HashMap::new();
         // Iterating over all possible segments allows us to do an exhaustive match here,
@@ -468,6 +475,7 @@ impl StaticFilesConfig {
                 StaticFileSegment::Headers => headers,
                 StaticFileSegment::Transactions => transactions,
                 StaticFileSegment::Receipts => receipts,
+                StaticFileSegment::TransactionSenders => transaction_senders,
             };
 
             if let Some(blocks_per_file) = blocks_per_file {
@@ -522,8 +530,12 @@ impl PruneConfig {
         self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
     }
 
-    /// Merges another `PruneConfig` into this one, taking values from the other config if and only
-    /// if the corresponding value in this config is not set.
+    /// Merges values from `other` into `self`.
+    /// - `Option<PruneMode>` fields: set from `other` only if `self` is `None`.
+    /// - `block_interval`: set from `other` only if `self.block_interval ==
+    ///   DEFAULT_BLOCK_INTERVAL`.
+    /// - `merkle_changesets`: always set from `other`.
+    /// - `receipts_log_filter`: set from `other` only if `self` is empty and `other` is non-empty.
     pub fn merge(&mut self, other: Self) {
         let Self {
             block_interval,
@@ -552,7 +564,7 @@ impl PruneConfig {
         self.segments.account_history = self.segments.account_history.or(account_history);
         self.segments.storage_history = self.segments.storage_history.or(storage_history);
         self.segments.bodies_history = self.segments.bodies_history.or(bodies_history);
-        // Merkle changesets is not optional, so we just replace it if provided
+        // Merkle changesets is not optional; always take the value from `other`
         self.segments.merkle_changesets = merkle_changesets;
 
         if self.segments.receipts_log_filter.0.is_empty() && !receipts_log_filter.0.is_empty() {

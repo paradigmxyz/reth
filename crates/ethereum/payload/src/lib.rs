@@ -153,9 +153,9 @@ where
     let PayloadConfig { parent_header, attributes } = config;
 
     let state_provider = client.state_by_block_hash(parent_header.hash())?;
-    let state = StateProviderDatabase::new(&state_provider);
+    let state = StateProviderDatabase::new(state_provider.as_ref());
     let mut db =
-        State::builder().with_database(cached_reads.as_db_mut(state)).with_bundle_update().build();
+        State::builder().with_database_ref(cached_reads.as_db(state)).with_bundle_update().build();
 
     let mut builder = evm_config
         .builder_for_next_block(
@@ -168,6 +168,7 @@ where
                 gas_limit: builder_config.gas_limit(parent_header.gas_limit),
                 parent_beacon_block_root: attributes.parent_beacon_block_root(),
                 withdrawals: Some(attributes.withdrawals().clone()),
+                extra_data: builder_config.extra_data,
             },
         )
         .map_err(PayloadBuilderError::other)?;
@@ -210,6 +211,8 @@ where
 
     let is_osaka = chain_spec.is_osaka_active_at_timestamp(attributes.timestamp);
 
+    let withdrawals_rlp_length = attributes.withdrawals().length();
+
     while let Some(pool_tx) = best_txs.next() {
         // ensure we still have capacity for this transaction
         if cumulative_gas_used + pool_tx.gas_limit() > block_gas_limit {
@@ -218,7 +221,7 @@ where
             // continue
             best_txs.mark_invalid(
                 &pool_tx,
-                InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
+                &InvalidPoolTransactionError::ExceedsGasLimit(pool_tx.gas_limit(), block_gas_limit),
             );
             continue
         }
@@ -231,15 +234,15 @@ where
         // convert tx to a signed transaction
         let tx = pool_tx.to_consensus();
 
-        let estimated_block_size_with_tx = block_transactions_rlp_length +
-            tx.inner().length() +
-            attributes.withdrawals().length() +
-            1024; // 1Kb of overhead for the block header
+        let tx_rlp_len = tx.inner().length();
+
+        let estimated_block_size_with_tx =
+            block_transactions_rlp_length + tx_rlp_len + withdrawals_rlp_length + 1024; // 1Kb of overhead for the block header
 
         if is_osaka && estimated_block_size_with_tx > MAX_RLP_BLOCK_SIZE {
             best_txs.mark_invalid(
                 &pool_tx,
-                InvalidPoolTransactionError::OversizedData {
+                &InvalidPoolTransactionError::OversizedData {
                     size: estimated_block_size_with_tx,
                     limit: MAX_RLP_BLOCK_SIZE,
                 },
@@ -261,7 +264,7 @@ where
                 trace!(target: "payload_builder", tx=?tx.hash(), ?block_blob_count, "skipping blob transaction because it would exceed the max blob count per block");
                 best_txs.mark_invalid(
                     &pool_tx,
-                    InvalidPoolTransactionError::Eip4844(
+                    &InvalidPoolTransactionError::Eip4844(
                         Eip4844PoolTransactionError::TooManyEip4844Blobs {
                             have: block_blob_count + tx_blob_count,
                             permitted: max_blob_count,
@@ -294,7 +297,7 @@ where
             blob_tx_sidecar = match blob_sidecar_result {
                 Ok(sidecar) => Some(sidecar),
                 Err(error) => {
-                    best_txs.mark_invalid(&pool_tx, InvalidPoolTransactionError::Eip4844(error));
+                    best_txs.mark_invalid(&pool_tx, &InvalidPoolTransactionError::Eip4844(error));
                     continue
                 }
             };
@@ -314,7 +317,7 @@ where
                     trace!(target: "payload_builder", %error, ?tx, "skipping invalid transaction and its descendants");
                     best_txs.mark_invalid(
                         &pool_tx,
-                        InvalidPoolTransactionError::Consensus(
+                        &InvalidPoolTransactionError::Consensus(
                             InvalidTransactionError::TxTypeNotSupported,
                         ),
                     );
@@ -335,7 +338,7 @@ where
             }
         }
 
-        block_transactions_rlp_length += tx.inner().length();
+        block_transactions_rlp_length += tx_rlp_len;
 
         // update and add to total fees
         let miner_fee =
@@ -357,7 +360,8 @@ where
         return Ok(BuildOutcome::Aborted { fees: total_fees, cached_reads })
     }
 
-    let BlockBuilderOutcome { execution_result, block, .. } = builder.finish(&state_provider)?;
+    let BlockBuilderOutcome { execution_result, block, .. } =
+        builder.finish(state_provider.as_ref())?;
 
     let requests = chain_spec
         .is_prague_active_at_timestamp(attributes.timestamp)

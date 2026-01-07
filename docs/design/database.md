@@ -2,8 +2,8 @@
 
 ## Abstractions
 
-- We created a [Database trait abstraction](https://github.com/paradigmxyz/reth/blob/main/crates/cli/commands/src/db/mod.rs) using Rust Stable GATs which frees us from being bound to a single database implementation. We currently use MDBX, but are exploring [redb](https://github.com/cberner/redb) as an alternative.
-- We then iterated on [`Transaction`](https://github.com/paradigmxyz/reth/blob/main/crates/storage/errors/src/db.rs) as a non-leaky abstraction with helpers for strictly-typed and unit-tested higher-level database abstractions.
+- We created a [Database trait abstraction](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/database.rs) using Rust Stable GATs which frees us from being bound to a single database implementation. We currently use MDBX, but are exploring [redb](https://github.com/cberner/redb) as an alternative.
+- We then iterated on [`Transaction`](https://github.com/paradigmxyz/reth/blob/main/crates/storage/db-api/src/transaction.rs) as a non-leaky abstraction with helpers for strictly-typed and unit-tested higher-level database abstractions.
 
 ## Codecs
 

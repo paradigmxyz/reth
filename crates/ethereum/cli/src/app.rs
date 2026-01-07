@@ -1,39 +1,47 @@
-use crate::{interface::Commands, Cli};
+use crate::{
+    interface::{Commands, NoSubCmd},
+    Cli,
+};
+use clap::Subcommand;
 use eyre::{eyre, Result};
 use reth_chainspec::{ChainSpec, EthChainSpec, Hardforks};
 use reth_cli::chainspec::ChainSpecParser;
 use reth_cli_commands::{
-    common::{CliComponentsBuilder, CliHeader, CliNodeTypes},
+    common::{CliComponentsBuilder, CliNodeTypes, HeaderMut},
     launcher::{FnLauncher, Launcher},
 };
 use reth_cli_runner::CliRunner;
 use reth_db::DatabaseEnv;
 use reth_node_api::NodePrimitives;
 use reth_node_builder::{NodeBuilder, WithLaunchContext};
-use reth_node_core::args::OtlpInitStatus;
 use reth_node_ethereum::{consensus::EthBeaconConsensus, EthEvmConfig, EthereumNode};
 use reth_node_metrics::recorder::install_prometheus_recorder;
 use reth_rpc_server_types::RpcModuleValidator;
 use reth_tracing::{FileWorkerGuard, Layers};
 use std::{fmt, sync::Arc};
-use tracing::{info, warn};
 
 /// A wrapper around a parsed CLI that handles command execution.
 #[derive(Debug)]
-pub struct CliApp<Spec: ChainSpecParser, Ext: clap::Args + fmt::Debug, Rpc: RpcModuleValidator> {
-    cli: Cli<Spec, Ext, Rpc>,
+pub struct CliApp<
+    Spec: ChainSpecParser,
+    Ext: clap::Args + fmt::Debug,
+    Rpc: RpcModuleValidator,
+    SubCmd: Subcommand + fmt::Debug = NoSubCmd,
+> {
+    cli: Cli<Spec, Ext, Rpc, SubCmd>,
     runner: Option<CliRunner>,
     layers: Option<Layers>,
     guard: Option<FileWorkerGuard>,
 }
 
-impl<C, Ext, Rpc> CliApp<C, Ext, Rpc>
+impl<C, Ext, Rpc, SubCmd> CliApp<C, Ext, Rpc, SubCmd>
 where
     C: ChainSpecParser,
     Ext: clap::Args + fmt::Debug,
     Rpc: RpcModuleValidator,
+    SubCmd: ExtendedCommand + Subcommand + fmt::Debug,
 {
-    pub(crate) fn new(cli: Cli<C, Ext, Rpc>) -> Self {
+    pub(crate) fn new(cli: Cli<C, Ext, Rpc, SubCmd>) -> Self {
         Self { cli, runner: None, layers: Some(Layers::new()), guard: None }
     }
 
@@ -83,7 +91,7 @@ where
         ) -> Result<()>,
     ) -> Result<()>
     where
-        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
+        N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
         C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     {
         let runner = match self.runner.take() {
@@ -100,41 +108,27 @@ where
         self.init_tracing(&runner)?;
 
         // Install the prometheus recorder to be sure to record all metrics
-        let _ = install_prometheus_recorder();
+        install_prometheus_recorder();
 
-        run_commands_with::<C, Ext, Rpc, N>(self.cli, runner, components, launcher)
+        run_commands_with::<C, Ext, Rpc, N, SubCmd>(self.cli, runner, components, launcher)
     }
 
     /// Initializes tracing with the configured options.
     ///
-    /// If file logging is enabled, this function stores guard to the struct.
-    /// For gRPC OTLP, it requires tokio runtime context.
+    /// See [`Cli::init_tracing`] for more information.
     pub fn init_tracing(&mut self, runner: &CliRunner) -> Result<()> {
         if self.guard.is_none() {
-            let mut layers = self.layers.take().unwrap_or_default();
-
-            let otlp_status = runner.block_on(self.cli.traces.init_otlp_tracing(&mut layers))?;
-
-            self.guard = self.cli.logs.init_tracing_with_layers(layers)?;
-            info!(target: "reth::cli", "Initialized tracing, debug log directory: {}", self.cli.logs.log_file_directory);
-            match otlp_status {
-                OtlpInitStatus::Started(endpoint) => {
-                    info!(target: "reth::cli", "Started OTLP {:?} tracing export to {endpoint}", self.cli.traces.protocol);
-                }
-                OtlpInitStatus::NoFeature => {
-                    warn!(target: "reth::cli", "Provided OTLP tracing arguments do not have effect, compile with the `otlp` feature")
-                }
-                OtlpInitStatus::Disabled => {}
-            }
+            self.guard = self.cli.init_tracing(runner, self.layers.take().unwrap_or_default())?;
         }
+
         Ok(())
     }
 }
 
 /// Run CLI commands with the provided runner, components and launcher.
 /// This is the shared implementation used by both `CliApp` and Cli methods.
-pub(crate) fn run_commands_with<C, Ext, Rpc, N>(
-    cli: Cli<C, Ext, Rpc>,
+pub(crate) fn run_commands_with<C, Ext, Rpc, N, SubCmd>(
+    cli: Cli<C, Ext, Rpc, SubCmd>,
     runner: CliRunner,
     components: impl CliComponentsBuilder<N>,
     launcher: impl AsyncFnOnce(
@@ -146,7 +140,8 @@ where
     C: ChainSpecParser<ChainSpec = N::ChainSpec>,
     Ext: clap::Args + fmt::Debug,
     Rpc: RpcModuleValidator,
-    N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: CliHeader>, ChainSpec: Hardforks>,
+    N: CliNodeTypes<Primitives: NodePrimitives<BlockHeader: HeaderMut>, ChainSpec: Hardforks>,
+    SubCmd: ExtendedCommand + Subcommand + fmt::Debug,
 {
     match cli.command {
         Commands::Node(command) => {
@@ -170,7 +165,9 @@ where
         Commands::ImportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
         Commands::ExportEra(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
         Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-        Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
+        Commands::Db(command) => {
+            runner.run_blocking_command_until_exit(|ctx| command.execute::<N>(ctx))
+        }
         Commands::Download(command) => runner.run_blocking_until_ctrl_c(command.execute::<N>()),
         Commands::Stage(command) => {
             runner.run_command_until_exit(|ctx| command.execute::<N, _>(ctx, components))
@@ -181,7 +178,17 @@ where
         #[cfg(feature = "dev")]
         Commands::TestVectors(command) => runner.run_until_ctrl_c(command.execute()),
         Commands::ReExecute(command) => runner.run_until_ctrl_c(command.execute::<N>(components)),
+        Commands::Ext(command) => command.execute(runner),
     }
+}
+
+/// A trait for extension subcommands that can be added to the CLI.
+///
+/// Consumers implement this trait for their custom subcommands to define
+/// how they should be executed.
+pub trait ExtendedCommand {
+    /// Execute the extension command with the provided CLI runner.
+    fn execute(self, runner: CliRunner) -> Result<()>;
 }
 
 #[cfg(test)]

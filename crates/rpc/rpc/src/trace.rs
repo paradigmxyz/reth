@@ -17,10 +17,9 @@ use alloy_rpc_types_trace::{
 };
 use async_trait::async_trait;
 use jsonrpsee::core::RpcResult;
-use reth_chainspec::{ChainSpecProvider, EthChainSpec, EthereumHardfork, MAINNET, SEPOLIA};
+use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
-use reth_revm::{database::StateProviderDatabase, State};
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
@@ -102,10 +101,6 @@ where
         let this = self.clone();
         self.eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
-                // wrapper is hack to get around 'higher-ranked lifetime error', see
-                // <https://github.com/rust-lang/rust/issues/100013>
-                let db = db.0;
-
                 let res = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
                 let trace_res = inspector
                     .into_parity_builder()
@@ -153,18 +148,14 @@ where
         let at = block_id.unwrap_or(BlockId::pending());
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
-        let this = self.clone();
         // execute all transactions on top of each other and record the traces
         self.eth_api()
-            .spawn_with_state_at_block(at, move |state| {
+            .spawn_with_state_at_block(at, move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(calls.len());
-                let mut db =
-                    State::builder().with_database(StateProviderDatabase::new(state)).build();
-
                 let mut calls = calls.into_iter().peekable();
 
                 while let Some((call, trace_types)) = calls.next() {
-                    let (evm_env, tx_env) = this.eth_api().prepare_call_env(
+                    let (evm_env, tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,
                         &mut db,
@@ -172,7 +163,7 @@ where
                     )?;
                     let config = TracingInspectorConfig::from_parity_config(&trace_types);
                     let mut inspector = TracingInspector::new(config);
-                    let res = this.eth_api().inspect(&mut db, evm_env, tx_env, &mut inspector)?;
+                    let res = eth_api.inspect(&mut db, evm_env, tx_env, &mut inspector)?;
 
                     let trace_res = inspector
                         .into_parity_builder()
@@ -184,8 +175,6 @@ where
                     // need to apply the state changes of this call before executing the
                     // next call
                     if calls.peek().is_some() {
-                        // need to apply the state changes of this call before executing
-                        // the next call
                         db.commit(res.state)
                     }
                 }
@@ -287,21 +276,13 @@ where
     ///
     /// - if Paris hardfork is activated, no block rewards are given
     /// - if Paris hardfork is not activated, calculate block rewards with block number only
-    /// - if Paris hardfork is unknown, calculate block rewards with block number and ttd
     fn calculate_base_block_reward<H: BlockHeader>(
         &self,
         header: &H,
     ) -> Result<Option<u128>, Eth::Error> {
         let chain_spec = self.provider().chain_spec();
-        let is_paris_activated = if chain_spec.chain() == MAINNET.chain() {
-            Some(header.number()) >= EthereumHardfork::Paris.mainnet_activation_block()
-        } else if chain_spec.chain() == SEPOLIA.chain() {
-            Some(header.number()) >= EthereumHardfork::Paris.sepolia_activation_block()
-        } else {
-            true
-        };
 
-        if is_paris_activated {
+        if chain_spec.is_paris_active_at_block(header.number()) {
             return Ok(None)
         }
 
@@ -391,9 +372,11 @@ where
 
         let mut all_traces = Vec::new();
         let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
-        for chunk_start in (start..end).step_by(self.inner.eth_config.max_tracing_requests) {
-            let chunk_end =
-                std::cmp::min(chunk_start + self.inner.eth_config.max_tracing_requests as u64, end);
+        for chunk_start in (start..=end).step_by(self.inner.eth_config.max_tracing_requests) {
+            let chunk_end = std::cmp::min(
+                chunk_start + self.inner.eth_config.max_tracing_requests as u64 - 1,
+                end,
+            );
 
             // fetch all blocks in that chunk
             let blocks = self

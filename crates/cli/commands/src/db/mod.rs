@@ -2,12 +2,14 @@ use crate::common::{AccessRights, CliNodeTypes, Environment, EnvironmentArgs};
 use clap::{Parser, Subcommand};
 use reth_chainspec::{EthChainSpec, EthereumHardforks};
 use reth_cli::chainspec::ChainSpecParser;
+use reth_cli_runner::CliContext;
 use reth_db::version::{get_db_version, DatabaseVersionError, DB_VERSION};
 use reth_db_common::DbTool;
 use std::{
     io::{self, Write},
     sync::Arc,
 };
+mod account_storage;
 mod checksum;
 mod clear;
 mod diff;
@@ -61,6 +63,8 @@ pub enum Subcommands {
     Path,
     /// Manage storage settings
     Settings(settings::Command),
+    /// Gets storage size information for an account
+    AccountStorage(account_storage::Command),
 }
 
 /// Initializes a provider factory with specified access rights, and then execute with the provided
@@ -76,7 +80,10 @@ macro_rules! db_exec {
 
 impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C> {
     /// Execute `db` command
-    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(self) -> eyre::Result<()> {
+    pub async fn execute<N: CliNodeTypes<ChainSpec = C::ChainSpec>>(
+        self,
+        ctx: CliContext,
+    ) -> eyre::Result<()> {
         let data_dir = self.env.datadir.clone().resolve_datadir(self.env.chain.chain());
         let db_path = data_dir.db();
         let static_files_path = data_dir.static_files();
@@ -155,7 +162,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 let access_rights =
                     if command.dry_run { AccessRights::RO } else { AccessRights::RW };
                 db_exec!(self.env, tool, N, access_rights, {
-                    command.execute(&tool)?;
+                    command.execute(&tool, ctx.task_executor.clone())?;
                 });
             }
             Subcommands::StaticFileHeader(command) => {
@@ -183,6 +190,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             }
             Subcommands::Settings(command) => {
                 db_exec!(self.env, tool, N, command.access_rights(), {
+                    command.execute(&tool)?;
+                });
+            }
+            Subcommands::AccountStorage(command) => {
+                db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
                 });
             }

@@ -13,8 +13,11 @@ use crate::{
     OpEthApiError, SequencerClient,
 };
 use alloy_consensus::BlockHeader;
+use alloy_eips::BlockNumHash;
 use alloy_primitives::{B256, U256};
+use alloy_rpc_types_eth::{Filter, Log};
 use eyre::WrapErr;
+use futures::StreamExt;
 use op_alloy_network::Optimism;
 use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
@@ -37,7 +40,10 @@ use reth_rpc_eth_api::{
     EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
     RpcNodeCoreExt, RpcTypes,
 };
-use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock};
+use reth_rpc_eth_types::{
+    logs_utils::matching_block_logs_with_tx_hashes, EthStateCache, FeeHistoryCache, GasPriceOracle,
+    PendingBlock,
+};
 use reth_storage_api::{BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
@@ -50,6 +56,7 @@ use std::{
     time::Duration,
 };
 use tokio::{sync::watch, time};
+use tokio_stream::{wrappers::BroadcastStream, Stream};
 use tracing::info;
 
 /// Maximum duration to wait for a fresh flashblock when one is being built.
@@ -125,6 +132,52 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
         self.inner.flashblocks.as_ref().map(|f| f.flashblocks_sequence.subscribe())
     }
 
+    /// Returns a stream of matching flashblock receipts, if any.
+    ///
+    /// This will yield all new matching receipts received from _new_ flashblocks.
+    pub fn flashblock_receipts_stream(
+        &self,
+        filter: Filter,
+    ) -> Option<impl Stream<Item = Log> + Send + Unpin> {
+        self.subscribe_received_flashblocks().map(|rx| {
+            BroadcastStream::new(rx)
+                .scan(
+                    None::<(u64, u64)>, // state buffers base block number and timestamp
+                    move |state, result| {
+                        let fb = match result.ok() {
+                            Some(fb) => fb,
+                            None => return futures::future::ready(None),
+                        };
+
+                        // Update state from base flashblock for block level meta data.
+                        if let Some(base) = &fb.base {
+                            *state = Some((base.block_number, base.timestamp));
+                        }
+
+                        let Some((block_number, timestamp)) = *state else {
+                            // we haven't received a new flashblock sequence yet, so we can skip
+                            // until we receive the first index 0 (base)
+                            return futures::future::ready(Some(Vec::new()))
+                        };
+
+                        let receipts =
+                            fb.metadata.receipts.iter().map(|(tx, receipt)| (*tx, receipt));
+
+                        let all_logs = matching_block_logs_with_tx_hashes(
+                            &filter,
+                            BlockNumHash::new(block_number, fb.diff.block_hash),
+                            timestamp,
+                            receipts,
+                            false,
+                        );
+
+                        futures::future::ready(Some(all_logs))
+                    },
+                )
+                .flat_map(futures::stream::iter)
+        })
+    }
+
     /// Returns information about the flashblock currently being built, if any.
     fn flashblock_build_info(&self) -> Option<FlashBlockBuildInfo> {
         self.inner.flashblocks.as_ref().and_then(|f| *f.in_progress_rx.borrow())
@@ -188,14 +241,14 @@ impl<N: RpcNodeCore, Rpc: RpcConvert> OpEthApi<N, Rpc> {
 impl<N, Rpc> EthApiTypes for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
     type Error = OpEthApiError;
     type NetworkTypes = Rpc::Network;
     type RpcConvert = Rpc;
 
-    fn tx_resp_builder(&self) -> &Self::RpcConvert {
-        self.inner.eth_api.tx_resp_builder()
+    fn converter(&self) -> &Self::RpcConvert {
+        self.inner.eth_api.converter()
     }
 }
 
@@ -245,7 +298,7 @@ where
 impl<N, Rpc> EthApiSpec for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
     #[inline]
     fn starting_block(&self) -> U256 {
@@ -256,7 +309,7 @@ where
 impl<N, Rpc> SpawnBlocking for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
 {
     #[inline]
     fn io_task_spawner(&self) -> impl TaskSpawner {
@@ -271,6 +324,11 @@ where
     #[inline]
     fn tracing_task_guard(&self) -> &BlockingTaskGuard {
         self.inner.eth_api.blocking_task_guard()
+    }
+
+    #[inline]
+    fn blocking_io_task_guard(&self) -> &Arc<tokio::sync::Semaphore> {
+        self.inner.eth_api.blocking_io_request_semaphore()
     }
 }
 
@@ -311,7 +369,7 @@ where
 impl<N, Rpc> EthState for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError>,
     Self: LoadPendingBlock,
 {
     #[inline]
@@ -332,7 +390,7 @@ impl<N, Rpc> Trace for OpEthApi<N, Rpc>
 where
     N: RpcNodeCore,
     OpEthApiError: FromEvmError<N::Evm>,
-    Rpc: RpcConvert<Primitives = N::Primitives>,
+    Rpc: RpcConvert<Primitives = N::Primitives, Error = OpEthApiError, Evm = N::Evm>,
 {
 }
 
@@ -525,8 +583,9 @@ where
                 ctx.components.evm_config().clone(),
                 ctx.components.provider().clone(),
                 ctx.components.task_executor().clone(),
-            )
-            .compute_state_root(flashblock_consensus); // enable state root calculation if flashblock_consensus if enabled.
+                // enable state root calculation if flashblock_consensus is enabled.
+                flashblock_consensus,
+            );
 
             let flashblocks_sequence = service.block_sequence_broadcaster().clone();
             let received_flashblocks = service.flashblocks_broadcaster().clone();

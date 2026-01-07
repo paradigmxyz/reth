@@ -6,6 +6,7 @@ use csv::Reader;
 use eyre::{eyre, Result, WrapErr};
 use serde::{Deserialize, Serialize};
 use std::{
+    cmp::Ordering,
     collections::HashMap,
     fs,
     path::{Path, PathBuf},
@@ -20,6 +21,8 @@ pub(crate) struct ComparisonGenerator {
     feature_ref_name: String,
     baseline_results: Option<BenchmarkResults>,
     feature_results: Option<BenchmarkResults>,
+    baseline_command: Option<String>,
+    feature_command: Option<String>,
 }
 
 /// Represents the results from a single benchmark run
@@ -36,7 +39,8 @@ pub(crate) struct BenchmarkResults {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct CombinedLatencyRow {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(default)]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub new_payload_latency: u128,
 }
@@ -45,18 +49,27 @@ pub(crate) struct CombinedLatencyRow {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct TotalGasRow {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(default)]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub time: u128,
 }
 
-/// Summary statistics for a benchmark run
+/// Summary statistics for a benchmark run.
+///
+/// Latencies are derived from per-block `engine_newPayload` timings (converted from µs to ms):
+/// - `mean_new_payload_latency_ms`: arithmetic mean latency across blocks.
+/// - `median_new_payload_latency_ms`: p50 latency across blocks.
+/// - `p90_new_payload_latency_ms` / `p99_new_payload_latency_ms`: tail latencies across blocks.
 #[derive(Debug, Clone, Serialize)]
 pub(crate) struct BenchmarkSummary {
     pub total_blocks: u64,
     pub total_gas_used: u64,
     pub total_duration_ms: u128,
-    pub avg_new_payload_latency_ms: f64,
+    pub mean_new_payload_latency_ms: f64,
+    pub median_new_payload_latency_ms: f64,
+    pub p90_new_payload_latency_ms: f64,
+    pub p99_new_payload_latency_ms: f64,
     pub gas_per_second: f64,
     pub blocks_per_second: f64,
     pub min_block_number: u64,
@@ -80,12 +93,32 @@ pub(crate) struct RefInfo {
     pub summary: BenchmarkSummary,
     pub start_timestamp: Option<DateTime<Utc>>,
     pub end_timestamp: Option<DateTime<Utc>>,
+    pub reth_command: Option<String>,
 }
 
-/// Summary of the comparison between references
+/// Summary of the comparison between references.
+///
+/// Percent deltas are `(feature - baseline) / baseline * 100`:
+/// - `new_payload_latency_p50_change_percent` / p90 / p99: percent changes of the respective
+///   per-block percentiles.
+/// - `per_block_latency_change_mean_percent` / `per_block_latency_change_median_percent` are the
+///   mean and median of per-block percent deltas (feature vs baseline), capturing block-level
+///   drift.
+/// - `per_block_latency_change_std_dev_percent`: standard deviation of per-block percent changes,
+///   measuring consistency of performance changes across blocks.
+/// - `new_payload_total_latency_change_percent` is the percent change of the total newPayload time
+///   across the run.
+///
+/// Positive means slower/higher; negative means faster/lower.
 #[derive(Debug, Serialize)]
 pub(crate) struct ComparisonSummary {
-    pub new_payload_latency_change_percent: f64,
+    pub per_block_latency_change_mean_percent: f64,
+    pub per_block_latency_change_median_percent: f64,
+    pub per_block_latency_change_std_dev_percent: f64,
+    pub new_payload_total_latency_change_percent: f64,
+    pub new_payload_latency_p50_change_percent: f64,
+    pub new_payload_latency_p90_change_percent: f64,
+    pub new_payload_latency_p99_change_percent: f64,
     pub gas_per_second_change_percent: f64,
     pub blocks_per_second_change_percent: f64,
 }
@@ -94,7 +127,8 @@ pub(crate) struct ComparisonSummary {
 #[derive(Debug, Serialize)]
 pub(crate) struct BlockComparison {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub baseline_new_payload_latency: u128,
     pub feature_new_payload_latency: u128,
@@ -114,6 +148,8 @@ impl ComparisonGenerator {
             feature_ref_name: args.feature_ref.clone(),
             baseline_results: None,
             feature_results: None,
+            baseline_command: None,
+            feature_command: None,
         }
     }
 
@@ -178,6 +214,21 @@ impl ComparisonGenerator {
         Ok(())
     }
 
+    /// Set the reth command for a reference
+    pub(crate) fn set_ref_command(&mut self, ref_type: &str, command: String) -> Result<()> {
+        match ref_type {
+            "baseline" => {
+                self.baseline_command = Some(command);
+            }
+            "feature" => {
+                self.feature_command = Some(command);
+            }
+            _ => return Err(eyre!("Unknown reference type: {}", ref_type)),
+        }
+
+        Ok(())
+    }
+
     /// Generate the final comparison report
     pub(crate) async fn generate_comparison_report(&self) -> Result<()> {
         info!("Generating comparison report...");
@@ -188,10 +239,12 @@ impl ComparisonGenerator {
         let feature =
             self.feature_results.as_ref().ok_or_else(|| eyre!("Feature results not loaded"))?;
 
-        // Generate comparison
-        let comparison_summary =
-            self.calculate_comparison_summary(&baseline.summary, &feature.summary)?;
         let per_block_comparisons = self.calculate_per_block_comparisons(baseline, feature)?;
+        let comparison_summary = self.calculate_comparison_summary(
+            &baseline.summary,
+            &feature.summary,
+            &per_block_comparisons,
+        )?;
 
         let report = ComparisonReport {
             timestamp: self.timestamp.clone(),
@@ -200,12 +253,14 @@ impl ComparisonGenerator {
                 summary: baseline.summary.clone(),
                 start_timestamp: baseline.start_timestamp,
                 end_timestamp: baseline.end_timestamp,
+                reth_command: self.baseline_command.clone(),
             },
             feature: RefInfo {
                 ref_name: feature.ref_name.clone(),
                 summary: feature.summary.clone(),
                 start_timestamp: feature.start_timestamp,
                 end_timestamp: feature.end_timestamp,
+                reth_command: self.feature_command.clone(),
             },
             comparison_summary,
             per_block_comparisons,
@@ -281,7 +336,11 @@ impl ComparisonGenerator {
         Ok(rows)
     }
 
-    /// Calculate summary statistics for a benchmark run
+    /// Calculate summary statistics for a benchmark run.
+    ///
+    /// Computes latency statistics from per-block `new_payload_latency` values in `combined_data`
+    /// (converting from µs to ms), and throughput metrics using the total run duration from
+    /// `total_gas_data`. Percentiles (p50/p90/p99) use linear interpolation on sorted latencies.
     fn calculate_summary(
         &self,
         combined_data: &[CombinedLatencyRow],
@@ -296,9 +355,16 @@ impl ComparisonGenerator {
 
         let total_duration_ms = total_gas_data.last().unwrap().time / 1000; // Convert microseconds to milliseconds
 
-        let avg_new_payload_latency_ms: f64 =
-            combined_data.iter().map(|r| r.new_payload_latency as f64 / 1000.0).sum::<f64>() /
-                total_blocks as f64;
+        let latencies_ms: Vec<f64> =
+            combined_data.iter().map(|r| r.new_payload_latency as f64 / 1000.0).collect();
+        let mean_new_payload_latency_ms: f64 =
+            latencies_ms.iter().sum::<f64>() / total_blocks as f64;
+
+        let mut sorted_latencies_ms = latencies_ms;
+        sorted_latencies_ms.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+        let median_new_payload_latency_ms = percentile(&sorted_latencies_ms, 0.5);
+        let p90_new_payload_latency_ms = percentile(&sorted_latencies_ms, 0.9);
+        let p99_new_payload_latency_ms = percentile(&sorted_latencies_ms, 0.99);
 
         let total_duration_seconds = total_duration_ms as f64 / 1000.0;
         let gas_per_second = if total_duration_seconds > f64::EPSILON {
@@ -320,7 +386,10 @@ impl ComparisonGenerator {
             total_blocks,
             total_gas_used,
             total_duration_ms,
-            avg_new_payload_latency_ms,
+            mean_new_payload_latency_ms,
+            median_new_payload_latency_ms,
+            p90_new_payload_latency_ms,
+            p99_new_payload_latency_ms,
             gas_per_second,
             blocks_per_second,
             min_block_number,
@@ -333,6 +402,7 @@ impl ComparisonGenerator {
         &self,
         baseline: &BenchmarkSummary,
         feature: &BenchmarkSummary,
+        per_block_comparisons: &[BlockComparison],
     ) -> Result<ComparisonSummary> {
         let calc_percent_change = |baseline: f64, feature: f64| -> f64 {
             if baseline.abs() > f64::EPSILON {
@@ -342,10 +412,50 @@ impl ComparisonGenerator {
             }
         };
 
+        // Calculate per-block statistics. "Per-block" means: for each block, compute the percent
+        // change (feature - baseline) / baseline * 100, then calculate statistics across those
+        // per-block percent changes. This captures how consistently the feature performs relative
+        // to baseline across all blocks.
+        let per_block_percent_changes: Vec<f64> =
+            per_block_comparisons.iter().map(|c| c.new_payload_latency_change_percent).collect();
+        let per_block_latency_change_mean_percent = if per_block_percent_changes.is_empty() {
+            0.0
+        } else {
+            per_block_percent_changes.iter().sum::<f64>() / per_block_percent_changes.len() as f64
+        };
+        let per_block_latency_change_median_percent = if per_block_percent_changes.is_empty() {
+            0.0
+        } else {
+            let mut sorted = per_block_percent_changes.clone();
+            sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(Ordering::Equal));
+            percentile(&sorted, 0.5)
+        };
+        let per_block_latency_change_std_dev_percent =
+            calculate_std_dev(&per_block_percent_changes, per_block_latency_change_mean_percent);
+
+        let baseline_total_latency_ms =
+            baseline.mean_new_payload_latency_ms * baseline.total_blocks as f64;
+        let feature_total_latency_ms =
+            feature.mean_new_payload_latency_ms * feature.total_blocks as f64;
+        let new_payload_total_latency_change_percent =
+            calc_percent_change(baseline_total_latency_ms, feature_total_latency_ms);
+
         Ok(ComparisonSummary {
-            new_payload_latency_change_percent: calc_percent_change(
-                baseline.avg_new_payload_latency_ms,
-                feature.avg_new_payload_latency_ms,
+            per_block_latency_change_mean_percent,
+            per_block_latency_change_median_percent,
+            per_block_latency_change_std_dev_percent,
+            new_payload_total_latency_change_percent,
+            new_payload_latency_p50_change_percent: calc_percent_change(
+                baseline.median_new_payload_latency_ms,
+                feature.median_new_payload_latency_ms,
+            ),
+            new_payload_latency_p90_change_percent: calc_percent_change(
+                baseline.p90_new_payload_latency_ms,
+                feature.p90_new_payload_latency_ms,
+            ),
+            new_payload_latency_p99_change_percent: calc_percent_change(
+                baseline.p99_new_payload_latency_ms,
+                feature.p99_new_payload_latency_ms,
             ),
             gas_per_second_change_percent: calc_percent_change(
                 baseline.gas_per_second,
@@ -450,15 +560,39 @@ impl ComparisonGenerator {
 
         println!("Performance Changes:");
         println!(
-            "  NewPayload Latency: {:+.2}% (total avg change)",
-            summary.new_payload_latency_change_percent
+            "  NewPayload Latency per-block mean change:   {:+.2}%",
+            summary.per_block_latency_change_mean_percent
         );
         println!(
-            "  Gas/Second:         {:+.2}% (total avg change)",
+            "  NewPayload Latency per-block median change: {:+.2}%",
+            summary.per_block_latency_change_median_percent
+        );
+        println!(
+            "  NewPayload Latency per-block std dev:       {:.2}%",
+            summary.per_block_latency_change_std_dev_percent
+        );
+        println!(
+            "  Total newPayload time change:                {:+.2}%",
+            summary.new_payload_total_latency_change_percent
+        );
+        println!(
+            "  NewPayload Latency p50:           {:+.2}%",
+            summary.new_payload_latency_p50_change_percent
+        );
+        println!(
+            "  NewPayload Latency p90:           {:+.2}%",
+            summary.new_payload_latency_p90_change_percent
+        );
+        println!(
+            "  NewPayload Latency p99:           {:+.2}%",
+            summary.new_payload_latency_p99_change_percent
+        );
+        println!(
+            "  Gas/Second:                      {:+.2}%",
             summary.gas_per_second_change_percent
         );
         println!(
-            "  Blocks/Second:      {:+.2}% (total avg change)",
+            "  Blocks/Second:                   {:+.2}%",
             summary.blocks_per_second_change_percent
         );
         println!();
@@ -473,7 +607,14 @@ impl ComparisonGenerator {
             baseline.total_gas_used,
             baseline.total_duration_ms as f64 / 1000.0
         );
-        println!("  Avg NewPayload: {:.2}ms", baseline.avg_new_payload_latency_ms);
+        println!("  NewPayload latency (ms):");
+        println!(
+            "    mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
+            baseline.mean_new_payload_latency_ms,
+            baseline.median_new_payload_latency_ms,
+            baseline.p90_new_payload_latency_ms,
+            baseline.p99_new_payload_latency_ms
+        );
         if let (Some(start), Some(end)) =
             (&report.baseline.start_timestamp, &report.baseline.end_timestamp)
         {
@@ -482,6 +623,9 @@ impl ComparisonGenerator {
                 start.format("%Y-%m-%d %H:%M:%S UTC"),
                 end.format("%Y-%m-%d %H:%M:%S UTC")
             );
+        }
+        if let Some(ref cmd) = report.baseline.reth_command {
+            println!("  Command: {}", cmd);
         }
         println!();
 
@@ -495,7 +639,14 @@ impl ComparisonGenerator {
             feature.total_gas_used,
             feature.total_duration_ms as f64 / 1000.0
         );
-        println!("  Avg NewPayload: {:.2}ms", feature.avg_new_payload_latency_ms);
+        println!("  NewPayload latency (ms):");
+        println!(
+            "    mean: {:.2}, p50: {:.2}, p90: {:.2}, p99: {:.2}",
+            feature.mean_new_payload_latency_ms,
+            feature.median_new_payload_latency_ms,
+            feature.p90_new_payload_latency_ms,
+            feature.p99_new_payload_latency_ms
+        );
         if let (Some(start), Some(end)) =
             (&report.feature.start_timestamp, &report.feature.end_timestamp)
         {
@@ -505,6 +656,58 @@ impl ComparisonGenerator {
                 end.format("%Y-%m-%d %H:%M:%S UTC")
             );
         }
+        if let Some(ref cmd) = report.feature.reth_command {
+            println!("  Command: {}", cmd);
+        }
         println!();
+    }
+}
+
+/// Calculate standard deviation from a set of values and their mean.
+///
+/// Computes the population standard deviation using the formula:
+/// `sqrt(sum((x - mean)²) / n)`
+///
+/// Returns 0.0 for empty input.
+fn calculate_std_dev(values: &[f64], mean: f64) -> f64 {
+    if values.is_empty() {
+        return 0.0;
+    }
+
+    let variance = values
+        .iter()
+        .map(|x| {
+            let diff = x - mean;
+            diff * diff
+        })
+        .sum::<f64>() /
+        values.len() as f64;
+
+    variance.sqrt()
+}
+
+/// Calculate percentile using linear interpolation on a sorted slice.
+///
+/// Computes `rank = percentile × (n - 1)` where n is the array length. If the rank falls
+/// between two indices, linearly interpolates between those values. For example, with 100 values,
+/// p90 computes rank = 0.9 × 99 = 89.1, then returns `values[89] × 0.9 + values[90] × 0.1`.
+///
+/// Returns 0.0 for empty input.
+fn percentile(sorted_values: &[f64], percentile: f64) -> f64 {
+    if sorted_values.is_empty() {
+        return 0.0;
+    }
+
+    let clamped = percentile.clamp(0.0, 1.0);
+    let max_index = sorted_values.len() - 1;
+    let rank = clamped * max_index as f64;
+    let lower = rank.floor() as usize;
+    let upper = rank.ceil() as usize;
+
+    if lower == upper {
+        sorted_values[lower]
+    } else {
+        let weight = rank - lower as f64;
+        sorted_values[lower].mul_add(1.0 - weight, sorted_values[upper] * weight)
     }
 }

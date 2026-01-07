@@ -26,10 +26,11 @@ use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
     eth_snap_stream::EthSnapMessage,
-    message::{EthBroadcastMessage, MessageError, RequestPair},
+    message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
 use reth_eth_wire_types::{
+    message::RequestPair,
     snap::{
         AccountRangeMessage, ByteCodesMessage, SnapProtocolMessage, StorageRangesMessage,
         TrieNodesMessage,
@@ -280,11 +281,17 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                         on_request!(req, Receipts, GetReceipts)
                     }
                 }
+                EthMessage::GetReceipts70(req) => {
+                    on_request!(req, Receipts70, GetReceipts70)
+                }
                 EthMessage::Receipts(resp) => {
                     on_response!(resp, GetReceipts)
                 }
                 EthMessage::Receipts69(resp) => {
                     on_response!(resp, GetReceipts69)
+                }
+                EthMessage::Receipts70(resp) => {
+                    on_response!(resp, GetReceipts70)
                 }
                 EthMessage::BlockRangeUpdate(msg) => {
                     // Validate that earliest <= latest according to the spec
@@ -464,7 +471,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle an internal peer request that will be sent to the remote.
     fn on_internal_peer_request(&mut self, request: PeerRequest<N>, deadline: Instant) {
         let request_id = self.next_id();
-
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
         let (outgoing, stored_request) = match request {
             PeerRequest::SnapGetAccountRange { mut request, response } => {
@@ -504,7 +510,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 )
             }
             other => {
-                let msg = other.create_request_message(request_id);
+                let msg = other.create_request_message(request_id).map_versioned(self.conn.version());
                 (msg.into(), other)
             }
         };

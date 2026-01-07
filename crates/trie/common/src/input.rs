@@ -61,9 +61,6 @@ impl TrieInput {
     }
 
     /// Extend the trie input with the provided blocks, from oldest to newest.
-    ///
-    /// For blocks with missing trie updates, the trie input will be extended with prefix sets
-    /// constructed from the state of this block and the state itself, **without** trie updates.
     pub fn extend_with_blocks<'a>(
         &mut self,
         blocks: impl IntoIterator<Item = (&'a HashedPostState, &'a TrieUpdates)>,

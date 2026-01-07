@@ -539,9 +539,12 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 let version = conn.version();
 
                 // Configure the interval at which the range information is updated, starting with
-                // ETH69
+                // ETH69. We use interval_at to delay the first tick, avoiding sending
+                // BlockRangeUpdate immediately after connection (which can cause issues with
+                // peers that don't properly handle the message).
                 let range_update_interval = (conn.version() >= EthVersion::Eth69).then(|| {
-                    let mut interval = tokio::time::interval(RANGE_UPDATE_INTERVAL);
+                    let start = tokio::time::Instant::now() + RANGE_UPDATE_INTERVAL;
+                    let mut interval = tokio::time::interval_at(start, RANGE_UPDATE_INTERVAL);
                     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     interval
                 });

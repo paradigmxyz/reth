@@ -79,7 +79,7 @@ where
         + StaticFileProviderFactory<Primitives: NodePrimitives<BlockHeader: Compact>>,
 {
     provider_rw.insert_block(
-        SealedBlock::<<Provider::Primitives as NodePrimitives>::Block>::from_sealed_parts(
+        &SealedBlock::<<Provider::Primitives as NodePrimitives>::Block>::from_sealed_parts(
             header.clone(),
             Default::default(),
         )

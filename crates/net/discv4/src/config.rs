@@ -17,8 +17,6 @@ use std::{
 #[derive(Clone, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Discv4Config {
-    /// Whether to enable the incoming packet filter. Default: false.
-    pub enable_packet_filter: bool,
     /// Size of the channel buffer for outgoing messages.
     pub udp_egress_message_buffer: usize,
     /// Size of the channel buffer for incoming messages.
@@ -26,7 +24,7 @@ pub struct Discv4Config {
     /// The number of allowed consecutive failures for `FindNode` requests. Default: 5.
     pub max_find_node_failures: u8,
     /// The interval to use when checking for expired nodes that need to be re-pinged. Default:
-    /// 10min.
+    /// 10 seconds.
     pub ping_interval: Duration,
     /// The duration of we consider a ping timed out.
     pub ping_expiration: Duration,
@@ -41,10 +39,6 @@ pub struct Discv4Config {
     /// Provides a way to ban peers and ips.
     #[cfg_attr(feature = "serde", serde(skip))]
     pub ban_list: BanList,
-    /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
-    /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
-    /// the filter will last indefinitely. Default is 1 hour.
-    pub ban_duration: Option<Duration>,
     /// Nodes to boot from.
     pub bootstrap_nodes: HashSet<NodeRecord>,
     /// Whether to randomly discover new peers.
@@ -99,7 +93,7 @@ impl Discv4Config {
     /// Returns the corresponding [`ResolveNatInterval`], if a [`NatResolver`] and an interval was
     /// configured
     pub fn resolve_external_ip_interval(&self) -> Option<ResolveNatInterval> {
-        let resolver = self.external_ip_resolver?;
+        let resolver = self.external_ip_resolver.clone()?;
         let interval = self.resolve_external_ip_interval?;
         Some(ResolveNatInterval::interval_at(resolver, tokio::time::Instant::now(), interval))
     }
@@ -108,7 +102,6 @@ impl Discv4Config {
 impl Default for Discv4Config {
     fn default() -> Self {
         Self {
-            enable_packet_filter: false,
             // This should be high enough to cover an entire recursive FindNode lookup which is
             // includes sending FindNode to nodes it discovered in the rounds using the concurrency
             // factor ALPHA
@@ -126,7 +119,6 @@ impl Default for Discv4Config {
 
             lookup_interval: Duration::from_secs(20),
             ban_list: Default::default(),
-            ban_duration: Some(Duration::from_secs(60 * 60)), // 1 hour
             bootstrap_nodes: Default::default(),
             enable_dht_random_walk: true,
             enable_lookup: true,
@@ -148,12 +140,6 @@ pub struct Discv4ConfigBuilder {
 }
 
 impl Discv4ConfigBuilder {
-    /// Whether to enable the incoming packet filter.
-    pub const fn enable_packet_filter(&mut self) -> &mut Self {
-        self.config.enable_packet_filter = true;
-        self
-    }
-
     /// Sets the channel size for incoming messages
     pub const fn udp_ingress_message_buffer(
         &mut self,
@@ -226,13 +212,13 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Whether to enforce expiration timestamps in messages.
+    /// Whether to enable EIP-868
     pub const fn enable_eip868(&mut self, enable_eip868: bool) -> &mut Self {
         self.config.enable_eip868 = enable_eip868;
         self
     }
 
-    /// Whether to enable EIP-868
+    /// Whether to enforce expiration timestamps in messages.
     pub const fn enforce_expiration_timestamps(
         &mut self,
         enforce_expiration_timestamps: bool,
@@ -276,14 +262,6 @@ impl Discv4ConfigBuilder {
         self
     }
 
-    /// Set the default duration for which nodes are banned for. This timeouts are checked every 5
-    /// minutes, so the precision will be to the nearest 5 minutes. If set to `None`, bans from
-    /// the filter will last indefinitely. Default is 1 hour.
-    pub const fn ban_duration(&mut self, ban_duration: Option<Duration>) -> &mut Self {
-        self.config.ban_duration = ban_duration;
-        self
-    }
-
     /// Adds a boot node
     pub fn add_boot_node(&mut self, node: NodeRecord) -> &mut Self {
         self.config.bootstrap_nodes.insert(node);
@@ -297,10 +275,7 @@ impl Discv4ConfigBuilder {
     }
 
     /// Configures if and how the external IP of the node should be resolved.
-    pub const fn external_ip_resolver(
-        &mut self,
-        external_ip_resolver: Option<NatResolver>,
-    ) -> &mut Self {
+    pub fn external_ip_resolver(&mut self, external_ip_resolver: Option<NatResolver>) -> &mut Self {
         self.config.external_ip_resolver = external_ip_resolver;
         self
     }
@@ -331,7 +306,6 @@ mod tests {
             .enable_lookup(true)
             .enable_dht_random_walk(true)
             .add_boot_nodes(HashSet::new())
-            .ban_duration(None)
             .lookup_interval(Duration::from_secs(3))
             .enable_lookup(true)
             .build();

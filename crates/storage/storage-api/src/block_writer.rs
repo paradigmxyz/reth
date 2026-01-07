@@ -9,7 +9,7 @@ use reth_trie_common::HashedPostStateSorted;
 
 /// `BlockExecution` Writer
 pub trait BlockExecutionWriter:
-    NodePrimitivesProvider<Primitives: NodePrimitives<Block = Self::Block>> + BlockWriter + Send + Sync
+    NodePrimitivesProvider<Primitives: NodePrimitives<Block = Self::Block>> + BlockWriter
 {
     /// Take all of the blocks above the provided number and their execution result
     ///
@@ -39,8 +39,8 @@ impl<T: BlockExecutionWriter> BlockExecutionWriter for &T {
 }
 
 /// Block Writer
-#[auto_impl::auto_impl(&, Arc, Box)]
-pub trait BlockWriter: Send + Sync {
+#[auto_impl::auto_impl(&, Box)]
+pub trait BlockWriter {
     /// The body this writer can write.
     type Block: Block;
     /// The receipt type for [`ExecutionOutcome`].
@@ -53,7 +53,7 @@ pub trait BlockWriter: Send + Sync {
     /// and transition in the block.
     fn insert_block(
         &self,
-        block: RecoveredBlock<Self::Block>,
+        block: &RecoveredBlock<Self::Block>,
     ) -> ProviderResult<StoredBlockBodyIndices>;
 
     /// Appends a batch of block bodies extending the canonical chain. This is invoked during
@@ -63,7 +63,7 @@ pub trait BlockWriter: Send + Sync {
     /// Bodies are passed as [`Option`]s, if body is `None` the corresponding block is empty.
     fn append_block_bodies(
         &self,
-        bodies: Vec<(BlockNumber, Option<<Self::Block as Block>::Body>)>,
+        bodies: Vec<(BlockNumber, Option<&<Self::Block as Block>::Body>)>,
     ) -> ProviderResult<()>;
 
     /// Removes all blocks above the given block number from the database.

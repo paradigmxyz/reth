@@ -44,7 +44,13 @@ impl NodeManager {
             binary_path: None,
             enable_profiling: args.profile,
             output_dir: args.output_dir_path(),
-            additional_reth_args: args.reth_args.clone(),
+            // Filter out empty strings to prevent invalid arguments being passed to reth node
+            additional_reth_args: args
+                .reth_args
+                .iter()
+                .filter(|s| !s.is_empty())
+                .cloned()
+                .collect(),
             comparison_dir: None,
             tracing_endpoint: args.traces.otlp.as_ref().map(|u| u.to_string()),
             otlp_max_queue_size: args.otlp_max_queue_size,
@@ -205,6 +211,11 @@ impl NodeManager {
         cmd.arg("--");
         cmd.args(reth_args);
 
+        // Enable tracing-samply
+        if supports_samply_flags(&reth_args[0]) {
+            cmd.arg("--log.samply");
+        }
+
         // Set environment variable to disable log styling
         cmd.env("RUST_LOG_STYLE", "never");
 
@@ -234,18 +245,23 @@ impl NodeManager {
     }
 
     /// Start a reth node using the specified binary path and return the process handle
+    /// along with the formatted reth command string for reporting.
     pub(crate) async fn start_node(
         &mut self,
         binary_path: &std::path::Path,
         _git_ref: &str,
         ref_type: &str,
         additional_args: &[String],
-    ) -> Result<tokio::process::Child> {
+    ) -> Result<(tokio::process::Child, String)> {
         // Store the binary path for later use (e.g., in unwind_to_block)
         self.binary_path = Some(binary_path.to_path_buf());
 
         let binary_path_str = binary_path.to_string_lossy();
         let (reth_args, _) = self.build_reth_args(&binary_path_str, additional_args, ref_type);
+
+        // Format the reth command string for reporting
+        let reth_command = shlex::try_join(reth_args.iter().map(|s| s.as_str()))
+            .wrap_err("Failed to format reth command string")?;
 
         // Log additional arguments if any
         if !self.additional_reth_args.is_empty() {
@@ -340,7 +356,7 @@ impl NodeManager {
         // Give the node a moment to start up
         sleep(Duration::from_secs(5)).await;
 
-        Ok(child)
+        Ok((child, reth_command))
     }
 
     /// Wait for the node to be ready and return its current tip
@@ -392,7 +408,7 @@ impl NodeManager {
 
     /// Stop the reth node gracefully
     pub(crate) async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
-        let pid = child.id().expect("Child process ID should be available");
+        let pid = child.id().ok_or_eyre("Child process ID should be available")?;
 
         // Check if the process has already exited
         match child.try_wait() {
@@ -540,4 +556,17 @@ impl NodeManager {
         info!("Unwound to block: {}", block_number);
         Ok(())
     }
+}
+
+fn supports_samply_flags(bin: &str) -> bool {
+    let mut cmd = std::process::Command::new(bin);
+    // NOTE: The flag to check must come before --help.
+    // We pass --help as a shortcut to not execute any command.
+    cmd.args(["--log.samply", "--help"]);
+    debug!(?cmd, "Checking samply flags support");
+    let Ok(output) = cmd.output() else {
+        return false;
+    };
+    debug!(?output, "Samply flags support check");
+    output.status.success()
 }

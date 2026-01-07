@@ -7,7 +7,6 @@ use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use reth_execution_errors::trie::StateProofError;
 use reth_primitives_traits::Account;
-use reth_trie_common::Nibbles;
 use std::rc::Rc;
 
 /// A trait for deferred RLP-encoding of leaf values.
@@ -76,40 +75,47 @@ impl LeafValueEncoder for StorageValueEncoder {
 
 /// An account value encoder that synchronously computes storage roots.
 ///
-/// This encoder contains a provider that can create trie and hashed cursors. Storage roots are
+/// This encoder contains factories for creating trie and hashed cursors. Storage roots are
 /// computed synchronously within the deferred encoder using a `StorageProofCalculator`.
 #[derive(Debug, Clone)]
-pub struct SyncAccountValueEncoder<P> {
-    /// Provider for creating trie and hashed cursors.
-    provider: Rc<P>,
+pub struct SyncAccountValueEncoder<T, H> {
+    /// Factory for creating trie cursors.
+    trie_cursor_factory: Rc<T>,
+    /// Factory for creating hashed cursors.
+    hashed_cursor_factory: Rc<H>,
 }
 
-impl<P> SyncAccountValueEncoder<P> {
-    /// Create a new account value encoder with the given provider.
-    pub const fn new(provider: Rc<P>) -> Self {
-        Self { provider }
+impl<T, H> SyncAccountValueEncoder<T, H> {
+    /// Create a new account value encoder with the given factories.
+    pub fn new(trie_cursor_factory: T, hashed_cursor_factory: H) -> Self {
+        Self {
+            trie_cursor_factory: Rc::new(trie_cursor_factory),
+            hashed_cursor_factory: Rc::new(hashed_cursor_factory),
+        }
     }
 }
 
 /// The deferred encoder for an account value with synchronous storage root calculation.
 #[derive(Debug, Clone)]
-pub struct SyncAccountDeferredValueEncoder<P> {
-    provider: Rc<P>,
+pub struct SyncAccountDeferredValueEncoder<T, H> {
+    trie_cursor_factory: Rc<T>,
+    hashed_cursor_factory: Rc<H>,
     hashed_address: B256,
     account: Account,
 }
 
-impl<P> DeferredValueEncoder for SyncAccountDeferredValueEncoder<P>
+impl<T, H> DeferredValueEncoder for SyncAccountDeferredValueEncoder<T, H>
 where
-    P: TrieCursorFactory + HashedCursorFactory,
+    T: TrieCursorFactory,
+    H: HashedCursorFactory,
 {
     // Synchronously computes the storage root for this account and RLP-encodes the resulting
     // `TrieAccount` into `buf`
     fn encode(self, buf: &mut Vec<u8>) -> Result<(), StateProofError> {
         // Create cursors for storage proof calculation
-        let provider = &*self.provider;
-        let trie_cursor = provider.storage_trie_cursor(self.hashed_address)?;
-        let hashed_cursor = provider.hashed_storage_cursor(self.hashed_address)?;
+        let trie_cursor = self.trie_cursor_factory.storage_trie_cursor(self.hashed_address)?;
+        let hashed_cursor =
+            self.hashed_cursor_factory.hashed_storage_cursor(self.hashed_address)?;
 
         // Create storage proof calculator with StorageValueEncoder
         let mut storage_proof_calculator = ProofCalculator::new_storage(trie_cursor, hashed_cursor);
@@ -117,7 +123,7 @@ where
         // Compute storage root by calling storage_proof with the root path as a target.
         // This returns just the root node of the storage trie.
         let storage_root = storage_proof_calculator
-            .storage_proof(self.hashed_address, [Nibbles::new()])
+            .storage_proof(self.hashed_address, &mut [B256::ZERO.into()])
             .map(|nodes| {
                 // Encode the root node to RLP and hash it
                 let root_node =
@@ -142,12 +148,13 @@ where
     }
 }
 
-impl<P> LeafValueEncoder for SyncAccountValueEncoder<P>
+impl<T, H> LeafValueEncoder for SyncAccountValueEncoder<T, H>
 where
-    P: TrieCursorFactory + HashedCursorFactory,
+    T: TrieCursorFactory,
+    H: HashedCursorFactory,
 {
     type Value = Account;
-    type DeferredEncoder = SyncAccountDeferredValueEncoder<P>;
+    type DeferredEncoder = SyncAccountDeferredValueEncoder<T, H>;
 
     fn deferred_encoder(
         &self,
@@ -156,6 +163,11 @@ where
     ) -> Self::DeferredEncoder {
         // Return a deferred encoder that will synchronously compute the storage root when encode()
         // is called.
-        SyncAccountDeferredValueEncoder { provider: self.provider.clone(), hashed_address, account }
+        SyncAccountDeferredValueEncoder {
+            trie_cursor_factory: self.trie_cursor_factory.clone(),
+            hashed_cursor_factory: self.hashed_cursor_factory.clone(),
+            hashed_address,
+            account,
+        }
     }
 }
