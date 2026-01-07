@@ -104,7 +104,7 @@ impl<N> ProviderFactoryBuilder<N> {
     where
         N: NodeTypesForProvider,
     {
-        let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir, watch_static_files } =
+        let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir,triedb_dir, watch_static_files } =
             config.into();
         self.db(Arc::new(open_db_read_only(db_dir, db_args)?))
             .chainspec(chainspec)
@@ -135,6 +135,8 @@ pub struct ReadOnlyConfig {
     pub static_files_dir: PathBuf,
     /// The path to the `RocksDB` directory
     pub rocksdb_dir: PathBuf,
+    /// the path to the `TrieDB` directory
+    pub triedb_dir: PathBuf,
     /// Whether the static files should be watched for changes.
     pub watch_static_files: bool,
 }
@@ -160,6 +162,7 @@ impl ReadOnlyConfig {
             db_args: Default::default(),
             static_files_dir: datadir.join("static_files"),
             rocksdb_dir: datadir.join("rocksdb"),
+            triedb_dir: datadir.join("triedb"),
             watch_static_files: true,
         }
     }
@@ -194,7 +197,8 @@ impl ReadOnlyConfig {
         let datadir = std::fs::canonicalize(db_dir).unwrap().parent().unwrap().to_path_buf();
         let static_files_dir = datadir.join("static_files");
         let rocksdb_dir = datadir.join("rocksdb");
-        Self::from_dirs(db_dir, static_files_dir, rocksdb_dir)
+        let triedb_dir = datadir.join("triedb");
+        Self::from_dirs(db_dir, static_files_dir, rocksdb_dir, triedb_dir)
     }
 
     /// Creates the config for the given paths.
@@ -206,12 +210,14 @@ impl ReadOnlyConfig {
         db_dir: impl AsRef<Path>,
         static_files_dir: impl AsRef<Path>,
         rocksdb_dir: impl AsRef<Path>,
+        triedb_dir: impl AsRef<Path>
     ) -> Self {
         Self {
             db_dir: db_dir.as_ref().into(),
             db_args: Default::default(),
             static_files_dir: static_files_dir.as_ref().into(),
             rocksdb_dir: rocksdb_dir.as_ref().into(),
+            triedb_dir: triedb_dir.as_ref().into(),
             watch_static_files: true,
         }
     }

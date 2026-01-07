@@ -89,6 +89,7 @@ op-alloy-network.workspace = true
 
 [features]
 default = ["reth-codec"]
+triedb = ["reth-provider/triedb"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-optimism-node/asm-keccak",

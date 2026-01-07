@@ -34,6 +34,9 @@ pub use consistent::ConsistentProvider;
 #[cfg_attr(all(unix, feature = "rocksdb"), path = "rocksdb/mod.rs")]
 #[cfg_attr(not(all(unix, feature = "rocksdb")), path = "rocksdb_stub.rs")]
 pub(crate) mod rocksdb;
+#[cfg_attr(feature = "triedb", path = "triedb/mod.rs")]
+#[cfg_attr(not(feature = "triedb"), path = "triedb_stub.rs")]
+pub(crate) mod triedb;
 
 pub use rocksdb::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksTx};
 

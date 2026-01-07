@@ -37,6 +37,7 @@ alloy-eips.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-consensus.workspace = true
+alloy-trie.workspace = true
 revm-database.workspace = true
 revm-state = { workspace = true, optional = true }
 
@@ -62,6 +63,9 @@ tokio = { workspace = true, features = ["sync"], optional = true }
 # parallel utils
 rayon.workspace = true
 
+# triedb
+triedb = { workspace = true, optional = true }
+
 [target.'cfg(unix)'.dependencies]
 # rocksdb: jemalloc is recommended production workload
 rocksdb = { workspace = true, features = ["jemalloc"], optional = true }
@@ -86,7 +90,9 @@ rand.workspace = true
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 
 [features]
+default = []
 rocksdb = ["dep:rocksdb"]
+triedb = ["dep:triedb"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",

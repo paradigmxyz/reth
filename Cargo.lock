@@ -4323,6 +4323,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "42012b0f064e01aa58b545fe3727f90f7dd4020f4a3ea735b50344965f5a57e9"
 
 [[package]]
+name = "fxhash"
+version = "0.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c31b6d751ae2c7f11320402d34e41349dd1016f8d5d45e48c4312bc8625af50c"
+dependencies = [
+ "byteorder",
+]
+
+[[package]]
 name = "generator"
 version = "0.8.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10111,6 +10120,7 @@ dependencies = [
  "alloy-eips",
  "alloy-primitives",
  "alloy-rpc-types-engine",
+ "alloy-trie",
  "assert_matches",
  "dashmap 6.1.0",
  "eyre",
@@ -10151,6 +10161,7 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "triedb",
 ]
 
 [[package]]
@@ -11862,6 +11873,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
+name = "sealed"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22f968c5ea23d555e670b449c1c5e7b2fc399fdaec1d304a17cd48e288abc107"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.113",
+]
+
+[[package]]
 name = "sec1"
 version = "0.7.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -13314,6 +13336,28 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.113",
+]
+
+[[package]]
+name = "triedb"
+version = "0.1.0"
+source = "git+https://github.com/base/triedb.git#cedd1a33084ddb2724240193c39df3fbdec1dba0"
+dependencies = [
+ "alloy-primitives",
+ "alloy-rlp",
+ "alloy-trie",
+ "arrayvec",
+ "fxhash",
+ "memmap2",
+ "metrics",
+ "metrics-derive",
+ "parking_lot",
+ "proptest",
+ "proptest-derive 0.6.0",
+ "rayon",
+ "sealed",
+ "static_assertions",
+ "zerocopy",
 ]
 
 [[package]]
