@@ -10,9 +10,8 @@ use std::{
     sync::Arc,
 };
 mod account_storage;
-mod checksum;
+pub mod checksum;
 mod clear;
-mod debug_report;
 mod diff;
 mod get;
 mod list;
@@ -66,10 +65,6 @@ pub enum Subcommands {
     Settings(settings::Command),
     /// Gets storage size information for an account
     AccountStorage(account_storage::Command),
-    /// Generates a debug report for state root validation errors.
-    /// Use this when encountering invalid state root errors to collect
-    /// all necessary information for bug reports.
-    DebugReport(debug_report::Command),
 }
 
 /// Initializes a provider factory with specified access rights, and then execute with the provided
@@ -201,11 +196,6 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
             Subcommands::AccountStorage(command) => {
                 db_exec!(self.env, tool, N, AccessRights::RO, {
                     command.execute(&tool)?;
-                });
-            }
-            Subcommands::DebugReport(command) => {
-                db_exec!(self.env, tool, N, AccessRights::RO, {
-                    command.execute(data_dir, &tool)?;
                 });
             }
         }

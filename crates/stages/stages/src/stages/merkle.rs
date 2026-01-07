@@ -27,16 +27,17 @@ pub const INVALID_STATE_ROOT_ERROR_MESSAGE: &str = r#"
 Invalid state root error on stage verification!
 This is an error that likely requires a report to the reth team with additional information.
 
-To generate a debug report, run:
-  reth db debug-report --block <BLOCK_NUMBER> [--checksum] --output debug_report.json
+To generate a debug report archive, run:
+  reth report --block <BLOCK_NUMBER> [--checksum] [-y]
 
 This will collect:
  * Block header information (state root, parent hash, etc.)
- * Database statistics
- * Recent log entries
+ * Database statistics and version history
+ * Log files and invalid block hook outputs
  * Optional: database checksums (--checksum flag, takes a long time!)
 
-Once you have the report, please submit a github issue at https://github.com/paradigmxyz/reth/issues/new
+The command will generate a .tar.gz archive and provide a link to create a GitHub issue.
+Once you have the report, please submit it at https://github.com/paradigmxyz/reth/issues/new
 "#;
 
 /// The default threshold (in number of blocks) for switching from incremental trie building
