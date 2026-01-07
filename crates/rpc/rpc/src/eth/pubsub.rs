@@ -430,11 +430,10 @@ fn parse_params_or_error(
     raw_params: Option<&JsonRawValue>,
     err_msg: &'static str,
 ) -> Result<Option<Params>, ParseSubscriptionError> {
-    parse_params(raw_params).map_err(|_| ParseSubscriptionError::InvalidParams(err_msg))
-}
-
-fn parse_params(raw_params: Option<&JsonRawValue>) -> Result<Option<Params>, serde_json::Error> {
-    raw_params.map(|raw| serde_json::from_str::<Params>(raw.get())).transpose()
+    raw_params
+        .map(|raw| serde_json::from_str::<Params>(raw.get()))
+        .transpose()
+        .map_err(|_| ParseSubscriptionError::InvalidParams(err_msg))
 }
 
 impl<Eth> std::fmt::Debug for EthPubSub<Eth> {
