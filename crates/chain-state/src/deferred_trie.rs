@@ -149,7 +149,7 @@ impl DeferredTrieData {
     /// 3. Otherwise, rebuild overlay from ancestors (rare fallback)
     /// 4. Extend the overlay with this block's sorted data
     ///
-    /// # Why anchor_hash mismatch is safe
+    /// # Why `anchor_hash` mismatch is safe
     /// The parent's overlay can be reused even when `anchor_hash` differs because:
     /// - Persisted blocks are removed from memory BEFORE new blocks are validated
     /// - The `ancestors` slice only contains unpersisted blocks
@@ -177,51 +177,39 @@ impl DeferredTrieData {
         // because persisted blocks are removed from memory before we get here.
         // The anchor_hash stored in the parent may differ from ours (e.g., after persist),
         // but the overlay content is still correct for all unpersisted ancestors.
+        // Build the overlay from ancestors. Three cases:
+        // 1. Parent has cached overlay → deep copy it (common case, O(N) copy)
+        // 2. Parent exists but no overlay → rebuild from all ancestors (rare)
+        // 3. No ancestors → start empty (first block after persist)
         let mut overlay = if let Some(parent) = ancestors.last() {
             let parent_data = parent.wait_cloned();
 
             match &parent_data.anchored_trie_input {
+                // Case 1: Parent has cached overlay - deep copy it.
+                // Parent's overlay already contains all ancestors' data merged.
                 Some(AnchoredTrieInput { trie_input, .. }) => {
-                    // O(N): Deep copy parent's already-merged overlay.
-                    // This is the same cost as main branch's iterative extend, but we
-                    // get the benefit of not re-walking ancestors on every block.
-                    // We do NOT clone prefix_sets - they are per-block, not cumulative.
-                    //
-                    // IMPORTANT: We deep-copy (Arc::new + clone) instead of Arc::clone.
-                    // This ensures strong_count = 1 so Arc::make_mut in the extend step
-                    // below never triggers a clone. Arc::clone would share the data with
-                    // the parent's cached overlay, causing strong_count > 1.
-                    DEFERRED_TRIE_METRICS.deferred_trie_overlay_reused.increment(1);
-
-                    // Track overlay size for diagnostics
-                    DEFERRED_TRIE_METRICS
-                        .deferred_trie_overlay_accounts_count
-                        .set(trie_input.state.accounts.len() as f64);
-                    DEFERRED_TRIE_METRICS
-                        .deferred_trie_overlay_nodes_count
-                        .set(trie_input.nodes.total_len() as f64);
-
-                    // Deep copy parent's overlay into fresh Arcs with strong_count=1.
+                    // We deep-copy (Arc::new + clone) instead of Arc::clone to ensure
+                    // strong_count = 1. This makes Arc::make_mut below a no-op.
+                    // Arc::clone would cause strong_count > 1, forcing Arc::make_mut
+                    // to clone the entire overlay again (double work).
                     TrieInputSorted::new(
                         Arc::new((*trie_input.nodes).clone()),
                         Arc::new((*trie_input.state).clone()),
-                        Default::default(),
+                        Default::default(), // prefix_sets are per-block, not cumulative
                     )
                 }
-                None => {
-                    // Rare fallback: parent has no cached overlay (e.g., created via
-                    // alternative constructor). Rebuild from all ancestors.
-                    DEFERRED_TRIE_METRICS.deferred_trie_overlay_rebuilt.increment(1);
-                    Self::merge_ancestors_into_overlay(ancestors)
-                }
+                // Case 2: Parent exists but has no cached overlay.
+                // This happens when parent was created via without_trie_input()
+                // (e.g., block builders that don't need proofs). Rebuild from scratch.
+                None => Self::merge_ancestors_into_overlay(ancestors),
             }
         } else {
-            // No ancestors: start from empty overlay (first block after anchor)
+            // Case 3: No in-memory ancestors (first block after persisted anchor).
+            // Start with empty overlay.
             TrieInputSorted::default()
         };
 
         // Extend overlay with current block's sorted data.
-        // Track if Arc::make_mut triggers a clone (strong_count > 1 means parent still holds ref).
         {
             let state_mut = Arc::make_mut(&mut overlay.state);
             state_mut.extend_ref(sorted_hashed_state.as_ref());
