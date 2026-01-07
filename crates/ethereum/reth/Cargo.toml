@@ -152,6 +152,15 @@ jemalloc = [
     "reth-ethereum-cli?/jemalloc",
     "reth-node-core?/jemalloc",
 ]
+jemalloc-prof = [
+    "jemalloc",
+    "reth-cli-util?/jemalloc-prof",
+    "reth-ethereum-cli?/jemalloc-prof",
+]
+jemalloc-symbols = [
+    "jemalloc-prof",
+    "reth-ethereum-cli?/jemalloc-symbols",
+]
 js-tracer = [
     "rpc",
     "reth-rpc/js-tracer",

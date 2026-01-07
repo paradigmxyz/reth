@@ -161,3 +161,14 @@ If everything is working, this will output `jeprof.*.heap` files while reth is r
 [The jemalloc website](https://jemalloc.net/jemalloc.3.html#opt.abort) has a helpful overview of the options available, for example `lg_prof_interval`, `lg_prof_sample`, `prof_leak`, and `prof_final`.
 
 Now that we have the heap snapshots, we can analyze them using `jeprof`. An example of jeprof usage and output can be seen on the jemalloc github repository: https://github.com/jemalloc/jemalloc/wiki/Use-Case:-Leak-Checking
+
+### HTTP pprof endpoint
+
+When built with the `jemalloc-prof` feature and started with the `--debug.heap-profiling` flag, reth exposes a heap profiling endpoint on the metrics server (default port 9001) at `/debug/pprof/heap`. This endpoint returns heap profiles in [pprof format](https://github.com/google/pprof), which is compatible with the standard `pprof` toolchain.
+
+By default, the pprof output contains raw addresses that require external symbolization. You need either `addr2line` or `llvm-addr2line` in your PATH for `pprof` to resolve function names.
+
+For pre-symbolized profiles (useful on macOS or when external tools are unavailable), build with the `jemalloc-symbols` feature:
+```
+cargo build --features jemalloc-prof,jemalloc-symbols --profile profiling
+```

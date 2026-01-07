@@ -108,6 +108,15 @@ pub struct DebugArgs {
     /// the backfill, but did not yet receive any new blocks.
     #[arg(long = "debug.startup-sync-state-idle", help_heading = "Debug")]
     pub startup_sync_state_idle: bool,
+
+    /// Enable the `/debug/pprof/heap` endpoint on the metrics server for heap profiling.
+    ///
+    /// This endpoint returns jemalloc heap profiles in pprof format, compatible with
+    /// the `pprof` tool.
+    ///
+    /// Requires building with the `jemalloc-prof` feature.
+    #[arg(long = "debug.heap-profiling", help_heading = "Debug")]
+    pub heap_profiling: bool,
 }
 
 impl Default for DebugArgs {
@@ -127,6 +136,7 @@ impl Default for DebugArgs {
             healthy_node_rpc_url: None,
             ethstats: None,
             startup_sync_state_idle: false,
+            heap_profiling: false,
         }
     }
 }
