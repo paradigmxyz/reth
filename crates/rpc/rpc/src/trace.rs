@@ -20,6 +20,7 @@ use jsonrpsee::core::RpcResult;
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
 use reth_evm::ConfigureEvm;
 use reth_primitives_traits::{BlockBody, BlockHeader};
+use reth_revm::cancelled::CancelOnDrop;
 use reth_rpc_api::TraceApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
@@ -93,14 +94,20 @@ where
         &self,
         trace_request: TraceCallRequest<RpcTxReq<Eth::NetworkTypes>>,
     ) -> Result<TraceResults, Eth::Error> {
+        let guard = CancelOnDrop::default();
+        let cancel = guard.clone();
         let at = trace_request.block_id.unwrap_or_default();
         let config = TracingInspectorConfig::from_parity_config(&trace_request.trace_types);
         let overrides =
             EvmOverrides::new(trace_request.state_overrides, trace_request.block_overrides);
         let mut inspector = TracingInspector::new(config);
         let this = self.clone();
-        self.eth_api()
+        let res = self
+            .eth_api()
             .spawn_with_call_at(trace_request.call, at, overrides, move |db, evm_env, tx_env| {
+                if cancel.is_cancelled() {
+                    return Err(EthApiError::InternalEthError.into())
+                }
                 let res = this.eth_api().inspect(&mut *db, evm_env, tx_env, &mut inspector)?;
                 let trace_res = inspector
                     .into_parity_builder()
@@ -108,7 +115,9 @@ where
                     .map_err(Eth::Error::from_eth_err)?;
                 Ok(trace_res)
             })
-            .await
+            .await;
+        drop(guard);
+        res
     }
 
     /// Traces a call to `eth_sendRawTransaction` without making the call, returning the traces.
@@ -118,6 +127,8 @@ where
         trace_types: HashSet<TraceType>,
         block_id: Option<BlockId>,
     ) -> Result<TraceResults, Eth::Error> {
+        let guard = CancelOnDrop::default();
+        let cancel = guard.clone();
         let tx = recover_raw_transaction::<PoolPooledTx<Eth::Pool>>(&tx)?
             .map(<Eth::Pool as TransactionPool>::Transaction::pooled_into_consensus);
 
@@ -126,14 +137,20 @@ where
 
         let config = TracingInspectorConfig::from_parity_config(&trace_types);
 
-        self.eth_api()
+        let res = self
+            .eth_api()
             .spawn_trace_at_with_state(evm_env, tx_env, config, at, move |inspector, res, db| {
+                if cancel.is_cancelled() {
+                    return Err(EthApiError::InternalEthError.into())
+                }
                 inspector
                     .into_parity_builder()
                     .into_trace_results_with_state(&res, &trace_types, &db)
                     .map_err(Eth::Error::from_eth_err)
             })
-            .await
+            .await;
+        drop(guard);
+        res
     }
 
     /// Performs multiple call traces on top of the same block. i.e. transaction n will be executed
@@ -145,16 +162,22 @@ where
         calls: Vec<(RpcTxReq<Eth::NetworkTypes>, HashSet<TraceType>)>,
         block_id: Option<BlockId>,
     ) -> Result<Vec<TraceResults>, Eth::Error> {
+        let guard = CancelOnDrop::default();
+        let cancel = guard.clone();
         let at = block_id.unwrap_or(BlockId::pending());
         let (evm_env, at) = self.eth_api().evm_env_at(at).await?;
 
         // execute all transactions on top of each other and record the traces
-        self.eth_api()
+        let res = self
+            .eth_api()
             .spawn_with_state_at_block(at, move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(calls.len());
                 let mut calls = calls.into_iter().peekable();
 
                 while let Some((call, trace_types)) = calls.next() {
+                    if cancel.is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let (evm_env, tx_env) = eth_api.prepare_call_env(
                         evm_env.clone(),
                         call,
@@ -181,7 +204,9 @@ where
 
                 Ok(results)
             })
-            .await
+            .await;
+        drop(guard);
+        res
     }
 
     /// Replays a transaction, returning the traces.
@@ -342,6 +367,8 @@ where
         &self,
         filter: TraceFilter,
     ) -> Result<Vec<LocalizedTransactionTrace>, Eth::Error> {
+        let guard = CancelOnDrop::default();
+        let cancel = guard.clone();
         // We'll reuse the matcher across multiple blocks that are traced in parallel
         let matcher = Arc::new(filter.matcher());
         let TraceFilter { from_block, to_block, mut after, count, .. } = filter;
@@ -373,15 +400,23 @@ where
         let mut all_traces = Vec::new();
         let mut block_traces = Vec::with_capacity(self.inner.eth_config.max_tracing_requests);
         for chunk_start in (start..=end).step_by(self.inner.eth_config.max_tracing_requests) {
+            if cancel.is_cancelled() {
+                drop(guard);
+                return Err(EthApiError::InternalEthError.into())
+            }
             let chunk_end = std::cmp::min(
                 chunk_start + self.inner.eth_config.max_tracing_requests as u64 - 1,
                 end,
             );
 
             // fetch all blocks in that chunk
+            let cancel_clone = cancel.clone();
             let blocks = self
                 .eth_api()
                 .spawn_blocking_io(move |this| {
+                    if cancel_clone.is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     Ok(this
                         .provider()
                         .recovered_block_range(chunk_start..=chunk_end)
@@ -394,13 +429,21 @@ where
 
             // trace all blocks
             for block in &blocks {
+                if cancel.is_cancelled() {
+                    drop(guard);
+                    return Err(EthApiError::InternalEthError.into())
+                }
                 let matcher = matcher.clone();
+                let cancel_clone = cancel.clone();
                 let traces = self.eth_api().trace_block_until(
                     block.hash().into(),
                     Some(block.clone()),
                     None,
                     TracingInspectorConfig::default_parity(),
                     move |tx_info, mut ctx| {
+                        if cancel_clone.is_cancelled() {
+                            return Err(EthApiError::InternalEthError.into())
+                        }
                         let mut traces = ctx
                             .take_inspector()
                             .into_parity_builder()
@@ -420,6 +463,10 @@ where
 
             // add reward traces for all blocks
             for block in &blocks {
+                if cancel.is_cancelled() {
+                    drop(guard);
+                    return Err(EthApiError::InternalEthError.into())
+                }
                 if let Some(base_block_reward) = self.calculate_base_block_reward(block.header())? {
                     all_traces.extend(
                         self.extract_reward_traces(
@@ -451,6 +498,7 @@ where
                 let count = count as usize;
                 if count < all_traces.len() {
                     all_traces.truncate(count);
+                    drop(guard);
                     return Ok(all_traces)
                 }
             };
@@ -461,9 +509,11 @@ where
         if let Some(cutoff) = after.map(|a| a as usize) &&
             cutoff >= all_traces.len()
         {
+            drop(guard);
             return Ok(vec![])
         }
 
+        drop(guard);
         Ok(all_traces)
     }
 
@@ -472,11 +522,16 @@ where
         &self,
         block_id: BlockId,
     ) -> Result<Option<Vec<LocalizedTransactionTrace>>, Eth::Error> {
+        let guard = CancelOnDrop::default();
+        let cancel = guard.clone();
         let traces = self.eth_api().trace_block_with(
             block_id,
             None,
             TracingInspectorConfig::default_parity(),
-            |tx_info, mut ctx| {
+            move |tx_info, mut ctx| {
+                if cancel.is_cancelled() {
+                    return Err(EthApiError::InternalEthError.into())
+                }
                 let traces = ctx
                     .take_inspector()
                     .into_parity_builder()
@@ -501,6 +556,7 @@ where
             ));
         }
 
+        drop(guard);
         Ok(maybe_traces)
     }
 
@@ -510,12 +566,18 @@ where
         block_id: BlockId,
         trace_types: HashSet<TraceType>,
     ) -> Result<Option<Vec<TraceResultsWithTransactionHash>>, Eth::Error> {
-        self.eth_api()
+        let guard = CancelOnDrop::default();
+        let cancel = guard.clone();
+        let res = self
+            .eth_api()
             .trace_block_with(
                 block_id,
                 None,
                 TracingInspectorConfig::from_parity_config(&trace_types),
                 move |tx_info, mut ctx| {
+                    if cancel.is_cancelled() {
+                        return Err(EthApiError::InternalEthError.into())
+                    }
                     let mut full_trace = ctx
                         .take_inspector()
                         .into_parity_builder()
@@ -535,7 +597,9 @@ where
                     Ok(trace)
                 },
             )
-            .await
+            .await;
+        drop(guard);
+        res
     }
 
     /// Returns the opcodes of all transactions in the given block.
