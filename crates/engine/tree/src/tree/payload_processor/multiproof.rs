@@ -153,8 +153,13 @@ impl ProofSequencer {
             self.pending_proofs.insert(sequence, update);
         }
 
-        // return early if we don't have the next expected proof to avoid unnecessary allocation
-        if self.pending_proofs.is_empty() {
+        // BTreeMap::first_key_value is more efficient than contains_key for checking
+        // if the next expected proof exists, since we only need to check the first key
+        let Some(first_key) = self.pending_proofs.first_key_value().map(|(k, _)| *k) else {
+            return Vec::new()
+        };
+
+        if first_key != self.next_to_deliver {
             return Vec::new()
         }
 
