@@ -1,7 +1,7 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
 use reth_db_api::{
     table::{Compress, Decompress, Encode, Table},
-    DatabaseError,
+    tables, DatabaseError,
 };
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
@@ -33,6 +33,11 @@ const DEFAULT_BYTES_PER_SYNC: u64 = 1_048_576;
 
 /// Default bloom filter bits per key (~1% false positive rate).
 const DEFAULT_BLOOM_FILTER_BITS: f64 = 10.0;
+
+/// Default buffer capacity for compression in batches.
+/// 4 KiB matches common block/page sizes and comfortably holds typical history values,
+/// reducing the first few reallocations without over-allocating.
+const DEFAULT_COMPRESS_BUF_CAPACITY: usize = 4096;
 
 /// Builder for [`RocksDBProvider`].
 pub struct RocksDBBuilder {
@@ -136,6 +141,18 @@ impl RocksDBBuilder {
     pub fn with_table<T: Table>(mut self) -> Self {
         self.column_families.push(T::NAME.to_string());
         self
+    }
+
+    /// Registers the default tables used by reth for `RocksDB` storage.
+    ///
+    /// This registers:
+    /// - [`tables::TransactionHashNumbers`] - Transaction hash to number mapping
+    /// - [`tables::AccountsHistory`] - Account history index
+    /// - [`tables::StoragesHistory`] - Storage history index
+    pub fn with_default_tables(self) -> Self {
+        self.with_table::<tables::TransactionHashNumbers>()
+            .with_table::<tables::AccountsHistory>()
+            .with_table::<tables::StoragesHistory>()
     }
 
     /// Enables metrics.
@@ -261,6 +278,18 @@ impl RocksDBProvider {
         RocksTx { inner, provider: self }
     }
 
+    /// Creates a new batch for atomic writes.
+    ///
+    /// Use [`Self::write_batch`] for closure-based atomic writes.
+    /// Use this method when the batch needs to be held by [`crate::EitherWriter`].
+    pub fn batch(&self) -> RocksDBBatch<'_> {
+        RocksDBBatch {
+            provider: self,
+            inner: WriteBatchWithTransaction::<true>::default(),
+            buf: Vec::with_capacity(DEFAULT_COMPRESS_BUF_CAPACITY),
+        }
+    }
+
     /// Gets the column family handle for a table.
     fn get_cf_handle<T: Table>(&self) -> Result<&rocksdb::ColumnFamily, DatabaseError> {
         self.0
@@ -351,34 +380,98 @@ impl RocksDBProvider {
         })
     }
 
+    /// Gets the first (smallest key) entry from the specified table.
+    pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
+            let cf = this.get_cf_handle::<T>()?;
+            let mut iter = this.0.db.iterator_cf(cf, IteratorMode::Start);
+
+            match iter.next() {
+                Some(Ok((key_bytes, value_bytes))) => {
+                    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    let value = T::Value::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    Ok(Some((key, value)))
+                }
+                Some(Err(e)) => {
+                    Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })))
+                }
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Gets the last (largest key) entry from the specified table.
+    pub fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
+            let cf = this.get_cf_handle::<T>()?;
+            let mut iter = this.0.db.iterator_cf(cf, IteratorMode::End);
+
+            match iter.next() {
+                Some(Ok((key_bytes, value_bytes))) => {
+                    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    let value = T::Value::decompress(&value_bytes)
+                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+                    Ok(Some((key, value)))
+                }
+                Some(Err(e)) => {
+                    Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                        message: e.to_string().into(),
+                        code: -1,
+                    })))
+                }
+                None => Ok(None),
+            }
+        })
+    }
+
+    /// Creates an iterator over all entries in the specified table.
+    ///
+    /// Returns decoded `(Key, Value)` pairs in key order.
+    pub fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let iter = self.0.db.iterator_cf(cf, IteratorMode::Start);
+        Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
     /// Writes a batch of operations atomically.
     pub fn write_batch<F>(&self, f: F) -> ProviderResult<()>
     where
         F: FnOnce(&mut RocksDBBatch<'_>) -> ProviderResult<()>,
     {
-        // Note: Using "Batch" as table name for batch operations across multiple tables
         self.execute_with_operation_metric(RocksDBOperation::BatchWrite, "Batch", |this| {
-            let mut batch_handle = RocksDBBatch {
-                provider: this,
-                inner: WriteBatchWithTransaction::<true>::default(),
-                buf: Vec::new(),
-            };
-
+            let mut batch_handle = this.batch();
             f(&mut batch_handle)?;
+            batch_handle.commit()
+        })
+    }
 
-            this.0.db.write(batch_handle.inner).map_err(|e| {
-                ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })
+    /// Commits a raw `WriteBatchWithTransaction` to `RocksDB`.
+    ///
+    /// This is used when the batch was extracted via [`RocksDBBatch::into_inner`]
+    /// and needs to be committed at a later point (e.g., at provider commit time).
+    pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
+        self.0.db.write_opt(batch, &WriteOptions::default()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
         })
     }
 }
 
 /// Handle for building a batch of operations atomically.
 ///
-/// Uses `WriteBatchWithTransaction<true>` for compatibility with `TransactionDB`.
+/// Uses `WriteBatchWithTransaction` for atomic writes without full transaction overhead.
+/// Unlike [`RocksTx`], this does NOT support read-your-writes. Use for write-only flows
+/// where you don't need to read back uncommitted data within the same operation
+/// (e.g., history index writes).
+#[must_use = "batch must be committed"]
 pub struct RocksDBBatch<'a> {
     provider: &'a RocksDBProvider,
     inner: WriteBatchWithTransaction<true>,
@@ -421,6 +514,40 @@ impl<'a> RocksDBBatch<'a> {
     pub fn delete<T: Table>(&mut self, key: T::Key) -> ProviderResult<()> {
         self.inner.delete_cf(self.provider.get_cf_handle::<T>()?, key.encode().as_ref());
         Ok(())
+    }
+
+    /// Commits the batch to the database.
+    ///
+    /// This consumes the batch and writes all operations atomically to `RocksDB`.
+    pub fn commit(self) -> ProviderResult<()> {
+        self.provider.0.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
+            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))
+        })
+    }
+
+    /// Returns the number of write operations (puts + deletes) queued in this batch.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Returns `true` if the batch contains no operations.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Returns a reference to the underlying `RocksDB` provider.
+    pub const fn provider(&self) -> &RocksDBProvider {
+        self.provider
+    }
+
+    /// Consumes the batch and returns the underlying `WriteBatchWithTransaction`.
+    ///
+    /// This is used to defer commits to the provider level.
+    pub fn into_inner(self) -> WriteBatchWithTransaction<true> {
+        self.inner
     }
 }
 
@@ -541,6 +668,50 @@ impl<'db> RocksTx<'db> {
     }
 }
 
+/// Iterator over a `RocksDB` table (non-transactional).
+///
+/// Yields decoded `(Key, Value)` pairs in key order.
+pub struct RocksDBIter<'db, T: Table> {
+    inner: rocksdb::DBIteratorWithThreadMode<'db, TransactionDB>,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: Table> fmt::Debug for RocksDBIter<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBIter").field("table", &T::NAME).finish_non_exhaustive()
+    }
+}
+
+impl<T: Table> Iterator for RocksDBIter<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key_bytes, value_bytes) = match self.inner.next()? {
+            Ok(kv) => kv,
+            Err(e) => {
+                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))))
+            }
+        };
+
+        // Decode key
+        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
+            Ok(k) => k,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        // Decompress value
+        let value = match T::Value::decompress(&value_bytes) {
+            Ok(v) => v,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        Some(Ok((key, value)))
+    }
+}
+
 /// Iterator over a `RocksDB` table within a transaction.
 ///
 /// Yields decoded `(Key, Value)` pairs. Sees uncommitted writes.
@@ -599,9 +770,37 @@ const fn convert_log_level(level: LogLevel) -> rocksdb::LogLevel {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_primitives::{TxHash, B256};
-    use reth_db_api::{table::Table, tables};
+    use alloy_primitives::{Address, TxHash, B256};
+    use reth_db_api::{
+        models::{sharded_key::ShardedKey, storage_sharded_key::StorageShardedKey, IntegerList},
+        table::Table,
+        tables,
+    };
     use tempfile::TempDir;
+
+    #[test]
+    fn test_with_default_tables_registers_required_column_families() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Build with default tables
+        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
+
+        // Should be able to write/read TransactionHashNumbers
+        let tx_hash = TxHash::from(B256::from([1u8; 32]));
+        provider.put::<tables::TransactionHashNumbers>(tx_hash, &100).unwrap();
+        assert_eq!(provider.get::<tables::TransactionHashNumbers>(tx_hash).unwrap(), Some(100));
+
+        // Should be able to write/read AccountsHistory
+        let key = ShardedKey::new(Address::ZERO, 100);
+        let value = IntegerList::default();
+        provider.put::<tables::AccountsHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::AccountsHistory>(key).unwrap().is_some());
+
+        // Should be able to write/read StoragesHistory
+        let key = StorageShardedKey::new(Address::ZERO, B256::ZERO, 100);
+        provider.put::<tables::StoragesHistory>(key.clone(), &value).unwrap();
+        assert!(provider.get::<tables::StoragesHistory>(key).unwrap().is_some());
+    }
 
     #[derive(Debug)]
     struct TestTable;
@@ -838,5 +1037,61 @@ mod tests {
 
         // Commit
         tx.commit().unwrap();
+    }
+
+    #[test]
+    fn test_batch_manual_commit() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Create a batch via provider.batch()
+        let mut batch = provider.batch();
+
+        // Add entries
+        for i in 0..10u64 {
+            let value = format!("batch_value_{i}").into_bytes();
+            batch.put::<TestTable>(i, &value).unwrap();
+        }
+
+        // Verify len/is_empty
+        assert_eq!(batch.len(), 10);
+        assert!(!batch.is_empty());
+
+        // Data should NOT be visible before commit
+        assert_eq!(provider.get::<TestTable>(0).unwrap(), None);
+
+        // Commit the batch
+        batch.commit().unwrap();
+
+        // Now data should be visible
+        for i in 0..10u64 {
+            let value = format!("batch_value_{i}").into_bytes();
+            assert_eq!(provider.get::<TestTable>(i).unwrap(), Some(value));
+        }
+    }
+
+    #[test]
+    fn test_first_and_last_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Empty table should return None for both
+        assert_eq!(provider.first::<TestTable>().unwrap(), None);
+        assert_eq!(provider.last::<TestTable>().unwrap(), None);
+
+        // Insert some entries
+        provider.put::<TestTable>(10, &b"value_10".to_vec()).unwrap();
+        provider.put::<TestTable>(20, &b"value_20".to_vec()).unwrap();
+        provider.put::<TestTable>(5, &b"value_5".to_vec()).unwrap();
+
+        // First should return the smallest key
+        let first = provider.first::<TestTable>().unwrap();
+        assert_eq!(first, Some((5, b"value_5".to_vec())));
+
+        // Last should return the largest key
+        let last = provider.last::<TestTable>().unwrap();
+        assert_eq!(last, Some((20, b"value_20".to_vec())));
     }
 }

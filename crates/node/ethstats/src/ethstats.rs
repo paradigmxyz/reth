@@ -3,8 +3,8 @@ use crate::{
     credentials::EthstatsCredentials,
     error::EthStatsError,
     events::{
-        AuthMsg, BlockMsg, BlockStats, HistoryMsg, LatencyMsg, NodeInfo, NodeStats, PendingMsg,
-        PendingStats, PingMsg, StatsMsg, TxStats, UncleStats,
+        AuthMsg, BlockMsg, BlockStats, HistoryMsg, LatencyMsg, NodeInfo, NodeStats, PayloadMsg,
+        PayloadStats, PendingMsg, PendingStats, PingMsg, StatsMsg, TxStats, UncleStats,
     },
 };
 use alloy_consensus::{BlockHeader, Sealable};
@@ -50,7 +50,7 @@ const READ_TIMEOUT: Duration = Duration::from_secs(30);
 /// authentication, stats reporting, block notifications, and connection management.
 /// It maintains a persistent `WebSocket` connection and automatically reconnects
 /// when the connection is lost.
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct EthStatsService<Network, Provider, Pool> {
     /// Authentication credentials for the `EthStats` server
     credentials: EthstatsCredentials,
@@ -208,7 +208,7 @@ where
                 active: true,
                 syncing: self.network.is_syncing(),
                 peers: self.network.num_connected_peers() as u64,
-                gas_price: 0, // TODO
+                gas_price: self.pool.block_info().pending_basefee,
                 uptime: 100,
             },
         };
@@ -343,6 +343,42 @@ where
                 return Err(EthStatsError::DataFetchError(e.to_string()));
             }
         };
+
+        Ok(())
+    }
+
+    /// Report new payload information to the `EthStats` server
+    ///
+    /// Sends information about payload processing time and block details
+    /// to the server for monitoring purposes.
+    pub async fn report_new_payload(
+        &self,
+        block_hash: alloy_primitives::B256,
+        block_number: u64,
+        processing_time: Duration,
+    ) -> Result<(), EthStatsError> {
+        let conn = self.conn.read().await;
+        let conn = conn.as_ref().ok_or(EthStatsError::NotConnected)?;
+
+        let payload_stats = PayloadStats {
+            number: U256::from(block_number),
+            hash: block_hash,
+            processing_time: processing_time.as_millis() as u64,
+        };
+
+        let payload_msg =
+            PayloadMsg { id: self.credentials.node_id.clone(), payload: payload_stats };
+
+        debug!(
+            target: "ethstats",
+            "Reporting new payload: block={}, hash={:?}, processing_time={}ms",
+            block_number,
+            block_hash,
+            processing_time.as_millis()
+        );
+
+        let message = payload_msg.generate_new_payload_message();
+        conn.write_json(&message).await?;
 
         Ok(())
     }

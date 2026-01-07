@@ -169,7 +169,7 @@ impl NewPooledTransactionHashes {
                 matches!(version, EthVersion::Eth67 | EthVersion::Eth66)
             }
             Self::Eth68(_) => {
-                matches!(version, EthVersion::Eth68 | EthVersion::Eth69)
+                matches!(version, EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70)
             }
         }
     }
@@ -407,6 +407,13 @@ impl NewPooledTransactionHashes68 {
         for tx in txs {
             self.push(tx);
         }
+    }
+
+    /// Shrinks the capacity of the message vectors as much as possible.
+    pub fn shrink_to_fit(&mut self) {
+        self.hashes.shrink_to_fit();
+        self.sizes.shrink_to_fit();
+        self.types.shrink_to_fit()
     }
 
     /// Consumes and appends a transaction

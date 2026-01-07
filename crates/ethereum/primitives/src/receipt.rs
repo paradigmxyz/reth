@@ -258,10 +258,7 @@ impl<T: TxTy> IsTyped2718 for Receipt<T> {
 
 impl<T: TxTy> InMemorySize for Receipt<T> {
     fn size(&self) -> usize {
-        self.tx_type.size() +
-            core::mem::size_of::<bool>() +
-            core::mem::size_of::<u64>() +
-            self.logs.iter().map(|log| log.size()).sum::<usize>()
+        size_of::<Self>() + self.logs.iter().map(|log| log.size()).sum::<usize>()
     }
 }
 

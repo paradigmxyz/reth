@@ -180,7 +180,7 @@ impl<T: ParkedOrd> ParkedPool<T> {
             return Vec::new()
         }
 
-        let mut removed = Vec::new();
+        let mut removed = Vec::with_capacity(limit.tx_excess(self.len()).unwrap_or(1));
 
         while !self.last_sender_submission.is_empty() && limit.is_exceeded(self.len(), self.size())
         {

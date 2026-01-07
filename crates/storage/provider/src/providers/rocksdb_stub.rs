@@ -77,6 +77,39 @@ impl RocksDBProvider {
     pub const fn tx(&self) -> RocksTx {
         RocksTx
     }
+
+    /// Creates a new batch for atomic writes (stub implementation).
+    pub const fn batch(&self) -> RocksDBBatch {
+        RocksDBBatch
+    }
+
+    /// Gets the first key-value pair from a table (stub implementation).
+    pub const fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        Ok(None)
+    }
+
+    /// Gets the last key-value pair from a table (stub implementation).
+    pub const fn last<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        Ok(None)
+    }
+
+    /// Creates an iterator for the specified table (stub implementation).
+    ///
+    /// Returns an empty iterator. This is consistent with `first()` and `last()` returning
+    /// `Ok(None)` - the stub behaves as if the database is empty rather than unavailable.
+    pub const fn iter<T: Table>(&self) -> ProviderResult<RocksDBIter<'_, T>> {
+        Ok(RocksDBIter { _marker: std::marker::PhantomData })
+    }
+
+    /// Check consistency of `RocksDB` tables (stub implementation).
+    ///
+    /// Returns `None` since there is no `RocksDB` data to check when the feature is disabled.
+    pub const fn check_consistency<Provider>(
+        &self,
+        _provider: &Provider,
+    ) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
+        Ok(None)
+    }
 }
 
 /// A stub batch writer for `RocksDB` on non-Unix platforms.
@@ -102,6 +135,25 @@ impl RocksDBBatch {
     pub fn delete<T: Table>(&self, _key: T::Key) -> ProviderResult<()> {
         Err(UnsupportedProvider)
     }
+
+    /// Commits the batch (stub implementation).
+    pub const fn commit(self) -> ProviderResult<()> {
+        Err(UnsupportedProvider)
+    }
+}
+
+/// A stub iterator for `RocksDB` (non-transactional).
+#[derive(Debug)]
+pub struct RocksDBIter<'a, T> {
+    _marker: std::marker::PhantomData<(&'a (), T)>,
+}
+
+impl<T: Table> Iterator for RocksDBIter<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
+    }
 }
 
 /// A stub builder for `RocksDB` on non-Unix platforms.
@@ -116,6 +168,11 @@ impl RocksDBBuilder {
 
     /// Adds a column family for a specific table type (stub implementation).
     pub const fn with_table<T: Table>(self) -> Self {
+        self
+    }
+
+    /// Registers the default tables used by reth for `RocksDB` storage (stub implementation).
+    pub const fn with_default_tables(self) -> Self {
         self
     }
 
@@ -207,4 +264,12 @@ impl RocksTx {
 #[derive(Debug)]
 pub struct RocksTxIter<'a, T> {
     _marker: std::marker::PhantomData<(&'a (), T)>,
+}
+
+impl<T: Table> Iterator for RocksTxIter<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        None
+    }
 }

@@ -77,7 +77,7 @@ pub struct Discv5 {
     metrics: Discv5Metrics,
     /// Returns the _local_ [`NodeRecord`] this service was started with.
     // Note: we must track this separately because the `discv5::Discv5` does not necessarily
-    // provide this via it's [`local_enr`](discv5::Discv5::local_ner()) This is intended for
+    // provide this via its [`local_enr`](discv5::Discv5::local_enr()). This is intended for
     // obtaining the port this service was launched at
     local_node_record: NodeRecord,
 }

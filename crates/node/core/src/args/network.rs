@@ -36,7 +36,7 @@ use reth_network::{
         DEFAULT_SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESP_ON_PACK_GET_POOLED_TRANSACTIONS_REQ,
         SOFT_LIMIT_BYTE_SIZE_POOLED_TRANSACTIONS_RESPONSE,
     },
-    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives, SessionsConfig,
+    HelloMessageWithProtocols, NetworkConfigBuilder, NetworkPrimitives,
 };
 use reth_network_peers::{mainnet_nodes, TrustedPeer};
 use secp256k1::SecretKey;
@@ -337,9 +337,9 @@ impl NetworkArgs {
 
         // Configure basic network stack
         NetworkConfigBuilder::<N>::new(secret_key)
-            .external_ip_resolver(self.nat)
+            .external_ip_resolver(self.nat.clone())
             .sessions_config(
-                SessionsConfig::default().with_upscaled_event_buffer(peers_config.max_peers()),
+                config.sessions.clone().with_upscaled_event_buffer(peers_config.max_peers()),
             )
             .peer_config(peers_config)
             .boot_nodes(chain_bootnodes.clone())
@@ -399,7 +399,7 @@ impl NetworkArgs {
     }
 
     /// Configures the [`NatResolver`]
-    pub const fn with_nat_resolver(mut self, nat: NatResolver) -> Self {
+    pub fn with_nat_resolver(mut self, nat: NatResolver) -> Self {
         self.nat = nat;
         self
     }
@@ -782,10 +782,11 @@ mod tests {
         let tests = vec![0, 10];
 
         for retries in tests {
+            let retries_str = retries.to_string();
             let args = CommandParser::<NetworkArgs>::parse_from([
                 "reth",
                 "--dns-retries",
-                retries.to_string().as_str(),
+                retries_str.as_str(),
             ])
             .args;
 
