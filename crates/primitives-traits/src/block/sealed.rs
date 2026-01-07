@@ -365,6 +365,11 @@ impl<B: crate::test_utils::TestBlock> SealedBlock<B> {
         self.header.set_block_number(number)
     }
 
+    /// Updates the block timestamp.
+    pub fn set_timestamp(&mut self, timestamp: u64) {
+        self.header.set_timestamp(timestamp)
+    }
+
     /// Updates the block state root.
     pub fn set_state_root(&mut self, state_root: alloy_primitives::B256) {
         self.header.set_state_root(state_root)

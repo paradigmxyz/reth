@@ -8,6 +8,7 @@ use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as Cros
 use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
+use rayon::prelude::*;
 use reth_metrics::Metrics;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
@@ -200,35 +201,38 @@ impl Drop for StateHookSender {
 }
 
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
+    update.into_par_iter()
+        .filter_map(|(address, account)| {
+            if !account.is_touched() {
+                return None;
+            }
 
-    for (address, account) in update {
-        if account.is_touched() {
             let hashed_address = keccak256(address);
             trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
             let info = if destroyed { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
 
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
+            let hashed_storage = if destroyed {
+                Some(HashedStorage::new(true))
+            } else {
+                let storage: Vec<_> = account
+                    .storage
+                    .into_iter()
+                    .filter(|(_slot, value)| value.is_changed())
+                    .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                    .collect();
 
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
-            }
-        }
-    }
+                if storage.is_empty() {
+                    None
+                } else {
+                    Some(HashedStorage::from_iter(false, storage))
+                }
+            };
 
-    hashed_state
+            Some((hashed_address, info, hashed_storage))
+        })
+        .collect()
 }
 
 /// Input parameters for dispatching a multiproof calculation.
@@ -594,8 +598,9 @@ impl MultiProofTask {
         proof_worker_handle: ProofWorkerHandle,
         to_sparse_trie: std::sync::mpsc::Sender<SparseTrieUpdate>,
         chunk_size: Option<usize>,
+        tx: CrossbeamSender<MultiProofMessage>,
+        rx: CrossbeamReceiver<MultiProofMessage>,
     ) -> Self {
-        let (tx, rx) = unbounded();
         let (proof_result_tx, proof_result_rx) = unbounded();
         let metrics = MultiProofTaskMetrics::default();
 
@@ -1048,7 +1053,7 @@ impl MultiProofTask {
                 }
 
                 // Convert BAL to HashedPostState and process it
-                match bal_to_hashed_post_state(&bal, &provider) {
+                match bal_to_hashed_post_state(&bal, provider) {
                     Ok(hashed_state) => {
                         debug!(
                             target: "engine::tree::payload_processor::multiproof",
@@ -1494,12 +1499,13 @@ fn estimate_evm_state_targets(state: &EvmState) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::tree::cached_state::{CachedStateProvider, ExecutionCacheBuilder};
     use alloy_eip7928::{AccountChanges, BalanceChange};
     use alloy_primitives::{map::B256Set, Address};
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        BlockReader, DatabaseProviderFactory, PruneCheckpointReader, StageCheckpointReader,
-        TrieReader,
+        BlockReader, DatabaseProviderFactory, LatestStateProvider, PruneCheckpointReader,
+        StageCheckpointReader, StateProviderBox, TrieReader,
     };
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
@@ -1531,8 +1537,23 @@ mod tests {
         let task_ctx = ProofTaskCtx::new(overlay_factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
+        let (tx, rx) = crossbeam_channel::unbounded();
 
-        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1))
+        MultiProofTask::new(proof_handle, to_sparse_trie, Some(1), tx, rx)
+    }
+
+    fn create_cached_provider<F>(factory: F) -> CachedStateProvider<StateProviderBox>
+    where
+        F: DatabaseProviderFactory<
+                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            > + Clone
+            + Send
+            + 'static,
+    {
+        let db_provider = factory.database_provider_ro().unwrap();
+        let state_provider: StateProviderBox = Box::new(LatestStateProvider::new(db_provider));
+        let cache = ExecutionCacheBuilder::default().build_caches(1000);
+        CachedStateProvider::new(state_provider, cache, Default::default())
     }
 
     #[test]
@@ -2464,7 +2485,7 @@ mod tests {
         use revm_state::Account;
 
         let test_provider_factory = create_test_provider_factory();
-        let test_provider = test_provider_factory.latest().unwrap();
+        let test_provider = create_cached_provider(test_provider_factory.clone());
         let mut task = create_test_state_root_task(test_provider_factory);
 
         // Queue: Prefetch1, StateUpdate, Prefetch2
@@ -2684,7 +2705,7 @@ mod tests {
     #[test]
     fn test_bal_message_processing() {
         let test_provider_factory = create_test_provider_factory();
-        let test_provider = test_provider_factory.latest().unwrap();
+        let test_provider = create_cached_provider(test_provider_factory.clone());
         let mut task = create_test_state_root_task(test_provider_factory);
 
         // Create a simple BAL with one account change

@@ -195,7 +195,8 @@ impl MerkleChangeSets {
             ?target_range,
             "Computing per-block state reverts",
         );
-        let mut per_block_state_reverts = Vec::new();
+        let range_len = target_end - target_start;
+        let mut per_block_state_reverts = Vec::with_capacity(range_len as usize);
         for block_number in target_range.clone() {
             per_block_state_reverts.push(HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(
                 provider.tx_ref(),
@@ -408,13 +409,19 @@ where
         // If we've unwound so far that there are no longer enough trie changesets available then
         // simply clear them and the checkpoints, so that on next pipeline startup they will be
         // regenerated.
+        //
+        // We don't do this check if the target block is not greater than the retention threshold
+        // (which happens near genesis), as in that case would could still have all possible
+        // changesets even if the total count doesn't meet the threshold.
         debug!(
             target: "sync::stages::merkle_changesets",
             ?computed_range,
             retention_blocks=?self.retention_blocks,
             "Checking if computed range is over retention threshold",
         );
-        if computed_range.end - computed_range.start < self.retention_blocks {
+        if input.unwind_to > self.retention_blocks &&
+            computed_range.end - computed_range.start < self.retention_blocks
+        {
             debug!(
                 target: "sync::stages::merkle_changesets",
                 ?computed_range,

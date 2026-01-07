@@ -120,7 +120,7 @@ pub trait DbCursorRW<T: Table> {
     fn delete_current(&mut self) -> Result<(), DatabaseError>;
 }
 
-/// Read Write Cursor over `DupSorted` table.
+/// Read Write Cursor over `DupSort` table.
 pub trait DbDupCursorRW<T: DupSort> {
     /// Delete all duplicate entries for current key.
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError>;
