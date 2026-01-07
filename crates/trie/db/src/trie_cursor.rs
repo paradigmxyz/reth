@@ -83,14 +83,17 @@ where
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         // For exact seeks, we can use the locality optimization when seeking forward:
         // try next() first, and if it returns exactly the key we want, we're done.
-        if let Some(last) = self.last_key
-            && key > last
-                && let Some((found_key, value)) = self.cursor.next()?.map(|v| (v.0 .0, v.1))
-                    && found_key == key {
+        if let Some(last) = self.last_key {
+            if key > last {
+                if let Some((found_key, value)) = self.cursor.next()?.map(|v| (v.0 .0, v.1)) {
+                    if found_key == key {
                         self.last_key = Some(found_key);
                         return Ok(Some((found_key, value)));
                     }
                     // next() didn't give us the exact key, fall through to seek_exact
+                }
+            }
+        }
 
         let result = self.cursor.seek_exact(StoredNibbles(key))?.map(|value| (value.0 .0, value.1));
         self.last_key = result.as_ref().map(|(k, _)| *k);
@@ -106,15 +109,18 @@ where
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         // Locality optimization: if we're seeking forward, try next() first
-        if let Some(last) = self.last_key
-            && key > last
-                && let Some((found_key, value)) = self.cursor.next()?.map(|v| (v.0 .0, v.1))
-                    && found_key >= key {
+        if let Some(last) = self.last_key {
+            if key > last {
+                if let Some((found_key, value)) = self.cursor.next()?.map(|v| (v.0 .0, v.1)) {
+                    if found_key >= key {
                         // next() gave us a key >= target, we're done
                         self.last_key = Some(found_key);
                         return Ok(Some((found_key, value)));
                     }
                     // next() returned a key < target, need to seek
+                }
+            }
+        }
 
         let result = self.cursor.seek(StoredNibbles(key))?.map(|value| (value.0 .0, value.1));
         self.last_key = result.as_ref().map(|(k, _)| *k);

@@ -77,15 +77,16 @@ where
     /// first. If `next()` returns a key >= target, we avoid an O(log N) seek.
     fn seek(&mut self, key: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
         // Locality optimization: if we're seeking forward, try next() first
-        if let Some(last) = self.last_key
-            && key > last
-                && let Some((found_key, value)) = self.cursor.next()?
-                    && found_key >= key {
-                        // next() gave us a key >= target, we're done
-                        self.last_key = Some(found_key);
-                        return Ok(Some((found_key, value)));
-                    }
-                    // next() returned a key < target, need to seek
+        if let Some(last) = self.last_key &&
+            key > last &&
+            let Some((found_key, value)) = self.cursor.next()? &&
+            found_key >= key
+        {
+            // next() gave us a key >= target, we're done
+            self.last_key = Some(found_key);
+            return Ok(Some((found_key, value)));
+        }
+        // next() returned a key < target, need to seek
 
         let result = self.cursor.seek(key)?;
         self.last_key = result.as_ref().map(|(k, _)| *k);
