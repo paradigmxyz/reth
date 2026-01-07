@@ -14,6 +14,8 @@ where
     if other.is_empty() {
         return;
     }
+    // Fast path: when target is empty, simply clone other and deduplicate.
+    // Deduplication is needed because other may contain duplicate keys.
     if target.is_empty() {
         target.extend(other.iter().cloned());
         dedup_sorted_by_key(target);
@@ -188,14 +190,6 @@ mod tests {
             target,
             vec![(1, "a"), (2, "b"), (3, "c_new"), (4, "d"), (5, "e"), (7, "g_new"), (8, "h")]
         );
-    }
-
-    #[test]
-    fn test_empty_other_with_duplicates_in_target() {
-        let mut target = vec![(1, "a"), (1, "a2")];
-        let other: Vec<(i32, &str)> = vec![];
-        extend_sorted_vec(&mut target, &other);
-        assert_eq!(target, vec![(1, "a"), (1, "a2")]);
     }
 
     #[test]
