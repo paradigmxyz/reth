@@ -526,8 +526,10 @@ async fn run_warmup_phase(
 ) -> Result<()> {
     info!("=== Running warmup phase ===");
 
-    // Unwind to starting block before warmup
-    node_manager.unwind_to_block(starting_tip).await?;
+    // Unwind to starting block minus warmup blocks, so we end up back at starting_tip
+    let warmup_blocks = args.get_warmup_blocks();
+    let unwind_target = starting_tip.saturating_sub(warmup_blocks);
+    node_manager.unwind_to_block(unwind_target).await?;
 
     // Use baseline for warmup
     let warmup_ref = &args.baseline_ref;
@@ -641,8 +643,9 @@ async fn run_benchmark_workflow(
         let commit = commits[i];
         info!("=== Processing {} reference: {} ===", ref_type, git_ref);
 
-        // Unwind to starting block before running this benchmark
-        node_manager.unwind_to_block(starting_tip).await?;
+        // Unwind to starting block minus benchmark blocks, so we end up back at starting_tip
+        let unwind_target = starting_tip.saturating_sub(args.blocks);
+        node_manager.unwind_to_block(unwind_target).await?;
 
         // Switch to target reference
         git_manager.switch_ref(git_ref)?;
