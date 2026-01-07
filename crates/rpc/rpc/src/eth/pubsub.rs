@@ -1,6 +1,6 @@
 //! `eth_` `PubSub` RPC handler implementation
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use alloy_primitives::TxHash;
 use alloy_rpc_types_eth::{
@@ -12,6 +12,7 @@ use jsonrpsee::{
     core::JsonRawValue, server::SubscriptionMessage, types::ErrorObject, PendingSubscriptionSink,
     SubscriptionSink,
 };
+use parking_lot::RwLock;
 use reth_chain_state::CanonStateSubscriptions;
 use reth_network_api::NetworkInfo;
 use reth_rpc_convert::RpcHeader;
@@ -40,6 +41,9 @@ pub struct EthPubSub<Eth> {
 }
 
 type PubSubStream = Box<dyn Stream<Item = Box<JsonRawValue>> + Send + Unpin>;
+type SubscriptionHandler = Arc<
+    dyn Fn(Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>> + Send + Sync,
+>;
 type FallbackHandler = Arc<
     dyn Fn(String, Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>>
         + Send
@@ -81,12 +85,28 @@ impl<Eth> EthPubSub<Eth> {
         )
     }
 
+    /// Registers a handler for an additional subscription kind.
+    pub fn register_handler<F>(&self, kind: impl Into<String>, handler: F)
+    where
+        F: Fn(Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>>
+            + Send
+            + Sync
+            + 'static,
+    {
+        self.inner.additional_handlers.write().insert(kind.into(), Arc::new(handler));
+    }
+
     fn with_spawner_and_fallback(
         eth_api: Eth,
         subscription_task_spawner: Box<dyn TaskSpawner>,
         fallback_handler: Option<FallbackHandler>,
     ) -> Self {
-        let inner = EthPubSubInner { eth_api, subscription_task_spawner, fallback_handler };
+        let inner = EthPubSubInner {
+            eth_api,
+            subscription_task_spawner,
+            additional_handlers: RwLock::new(HashMap::new()),
+            fallback_handler,
+        };
         Self { inner: Arc::new(inner) }
     }
 }
@@ -284,6 +304,11 @@ where
         params: Option<Box<JsonRawValue>>,
         err_msg: &'static str,
     ) -> Result<(), ErrorObject<'static>> {
+        if let Some(handler) = self.inner.additional_handlers.read().get(kind.as_str()).cloned() {
+            let stream = (handler)(params)?;
+            return pipe_from_stream(accepted_sink, stream).await
+        }
+
         if let Some(fallback_handler) = &self.inner.fallback_handler {
             let stream = (fallback_handler)(kind, params)?;
             return pipe_from_stream(accepted_sink, stream).await
@@ -386,6 +411,8 @@ struct EthPubSubInner<EthApi> {
     eth_api: EthApi,
     /// The type that's used to spawn subscription tasks.
     subscription_task_spawner: Box<dyn TaskSpawner>,
+    /// Additional handlers keyed by subscription kind.
+    additional_handlers: RwLock<HashMap<String, SubscriptionHandler>>,
     /// Fallback handler for unknown subscription kinds or params.
     fallback_handler: Option<FallbackHandler>,
 }
