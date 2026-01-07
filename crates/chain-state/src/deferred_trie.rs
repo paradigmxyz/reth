@@ -784,4 +784,85 @@ mod tests {
         let overlay = final_result.anchored_trie_input.as_ref().unwrap();
         assert_eq!(overlay.trie_input.state.accounts.len(), num_blocks);
     }
+
+    /// Verifies that a multi-ancestor overlay is correctly reused when anchor changes.
+    /// This simulates the "persist prefix then keep building" scenario where:
+    /// 1. A chain of blocks is built with anchor A
+    /// 2. Some blocks are persisted, changing anchor to B
+    /// 3. New blocks should reuse the existing multi-ancestor overlay
+    #[test]
+    fn multi_ancestor_overlay_reused_after_anchor_change() {
+        let old_anchor = B256::with_last_byte(1);
+        let new_anchor = B256::with_last_byte(2);
+        let key1 = B256::with_last_byte(1);
+        let key2 = B256::with_last_byte(2);
+        let key3 = B256::with_last_byte(3);
+        let key4 = B256::with_last_byte(4);
+
+        // Build a chain of 3 blocks with old_anchor
+        let block1 = ready_block_with_state(
+            old_anchor,
+            vec![(key1, Some(Account { nonce: 1, balance: U256::ZERO, bytecode_hash: None }))],
+        );
+
+        let block2_hashed = HashedPostState::default().with_accounts([(
+            key2,
+            Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
+        let block2 = DeferredTrieData::pending(
+            Arc::new(block2_hashed),
+            Arc::new(TrieUpdates::default()),
+            old_anchor,
+            vec![block1.clone()],
+        );
+        let block2_ready = DeferredTrieData::ready(block2.wait_cloned());
+
+        let block3_hashed = HashedPostState::default().with_accounts([(
+            key3,
+            Some(Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
+        let block3 = DeferredTrieData::pending(
+            Arc::new(block3_hashed),
+            Arc::new(TrieUpdates::default()),
+            old_anchor,
+            vec![block1.clone(), block2_ready.clone()],
+        );
+        let block3_ready = DeferredTrieData::ready(block3.wait_cloned());
+
+        // Verify block3's overlay has all 3 accounts with old_anchor
+        let block3_overlay = block3_ready.wait_cloned().anchored_trie_input.unwrap();
+        assert_eq!(block3_overlay.anchor_hash, old_anchor);
+        assert_eq!(block3_overlay.trie_input.state.accounts.len(), 3);
+
+        // Now simulate persist: create block4 with NEW anchor but same ancestors
+        // In reality, persisted blocks would be removed from ancestors, but block3
+        // would still have its cached overlay from before persist
+        let block4_hashed = HashedPostState::default().with_accounts([(
+            key4,
+            Some(Account { nonce: 4, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
+        let block4 = DeferredTrieData::pending(
+            Arc::new(block4_hashed),
+            Arc::new(TrieUpdates::default()),
+            new_anchor, // Different anchor - simulates post-persist
+            vec![block3_ready],
+        );
+
+        let result = block4.wait_cloned();
+
+        // Verify:
+        // 1. New anchor is used in result
+        assert_eq!(result.anchor_hash(), Some(new_anchor));
+
+        // 2. All 4 accounts are in the overlay (parent's overlay was reused + extended)
+        let overlay = result.anchored_trie_input.as_ref().unwrap();
+        assert_eq!(overlay.trie_input.state.accounts.len(), 4);
+
+        // 3. All accounts have correct values
+        let accounts = &overlay.trie_input.state.accounts;
+        assert!(accounts.iter().any(|(k, a)| *k == key1 && a.unwrap().nonce == 1));
+        assert!(accounts.iter().any(|(k, a)| *k == key2 && a.unwrap().nonce == 2));
+        assert!(accounts.iter().any(|(k, a)| *k == key3 && a.unwrap().nonce == 3));
+        assert!(accounts.iter().any(|(k, a)| *k == key4 && a.unwrap().nonce == 4));
+    }
 }
