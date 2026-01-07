@@ -312,9 +312,8 @@ impl ECIES {
 
     /// Create a new ECIES client with the given static secret key and remote peer ID.
     pub fn new_client(secret_key: SecretKey, remote_id: PeerId) -> Result<Self, ECIESError> {
-        // TODO(rand): use rng for nonce
         let mut rng = rng();
-        let nonce = B256::random();
+        let nonce = rng.gen();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_client(secret_key, remote_id, nonce, ephemeral_secret_key)
     }
@@ -356,7 +355,7 @@ impl ECIES {
     /// Create a new ECIES server with the given static secret key.
     pub fn new_server(secret_key: SecretKey) -> Result<Self, ECIESError> {
         let mut rng = rng();
-        let nonce = B256::random();
+        let nonce = rng.gen();
         let ephemeral_secret_key = SecretKey::new(&mut rng);
         Self::new_static_server(secret_key, nonce, ephemeral_secret_key)
     }

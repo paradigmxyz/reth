@@ -1,6 +1,5 @@
 //! Mock discovery support
 
-// TODO(rand): update ::random calls after rand_09 migration
 
 use crate::{
     proto::{FindNode, Message, Neighbours, NodeEndpoint, Packet, Ping, Pong},
@@ -267,8 +266,7 @@ pub fn rng_endpoint(rng: &mut impl Rng) -> NodeEndpoint {
 /// Generates a random [`NodeRecord`] using the provided random number generator.
 pub fn rng_record(rng: &mut impl RngCore) -> NodeRecord {
     let NodeEndpoint { address, udp_port, tcp_port } = rng_endpoint(rng);
-    // TODO(rand)
-    NodeRecord { address, tcp_port, udp_port, id: B512::random() }
+    NodeRecord { address, tcp_port, udp_port, id: rng.gen() }
 }
 
 /// Generates a random IPv6 [`NodeRecord`] using the provided random number generator.
@@ -276,8 +274,7 @@ pub fn rng_ipv6_record(rng: &mut impl RngCore) -> NodeRecord {
     let mut ip = [0u8; 16];
     rng.fill_bytes(&mut ip);
     let address = IpAddr::V6(ip.into());
-    // TODO(rand)
-    NodeRecord { address, tcp_port: rng.r#gen(), udp_port: rng.r#gen(), id: B512::random() }
+    NodeRecord { address, tcp_port: rng.r#gen(), udp_port: rng.r#gen(), id: rng.gen() }
 }
 
 /// Generates a random IPv4 [`NodeRecord`] using the provided random number generator.
@@ -285,8 +282,7 @@ pub fn rng_ipv4_record(rng: &mut impl RngCore) -> NodeRecord {
     let mut ip = [0u8; 4];
     rng.fill_bytes(&mut ip);
     let address = IpAddr::V4(ip.into());
-    // TODO(rand)
-    NodeRecord { address, tcp_port: rng.r#gen(), udp_port: rng.r#gen(), id: B512::random() }
+    NodeRecord { address, tcp_port: rng.r#gen(), udp_port: rng.r#gen(), id: rng.gen() }
 }
 
 /// Generates a random [`Message`] using the provided random number generator.
@@ -304,7 +300,7 @@ pub fn rng_message(rng: &mut impl RngCore) -> Message {
             expire: rng.r#gen(),
             enr_sq: None,
         }),
-        3 => Message::FindNode(FindNode { id: B512::random(), expire: rng.r#gen() }),
+        3 => Message::FindNode(FindNode { id: rng.gen(), expire: rng.r#gen() }),
         4 => {
             let num: usize = rng.gen_range(1..=SAFE_MAX_DATAGRAM_NEIGHBOUR_RECORDS);
             Message::Neighbours(Neighbours {
