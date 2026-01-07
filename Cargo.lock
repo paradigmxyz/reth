@@ -10277,6 +10277,7 @@ version = "1.9.3"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-evm",
  "alloy-genesis",
@@ -10359,6 +10360,7 @@ dependencies = [
 name = "reth-rpc-api"
 version = "1.9.3"
 dependencies = [
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
  "alloy-json-rpc",
