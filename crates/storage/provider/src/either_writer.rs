@@ -805,6 +805,7 @@ impl EitherWriterDestination {
     }
 
     /// Returns the destination for writing transaction hash numbers based on storage settings.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn transaction_hash_numbers<P>(_provider: &P) -> Self
     where
         P: StorageSettingsCache,
@@ -818,6 +819,7 @@ impl EitherWriterDestination {
     }
 
     /// Returns the destination for writing storage history based on storage settings.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn storages_history<P>(_provider: &P) -> Self
     where
         P: StorageSettingsCache,
@@ -831,6 +833,7 @@ impl EitherWriterDestination {
     }
 
     /// Returns the destination for writing account history based on storage settings.
+    #[allow(clippy::missing_const_for_fn)]
     pub fn accounts_history<P>(_provider: &P) -> Self
     where
         P: StorageSettingsCache,
