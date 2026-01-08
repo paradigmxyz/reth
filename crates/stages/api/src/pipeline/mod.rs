@@ -55,7 +55,7 @@ pub type PipelineWithResult<N> = (Pipeline<N>, Result<ControlFlow, PipelineError
 /// After the entire pipeline has been run, it will run again unless asked to stop (see
 /// [`PipelineBuilder::with_max_block`]).
 ///
-/// include_mmd!("docs/mermaid/pipeline.mmd")
+/// `include_mmd!("docs/mermaid/pipeline.mmd`")
 ///
 /// # Unwinding
 ///
