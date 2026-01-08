@@ -5,7 +5,6 @@ use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
