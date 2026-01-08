@@ -40,10 +40,7 @@ use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
 use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
-use std::{
-    collections::VecDeque,
-    sync::Arc,
-};
+use std::{collections::VecDeque, sync::Arc};
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
 use tokio_stream::StreamExt;
 
@@ -625,7 +622,6 @@ where
             })
             .await
     }
-
 }
 
 #[async_trait]
