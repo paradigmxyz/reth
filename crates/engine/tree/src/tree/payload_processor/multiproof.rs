@@ -1071,7 +1071,6 @@ impl MultiProofTask {
                 false
             }
             // Signal that no more state updates will arrive.
-            // Process all deferred state updates now.
             MultiProofMessage::FinishedStateUpdates => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
 
