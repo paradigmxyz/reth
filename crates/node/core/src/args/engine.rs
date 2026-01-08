@@ -36,6 +36,7 @@ pub struct DefaultEngineValues {
     allow_unwind_canonical_header: bool,
     storage_worker_count: Option<usize>,
     account_worker_count: Option<usize>,
+    enable_proof_v2: bool,
 }
 
 impl DefaultEngineValues {
@@ -165,6 +166,12 @@ impl DefaultEngineValues {
         self.account_worker_count = v;
         self
     }
+
+    /// Set whether to enable proof V2 by default
+    pub const fn with_enable_proof_v2(mut self, v: bool) -> Self {
+        self.enable_proof_v2 = v;
+        self
+    }
 }
 
 impl Default for DefaultEngineValues {
@@ -189,6 +196,7 @@ impl Default for DefaultEngineValues {
             allow_unwind_canonical_header: false,
             storage_worker_count: None,
             account_worker_count: None,
+            enable_proof_v2: false,
         }
     }
 }
@@ -308,6 +316,10 @@ pub struct EngineArgs {
     /// If not specified, defaults to the same count as storage workers.
     #[arg(long = "engine.account-worker-count", default_value = Resettable::from(DefaultEngineValues::get_global().account_worker_count.map(|v| v.to_string().into())))]
     pub account_worker_count: Option<usize>,
+
+    /// Enable V2 storage proofs for state root calculations
+    #[arg(long = "engine.enable-proof-v2", default_value_t = DefaultEngineValues::get_global().enable_proof_v2)]
+    pub enable_proof_v2: bool,
 }
 
 #[allow(deprecated)]
@@ -333,6 +345,7 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
+            enable_proof_v2,
         } = DefaultEngineValues::get_global().clone();
         Self {
             persistence_threshold,
@@ -357,6 +370,7 @@ impl Default for EngineArgs {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
+            enable_proof_v2,
         }
     }
 }
@@ -391,6 +405,8 @@ impl EngineArgs {
         if let Some(count) = self.account_worker_count {
             config = config.with_account_worker_count(count);
         }
+
+        config = config.with_enable_proof_v2(self.enable_proof_v2);
 
         config
     }
@@ -441,6 +457,7 @@ mod tests {
             allow_unwind_canonical_header: true,
             storage_worker_count: Some(16),
             account_worker_count: Some(8),
+            enable_proof_v2: false,
         };
 
         let parsed_args = CommandParser::<EngineArgs>::parse_from([
