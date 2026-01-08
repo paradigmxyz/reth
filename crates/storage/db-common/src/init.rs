@@ -216,6 +216,13 @@ where
         .user_header_mut()
         .set_block_range(genesis_block_number, genesis_block_number);
 
+    if genesis_storage_settings.transaction_senders_in_static_files {
+        static_file_provider
+            .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
+            .user_header_mut()
+            .set_block_range(genesis_block_number, genesis_block_number);
+    }
+
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
     provider_rw.commit()?;
