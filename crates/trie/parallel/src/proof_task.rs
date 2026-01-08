@@ -59,6 +59,7 @@ use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
     prefix_set::{PrefixSet, PrefixSetMut},
     proof::{DecodedProofNodes, ProofRetainer},
+    BranchNodeMasks, BranchNodeMasksMap,
 };
 use reth_trie_sparse::provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory};
 use std::{
@@ -1536,14 +1537,16 @@ where
     let account_subtree_raw_nodes = hash_builder.take_proof_nodes();
     let decoded_account_subtree = DecodedProofNodes::try_from(account_subtree_raw_nodes)?;
 
-    let (branch_node_hash_masks, branch_node_tree_masks) = if ctx.collect_branch_node_masks {
+    let branch_node_masks = if ctx.collect_branch_node_masks {
         let updated_branch_nodes = hash_builder.updated_branch_nodes.unwrap_or_default();
-        (
-            updated_branch_nodes.iter().map(|(path, node)| (*path, node.hash_mask)).collect(),
-            updated_branch_nodes.into_iter().map(|(path, node)| (path, node.tree_mask)).collect(),
-        )
+        updated_branch_nodes
+            .into_iter()
+            .map(|(path, node)| {
+                (path, BranchNodeMasks { hash_mask: node.hash_mask, tree_mask: node.tree_mask })
+            })
+            .collect()
     } else {
-        (Default::default(), Default::default())
+        BranchNodeMasksMap::default()
     };
 
     // Extend tracker with accumulated metrics from account cursors
@@ -1552,8 +1555,7 @@ where
 
     Ok(DecodedMultiProof {
         account_subtree: decoded_account_subtree,
-        branch_node_hash_masks,
-        branch_node_tree_masks,
+        branch_node_masks,
         storages: collected_decoded_storages,
     })
 }

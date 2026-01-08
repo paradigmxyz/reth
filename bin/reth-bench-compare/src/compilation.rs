@@ -13,8 +13,6 @@ pub(crate) struct CompilationManager {
     repo_root: String,
     output_dir: PathBuf,
     git_manager: GitManager,
-    features: String,
-    enable_profiling: bool,
 }
 
 impl CompilationManager {
@@ -23,10 +21,8 @@ impl CompilationManager {
         repo_root: String,
         output_dir: PathBuf,
         git_manager: GitManager,
-        features: String,
-        enable_profiling: bool,
     ) -> Result<Self> {
-        Ok(Self { repo_root, output_dir, git_manager, features, enable_profiling })
+        Ok(Self { repo_root, output_dir, git_manager })
     }
 
     /// Detect if the RPC endpoint is an Optimism chain
@@ -70,7 +66,13 @@ impl CompilationManager {
     }
 
     /// Compile reth using cargo build and cache the binary
-    pub(crate) fn compile_reth(&self, commit: &str, is_optimism: bool) -> Result<()> {
+    pub(crate) fn compile_reth(
+        &self,
+        commit: &str,
+        is_optimism: bool,
+        features: &str,
+        rustflags: &str,
+    ) -> Result<()> {
         // Validate that current git commit matches the expected commit
         let current_commit = self.git_manager.get_current_commit()?;
         if current_commit != commit {
@@ -102,18 +104,8 @@ impl CompilationManager {
         let mut cmd = Command::new("cargo");
         cmd.arg("build").arg("--profile").arg("profiling");
 
-        // Append samply feature when profiling to enable tracing span markers.
-        // NOTE: The `samply` feature must exist in the branch being compiled. If comparing
-        // against an older branch that predates the samply integration, compilation will fail
-        // or markers won't appear. In that case, omit --profile or ensure both branches
-        // include the samply feature support.
-        let features = if self.enable_profiling && !self.features.contains("samply") {
-            format!("{},samply", self.features)
-        } else {
-            self.features.clone()
-        };
-        cmd.arg("--features").arg(&features);
-        info!("Using features: {}", features);
+        cmd.arg("--features").arg(features);
+        info!("Using features: {features}");
 
         // Add bin-specific arguments for optimism
         if is_optimism {
@@ -125,8 +117,9 @@ impl CompilationManager {
 
         cmd.current_dir(&self.repo_root);
 
-        // Set RUSTFLAGS for native CPU optimization
-        cmd.env("RUSTFLAGS", "-C target-cpu=native");
+        // Set RUSTFLAGS
+        cmd.env("RUSTFLAGS", rustflags);
+        info!("Using RUSTFLAGS: {rustflags}");
 
         // Debug log the command
         debug!("Executing cargo command: {:?}", cmd);

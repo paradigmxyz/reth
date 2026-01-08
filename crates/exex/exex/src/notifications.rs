@@ -354,10 +354,10 @@ where
     /// canonical chain.
     ///
     /// Possible situations are:
-    /// - ExEx is behind the node head (`node_head.number < exex_head.number`). Backfill from the
+    /// - ExEx is behind the node head (`exex_head.number < node_head.number`). Backfill from the
     ///   node database.
-    /// - ExEx is at the same block number as the node head (`node_head.number ==
-    ///   exex_head.number`). Nothing to do.
+    /// - ExEx is at the same block number as the node head (`exex_head.number ==
+    ///   node_head.number`). Nothing to do.
     fn check_backfill(&mut self) -> eyre::Result<()> {
         let backfill_job_factory =
             BackfillJobFactory::new(self.evm_config.clone(), self.provider.clone());

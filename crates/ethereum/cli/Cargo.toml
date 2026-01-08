@@ -38,7 +38,6 @@ tempfile.workspace = true
 default = []
 
 otlp = ["reth-tracing/otlp", "reth-node-core/otlp"]
-samply = ["reth-tracing/samply", "reth-node-core/samply"]
 
 dev = ["reth-cli-commands/arbitrary"]
 
@@ -52,7 +51,12 @@ jemalloc = [
     "reth-node-metrics/jemalloc",
 ]
 jemalloc-prof = [
-    "reth-node-core/jemalloc",
+    "jemalloc",
+    "reth-node-metrics/jemalloc-prof",
+]
+jemalloc-symbols = [
+    "jemalloc-prof",
+    "reth-node-metrics/jemalloc-symbols",
 ]
 tracy-allocator = []
 

@@ -3,11 +3,11 @@
 use super::precompile_cache::PrecompileCacheMap;
 use crate::tree::{
     cached_state::{
-        CachedStateMetrics, ExecutionCache as StateExecutionCache, ExecutionCacheBuilder,
-        SavedCache,
+        CachedStateMetrics, CachedStateProvider, ExecutionCache as StateExecutionCache,
+        ExecutionCacheBuilder, SavedCache,
     },
     payload_processor::{
-        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmTaskEvent},
+        prewarm::{PrewarmCacheTask, PrewarmContext, PrewarmMode, PrewarmTaskEvent},
         sparse_trie::StateRootComputeOutcome,
     },
     sparse_trie::SparseTrieTask,
@@ -30,7 +30,9 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
+use reth_provider::{
+    BlockReader, DatabaseProviderROFactory, StateProvider, StateProviderFactory, StateReader,
+};
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
@@ -44,6 +46,7 @@ use reth_trie_sparse::{
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
+    ops::Not,
     sync::{
         atomic::AtomicBool,
         mpsc::{self, channel},
@@ -240,28 +243,30 @@ where
 
         // Handle BAL-based optimization if available
         let prewarm_handle = if let Some(bal) = bal {
-            // When BAL is present, skip spawning prewarm tasks entirely and send BAL to multiproof
-            debug!(target: "engine::tree::payload_processor", "BAL present, skipping prewarm tasks");
+            // When BAL is present, use BAL prewarming and send BAL to multiproof
+            debug!(target: "engine::tree::payload_processor", "BAL present, using BAL prewarming");
 
             // Send BAL message immediately to MultiProofTask
-            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(bal));
+            let _ = to_multi_proof.send(MultiProofMessage::BlockAccessList(Arc::clone(&bal)));
 
-            // Spawn minimal cache-only task without prewarming
+            // Spawn with BAL prewarming
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
                 transaction_count_hint,
                 provider_builder.clone(),
                 None, // Don't send proof targets when BAL is present
+                Some(bal),
             )
         } else {
-            // Normal path: spawn with full prewarming
+            // Normal path: spawn with transaction prewarming
             self.spawn_caching_with(
                 env,
                 prewarm_rx,
                 transaction_count_hint,
                 provider_builder.clone(),
                 Some(to_multi_proof.clone()),
+                None,
             )
         };
 
@@ -288,10 +293,18 @@ where
 
         // spawn multi-proof task
         let parent_span = span.clone();
+        let saved_cache = prewarm_handle.saved_cache.clone();
         self.executor.spawn_blocking(move || {
             let _enter = parent_span.entered();
             // Build a state provider for the multiproof task
             let provider = provider_builder.build().expect("failed to build provider");
+            let provider = if let Some(saved_cache) = saved_cache {
+                let (cache, metrics) = saved_cache.split();
+                Box::new(CachedStateProvider::new(provider, cache, metrics))
+                    as Box<dyn StateProvider>
+            } else {
+                Box::new(provider)
+            };
             multi_proof_task.run(provider);
         });
 
@@ -319,13 +332,14 @@ where
         env: ExecutionEnv<Evm>,
         transactions: I,
         provider_builder: StateProviderBuilder<N, P>,
+        bal: Option<Arc<BlockAccessList>>,
     ) -> IteratorPayloadHandle<Evm, I, N>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
     {
         let (prewarm_rx, execution_rx, size_hint) = self.spawn_tx_iterator(transactions);
         let prewarm_handle =
-            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None);
+            self.spawn_caching_with(env, prewarm_rx, size_hint, provider_builder, None, bal);
         PayloadHandle {
             to_multi_proof: None,
             prewarm_handle,
@@ -399,6 +413,7 @@ where
         transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
+        bal: Option<Arc<BlockAccessList>>,
     ) -> CacheTaskHandle<N::Receipt>
     where
         P: BlockReader + StateProviderFactory + StateReader + Clone + 'static,
@@ -409,20 +424,13 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let (saved_cache, cache, cache_metrics) = if self.disable_state_cache {
-            (None, None, None)
-        } else {
-            let saved_cache = self.cache_for(env.parent_hash);
-            let cache = saved_cache.cache().clone();
-            let cache_metrics = saved_cache.metrics().clone();
-            (Some(saved_cache), Some(cache), Some(cache_metrics))
-        };
+        let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
             evm_config: self.evm_config.clone(),
-            saved_cache,
+            saved_cache: saved_cache.clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
@@ -443,11 +451,16 @@ where
         {
             let to_prewarm_task = to_prewarm_task.clone();
             self.executor.spawn_blocking(move || {
-                prewarm_task.run(transactions, to_prewarm_task);
+                let mode = if let Some(bal) = bal {
+                    PrewarmMode::BlockAccessList(bal)
+                } else {
+                    PrewarmMode::Transactions(transactions)
+                };
+                prewarm_task.run(mode, to_prewarm_task);
             });
         }
 
-        CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
+        CacheTaskHandle { saved_cache, to_prewarm_task: Some(to_prewarm_task) }
     }
 
     /// Returns the cache for the given parent hash.
@@ -633,12 +646,12 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns a clone of the caches used by prewarming
     pub(super) fn caches(&self) -> Option<StateExecutionCache> {
-        self.prewarm_handle.cache.clone()
+        self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
     }
 
     /// Returns a clone of the cache metrics used by prewarming
     pub(super) fn cache_metrics(&self) -> Option<CachedStateMetrics> {
-        self.prewarm_handle.cache_metrics.clone()
+        self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.metrics().clone())
     }
 
     /// Terminates the pre-warming transaction processing.
@@ -675,9 +688,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle<R> {
     /// The shared cache the task operates with.
-    cache: Option<StateExecutionCache>,
-    /// Metrics for the caches
-    cache_metrics: Option<CachedStateMetrics>,
+    saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
 }
@@ -763,12 +774,34 @@ impl ExecutionCache {
             warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
         }
 
-        cache
-            .as_ref()
+        if let Some(c) = cache.as_ref() {
+            let cached_hash = c.executed_block_hash();
+            // Check that the cache hash matches the parent hash of the current block. It won't
+            // match in case it's a fork block.
+            let hash_matches = cached_hash == parent_hash;
             // Check `is_available()` to ensure no other tasks (e.g., prewarming) currently hold
             // a reference to this cache. We can only reuse it when we have exclusive access.
-            .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())
-            .cloned()
+            let available = c.is_available();
+            let usage_count = c.usage_count();
+
+            debug!(
+                target: "engine::caching",
+                %cached_hash,
+                %parent_hash,
+                hash_matches,
+                available,
+                usage_count,
+                "Existing cache found"
+            );
+
+            if hash_matches && available {
+                return Some(c.clone());
+            }
+        } else {
+            debug!(target: "engine::caching", %parent_hash, "No cache found");
+        }
+
+        None
     }
 
     /// Clears the tracked cache

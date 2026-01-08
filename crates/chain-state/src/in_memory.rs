@@ -86,14 +86,20 @@ impl<N: NodePrimitives> InMemoryState<N> {
     ///
     /// This tries to acquire a read lock. Drop any write locks before calling this.
     pub(crate) fn update_metrics(&self) {
-        let numbers = self.numbers.read();
-        if let Some((earliest_block_number, _)) = numbers.first_key_value() {
-            self.metrics.earliest_block.set(*earliest_block_number as f64);
+        let (count, earliest, latest) = {
+            let numbers = self.numbers.read();
+            let count = numbers.len();
+            let earliest = numbers.first_key_value().map(|(number, _)| *number);
+            let latest = numbers.last_key_value().map(|(number, _)| *number);
+            (count, earliest, latest)
+        };
+        if let Some(earliest_block_number) = earliest {
+            self.metrics.earliest_block.set(earliest_block_number as f64);
         }
-        if let Some((latest_block_number, _)) = numbers.last_key_value() {
-            self.metrics.latest_block.set(*latest_block_number as f64);
+        if let Some(latest_block_number) = latest {
+            self.metrics.latest_block.set(latest_block_number as f64);
         }
-        self.metrics.num_blocks.set(numbers.len() as f64);
+        self.metrics.num_blocks.set(count as f64);
     }
 
     /// Returns the state for a given block hash.
@@ -1461,8 +1467,7 @@ mod tests {
         assert_eq!(parents[0].block().recovered_block().number, 2);
         assert_eq!(parents[1].block().recovered_block().number, 1);
 
-        let parents: Vec<_> = chain[0].parent_state_chain().collect();
-        assert_eq!(parents.len(), 0);
+        assert_eq!(chain[0].parent_state_chain().count(), 0);
     }
 
     #[test]
@@ -1473,8 +1478,7 @@ mod tests {
             create_mock_state(&mut test_block_builder, single_block_number, B256::random());
         let single_block_hash = single_block.block().recovered_block().hash();
 
-        let parents: Vec<_> = single_block.parent_state_chain().collect();
-        assert_eq!(parents.len(), 0);
+        assert_eq!(single_block.parent_state_chain().count(), 0);
 
         let block_state_chain = single_block.chain().collect::<Vec<_>>();
         assert_eq!(block_state_chain.len(), 1);
