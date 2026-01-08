@@ -694,21 +694,12 @@ impl From<StorageProofResult> for Option<DecodedStorageMultiProof> {
         match proof_result {
             StorageProofResult::Legacy { proof } => Some(proof),
             StorageProofResult::V2 { proof, root } => root.map(|root| {
-                let branch_node_hash_masks = proof
+                let branch_node_masks = proof
                     .iter()
-                    .filter_map(|node| node.masks.hash_mask.map(|mask| (node.path, mask)))
-                    .collect();
-                let branch_node_tree_masks = proof
-                    .iter()
-                    .filter_map(|node| node.masks.tree_mask.map(|mask| (node.path, mask)))
+                    .filter_map(|node| node.masks.map(|masks| (node.path, masks)))
                     .collect();
                 let subtree = proof.into_iter().map(|node| (node.path, node.node)).collect();
-                DecodedStorageMultiProof {
-                    root,
-                    subtree,
-                    branch_node_hash_masks,
-                    branch_node_tree_masks,
-                }
+                DecodedStorageMultiProof { root, subtree, branch_node_masks }
             }),
         }
     }
