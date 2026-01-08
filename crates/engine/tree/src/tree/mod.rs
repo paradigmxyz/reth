@@ -37,18 +37,12 @@ use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
 use revm::state::EvmState;
 use state::TreeState;
-use std::{
-    fmt::Debug,
-    ops,
-    sync::{
-        mpsc::{Receiver, RecvError, RecvTimeoutError, Sender},
-        Arc,
-    },
-    time::Instant,
-};
+use std::{fmt::Debug, ops, sync::Arc, time::Instant};
+
+use crossbeam_channel::{Receiver, Sender};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    oneshot::{self, error::TryRecvError},
+    oneshot,
 };
 use tracing::*;
 
@@ -338,7 +332,7 @@ where
         engine_kind: EngineApiKind,
         evm_config: C,
     ) -> Self {
-        let (incoming_tx, incoming) = std::sync::mpsc::channel();
+        let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
         Self {
             provider,
@@ -423,8 +417,8 @@ where
     /// This will block the current thread and process incoming messages.
     pub fn run(mut self) {
         loop {
-            match self.try_recv_engine_message() {
-                Ok(Some(msg)) => {
+            match self.wait_for_event() {
+                LoopEvent::EngineMessage(msg) => {
                     debug!(target: "engine::tree", %msg, "received new engine message");
                     match self.on_engine_message(msg) {
                         Ok(ops::ControlFlow::Break(())) => return,
@@ -435,18 +429,66 @@ where
                         }
                     }
                 }
-                Ok(None) => {
-                    debug!(target: "engine::tree", "received no engine message for some time, while waiting for persistence task to complete");
+                LoopEvent::PersistenceComplete { result, start_time } => {
+                    if let Err(err) = self.on_persistence_complete(result, start_time) {
+                        error!(target: "engine::tree", %err, "Persistence complete handling failed");
+                        return
+                    }
                 }
-                Err(_err) => {
-                    error!(target: "engine::tree", "Engine channel disconnected");
+                LoopEvent::Disconnected => {
+                    error!(target: "engine::tree", "Channel disconnected");
                     return
                 }
             }
 
+            // Always check if we need to trigger new persistence after any event:
+            // - After engine messages: new blocks may have been inserted that exceed the
+            //   persistence threshold
+            // - After persistence completion: we can now persist more blocks if needed
             if let Err(err) = self.advance_persistence() {
                 error!(target: "engine::tree", %err, "Advancing persistence failed");
                 return
+            }
+        }
+    }
+
+    /// Blocks until the next event is ready: either an incoming engine message or a persistence
+    /// completion (if one is in progress).
+    ///
+    /// Uses biased selection to prioritize persistence completion to update in-memory state and
+    /// unblock further writes.
+    fn wait_for_event(&mut self) -> LoopEvent<T, N> {
+        // Take ownership of persistence rx if present
+        let maybe_persistence = self.persistence_state.rx.take();
+
+        if let Some((persistence_rx, start_time, action)) = maybe_persistence {
+            // Biased select prioritizes persistence completion to update in memory state and
+            // unblock further writes
+            crossbeam_channel::select_biased! {
+                recv(persistence_rx) -> result => {
+                    // Don't put it back - consumed (oneshot-like behavior)
+                    match result {
+                        Ok(value) => LoopEvent::PersistenceComplete {
+                            result: value,
+                            start_time,
+                        },
+                        Err(_) => LoopEvent::Disconnected,
+                    }
+                },
+                recv(self.incoming) -> msg => {
+                    // Put the persistence rx back - we didn't consume it
+                    self.persistence_state.rx = Some((persistence_rx, start_time, action));
+                    match msg {
+                        Ok(m) => LoopEvent::EngineMessage(m),
+                        Err(_) => LoopEvent::Disconnected,
+                    }
+                },
+            }
+        } else {
+            // No persistence in progress - just wait on incoming
+            match self.incoming.recv() {
+                Ok(m) => LoopEvent::EngineMessage(m),
+                Err(_) => LoopEvent::Disconnected,
             }
         }
     }
@@ -1191,39 +1233,13 @@ where
         .with_event(TreeEvent::Download(DownloadRequest::single_block(target))))
     }
 
-    /// Attempts to receive the next engine request.
-    ///
-    /// If there's currently no persistence action in progress, this will block until a new request
-    /// is received. If there's a persistence action in progress, this will try to receive the
-    /// next request with a timeout to not block indefinitely and return `Ok(None)` if no request is
-    /// received in time.
-    ///
-    /// Returns an error if the engine channel is disconnected.
-    #[expect(clippy::type_complexity)]
-    fn try_recv_engine_message(
-        &self,
-    ) -> Result<Option<FromEngine<EngineApiRequest<T, N>, N::Block>>, RecvError> {
-        if self.persistence_state.in_progress() {
-            // try to receive the next request with a timeout to not block indefinitely
-            match self.incoming.recv_timeout(std::time::Duration::from_millis(500)) {
-                Ok(msg) => Ok(Some(msg)),
-                Err(err) => match err {
-                    RecvTimeoutError::Timeout => Ok(None),
-                    RecvTimeoutError::Disconnected => Err(RecvError),
-                },
-            }
-        } else {
-            self.incoming.recv().map(Some)
-        }
-    }
-
     /// Helper method to remove blocks and set the persistence state. This ensures we keep track of
     /// the current persistence action while we're removing blocks.
     fn remove_blocks(&mut self, new_tip_num: u64) {
         debug!(target: "engine::tree", ?new_tip_num, last_persisted_block_number=?self.persistence_state.last_persisted_block.number, "Removing blocks using persistence task");
         if new_tip_num < self.persistence_state.last_persisted_block.number {
             debug!(target: "engine::tree", ?new_tip_num, "Starting remove blocks job");
-            let (tx, rx) = oneshot::channel();
+            let (tx, rx) = crossbeam_channel::bounded(1);
             let _ = self.persistence.remove_blocks_above(new_tip_num, tx);
             self.persistence_state.start_remove(new_tip_num, rx);
         }
@@ -1245,35 +1261,17 @@ where
             .expect("Checked non-empty persisting blocks");
 
         debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
-        let (tx, rx) = oneshot::channel();
+        let (tx, rx) = crossbeam_channel::bounded(1);
         let _ = self.persistence.save_blocks(blocks_to_persist, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
     }
 
-    /// Attempts to advance the persistence state.
+    /// Triggers new persistence actions if no persistence task is currently in progress.
     ///
-    /// If we're currently awaiting a response this will try to receive the response (non-blocking)
-    /// or send a new persistence action if necessary.
+    /// This checks if we need to remove blocks (disk reorg) or save new blocks to disk.
+    /// Persistence completion is handled separately via the `wait_for_event` method.
     fn advance_persistence(&mut self) -> Result<(), AdvancePersistenceError> {
-        if self.persistence_state.in_progress() {
-            let (mut rx, start_time, current_action) = self
-                .persistence_state
-                .rx
-                .take()
-                .expect("if a persistence task is in progress Receiver must be Some");
-            // Check if persistence has complete
-            match rx.try_recv() {
-                Ok(last_persisted_hash_num) => {
-                    self.on_persistence_complete(last_persisted_hash_num, start_time)?;
-                }
-                Err(TryRecvError::Closed) => return Err(TryRecvError::Closed.into()),
-                Err(TryRecvError::Empty) => {
-                    self.persistence_state.rx = Some((rx, start_time, current_action))
-                }
-            }
-        }
-
         if !self.persistence_state.in_progress() {
             if let Some(new_tip_num) = self.find_disk_reorg()? {
                 self.remove_blocks(new_tip_num)
@@ -1306,7 +1304,7 @@ where
         loop {
             // Wait for any in-progress persistence to complete (blocking)
             if let Some((rx, start_time, _action)) = self.persistence_state.rx.take() {
-                let result = rx.blocking_recv().map_err(|_| TryRecvError::Closed)?;
+                let result = rx.recv().map_err(|_| AdvancePersistenceError::ChannelClosed)?;
                 self.on_persistence_complete(result, start_time)?;
             }
 
@@ -1319,6 +1317,31 @@ where
 
             debug!(target: "engine::tree", count = blocks_to_persist.len(), "persisting remaining blocks before shutdown");
             self.persist_blocks(blocks_to_persist);
+        }
+    }
+
+    /// Tries to poll for a completed persistence task (non-blocking).
+    ///
+    /// Returns `true` if a persistence task was completed, `false` otherwise.
+    #[cfg(test)]
+    pub fn try_poll_persistence(&mut self) -> Result<bool, AdvancePersistenceError> {
+        let Some((rx, start_time, action)) = self.persistence_state.rx.take() else {
+            return Ok(false);
+        };
+
+        match rx.try_recv() {
+            Ok(result) => {
+                self.on_persistence_complete(result, start_time)?;
+                Ok(true)
+            }
+            Err(crossbeam_channel::TryRecvError::Empty) => {
+                // Not ready yet, put it back
+                self.persistence_state.rx = Some((rx, start_time, action));
+                Ok(false)
+            }
+            Err(crossbeam_channel::TryRecvError::Disconnected) => {
+                Err(AdvancePersistenceError::ChannelClosed)
+            }
         }
     }
 
@@ -2846,6 +2869,26 @@ where
         debug!(target: "engine::tree", %hash, "no canonical state found for block");
         Ok(None)
     }
+}
+
+/// Events received in the main engine loop.
+#[derive(Debug)]
+enum LoopEvent<T, N>
+where
+    N: NodePrimitives,
+    T: PayloadTypes,
+{
+    /// An engine API message was received.
+    EngineMessage(FromEngine<EngineApiRequest<T, N>, N::Block>),
+    /// A persistence task completed.
+    PersistenceComplete {
+        /// The result of the persistence operation.
+        result: Option<BlockNumHash>,
+        /// When the persistence operation started.
+        start_time: Instant,
+    },
+    /// A channel was disconnected.
+    Disconnected,
 }
 
 /// Block inclusion can be valid, accepted, or invalid. Invalid blocks are returned as an error
