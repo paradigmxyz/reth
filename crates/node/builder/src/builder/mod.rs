@@ -870,9 +870,8 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Convenience function to start the network tasks with custom policies.
     ///
     /// Accepts the config for the transaction task, the policy for propagation,
-    /// and a custom announcement filter. This is useful for chains with custom
-    /// transaction types (like CATX) that need to configure which tx types are
-    /// accepted in announcements.
+    /// and a custom announcement filter. This is useful for configuring which tx types are accepted
+    /// in announcements.
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
