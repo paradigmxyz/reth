@@ -504,9 +504,7 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         };
 
         let outgoing = match outgoing {
-            EthSnapMessage::Eth(msg) => {
-                EthSnapMessage::Eth(msg.map_versioned(self.conn.version()))
-            }
+            EthSnapMessage::Eth(msg) => EthSnapMessage::Eth(msg.map_versioned(self.conn.version())),
             other => other,
         };
 

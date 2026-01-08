@@ -312,30 +312,42 @@ impl<N: NetworkPrimitives> PeerRequest<N> {
     /// Returns the [`EthSnapMessage`] for this type.
     pub fn create_request_message(&self, request_id: u64) -> EthSnapMessage<N> {
         match self {
-            Self::GetBlockHeaders { request, .. } => EthSnapMessage::Eth(
-                EthMessage::GetBlockHeaders(RequestPair { request_id, message: *request }),
-            ),
-            Self::GetBlockBodies { request, .. } => EthSnapMessage::Eth(
-                EthMessage::GetBlockBodies(RequestPair { request_id, message: request.clone() }),
-            ),
-            Self::GetPooledTransactions { request, .. } => EthSnapMessage::Eth(
-                EthMessage::GetPooledTransactions(RequestPair {
+            Self::GetBlockHeaders { request, .. } => {
+                EthSnapMessage::Eth(EthMessage::GetBlockHeaders(RequestPair {
+                    request_id,
+                    message: *request,
+                }))
+            }
+            Self::GetBlockBodies { request, .. } => {
+                EthSnapMessage::Eth(EthMessage::GetBlockBodies(RequestPair {
                     request_id,
                     message: request.clone(),
-                }),
-            ),
-            Self::GetNodeData { request, .. } => EthSnapMessage::Eth(EthMessage::GetNodeData(
-                RequestPair { request_id, message: request.clone() },
-            )),
+                }))
+            }
+            Self::GetPooledTransactions { request, .. } => {
+                EthSnapMessage::Eth(EthMessage::GetPooledTransactions(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                }))
+            }
+            Self::GetNodeData { request, .. } => {
+                EthSnapMessage::Eth(EthMessage::GetNodeData(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                }))
+            }
             Self::GetReceipts { request, .. } | Self::GetReceipts69 { request, .. } => {
                 EthSnapMessage::Eth(EthMessage::GetReceipts(RequestPair {
                     request_id,
                     message: request.clone(),
                 }))
             }
-            Self::GetReceipts70 { request, .. } => EthSnapMessage::Eth(EthMessage::GetReceipts70(
-                RequestPair { request_id, message: request.clone() },
-            )),
+            Self::GetReceipts70 { request, .. } => {
+                EthSnapMessage::Eth(EthMessage::GetReceipts70(RequestPair {
+                    request_id,
+                    message: request.clone(),
+                }))
+            }
             Self::SnapGetAccountRange { request, .. } => {
                 let mut request = request.clone();
                 request.request_id = request_id;
