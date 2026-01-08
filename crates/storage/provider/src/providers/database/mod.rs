@@ -108,6 +108,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Default::default(),
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
+            triedb_provider.clone(),
         )
         .storage_settings()?
         .unwrap_or(legacy_settings);
@@ -165,6 +166,12 @@ impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
     }
 }
 
+impl<N: NodeTypesWithDB> crate::TrieDBProviderFactory for ProviderFactory<N> {
+    fn triedb_provider(&self) -> TrieDBProvider {
+        self.triedb_provider.clone()
+    }
+}
+
 impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
     /// Create new database provider by passing a path. [`ProviderFactory`] will own the database
     /// instance.
@@ -204,6 +211,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage.clone(),
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
+            self.triedb_provider.clone(),
         ))
     }
 
@@ -221,6 +229,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             self.storage.clone(),
             self.storage_settings.clone(),
             self.rocksdb_provider.clone(),
+            self.triedb_provider.clone(),
         )))
     }
 

@@ -6,7 +6,7 @@ use crate::{
         database::{chain::ChainStorage, metrics},
         rocksdb::RocksDBProvider,
         static_file::StaticFileWriter,
-        NodeTypesForProvider, StaticFileProvider,
+        TrieDBProvider, NodeTypesForProvider, StaticFileProvider,
     },
     to_range,
     traits::{
@@ -166,6 +166,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// `TrieDB` provider
+    triedb_provider: TrieDBProvider,
     /// Pending `RocksDB` batches to be committed at provider commit time.
     #[cfg(all(unix, feature = "rocksdb"))]
     pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
@@ -182,7 +184,8 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("prune_modes", &self.prune_modes)
             .field("storage", &self.storage)
             .field("storage_settings", &self.storage_settings)
-            .field("rocksdb_provider", &self.rocksdb_provider);
+            .field("rocksdb_provider", &self.rocksdb_provider)
+            .field("triedb_provider", &self.triedb_provider);
         #[cfg(all(unix, feature = "rocksdb"))]
         s.field("pending_rocksdb_batches", &"<pending batches>");
         s.field("minimum_pruning_distance", &self.minimum_pruning_distance).finish()
@@ -193,6 +196,11 @@ impl<TX, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Returns reference to prune modes.
     pub const fn prune_modes_ref(&self) -> &PruneModes {
         &self.prune_modes
+    }
+
+    /// Returns reference to TrieDB provider.
+    pub const fn triedb_provider(&self) -> &TrieDBProvider {
+        &self.triedb_provider
     }
 }
 
@@ -304,6 +312,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
     ) -> Self {
         Self {
             tx,
@@ -313,6 +322,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            triedb_provider,
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
@@ -561,6 +571,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
     ) -> Self {
         Self {
             tx,
@@ -570,6 +581,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            triedb_provider,
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,

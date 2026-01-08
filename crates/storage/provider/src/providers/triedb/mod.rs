@@ -171,6 +171,11 @@ impl TrieDBProvider {
         f(&mut batch)?;
         batch.commit()
     }
+
+    /// Returns the current state root from TrieDB.
+    pub fn state_root(&self) -> ProviderResult<B256> {
+        Ok(self.0.db.state_root())
+    }
 }
 
 /// Handle for building a batch of operations atomically.
@@ -290,6 +295,35 @@ impl<'db> TrieDBTx<'db> {
     pub fn delete_account(&mut self, address: Address) -> ProviderResult<()> {
         let address_path = AddressPath::for_address(address);
         self.inner.set_account(address_path, None).map_err(convert_transaction_error)?;
+        Ok(())
+    }
+
+    /// Sets a storage slot for an account.
+    pub fn set_storage(
+        &mut self,
+        address: Address,
+        storage_key: alloy_primitives::StorageKey,
+        storage_value: alloy_primitives::U256,
+    ) -> ProviderResult<()> {
+        use triedb::path::StoragePath;
+
+        let address_path = AddressPath::for_address(address);
+        let storage_path = StoragePath::for_address_path_and_slot(
+            address_path,
+            storage_key,
+        );
+
+        let storage_value_triedb = if storage_value.is_zero() {
+            None
+        } else {
+            Some(alloy_primitives::StorageValue::from_be_slice(
+                storage_value.to_be_bytes::<32>().as_slice()
+            ))
+        };
+
+        self.inner
+            .set_storage_slot(storage_path, storage_value_triedb)
+            .map_err(convert_transaction_error)?;
         Ok(())
     }
 

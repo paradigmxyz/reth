@@ -106,6 +106,7 @@ tempfile.workspace = true
 
 [features]
 default = []
+triedb = ["reth-db-common/triedb"]
 arbitrary = [
     "dep:proptest",
     "dep:arbitrary",

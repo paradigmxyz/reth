@@ -41,6 +41,10 @@ serde_json.workspace = true
 # tracing
 tracing.workspace = true
 
+[features]
+default = []
+triedb = ["reth-provider/triedb"]
+
 [dev-dependencies]
 reth-db = { workspace = true, features = ["mdbx"] }
 reth-provider = { workspace = true, features = ["test-utils"] }
