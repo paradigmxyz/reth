@@ -240,7 +240,7 @@ where
             }
             BlockOrPayload::Block(block) => {
                 let iter = Either::Right(
-                    block.body().clone_transactions().into_par_iter().map(Either::Right),
+                    block.body().transactions().par_iter().cloned().map(Either::Right),
                 );
                 let convert = move |tx: Either<_, N::SignedTx>| {
                     let Either::Right(tx) = tx else { unreachable!() };
