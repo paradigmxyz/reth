@@ -169,20 +169,20 @@ where
     let results: Vec<_> = state
         .storages
         .into_iter()
-        .map(|(address, storage)| (address, storage, trie.take_storage_trie(&address)))
+        .map(|(address, storage)| (address, storage, trie.take_storage_trie_entry(&address)))
         .par_bridge()
-        .map(|(address, storage, storage_trie)| {
+        .map(|(address, storage, storage_entry)| {
             let _enter =
                 debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: span.clone(), "storage trie", ?address)
                     .entered();
 
             trace!(target: "engine::tree::payload_processor::sparse_trie", "Updating storage");
             let storage_provider = blinded_provider_factory.storage_node_provider(address);
-            let mut storage_trie = storage_trie.ok_or(SparseTrieErrorKind::Blind)?;
+            let mut storage_entry = storage_entry.ok_or(SparseTrieErrorKind::Blind)?;
 
             if storage.wiped {
                 trace!(target: "engine::tree::payload_processor::sparse_trie", "Wiping storage");
-                storage_trie.wipe()?;
+                storage_entry.trie.wipe()?;
             }
 
             // Defer leaf removals until after updates/additions, so that we don't delete an
@@ -200,7 +200,7 @@ where
                 }
 
                 trace!(target: "engine::tree::payload_processor::sparse_trie", ?slot_nibbles, "Updating storage slot");
-                storage_trie.update_leaf(
+                storage_entry.trie.update_leaf(
                     slot_nibbles,
                     alloy_rlp::encode_fixed_size(&value).to_vec(),
                     &storage_provider,
@@ -209,12 +209,12 @@ where
 
             for slot_nibbles in removed_slots {
                 trace!(target: "engine::root::sparse", ?slot_nibbles, "Removing storage slot");
-                storage_trie.remove_leaf(&slot_nibbles, &storage_provider)?;
+                storage_entry.trie.remove_leaf(&slot_nibbles, &storage_provider)?;
             }
 
-            storage_trie.root();
+            storage_entry.trie.root();
 
-            SparseStateTrieResult::Ok((address, storage_trie))
+            SparseStateTrieResult::Ok((address, storage_entry))
         })
         .collect();
 
@@ -229,8 +229,8 @@ where
         tracing::debug_span!(target: "engine::tree::payload_processor::sparse_trie", "account trie")
             .entered();
     for result in results {
-        let (address, storage_trie) = result?;
-        trie.insert_storage_trie(address, storage_trie);
+        let (address, storage_entry) = result?;
+        trie.insert_storage_trie_entry(address, storage_entry);
 
         if let Some(account) = state.accounts.remove(&address) {
             // If the account itself has an update, remove it from the state update and update in

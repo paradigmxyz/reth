@@ -219,14 +219,14 @@ where
         self.storage.entries.get_mut(address).and_then(|e| e.trie.as_revealed_mut())
     }
 
-    /// Takes the storage trie for the provided address.
-    pub fn take_storage_trie(&mut self, address: &B256) -> Option<SparseTrie<S>> {
-        self.storage.entries.remove(address).map(|e| e.trie)
+    /// Takes the storage trie entry for the provided address.
+    pub fn take_storage_trie_entry(&mut self, address: &B256) -> Option<StorageTrieEntry<S>> {
+        self.storage.entries.remove(address)
     }
 
-    /// Inserts storage trie for the provided address.
-    pub fn insert_storage_trie(&mut self, address: B256, storage_trie: SparseTrie<S>) {
-        self.storage.entries.entry(address).or_default().trie = storage_trie;
+    /// Inserts storage trie entry for the provided address.
+    pub fn insert_storage_trie_entry(&mut self, address: B256, entry: StorageTrieEntry<S>) {
+        self.storage.entries.insert(address, entry);
     }
 
     /// Reveal unknown trie paths from multiproof.
@@ -815,11 +815,11 @@ where
 
 /// Entry containing both the sparse trie and its revealed paths for a storage account.
 #[derive(Debug)]
-struct StorageTrieEntry<S> {
+pub struct StorageTrieEntry<S> {
     /// The sparse trie for this storage account.
-    trie: SparseTrie<S>,
+    pub trie: SparseTrie<S>,
     /// Collection of revealed trie node paths.
-    revealed_paths: HashSet<Nibbles>,
+    pub revealed_paths: HashSet<Nibbles>,
 }
 
 impl<S: Default> Default for StorageTrieEntry<S> {
