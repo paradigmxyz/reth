@@ -246,13 +246,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         provider_factory.db_ref().view(|tx| {
             for table in Tables::ALL {
-                if let Ok(table_db) = tx.inner.open_db(Some(table.name())) &&
-                    let Ok(table_stats) = tx.inner.db_stat(&table_db)
+                if let Ok(table_db) = tx.inner.open_db(Some(table.name()))
+                    && let Ok(table_stats) = tx.inner.db_stat(&table_db)
                 {
                     let page_size = table_stats.page_size() as u64;
-                    let num_pages = (table_stats.leaf_pages() +
-                        table_stats.branch_pages() +
-                        table_stats.overflow_pages()) as u64;
+                    let num_pages = (table_stats.leaf_pages()
+                        + table_stats.branch_pages()
+                        + table_stats.overflow_pages()) as u64;
 
                     tables_stats.push(TableStats {
                         name: table.name().to_string(),
@@ -298,8 +298,11 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
         info!(target: "reth::cli", files = logs_collected, "Log files collected");
 
         // Collect invalid_block_hooks directory
-        let hooks_collected =
-            collect_directory_recursive(&mut archive, &data_dir.invalid_block_hooks(), "invalid_block_hooks")?;
+        let hooks_collected = collect_directory_recursive(
+            &mut archive,
+            &data_dir.invalid_block_hooks(),
+            "invalid_block_hooks",
+        )?;
         info!(target: "reth::cli", files = hooks_collected, "Invalid block hook files collected");
 
         // Finalize the archive
@@ -330,7 +333,9 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 }
 
 fn collect_checksums<DB: Database>(
-    provider_factory: &reth_provider::ProviderFactory<impl reth_provider::providers::ProviderNodeTypes<DB = DB>>,
+    provider_factory: &reth_provider::ProviderFactory<
+        impl reth_provider::providers::ProviderNodeTypes<DB = DB>,
+    >,
 ) -> eyre::Result<Vec<TableChecksum>> {
     use crate::db::checksum::ChecksumViewer;
     use reth_db_api::TableViewer;
@@ -372,12 +377,12 @@ fn collect_logs<W: Write>(log_dir: &Path, archive: &mut Builder<W>) -> eyre::Res
         let entry = entry?;
         let path = entry.path();
 
-        if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-            if name.starts_with("reth.log") {
-                let archive_path = format!("logs/{name}");
-                add_file_to_archive(archive, &path, &archive_path)?;
-                count += 1;
-            }
+        if let Some(name) = path.file_name().and_then(|n| n.to_str())
+            && name.starts_with("reth.log")
+        {
+            let archive_path = format!("logs/{name}");
+            add_file_to_archive(archive, &path, &archive_path)?;
+            count += 1;
         }
     }
 
@@ -428,10 +433,7 @@ fn add_json_to_archive<W: Write, T: Serialize>(
     header.set_size(bytes.len() as u64);
     header.set_mode(0o644);
     header.set_mtime(
-        SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
+        SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).unwrap_or_default().as_secs(),
     );
     header.set_cksum();
 
