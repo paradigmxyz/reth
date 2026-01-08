@@ -726,7 +726,7 @@ mod tests {
         {
             let factory = create_test_provider_factory();
             let provider = factory.provider_rw().unwrap();
-            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
+            assert_matches!(provider.insert_block(&block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
                 if sender == block.body().transactions[0].recover_signer().unwrap()
@@ -745,7 +745,7 @@ mod tests {
             };
             let factory = create_test_provider_factory();
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
-            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
+            assert_matches!(provider.insert_block(&block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(provider.transaction_sender(0), Ok(None));
             assert_matches!(
                 provider.transaction_id(*block.body().transactions[0].tx_hash()),
@@ -765,18 +765,18 @@ mod tests {
             let factory = create_test_provider_factory();
             let provider = factory.provider_rw().unwrap();
 
-            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
+            assert_matches!(provider.insert_block(&block.clone().try_recover().unwrap()), Ok(_));
 
-            let senders = provider.take::<tables::TransactionSenders>(range.clone());
+            let senders = provider.take::<tables::TransactionSenders>(range.clone()).unwrap();
             assert_eq!(
                 senders,
-                Ok(range
+                range
                     .clone()
                     .map(|tx_number| (
                         tx_number,
                         block.body().transactions[tx_number as usize].recover_signer().unwrap()
                     ))
-                    .collect())
+                    .collect::<Vec<_>>()
             );
 
             let db_senders = provider.senders_by_tx_range(range);

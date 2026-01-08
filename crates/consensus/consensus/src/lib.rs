@@ -49,15 +49,12 @@ pub trait FullConsensus<N: NodePrimitives>: Consensus<N::Block> {
 /// Consensus is a protocol that chooses canonical chain.
 #[auto_impl::auto_impl(&, Arc)]
 pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
-    /// The error type related to consensus.
-    type Error;
-
     /// Ensures that body field values match the header.
     fn validate_body_against_header(
         &self,
         body: &B::Body,
         header: &SealedHeader<B::Header>,
-    ) -> Result<(), Self::Error>;
+    ) -> Result<(), ConsensusError>;
 
     /// Validate a block disregarding world state, i.e. things that can be checked before sender
     /// recovery and execution.
@@ -69,7 +66,7 @@ pub trait Consensus<B: Block>: HeaderValidator<B::Header> {
     /// **This should not be called for the genesis block**.
     ///
     /// Note: validating blocks does not include other validations of the Consensus
-    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error>;
+    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError>;
 }
 
 /// `HeaderValidator` is a protocol that validates headers and their relationships.
@@ -135,7 +132,7 @@ pub enum ConsensusError {
         /// The gas limit in the block header.
         gas_limit: u64,
     },
-    /// Error when the gas the gas limit is more than the maximum allowed.
+    /// Error when the gas limit is more than the maximum allowed.
     #[error(
         "header gas limit ({gas_limit}) exceed the maximum allowed gas limit ({MAXIMUM_GAS_LIMIT_BLOCK})"
     )]

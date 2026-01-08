@@ -22,9 +22,9 @@
 //! # use reth_config::config::StageConfig;
 //! # use reth_ethereum_primitives::EthPrimitives;
 //! # use std::sync::Arc;
-//! # use reth_consensus::{FullConsensus, ConsensusError};
+//! # use reth_consensus::FullConsensus;
 //!
-//! # fn create(exec: impl ConfigureEvm<Primitives = EthPrimitives> + 'static, consensus: impl FullConsensus<EthPrimitives, Error = ConsensusError> + 'static) {
+//! # fn create(exec: impl ConfigureEvm<Primitives = EthPrimitives> + 'static, consensus: impl FullConsensus<EthPrimitives> + 'static) {
 //!
 //! let provider_factory = create_test_provider_factory();
 //! let static_file_producer =
@@ -47,7 +47,7 @@ use crate::{
 };
 use alloy_primitives::B256;
 use reth_config::config::StageConfig;
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives_traits::{Block, NodePrimitives};
@@ -66,6 +66,7 @@ use tokio::sync::watch;
 /// - [`FinishStage`]
 ///
 /// This expands to the following series of stages:
+/// - [`EraStage`] (optional, for ERA1 import)
 /// - [`HeaderStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
@@ -93,7 +94,7 @@ where
     /// Executor factory needs for execution stage
     evm_config: E,
     /// Consensus instance
-    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
     /// Prune configuration for every segment that can be pruned
@@ -111,7 +112,7 @@ where
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         header_downloader: H,
         body_downloader: B,
         evm_config: E,
@@ -146,7 +147,7 @@ where
     pub fn add_offline_stages<Provider>(
         default_offline: StageSetBuilder<Provider>,
         evm_config: E,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         stages_config: StageConfig,
         prune_modes: PruneModes,
     ) -> StageSetBuilder<Provider>
@@ -303,7 +304,7 @@ pub struct OfflineStages<E: ConfigureEvm> {
     /// Executor factory needs for execution stage
     evm_config: E,
     /// Consensus instance for validating blocks.
-    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
     /// Prune configuration for every segment that can be pruned
@@ -314,7 +315,7 @@ impl<E: ConfigureEvm> OfflineStages<E> {
     /// Create a new set of offline stages with default values.
     pub const fn new(
         evm_config: E,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         stages_config: StageConfig,
         prune_modes: PruneModes,
     ) -> Self {
@@ -359,7 +360,7 @@ pub struct ExecutionStages<E: ConfigureEvm> {
     /// Executor factory that will create executors.
     evm_config: E,
     /// Consensus instance for validating blocks.
-    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
 }
@@ -368,7 +369,7 @@ impl<E: ConfigureEvm> ExecutionStages<E> {
     /// Create a new set of execution stages with default values.
     pub const fn new(
         executor_provider: E,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         stages_config: StageConfig,
     ) -> Self {
         Self { evm_config: executor_provider, consensus, stages_config }

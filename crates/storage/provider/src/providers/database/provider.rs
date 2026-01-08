@@ -284,7 +284,7 @@ impl<TX, N: NodeTypes> RocksDBProviderFactory for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: Debug + Send + Sync, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
+impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpecProvider
     for DatabaseProvider<TX, N>
 {
     type ChainSpec = N::ChainSpec;
@@ -356,7 +356,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let trie_data = block.trie_data();
             let ExecutedBlock { recovered_block, execution_output, .. } = block;
             let block_number = recovered_block.number();
-            self.insert_block(Arc::unwrap_or_clone(recovered_block))?;
+            self.insert_block(&recovered_block)?;
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
@@ -680,7 +680,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             .zip(headers)
             .collect::<Vec<_>>();
 
-        let mut inputs = Vec::new();
+        let mut inputs = Vec::with_capacity(present_headers.len());
         for (tx_range, header) in &present_headers {
             let transactions = if tx_range.is_empty() {
                 Vec::new()
@@ -830,30 +830,11 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
-    /// Load shard and remove it. If list is empty, last shard was full or
-    /// there are no shards at all.
-    fn take_shard<T>(
-        &self,
-        cursor: &mut <TX as DbTxMut>::CursorMut<T>,
-        key: T::Key,
-    ) -> ProviderResult<Vec<u64>>
-    where
-        T: Table<Value = BlockNumberList>,
-    {
-        if let Some((_, list)) = cursor.seek_exact(key)? {
-            // delete old shard so new one can be inserted.
-            cursor.delete_current()?;
-            let list = list.iter().collect::<Vec<_>>();
-            return Ok(list)
-        }
-        Ok(Vec::new())
-    }
-
     /// Insert history index to the database.
     ///
-    /// For each updated partial key, this function removes the last shard from
-    /// the database (if any), appends the new indices to it, chunks the resulting integer list and
-    /// inserts the new shards back into the database.
+    /// For each updated partial key, this function retrieves the last shard from the database
+    /// (if any), appends the new indices to it, chunks the resulting list if needed, and upserts
+    /// the shards back into the database.
     ///
     /// This function is used by history indexing stages.
     fn append_history_index<P, T>(
@@ -865,26 +846,44 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         P: Copy,
         T: Table<Value = BlockNumberList>,
     {
+        // This function cannot be used with DUPSORT tables because `upsert` on DUPSORT tables
+        // will append duplicate entries instead of updating existing ones, causing data corruption.
+        assert!(!T::DUPSORT, "append_history_index cannot be used with DUPSORT tables");
+
         let mut cursor = self.tx.cursor_write::<T>()?;
+
         for (partial_key, indices) in index_updates {
-            let mut last_shard =
-                self.take_shard::<T>(&mut cursor, sharded_key_factory(partial_key, u64::MAX))?;
-            last_shard.extend(indices);
-            // Chunk indices and insert them in shards of N size.
-            let mut chunks = last_shard.chunks(sharded_key::NUM_OF_INDICES_IN_SHARD).peekable();
-            while let Some(list) = chunks.next() {
-                let highest_block_number = if chunks.peek().is_some() {
-                    *list.last().expect("`chunks` does not return empty list")
+            let last_key = sharded_key_factory(partial_key, u64::MAX);
+            let mut last_shard = cursor
+                .seek_exact(last_key.clone())?
+                .map(|(_, list)| list)
+                .unwrap_or_else(BlockNumberList::empty);
+
+            last_shard.append(indices).map_err(ProviderError::other)?;
+
+            // fast path: all indices fit in one shard
+            if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
+                cursor.upsert(last_key, &last_shard)?;
+                continue;
+            }
+
+            // slow path: rechunk into multiple shards
+            let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
+            let mut chunks_peekable = chunks.into_iter().peekable();
+
+            while let Some(chunk) = chunks_peekable.next() {
+                let shard = BlockNumberList::new_pre_sorted(chunk);
+                let highest_block_number = if chunks_peekable.peek().is_some() {
+                    shard.iter().next_back().expect("`chunks` does not return empty list")
                 } else {
                     // Insert last list with `u64::MAX`.
                     u64::MAX
                 };
-                cursor.insert(
-                    sharded_key_factory(partial_key, highest_block_number),
-                    &BlockNumberList::new_pre_sorted(list.iter().copied()),
-                )?;
+
+                cursor.upsert(sharded_key_factory(partial_key, highest_block_number), &shard)?;
             }
         }
+
         Ok(())
     }
 }
@@ -895,18 +894,14 @@ impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
     fn changed_accounts_with_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeSet<Address>> {
-        self.tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .map(|entry| {
-                entry.map(|(_, account_before)| account_before.address).map_err(Into::into)
-            })
-            .collect()
+        let mut reader = EitherReader::new_account_changesets(self)?;
+
+        reader.changed_accounts_with_range(range)
     }
 
     fn basic_accounts(
@@ -924,18 +919,44 @@ impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<Address, Vec<u64>>> {
-        let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+        let highest_static_block = self
+            .static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
-        let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
-            BTreeMap::new(),
-            |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> ProviderResult<_> {
-                let (index, account) = entry?;
-                accounts.entry(account.address).or_default().push(index);
-                Ok(accounts)
-            },
-        )?;
+        if let Some(highest) = highest_static_block &&
+            self.cached_storage_settings().account_changesets_in_static_files
+        {
+            let start = *range.start();
+            let static_end = (*range.end()).min(highest + 1);
 
-        Ok(account_transitions)
+            let mut changed_accounts_and_blocks: BTreeMap<_, Vec<u64>> = BTreeMap::default();
+            if start <= static_end {
+                for block in start..=static_end {
+                    let block_changesets = self.account_block_changeset(block)?;
+                    for changeset in block_changesets {
+                        changed_accounts_and_blocks
+                            .entry(changeset.address)
+                            .or_default()
+                            .push(block);
+                    }
+                }
+            }
+
+            Ok(changed_accounts_and_blocks)
+        } else {
+            let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+
+            let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> ProviderResult<_> {
+                    let (index, account) = entry?;
+                    accounts.entry(account.address).or_default().push(index);
+                    Ok(accounts)
+                },
+            )?;
+
+            Ok(account_transitions)
+        }
     }
 }
 
@@ -959,15 +980,21 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
-        let range = block_number..=block_number;
-        self.tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .map(|result| -> ProviderResult<_> {
-                let (_, account_before) = result?;
-                Ok(account_before)
-            })
-            .collect()
+        if self.cached_storage_settings().account_changesets_in_static_files {
+            let static_changesets =
+                self.static_file_provider.account_block_changeset(block_number)?;
+            Ok(static_changesets)
+        } else {
+            let range = block_number..=block_number;
+            self.tx
+                .cursor_read::<tables::AccountChangeSets>()?
+                .walk_range(range)?
+                .map(|result| -> ProviderResult<_> {
+                    let (_, account_before) = result?;
+                    Ok(account_before)
+                })
+                .collect()
+        }
     }
 
     fn get_account_before_block(
@@ -975,12 +1002,58 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
-        self.tx
-            .cursor_dup_read::<tables::AccountChangeSets>()?
-            .seek_by_key_subkey(block_number, address)?
-            .filter(|acc| acc.address == address)
-            .map(Ok)
-            .transpose()
+        if self.cached_storage_settings().account_changesets_in_static_files {
+            Ok(self.static_file_provider.get_account_before_block(block_number, address)?)
+        } else {
+            self.tx
+                .cursor_dup_read::<tables::AccountChangeSets>()?
+                .seek_by_key_subkey(block_number, address)?
+                .filter(|acc| acc.address == address)
+                .map(Ok)
+                .transpose()
+        }
+    }
+
+    fn account_changesets_range(
+        &self,
+        range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        let range = to_range(range);
+        let mut changesets = Vec::new();
+        if self.cached_storage_settings().account_changesets_in_static_files &&
+            let Some(highest) = self
+                .static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
+        {
+            let static_end = range.end.min(highest + 1);
+            if range.start < static_end {
+                for block in range.start..static_end {
+                    let block_changesets = self.account_block_changeset(block)?;
+                    for changeset in block_changesets {
+                        changesets.push((block, changeset));
+                    }
+                }
+            }
+        } else {
+            // Fetch from database for blocks not in static files
+            let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+            for entry in cursor.walk_range(range)? {
+                let (block_num, account_before) = entry?;
+                changesets.push((block_num, account_before));
+            }
+        }
+
+        Ok(changesets)
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        // check if account changesets are in static files, otherwise just count the changeset
+        // entries in the DB
+        if self.cached_storage_settings().account_changesets_in_static_files {
+            self.static_file_provider.account_changeset_count()
+        } else {
+            Ok(self.tx.entries::<tables::AccountChangeSets>()?)
+        }
     }
 }
 
@@ -1454,7 +1527,8 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> ReceiptProvider for DatabasePr
         }
 
         // collect block body indices for each block in the range
-        let mut block_body_indices = Vec::new();
+        let range_len = block_range.end().saturating_sub(*block_range.start()) as usize + 1;
+        let mut block_body_indices = Vec::with_capacity(range_len);
         for block_num in block_range {
             if let Some(indices) = self.block_body_indices(block_num)? {
                 block_body_indices.push(indices);
@@ -1796,22 +1870,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
-        // Write account changes
-        tracing::trace!("Writing account changes");
-        let mut account_changeset_cursor =
-            self.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?;
-
-        for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate() {
+        // Write account changes to static files
+        tracing::debug!(target: "sync::stages::merkle_changesets", ?first_block, "Writing account changes");
+        for (block_index, account_block_reverts) in reverts.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
-            // Sort accounts by address.
-            account_block_reverts.par_sort_by_key(|a| a.0);
+            let changeset = account_block_reverts
+                .into_iter()
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .collect::<Vec<_>>();
+            let mut account_changesets_writer =
+                EitherWriter::new_account_changesets(self, block_number)?;
 
-            for (address, info) in account_block_reverts {
-                account_changeset_cursor.append_dup(
-                    block_number,
-                    AccountBeforeTx { address, info: info.map(Into::into) },
-                )?;
-            }
+            account_changesets_writer.append_account_changeset(block_number, changeset)?;
         }
 
         Ok(())
@@ -2051,7 +2121,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let storage_range = BlockNumberAddress::range(range.clone());
 
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
-        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
@@ -2059,6 +2128,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // anything.
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        // if there are static files for this segment, prune them.
+        let highest_changeset_block = self
+            .static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+        let account_changeset = if let Some(highest_block) = highest_changeset_block &&
+            self.cached_storage_settings().account_changesets_in_static_files
+        {
+            // TODO: add a `take` method that removes and returns the items instead of doing this
+            let changesets = self.account_changesets_range(block + 1..highest_block + 1)?;
+            let mut changeset_writer =
+                self.static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
+            changeset_writer.prune_account_changesets(block)?;
+
+            changesets
+        } else {
+            // Have to remove from static files if they exist, otherwise remove using `take` for the
+            // changeset tables
+            self.take::<tables::AccountChangeSets>(range)?
+        };
 
         // populate bundle state and reverts from changesets / state cursors, to iterate over,
         // remove, and return later
@@ -2875,7 +2964,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
     /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
     fn insert_block(
         &self,
-        block: RecoveredBlock<Self::Block>,
+        block: &RecoveredBlock<Self::Block>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number();
         let tx_count = block.body().transaction_count() as u64;
@@ -2915,7 +3004,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
         }
 
-        self.append_block_bodies(vec![(block_number, Some(block.into_body()))])?;
+        self.append_block_bodies(vec![(block_number, Some(block.body()))])?;
 
         debug!(
             target: "providers::db",
@@ -2929,7 +3018,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
     fn append_block_bodies(
         &self,
-        bodies: Vec<(BlockNumber, Option<BodyTy<N>>)>,
+        bodies: Vec<(BlockNumber, Option<&BodyTy<N>>)>,
     ) -> ProviderResult<()> {
         let Some(from_block) = bodies.first().map(|(block, _)| *block) else { return Ok(()) };
 
@@ -3081,7 +3170,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         // Insert the blocks
         for block in blocks {
-            self.insert_block(block)?;
+            self.insert_block(&block)?;
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 
@@ -3253,7 +3342,7 @@ impl<TX: DbTxMut, N: NodeTypes> MetadataWriter for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: Send + Sync, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
+impl<TX: Send, N: NodeTypes> StorageSettingsCache for DatabaseProvider<TX, N> {
     fn cached_storage_settings(&self) -> StorageSettings {
         *self.storage_settings.read()
     }
@@ -3302,14 +3391,14 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
             )
             .unwrap();
-        provider_rw.insert_block(data.blocks[0].0.clone()).unwrap();
+        provider_rw.insert_block(&data.blocks[0].0).unwrap();
         provider_rw.write_state(&data.blocks[0].1, crate::OriginalValuesKnown::No).unwrap();
         provider_rw.commit().unwrap();
 
@@ -3328,7 +3417,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3336,7 +3425,7 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3358,7 +3447,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3368,7 +3457,7 @@ mod tests {
 
         // insert blocks 1-3 with receipts
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3389,7 +3478,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3397,7 +3486,7 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3433,7 +3522,7 @@ mod tests {
 
         let provider_rw = factory.provider_rw().unwrap();
         for block in blocks {
-            provider_rw.insert_block(block.try_recover().unwrap()).unwrap();
+            provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -3452,7 +3541,7 @@ mod tests {
         let data = BlockchainTestData::default();
 
         let provider_rw = factory.provider_rw().unwrap();
-        provider_rw.insert_block(data.genesis.clone().try_recover().unwrap()).unwrap();
+        provider_rw.insert_block(&data.genesis.clone().try_recover().unwrap()).unwrap();
         provider_rw
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
@@ -3460,7 +3549,7 @@ mod tests {
             )
             .unwrap();
         for i in 0..3 {
-            provider_rw.insert_block(data.blocks[i].0.clone()).unwrap();
+            provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
         }
         provider_rw.commit().unwrap();
@@ -4760,7 +4849,7 @@ mod tests {
                         block_num,
                         BlockParams { tx_count: Some(tx_count), ..Default::default() },
                     );
-                    provider_rw.insert_block(block.try_recover().unwrap()).unwrap();
+                    provider_rw.insert_block(&block.try_recover().unwrap()).unwrap();
                 }
             };
 

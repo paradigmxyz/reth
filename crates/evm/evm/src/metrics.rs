@@ -6,7 +6,6 @@ use reth_primitives_traits::{Block, RecoveredBlock};
 use std::time::Instant;
 
 /// Executor metrics.
-// TODO(onbjerg): add sload/sstore
 #[derive(Metrics, Clone)]
 #[metrics(scope = "sync.execution")]
 pub struct ExecutorMetrics {

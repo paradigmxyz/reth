@@ -78,7 +78,6 @@ default = []
 
 # Opentelemtry feature to activate metrics export
 otlp = ["reth-tracing/otlp", "reth-node-core/otlp"]
-samply = ["reth-tracing/samply", "reth-node-core/samply"]
 
 asm-keccak = [
     "alloy-primitives/asm-keccak",
@@ -90,6 +89,14 @@ asm-keccak = [
 jemalloc = [
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",
+]
+jemalloc-prof = [
+    "jemalloc",
+    "reth-node-metrics/jemalloc-prof",
+]
+jemalloc-symbols = [
+    "jemalloc-prof",
+    "reth-node-metrics/jemalloc-symbols",
 ]
 
 dev = [

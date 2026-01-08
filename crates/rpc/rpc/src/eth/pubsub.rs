@@ -137,7 +137,7 @@ where
                         Params::Bool(false) | Params::None => {
                             // only hashes requested
                         }
-                        Params::Logs(_) => {
+                        _ => {
                             return Err(invalid_params_rpc_err(
                                 "Invalid params for newPendingTransactions",
                             ))
@@ -193,7 +193,7 @@ where
                 Ok(())
             }
             _ => {
-                // TODO: implement once https://github.com/alloy-rs/alloy/pull/2974 is released
+                // TODO: implement once https://github.com/alloy-rs/alloy/pull/3410 is released
                 Err(invalid_params_rpc_err("Unsupported subscription kind"))
             }
         }

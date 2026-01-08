@@ -34,13 +34,12 @@ use reth_primitives_traits::{
     SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
-    DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, TrieReader,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome,
+    HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
+    StateProvider, StateProviderFactory, StateReader, TrieReader,
 };
 use reth_revm::db::State;
-use reth_storage_errors::db::DatabaseError;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
@@ -112,7 +111,7 @@ where
     /// Provider for database access.
     provider: P,
     /// Consensus implementation for validation.
-    consensus: Arc<dyn FullConsensus<Evm::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<Evm::Primitives>>,
     /// EVM configuration.
     evm_config: Evm,
     /// Configuration for the tree.
@@ -136,8 +135,15 @@ impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + TrieReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
+        + ChangeSetReader
+        + BlockNumReader
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
@@ -149,7 +155,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
-        consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<N>>,
         evm_config: Evm,
         validator: V,
         config: TreeConfig,
@@ -435,8 +441,7 @@ where
         }
 
         // Execute the block and handle any execution errors
-        let (output, senders) = match self.execute_block(&state_provider, env, &input, &mut handle)
-        {
+        let (output, senders) = match self.execute_block(state_provider, env, &input, &mut handle) {
             Ok(output) => output,
             Err(err) => return self.handle_execution_error(input, err, &parent_block),
         };
@@ -603,7 +608,7 @@ where
         handle: &mut PayloadHandle<impl ExecutableTxFor<Evm>, Err, N::Receipt>,
     ) -> Result<(BlockExecutionOutput<N::Receipt>, Vec<Address>), InsertBlockErrorKind>
     where
-        S: StateProvider,
+        S: StateProvider + Send,
         Err: core::error::Error + Send + Sync + 'static,
         V: PayloadValidator<T, Block = N::Block>,
         T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
@@ -644,6 +649,7 @@ where
         let (output, senders) = self.metrics.execute_metered(
             executor,
             handle.iter_transactions().map(|res| res.map_err(BlockExecutionError::other)),
+            input.transaction_count(),
             state_hook,
         )?;
         let execution_finish = Instant::now();
@@ -713,8 +719,7 @@ where
 
         Ok(StateRoot::new(&provider, &provider)
             .with_prefix_sets(prefix_sets.freeze())
-            .root_with_updates()
-            .map_err(Into::<DatabaseError>::into)?)
+            .root_with_updates()?)
     }
 
     /// Validates the block after execution.
@@ -862,8 +867,12 @@ where
             }
             StateRootStrategy::Parallel | StateRootStrategy::Synchronous => {
                 let start = Instant::now();
-                let handle =
-                    self.payload_processor.spawn_cache_exclusive(env, txs, provider_builder);
+                let handle = self.payload_processor.spawn_cache_exclusive(
+                    env,
+                    txs,
+                    provider_builder,
+                    block_access_list,
+                );
 
                 // Record prewarming initialization duration
                 self.metrics
@@ -1181,10 +1190,17 @@ pub trait EngineValidator<
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
     P: DatabaseProviderFactory<
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + TrieReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
+        + ChangeSetReader
+        + BlockNumReader
         + HashedPostStateProvider
         + Clone
         + 'static,
@@ -1287,5 +1303,16 @@ impl<T: PayloadTypes> BlockOrPayload<T> {
     pub const fn block_access_list(&self) -> Option<Result<BlockAccessList, alloy_rlp::Error>> {
         // TODO decode and return `BlockAccessList`
         None
+    }
+
+    /// Returns the number of transactions in the payload or block.
+    pub fn transaction_count(&self) -> usize
+    where
+        T::ExecutionData: ExecutionPayload,
+    {
+        match self {
+            Self::Payload(payload) => payload.transaction_count(),
+            Self::Block(block) => block.transaction_count(),
+        }
     }
 }

@@ -721,6 +721,17 @@ impl<N: ProviderNodeTypes> ChangeSetReader for BlockchainProvider<N> {
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         self.consistent_provider()?.get_account_before_block(block_number, address)
     }
+
+    fn account_changesets_range(
+        &self,
+        range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        self.consistent_provider()?.account_changesets_range(range)
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        self.consistent_provider()?.account_changeset_count()
+    }
 }
 
 impl<N: ProviderNodeTypes> AccountReader for BlockchainProvider<N> {
@@ -875,7 +886,7 @@ mod tests {
         // Insert blocks into the database
         for block in &database_blocks {
             provider_rw.insert_block(
-                block.clone().try_recover().expect("failed to seal block with senders"),
+                &block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
 
@@ -1005,9 +1016,10 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_block(
-                block.clone().try_recover().expect("failed to seal block with senders"),
+                &block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
+
         provider_rw.commit()?;
 
         // Create a new provider
@@ -1103,7 +1115,7 @@ mod tests {
         let provider_rw = factory.provider_rw()?;
         for block in database_blocks {
             provider_rw.insert_block(
-                block.clone().try_recover().expect("failed to seal block with senders"),
+                &block.clone().try_recover().expect("failed to seal block with senders"),
             )?;
         }
         provider_rw.commit()?;
@@ -1320,7 +1332,7 @@ mod tests {
 
         // Insert and commit the block.
         let provider_rw = factory.provider_rw()?;
-        provider_rw.insert_block(block_1)?;
+        provider_rw.insert_block(&block_1)?;
         provider_rw.commit()?;
 
         let provider = BlockchainProvider::new(factory)?;

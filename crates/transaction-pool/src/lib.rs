@@ -554,6 +554,15 @@ where
         self.pool.get_pooled_transaction_elements(tx_hashes, limit)
     }
 
+    fn append_pooled_transaction_elements(
+        &self,
+        tx_hashes: &[TxHash],
+        limit: GetPooledTransactionLimit,
+        out: &mut Vec<<<V as TransactionValidator>::Transaction as PoolTransaction>::Pooled>,
+    ) {
+        self.pool.append_pooled_transaction_elements(tx_hashes, limit, out)
+    }
+
     fn get_pooled_transaction_element(
         &self,
         tx_hash: TxHash,

@@ -9,7 +9,10 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_db_common::DbTool;
-use reth_node_core::version::version_metadata;
+use reth_node_core::{
+    dirs::{ChainPath, DataDirPath},
+    version::version_metadata,
+};
 use reth_node_metrics::{
     chain::ChainSpecInfo,
     hooks::Hooks,
@@ -53,11 +56,13 @@ impl Command {
         self,
         tool: &DbTool<N>,
         task_executor: TaskExecutor,
+        data_dir: &ChainPath<DataDirPath>,
     ) -> eyre::Result<()> {
         // Set up metrics server if requested
         let _metrics_handle = if let Some(listen_addr) = self.metrics {
             let chain_name = tool.provider_factory.chain_spec().chain().to_string();
             let executor = task_executor.clone();
+            let pprof_dump_dir = data_dir.pprof_dumps();
 
             let handle = task_executor.spawn_critical("metrics server", async move {
                 let config = MetricServerConfig::new(
@@ -73,6 +78,7 @@ impl Command {
                     ChainSpecInfo { name: chain_name },
                     executor,
                     Hooks::builder().build(),
+                    pprof_dump_dir,
                 );
 
                 // Spawn the metrics server
@@ -301,8 +307,8 @@ fn verify_and_repair<N: ProviderNodeTypes>(tool: &DbTool<N>) -> eyre::Result<()>
     if inconsistent_nodes == 0 {
         info!("No inconsistencies found");
     } else {
-        info!("Repaired {} inconsistencies, committing changes", inconsistent_nodes);
         provider_rw.commit()?;
+        info!("Repaired {} inconsistencies and committed changes", inconsistent_nodes);
     }
 
     Ok(())

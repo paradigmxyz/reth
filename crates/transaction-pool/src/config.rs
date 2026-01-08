@@ -158,6 +158,11 @@ impl SubPoolLimit {
     pub const fn is_exceeded(&self, txs: usize, size: usize) -> bool {
         self.max_txs < txs || self.max_size < size
     }
+
+    /// Returns how many transactions exceed the configured limit.
+    pub const fn tx_excess(&self, txs: usize) -> Option<usize> {
+        txs.checked_sub(self.max_txs)
+    }
 }
 
 impl Mul<usize> for SubPoolLimit {
