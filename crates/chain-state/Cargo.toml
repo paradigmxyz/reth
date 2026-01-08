@@ -40,6 +40,7 @@ tracing.workspace = true
 derive_more.workspace = true
 metrics.workspace = true
 parking_lot.workspace = true
+rayon.workspace = true
 pin-project.workspace = true
 serde = { workspace = true, optional = true }
 
