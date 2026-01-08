@@ -441,4 +441,22 @@ mod tests {
         let (_, account) = &overlay_state[0];
         assert_eq!(account.unwrap().nonce, 2);
     }
+
+    /// Verifies `Arc::try_unwrap` fallback: when Arcs are shared, external references stay valid.
+    #[test]
+    fn shared_arc_fallback_preserves_external_refs() {
+        let hashed_arc = Arc::new(HashedPostState::default());
+        let trie_arc = Arc::new(TrieUpdates::default());
+
+        // Hold external references (refcount = 2, so try_unwrap must fail)
+        let external_hashed = Arc::clone(&hashed_arc);
+        let external_trie = Arc::clone(&trie_arc);
+
+        let deferred = DeferredTrieData::pending(hashed_arc, trie_arc, B256::ZERO, Vec::new());
+        let _ = deferred.wait_cloned();
+
+        // External refs must still be valid (proves clone path was used, not move)
+        assert_eq!(Arc::strong_count(&external_hashed), 1);
+        assert_eq!(Arc::strong_count(&external_trie), 1);
+    }
 }
