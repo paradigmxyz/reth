@@ -234,7 +234,7 @@ where
     C: ConfigureEvm<Primitives = N> + 'static,
 {
     provider: P,
-    consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<N>>,
     payload_validator: V,
     /// Keeps track of internals such as executed and buffered blocks.
     state: EngineApiTreeState<N>,
@@ -320,7 +320,7 @@ where
     #[expect(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
-        consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<N>>,
         payload_validator: V,
         outgoing: UnboundedSender<EngineApiEvent<N>>,
         state: EngineApiTreeState<N>,
@@ -362,7 +362,7 @@ where
     #[expect(clippy::complexity)]
     pub fn spawn_new(
         provider: P,
-        consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<N>>,
         payload_validator: V,
         persistence: PersistenceHandle<N>,
         payload_builder: PayloadBuilderHandle<T>,
