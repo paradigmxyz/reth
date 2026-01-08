@@ -726,6 +726,8 @@ pub enum TrieType {
     State,
     /// Storage trie type.
     Storage,
+    /// Custom trie type. Can be used in ExEx.
+    Custom(&'static str),
 }
 
 impl TrieType {
@@ -734,6 +736,7 @@ impl TrieType {
         match self {
             Self::State => "state",
             Self::Storage => "storage",
+            Self::Custom(s) => s,
         }
     }
 }
