@@ -364,6 +364,7 @@ fn jemalloc_pprof_dump(pprof_dump_dir: &PathBuf) -> eyre::Result<Vec<u8>> {
     use pprof_util::parse_jeheap;
     use tempfile::NamedTempFile;
 
+    reth_fs_util::create_dir_all(pprof_dump_dir)?;
     let f = NamedTempFile::new_in(pprof_dump_dir)?;
     let path = CString::new(f.path().as_os_str().as_encoded_bytes()).unwrap();
 

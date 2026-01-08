@@ -9559,6 +9559,7 @@ dependencies = [
  "pprof_util",
  "procfs 0.17.0",
  "reqwest",
+ "reth-fs-util",
  "reth-metrics",
  "reth-tasks",
  "socket2 0.5.10",
