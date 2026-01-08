@@ -20,6 +20,8 @@ tokio.workspace = true
 
 jsonrpsee-server.workspace = true
 http.workspace = true
+http-body-util.workspace = true
+bytes.workspace = true
 tower.workspace = true
 reqwest.workspace = true
 
@@ -28,6 +30,7 @@ eyre.workspace = true
 
 [target.'cfg(unix)'.dependencies]
 tikv-jemalloc-ctl = { workspace = true, optional = true, features = ["stats"] }
+jemalloc_pprof = { workspace = true, optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 procfs = "0.17.0"
@@ -41,3 +44,5 @@ workspace = true
 
 [features]
 jemalloc = ["dep:tikv-jemalloc-ctl"]
+jemalloc-prof = ["jemalloc", "dep:jemalloc_pprof"]
+jemalloc-symbols = ["jemalloc-prof", "jemalloc_pprof?/symbolize"]

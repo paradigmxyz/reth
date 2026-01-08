@@ -15,7 +15,7 @@ use alloy_primitives::{B256, U256};
 use alloy_rlp::Encodable;
 use alloy_trie::{BranchNodeCompact, TrieMask};
 use reth_execution_errors::trie::StateProofError;
-use reth_trie_common::{BranchNode, Nibbles, ProofTrieNode, RlpNode, TrieMasks, TrieNode};
+use reth_trie_common::{BranchNode, BranchNodeMasks, Nibbles, ProofTrieNode, RlpNode, TrieNode};
 use std::cmp::Ordering;
 use tracing::{instrument, trace};
 
@@ -452,7 +452,7 @@ where
         self.branch_stack.push(ProofTrieBranch {
             ext_len: common_prefix_len as u8,
             state_mask: TrieMask::new(1 << first_child_nibble),
-            masks: TrieMasks::none(),
+            masks: None,
         });
 
         trace!(
@@ -696,10 +696,10 @@ where
         ProofTrieBranch {
             ext_len,
             state_mask: TrieMask::new(0),
-            masks: TrieMasks {
-                tree_mask: Some(cached_branch.tree_mask),
-                hash_mask: Some(cached_branch.hash_mask),
-            },
+            masks: Some(BranchNodeMasks {
+                tree_mask: cached_branch.tree_mask,
+                hash_mask: cached_branch.hash_mask,
+            }),
         }
     }
 
@@ -1226,7 +1226,7 @@ where
                 self.retained_proofs.push(ProofTrieNode {
                     path: Nibbles::new(), // root path
                     node: TrieNode::EmptyRoot,
-                    masks: TrieMasks::none(),
+                    masks: None,
                 });
             }
             (true, Some(root_node)) => {
@@ -1343,7 +1343,7 @@ where
             return Ok(vec![ProofTrieNode {
                 path: Nibbles::default(),
                 node: TrieNode::EmptyRoot,
-                masks: TrieMasks::none(),
+                masks: None,
             }])
         }
 
@@ -1647,16 +1647,9 @@ mod tests {
                     // The legacy proof calculator will calculate masks for the root node, even
                     // though we never store the root node so the masks for it aren't really valid.
                     let masks = if path.is_empty() {
-                        TrieMasks::none()
-                    } else if let Some(branch_masks) =
-                        proof_legacy_result.branch_node_masks.get(path)
-                    {
-                        TrieMasks {
-                            hash_mask: Some(branch_masks.hash_mask),
-                            tree_mask: Some(branch_masks.tree_mask),
-                        }
+                        None
                     } else {
-                        TrieMasks::none()
+                        proof_legacy_result.branch_node_masks.get(path).copied()
                     };
 
                     ProofTrieNode { path: *path, node, masks }
@@ -1785,9 +1778,7 @@ mod tests {
 
         // Collect targets; partially from real keys, partially random keys which probably won't
         // exist.
-        let num_real_targets = post_state.accounts.len() * 5;
-        let mut targets =
-            post_state.accounts.keys().copied().sorted().take(num_real_targets).collect::<Vec<_>>();
+        let mut targets = post_state.accounts.keys().copied().collect::<Vec<_>>();
         for _ in 0..post_state.accounts.len() / 5 {
             targets.push(rand_b256());
         }
