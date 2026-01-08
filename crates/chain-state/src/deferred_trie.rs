@@ -230,19 +230,24 @@ impl DeferredTrieData {
     ///
     /// Iterates ancestors oldest -> newest so later state takes precedence.
     fn merge_ancestors_into_overlay(ancestors: &[Self]) -> TrieInputSorted {
+        if ancestors.is_empty() {
+            return TrieInputSorted::default();
+        }
+
         let mut overlay = TrieInputSorted::default();
 
+        // Hoist Arc::make_mut outside the loop to avoid repeated atomic refcount checks.
+        // This reduces O(N) atomic operations to O(1) per field.
+        let state_mut = Arc::make_mut(&mut overlay.state);
+        let nodes_mut = Arc::make_mut(&mut overlay.nodes);
+
+        // Ancestors are processed oldest -> newest so later state takes precedence.
         for ancestor in ancestors {
             let ancestor_data = ancestor.wait_cloned();
-            {
-                let state_mut = Arc::make_mut(&mut overlay.state);
-                state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
-            }
-            {
-                let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-                nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
-            }
+            state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
+            nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
         }
+
         overlay
     }
 
