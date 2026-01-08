@@ -191,9 +191,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
             // Terminate the loop early if it's reached the maximum user
             // configured block.
-            if next_action.should_continue()
-                && self
-                    .progress
+            if next_action.should_continue() &&
+                self.progress
                     .minimum_block_number
                     .zip(self.max_block)
                     .is_some_and(|(progress, target)| progress >= target)
@@ -385,8 +384,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
 
                         // If None, that means the finalized block is not written so we should
                         // always save in that case
-                        if last_saved_finalized_block_number.is_none()
-                            || Some(checkpoint.block_number) < last_saved_finalized_block_number
+                        if last_saved_finalized_block_number.is_none() ||
+                            Some(checkpoint.block_number) < last_saved_finalized_block_number
                         {
                             provider_rw.save_finalized_block_number(BlockNumber::from(
                                 checkpoint.block_number,
@@ -539,8 +538,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
             warn!(target: "sync::pipeline", stage = %stage_id, ?local_head, ?header, %error, "Stage encountered detached head");
 
             if let Some(last_detached_head_unwind_target) = self.last_detached_head_unwind_target {
-                if local_head.block.hash == last_detached_head_unwind_target
-                    && header.block.number == local_head.block.number + 1
+                if local_head.block.hash == last_detached_head_unwind_target &&
+                    header.block.number == local_head.block.number + 1
                 {
                     self.detached_head_attempts += 1;
                 } else {

@@ -246,13 +246,13 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
 
         provider_factory.db_ref().view(|tx| {
             for table in Tables::ALL {
-                if let Ok(table_db) = tx.inner.open_db(Some(table.name()))
-                    && let Ok(table_stats) = tx.inner.db_stat(&table_db)
+                if let Ok(table_db) = tx.inner.open_db(Some(table.name())) &&
+                    let Ok(table_stats) = tx.inner.db_stat(&table_db)
                 {
                     let page_size = table_stats.page_size() as u64;
-                    let num_pages = (table_stats.leaf_pages()
-                        + table_stats.branch_pages()
-                        + table_stats.overflow_pages()) as u64;
+                    let num_pages = (table_stats.leaf_pages() +
+                        table_stats.branch_pages() +
+                        table_stats.overflow_pages()) as u64;
 
                     tables_stats.push(TableStats {
                         name: table.name().to_string(),
@@ -377,8 +377,8 @@ fn collect_logs<W: Write>(log_dir: &Path, archive: &mut Builder<W>) -> eyre::Res
         let entry = entry?;
         let path = entry.path();
 
-        if let Some(name) = path.file_name().and_then(|n| n.to_str())
-            && name.starts_with("reth.log")
+        if let Some(name) = path.file_name().and_then(|n| n.to_str()) &&
+            name.starts_with("reth.log")
         {
             let archive_path = format!("logs/{name}");
             add_file_to_archive(archive, &path, &archive_path)?;
