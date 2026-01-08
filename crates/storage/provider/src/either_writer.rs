@@ -408,7 +408,7 @@ where
     ///
     /// When `append_only` is true, uses `cursor.append()` which is significantly faster
     /// but requires entries to be inserted in order and the table to be empty.
-    /// When false, uses `cursor.insert()` which handles arbitrary insertion order.
+    /// When false, uses `cursor.upsert()` which handles arbitrary insertion order and duplicates.
     pub fn put_transaction_hash_number(
         &mut self,
         hash: TxHash,
@@ -420,7 +420,7 @@ where
                 if append_only {
                     Ok(cursor.append(hash, &tx_num)?)
                 } else {
-                    Ok(cursor.insert(hash, &tx_num)?)
+                    Ok(cursor.upsert(hash, &tx_num)?)
                 }
             }
             Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
