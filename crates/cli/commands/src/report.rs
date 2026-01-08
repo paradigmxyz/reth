@@ -474,25 +474,8 @@ fn generate_github_issue_link(metadata: &ReportMetadata) -> String {
         "Debug Report".to_string()
     };
 
-    let body = format!(
-        "## Environment\n\
-        - **reth version**: {}\n\
-        - **Chain**: {}\n\
-        - **Block**: {}\n\
-        - **Generated at**: {}\n\n\
-        ## Description\n\
-        <!-- Please describe the issue you encountered -->\n\n\
-        ## Debug Report\n\
-        <!-- Please attach the generated .tar.gz archive -->",
-        metadata.reth_version,
-        metadata.chain,
-        metadata.target_block.map_or("N/A".to_string(), |b| b.to_string()),
-        metadata.generated_at
-    );
-
     format!(
-        "https://github.com/paradigmxyz/reth/issues/new?title={}&body={}&labels=C-bug",
-        urlencoding::encode(&title),
-        urlencoding::encode(&body)
+        "https://github.com/paradigmxyz/reth/issues/new?title={}&labels=C-bug",
+        urlencoding::encode(&title)
     )
 }
