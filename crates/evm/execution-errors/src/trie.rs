@@ -33,7 +33,7 @@ impl From<StateRootError> for ProviderError {
 }
 
 /// Storage root error.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Clone, Debug)]
 pub enum StorageRootError {
     /// Internal database error.
     #[error(transparent)]
@@ -49,7 +49,7 @@ impl From<StorageRootError> for DatabaseError {
 }
 
 /// State proof errors.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Clone, Debug)]
 pub enum StateProofError {
     /// Internal database error.
     #[error(transparent)]

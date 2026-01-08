@@ -664,7 +664,9 @@ where
                         }
                     })
                     .build(),
-            ).with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
+                self.data_dir().pprof_dumps(),
+            )
+            .with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
 
             MetricServer::new(config).serve().await?;
         }

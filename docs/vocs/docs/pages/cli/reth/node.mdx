@@ -74,6 +74,9 @@ Datadir:
       --datadir.rocksdb <PATH>
           The absolute path to store `RocksDB` database in.
 
+      --datadir.pprof-dumps <PATH>
+          The absolute path to store pprof dumps in.
+
 Networking:
   -d, --disable-discovery
           Disable the discovery service
@@ -955,6 +958,9 @@ Engine:
 
       --engine.account-worker-count <ACCOUNT_WORKER_COUNT>
           Configure the number of account proof workers in the Tokio blocking pool. If not specified, defaults to the same count as storage workers
+
+      --engine.enable-proof-v2
+          Enable V2 storage proofs for state root calculations
 
 ERA:
       --era.enable
