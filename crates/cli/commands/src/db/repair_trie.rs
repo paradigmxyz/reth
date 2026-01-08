@@ -62,7 +62,7 @@ impl Command {
         let _metrics_handle = if let Some(listen_addr) = self.metrics {
             let chain_name = tool.provider_factory.chain_spec().chain().to_string();
             let executor = task_executor.clone();
-            let pprof_dump_dir = data_dir.data_dir().to_path_buf();
+            let pprof_dump_dir = data_dir.pprof_dumps();
 
             let handle = task_executor.spawn_critical("metrics server", async move {
                 let config = MetricServerConfig::new(

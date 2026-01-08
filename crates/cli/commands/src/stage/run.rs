@@ -153,7 +153,7 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + Hardforks + EthereumHardforks>
                         }
                     })
                     .build(),
-                data_dir.data_dir().to_path_buf(),
+                data_dir.pprof_dumps(),
             );
 
             MetricServer::new(config).serve().await?;
