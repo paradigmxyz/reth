@@ -2106,7 +2106,7 @@ mod tests {
     }
 
     /// Verifies that a pending message is processed before the next loop iteration (ordering).
-    /// With deferred state update processing, StateUpdate messages simply buffer the state
+    /// With deferred state update processing, `StateUpdate` messages simply buffer the state
     /// without trying to batch consecutive messages.
     #[test]
     fn test_pending_message_processed_before_next_iteration() {
