@@ -9,7 +9,7 @@ use core::fmt;
 /// blockchain data. It serves as the foundation for type consistency across
 /// different node implementations.
 pub trait NodePrimitives:
-    Send + Sync + Unpin + Clone + Default + fmt::Debug + PartialEq + Eq + 'static
+    Send + Sync + Unpin + Clone + Default + fmt::Debug + Eq + 'static
 {
     /// Block primitive.
     type Block: FullBlock<Header = Self::BlockHeader, Body = Self::BlockBody>
