@@ -257,8 +257,6 @@ pub struct MultiproofManager {
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
-    /// Whether to use V2 storage proofs
-    v2_proofs_enabled: bool,
 }
 
 impl MultiproofManager {
@@ -272,9 +270,7 @@ impl MultiproofManager {
         metrics.max_storage_workers.set(proof_worker_handle.total_storage_workers() as f64);
         metrics.max_account_workers.set(proof_worker_handle.total_account_workers() as f64);
 
-        let v2_proofs_enabled = proof_worker_handle.v2_proofs_enabled();
-
-        Self { metrics, proof_worker_handle, proof_result_tx, v2_proofs_enabled }
+        Self { metrics, proof_worker_handle, proof_result_tx }
     }
 
     /// Dispatches a new multiproof calculation to worker pools.
@@ -351,7 +347,6 @@ impl MultiproofManager {
                 hashed_state_update,
                 start,
             ),
-            v2_proofs_enabled: self.v2_proofs_enabled,
         };
 
         if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(input) {

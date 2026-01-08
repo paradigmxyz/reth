@@ -194,7 +194,8 @@ impl ParallelProof {
         let (result_tx, result_rx) = crossbeam_unbounded();
         let account_multiproof_start_time = Instant::now();
 
-        let input = AccountMultiproofInput {
+        // TODO switch on v2_enabled
+        let input = AccountMultiproofInput::Legacy {
             targets,
             prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
@@ -205,7 +206,6 @@ impl ParallelProof {
                 HashedPostState::default(),
                 account_multiproof_start_time,
             ),
-            v2_proofs_enabled: self.v2_proofs_enabled,
         };
 
         self.proof_worker_handle
@@ -219,20 +219,12 @@ impl ParallelProof {
             )
         })?;
 
-        let ProofResult { proof: multiproof, stats } = proof_result_msg.result?;
-
-        #[cfg(feature = "metrics")]
-        self.metrics.record(stats);
+        let ProofResult::Legacy { proof: multiproof } = proof_result_msg.result? else { todo!() };
 
         trace!(
             target: "trie::parallel_proof",
             total_targets = storage_root_targets_len,
-            duration = ?stats.duration(),
-            branches_added = stats.branches_added(),
-            leaves_added = stats.leaves_added(),
-            missed_leaves = stats.missed_leaves(),
-            precomputed_storage_roots = stats.precomputed_storage_roots(),
-            "Calculated decoded proof"
+            "Calculated decoded proof",
         );
 
         Ok(multiproof)

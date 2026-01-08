@@ -30,9 +30,8 @@
 //! ```
 
 use crate::{
-    root::ParallelStateRootError,
-    stats::{ParallelTrieStats, ParallelTrieTracker},
-    StorageRootTargets,
+    root::ParallelStateRootError, stats::ParallelTrieTracker,
+    value_encoder::AsyncAccountValueEncoder, StorageRootTargets,
 };
 use alloy_primitives::{
     map::{B256Map, B256Set},
@@ -49,7 +48,7 @@ use reth_trie::{
     node_iter::{TrieElement, TrieNodeIter},
     prefix_set::TriePrefixSets,
     proof::{ProofBlindedAccountProvider, ProofBlindedStorageProvider, StorageProof},
-    proof_v2::{self, StorageProofCalculator},
+    proof_v2,
     trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
     walker::TrieWalker,
     DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostState, MultiProofTargets,
@@ -220,7 +219,8 @@ impl ProofWorkerHandle {
                     metrics,
                     #[cfg(feature = "metrics")]
                     cursor_metrics,
-                );
+                )
+                .with_v2_proofs(v2_proofs_enabled);
                 if let Err(error) = worker.run() {
                     error!(
                         target: "trie::proof_task",
@@ -333,16 +333,12 @@ impl ProofWorkerHandle {
                     ProviderError::other(std::io::Error::other("account workers unavailable"));
 
                 if let AccountWorkerJob::AccountMultiproof { input } = err.0 {
-                    let AccountMultiproofInput {
-                        proof_result_sender:
-                            ProofResultContext {
-                                sender: result_tx,
-                                sequence_number: seq,
-                                state,
-                                start_time: start,
-                            },
-                        ..
-                    } = *input;
+                    let ProofResultContext {
+                        sender: result_tx,
+                        sequence_number: seq,
+                        state,
+                        start_time: start,
+                    } = input.into_proof_result_sender();
 
                     let _ = result_tx.send(ProofResultMessage {
                         sequence_number: seq,
@@ -605,11 +601,17 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
 
 /// Result of a multiproof calculation.
 #[derive(Debug)]
-pub struct ProofResult {
-    /// The account multiproof
-    pub proof: DecodedMultiProof,
-    /// Statistics collected during proof computation
-    pub stats: ParallelTrieStats,
+pub enum ProofResult {
+    Legacy {
+        /// The account multiproof
+        proof: DecodedMultiProof,
+    },
+    V2 {
+        /// Account trie proof nodes
+        account_proofs: Vec<ProofTrieNode>,
+        /// Storage trie proof nodes indexed by account
+        storage_proofs: B256Map<Vec<ProofTrieNode>>,
+    },
 }
 
 /// Channel used by worker threads to deliver `ProofResultMessage` items back to
@@ -715,7 +717,7 @@ pub struct StorageProofResultMessage {
 
 /// Internal message for storage workers.
 #[derive(Debug)]
-enum StorageWorkerJob {
+pub(crate) enum StorageWorkerJob {
     /// Storage proof computation request
     StorageProof {
         /// Storage proof input parameters
@@ -889,7 +891,7 @@ where
         &self,
         proof_tx: &ProofTaskTx<Provider>,
         v2_calculator: Option<
-            &mut StorageProofCalculator<
+            &mut proof_v2::StorageProofCalculator<
                 <Provider as TrieCursorFactory>::StorageTrieCursor<'_>,
                 <Provider as HashedCursorFactory>::StorageCursor<'_>,
             >,
@@ -1053,6 +1055,8 @@ struct AccountProofWorker<Factory> {
     /// Cursor metrics for this worker
     #[cfg(feature = "metrics")]
     cursor_metrics: ProofTaskCursorMetrics,
+    /// Set to true if V2 proofs are enabled.
+    v2_enabled: bool,
 }
 
 impl<Factory> AccountProofWorker<Factory>
@@ -1082,7 +1086,14 @@ where
             metrics,
             #[cfg(feature = "metrics")]
             cursor_metrics,
+            v2_enabled: false,
         }
+    }
+
+    /// Changes whether or not V2 proofs are enabled.
+    const fn with_v2_proofs(mut self, v2_enabled: bool) -> Self {
+        self.v2_enabled = v2_enabled;
+        self
     }
 
     /// Runs the worker loop, processing jobs until the channel closes.
@@ -1117,6 +1128,17 @@ where
         let mut account_nodes_processed = 0u64;
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
+        let mut v2_calculator = if self.v2_enabled {
+            let trie_cursor = proof_tx.provider.account_trie_cursor()?;
+            let hashed_cursor = proof_tx.provider.hashed_account_cursor()?;
+            Some(proof_v2::ProofCalculator::<_, _, AsyncAccountValueEncoder>::new(
+                trie_cursor,
+                hashed_cursor,
+            ))
+        } else {
+            None
+        };
+
         // Count this worker as available only after successful initialization.
         self.available_workers.fetch_add(1, Ordering::Relaxed);
 
@@ -1128,6 +1150,7 @@ where
                 AccountWorkerJob::AccountMultiproof { input } => {
                     self.process_account_multiproof(
                         &proof_tx,
+                        v2_calculator.as_mut(),
                         *input,
                         &mut account_proofs_processed,
                         &mut cursor_metrics_cache,
@@ -1166,26 +1189,18 @@ where
         Ok(())
     }
 
-    /// Processes an account multiproof request.
-    fn process_account_multiproof<Provider>(
+    fn compute_legacy_account_multiproof<Provider>(
         &self,
         proof_tx: &ProofTaskTx<Provider>,
-        input: AccountMultiproofInput,
-        account_proofs_processed: &mut u64,
-        cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
-    ) where
+        targets: MultiProofTargets,
+        mut prefix_sets: TriePrefixSets,
+        collect_branch_node_masks: bool,
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+        proof_cursor_metrics: &mut ProofTaskCursorMetricsCache,
+    ) -> Result<ProofResult, ParallelStateRootError>
+    where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
-        let AccountMultiproofInput {
-            targets,
-            mut prefix_sets,
-            collect_branch_node_masks,
-            multi_added_removed_keys,
-            proof_result_sender:
-                ProofResultContext { sender: result_tx, sequence_number: seq, state, start_time: start },
-            v2_proofs_enabled,
-        } = input;
-
         let span = debug_span!(
             target: "trie::proof_task",
             "Account multiproof calculation",
@@ -1199,8 +1214,6 @@ where
             "Processing account multiproof"
         );
 
-        let proof_start = Instant::now();
-
         let mut tracker = ParallelTrieTracker::default();
 
         let mut storage_prefix_sets = std::mem::take(&mut prefix_sets.storage_prefix_sets);
@@ -1210,29 +1223,14 @@ where
 
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
-        let storage_proof_receivers = match dispatch_storage_proofs(
+        let storage_proof_receivers = dispatch_storage_proofs(
             &self.storage_work_tx,
             &targets,
             &mut storage_prefix_sets,
             collect_branch_node_masks,
             multi_added_removed_keys.as_ref(),
-            v2_proofs_enabled,
-        ) {
-            Ok(receivers) => receivers,
-            Err(error) => {
-                // Send error through result channel
-                error!(target: "trie::proof_task", "Failed to dispatch storage proofs: {error}");
-                let _ = result_tx.send(ProofResultMessage {
-                    sequence_number: seq,
-                    result: Err(error),
-                    elapsed: start.elapsed(),
-                    state,
-                });
-                return;
-            }
-        };
+        )?;
 
-        // Use the missed leaves cache passed from the multiproof manager
         let account_prefix_set = std::mem::take(&mut prefix_sets.account_prefix_set);
 
         let ctx = AccountMultiproofParams {
@@ -1244,16 +1242,114 @@ where
             cached_storage_roots: &self.cached_storage_roots,
         };
 
-        let result =
-            build_account_multiproof_with_storage_roots(&proof_tx.provider, ctx, &mut tracker);
+        let result = build_account_multiproof_with_storage_roots(
+            &proof_tx.provider,
+            ctx,
+            &mut tracker,
+            proof_cursor_metrics,
+        );
+
+        result.map(|proof| ProofResult::Legacy { proof })
+    }
+
+    fn compute_v2_account_multiproof<Provider>(
+        &self,
+        v2_calculator: &mut proof_v2::ProofCalculator<
+            <Provider as TrieCursorFactory>::AccountTrieCursor<'_>,
+            <Provider as HashedCursorFactory>::AccountCursor<'_>,
+            AsyncAccountValueEncoder,
+        >,
+        mut account_targets: Vec<proof_v2::Target>,
+        storage_targets: B256Map<Vec<proof_v2::Target>>,
+    ) -> Result<ProofResult, ParallelStateRootError>
+    where
+        Provider: TrieCursorFactory + HashedCursorFactory,
+    {
+        let span = debug_span!(
+            target: "trie::proof_task",
+            "Account V2 multiproof calculation",
+            account_targets = account_targets.len(),
+            storage_targets = storage_targets.values().map(|t| t.len()).sum::<usize>(),
+            worker_id = self.worker_id,
+        );
+        let _span_guard = span.enter();
+
+        trace!(target: "trie::proof_task", "Processing V2 account multiproof");
+
+        let storage_proof_receivers =
+            dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
+
+        let value_encoder = AsyncAccountValueEncoder::new(
+            self.storage_work_tx.clone(),
+            storage_proof_receivers,
+            self.cached_storage_roots.clone(),
+        );
+
+        let proof = v2_calculator.proof(&value_encoder, &mut account_targets)?;
+        todo!()
+    }
+
+    /// Processes an account multiproof request.
+    fn process_account_multiproof<Provider>(
+        &self,
+        proof_tx: &ProofTaskTx<Provider>,
+        v2_calculator: Option<
+            &mut proof_v2::ProofCalculator<
+                <Provider as TrieCursorFactory>::AccountTrieCursor<'_>,
+                <Provider as HashedCursorFactory>::AccountCursor<'_>,
+                AsyncAccountValueEncoder,
+            >,
+        >,
+        input: AccountMultiproofInput,
+        account_proofs_processed: &mut u64,
+        cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
+    ) where
+        Provider: TrieCursorFactory + HashedCursorFactory,
+    {
+        let mut proof_cursor_metrics = ProofTaskCursorMetricsCache::default();
+        let proof_start = Instant::now();
+
+        let (proof_result_sender, result) = match input {
+            AccountMultiproofInput::Legacy {
+                targets,
+                prefix_sets,
+                collect_branch_node_masks,
+                multi_added_removed_keys,
+                proof_result_sender,
+            } => (
+                proof_result_sender,
+                self.compute_legacy_account_multiproof(
+                    proof_tx,
+                    targets,
+                    prefix_sets,
+                    collect_branch_node_masks,
+                    multi_added_removed_keys,
+                    &mut proof_cursor_metrics,
+                ),
+            ),
+            AccountMultiproofInput::V2 {
+                account_targets,
+                storage_targets,
+                proof_result_sender,
+            } => (
+                proof_result_sender,
+                self.compute_v2_account_multiproof::<Provider>(
+                    v2_calculator.expect("v2 calculator provided"),
+                    account_targets,
+                    storage_targets,
+                ),
+            ),
+        };
+
+        let ProofResultContext {
+            sender: result_tx,
+            sequence_number: seq,
+            state,
+            start_time: start,
+        } = proof_result_sender;
 
         let proof_elapsed = proof_start.elapsed();
         let total_elapsed = start.elapsed();
-        let proof_cursor_metrics = tracker.cursor_metrics;
-        proof_cursor_metrics.record_spans();
-
-        let stats = tracker.finish();
-        let result = result.map(|proof| ProofResult { proof, stats });
         *account_proofs_processed += 1;
 
         // Send result to MultiProofTask
@@ -1273,6 +1369,8 @@ where
                 "Account multiproof receiver dropped, discarding result"
             );
         }
+
+        proof_cursor_metrics.record_spans();
 
         trace!(
             target: "trie::proof_task",
@@ -1354,6 +1452,7 @@ fn build_account_multiproof_with_storage_roots<P>(
     provider: &P,
     ctx: AccountMultiproofParams<'_>,
     tracker: &mut ParallelTrieTracker,
+    proof_cursor_metrics: &mut ProofTaskCursorMetricsCache,
 ) -> Result<DecodedMultiProof, ParallelStateRootError>
 where
     P: TrieCursorFactory + HashedCursorFactory,
@@ -1361,15 +1460,12 @@ where
     let accounts_added_removed_keys =
         ctx.multi_added_removed_keys.as_ref().map(|keys| keys.get_accounts());
 
-    // Create local metrics caches for account cursors. We can't directly use the metrics caches in
-    // the tracker due to the call to `inc_missed_leaves` which occurs on it.
-    let mut account_trie_cursor_metrics = TrieCursorMetricsCache::default();
-    let mut account_hashed_cursor_metrics = HashedCursorMetricsCache::default();
-
     // Wrap account trie cursor with instrumented cursor
     let account_trie_cursor = provider.account_trie_cursor().map_err(ProviderError::Database)?;
-    let account_trie_cursor =
-        InstrumentedTrieCursor::new(account_trie_cursor, &mut account_trie_cursor_metrics);
+    let account_trie_cursor = InstrumentedTrieCursor::new(
+        account_trie_cursor,
+        &mut proof_cursor_metrics.account_trie_cursor,
+    );
 
     // Create the walker.
     let walker = TrieWalker::<_>::state_trie(account_trie_cursor, ctx.prefix_set)
@@ -1396,8 +1492,10 @@ where
     // Wrap account hashed cursor with instrumented cursor
     let account_hashed_cursor =
         provider.hashed_account_cursor().map_err(ProviderError::Database)?;
-    let account_hashed_cursor =
-        InstrumentedHashedCursor::new(account_hashed_cursor, &mut account_hashed_cursor_metrics);
+    let account_hashed_cursor = InstrumentedHashedCursor::new(
+        account_hashed_cursor,
+        &mut proof_cursor_metrics.account_hashed_cursor,
+    );
 
     let mut account_node_iter = TrieNodeIter::state_trie(walker, account_hashed_cursor);
 
@@ -1461,10 +1559,10 @@ where
                                     StorageProof::new_hashed(provider, provider, hashed_address)
                                         .with_prefix_set_mut(Default::default())
                                         .with_trie_cursor_metrics(
-                                            &mut tracker.cursor_metrics.storage_trie_cursor,
+                                            &mut proof_cursor_metrics.storage_trie_cursor,
                                         )
                                         .with_hashed_cursor_metrics(
-                                            &mut tracker.cursor_metrics.storage_hashed_cursor,
+                                            &mut proof_cursor_metrics.storage_hashed_cursor,
                                         )
                                         .storage_multiproof(
                                             ctx.targets
@@ -1526,10 +1624,6 @@ where
         BranchNodeMasksMap::default()
     };
 
-    // Extend tracker with accumulated metrics from account cursors
-    tracker.cursor_metrics.account_trie_cursor.extend(&account_trie_cursor_metrics);
-    tracker.cursor_metrics.account_hashed_cursor.extend(&account_hashed_cursor_metrics);
-
     Ok(DecodedMultiProof {
         account_subtree: decoded_account_subtree,
         branch_node_masks,
@@ -1549,31 +1643,24 @@ fn dispatch_storage_proofs(
     storage_prefix_sets: &mut B256Map<PrefixSet>,
     with_branch_node_masks: bool,
     multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
-    use_v2_proofs: bool,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
         B256Map::with_capacity_and_hasher(targets.len(), Default::default());
 
     // Dispatch all storage proofs to worker pool
     for (hashed_address, target_slots) in targets.iter() {
-        // Create channel for receiving ProofResultMessage
+        // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
 
         // Create computation input based on V2 flag
-        let input = if use_v2_proofs {
-            // Convert target slots to V2 targets
-            let v2_targets = target_slots.iter().copied().map(Into::into).collect();
-            StorageProofInput::new(*hashed_address, v2_targets)
-        } else {
-            let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
-            StorageProofInput::legacy(
-                *hashed_address,
-                prefix_set,
-                target_slots.clone(),
-                with_branch_node_masks,
-                multi_added_removed_keys.cloned(),
-            )
-        };
+        let prefix_set = storage_prefix_sets.remove(hashed_address).unwrap_or_default();
+        let input = StorageProofInput::legacy(
+            *hashed_address,
+            prefix_set,
+            target_slots.clone(),
+            with_branch_node_masks,
+            multi_added_removed_keys.cloned(),
+        );
 
         // Always dispatch a storage proof so we obtain the storage root even when no slots are
         // requested.
@@ -1591,6 +1678,64 @@ fn dispatch_storage_proofs(
 
     Ok(storage_proof_receivers)
 }
+
+/// Queues V2 storage proofs for all accounts in the targets and returns receivers.
+///
+/// This function queues all storage proof tasks to the worker pool but returns immediately
+/// with receivers, allowing the account trie walk to proceed in parallel with storage proof
+/// computation. This enables interleaved parallelism for better performance.
+///
+/// Propagates errors up if queuing fails. Receivers must be consumed by the caller.
+fn dispatch_v2_storage_proofs(
+    storage_work_tx: &CrossbeamSender<StorageWorkerJob>,
+    account_targets: &Vec<proof_v2::Target>,
+    storage_targets: B256Map<Vec<proof_v2::Target>>,
+) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
+    let mut storage_proof_receivers =
+        B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
+
+    // Dispatch all proofs for targetted storage slots
+    for (hashed_address, targets) in storage_targets.into_iter() {
+        // Create channel for receiving StorageProofResultMessage
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let input = StorageProofInput::new(hashed_address, targets);
+
+        storage_work_tx
+            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
+            .map_err(|_| {
+                ParallelStateRootError::Other(format!(
+                    "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
+                ))
+            })?;
+
+        storage_proof_receivers.insert(hashed_address, result_rx);
+    }
+
+    // If there are any targetted accounts which did not have storage targets then we generate a
+    // single proof target for them so that we get their root.
+    for target in account_targets {
+        let hashed_address = target.key();
+        if storage_proof_receivers.contains_key(&hashed_address) {
+            continue
+        }
+
+        let (result_tx, result_rx) = crossbeam_channel::unbounded();
+        let input = StorageProofInput::new(hashed_address, vec![proof_v2::Target::new(B256::ZERO)]);
+
+        storage_work_tx
+            .send(StorageWorkerJob::StorageProof { input, proof_result_sender: result_tx })
+            .map_err(|_| {
+                ParallelStateRootError::Other(format!(
+                    "Failed to queue storage proof for {hashed_address:?}: storage worker pool unavailable",
+                ))
+            })?;
+
+        storage_proof_receivers.insert(hashed_address, result_rx);
+    }
+
+    Ok(storage_proof_receivers)
+}
+
 /// Input parameters for storage proof computation.
 #[derive(Debug)]
 pub enum StorageProofInput {
@@ -1651,20 +1796,41 @@ impl StorageProofInput {
 }
 
 /// Input parameters for account multiproof computation.
-#[derive(Debug, Clone)]
-pub struct AccountMultiproofInput {
-    /// The targets for which to compute the multiproof.
-    pub targets: MultiProofTargets,
-    /// The prefix sets for the proof calculation.
-    pub prefix_sets: TriePrefixSets,
-    /// Whether or not to collect branch node masks.
-    pub collect_branch_node_masks: bool,
-    /// Provided by the user to give the necessary context to retain extra proofs.
-    pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
-    /// Context for sending the proof result.
-    pub proof_result_sender: ProofResultContext,
-    /// Whether to use V2 storage proofs.
-    pub v2_proofs_enabled: bool,
+#[derive(Debug)]
+pub enum AccountMultiproofInput {
+    /// Legacy account multiproof proof variant
+    Legacy {
+        /// The targets for which to compute the multiproof.
+        targets: MultiProofTargets,
+        /// The prefix sets for the proof calculation.
+        prefix_sets: TriePrefixSets,
+        /// Whether or not to collect branch node masks.
+        collect_branch_node_masks: bool,
+        /// Provided by the user to give the necessary context to retain extra proofs.
+        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+        /// Context for sending the proof result.
+        proof_result_sender: ProofResultContext,
+    },
+    /// V2 account multiproof variant
+    V2 {
+        /// The set of account proof targets
+        account_targets: Vec<proof_v2::Target>,
+        /// The sets of storage proof targets
+        storage_targets: B256Map<Vec<proof_v2::Target>>,
+        /// Context for sending the proof result.
+        proof_result_sender: ProofResultContext,
+    },
+}
+
+impl AccountMultiproofInput {
+    /// Returns the [`ProofResultContext`] for this input, consuming the input.
+    fn into_proof_result_sender(self) -> ProofResultContext {
+        match self {
+            Self::Legacy { proof_result_sender, .. } | Self::V2 { proof_result_sender, .. } => {
+                proof_result_sender
+            }
+        }
+    }
 }
 
 /// Parameters for building an account multiproof with pre-computed storage roots.
