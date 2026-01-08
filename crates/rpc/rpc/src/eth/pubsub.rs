@@ -40,36 +40,6 @@ pub struct EthPubSub<Eth> {
     inner: Arc<EthPubSubInner<Eth>>,
 }
 
-type PubSubStream = Box<dyn Stream<Item = Box<JsonRawValue>> + Send + Unpin>;
-type SubscriptionHandler = Arc<
-    dyn Fn(Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>> + Send + Sync,
->;
-type FallbackHandler = Arc<
-    dyn Fn(String, Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>>
-        + Send
-        + Sync,
->;
-
-struct ParsedSubscription {
-    kind: SubscriptionKind,
-    params: Option<Params>,
-}
-
-#[derive(Debug)]
-enum ParseSubscriptionError {
-    UnsupportedKind,
-    InvalidParams(&'static str),
-}
-
-impl ParseSubscriptionError {
-    const fn message(&self) -> &'static str {
-        match self {
-            Self::UnsupportedKind => "Unsupported subscription kind",
-            Self::InvalidParams(message) => message,
-        }
-    }
-}
-
 // === impl EthPubSub ===
 
 impl<Eth> EthPubSub<Eth> {
@@ -553,5 +523,35 @@ where
                 );
                 futures::stream::iter(all_logs)
             })
+    }
+}
+
+type PubSubStream = Box<dyn Stream<Item = Box<JsonRawValue>> + Send + Unpin>;
+type SubscriptionHandler = Arc<
+    dyn Fn(Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>> + Send + Sync,
+>;
+type FallbackHandler = Arc<
+    dyn Fn(String, Option<Box<JsonRawValue>>) -> Result<PubSubStream, ErrorObject<'static>>
+        + Send
+        + Sync,
+>;
+
+struct ParsedSubscription {
+    kind: SubscriptionKind,
+    params: Option<Params>,
+}
+
+#[derive(Debug)]
+enum ParseSubscriptionError {
+    UnsupportedKind,
+    InvalidParams(&'static str),
+}
+
+impl ParseSubscriptionError {
+    const fn message(&self) -> &'static str {
+        match self {
+            Self::UnsupportedKind => "Unsupported subscription kind",
+            Self::InvalidParams(message) => message,
+        }
     }
 }
