@@ -66,6 +66,7 @@ use tokio::sync::watch;
 /// - [`FinishStage`]
 ///
 /// This expands to the following series of stages:
+/// - [`EraStage`] (optional, for ERA1 import)
 /// - [`HeaderStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
