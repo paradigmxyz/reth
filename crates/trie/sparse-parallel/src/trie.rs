@@ -188,10 +188,10 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
         // Update the top-level branch node masks. This is simple and can't be done in parallel.
         for ProofTrieNode { path, masks, .. } in &nodes {
-            if let Some(branch_masks) = masks {
-                if !branch_masks.hash_mask.is_empty() || !branch_masks.tree_mask.is_empty() {
-                    self.branch_node_masks.insert(*path, *branch_masks);
-                }
+            if let Some(branch_masks) = masks &&
+                (!branch_masks.hash_mask.is_empty() || !branch_masks.tree_mask.is_empty())
+            {
+                self.branch_node_masks.insert(*path, *branch_masks);
             }
         }
 
