@@ -15,7 +15,10 @@ use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
 use reth_exex::ExExContext;
 use reth_network::{
-    transactions::{TransactionPropagationPolicy, TransactionsManagerConfig},
+    transactions::{
+        config::{AnnouncementFilteringPolicy, StrictEthAnnouncementFilter},
+        TransactionPropagationPolicy, TransactionsManagerConfig,
+    },
     NetworkBuilder, NetworkConfig, NetworkConfigBuilder, NetworkHandle, NetworkManager,
     NetworkPrimitives,
 };
@@ -832,6 +835,7 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
     /// Convenience function to start the network tasks.
     ///
     /// Accepts the config for the transaction task and the policy for propagation.
+    /// Uses the default [`StrictEthAnnouncementFilter`] for announcement filtering.
     ///
     /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
     /// connected to that network.
@@ -854,8 +858,47 @@ impl<Node: FullNodeTypes> BuilderContext<Node> {
         Node::Provider: BlockReaderFor<N>,
         Policy: TransactionPropagationPolicy<N>,
     {
+        self.start_network_with_policies(
+            builder,
+            pool,
+            tx_config,
+            propagation_policy,
+            StrictEthAnnouncementFilter::default(),
+        )
+    }
+
+    /// Convenience function to start the network tasks with custom policies.
+    ///
+    /// Accepts the config for the transaction task, the policy for propagation,
+    /// and a custom announcement filter. This is useful for chains with custom
+    /// transaction types (like CATX) that need to configure which tx types are
+    /// accepted in announcements.
+    ///
+    /// Spawns the configured network and associated tasks and returns the [`NetworkHandle`]
+    /// connected to that network.
+    pub fn start_network_with_policies<Pool, N, PropPolicy, AnnPolicy>(
+        &self,
+        builder: NetworkBuilder<(), (), N>,
+        pool: Pool,
+        tx_config: TransactionsManagerConfig,
+        propagation_policy: PropPolicy,
+        announcement_policy: AnnPolicy,
+    ) -> NetworkHandle<N>
+    where
+        N: NetworkPrimitives,
+        Pool: TransactionPool<
+                Transaction: PoolTransaction<
+                    Consensus = N::BroadcastedTransaction,
+                    Pooled = N::PooledTransaction,
+                >,
+            > + Unpin
+            + 'static,
+        Node::Provider: BlockReaderFor<N>,
+        PropPolicy: TransactionPropagationPolicy<N>,
+        AnnPolicy: AnnouncementFilteringPolicy<N>,
+    {
         let (handle, network, txpool, eth) = builder
-            .transactions_with_policy(pool, tx_config, propagation_policy)
+            .transactions_with_policies(pool, tx_config, propagation_policy, announcement_policy)
             .request_handler(self.provider().clone())
             .split_with_handle();
 
