@@ -20,7 +20,7 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
 };
-use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -672,48 +672,15 @@ impl MultiProofTask {
         all_proofs_processed && no_pending && updates_finished
     }
 
-    /// Calls `get_proof_targets` with existing proof targets for prefetching.
+    /// Filters out proof targets that have already been fetched.
+    ///
+    /// Given a set of prefetch `targets`, removes any accounts and storage slots that are
+    /// already present in `fetched_proof_targets`. This avoids redundant proof fetches by
+    /// returning only the targets that still need to be retrieved.
     fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> MultiProofTargets {
-        // Here we want to filter out any targets that are already fetched
-        //
-        // This means we need to remove any storage slots that have already been fetched
-        let mut duplicates = 0;
-
-        // First remove all storage targets that are subsets of already fetched storage slots
-        targets.retain(|hashed_address, target_storage| {
-            let keep = self
-                .fetched_proof_targets
-                .get(hashed_address)
-                // do NOT remove if None, because that means the account has not been fetched yet
-                .is_none_or(|fetched_storage| {
-                    // remove if a subset
-                    !target_storage.is_subset(fetched_storage)
-                });
-
-            if !keep {
-                duplicates += target_storage.len();
-            }
-
-            keep
-        });
-
-        // For all non-subset remaining targets, we have to calculate the difference
-        for (hashed_address, target_storage) in targets.deref_mut() {
-            let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
-                // this means the account has not been fetched yet, so we must fetch everything
-                // associated with this account
-                continue;
-            };
-
-            let prev_target_storage_len = target_storage.len();
-
-            // keep only the storage slots that have not been fetched yet
-            //
-            // we already removed subsets, so this should only remove duplicates
-            target_storage.retain(|slot| !fetched_storage.contains(slot));
-
-            duplicates += prev_target_storage_len - target_storage.len();
-        }
+        let before = targets.chunking_length();
+        targets.retain_difference(&self.fetched_proof_targets);
+        let duplicates = before - targets.chunking_length();
 
         if duplicates > 0 {
             trace!(target: "engine::tree::payload_processor::multiproof", duplicates, "Removed duplicate prefetch proof targets");
