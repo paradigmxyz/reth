@@ -8,7 +8,6 @@ use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as Cros
 use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
-use rayon::prelude::*;
 use reth_metrics::Metrics;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
@@ -201,38 +200,35 @@ impl Drop for StateHookSender {
 }
 
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    update.into_par_iter()
-        .filter_map(|(address, account)| {
-            if !account.is_touched() {
-                return None;
-            }
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
 
+    for (address, account) in update {
+        if account.is_touched() {
             let hashed_address = keccak256(address);
             trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
             let info = if destroyed { None } else { Some(account.info.into()) };
+            hashed_state.accounts.insert(hashed_address, info);
 
-            let hashed_storage = if destroyed {
-                Some(HashedStorage::new(true))
-            } else {
-                let storage: Vec<_> = account
-                    .storage
-                    .into_iter()
-                    .filter(|(_slot, value)| value.is_changed())
-                    .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                    .collect();
+            let mut changed_storage_iter = account
+                .storage
+                .into_iter()
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .peekable();
 
-                if storage.is_empty() {
-                    None
-                } else {
-                    Some(HashedStorage::from_iter(false, storage))
-                }
-            };
+            if destroyed {
+                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+            } else if changed_storage_iter.peek().is_some() {
+                hashed_state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            }
+        }
+    }
 
-            Some((hashed_address, info, hashed_storage))
-        })
-        .collect()
+    hashed_state
 }
 
 /// Input parameters for dispatching a multiproof calculation.

@@ -757,12 +757,12 @@ impl RequestTxHashes {
         Self::new(HashSet::with_capacity_and_hasher(capacity, Default::default()))
     }
 
-    /// Returns an new empty instance.
+    /// Returns a new empty instance.
     fn empty() -> Self {
         Self::new(HashSet::default())
     }
 
-    /// Retains the given number of elements, returning and iterator over the rest.
+    /// Retains the given number of elements, returning an iterator over the rest.
     pub fn retain_count(&mut self, count: usize) -> Self {
         let rest_capacity = self.hashes.len().saturating_sub(count);
         if rest_capacity == 0 {
