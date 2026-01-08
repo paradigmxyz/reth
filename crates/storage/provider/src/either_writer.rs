@@ -1,7 +1,11 @@
 //! Generic reader and writer abstractions for interacting with either database tables or static
 //! files.
 
-use std::{marker::PhantomData, ops::Range};
+use std::{
+    collections::BTreeSet,
+    marker::PhantomData,
+    ops::{Range, RangeInclusive},
+};
 
 #[cfg(all(unix, feature = "rocksdb"))]
 use crate::providers::rocksdb::RocksDBBatch;
@@ -10,11 +14,13 @@ use crate::{
     StaticFileProviderFactory,
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
+use rayon::slice::ParallelSliceMut;
 use reth_db::{
-    cursor::DbCursorRO,
+    cursor::{DbCursorRO, DbDupCursorRW},
+    models::AccountBeforeTx,
     static_file::TransactionSenderMask,
     table::Value,
-    transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut},
+    transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut, DupCursorMutTy, DupCursorTy},
 };
 use reth_db_api::{
     cursor::DbCursorRW,
@@ -26,13 +32,27 @@ use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
 use reth_primitives_traits::ReceiptTy;
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::{DBProvider, NodePrimitivesProvider, StorageSettingsCache};
+use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<'a, P, T> =
     EitherReader<'a, CursorTy<<P as DBProvider>::Tx, T>, <P as NodePrimitivesProvider>::Primitives>;
+
+/// Type alias for [`EitherReader`] constructors.
+type DupEitherReaderTy<'a, P, T> = EitherReader<
+    'a,
+    DupCursorTy<<P as DBProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
+
+/// Type alias for dup [`EitherWriter`] constructors.
+type DupEitherWriterTy<'a, P, T> = EitherWriter<
+    'a,
+    DupCursorMutTy<<P as DBProvider>::Tx, T>,
+    <P as NodePrimitivesProvider>::Primitives,
+>;
 
 /// Type alias for [`EitherWriter`] constructors.
 type EitherWriterTy<'a, P, T> = EitherWriter<
@@ -87,6 +107,49 @@ impl<'a> EitherWriter<'a, (), ()> {
         }
     }
 
+    /// Creates a new [`EitherWriter`] for senders based on storage settings.
+    pub fn new_senders<P>(
+        provider: &'a P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionSenders>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if EitherWriterDestination::senders(provider).is_static_file() {
+            Ok(EitherWriter::StaticFile(
+                provider
+                    .get_static_file_writer(block_number, StaticFileSegment::TransactionSenders)?,
+            ))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_write::<tables::TransactionSenders>()?,
+            ))
+        }
+    }
+
+    /// Creates a new [`EitherWriter`] for account changesets based on storage settings and prune
+    /// modes.
+    pub fn new_account_changesets<P>(
+        provider: &'a P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::AccountChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().account_changesets_in_static_files {
+            Ok(EitherWriter::StaticFile(
+                provider
+                    .get_static_file_writer(block_number, StaticFileSegment::AccountChangeSets)?,
+            ))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?,
+            ))
+        }
+    }
+
     /// Returns the destination for writing receipts.
     ///
     /// The rules are as follows:
@@ -111,24 +174,16 @@ impl<'a> EitherWriter<'a, (), ()> {
         }
     }
 
-    /// Creates a new [`EitherWriter`] for senders based on storage settings.
-    pub fn new_senders<P>(
-        provider: &'a P,
-        block_number: BlockNumber,
-    ) -> ProviderResult<EitherWriterTy<'a, P, tables::TransactionSenders>>
-    where
-        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
-        P::Tx: DbTxMut,
-    {
-        if EitherWriterDestination::senders(provider).is_static_file() {
-            Ok(EitherWriter::StaticFile(
-                provider
-                    .get_static_file_writer(block_number, StaticFileSegment::TransactionSenders)?,
-            ))
+    /// Returns the destination for writing account changesets.
+    ///
+    /// This determines the destination based solely on storage settings.
+    pub fn account_changesets_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        if provider.cached_storage_settings().account_changesets_in_static_files {
+            EitherWriterDestination::StaticFile
         } else {
-            Ok(EitherWriter::Database(
-                provider.tx_ref().cursor_write::<tables::TransactionSenders>()?,
-            ))
+            EitherWriterDestination::Database
         }
     }
 
@@ -427,6 +482,37 @@ where
     }
 }
 
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbDupCursorRW<tables::AccountChangeSets>,
+{
+    /// Append account changeset for a block.
+    ///
+    /// NOTE: This _sorts_ the changesets by address before appending
+    pub fn append_account_changeset(
+        &mut self,
+        block_number: BlockNumber,
+        mut changeset: Vec<AccountBeforeTx>,
+    ) -> ProviderResult<()> {
+        // First sort the changesets
+        changeset.par_sort_by_key(|a| a.address);
+        match self {
+            Self::Database(cursor) => {
+                for change in changeset {
+                    cursor.append_dup(block_number, change)?;
+                }
+            }
+            Self::StaticFile(writer) => {
+                writer.append_account_changeset(changeset, block_number)?;
+            }
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
+        }
+
+        Ok(())
+    }
+}
+
 /// Represents a source for reading data, either from database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherReader<'a, CURSOR, N> {
@@ -517,6 +603,24 @@ impl<'a> EitherReader<'a, (), ()> {
             PhantomData,
         ))
     }
+
+    /// Creates a new [`EitherReader`] for account changesets based on storage settings.
+    pub fn new_account_changesets<P>(
+        provider: &P,
+    ) -> ProviderResult<DupEitherReaderTy<'a, P, tables::AccountChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTx,
+    {
+        if EitherWriterDestination::account_changesets(provider).is_static_file() {
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
+        } else {
+            Ok(EitherReader::Database(
+                provider.tx_ref().cursor_dup_read::<tables::AccountChangeSets>()?,
+                PhantomData,
+            ))
+        }
+    }
 }
 
 impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
@@ -605,6 +709,53 @@ where
     }
 }
 
+impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
+where
+    CURSOR: DbCursorRO<tables::AccountChangeSets>,
+{
+    /// Iterate over account changesets and return all account address that were changed.
+    pub fn changed_accounts_with_range(
+        &mut self,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<BTreeSet<Address>> {
+        match self {
+            Self::StaticFile(provider, _) => {
+                let highest_static_block =
+                    provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+
+                let Some(highest) = highest_static_block else {
+                    return Err(ProviderError::MissingHighestStaticFileBlock(
+                        StaticFileSegment::AccountChangeSets,
+                    ))
+                };
+
+                let start = *range.start();
+                let static_end = (*range.end()).min(highest + 1);
+
+                let mut changed_accounts = BTreeSet::default();
+                if start <= static_end {
+                    for block in start..=static_end {
+                        let block_changesets = provider.account_block_changeset(block)?;
+                        for changeset in block_changesets {
+                            changed_accounts.insert(changeset.address);
+                        }
+                    }
+                }
+
+                Ok(changed_accounts)
+            }
+            Self::Database(provider, _) => provider
+                .walk_range(range)?
+                .map(|entry| {
+                    entry.map(|(_, account_before)| account_before.address).map_err(Into::into)
+                })
+                .collect(),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => Err(ProviderError::UnsupportedProvider),
+        }
+    }
+}
+
 /// Destination for writing data.
 #[derive(Debug, EnumIs)]
 pub enum EitherWriterDestination {
@@ -624,6 +775,19 @@ impl EitherWriterDestination {
     {
         // Write senders to static files only if they're explicitly enabled
         if provider.cached_storage_settings().transaction_senders_in_static_files {
+            Self::StaticFile
+        } else {
+            Self::Database
+        }
+    }
+
+    /// Returns the destination for writing account changesets based on storage settings.
+    pub fn account_changesets<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        // Write account changesets to static files only if they're explicitly enabled
+        if provider.cached_storage_settings().account_changesets_in_static_files {
             Self::StaticFile
         } else {
             Self::Database

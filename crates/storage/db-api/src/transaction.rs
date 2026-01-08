@@ -8,8 +8,14 @@ use std::fmt::Debug;
 /// Helper adapter type for accessing [`DbTx`] cursor.
 pub type CursorTy<TX, T> = <TX as DbTx>::Cursor<T>;
 
+/// Helper adapter type for accessing [`DbTx`] dup cursor.
+pub type DupCursorTy<TX, T> = <TX as DbTx>::DupCursor<T>;
+
 /// Helper adapter type for accessing [`DbTxMut`] mutable cursor.
 pub type CursorMutTy<TX, T> = <TX as DbTxMut>::CursorMut<T>;
+
+/// Helper adapter type for accessing [`DbTxMut`] mutable dup cursor.
+pub type DupCursorMutTy<TX, T> = <TX as DbTxMut>::DupCursorMut<T>;
 
 /// Read only transaction
 pub trait DbTx: Debug + Send {
