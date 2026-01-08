@@ -1360,8 +1360,8 @@ mod tests {
     use alloy_primitives::{map::B256Set, Address};
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        BlockReader, DatabaseProviderFactory, LatestStateProvider, PruneCheckpointReader,
-        StageCheckpointReader, StateProviderBox, TrieReader,
+        BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
+        PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TrieReader,
     };
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
@@ -1383,7 +1383,12 @@ mod tests {
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
     where
         F: DatabaseProviderFactory<
-                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+                Provider: BlockReader
+                              + TrieReader
+                              + StageCheckpointReader
+                              + PruneCheckpointReader
+                              + ChangeSetReader
+                              + BlockNumReader,
             > + Clone
             + Send
             + 'static,

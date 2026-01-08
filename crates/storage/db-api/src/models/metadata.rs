@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 ///
 /// These should be set during `init_genesis` or `init_db` depending on whether we want dictate
 /// behaviour of new or old nodes respectively.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Compact)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize, Compact)]
 #[cfg_attr(any(test, feature = "arbitrary"), derive(arbitrary::Arbitrary))]
 #[add_arbitrary_tests(compact)]
 pub struct StorageSettings {
@@ -28,6 +28,9 @@ pub struct StorageSettings {
     /// Whether `AccountsHistory` is stored in `RocksDB`.
     #[serde(default)]
     pub account_history_in_rocksdb: bool,
+    /// Whether this node should read and write account changesets from static files.
+    #[serde(default)]
+    pub account_changesets_in_static_files: bool,
 }
 
 impl StorageSettings {
@@ -43,6 +46,7 @@ impl StorageSettings {
             storages_history_in_rocksdb: false,
             transaction_hash_numbers_in_rocksdb: false,
             account_history_in_rocksdb: false,
+            account_changesets_in_static_files: false,
         }
     }
 
@@ -73,6 +77,12 @@ impl StorageSettings {
     /// Sets the `account_history_in_rocksdb` flag to the provided value.
     pub const fn with_account_history_in_rocksdb(mut self, value: bool) -> Self {
         self.account_history_in_rocksdb = value;
+        self
+    }
+
+    /// Sets the `account_changesets_in_static_files` flag to the provided value.
+    pub const fn with_account_changesets_in_static_files(mut self, value: bool) -> Self {
+        self.account_changesets_in_static_files = value;
         self
     }
 }
