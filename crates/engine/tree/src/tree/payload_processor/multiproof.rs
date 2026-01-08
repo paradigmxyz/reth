@@ -5,7 +5,6 @@ use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
@@ -258,18 +257,6 @@ impl MultiproofInput {
 pub struct MultiproofManager {
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
-    /// Cached storage proof roots for missed leaves; this maps
-    /// hashed (missed) addresses to their storage proof roots.
-    ///
-    /// It is important to cache these. Otherwise, a common account
-    /// (popular ERC-20, etc.) having missed leaves in its path would
-    /// repeatedly calculate these proofs per interacting transaction
-    /// (same account different slots).
-    ///
-    /// This also works well with chunking multiproofs, which may break
-    /// a big account change into different chunks, which may repeatedly
-    /// revisit missed leaves.
-    missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     /// Channel sender cloned into each dispatched job so workers can send back the
     /// `ProofResultMessage`.
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
@@ -292,13 +279,7 @@ impl MultiproofManager {
 
         let v2_proofs_enabled = proof_worker_handle.v2_proofs_enabled();
 
-        Self {
-            metrics,
-            proof_worker_handle,
-            missed_leaves_storage_roots: Default::default(),
-            proof_result_tx,
-            v2_proofs_enabled,
-        }
+        Self { metrics, proof_worker_handle, proof_result_tx, v2_proofs_enabled }
     }
 
     /// Dispatches a new multiproof calculation to worker pools.
@@ -343,7 +324,6 @@ impl MultiproofManager {
             multi_added_removed_keys,
         } = multiproof_input;
 
-        let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
         let account_targets = proof_targets.len();
         let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
@@ -369,7 +349,6 @@ impl MultiproofManager {
             prefix_sets: frozen_prefix_sets,
             collect_branch_node_masks: true,
             multi_added_removed_keys,
-            missed_leaves_storage_roots,
             // Workers will send ProofResultMessage directly to proof_result_rx
             proof_result_sender: ProofResultContext::new(
                 self.proof_result_tx.clone(),
