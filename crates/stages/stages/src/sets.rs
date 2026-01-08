@@ -71,7 +71,7 @@ use tokio::sync::watch;
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
 /// - [`ExecutionStage`]
-/// - [`PruneSenderRecoveryStage`] (execute)
+/// - [`PruneSenderRecoveryStage`] (execute, optional; only if sender recovery pruning is enabled)
 /// - [`MerkleStage`] (unwind)
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
@@ -294,7 +294,7 @@ where
 /// A combination of (in order)
 ///
 /// - [`ExecutionStages`]
-/// - [`PruneSenderRecoveryStage`]
+/// - [`PruneSenderRecoveryStage`] (optional; only if sender recovery pruning is enabled)
 /// - [`HashingStages`]
 /// - [`HistoryIndexingStages`]
 /// - [`PruneStage`]
