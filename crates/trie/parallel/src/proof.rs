@@ -9,7 +9,6 @@ use crate::{
 };
 use alloy_primitives::{map::B256Set, B256};
 use crossbeam_channel::{unbounded as crossbeam_unbounded, Receiver as CrossbeamReceiver};
-use dashmap::DashMap;
 use reth_execution_errors::StorageRootError;
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -34,9 +33,6 @@ pub struct ParallelProof {
     multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
     /// Handle to the proof worker pools.
     proof_worker_handle: ProofWorkerHandle,
-    /// Cached storage proof roots for missed leaves; this maps
-    /// hashed (missed) addresses to their storage proof roots.
-    missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     /// Whether to use V2 storage proofs.
     v2_proofs_enabled: bool,
     #[cfg(feature = "metrics")]
@@ -47,12 +43,10 @@ impl ParallelProof {
     /// Create new state proof generator.
     pub fn new(
         prefix_sets: Arc<TriePrefixSetsMut>,
-        missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
         proof_worker_handle: ProofWorkerHandle,
     ) -> Self {
         Self {
             prefix_sets,
-            missed_leaves_storage_roots,
             collect_branch_node_masks: false,
             multi_added_removed_keys: None,
             proof_worker_handle,
@@ -205,7 +199,6 @@ impl ParallelProof {
             prefix_sets,
             collect_branch_node_masks: self.collect_branch_node_masks,
             multi_added_removed_keys: self.multi_added_removed_keys.clone(),
-            missed_leaves_storage_roots: self.missed_leaves_storage_roots.clone(),
             proof_result_sender: ProofResultContext::new(
                 result_tx,
                 0,
@@ -331,10 +324,9 @@ mod tests {
         let proof_worker_handle =
             ProofWorkerHandle::new(rt.handle().clone(), task_ctx, 1, 1, false);
 
-        let parallel_result =
-            ParallelProof::new(Default::default(), Default::default(), proof_worker_handle.clone())
-                .decoded_multiproof(targets.clone())
-                .unwrap();
+        let parallel_result = ParallelProof::new(Default::default(), proof_worker_handle.clone())
+            .decoded_multiproof(targets.clone())
+            .unwrap();
 
         let sequential_result_raw = Proof::new(trie_cursor_factory, hashed_cursor_factory)
             .multiproof(targets.clone())
