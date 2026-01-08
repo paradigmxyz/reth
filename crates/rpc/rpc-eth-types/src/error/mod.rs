@@ -878,7 +878,7 @@ pub struct RevertError {
 impl RevertError {
     /// Wraps the output bytes
     ///
-    /// Note: this is intended to wrap an revm output
+    /// Note: this is intended to wrap a revm output
     pub fn new(output: Bytes) -> Self {
         if output.is_empty() {
             Self { output: None }

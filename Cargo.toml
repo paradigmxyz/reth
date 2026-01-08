@@ -684,6 +684,7 @@ ethereum_ssz = "0.9.0"
 ethereum_ssz_derive = "0.9.0"
 
 # allocators
+jemalloc_pprof = { version = "0.8", default-features = false }
 tikv-jemalloc-ctl = "0.6"
 tikv-jemallocator = "0.6"
 tracy-client = "0.18.0"
@@ -694,7 +695,7 @@ ahash = "0.8"
 anyhow = "1.0"
 bindgen = { version = "0.71", default-features = false }
 block-padding = "0.3.2"
-cc = "=1.2.15"
+cc = "1.2.15"
 cipher = "0.4.3"
 comfy-table = "7.0"
 concat-kdf = "0.1.0"

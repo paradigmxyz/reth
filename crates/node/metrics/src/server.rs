@@ -4,8 +4,10 @@ use crate::{
     recorder::install_prometheus_recorder,
     version::VersionInfo,
 };
+use bytes::Bytes;
 use eyre::WrapErr;
-use http::{header::CONTENT_TYPE, HeaderValue, Response};
+use http::{header::CONTENT_TYPE, HeaderValue, Request, Response, StatusCode};
+use http_body_util::Full;
 use metrics::describe_gauge;
 use metrics_process::Collector;
 use reqwest::Client;
@@ -139,13 +141,8 @@ impl MetricServer {
 
                     let handle = install_prometheus_recorder();
                     let hook = hook.clone();
-                    let service = tower::service_fn(move |_| {
-                        (hook)();
-                        let metrics = handle.handle().render();
-                        let mut response = Response::new(metrics);
-                        response
-                            .headers_mut()
-                            .insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+                    let service = tower::service_fn(move |req: Request<_>| {
+                        let response = handle_request(req.uri().path(), &*hook, handle);
                         async move { Ok::<_, Infallible>(response) }
                     });
 
@@ -286,6 +283,76 @@ fn describe_io_stats() {
 
 #[cfg(not(target_os = "linux"))]
 const fn describe_io_stats() {}
+
+fn handle_request(
+    path: &str,
+    hook: impl Fn(),
+    handle: &crate::recorder::PrometheusRecorder,
+) -> Response<Full<Bytes>> {
+    match path {
+        "/debug/pprof/heap" => handle_pprof_heap(),
+        _ => {
+            hook();
+            let metrics = handle.handle().render();
+            let mut response = Response::new(Full::new(Bytes::from(metrics)));
+            response.headers_mut().insert(CONTENT_TYPE, HeaderValue::from_static("text/plain"));
+            response
+        }
+    }
+}
+
+#[cfg(all(feature = "jemalloc-prof", unix))]
+fn handle_pprof_heap() -> Response<Full<Bytes>> {
+    use http::header::CONTENT_ENCODING;
+
+    match jemalloc_pprof::PROF_CTL.as_ref() {
+        Some(prof_ctl) => match prof_ctl.try_lock() {
+            Ok(mut ctl) => match ctl.dump_pprof() {
+                Ok(pprof) => {
+                    let mut response = Response::new(Full::new(Bytes::from(pprof)));
+                    response
+                        .headers_mut()
+                        .insert(CONTENT_TYPE, HeaderValue::from_static("application/octet-stream"));
+                    response
+                        .headers_mut()
+                        .insert(CONTENT_ENCODING, HeaderValue::from_static("gzip"));
+                    response
+                }
+                Err(err) => {
+                    let mut response = Response::new(Full::new(Bytes::from(format!(
+                        "Failed to dump pprof: {err}"
+                    ))));
+                    *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+                    response
+                }
+            },
+            Err(_) => {
+                let mut response = Response::new(Full::new(Bytes::from_static(
+                    b"Profile dump already in progress. Try again later.",
+                )));
+                *response.status_mut() = StatusCode::SERVICE_UNAVAILABLE;
+                response
+            }
+        },
+        None => {
+            let mut response = Response::new(Full::new(Bytes::from_static(
+                b"jemalloc profiling not enabled. \
+                 Set MALLOC_CONF=prof:true or rebuild with jemalloc-prof feature.",
+            )));
+            *response.status_mut() = StatusCode::INTERNAL_SERVER_ERROR;
+            response
+        }
+    }
+}
+
+#[cfg(not(all(feature = "jemalloc-prof", unix)))]
+fn handle_pprof_heap() -> Response<Full<Bytes>> {
+    let mut response = Response::new(Full::new(Bytes::from_static(
+        b"jemalloc pprof support not compiled. Rebuild with the jemalloc-prof feature.",
+    )));
+    *response.status_mut() = StatusCode::NOT_IMPLEMENTED;
+    response
+}
 
 #[cfg(test)]
 mod tests {
