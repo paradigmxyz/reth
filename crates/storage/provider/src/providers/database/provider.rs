@@ -2675,19 +2675,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
         // Use HashMap to cache hashed addresses and avoid redundant keccak256 computation.
         let mut address_hash_cache = HashMap::new();
         let mut hashed_storages = Vec::new();
-        
+
         for (BlockNumberAddress((_, address)), storage_entry) in changesets {
-            let hashed_address = *address_hash_cache
-                .entry(address)
-                .or_insert_with(|| keccak256(address));
-            
+            let hashed_address =
+                *address_hash_cache.entry(address).or_insert_with(|| keccak256(address));
+
             hashed_storages.push((
                 hashed_address,
                 keccak256(storage_entry.key),
                 storage_entry.value,
             ));
         }
-        
+
         hashed_storages.sort_by_key(|(ha, hk, _)| (*ha, *hk));
 
         // Apply values to HashedState, and remove the account if it's None.
