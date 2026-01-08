@@ -741,11 +741,30 @@ pub struct ChunkedHashedPostState {
     size: usize,
 }
 
+/// Order discriminant for sorting flattened state items.
+/// Ordering: `StorageWipe` < `StorageUpdate` (by slot) < `Account`
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FlattenedStateOrder {
+    StorageWipe,
+    StorageUpdate(B256),
+    Account,
+}
+
 #[derive(Debug)]
 enum FlattenedHashedPostStateItem {
     Account(Option<Account>),
     StorageWipe,
     StorageUpdate { slot: B256, value: U256 },
+}
+
+impl FlattenedHashedPostStateItem {
+    const fn order(&self) -> FlattenedStateOrder {
+        match self {
+            Self::StorageWipe => FlattenedStateOrder::StorageWipe,
+            Self::StorageUpdate { slot, .. } => FlattenedStateOrder::StorageUpdate(*slot),
+            Self::Account(_) => FlattenedStateOrder::Account,
+        }
+    }
 }
 
 impl ChunkedHashedPostState {
@@ -754,29 +773,22 @@ impl ChunkedHashedPostState {
             .storages
             .into_iter()
             .flat_map(|(address, storage)| {
-                // Storage wipes should go first
-                Some((address, FlattenedHashedPostStateItem::StorageWipe))
-                    .filter(|_| storage.wiped)
+                storage
+                    .wiped
+                    .then_some((address, FlattenedHashedPostStateItem::StorageWipe))
                     .into_iter()
-                    .chain(
-                        storage.storage.into_iter().sorted_unstable_by_key(|(slot, _)| *slot).map(
-                            move |(slot, value)| {
-                                (
-                                    address,
-                                    FlattenedHashedPostStateItem::StorageUpdate { slot, value },
-                                )
-                            },
-                        ),
-                    )
+                    .chain(storage.storage.into_iter().map(move |(slot, value)| {
+                        (address, FlattenedHashedPostStateItem::StorageUpdate { slot, value })
+                    }))
             })
             .chain(hashed_post_state.accounts.into_iter().map(|(address, account)| {
                 (address, FlattenedHashedPostStateItem::Account(account))
             }))
-            // We need stable sort here to preserve the order for each address:
-            // 1. Storage wipes
-            // 2. Storage updates
-            // 3. Account update
-            .sorted_by_key(|(address, _)| *address);
+            // Sort by address, then by item order to ensure correct application sequence:
+            // 1. Storage wipes (must come first to clear storage)
+            // 2. Storage updates (sorted by slot for determinism)
+            // 3. Account updates (can be applied last)
+            .sorted_unstable_by_key(|(address, item)| (*address, item.order()));
 
         Self { flattened, size }
     }
@@ -1260,6 +1272,51 @@ mod tests {
             })
         );
         assert_eq!(chunks.next(), None);
+    }
+
+    #[test]
+    fn test_chunks_ordering_guarantee() {
+        // Test that chunks preserve the ordering: wipe -> storage updates -> account
+        // Use chunk size of 1 to verify each item comes out in the correct order
+        let addr = B256::from([1; 32]);
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+
+        let state = HashedPostState {
+            accounts: B256Map::from_iter([(addr, Some(Default::default()))]),
+            storages: B256Map::from_iter([(
+                addr,
+                HashedStorage {
+                    wiped: true,
+                    storage: B256Map::from_iter([(slot1, U256::from(1)), (slot2, U256::from(2))]),
+                },
+            )]),
+        };
+
+        let chunks: Vec<_> = state.chunks(1).collect();
+
+        // Should have 4 chunks: 1 wipe + 2 storage updates + 1 account
+        assert_eq!(chunks.len(), 4);
+
+        // First chunk must be the storage wipe
+        assert!(chunks[0].accounts.is_empty());
+        assert_eq!(chunks[0].storages.len(), 1);
+        assert!(chunks[0].storages.get(&addr).unwrap().wiped);
+        assert!(chunks[0].storages.get(&addr).unwrap().storage.is_empty());
+
+        // Next two chunks must be storage updates (order between them doesn't matter)
+        assert!(chunks[1].accounts.is_empty());
+        assert!(!chunks[1].storages.get(&addr).unwrap().wiped);
+        assert_eq!(chunks[1].storages.get(&addr).unwrap().storage.len(), 1);
+
+        assert!(chunks[2].accounts.is_empty());
+        assert!(!chunks[2].storages.get(&addr).unwrap().wiped);
+        assert_eq!(chunks[2].storages.get(&addr).unwrap().storage.len(), 1);
+
+        // Last chunk must be the account update
+        assert_eq!(chunks[3].accounts.len(), 1);
+        assert!(chunks[3].accounts.contains_key(&addr));
+        assert!(chunks[3].storages.is_empty());
     }
 
     #[test]
