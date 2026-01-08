@@ -24,8 +24,8 @@ use reth_provider::{
         RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter,
     },
     test_utils::MockNodeTypesWithDB,
-    DatabaseProviderFactory, HistoryWriter, ProviderError, ProviderFactory,
-    StaticFileProviderFactory, StatsReader,
+    DatabaseProviderFactory, EitherWriter, HistoryWriter, ProviderError, ProviderFactory,
+    RocksBatchArg, StaticFileProviderFactory, StatsReader,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
@@ -103,6 +103,19 @@ impl TestStageDB {
         ) -> ProviderResult<Ok>,
     {
         f(self.factory.provider()?)
+    }
+
+    /// Invoke a callback with a writable provider, committing afterwards.
+    pub fn commit_with_provider<F>(&self, f: F) -> ProviderResult<()>
+    where
+        F: FnOnce(
+            &<ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::ProviderRW,
+        ) -> ProviderResult<()>,
+    {
+        let provider = self.factory.provider_rw()?;
+        f(&provider)?;
+        provider.commit().expect("failed to commit");
+        Ok(())
     }
 
     /// Check if the table is empty
@@ -315,10 +328,13 @@ impl TestStageDB {
     where
         I: IntoIterator<Item = (TxHash, TxNumber)>,
     {
-        self.commit(|tx| {
-            tx_hash_numbers.into_iter().try_for_each(|(tx_hash, tx_num)| {
-                // Insert into tx hash numbers table.
-                Ok(tx.put::<tables::TransactionHashNumbers>(tx_hash, tx_num)?)
+        self.commit_with_provider(|provider| {
+            provider.with_rocksdb_batch(|batch: RocksBatchArg<'_>| {
+                let mut writer = EitherWriter::new_transaction_hash_numbers(provider, batch)?;
+                for (tx_hash, tx_num) in tx_hash_numbers.into_iter() {
+                    writer.put_transaction_hash_number(tx_hash, tx_num, false)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
             })
         })
     }

@@ -61,17 +61,38 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
-// Helper types so constructors stay exported even when RocksDB feature is off.
-// Historical data tables use a write-only RocksDB batch (no read-your-writes needed).
+/// Helper type for RocksDB batch argument in writer constructors.
+///
+/// When `rocksdb` feature is enabled, this is a real RocksDB batch.
+/// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(all(unix, feature = "rocksdb"))]
-type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
+pub type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
+/// Helper type for RocksDB batch argument in writer constructors.
+///
+/// When `rocksdb` feature is enabled, this is a real RocksDB batch.
+/// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(not(all(unix, feature = "rocksdb")))]
-type RocksBatchArg<'a> = ();
+pub type RocksBatchArg<'a> = ();
 
+/// The raw RocksDB batch type returned by [`EitherWriter::into_raw_rocksdb_batch`].
 #[cfg(all(unix, feature = "rocksdb"))]
-type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
+pub type RawRocksDBBatch = rocksdb::WriteBatchWithTransaction<true>;
+/// The raw RocksDB batch type returned by [`EitherWriter::into_raw_rocksdb_batch`].
 #[cfg(not(all(unix, feature = "rocksdb")))]
-type RocksTxRefArg<'a> = ();
+pub type RawRocksDBBatch = ();
+
+/// Helper type for RocksDB transaction reference argument in reader constructors.
+///
+/// When `rocksdb` feature is enabled, this is a reference to a RocksDB transaction.
+/// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
+/// Helper type for RocksDB transaction reference argument in reader constructors.
+///
+/// When `rocksdb` feature is enabled, this is a reference to a RocksDB transaction.
+/// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
+#[cfg(not(all(unix, feature = "rocksdb")))]
+pub type RocksTxRefArg<'a> = ();
 
 /// Represents a destination for writing data, either to database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
@@ -254,6 +275,16 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
         match self {
             Self::Database(_) | Self::StaticFile(_) => None,
             Self::RocksDB(batch) => Some(batch.into_inner()),
+        }
+    }
+
+    /// Extracts the raw `RocksDB` write batch from this writer, if it contains one.
+    ///
+    /// Without the `rocksdb` feature, this always returns `None`.
+    #[cfg(not(all(unix, feature = "rocksdb")))]
+    pub fn into_raw_rocksdb_batch(self) -> Option<RawRocksDBBatch> {
+        match self {
+            Self::Database(_) | Self::StaticFile(_) => None,
         }
     }
 
