@@ -193,10 +193,6 @@ impl Drop for StateHookSender {
 }
 
 /// Converts EVM state to hashed post state using parallel iteration.
-///
-/// This function uses rayon's parallel iterator to hash addresses and storage slots
-/// concurrently. It's designed to be called once per block with the merged state from
-/// all transactions, making the parallelization overhead worthwhile.
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
     update
         .into_par_iter()
@@ -231,6 +227,47 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
             Some((hashed_address, info, hashed_storage))
         })
         .collect()
+}
+
+/// Merges multiple EVM states into one, properly combining storage slots.
+///
+/// Unlike `HashMap::extend` which blindly overwrites accounts, this function
+/// properly merges storage slots when the same account appears in multiple states.
+/// For each account that exists in both the target and source:
+/// - Storage slots are merged (existing slots updated, new slots inserted)
+/// - Account info is updated to the latest value
+/// - Status flags are combined using bitwise OR
+fn merge_evm_states(states: Vec<EvmState>) -> EvmState {
+    let mut merged = EvmState::default();
+
+    for state in states {
+        for (address, account) in state {
+            match merged.entry(address) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    let existing = entry.get_mut();
+                    // Merge storage slots - update present_value for existing, insert new
+                    for (slot, value) in account.storage {
+                        existing
+                            .storage
+                            .entry(slot)
+                            .and_modify(|existing_slot| {
+                                existing_slot.present_value = value.present_value;
+                            })
+                            .or_insert(value);
+                    }
+                    // Update account info to latest
+                    existing.info = account.info;
+                    // Combine status flags
+                    existing.status |= account.status;
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(account);
+                }
+            }
+        }
+    }
+
+    merged
 }
 
 /// Input parameters for dispatching a multiproof calculation.
@@ -1044,11 +1081,8 @@ impl MultiProofTask {
                         "Processing deferred state updates"
                     );
 
-                    // Merge all EVM states into one
-                    let mut merged_state = EvmState::default();
-                    for state in deferred_states {
-                        merged_state.extend(state);
-                    }
+                    // Merge all EVM states into one, properly combining storage slots
+                    let merged_state = merge_evm_states(deferred_states);
 
                     // Record batch size metric
                     self.metrics.state_update_batch_size_histogram.record(num_deferred as f64);
