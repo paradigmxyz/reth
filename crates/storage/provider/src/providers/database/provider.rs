@@ -327,9 +327,9 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
-    /// Executes a closure with a RocksDB batch, automatically registering it for commit.
+    /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
     ///
-    /// This helper encapsulates all the cfg-gated RocksDB batch handling.
+    /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
     pub fn with_rocksdb_batch<F, R>(&self, f: F) -> ProviderResult<R>
     where
         F: FnOnce(RocksBatchArg<'_>) -> ProviderResult<(R, Option<RawRocksDBBatch>)>,
@@ -621,9 +621,9 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         &self.chain_spec
     }
 
-    /// Executes a closure with a RocksDB transaction for reading.
+    /// Executes a closure with a `RocksDB` transaction for reading.
     ///
-    /// This helper encapsulates all the cfg-gated RocksDB transaction handling for reads.
+    /// This helper encapsulates all the cfg-gated `RocksDB` transaction handling for reads.
     fn with_rocksdb_tx<F, R>(&self, f: F) -> ProviderResult<R>
     where
         F: FnOnce(RocksTxRefArg<'_>) -> ProviderResult<R>,

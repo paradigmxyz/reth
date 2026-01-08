@@ -331,7 +331,7 @@ impl TestStageDB {
         self.commit_with_provider(|provider| {
             provider.with_rocksdb_batch(|batch: RocksBatchArg<'_>| {
                 let mut writer = EitherWriter::new_transaction_hash_numbers(provider, batch)?;
-                for (tx_hash, tx_num) in tx_hash_numbers.into_iter() {
+                for (tx_hash, tx_num) in tx_hash_numbers {
                     writer.put_transaction_hash_number(tx_hash, tx_num, false)?;
                 }
                 Ok(((), writer.into_raw_rocksdb_batch()))

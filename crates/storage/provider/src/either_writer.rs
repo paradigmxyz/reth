@@ -61,35 +61,35 @@ type EitherWriterTy<'a, P, T> = EitherWriter<
     <P as NodePrimitivesProvider>::Primitives,
 >;
 
-/// Helper type for RocksDB batch argument in writer constructors.
+/// Helper type for `RocksDB` batch argument in writer constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a real RocksDB batch.
+/// When `rocksdb` feature is enabled, this is a real `RocksDB` batch.
 /// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(all(unix, feature = "rocksdb"))]
 pub type RocksBatchArg<'a> = crate::providers::rocksdb::RocksDBBatch<'a>;
-/// Helper type for RocksDB batch argument in writer constructors.
+/// Helper type for `RocksDB` batch argument in writer constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a real RocksDB batch.
+/// When `rocksdb` feature is enabled, this is a real `RocksDB` batch.
 /// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub type RocksBatchArg<'a> = ();
 
-/// The raw RocksDB batch type returned by [`EitherWriter::into_raw_rocksdb_batch`].
+/// The raw `RocksDB` batch type returned by [`EitherWriter::into_raw_rocksdb_batch`].
 #[cfg(all(unix, feature = "rocksdb"))]
 pub type RawRocksDBBatch = rocksdb::WriteBatchWithTransaction<true>;
-/// The raw RocksDB batch type returned by [`EitherWriter::into_raw_rocksdb_batch`].
+/// The raw `RocksDB` batch type returned by [`EitherWriter::into_raw_rocksdb_batch`].
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub type RawRocksDBBatch = ();
 
-/// Helper type for RocksDB transaction reference argument in reader constructors.
+/// Helper type for `RocksDB` transaction reference argument in reader constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a reference to a RocksDB transaction.
+/// When `rocksdb` feature is enabled, this is a reference to a `RocksDB` transaction.
 /// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(all(unix, feature = "rocksdb"))]
 pub type RocksTxRefArg<'a> = &'a crate::providers::rocksdb::RocksTx<'a>;
-/// Helper type for RocksDB transaction reference argument in reader constructors.
+/// Helper type for `RocksDB` transaction reference argument in reader constructors.
 ///
-/// When `rocksdb` feature is enabled, this is a reference to a RocksDB transaction.
+/// When `rocksdb` feature is enabled, this is a reference to a `RocksDB` transaction.
 /// Otherwise, it's `()` (unit type) to allow the same API without feature gates.
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub type RocksTxRefArg<'a> = ();
