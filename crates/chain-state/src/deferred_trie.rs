@@ -1,15 +1,27 @@
 use alloy_primitives::B256;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RwLock};
 use reth_metrics::{metrics::Counter, Metrics};
 use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, TrieInputSorted,
 };
 use std::{
+    collections::HashMap,
     fmt,
     sync::{Arc, LazyLock},
 };
 use tracing::instrument;
+
+/// Global cache for pre-computed overlays at persist boundaries.
+///
+/// When persist starts, we pre-compute the overlay for the new anchor in background.
+/// This cache stores those pre-computed overlays so blocks arriving after persist
+/// can use them instead of rebuilding from scratch.
+///
+/// Key: (old_anchor_hash, new_anchor_hash)
+/// Value: Pre-computed overlay for new_anchor
+static PRECOMPUTED_OVERLAY_CACHE: LazyLock<RwLock<HashMap<(B256, B256), Arc<TrieInputSorted>>>> =
+    LazyLock::new(|| RwLock::new(HashMap::new()));
 
 /// Shared handle to asynchronously populated trie data.
 ///
@@ -65,6 +77,87 @@ struct DeferredTrieMetrics {
     deferred_trie_overlay_reused: Counter,
     /// Number of times trie overlay was rebuilt from ancestors (fallback/persist).
     deferred_trie_overlay_rebuilt: Counter,
+    /// Number of times pre-computed overlay was used (persist boundary optimization).
+    deferred_trie_overlay_precomputed_hit: Counter,
+}
+
+/// Store a pre-computed overlay for a persist boundary transition.
+///
+/// Called when persist starts to pre-compute the overlay for the new anchor.
+/// The overlay can then be retrieved by blocks arriving after persist completes.
+///
+/// # Arguments
+/// * `old_anchor` - The anchor hash before persist
+/// * `new_anchor` - The anchor hash after persist (the last persisted block)
+/// * `overlay` - The pre-computed overlay relative to new_anchor
+pub fn store_precomputed_overlay(old_anchor: B256, new_anchor: B256, overlay: Arc<TrieInputSorted>) {
+    let mut cache = PRECOMPUTED_OVERLAY_CACHE.write();
+    cache.insert((old_anchor, new_anchor), overlay);
+    // Keep cache bounded - remove old entries if too many
+    if cache.len() > 10 {
+        // Remove oldest entries (simple strategy)
+        let keys_to_remove: Vec<_> = cache.keys().take(cache.len() - 5).cloned().collect();
+        for key in keys_to_remove {
+            cache.remove(&key);
+        }
+    }
+}
+
+/// Try to get a pre-computed overlay for a persist boundary transition.
+///
+/// Returns the pre-computed overlay if available, or None if not found.
+fn get_precomputed_overlay(old_anchor: B256, new_anchor: B256) -> Option<Arc<TrieInputSorted>> {
+    let cache = PRECOMPUTED_OVERLAY_CACHE.read();
+    cache.get(&(old_anchor, new_anchor)).cloned()
+}
+
+/// Clear the pre-computed overlay cache.
+///
+/// Called when overlays are no longer needed (e.g., after anchor transition completes).
+pub fn clear_precomputed_overlay(old_anchor: B256, new_anchor: B256) {
+    let mut cache = PRECOMPUTED_OVERLAY_CACHE.write();
+    cache.remove(&(old_anchor, new_anchor));
+}
+
+/// Compute and store a pre-computed overlay for blocks that will remain after persist.
+///
+/// This is called when persist starts to pre-compute the overlay for the new anchor.
+/// The overlay contains the merged state of all remaining in-memory blocks relative
+/// to the new anchor.
+///
+/// # Arguments
+/// * `old_anchor` - The anchor hash before persist (used as cache key)
+/// * `new_anchor` - The anchor hash after persist (the last persisted block)
+/// * `remaining_blocks` - DeferredTrieData handles for blocks that will remain in memory
+///   after persist completes (ordered oldest to newest)
+#[instrument(level = "debug", target = "engine::tree::deferred_trie", skip_all)]
+pub fn precompute_overlay_for_persist(
+    old_anchor: B256,
+    new_anchor: B256,
+    remaining_blocks: Vec<DeferredTrieData>,
+) {
+    if remaining_blocks.is_empty() {
+        // No remaining blocks - no need to pre-compute
+        return;
+    }
+
+    // Compute overlay by merging all remaining blocks' state
+    let mut overlay = TrieInputSorted::default();
+
+    for block in &remaining_blocks {
+        let block_data = block.wait_cloned();
+        {
+            let state_mut = Arc::make_mut(&mut overlay.state);
+            state_mut.extend_ref(block_data.hashed_state.as_ref());
+        }
+        {
+            let nodes_mut = Arc::make_mut(&mut overlay.nodes);
+            nodes_mut.extend_ref(block_data.trie_updates.as_ref());
+        }
+    }
+
+    // Store in cache
+    store_precomputed_overlay(old_anchor, new_anchor, Arc::new(overlay));
 }
 
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
@@ -190,9 +283,26 @@ impl DeferredTrieData {
                         Default::default(), // prefix_sets are per-block, not cumulative
                     )
                 }
-                // Case 2: Parent exists but anchor mismatch or no cached overlay.
-                // We must rebuild from the ancestors list (which only contains unpersisted blocks).
-                _ => {
+                // Case 2: Parent has cached overlay but anchor mismatch (persist boundary).
+                // Check precomputed cache first, then fall back to rebuild.
+                Some(AnchoredTrieInput { anchor_hash: parent_anchor, .. }) => {
+                    // Check if we have a pre-computed overlay for this anchor transition
+                    if let Some(precomputed) =
+                        get_precomputed_overlay(*parent_anchor, anchor_hash)
+                    {
+                        DEFERRED_TRIE_METRICS.deferred_trie_overlay_precomputed_hit.increment(1);
+                        TrieInputSorted::new(
+                            Arc::new((*precomputed.nodes).clone()),
+                            Arc::new((*precomputed.state).clone()),
+                            Default::default(),
+                        )
+                    } else {
+                        DEFERRED_TRIE_METRICS.deferred_trie_overlay_rebuilt.increment(1);
+                        Self::merge_ancestors_into_overlay(ancestors)
+                    }
+                }
+                // Case 3: Parent has no cached overlay (rare fallback).
+                None => {
                     DEFERRED_TRIE_METRICS.deferred_trie_overlay_rebuilt.increment(1);
                     Self::merge_ancestors_into_overlay(ancestors)
                 }

@@ -1244,11 +1244,66 @@ where
             .map(|b| b.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
 
+        // Pre-compute overlay for remaining blocks (persist boundary optimization).
+        // This allows blocks arriving after persist completes to use the pre-computed
+        // overlay instead of rebuilding from scratch (O(1) vs O(N)).
+        let old_anchor = self.persistence_state.last_persisted_block.hash;
+        let new_anchor = highest_num_hash.hash;
+        self.spawn_overlay_precompute_task(old_anchor, new_anchor);
+
         debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
         let (tx, rx) = oneshot::channel();
         let _ = self.persistence.save_blocks(blocks_to_persist, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
+    }
+
+    /// Spawns a background task to pre-compute the overlay for remaining in-memory blocks
+    /// after a persist operation.
+    ///
+    /// This optimization allows blocks arriving after persist completes to find a pre-computed
+    /// overlay in the cache, avoiding an O(N) rebuild at the persist boundary.
+    fn spawn_overlay_precompute_task(&self, old_anchor: B256, new_anchor: B256) {
+        // Collect DeferredTrieData handles for blocks that will remain after persist.
+        // These are the blocks from (new_anchor) to canonical head.
+        let mut remaining_handles = Vec::new();
+        let mut current_hash = self.state.tree_state.canonical_block_hash();
+
+        // Traverse backwards from canonical head, collecting blocks until we hit new_anchor
+        while let Some(block) = self.state.tree_state.blocks_by_hash.get(&current_hash) {
+            let block_hash = block.recovered_block().hash();
+            if block_hash == new_anchor {
+                // Reached the new anchor (which is being persisted), stop
+                break;
+            }
+            remaining_handles.push(block.trie_data_handle());
+            current_hash = block.recovered_block().parent_hash();
+        }
+
+        if remaining_handles.is_empty() {
+            // No blocks will remain after persist - no need to pre-compute
+            return;
+        }
+
+        // Reverse to get oldest -> newest order (required for correct merge)
+        remaining_handles.reverse();
+
+        debug!(
+            target: "engine::tree",
+            remaining_blocks = remaining_handles.len(),
+            ?old_anchor,
+            ?new_anchor,
+            "Spawning overlay pre-compute task for persist boundary"
+        );
+
+        // Spawn background task to compute overlay
+        rayon::spawn(move || {
+            reth_chain_state::precompute_overlay_for_persist(
+                old_anchor,
+                new_anchor,
+                remaining_handles,
+            );
+        });
     }
 
     /// Attempts to advance the persistence state.
