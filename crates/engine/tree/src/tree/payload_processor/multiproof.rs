@@ -866,6 +866,8 @@ impl MultiProofTask {
                 ctx.accumulated_prefetch_targets.push(targets);
 
                 // Batch consecutive prefetch messages up to limits.
+                // EmptyProof messages are handled inline since they're very fast (~100ns)
+                // and shouldn't interrupt batching.
                 while accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
                     ctx.accumulated_prefetch_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
                 {
@@ -879,6 +881,16 @@ impl MultiProofTask {
                             }
                             accumulated_count += next_count;
                             ctx.accumulated_prefetch_targets.push(next_targets);
+                        }
+                        Ok(MultiProofMessage::EmptyProof { sequence_number, state }) => {
+                            // Handle inline - very fast, don't break batching
+                            batch_metrics.proofs_processed += 1;
+                            if let Some(combined_update) = self.on_proof(
+                                sequence_number,
+                                SparseTrieUpdate { state, multiproof: Default::default() },
+                            ) {
+                                let _ = self.to_sparse_trie.send(combined_update);
+                            }
                         }
                         Ok(other_msg) => {
                             ctx.pending_msg = Some(other_msg);
