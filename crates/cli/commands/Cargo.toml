@@ -130,4 +130,4 @@ arbitrary = [
     "reth-ethereum-primitives/arbitrary",
 ]
 
-storage-edge = ["reth-db-common/edge", "reth-stages/rocksdb"]
+edge = ["reth-db-common/edge", "reth-stages/rocksdb"]

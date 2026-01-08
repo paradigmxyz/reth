@@ -28,7 +28,7 @@ jobs:
     with:
       image_tag: ghcr.io/paradigmxyz/reth:latest
       binary_name: reth
-      cargo_features: "asm-keccak storage-edge"
+      cargo_features: "asm-keccak edge"
       artifact_name: "reth-edge"
 
   prepare-hive:

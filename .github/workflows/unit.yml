@@ -23,7 +23,7 @@ jobs:
     runs-on: depot-ubuntu-latest-4
     env:
       RUST_BACKTRACE: 1
-      EDGE_FEATURES: ${{ matrix.storage == 'edge' && 'storage-edge' || '' }}
+      EDGE_FEATURES: ${{ matrix.storage == 'edge' && 'edge' || '' }}
     strategy:
       matrix:
         type: [ethereum, optimism]

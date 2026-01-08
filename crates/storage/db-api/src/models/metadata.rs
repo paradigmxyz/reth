@@ -36,7 +36,7 @@ pub struct StorageSettings {
 impl StorageSettings {
     /// Creates `StorageSettings` for edge nodes with all storage features enabled:
     /// - Receipts and transaction senders in static files
-    /// - History indices in RocksDB (storages, accounts, transaction hashes)
+    /// - History indices in `RocksDB` (storages, accounts, transaction hashes)
     /// - Account changesets in static files
     #[cfg(feature = "edge")]
     pub const fn edge() -> Self {
