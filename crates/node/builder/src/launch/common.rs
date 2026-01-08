@@ -664,6 +664,7 @@ where
                         }
                     })
                     .build(),
+                self.data_dir().pprof_dumps(),
             )
             .with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
 
