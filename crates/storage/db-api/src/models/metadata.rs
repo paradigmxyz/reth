@@ -43,10 +43,10 @@ impl StorageSettings {
         Self {
             receipts_in_static_files: true,
             transaction_senders_in_static_files: true,
-            storages_history_in_rocksdb: true,
-            transaction_hash_numbers_in_rocksdb: true,
-            account_history_in_rocksdb: true,
             account_changesets_in_static_files: true,
+            storages_history_in_rocksdb: false,
+            transaction_hash_numbers_in_rocksdb: false,
+            account_history_in_rocksdb: false,
         }
     }
 
