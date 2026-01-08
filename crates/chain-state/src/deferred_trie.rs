@@ -156,7 +156,7 @@ impl DeferredTrieData {
     ) -> ComputedTrieData {
         // Sort the current block's hashed state and trie updates
         let sorted_hashed_state = Arc::new(hashed_state.clone_into_sorted());
-        let sorted_trie_updates = Arc::new(trie_updates.clone().into_sorted());
+        let sorted_trie_updates = Arc::new(trie_updates.clone_into_sorted());
 
         // Merge trie data from ancestors (oldest -> newest so later state takes precedence)
         let mut overlay = TrieInputSorted::default();

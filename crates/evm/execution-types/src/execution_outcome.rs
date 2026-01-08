@@ -342,7 +342,7 @@ impl<T> ExecutionOutcome<T> {
     /// Prepends present the state with the given `BundleState`.
     /// It adds changes from the given state but does not override any existing changes.
     ///
-    /// Reverts  and receipts are not updated.
+    /// Reverts and receipts are not updated.
     pub fn prepend_state(&mut self, mut other: BundleState) {
         let other_len = other.reverts.len();
         // take this bundle
@@ -396,7 +396,7 @@ impl ExecutionOutcome {
     /// Returns the ethereum receipt root for all recorded receipts.
     ///
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
+    /// of receipt. This is an expensive operation.
     pub fn ethereum_receipts_root(&self, block_number: BlockNumber) -> Option<B256> {
         self.generic_receipts_root_slow(
             block_number,

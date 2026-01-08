@@ -721,13 +721,13 @@ where
                     logs_found = all_logs.len(),
                     max_logs_per_response,
                     from_block,
-                    to_block = num_hash.number.saturating_sub(1),
+                    to_block = num_hash.number,
                     "Query exceeded max logs per response limit"
                 );
                 return Err(EthFilterError::QueryExceedsMaxResults {
                     max_logs: max_logs_per_response,
                     from_block,
-                    to_block: num_hash.number.saturating_sub(1),
+                    to_block: num_hash.number,
                 });
             }
         }
@@ -1252,7 +1252,7 @@ impl<
             let filter_inner = self.filter_inner.clone();
             let chunk_task = Box::pin(async move {
                 let chunk_task = tokio::task::spawn_blocking(move || {
-                    let mut chunk_results = Vec::new();
+                    let mut chunk_results = Vec::with_capacity(chunk_headers.len());
 
                     for header in chunk_headers {
                         // Fetch directly from provider - RangeMode is used for older blocks

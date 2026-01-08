@@ -30,7 +30,9 @@ use reth_evm::{
 };
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::NodePrimitives;
-use reth_provider::{BlockReader, DatabaseProviderROFactory, StateProviderFactory, StateReader};
+use reth_provider::{
+    BlockReader, DatabaseProviderROFactory, StateProvider, StateProviderFactory, StateReader,
+};
 use reth_revm::{db::BundleState, state::EvmState};
 use reth_trie::{hashed_cursor::HashedCursorFactory, trie_cursor::TrieCursorFactory};
 use reth_trie_parallel::{
@@ -44,6 +46,7 @@ use reth_trie_sparse::{
 use reth_trie_sparse_parallel::{ParallelSparseTrie, ParallelismThresholds};
 use std::{
     collections::BTreeMap,
+    ops::Not,
     sync::{
         atomic::AtomicBool,
         mpsc::{self, channel},
@@ -230,8 +233,6 @@ where
             + Send
             + 'static,
     {
-        let parent_hash = env.parent_hash;
-
         // start preparing transactions immediately
         let (prewarm_rx, execution_rx, transaction_count_hint) =
             self.spawn_tx_iterator(transactions);
@@ -293,17 +294,19 @@ where
 
         // spawn multi-proof task
         let parent_span = span.clone();
-        self.executor.spawn_blocking({
-            let saved_cache = self.cache_for(parent_hash);
-            let cache = saved_cache.cache().clone();
-            let cache_metrics = saved_cache.metrics().clone();
-            move || {
-                let _enter = parent_span.entered();
-                // Build a state provider for the multiproof task
-                let provider = provider_builder.build().expect("failed to build provider");
-                let provider = CachedStateProvider::new(provider, cache, cache_metrics);
-                multi_proof_task.run(provider);
-            }
+        let saved_cache = prewarm_handle.saved_cache.clone();
+        self.executor.spawn_blocking(move || {
+            let _enter = parent_span.entered();
+            // Build a state provider for the multiproof task
+            let provider = provider_builder.build().expect("failed to build provider");
+            let provider = if let Some(saved_cache) = saved_cache {
+                let (cache, metrics) = saved_cache.split();
+                Box::new(CachedStateProvider::new(provider, cache, metrics))
+                    as Box<dyn StateProvider>
+            } else {
+                Box::new(provider)
+            };
+            multi_proof_task.run(provider);
         });
 
         // wire the sparse trie to the state root response receiver
@@ -422,20 +425,13 @@ where
             transactions = mpsc::channel().1;
         }
 
-        let (saved_cache, cache, cache_metrics) = if self.disable_state_cache {
-            (None, None, None)
-        } else {
-            let saved_cache = self.cache_for(env.parent_hash);
-            let cache = saved_cache.cache().clone();
-            let cache_metrics = saved_cache.metrics().clone();
-            (Some(saved_cache), Some(cache), Some(cache_metrics))
-        };
+        let saved_cache = self.disable_state_cache.not().then(|| self.cache_for(env.parent_hash));
 
         // configure prewarming
         let prewarm_ctx = PrewarmContext {
             env,
             evm_config: self.evm_config.clone(),
-            saved_cache,
+            saved_cache: saved_cache.clone(),
             provider: provider_builder,
             metrics: PrewarmMetrics::default(),
             terminate_execution: Arc::new(AtomicBool::new(false)),
@@ -465,7 +461,7 @@ where
             });
         }
 
-        CacheTaskHandle { cache, to_prewarm_task: Some(to_prewarm_task), cache_metrics }
+        CacheTaskHandle { saved_cache, to_prewarm_task: Some(to_prewarm_task) }
     }
 
     /// Returns the cache for the given parent hash.
@@ -651,12 +647,12 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 
     /// Returns a clone of the caches used by prewarming
     pub(super) fn caches(&self) -> Option<StateExecutionCache> {
-        self.prewarm_handle.cache.clone()
+        self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.cache().clone())
     }
 
     /// Returns a clone of the cache metrics used by prewarming
     pub(super) fn cache_metrics(&self) -> Option<CachedStateMetrics> {
-        self.prewarm_handle.cache_metrics.clone()
+        self.prewarm_handle.saved_cache.as_ref().map(|cache| cache.metrics().clone())
     }
 
     /// Terminates the pre-warming transaction processing.
@@ -693,9 +689,7 @@ impl<Tx, Err, R: Send + Sync + 'static> PayloadHandle<Tx, Err, R> {
 #[derive(Debug)]
 pub(crate) struct CacheTaskHandle<R> {
     /// The shared cache the task operates with.
-    cache: Option<StateExecutionCache>,
-    /// Metrics for the caches
-    cache_metrics: Option<CachedStateMetrics>,
+    saved_cache: Option<SavedCache>,
     /// Channel to the spawned prewarm task if any
     to_prewarm_task: Option<std::sync::mpsc::Sender<PrewarmTaskEvent<R>>>,
 }
@@ -781,12 +775,34 @@ impl ExecutionCache {
             warn!(blocked_for=?elapsed, "Blocked waiting for execution cache mutex");
         }
 
-        cache
-            .as_ref()
+        if let Some(c) = cache.as_ref() {
+            let cached_hash = c.executed_block_hash();
+            // Check that the cache hash matches the parent hash of the current block. It won't
+            // match in case it's a fork block.
+            let hash_matches = cached_hash == parent_hash;
             // Check `is_available()` to ensure no other tasks (e.g., prewarming) currently hold
             // a reference to this cache. We can only reuse it when we have exclusive access.
-            .filter(|c| c.executed_block_hash() == parent_hash && c.is_available())
-            .cloned()
+            let available = c.is_available();
+            let usage_count = c.usage_count();
+
+            debug!(
+                target: "engine::caching",
+                %cached_hash,
+                %parent_hash,
+                hash_matches,
+                available,
+                usage_count,
+                "Existing cache found"
+            );
+
+            if hash_matches && available {
+                return Some(c.clone());
+            }
+        } else {
+            debug!(target: "engine::caching", %parent_hash, "No cache found");
+        }
+
+        None
     }
 
     /// Clears the tracked cache
