@@ -1613,7 +1613,7 @@ impl SerialSparseTrie {
 
                     let mut tree_mask = TrieMask::default();
                     let mut hash_mask = TrieMask::default();
-                    let mut hashes = Vec::new();
+                    buffers.hashes_buf.clear();
 
                     // Lazy lookup for branch node masks - shared across loop iterations
                     let mut path_masks_storage = None;
@@ -1664,7 +1664,7 @@ impl SerialSparseTrie {
                                 });
                                 if let Some(hash) = hash {
                                     hash_mask.set_bit(last_child_nibble);
-                                    hashes.push(hash);
+                                    buffers.hashes_buf.push(hash);
                                 }
                             }
 
@@ -1715,12 +1715,12 @@ impl SerialSparseTrie {
                         if store_in_db_trie {
                             // Store in DB trie if there are either any children that are stored in
                             // the DB trie, or any children represent hashed values
-                            hashes.reverse();
+                            buffers.hashes_buf.reverse();
                             let branch_node = BranchNodeCompact::new(
                                 *state_mask,
                                 tree_mask,
                                 hash_mask,
-                                hashes,
+                                buffers.hashes_buf.drain(..).collect(),
                                 hash.filter(|_| path.is_empty()),
                             );
                             updates.updated_nodes.insert(path, branch_node);
@@ -1957,6 +1957,8 @@ pub struct RlpNodeBuffers {
     branch_child_buf: SmallVec<[Nibbles; 16]>,
     /// Reusable branch value stack
     branch_value_stack_buf: SmallVec<[RlpNode; 16]>,
+    /// Reusable buffer for collecting branch node child hashes
+    hashes_buf: SmallVec<[B256; 16]>,
 }
 
 impl RlpNodeBuffers {
@@ -1971,6 +1973,7 @@ impl RlpNodeBuffers {
             rlp_node_stack: Vec::new(),
             branch_child_buf: SmallVec::<[Nibbles; 16]>::new_const(),
             branch_value_stack_buf: SmallVec::<[RlpNode; 16]>::new_const(),
+            hashes_buf: SmallVec::<[B256; 16]>::new_const(),
         }
     }
 }
