@@ -25,7 +25,7 @@ use reth_trie_parallel::{
 use std::{collections::BTreeMap, mem, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
-/// Source of state changes, either from EVM execution or from a Block Access List.
+/// Source of state changes during block processing.
 #[derive(Clone, Copy)]
 pub enum Source {
     /// State changes from EVM execution.
