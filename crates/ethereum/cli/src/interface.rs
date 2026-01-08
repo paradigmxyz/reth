@@ -290,7 +290,7 @@ pub enum Commands<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> {
     ReExecute(re_execute::Command<C>),
     /// Generate a debug report archive for bug reports.
     #[command(name = "report")]
-    Report(report::Command),
+    Report(report::Command<C>),
 }
 
 impl<C: ChainSpecParser, Ext: clap::Args + fmt::Debug> Commands<C, Ext> {
