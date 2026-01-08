@@ -17,6 +17,8 @@ reth-primitives-traits.workspace = true
 reth-execution-errors.workspace = true
 reth-db-api.workspace = true
 reth-trie.workspace = true
+reth-storage-api = { workspace = true, features = ["db-api"] }
+reth-storage-errors.workspace = true
 
 # alloy
 alloy-primitives.workspace = true
@@ -53,6 +55,7 @@ serde = [
     "similar-asserts/serde",
     "alloy-consensus/serde",
     "alloy-primitives/serde",
+    "reth-storage-api/serde",
     "reth-trie/serde",
     "reth-trie-common/serde",
     "reth-primitives-traits/serde",
