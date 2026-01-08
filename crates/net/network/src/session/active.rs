@@ -173,6 +173,14 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     ///
     /// Returns an error if the message is considered to be in violation of the protocol.
     fn on_incoming_message(&mut self, msg: EthSnapMessage<N>) -> OnIncomingMessageOutcome<N> {
+        match msg {
+            EthSnapMessage::Eth(msg) => self.on_incoming_eth_message(msg),
+            EthSnapMessage::Snap(msg) => self.on_incoming_snap_message(msg),
+        }
+    }
+
+    /// Handle incoming eth protocol messages.
+    fn on_incoming_eth_message(&mut self, msg: EthMessage<N>) -> OnIncomingMessageOutcome<N> {
         /// A macro that handles an incoming request
         /// This creates a new channel and tries to send the sender half to the session while
         /// storing the receiver half internally so the pending response can be polled.
@@ -224,108 +232,101 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         }
 
         match msg {
-            EthSnapMessage::Eth(msg) => match msg {
-                message @ EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
-                    error: EthStreamError::EthHandshakeError(
-                        EthHandshakeError::StatusNotInHandshake,
-                    ),
-                    message,
-                },
-                EthMessage::NewBlockHashes(msg) => {
-                    self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
-                }
-                EthMessage::NewBlock(msg) => {
-                    let block: NewBlockMessage<N::NewBlockPayload> = NewBlockMessage {
-                        hash: msg.block().header().hash_slow(),
-                        block: Arc::new(*msg),
-                    };
-                    self.try_emit_broadcast(PeerMessage::NewBlock(block)).into()
-                }
-                EthMessage::Transactions(msg) => {
-                    self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
-                }
-                EthMessage::NewPooledTransactionHashes66(msg) => {
-                    self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
-                }
-                EthMessage::NewPooledTransactionHashes68(msg) => {
-                    self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
-                }
-                EthMessage::GetBlockHeaders(req) => {
-                    on_request!(req, BlockHeaders, GetBlockHeaders)
-                }
-                EthMessage::BlockHeaders(resp) => {
-                    on_response!(resp, GetBlockHeaders)
-                }
-                EthMessage::GetBlockBodies(req) => {
-                    on_request!(req, BlockBodies, GetBlockBodies)
-                }
-                EthMessage::BlockBodies(resp) => {
-                    on_response!(resp, GetBlockBodies)
-                }
-                EthMessage::GetPooledTransactions(req) => {
-                    on_request!(req, PooledTransactions, GetPooledTransactions)
-                }
-                EthMessage::PooledTransactions(resp) => {
-                    on_response!(resp, GetPooledTransactions)
-                }
-                EthMessage::GetNodeData(req) => {
-                    on_request!(req, NodeData, GetNodeData)
-                }
-                EthMessage::NodeData(resp) => {
-                    on_response!(resp, GetNodeData)
-                }
-                EthMessage::GetReceipts(req) => {
-                    if self.conn.version() >= EthVersion::Eth69 {
-                        on_request!(req, Receipts69, GetReceipts69)
-                    } else {
-                        on_request!(req, Receipts, GetReceipts)
-                    }
-                }
-                EthMessage::GetReceipts70(req) => {
-                    on_request!(req, Receipts70, GetReceipts70)
-                }
-                EthMessage::Receipts(resp) => {
-                    on_response!(resp, GetReceipts)
-                }
-                EthMessage::Receipts69(resp) => {
-                    on_response!(resp, GetReceipts69)
-                }
-                EthMessage::Receipts70(resp) => {
-                    on_response!(resp, GetReceipts70)
-                }
-                EthMessage::BlockRangeUpdate(msg) => {
-                    // Validate that earliest <= latest according to the spec
-                    if msg.earliest > msg.latest {
-                        return OnIncomingMessageOutcome::BadMessage {
-                            error: EthStreamError::InvalidMessage(MessageError::Other(format!(
-                                "invalid block range: earliest ({}) > latest ({})",
-                                msg.earliest, msg.latest
-                            ))),
-                            message: EthMessage::BlockRangeUpdate(msg),
-                        };
-                    }
-
-                    // Validate that the latest hash is not zero
-                    if msg.latest_hash.is_zero() {
-                        return OnIncomingMessageOutcome::BadMessage {
-                            error: EthStreamError::InvalidMessage(MessageError::Other(
-                                "invalid block range: latest_hash cannot be zero".to_string(),
-                            )),
-                            message: EthMessage::BlockRangeUpdate(msg),
-                        };
-                    }
-
-                    if let Some(range_info) = self.range_info.as_ref() {
-                        range_info.update(msg.earliest, msg.latest, msg.latest_hash);
-                    }
-
-                    OnIncomingMessageOutcome::Ok
-                }
-                EthMessage::Other(bytes) => {
-                    self.try_emit_broadcast(PeerMessage::Other(bytes)).into()
-                }
+            message @ EthMessage::Status(_) => OnIncomingMessageOutcome::BadMessage {
+                error: EthStreamError::EthHandshakeError(EthHandshakeError::StatusNotInHandshake),
+                message,
             },
-            EthSnapMessage::Snap(msg) => self.on_incoming_snap_message(msg),
+            EthMessage::NewBlockHashes(msg) => {
+                self.try_emit_broadcast(PeerMessage::NewBlockHashes(msg)).into()
+            }
+            EthMessage::NewBlock(msg) => {
+                let block: NewBlockMessage<N::NewBlockPayload> = NewBlockMessage {
+                    hash: msg.block().header().hash_slow(),
+                    block: Arc::new(*msg),
+                };
+                self.try_emit_broadcast(PeerMessage::NewBlock(block)).into()
+            }
+            EthMessage::Transactions(msg) => {
+                self.try_emit_broadcast(PeerMessage::ReceivedTransaction(msg)).into()
+            }
+            EthMessage::NewPooledTransactionHashes66(msg) => {
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+            }
+            EthMessage::NewPooledTransactionHashes68(msg) => {
+                self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
+            }
+            EthMessage::GetBlockHeaders(req) => {
+                on_request!(req, BlockHeaders, GetBlockHeaders)
+            }
+            EthMessage::BlockHeaders(resp) => {
+                on_response!(resp, GetBlockHeaders)
+            }
+            EthMessage::GetBlockBodies(req) => {
+                on_request!(req, BlockBodies, GetBlockBodies)
+            }
+            EthMessage::BlockBodies(resp) => {
+                on_response!(resp, GetBlockBodies)
+            }
+            EthMessage::GetPooledTransactions(req) => {
+                on_request!(req, PooledTransactions, GetPooledTransactions)
+            }
+            EthMessage::PooledTransactions(resp) => {
+                on_response!(resp, GetPooledTransactions)
+            }
+            EthMessage::GetNodeData(req) => {
+                on_request!(req, NodeData, GetNodeData)
+            }
+            EthMessage::NodeData(resp) => {
+                on_response!(resp, GetNodeData)
+            }
+            EthMessage::GetReceipts(req) => {
+                if self.conn.version() >= EthVersion::Eth69 {
+                    on_request!(req, Receipts69, GetReceipts69)
+                } else {
+                    on_request!(req, Receipts, GetReceipts)
+                }
+            }
+            EthMessage::GetReceipts70(req) => {
+                on_request!(req, Receipts70, GetReceipts70)
+            }
+            EthMessage::Receipts(resp) => {
+                on_response!(resp, GetReceipts)
+            }
+            EthMessage::Receipts69(resp) => {
+                on_response!(resp, GetReceipts69)
+            }
+            EthMessage::Receipts70(resp) => {
+                on_response!(resp, GetReceipts70)
+            }
+            EthMessage::BlockRangeUpdate(msg) => {
+                // Validate that earliest <= latest according to the spec
+                if msg.earliest > msg.latest {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(format!(
+                            "invalid block range: earliest ({}) > latest ({})",
+                            msg.earliest, msg.latest
+                        ))),
+                        message: EthMessage::BlockRangeUpdate(msg),
+                    };
+                }
+
+                // Validate that the latest hash is not zero
+                if msg.latest_hash.is_zero() {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(
+                            "invalid block range: latest_hash cannot be zero".to_string(),
+                        )),
+                        message: EthMessage::BlockRangeUpdate(msg),
+                    };
+                }
+
+                if let Some(range_info) = self.range_info.as_ref() {
+                    range_info.update(msg.earliest, msg.latest, msg.latest_hash);
+                }
+
+                OnIncomingMessageOutcome::Ok
+            }
+            EthMessage::Other(bytes) => self.try_emit_broadcast(PeerMessage::Other(bytes)).into(),
         }
     }
 
