@@ -138,6 +138,8 @@ impl ProofWorkerHandle {
         let storage_available_workers = Arc::new(AtomicUsize::new(0));
         let account_available_workers = Arc::new(AtomicUsize::new(0));
 
+        let cached_storage_roots = Arc::new(DashMap::new());
+
         debug!(
             target: "trie::proof_task",
             storage_worker_count,
@@ -155,6 +157,7 @@ impl ProofWorkerHandle {
             let task_ctx_clone = task_ctx.clone();
             let work_rx_clone = storage_work_rx.clone();
             let storage_available_workers_clone = storage_available_workers.clone();
+            let cached_storage_roots = cached_storage_roots.clone();
 
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
@@ -168,6 +171,7 @@ impl ProofWorkerHandle {
                     work_rx_clone,
                     worker_id,
                     storage_available_workers_clone,
+                    cached_storage_roots,
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -196,6 +200,7 @@ impl ProofWorkerHandle {
             let work_rx_clone = account_work_rx.clone();
             let storage_work_tx_clone = storage_work_tx.clone();
             let account_available_workers_clone = account_available_workers.clone();
+            let cached_storage_roots = cached_storage_roots.clone();
 
             executor.spawn_blocking(move || {
                 #[cfg(feature = "metrics")]
@@ -210,6 +215,7 @@ impl ProofWorkerHandle {
                     worker_id,
                     storage_work_tx_clone,
                     account_available_workers_clone,
+                    cached_storage_roots,
                     #[cfg(feature = "metrics")]
                     metrics,
                     #[cfg(feature = "metrics")]
@@ -748,6 +754,8 @@ struct StorageProofWorker<Factory> {
     worker_id: usize,
     /// Counter tracking worker availability
     available_workers: Arc<AtomicUsize>,
+    /// Cached storage roots
+    cached_storage_roots: Arc<DashMap<B256, B256>>,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -768,6 +776,7 @@ where
         work_rx: CrossbeamReceiver<StorageWorkerJob>,
         worker_id: usize,
         available_workers: Arc<AtomicUsize>,
+        cached_storage_roots: Arc<DashMap<B256, B256>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
@@ -776,6 +785,7 @@ where
             work_rx,
             worker_id,
             available_workers,
+            cached_storage_roots,
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
@@ -808,25 +818,13 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        let Self {
-            task_ctx,
-            work_rx,
-            worker_id,
-            available_workers,
-            #[cfg(feature = "metrics")]
-            metrics,
-            #[cfg(feature = "metrics")]
-            ref mut cursor_metrics,
-            v2_enabled: _,
-        } = self;
-
         // Create provider from factory
-        let provider = task_ctx.factory.database_provider_ro()?;
-        let proof_tx = ProofTaskTx::new(provider, worker_id);
+        let provider = self.task_ctx.factory.database_provider_ro()?;
+        let proof_tx = ProofTaskTx::new(provider, self.worker_id);
 
         trace!(
             target: "trie::proof_task",
-            worker_id,
+            worker_id = self.worker_id,
             "Storage worker started"
         );
 
@@ -842,16 +840,15 @@ where
         };
 
         // Initially mark this worker as available.
-        available_workers.fetch_add(1, Ordering::Relaxed);
+        self.available_workers.fetch_add(1, Ordering::Relaxed);
 
-        while let Ok(job) = work_rx.recv() {
+        while let Ok(job) = self.work_rx.recv() {
             // Mark worker as busy.
-            available_workers.fetch_sub(1, Ordering::Relaxed);
+            self.available_workers.fetch_sub(1, Ordering::Relaxed);
 
             match job {
                 StorageWorkerJob::StorageProof { input, proof_result_sender } => {
-                    Self::process_storage_proof(
-                        worker_id,
+                    self.process_storage_proof(
                         &proof_tx,
                         v2_calculator.as_mut(),
                         input,
@@ -863,7 +860,7 @@ where
 
                 StorageWorkerJob::BlindedStorageNode { account, path, result_sender } => {
                     Self::process_blinded_node(
-                        worker_id,
+                        self.worker_id,
                         &proof_tx,
                         account,
                         path,
@@ -874,12 +871,12 @@ where
             }
 
             // Mark worker as available again.
-            available_workers.fetch_add(1, Ordering::Relaxed);
+            self.available_workers.fetch_add(1, Ordering::Relaxed);
         }
 
         trace!(
             target: "trie::proof_task",
-            worker_id,
+            worker_id = self.worker_id,
             storage_proofs_processed,
             storage_nodes_processed,
             "Storage worker shutting down"
@@ -887,8 +884,8 @@ where
 
         #[cfg(feature = "metrics")]
         {
-            metrics.record_storage_nodes(storage_nodes_processed as usize);
-            cursor_metrics.record(&mut cursor_metrics_cache);
+            self.metrics.record_storage_nodes(storage_nodes_processed as usize);
+            self.cursor_metrics.record(&mut cursor_metrics_cache);
         }
 
         Ok(())
@@ -896,7 +893,7 @@ where
 
     /// Processes a storage proof request.
     fn process_storage_proof<Provider>(
-        worker_id: usize,
+        &self,
         proof_tx: &ProofTaskTx<Provider>,
         v2_calculator: Option<
             &mut StorageProofCalculator<
@@ -920,7 +917,7 @@ where
             StorageProofInput::Legacy { hashed_address, prefix_set, target_slots, .. } => {
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
+                    worker_id = self.worker_id,
                     hashed_address = ?hashed_address,
                     prefix_set_len = prefix_set.len(),
                     target_slots_len = target_slots.len(),
@@ -936,7 +933,7 @@ where
             StorageProofInput::V2 { hashed_address, targets } => {
                 trace!(
                     target: "trie::proof_task",
-                    worker_id,
+                    worker_id = self.worker_id,
                     hashed_address = ?hashed_address,
                     targets_len = targets.len(),
                     "Processing V2 storage proof"
@@ -949,19 +946,25 @@ where
         let proof_elapsed = proof_start.elapsed();
         *storage_proofs_processed += 1;
 
+        let root = result.as_ref().ok().and_then(|result| result.root());
+
         if proof_result_sender.send(StorageProofResultMessage { hashed_address, result }).is_err() {
             trace!(
                 target: "trie::proof_task",
-                worker_id,
+                worker_id = self.worker_id,
                 hashed_address = ?hashed_address,
                 storage_proofs_processed,
                 "Proof result receiver dropped, discarding result"
             );
         }
 
+        if let Some(root) = root {
+            self.cached_storage_roots.insert(hashed_address, root);
+        }
+
         trace!(
             target: "trie::proof_task",
-            worker_id,
+            worker_id = self.worker_id,
             hashed_address = ?hashed_address,
             proof_time_us = proof_elapsed.as_micros(),
             total_processed = storage_proofs_processed,
@@ -969,6 +972,7 @@ where
             hashed_cursor_duration_us = hashed_cursor_metrics.total_duration.as_micros(),
             ?trie_cursor_metrics,
             ?hashed_cursor_metrics,
+            ?root,
             "Storage proof completed"
         );
 
@@ -1048,6 +1052,8 @@ struct AccountProofWorker<Factory> {
     storage_work_tx: CrossbeamSender<StorageWorkerJob>,
     /// Counter tracking worker availability
     available_workers: Arc<AtomicUsize>,
+    /// Cached storage roots
+    cached_storage_roots: Arc<DashMap<B256, B256>>,
     /// Metrics collector for this worker
     #[cfg(feature = "metrics")]
     metrics: ProofTaskTrieMetrics,
@@ -1061,12 +1067,14 @@ where
     Factory: DatabaseProviderROFactory<Provider: TrieCursorFactory + HashedCursorFactory>,
 {
     /// Creates a new account proof worker.
+    #[allow(clippy::too_many_arguments)]
     const fn new(
         task_ctx: ProofTaskCtx<Factory>,
         work_rx: CrossbeamReceiver<AccountWorkerJob>,
         worker_id: usize,
         storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         available_workers: Arc<AtomicUsize>,
+        cached_storage_roots: Arc<DashMap<B256, B256>>,
         #[cfg(feature = "metrics")] metrics: ProofTaskTrieMetrics,
         #[cfg(feature = "metrics")] cursor_metrics: ProofTaskCursorMetrics,
     ) -> Self {
@@ -1076,6 +1084,7 @@ where
             worker_id,
             storage_work_tx,
             available_workers,
+            cached_storage_roots,
             #[cfg(feature = "metrics")]
             metrics,
             #[cfg(feature = "metrics")]
@@ -1101,25 +1110,13 @@ where
     /// If this function panics, the worker thread terminates but other workers
     /// continue operating and the system degrades gracefully.
     fn run(mut self) -> ProviderResult<()> {
-        let Self {
-            task_ctx,
-            work_rx,
-            worker_id,
-            storage_work_tx,
-            available_workers,
-            #[cfg(feature = "metrics")]
-            metrics,
-            #[cfg(feature = "metrics")]
-            ref mut cursor_metrics,
-        } = self;
-
         // Create provider from factory
-        let provider = task_ctx.factory.database_provider_ro()?;
-        let proof_tx = ProofTaskTx::new(provider, worker_id);
+        let provider = self.task_ctx.factory.database_provider_ro()?;
+        let proof_tx = ProofTaskTx::new(provider, self.worker_id);
 
         trace!(
             target: "trie::proof_task",
-            worker_id,
+            worker_id=self.worker_id,
             "Account worker started"
         );
 
@@ -1128,18 +1125,16 @@ where
         let mut cursor_metrics_cache = ProofTaskCursorMetricsCache::default();
 
         // Count this worker as available only after successful initialization.
-        available_workers.fetch_add(1, Ordering::Relaxed);
+        self.available_workers.fetch_add(1, Ordering::Relaxed);
 
-        while let Ok(job) = work_rx.recv() {
+        while let Ok(job) = self.work_rx.recv() {
             // Mark worker as busy.
-            available_workers.fetch_sub(1, Ordering::Relaxed);
+            self.available_workers.fetch_sub(1, Ordering::Relaxed);
 
             match job {
                 AccountWorkerJob::AccountMultiproof { input } => {
-                    Self::process_account_multiproof(
-                        worker_id,
+                    self.process_account_multiproof(
                         &proof_tx,
-                        storage_work_tx.clone(),
                         *input,
                         &mut account_proofs_processed,
                         &mut cursor_metrics_cache,
@@ -1148,7 +1143,7 @@ where
 
                 AccountWorkerJob::BlindedAccountNode { path, result_sender } => {
                     Self::process_blinded_node(
-                        worker_id,
+                        self.worker_id,
                         &proof_tx,
                         path,
                         result_sender,
@@ -1158,12 +1153,12 @@ where
             }
 
             // Mark worker as available again.
-            available_workers.fetch_add(1, Ordering::Relaxed);
+            self.available_workers.fetch_add(1, Ordering::Relaxed);
         }
 
         trace!(
             target: "trie::proof_task",
-            worker_id,
+            worker_id=self.worker_id,
             account_proofs_processed,
             account_nodes_processed,
             "Account worker shutting down"
@@ -1171,8 +1166,8 @@ where
 
         #[cfg(feature = "metrics")]
         {
-            metrics.record_account_nodes(account_nodes_processed as usize);
-            cursor_metrics.record(&mut cursor_metrics_cache);
+            self.metrics.record_account_nodes(account_nodes_processed as usize);
+            self.cursor_metrics.record(&mut cursor_metrics_cache);
         }
 
         Ok(())
@@ -1180,9 +1175,8 @@ where
 
     /// Processes an account multiproof request.
     fn process_account_multiproof<Provider>(
-        worker_id: usize,
+        &self,
         proof_tx: &ProofTaskTx<Provider>,
-        storage_work_tx: CrossbeamSender<StorageWorkerJob>,
         input: AccountMultiproofInput,
         account_proofs_processed: &mut u64,
         cursor_metrics_cache: &mut ProofTaskCursorMetricsCache,
@@ -1194,7 +1188,6 @@ where
             mut prefix_sets,
             collect_branch_node_masks,
             multi_added_removed_keys,
-            missed_leaves_storage_roots,
             proof_result_sender:
                 ProofResultContext { sender: result_tx, sequence_number: seq, state, start_time: start },
             v2_proofs_enabled,
@@ -1204,7 +1197,7 @@ where
             target: "trie::proof_task",
             "Account multiproof calculation",
             targets = targets.len(),
-            worker_id,
+            worker_id=self.worker_id,
         );
         let _span_guard = span.enter();
 
@@ -1225,7 +1218,7 @@ where
         tracker.set_precomputed_storage_roots(storage_root_targets_len as u64);
 
         let storage_proof_receivers = match dispatch_storage_proofs(
-            &storage_work_tx,
+            &self.storage_work_tx,
             &targets,
             &mut storage_prefix_sets,
             collect_branch_node_masks,
@@ -1255,7 +1248,7 @@ where
             collect_branch_node_masks,
             multi_added_removed_keys: multi_added_removed_keys.as_ref(),
             storage_proof_receivers,
-            missed_leaves_storage_roots: missed_leaves_storage_roots.as_ref(),
+            cached_storage_roots: &self.cached_storage_roots,
         };
 
         let result =
@@ -1282,7 +1275,7 @@ where
         {
             trace!(
                 target: "trie::proof_task",
-                worker_id,
+                worker_id=self.worker_id,
                 account_proofs_processed,
                 "Account multiproof receiver dropped, discarding result"
             );
@@ -1468,7 +1461,7 @@ where
                     None => {
                         tracker.inc_missed_leaves();
 
-                        match ctx.missed_leaves_storage_roots.entry(hashed_address) {
+                        match ctx.cached_storage_roots.entry(hashed_address) {
                             dashmap::Entry::Occupied(occ) => *occ.get(),
                             dashmap::Entry::Vacant(vac) => {
                                 let root =
@@ -1675,8 +1668,6 @@ pub struct AccountMultiproofInput {
     pub collect_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
     pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
-    /// Cached storage proof roots for missed leaves encountered during account trie walk.
-    pub missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     /// Context for sending the proof result.
     pub proof_result_sender: ProofResultContext,
     /// Whether to use V2 storage proofs.
@@ -1695,8 +1686,9 @@ struct AccountMultiproofParams<'a> {
     multi_added_removed_keys: Option<&'a Arc<MultiAddedRemovedKeys>>,
     /// Receivers for storage proofs being computed in parallel.
     storage_proof_receivers: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
-    /// Cached storage proof roots for missed leaves encountered during account trie walk.
-    missed_leaves_storage_roots: &'a DashMap<B256, B256>,
+    /// Cached storage roots. This will be used to read storage roots for missed leaves, as well as
+    /// to write calculated storage roots.
+    cached_storage_roots: &'a DashMap<B256, B256>,
 }
 
 /// Internal message for account workers.
