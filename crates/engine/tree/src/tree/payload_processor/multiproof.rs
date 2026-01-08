@@ -22,7 +22,7 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
 };
-use std::{collections::BTreeMap, ops::DerefMut, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, mem, ops::DerefMut, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -989,7 +989,7 @@ impl MultiProofTask {
 
                 false
             }
-            MultiProofMessage::StateUpdate(source, update) => {
+            MultiProofMessage::StateUpdate(_source, update) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
 
                 if ctx.first_update_time.is_none() {
@@ -1079,9 +1079,6 @@ impl MultiProofTask {
 
                     // Merge all EVM states into one, properly combining storage slots
                     let merged_state = merge_evm_states(deferred_states);
-
-                    // Record batch size metric
-                    self.metrics.state_update_batch_size_histogram.record(num_deferred as f64);
 
                     // Hash everything in parallel and process
                     batch_metrics.state_update_proofs_requested += self.on_state_update(
