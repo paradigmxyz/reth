@@ -65,7 +65,7 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
+    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider, TrieDBProvider},
     BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
     ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
     StaticFileProviderFactory,
@@ -490,11 +490,15 @@ where
             .with_statistics()
             .build()?;
 
+        // Initialize TrieDB provider
+        let triedb_provider = TrieDBProvider::builder(self.data_dir().triedb()).build()?;
+
         let factory = ProviderFactory::new(
             self.right().clone(),
             self.chain_spec(),
             static_file_provider,
             rocksdb_provider,
+            triedb_provider,
         )?
         .with_prune_modes(self.prune_modes());
 

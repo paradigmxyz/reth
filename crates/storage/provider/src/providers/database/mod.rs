@@ -55,6 +55,7 @@ mod metrics;
 
 mod chain;
 pub use chain::*;
+use crate::providers::triedb::TrieDBProvider;
 
 /// A common provider that fetches data from a database or static file.
 ///
@@ -74,6 +75,8 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// `TrieDB` provider
+    triedb_provider: TrieDBProvider
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
@@ -90,6 +93,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
     ) -> ProviderResult<Self> {
         // Load storage settings from database at init time. Creates a temporary provider
         // to read persisted settings, falling back to legacy defaults if none exist.
@@ -116,6 +120,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             storage: Default::default(),
             storage_settings: Arc::new(RwLock::new(storage_settings)),
             rocksdb_provider,
+            triedb_provider
         })
     }
 }
@@ -169,12 +174,14 @@ impl<N: ProviderNodeTypes<DB = Arc<DatabaseEnv>>> ProviderFactory<N> {
         args: DatabaseArguments,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider
     ) -> RethResult<Self> {
         Self::new(
             Arc::new(init_db(path, args).map_err(RethError::msg)?),
             chain_spec,
             static_file_provider,
             rocksdb_provider,
+            triedb_provider,
         )
         .map_err(RethError::Provider)
     }
@@ -623,6 +630,7 @@ where
             storage,
             storage_settings,
             rocksdb_provider,
+            triedb_provider,
         } = self;
         f.debug_struct("ProviderFactory")
             .field("db", &db)
@@ -632,6 +640,7 @@ where
             .field("storage", &storage)
             .field("storage_settings", &*storage_settings.read())
             .field("rocksdb_provider", &rocksdb_provider)
+            .field("triedb_provider", &triedb_provider)
             .finish()
     }
 }
@@ -646,6 +655,7 @@ impl<N: NodeTypesWithDB> Clone for ProviderFactory<N> {
             storage: self.storage.clone(),
             storage_settings: self.storage_settings.clone(),
             rocksdb_provider: self.rocksdb_provider.clone(),
+            triedb_provider: self.triedb_provider.clone(),
         }
     }
 }
@@ -672,6 +682,7 @@ mod tests {
     use reth_storage_errors::provider::ProviderError;
     use reth_testing_utils::generators::{self, random_block, random_header, BlockParams};
     use std::{ops::RangeInclusive, sync::Arc};
+    use reth_db::test_utils::create_test_triedb_dir;
 
     #[test]
     fn common_history_provider() {
@@ -704,12 +715,14 @@ mod tests {
         let chain_spec = ChainSpecBuilder::mainnet().build();
         let (_static_dir, static_dir_path) = create_test_static_files_dir();
         let (_, rocksdb_path) = create_test_rocksdb_dir();
+        let (_, triedb_path) =create_test_triedb_dir();
         let factory = ProviderFactory::<MockNodeTypesWithDB<DatabaseEnv>>::new_with_database_path(
             tempfile::TempDir::new().expect(ERROR_TEMPDIR).keep(),
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
             RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
+            TrieDBProvider::builder(&triedb_path).build().unwrap(),
         )
         .unwrap();
         let provider = factory.provider().unwrap();

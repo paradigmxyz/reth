@@ -25,7 +25,7 @@ use reth_node_core::{
 use reth_provider::{
     providers::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
-        StaticFileProviderBuilder,
+        StaticFileProviderBuilder, TrieDBProvider,
     },
     ProviderFactory, StaticFileProviderFactory,
 };
@@ -127,8 +127,10 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             .with_database_log_level(self.db.log_level)
             .build()?;
 
+        let triedb_provider = TrieDBProvider::builder(data_dir.triedb()).build()?;
+
         let provider_factory =
-            self.create_provider_factory(&config, db, sfp, rocksdb_provider, access)?;
+            self.create_provider_factory(&config, db, sfp, rocksdb_provider, triedb_provider, access)?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.static_files.to_settings())?;
@@ -148,6 +150,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         db: Arc<DatabaseEnv>,
         static_file_provider: StaticFileProvider<N::Primitives>,
         rocksdb_provider: RocksDBProvider,
+        triedb_provider: TrieDBProvider,
         access: AccessRights,
     ) -> eyre::Result<ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>>>
     where
@@ -159,6 +162,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
             self.chain.clone(),
             static_file_provider,
             rocksdb_provider,
+            triedb_provider,
         )?
         .with_prune_modes(prune_modes.clone());
 

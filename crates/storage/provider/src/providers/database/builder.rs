@@ -4,7 +4,7 @@
 //! up to the intended build target.
 
 use crate::{
-    providers::{NodeTypesForProvider, RocksDBProvider, StaticFileProvider},
+    providers::{NodeTypesForProvider, RocksDBProvider, StaticFileProvider, TrieDBProvider},
     ProviderFactory,
 };
 use reth_db::{
@@ -28,6 +28,8 @@ use std::{
 ///  1. Configure the database: [`ProviderFactoryBuilder::db`]
 ///  2. Configure the chainspec: `chainspec`
 ///  3. Configure the [`StaticFileProvider`]: `static_file`
+///  4. Configure the `RocksDB` provider: `rocksdb_provider`
+///  5. Configure the `TrieDB` provider: `triedb_provider`
 #[derive(Debug)]
 pub struct ProviderFactoryBuilder<N> {
     _types: PhantomData<N>,
@@ -104,12 +106,13 @@ impl<N> ProviderFactoryBuilder<N> {
     where
         N: NodeTypesForProvider,
     {
-        let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir,triedb_dir, watch_static_files } =
+        let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir, triedb_dir, watch_static_files } =
             config.into();
         self.db(Arc::new(open_db_read_only(db_dir, db_args)?))
             .chainspec(chainspec)
             .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
             .rocksdb_provider(RocksDBProvider::builder(&rocksdb_dir).with_default_tables().build()?)
+            .triedb_provider(TrieDBProvider::builder(&triedb_dir).build()?)
             .build_provider_factory()
             .map_err(Into::into)
     }
@@ -366,7 +369,38 @@ impl<N, Val1, Val2, Val3, Val4> TypesAnd4<N, Val1, Val2, Val3, Val4> {
     }
 }
 
-impl<N, DB> TypesAnd4<N, DB, Arc<N::ChainSpec>, StaticFileProvider<N::Primitives>, RocksDBProvider>
+impl<N, DB, C> TypesAnd4<N, DB, Arc<C>, StaticFileProvider<N::Primitives>, RocksDBProvider>
+where
+    N: NodeTypes,
+{
+    /// Configures the `TrieDB` provider.
+    pub fn triedb_provider(
+        self,
+        triedb_provider: TrieDBProvider,
+    ) -> TypesAnd5<N, DB, Arc<C>, StaticFileProvider<N::Primitives>, RocksDBProvider, TrieDBProvider> {
+        TypesAnd5::new(self.val_1, self.val_2, self.val_3, self.val_4, triedb_provider)
+    }
+}
+
+/// This is staging type that contains the configured types and _five_ values.
+#[derive(Debug)]
+pub struct TypesAnd5<N, Val1, Val2, Val3, Val4, Val5> {
+    _types: PhantomData<N>,
+    val_1: Val1,
+    val_2: Val2,
+    val_3: Val3,
+    val_4: Val4,
+    val_5: Val5,
+}
+
+impl<N, Val1, Val2, Val3, Val4, Val5> TypesAnd5<N, Val1, Val2, Val3, Val4, Val5> {
+    /// Creates a new instance with the given types and five values.
+    pub fn new(val_1: Val1, val_2: Val2, val_3: Val3, val_4: Val4, val_5: Val5) -> Self {
+        Self { _types: Default::default(), val_1, val_2, val_3, val_4, val_5 }
+    }
+}
+
+impl<N, DB> TypesAnd5<N, DB, Arc<N::ChainSpec>, StaticFileProvider<N::Primitives>, RocksDBProvider, TrieDBProvider>
 where
     N: NodeTypesForProvider,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,
@@ -375,7 +409,7 @@ where
     pub fn build_provider_factory(
         self,
     ) -> ProviderResult<ProviderFactory<NodeTypesWithDBAdapter<N, DB>>> {
-        let Self { _types, val_1, val_2, val_3, val_4 } = self;
-        ProviderFactory::new(val_1, val_2, val_3, val_4)
+        let Self { _types, val_1, val_2, val_3, val_4, val_5 } = self;
+        ProviderFactory::new(val_1, val_2, val_3, val_4, val_5)
     }
 }

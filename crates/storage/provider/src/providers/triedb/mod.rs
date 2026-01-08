@@ -4,7 +4,7 @@
 //! using Merkle Patricia Tries.
 
 use alloy_consensus::constants::KECCAK_EMPTY;
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256};
 use alloy_trie::EMPTY_ROOT_HASH;
 use reth_db_api::DatabaseError;
 use reth_primitives_traits::Account;
@@ -45,21 +45,30 @@ impl TrieDBBuilder {
     ///
     /// Creates the database if it doesn't exist, or opens it if it does.
     pub fn build(self) -> ProviderResult<TrieDBProvider> {
-        let db = if self.path.exists() {
-            TrieDbDatabase::open(&self.path).map_err(|e| {
-                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
-                    message: format!("Failed to open TrieDB at {:?}: {e:?}", self.path).into(),
-                    code: -1,
-                }))
-            })?
-        } else {
-            Self::ensure_parent_dir(&self.path)?;
-            TrieDbDatabase::create_new(&self.path).map_err(|e| {
-                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
-                    message: format!("Failed to create TrieDB at {:?}: {e:?}", self.path).into(),
-                    code: -1,
-                }))
-            })?
+        Self::ensure_parent_dir(&self.path)?;
+
+        // Try to open existing database first
+        let db = match TrieDbDatabase::open(&self.path) {
+            Ok(db) => db,
+            Err(_) => {
+                // Database doesn't exist. If path exists and is a directory, remove it first
+                // so create_new can succeed.
+                if self.path.exists() && self.path.is_dir() {
+                    std::fs::remove_dir(&self.path).map_err(|e| {
+                        ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                            message: format!("Failed to remove empty directory at {:?}: {e}", self.path).into(),
+                            code: -1,
+                        }))
+                    })?;
+                }
+
+                TrieDbDatabase::create_new(&self.path).map_err(|e| {
+                    ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                        message: format!("Failed to create TrieDB at {:?}: {e:?}", self.path).into(),
+                        code: -1,
+                    }))
+                })?
+            }
         };
 
         Ok(TrieDBProvider(Arc::new(TrieDBProviderInner { db })))
@@ -305,6 +314,7 @@ fn convert_transaction_error(err: TransactionError) -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::U256;
     use tempfile::TempDir;
 
     #[test]

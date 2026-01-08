@@ -39,6 +39,7 @@ pub(crate) mod rocksdb;
 pub(crate) mod triedb;
 
 pub use rocksdb::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksTx};
+pub use triedb::{TrieDBBatch, TrieDBBuilder, TrieDBProvider, TrieDBTx};
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy
 /// [`ProviderNodeTypes`].
