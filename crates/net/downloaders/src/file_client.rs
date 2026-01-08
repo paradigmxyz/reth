@@ -86,7 +86,7 @@ impl<B: FullBlock> FileClient<B> {
     /// Create a new file client from a file path.
     pub async fn new<P: AsRef<Path>>(
         path: P,
-        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B>>,
     ) -> Result<Self, FileClientError> {
         let file = File::open(path).await?;
         Self::from_file(file, consensus).await
@@ -95,7 +95,7 @@ impl<B: FullBlock> FileClient<B> {
     /// Initialize the [`FileClient`] with a file directly.
     pub(crate) async fn from_file(
         mut file: File,
-        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B>>,
     ) -> Result<Self, FileClientError> {
         // get file len from metadata before reading
         let metadata = file.metadata().await?;
@@ -200,7 +200,7 @@ impl<B: FullBlock> FileClient<B> {
 }
 
 struct FileClientBuilder<B: Block> {
-    pub consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+    pub consensus: Arc<dyn Consensus<B>>,
     pub parent_header: Option<SealedHeader<B::Header>>,
 }
 
@@ -562,7 +562,7 @@ impl ChunkedFileReader {
     /// are available before processing. For plain files, it uses the original chunking logic.
     pub async fn next_chunk<B: FullBlock>(
         &mut self,
-        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B>>,
         parent_header: Option<SealedHeader<B::Header>>,
     ) -> Result<Option<FileClient<B>>, FileClientError> {
         let Some(chunk_len) = self.read_next_chunk().await? else { return Ok(None) };

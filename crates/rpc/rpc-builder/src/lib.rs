@@ -31,7 +31,7 @@ use jsonrpsee::{
     Methods, RpcModule,
 };
 use reth_chainspec::{ChainSpecProvider, EthereumHardforks};
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_engine_primitives::ConsensusEngineEvent;
 use reth_evm::ConfigureEvm;
 use reth_network_api::{noop::NoopNetwork, NetworkInfo, Peers};
@@ -316,7 +316,7 @@ where
     Pool: TransactionPool + Clone + 'static,
     Network: NetworkInfo + Peers + Clone + 'static,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
-    Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
+    Consensus: FullConsensus<N> + Clone + 'static,
 {
     /// Configures all [`RpcModule`]s specific to the given [`TransportRpcModuleConfig`] which can
     /// be used to start the transport server(s).
@@ -849,7 +849,7 @@ where
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: FullEthApiServer,
     EvmConfig: ConfigureEvm<Primitives = N> + 'static,
-    Consensus: FullConsensus<N, Error = ConsensusError> + Clone + 'static,
+    Consensus: FullConsensus<N> + Clone + 'static,
 {
     /// Configures the auth module that includes the
     ///   * `engine_` namespace
