@@ -32,6 +32,14 @@ pub enum Source {
     Evm(StateChangeSource),
     /// State changes from Block Access List (EIP-7928).
     BlockAccessList,
+    /// Batched state changes from multiple transactions.
+    ///
+    /// This variant is used when multiple transaction state updates are merged together
+    /// for more efficient hashing.
+    BatchedTransactions {
+        /// Number of transactions that were batched together.
+        count: usize,
+    },
 }
 
 impl std::fmt::Debug for Source {
@@ -39,6 +47,7 @@ impl std::fmt::Debug for Source {
         match self {
             Self::Evm(source) => source.fmt(f),
             Self::BlockAccessList => f.write_str("BlockAccessList"),
+            Self::BatchedTransactions { count } => write!(f, "BatchedTransactions({count})"),
         }
     }
 }
@@ -1082,7 +1091,7 @@ impl MultiProofTask {
 
                     // Hash everything in parallel and process
                     batch_metrics.state_update_proofs_requested += self.on_state_update(
-                        Source::Evm(StateChangeSource::Transaction(0)),
+                        Source::BatchedTransactions { count: num_deferred },
                         merged_state,
                     );
 
