@@ -14,8 +14,8 @@ use alloy_rpc_types_engine::{
 };
 use error::{InsertBlockError, InsertBlockFatalError};
 use reth_chain_state::{
-    CanonicalInMemoryState, ComputedTrieData, ExecutedBlock, MemoryOverlayStateProvider,
-    NewCanonicalChain,
+    precompute_overlay_for_persist, CanonicalInMemoryState, ComputedTrieData, DeferredTrieData,
+    ExecutedBlock, MemoryOverlayStateProvider, NewCanonicalChain,
 };
 use reth_consensus::{Consensus, FullConsensus};
 use reth_engine_primitives::{
@@ -1244,11 +1244,58 @@ where
             .map(|b| b.recovered_block().num_hash())
             .expect("Checked non-empty persisting blocks");
 
+        // Spawn background task to pre-compute overlay for blocks that will remain after persist.
+        // This avoids O(N) rebuild blocking the critical path when anchor changes.
+        self.spawn_overlay_precompute_task(highest_num_hash);
+
         debug!(target: "engine::tree", count=blocks_to_persist.len(), blocks = ?blocks_to_persist.iter().map(|block| block.recovered_block().num_hash()).collect::<Vec<_>>(), "Persisting blocks");
         let (tx, rx) = oneshot::channel();
         let _ = self.persistence.save_blocks(blocks_to_persist, tx);
 
         self.persistence_state.start_save(highest_num_hash, rx);
+    }
+
+    /// Spawns a background task to pre-compute the overlay for blocks remaining after persist.
+    ///
+    /// When persist completes, the anchor changes from the old persisted block to the new one.
+    /// The first block that needs its overlay after persist would normally trigger an O(N) rebuild.
+    /// By pre-computing the overlay in the background, we can avoid this latency spike.
+    fn spawn_overlay_precompute_task(&self, new_anchor: BlockNumHash) {
+        // Collect blocks that will remain after persist (number > new_anchor.number)
+        // and sort them by block number (oldest to newest) for correct merge order
+        let mut remaining_blocks: Vec<_> = self
+            .state
+            .tree_state
+            .blocks_by_hash
+            .values()
+            .filter(|block| block.recovered_block().number() > new_anchor.number)
+            .collect();
+
+        if remaining_blocks.is_empty() {
+            // No blocks remaining - nothing to pre-compute
+            return;
+        }
+
+        // Sort by block number (oldest first) to ensure correct merge order
+        remaining_blocks.sort_by_key(|block| block.recovered_block().number());
+
+        // Extract trie data in sorted order
+        let remaining_trie_data: Vec<DeferredTrieData> =
+            remaining_blocks.iter().map(|block| block.trie_data.clone()).collect();
+
+        let anchor_hash = new_anchor.hash;
+        debug!(
+            target: "engine::tree",
+            ?anchor_hash,
+            remaining_blocks = remaining_trie_data.len(),
+            "Spawning overlay pre-compute task"
+        );
+
+        // Spawn a background thread to pre-compute the overlay.
+        // This uses rayon's parallel pre-warming internally to ensure all ancestor data is ready.
+        std::thread::spawn(move || {
+            precompute_overlay_for_persist(anchor_hash, &remaining_trie_data);
+        });
     }
 
     /// Attempts to advance the persistence state.

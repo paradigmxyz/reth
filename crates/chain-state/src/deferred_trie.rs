@@ -7,10 +7,23 @@ use reth_trie::{
     HashedPostState, HashedPostStateSorted, TrieInputSorted,
 };
 use std::{
+    collections::HashMap,
     fmt,
     sync::{Arc, LazyLock},
 };
 use tracing::instrument;
+
+/// Global cache for pre-computed overlays.
+///
+/// When blocks are about to be persisted, we can pre-compute the new overlay
+/// in the background before the persist completes. This avoids the O(N) rebuild
+/// blocking the critical path when the anchor changes.
+///
+/// The cache is keyed by the new anchor hash. When a persist completes and the anchor
+/// changes, the first block that needs to rebuild its overlay can look up the
+/// pre-computed overlay by the new anchor hash.
+static PRECOMPUTED_OVERLAY_CACHE: LazyLock<Mutex<HashMap<B256, Arc<TrieInputSorted>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 /// Shared handle to asynchronously populated trie data.
 ///
@@ -46,10 +59,10 @@ pub struct ComputedTrieData {
 /// # Invariants
 ///
 /// For correctness of overlay reuse optimizations:
-/// - The `ancestors` passed to [`DeferredTrieData::pending`] must form a true ancestor chain
-///   (each entry's parent is the previous entry, oldest to newest order)
-/// - When `anchor_hash` matches the parent's `anchor_hash`, the parent's `trie_input`
-///   already contains all ancestors in that chain, enabling O(1) reuse
+/// - The `ancestors` passed to [`DeferredTrieData::pending`] must form a true ancestor chain (each
+///   entry's parent is the previous entry, oldest to newest order)
+/// - When `anchor_hash` matches the parent's `anchor_hash`, the parent's `trie_input` already
+///   contains all ancestors in that chain, enabling O(1) reuse
 /// - A given `anchor_hash` uniquely identifies a persisted base state
 #[derive(Clone, Debug)]
 pub struct AnchoredTrieInput {
@@ -74,10 +87,61 @@ struct DeferredTrieMetrics {
     deferred_trie_overlay_reused: Counter,
     /// Number of times the trie overlay was rebuilt from all ancestors (O(N) slow path).
     deferred_trie_overlay_rebuilt: Counter,
+    /// Number of times a pre-computed overlay was used from cache (avoids O(N) at persist
+    /// boundary).
+    deferred_trie_overlay_cache_hit: Counter,
 }
 
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
     LazyLock::new(DeferredTrieMetrics::default);
+
+/// Store a pre-computed overlay in the cache.
+///
+/// Call this after pre-computing an overlay in the background to make it available
+/// for the next block that would need to rebuild due to anchor change.
+///
+/// # Arguments
+/// * `new_anchor` - The hash of the block that will become the new anchor after persist
+/// * `overlay` - The pre-computed overlay for blocks remaining after persist
+pub fn store_precomputed_overlay(new_anchor: B256, overlay: Arc<TrieInputSorted>) {
+    let mut cache = PRECOMPUTED_OVERLAY_CACHE.lock();
+    cache.insert(new_anchor, overlay);
+}
+
+/// Retrieve a pre-computed overlay from the cache, removing it.
+///
+/// Returns `Some(overlay)` if found and removes it from cache, `None` otherwise.
+fn take_precomputed_overlay(new_anchor: B256) -> Option<Arc<TrieInputSorted>> {
+    let mut cache = PRECOMPUTED_OVERLAY_CACHE.lock();
+    cache.remove(&new_anchor)
+}
+
+/// Clear all pre-computed overlays from the cache.
+///
+/// Call this on reorg or when the cached overlays are no longer valid.
+pub fn clear_precomputed_overlays() {
+    let mut cache = PRECOMPUTED_OVERLAY_CACHE.lock();
+    cache.clear();
+}
+
+/// Pre-compute the overlay for blocks that will remain after persist completes.
+///
+/// This function should be called when blocks are about to be persisted. It computes
+/// the new overlay using parallel pre-warming to ensure all ancestor data is ready,
+/// then stores it in the cache for the next block that would need it.
+///
+/// # Arguments
+/// * `new_anchor` - The hash of the block that will become the new anchor after persist
+/// * `remaining_blocks` - The blocks that will remain in-memory after persist (oldest to newest)
+///
+/// Call this from a background thread/task to avoid blocking the main processing path.
+pub fn precompute_overlay_for_persist(new_anchor: B256, remaining_blocks: &[DeferredTrieData]) {
+    // Use merge_ancestors_into_overlay which already has parallel pre-warming
+    let overlay = Arc::new(DeferredTrieData::merge_ancestors_into_overlay(remaining_blocks));
+
+    // Store in cache keyed by the new anchor
+    store_precomputed_overlay(new_anchor, overlay);
+}
 
 /// Internal state for deferred trie data.
 enum DeferredState {
@@ -200,12 +264,20 @@ impl DeferredTrieData {
                     (**trie_input).clone()
                 }
 
-                // Slow path: no matching parent overlay -> rebuild from all ancestors.
+                // Slow path: no matching parent overlay.
                 // This happens after persist (anchor changes) or if parent lacks anchored input.
-                // O(N) but only at persist/reorg boundaries, not per block.
+                // Try to use a pre-computed overlay from cache first (populated by background
+                // task).
                 _ => {
-                    DEFERRED_TRIE_METRICS.deferred_trie_overlay_rebuilt.increment(1);
-                    Self::merge_ancestors_into_overlay(ancestors)
+                    // Check cache for pre-computed overlay at the new anchor
+                    if let Some(cached_overlay) = take_precomputed_overlay(anchor_hash) {
+                        DEFERRED_TRIE_METRICS.deferred_trie_overlay_cache_hit.increment(1);
+                        (*cached_overlay).clone()
+                    } else {
+                        // No cache hit - rebuild from all ancestors with parallel pre-warming
+                        DEFERRED_TRIE_METRICS.deferred_trie_overlay_rebuilt.increment(1);
+                        Self::merge_ancestors_into_overlay(ancestors)
+                    }
                 }
             }
         } else {
@@ -518,7 +590,8 @@ mod tests {
         anchor_hash: B256,
         accounts: Vec<(B256, Option<Account>)>,
     ) -> DeferredTrieData {
-        let hashed_state = Arc::new(HashedPostStateSorted::new(accounts.clone(), B256Map::default()));
+        let hashed_state =
+            Arc::new(HashedPostStateSorted::new(accounts.clone(), B256Map::default()));
         let trie_updates = Arc::default();
         let mut overlay = TrieInputSorted::default();
         Arc::make_mut(&mut overlay.state).extend_ref(hashed_state.as_ref());
@@ -627,10 +700,8 @@ mod tests {
         let account = Account { nonce: 25, balance: U256::ZERO, bytecode_hash: None };
 
         // Create parent WITHOUT anchored trie input (e.g., from without_trie_input constructor)
-        let parent_state = HashedPostStateSorted::new(
-            vec![(key, Some(account))],
-            B256Map::default(),
-        );
+        let parent_state =
+            HashedPostStateSorted::new(vec![(key, Some(account))], B256Map::default());
         let parent = DeferredTrieData::ready(ComputedTrieData {
             hashed_state: Arc::new(parent_state),
             trie_updates: Arc::default(),
@@ -668,9 +739,10 @@ mod tests {
         );
 
         // Block 2: adds account at key2, ancestor is block1
-        let block2_hashed = HashedPostState::default().with_accounts([
-            (key2, Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }))
-        ]);
+        let block2_hashed = HashedPostState::default().with_accounts([(
+            key2,
+            Some(Account { nonce: 2, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
         let block2 = DeferredTrieData::pending(
             Arc::new(block2_hashed),
             Arc::new(TrieUpdates::default()),
@@ -682,9 +754,10 @@ mod tests {
         let block2_ready = DeferredTrieData::ready(block2_computed);
 
         // Block 3: adds account at key3, ancestor is block2 (which includes block1)
-        let block3_hashed = HashedPostState::default().with_accounts([
-            (key3, Some(Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None }))
-        ]);
+        let block3_hashed = HashedPostState::default().with_accounts([(
+            key3,
+            Some(Account { nonce: 3, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
         let block3 = DeferredTrieData::pending(
             Arc::new(block3_hashed),
             Arc::new(TrieUpdates::default()),
@@ -718,9 +791,10 @@ mod tests {
         );
 
         // Child overwrites nonce to 99
-        let child_hashed = HashedPostState::default().with_accounts([
-            (key, Some(Account { nonce: 99, balance: U256::ZERO, bytecode_hash: None }))
-        ]);
+        let child_hashed = HashedPostState::default().with_accounts([(
+            key,
+            Some(Account { nonce: 99, balance: U256::ZERO, bytecode_hash: None }),
+        )]);
         let child = DeferredTrieData::pending(
             Arc::new(child_hashed),
             Arc::new(TrieUpdates::default()),
