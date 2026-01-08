@@ -135,6 +135,8 @@ pub struct TreeConfig {
     storage_worker_count: usize,
     /// Number of account proof worker threads.
     account_worker_count: usize,
+    /// Whether to enable V2 storage proofs.
+    enable_proof_v2: bool,
 }
 
 impl Default for TreeConfig {
@@ -163,6 +165,7 @@ impl Default for TreeConfig {
             allow_unwind_canonical_header: false,
             storage_worker_count: default_storage_worker_count(),
             account_worker_count: default_account_worker_count(),
+            enable_proof_v2: false,
         }
     }
 }
@@ -194,6 +197,7 @@ impl TreeConfig {
         allow_unwind_canonical_header: bool,
         storage_worker_count: usize,
         account_worker_count: usize,
+        enable_proof_v2: bool,
     ) -> Self {
         Self {
             persistence_threshold,
@@ -219,6 +223,7 @@ impl TreeConfig {
             allow_unwind_canonical_header,
             storage_worker_count,
             account_worker_count,
+            enable_proof_v2,
         }
     }
 
@@ -498,6 +503,17 @@ impl TreeConfig {
     /// Setter for the number of account proof worker threads.
     pub fn with_account_worker_count(mut self, account_worker_count: usize) -> Self {
         self.account_worker_count = account_worker_count.max(MIN_WORKER_COUNT);
+        self
+    }
+
+    /// Return whether V2 storage proofs are enabled.
+    pub const fn enable_proof_v2(&self) -> bool {
+        self.enable_proof_v2
+    }
+
+    /// Setter for whether to enable V2 storage proofs.
+    pub const fn with_enable_proof_v2(mut self, enable_proof_v2: bool) -> Self {
+        self.enable_proof_v2 = enable_proof_v2;
         self
     }
 }
