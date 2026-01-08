@@ -1,12 +1,9 @@
 use alloy_consensus::{transaction::TxHashRef, BlockHeader};
-use alloy_eip7928::{
-    AccountChanges, BalanceChange, BlockAccessList, CodeChange, NonceChange, SlotChanges,
-    StorageChange,
-};
+use alloy_eip7928::BlockAccessList;
 use alloy_eips::{eip2718::Encodable2718, BlockId, BlockNumberOrTag};
 use alloy_evm::env::BlockEnvironment;
 use alloy_genesis::ChainConfig;
-use alloy_primitives::{hex::decode, map::HashMap, uint, Address, Bytes, StorageKey, B256};
+use alloy_primitives::{hex::decode, uint, Address, Bytes, B256};
 use alloy_rlp::{Decodable, Encodable};
 use alloy_rpc_types::BlockTransactionsKind;
 use alloy_rpc_types_debug::ExecutionWitness;
@@ -25,7 +22,7 @@ use reth_evm::{execute::Executor, ConfigureEvm, EvmEnvFor};
 use reth_primitives_traits::{
     Block as BlockTrait, BlockBody, BlockTy, ReceiptWithBloom, RecoveredBlock,
 };
-use reth_revm::{db::State, state::EvmState, witness::ExecutionWitnessRecord};
+use reth_revm::{db::State, witness::ExecutionWitnessRecord};
 use reth_rpc_api::DebugApiServer;
 use reth_rpc_convert::RpcTxReq;
 use reth_rpc_eth_api::{
@@ -41,13 +38,10 @@ use reth_storage_api::{
 use reth_tasks::{pool::BlockingTaskGuard, TaskSpawner};
 use reth_trie_common::{updates::TrieUpdates, HashedPostState};
 use revm::DatabaseCommit;
-use revm_inspectors::{
-    storage::StorageInspector,
-    tracing::{DebugInspector, TransactionContext},
-};
+use revm_inspectors::tracing::{DebugInspector, TransactionContext};
 use serde::{Deserialize, Serialize};
 use std::{
-    collections::{BTreeMap, BTreeSet, VecDeque},
+    collections::VecDeque,
     sync::Arc,
 };
 use tokio::sync::{AcquireError, OwnedSemaphorePermit};
@@ -632,139 +626,6 @@ where
             .await
     }
 
-    /// Generates a Block Access List (BAL) by re-executing the given block per EIP-7928.
-    pub async fn debug_get_block_access_list(
-        &self,
-        block_id: BlockId,
-    ) -> Result<BlockAccessList, Eth::Error> {
-        let block_hash = self
-            .provider()
-            .block_hash_for_id(block_id)
-            .map_err(Eth::Error::from_eth_err)?
-            .ok_or(EthApiError::HeaderNotFound(block_id))?;
-
-        let ((evm_env, _), block) = futures::try_join!(
-            self.eth_api().evm_env_at(block_hash.into()),
-            self.eth_api().recovered_block(block_hash.into()),
-        )?;
-
-        let block = block.ok_or(EthApiError::HeaderNotFound(block_id))?;
-
-        self.eth_api()
-            .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
-                let mut account_records: BTreeMap<Address, BALAccountRecord> = BTreeMap::new();
-
-                eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
-
-                let mut transactions = block.transactions_recovered().enumerate().peekable();
-                while let Some((tx_index, tx)) = transactions.next() {
-                    let tx_env = eth_api.evm_config().tx_env(tx);
-                    let mut storage_inspector = StorageInspector::default();
-                    let res = eth_api.inspect(
-                        &mut db,
-                        evm_env.clone(),
-                        tx_env,
-                        &mut storage_inspector,
-                    )?;
-
-                    let block_access_index = (tx_index + 1) as u64;
-                    collect_bal_state_changes(
-                        &res.state,
-                        block_access_index,
-                        storage_inspector.accessed_slots(),
-                        &mut account_records,
-                    );
-
-                    if transactions.peek().is_some() {
-                        db.commit(res.state);
-                    }
-                }
-
-                let bal: BlockAccessList =
-                    account_records.into_iter().map(|(addr, rec)| rec.build(addr)).collect();
-                Ok(bal)
-            })
-            .await
-    }
-}
-
-#[derive(Debug, Default)]
-struct BALAccountRecord {
-    storage_changes: BTreeMap<StorageKey, Vec<StorageChange>>,
-    storage_reads: BTreeSet<StorageKey>,
-    balance_changes: Vec<BalanceChange>,
-    nonce_changes: Vec<NonceChange>,
-    code_changes: Vec<CodeChange>,
-}
-
-impl BALAccountRecord {
-    fn add_storage_change(&mut self, slot: StorageKey, change: StorageChange) {
-        self.storage_changes.entry(slot).or_default().push(change);
-        self.storage_reads.remove(&slot);
-    }
-
-    fn add_storage_read(&mut self, slot: StorageKey) {
-        if !self.storage_changes.contains_key(&slot) {
-            self.storage_reads.insert(slot);
-        }
-    }
-
-    fn build(self, address: Address) -> AccountChanges {
-        let storage_changes: Vec<SlotChanges> = self
-            .storage_changes
-            .into_iter()
-            .map(|(slot, changes)| SlotChanges { slot, changes })
-            .collect();
-        let storage_reads: Vec<StorageKey> = self.storage_reads.into_iter().collect();
-        AccountChanges {
-            address,
-            storage_changes,
-            storage_reads,
-            balance_changes: self.balance_changes,
-            nonce_changes: self.nonce_changes,
-            code_changes: self.code_changes,
-        }
-    }
-}
-
-fn collect_bal_state_changes(
-    state: &EvmState,
-    block_access_index: u64,
-    accessed_slots: &HashMap<Address, HashMap<B256, u64>>,
-    account_records: &mut BTreeMap<Address, BALAccountRecord>,
-) {
-    for (address, slots) in accessed_slots {
-        let record = account_records.entry(*address).or_default();
-        for slot in slots.keys() {
-            record.add_storage_read(StorageKey::from(*slot));
-        }
-    }
-
-    for (address, account) in state {
-        if !account.is_touched() {
-            continue;
-        }
-        let record = account_records.entry(*address).or_default();
-        record.balance_changes.push(BalanceChange::new(block_access_index, account.info.balance));
-        record.nonce_changes.push(NonceChange::new(block_access_index, account.info.nonce));
-        if let Some(code) = &account.info.code {
-            if !code.is_empty() {
-                record
-                    .code_changes
-                    .push(CodeChange::new(block_access_index, code.original_bytes()));
-            }
-        }
-        for (slot, storage_slot) in &account.storage {
-            if storage_slot.is_changed() {
-                let slot_key = StorageKey::from(slot.to_be_bytes::<32>());
-                let new_value = B256::from(storage_slot.present_value().to_be_bytes::<32>());
-                record.add_storage_change(
-                    slot_key,
-                    StorageChange::new(block_access_index, new_value),
-                );
-            }
-        }
-    }
 }
 
 #[async_trait]
@@ -971,9 +832,8 @@ where
         Self::debug_execution_witness_by_block_hash(self, hash).await.map_err(Into::into)
     }
 
-    async fn debug_get_block_access_list(&self, block_id: BlockId) -> RpcResult<BlockAccessList> {
-        let _permit = self.acquire_trace_permit().await;
-        Self::debug_get_block_access_list(self, block_id).await.map_err(Into::into)
+    async fn debug_get_block_access_list(&self, _block_id: BlockId) -> RpcResult<BlockAccessList> {
+        Err(internal_rpc_err("unimplemented"))
     }
 
     async fn debug_backtrace_at(&self, _location: &str) -> RpcResult<()> {
