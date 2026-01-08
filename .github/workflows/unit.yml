@@ -99,6 +99,24 @@ jobs:
           cache-on-failure: true
       - run: cargo nextest run --release -p ef-tests --features "asm-keccak ef-tests"
 
+  rocksdb:
+    name: rocksdb tests
+    runs-on: depot-ubuntu-latest-4
+    env:
+      RUST_BACKTRACE: 1
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: rui314/setup-mold@v1
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      - uses: taiki-e/install-action@nextest
+      - name: Run RocksDB tests
+        run: cargo nextest run -p reth-provider -p reth-stages --features "rocksdb" --locked
+
   doc:
     name: doc tests
     runs-on: depot-ubuntu-latest
@@ -120,7 +138,7 @@ jobs:
     name: unit success
     runs-on: ubuntu-latest
     if: always()
-    needs: [test, state, doc]
+    needs: [test, state, rocksdb, doc]
     timeout-minutes: 30
     steps:
       - name: Decide whether the needed jobs succeeded or failed
