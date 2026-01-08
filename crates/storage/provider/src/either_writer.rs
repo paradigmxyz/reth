@@ -196,12 +196,16 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTxMut,
     {
-        #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().storages_history_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+        match EitherWriterDestination::storages_history(provider) {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            EitherWriterDestination::RocksDB => Ok(EitherWriter::RocksDB(_rocksdb_batch)),
+            EitherWriterDestination::Database => Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_write::<tables::StoragesHistory>()?,
+            )),
+            EitherWriterDestination::StaticFile => {
+                Err(ProviderError::UnsupportedProvider)
+            }
         }
-
-        Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::StoragesHistory>()?))
     }
 
     /// Creates a new [`EitherWriter`] for transaction hash numbers based on storage settings.
@@ -213,14 +217,16 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTxMut,
     {
-        #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+        match EitherWriterDestination::transaction_hash_numbers(provider) {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            EitherWriterDestination::RocksDB => Ok(EitherWriter::RocksDB(_rocksdb_batch)),
+            EitherWriterDestination::Database => Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_write::<tables::TransactionHashNumbers>()?,
+            )),
+            EitherWriterDestination::StaticFile => {
+                Err(ProviderError::UnsupportedProvider)
+            }
         }
-
-        Ok(EitherWriter::Database(
-            provider.tx_ref().cursor_write::<tables::TransactionHashNumbers>()?,
-        ))
     }
 
     /// Creates a new [`EitherWriter`] for account history based on storage settings.
@@ -232,12 +238,16 @@ impl<'a> EitherWriter<'a, (), ()> {
         P: DBProvider + NodePrimitivesProvider + StorageSettingsCache,
         P::Tx: DbTxMut,
     {
-        #[cfg(all(unix, feature = "rocksdb"))]
-        if provider.cached_storage_settings().account_history_in_rocksdb {
-            return Ok(EitherWriter::RocksDB(_rocksdb_batch));
+        match EitherWriterDestination::accounts_history(provider) {
+            #[cfg(all(unix, feature = "rocksdb"))]
+            EitherWriterDestination::RocksDB => Ok(EitherWriter::RocksDB(_rocksdb_batch)),
+            EitherWriterDestination::Database => Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_write::<tables::AccountsHistory>()?,
+            )),
+            EitherWriterDestination::StaticFile => {
+                Err(ProviderError::UnsupportedProvider)
+            }
         }
-
-        Ok(EitherWriter::Database(provider.tx_ref().cursor_write::<tables::AccountsHistory>()?))
     }
 }
 
@@ -792,6 +802,45 @@ impl EitherWriterDestination {
         } else {
             Self::Database
         }
+    }
+
+    /// Returns the destination for writing transaction hash numbers based on storage settings.
+    pub fn transaction_hash_numbers<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().transaction_hash_numbers_in_rocksdb {
+            return Self::RocksDB;
+        }
+
+        Self::Database
+    }
+
+    /// Returns the destination for writing storage history based on storage settings.
+    pub fn storages_history<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().storages_history_in_rocksdb {
+            return Self::RocksDB;
+        }
+
+        Self::Database
+    }
+
+    /// Returns the destination for writing account history based on storage settings.
+    pub fn accounts_history<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if provider.cached_storage_settings().account_history_in_rocksdb {
+            return Self::RocksDB;
+        }
+
+        Self::Database
     }
 }
 
