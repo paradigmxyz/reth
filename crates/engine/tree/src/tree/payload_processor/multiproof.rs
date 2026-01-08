@@ -8,6 +8,7 @@ use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as Cros
 use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
+use rayon::prelude::*;
 use reth_metrics::Metrics;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
@@ -56,14 +57,6 @@ const PREFETCH_MAX_BATCH_TARGETS: usize = 512;
 /// Maximum number of prefetch messages to batch together.
 /// Prevents excessive batching even with small messages.
 const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
-
-/// Maximum number of targets to batch together for state updates.
-/// Lower than prefetch because state updates require additional processing (hashing, state
-/// partitioning) before dispatch.
-const STATE_UPDATE_MAX_BATCH_TARGETS: usize = 64;
-
-/// Preallocation hint for state update batching to avoid repeated reallocations on small bursts.
-const STATE_UPDATE_BATCH_PREALLOC: usize = 16;
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
@@ -199,36 +192,45 @@ impl Drop for StateHookSender {
     }
 }
 
+/// Converts EVM state to hashed post state using parallel iteration.
+///
+/// This function uses rayon's parallel iterator to hash addresses and storage slots
+/// concurrently. It's designed to be called once per block with the merged state from
+/// all transactions, making the parallelization overhead worthwhile.
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    let mut hashed_state = HashedPostState::with_capacity(update.len());
+    update
+        .into_par_iter()
+        .filter_map(|(address, account)| {
+            if !account.is_touched() {
+                return None;
+            }
 
-    for (address, account) in update {
-        if account.is_touched() {
             let hashed_address = keccak256(address);
             trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
             let info = if destroyed { None } else { Some(account.info.into()) };
-            hashed_state.accounts.insert(hashed_address, info);
 
-            let mut changed_storage_iter = account
-                .storage
-                .into_iter()
-                .filter(|(_slot, value)| value.is_changed())
-                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                .peekable();
+            let hashed_storage = if destroyed {
+                Some(HashedStorage::new(true))
+            } else {
+                let storage: Vec<_> = account
+                    .storage
+                    .into_iter()
+                    .filter(|(_slot, value)| value.is_changed())
+                    .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                    .collect();
 
-            if destroyed {
-                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
-            } else if changed_storage_iter.peek().is_some() {
-                hashed_state
-                    .storages
-                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
-            }
-        }
-    }
+                if storage.is_empty() {
+                    None
+                } else {
+                    Some(HashedStorage::from_iter(false, storage))
+                }
+            };
 
-    hashed_state
+            Some((hashed_address, info, hashed_storage))
+        })
+        .collect()
 }
 
 /// Input parameters for dispatching a multiproof calculation.
@@ -591,6 +593,10 @@ pub(super) struct MultiProofTask {
     /// there are any active workers and force chunking across workers. This is to prevent tasks
     /// which are very long from hitting a single worker.
     max_targets_for_chunking: usize,
+    /// Buffer for accumulating raw EVM state updates until block execution finishes.
+    /// These are processed in bulk when `FinishedStateUpdates` is received, allowing
+    /// for more efficient parallel hashing of the combined state.
+    deferred_evm_states: Vec<EvmState>,
 }
 
 impl MultiProofTask {
@@ -622,6 +628,7 @@ impl MultiProofTask {
             ),
             metrics,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
+            deferred_evm_states: Vec::new(),
         }
     }
 
@@ -947,9 +954,10 @@ impl MultiProofTask {
 
                 false
             }
-            // State update: batch consecutive updates from the same source
-            MultiProofMessage::StateUpdate(source, update) => {
-                trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
+            // State update: defer processing until FinishedStateUpdates is received.
+            // This allows us to batch all state updates and hash them in parallel.
+            MultiProofMessage::StateUpdate(_source, update) => {
+                trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate (deferred)");
 
                 if ctx.first_update_time.is_none() {
                     self.metrics
@@ -959,80 +967,13 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Accumulate messages including the first one; reuse buffer to avoid allocations.
-                let mut accumulated_targets = estimate_evm_state_targets(&update);
-                ctx.accumulated_state_updates.clear();
-                ctx.accumulated_state_updates.push((source, update));
+                // Buffer this state update for deferred processing
+                self.deferred_evm_states.push(update);
 
-                // Batch consecutive state update messages up to target limit.
-                while accumulated_targets < STATE_UPDATE_MAX_BATCH_TARGETS {
-                    match self.rx.try_recv() {
-                        Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                            let (batch_source, batch_update) = &ctx.accumulated_state_updates[0];
-                            if !can_batch_state_update(
-                                *batch_source,
-                                batch_update,
-                                next_source,
-                                &next_update,
-                            ) {
-                                ctx.pending_msg =
-                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                                break;
-                            }
-
-                            let next_estimate = estimate_evm_state_targets(&next_update);
-                            // Would exceed batch cap; leave pending to dispatch on next iteration.
-                            if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
-                            {
-                                ctx.pending_msg =
-                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                                break;
-                            }
-                            accumulated_targets += next_estimate;
-                            ctx.accumulated_state_updates.push((next_source, next_update));
-                        }
-                        Ok(other_msg) => {
-                            ctx.pending_msg = Some(other_msg);
-                            break;
-                        }
-                        Err(_) => break,
-                    }
-                }
-
-                // Process all accumulated messages in a single batch
-                let num_batched = ctx.accumulated_state_updates.len();
-                self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
-
-                #[cfg(debug_assertions)]
-                {
-                    let batch_source = ctx.accumulated_state_updates[0].0;
-                    let batch_update = &ctx.accumulated_state_updates[0].1;
-                    debug_assert!(ctx.accumulated_state_updates.iter().all(|(source, update)| {
-                        can_batch_state_update(batch_source, batch_update, *source, update)
-                    }));
-                }
-
-                // Merge all accumulated updates into a single EvmState payload.
-                // Use drain to preserve the buffer allocation.
-                let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
-                let (mut batch_source, mut merged_update) = accumulated_iter
-                    .next()
-                    .expect("state update batch always has at least one entry");
-                for (next_source, next_update) in accumulated_iter {
-                    batch_source = next_source;
-                    merged_update.extend(next_update);
-                }
-
-                let batch_len = merged_update.len();
-                batch_metrics.state_update_proofs_requested +=
-                    self.on_state_update(batch_source, merged_update);
                 trace!(
                     target: "engine::tree::payload_processor::multiproof",
-                    ?batch_source,
-                    len = batch_len,
-                    state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
-                    num_batched,
-                    "Dispatched state update batch"
+                    buffered_count = self.deferred_evm_states.len(),
+                    "Buffered state update for deferred processing"
                 );
 
                 false
@@ -1087,9 +1028,44 @@ impl MultiProofTask {
                 }
                 false
             }
-            // Signal that no more state updates will arrive
+            // Signal that no more state updates will arrive.
+            // Process all deferred state updates now.
             MultiProofMessage::FinishedStateUpdates => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::FinishedStateUpdates");
+
+                // Take all buffered EVM states
+                let deferred_states = mem::take(&mut self.deferred_evm_states);
+                let num_deferred = deferred_states.len();
+
+                if !deferred_states.is_empty() {
+                    debug!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        num_deferred,
+                        "Processing deferred state updates"
+                    );
+
+                    // Merge all EVM states into one
+                    let mut merged_state = EvmState::default();
+                    for state in deferred_states {
+                        merged_state.extend(state);
+                    }
+
+                    // Record batch size metric
+                    self.metrics.state_update_batch_size_histogram.record(num_deferred as f64);
+
+                    // Hash everything in parallel and process
+                    batch_metrics.state_update_proofs_requested += self.on_state_update(
+                        Source::Evm(StateChangeSource::Transaction(0)),
+                        merged_state,
+                    );
+
+                    trace!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        num_deferred,
+                        state_update_proofs_requested = batch_metrics.state_update_proofs_requested,
+                        "Processed all deferred state updates"
+                    );
+                }
 
                 ctx.updates_finished_time = Some(Instant::now());
 
@@ -1320,8 +1296,6 @@ struct MultiproofBatchCtx {
     updates_finished_time: Option<Instant>,
     /// Reusable buffer for accumulating prefetch targets during batching.
     accumulated_prefetch_targets: Vec<MultiProofTargets>,
-    /// Reusable buffer for accumulating state updates during batching.
-    accumulated_state_updates: Vec<(Source, EvmState)>,
 }
 
 impl MultiproofBatchCtx {
@@ -1333,7 +1307,6 @@ impl MultiproofBatchCtx {
             start,
             updates_finished_time: None,
             accumulated_prefetch_targets: Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES),
-            accumulated_state_updates: Vec::with_capacity(STATE_UPDATE_BATCH_PREALLOC),
         }
     }
 
@@ -1433,68 +1406,71 @@ where
     1
 }
 
-/// Checks whether two state updates can be merged in a batch.
-///
-/// Transaction updates with the same transaction ID (`StateChangeSource::Transaction(id)`)
-/// are safe to merge because they originate from the same logical execution and can be
-/// coalesced to amortize proof work.
-fn can_batch_state_update(
-    batch_source: Source,
-    batch_update: &EvmState,
-    next_source: Source,
-    next_update: &EvmState,
-) -> bool {
-    if !same_source(batch_source, next_source) {
-        return false;
-    }
-
-    match (batch_source, next_source) {
-        (
-            Source::Evm(StateChangeSource::PreBlock(_)),
-            Source::Evm(StateChangeSource::PreBlock(_)),
-        ) |
-        (
-            Source::Evm(StateChangeSource::PostBlock(_)),
-            Source::Evm(StateChangeSource::PostBlock(_)),
-        ) => batch_update == next_update,
-        _ => true,
-    }
-}
-
-/// Checks whether two sources refer to the same origin.
-fn same_source(lhs: Source, rhs: Source) -> bool {
-    match (lhs, rhs) {
-        (
-            Source::Evm(StateChangeSource::Transaction(a)),
-            Source::Evm(StateChangeSource::Transaction(b)),
-        ) => a == b,
-        (
-            Source::Evm(StateChangeSource::PreBlock(a)),
-            Source::Evm(StateChangeSource::PreBlock(b)),
-        ) => mem::discriminant(&a) == mem::discriminant(&b),
-        (
-            Source::Evm(StateChangeSource::PostBlock(a)),
-            Source::Evm(StateChangeSource::PostBlock(b)),
-        ) => mem::discriminant(&a) == mem::discriminant(&b),
-        (Source::BlockAccessList, Source::BlockAccessList) => true,
-        _ => false,
-    }
-}
-
-/// Estimates target count from `EvmState` for batching decisions.
-fn estimate_evm_state_targets(state: &EvmState) -> usize {
-    state
-        .values()
-        .filter(|account| account.is_touched())
-        .map(|account| {
-            let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
-            1 + changed_slots
-        })
-        .sum()
-}
-
 #[cfg(test)]
 mod tests {
+    /// Maximum number of targets to batch together for state updates.
+    /// Used in legacy batching tests.
+    const STATE_UPDATE_MAX_BATCH_TARGETS: usize = 64;
+
+    /// Checks whether two state updates can be merged in a batch.
+    ///
+    /// Transaction updates with the same transaction ID (`StateChangeSource::Transaction(id)`)
+    /// are safe to merge because they originate from the same logical execution and can be
+    /// coalesced to amortize proof work.
+    fn can_batch_state_update(
+        batch_source: super::Source,
+        batch_update: &super::EvmState,
+        next_source: super::Source,
+        next_update: &super::EvmState,
+    ) -> bool {
+        if !same_source(batch_source, next_source) {
+            return false;
+        }
+
+        match (batch_source, next_source) {
+            (
+                super::Source::Evm(super::StateChangeSource::PreBlock(_)),
+                super::Source::Evm(super::StateChangeSource::PreBlock(_)),
+            ) |
+            (
+                super::Source::Evm(super::StateChangeSource::PostBlock(_)),
+                super::Source::Evm(super::StateChangeSource::PostBlock(_)),
+            ) => batch_update == next_update,
+            _ => true,
+        }
+    }
+
+    /// Checks whether two sources refer to the same origin.
+    fn same_source(lhs: super::Source, rhs: super::Source) -> bool {
+        match (lhs, rhs) {
+            (
+                super::Source::Evm(super::StateChangeSource::Transaction(a)),
+                super::Source::Evm(super::StateChangeSource::Transaction(b)),
+            ) => a == b,
+            (
+                super::Source::Evm(super::StateChangeSource::PreBlock(a)),
+                super::Source::Evm(super::StateChangeSource::PreBlock(b)),
+            ) => std::mem::discriminant(&a) == std::mem::discriminant(&b),
+            (
+                super::Source::Evm(super::StateChangeSource::PostBlock(a)),
+                super::Source::Evm(super::StateChangeSource::PostBlock(b)),
+            ) => std::mem::discriminant(&a) == std::mem::discriminant(&b),
+            (super::Source::BlockAccessList, super::Source::BlockAccessList) => true,
+            _ => false,
+        }
+    }
+
+    /// Estimates target count from `EvmState` for batching decisions.
+    fn estimate_evm_state_targets(state: &super::EvmState) -> usize {
+        state
+            .values()
+            .filter(|account| account.is_touched())
+            .map(|account| {
+                let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
+                1 + changed_slots
+            })
+            .sum()
+    }
     use super::*;
     use crate::tree::cached_state::{CachedStateProvider, ExecutionCacheBuilder};
     use alloy_eip7928::{AccountChanges, BalanceChange};
@@ -2481,6 +2457,8 @@ mod tests {
     }
 
     /// Verifies that a pending message is processed before the next loop iteration (ordering).
+    /// With deferred state update processing, StateUpdate messages simply buffer the state
+    /// without trying to batch consecutive messages.
     #[test]
     fn test_pending_message_processed_before_next_iteration() {
         use alloy_evm::block::StateChangeSource;
@@ -2537,7 +2515,8 @@ mod tests {
         let pending = ctx.pending_msg.take().expect("pending message captured");
         assert!(matches!(pending, MultiProofMessage::StateUpdate(_, _)));
 
-        // Pending message should be handled before the next select loop.
+        // Pending StateUpdate should be handled - it now just buffers the state (deferred
+        // processing)
         assert!(!task.process_multiproof_message(
             pending,
             &mut ctx,
@@ -2545,13 +2524,19 @@ mod tests {
             &test_provider
         ));
 
-        // Prefetch2 should now be in pending_msg (captured by StateUpdate's batching loop).
-        match ctx.pending_msg.take() {
-            Some(MultiProofMessage::PrefetchProofs(targets)) => {
+        // With deferred processing, StateUpdate doesn't try to batch, so no pending_msg
+        // The state is buffered in task.deferred_evm_states instead
+        assert!(ctx.pending_msg.is_none());
+        assert_eq!(task.deferred_evm_states.len(), 1);
+
+        // Prefetch2 is still in the channel, not captured as pending
+        let next = task.rx.recv().unwrap();
+        match next {
+            MultiProofMessage::PrefetchProofs(targets) => {
                 assert_eq!(targets.len(), 1);
                 assert!(targets.contains_key(&prefetch_addr2));
             }
-            other => panic!("Expected remaining PrefetchProofs2 in pending_msg, got {:?}", other),
+            other => panic!("Expected PrefetchProofs2 from channel, got {:?}", other),
         }
     }
 
