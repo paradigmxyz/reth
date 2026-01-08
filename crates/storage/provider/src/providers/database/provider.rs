@@ -3168,6 +3168,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
 
         let mut durations_recorder = metrics::DurationsRecorder::default();
 
+        // Extract account and storage transitions from the bundle reverts BEFORE writing state.
+        // This is necessary because with edge storage, changesets are written to static files
+        // whose index isn't updated until commit, making them invisible to subsequent reads
+        // within the same transaction.
+        let (account_transitions, storage_transitions) = {
+            let mut account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+            let mut storage_transitions: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+            for (block_idx, block_reverts) in execution_outcome.bundle.reverts.iter().enumerate() {
+                let block_number = first_number + block_idx as u64;
+                for (address, account_revert) in block_reverts {
+                    account_transitions.entry(*address).or_default().push(block_number);
+                    for storage_key in account_revert.storage.keys() {
+                        let key = B256::new(storage_key.to_be_bytes());
+                        storage_transitions.entry((*address, key)).or_default().push(block_number);
+                    }
+                }
+            }
+            (account_transitions, storage_transitions)
+        };
+
         // Insert the blocks
         for block in blocks {
             self.insert_block(&block)?;
@@ -3181,7 +3201,10 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         self.write_hashed_state(&hashed_state)?;
         durations_recorder.record_relative(metrics::Action::InsertHashes);
 
-        self.update_history_indices(first_number..=last_block_number)?;
+        // Use pre-computed transitions for history indices since static file
+        // writes aren't visible until commit.
+        self.insert_account_history_index(account_transitions)?;
+        self.insert_storage_history_index(storage_transitions)?;
         durations_recorder.record_relative(metrics::Action::InsertHistoryIndices);
 
         // Update pipeline progress
