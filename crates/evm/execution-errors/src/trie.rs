@@ -7,7 +7,7 @@ use reth_storage_errors::{db::DatabaseError, provider::ProviderError};
 use thiserror::Error;
 
 /// State root errors.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Clone, Debug)]
 pub enum StateRootError {
     /// Internal database error.
     #[error(transparent)]
@@ -27,7 +27,7 @@ impl From<StateRootError> for DatabaseError {
 }
 
 /// Storage root error.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Clone, Debug)]
 pub enum StorageRootError {
     /// Internal database error.
     #[error(transparent)]
@@ -43,7 +43,7 @@ impl From<StorageRootError> for DatabaseError {
 }
 
 /// State proof errors.
-#[derive(Error, PartialEq, Eq, Clone, Debug)]
+#[derive(Error, Clone, Debug)]
 pub enum StateProofError {
     /// Internal database error.
     #[error(transparent)]
