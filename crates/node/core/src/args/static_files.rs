@@ -24,6 +24,10 @@ pub struct StaticFilesArgs {
     #[arg(long = "static-files.blocks-per-file.transaction-senders")]
     pub blocks_per_file_transaction_senders: Option<u64>,
 
+    /// Number of blocks per file for the account changesets segment.
+    #[arg(long = "static-files.blocks-per-file.account-change-sets")]
+    pub blocks_per_file_account_change_sets: Option<u64>,
+
     /// Store receipts in static files instead of the database.
     ///
     /// When enabled, receipts will be written to static files on disk instead of the database.
@@ -42,6 +46,16 @@ pub struct StaticFilesArgs {
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
     #[arg(long = "static-files.transaction-senders")]
     pub transaction_senders: bool,
+
+    /// Store account changesets in static files.
+    ///
+    /// When enabled, account changesets will be written to static files on disk instead of the
+    /// database.
+    ///
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
+    #[arg(long = "static-files.account-change-sets")]
+    pub account_changesets: bool,
 }
 
 impl StaticFilesArgs {
@@ -58,6 +72,9 @@ impl StaticFilesArgs {
                 transaction_senders: self
                     .blocks_per_file_transaction_senders
                     .or(config.blocks_per_file.transaction_senders),
+                account_change_sets: self
+                    .blocks_per_file_account_change_sets
+                    .or(config.blocks_per_file.account_change_sets),
             },
         }
     }
@@ -67,5 +84,6 @@ impl StaticFilesArgs {
         StorageSettings::legacy()
             .with_receipts_in_static_files(self.receipts)
             .with_transaction_senders_in_static_files(self.transaction_senders)
+            .with_account_changesets_in_static_files(self.account_changesets)
     }
 }

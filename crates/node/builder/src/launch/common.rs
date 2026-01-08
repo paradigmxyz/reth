@@ -477,7 +477,7 @@ where
 
         // Apply per-segment blocks_per_file configuration
         let static_file_provider =
-            StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
+            StaticFileProviderBuilder::read_write(self.data_dir().static_files())
                 .with_metrics()
                 .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
                 .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
@@ -648,7 +648,7 @@ where
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo { name: self.left().config.chain.chain().to_string() },
+                ChainSpecInfo { name: self.chain_id().to_string() },
                 self.task_executor().clone(),
                 Hooks::builder()
                     .with_hook({
@@ -664,7 +664,9 @@ where
                         }
                     })
                     .build(),
-            ).with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
+                self.data_dir().pprof_dumps(),
+            )
+            .with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
 
             MetricServer::new(config).serve().await?;
         }

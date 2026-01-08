@@ -1,8 +1,6 @@
 //! Multiproof task related functionality.
 
-use crate::tree::{
-    cached_state::CachedStateProvider, payload_processor::bal::bal_to_hashed_post_state,
-};
+use crate::tree::payload_processor::bal::bal_to_hashed_post_state;
 use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
@@ -10,7 +8,6 @@ use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as Cros
 use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
-use rayon::prelude::*;
 use reth_metrics::Metrics;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
@@ -203,38 +200,35 @@ impl Drop for StateHookSender {
 }
 
 pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostState {
-    update.into_par_iter()
-        .filter_map(|(address, account)| {
-            if !account.is_touched() {
-                return None;
-            }
+    let mut hashed_state = HashedPostState::with_capacity(update.len());
 
+    for (address, account) in update {
+        if account.is_touched() {
             let hashed_address = keccak256(address);
             trace!(target: "engine::tree::payload_processor::multiproof", ?address, ?hashed_address, "Adding account to state update");
 
             let destroyed = account.is_selfdestructed();
             let info = if destroyed { None } else { Some(account.info.into()) };
+            hashed_state.accounts.insert(hashed_address, info);
 
-            let hashed_storage = if destroyed {
-                Some(HashedStorage::new(true))
-            } else {
-                let storage: Vec<_> = account
-                    .storage
-                    .into_iter()
-                    .filter(|(_slot, value)| value.is_changed())
-                    .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
-                    .collect();
+            let mut changed_storage_iter = account
+                .storage
+                .into_iter()
+                .filter(|(_slot, value)| value.is_changed())
+                .map(|(slot, value)| (keccak256(B256::from(slot)), value.present_value))
+                .peekable();
 
-                if storage.is_empty() {
-                    None
-                } else {
-                    Some(HashedStorage::from_iter(false, storage))
-                }
-            };
+            if destroyed {
+                hashed_state.storages.insert(hashed_address, HashedStorage::new(true));
+            } else if changed_storage_iter.peek().is_some() {
+                hashed_state
+                    .storages
+                    .insert(hashed_address, HashedStorage::from_iter(false, changed_storage_iter));
+            }
+        }
+    }
 
-            Some((hashed_address, info, hashed_storage))
-        })
-        .collect()
+    hashed_state
 }
 
 /// Input parameters for dispatching a multiproof calculation.
@@ -289,6 +283,8 @@ pub struct MultiproofManager {
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
+    /// Whether to use V2 storage proofs
+    v2_proofs_enabled: bool,
 }
 
 impl MultiproofManager {
@@ -302,11 +298,14 @@ impl MultiproofManager {
         metrics.max_storage_workers.set(proof_worker_handle.total_storage_workers() as f64);
         metrics.max_account_workers.set(proof_worker_handle.total_account_workers() as f64);
 
+        let v2_proofs_enabled = proof_worker_handle.v2_proofs_enabled();
+
         Self {
             metrics,
             proof_worker_handle,
             missed_leaves_storage_roots: Default::default(),
             proof_result_tx,
+            v2_proofs_enabled,
         }
     }
 
@@ -386,6 +385,7 @@ impl MultiproofManager {
                 hashed_state_update,
                 start,
             ),
+            v2_proofs_enabled: self.v2_proofs_enabled,
         };
 
         if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(input) {
@@ -623,11 +623,6 @@ impl MultiProofTask {
             metrics,
             max_targets_for_chunking: DEFAULT_MAX_TARGETS_FOR_CHUNKING,
         }
-    }
-
-    /// Returns a sender that can be used to send arbitrary [`MultiProofMessage`]s to this task.
-    pub(super) fn state_root_message_sender(&self) -> CrossbeamSender<MultiProofMessage> {
-        self.tx.clone()
     }
 
     /// Handles request for proof prefetch.
@@ -879,7 +874,7 @@ impl MultiProofTask {
         msg: MultiProofMessage,
         ctx: &mut MultiproofBatchCtx,
         batch_metrics: &mut MultiproofBatchMetrics,
-        provider: &CachedStateProvider<P>,
+        provider: &P,
     ) -> bool
     where
         P: AccountReader,
@@ -1184,7 +1179,7 @@ impl MultiProofTask {
         target = "engine::tree::payload_processor::multiproof",
         skip_all
     )]
-    pub(crate) fn run<P>(mut self, provider: CachedStateProvider<P>)
+    pub(crate) fn run<P>(mut self, provider: P)
     where
         P: AccountReader,
     {
@@ -1229,7 +1224,7 @@ impl MultiProofTask {
 
                                     let update = SparseTrieUpdate {
                                         state: proof_result.state,
-                                        multiproof: proof_result_data.into_multiproof(),
+                                        multiproof: proof_result_data.proof,
                                     };
 
                                     if let Some(combined_update) =
@@ -1501,13 +1496,13 @@ fn estimate_evm_state_targets(state: &EvmState) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tree::cached_state::ExecutionCacheBuilder;
+    use crate::tree::cached_state::{CachedStateProvider, ExecutionCacheBuilder};
     use alloy_eip7928::{AccountChanges, BalanceChange};
     use alloy_primitives::{map::B256Set, Address};
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        BlockReader, DatabaseProviderFactory, LatestStateProvider, PruneCheckpointReader,
-        StageCheckpointReader, StateProviderBox, TrieReader,
+        BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
+        PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TrieReader,
     };
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
@@ -1529,7 +1524,12 @@ mod tests {
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
     where
         F: DatabaseProviderFactory<
-                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+                Provider: BlockReader
+                              + TrieReader
+                              + StageCheckpointReader
+                              + PruneCheckpointReader
+                              + ChangeSetReader
+                              + BlockNumReader,
             > + Clone
             + Send
             + 'static,
@@ -1537,7 +1537,7 @@ mod tests {
         let rt_handle = get_test_runtime_handle();
         let overlay_factory = OverlayStateProviderFactory::new(factory);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
+        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -2011,7 +2011,7 @@ mod tests {
         let mut targets3 = MultiProofTargets::default();
         targets3.insert(addr3, HashSet::default());
 
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(targets1)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(targets2)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(targets3)).unwrap();
@@ -2087,7 +2087,7 @@ mod tests {
 
         let source = StateChangeSource::Transaction(0);
 
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::StateUpdate(source.into(), update1.clone())).unwrap();
         tx.send(MultiProofMessage::StateUpdate(source.into(), update2.clone())).unwrap();
 
@@ -2151,7 +2151,7 @@ mod tests {
         let source_b = StateChangeSource::Transaction(2);
 
         // Queue: A1 (immediate dispatch), B1 (batched), A2 (should become pending)
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::StateUpdate(source_a.into(), create_state_update(addr_a1, 100)))
             .unwrap();
         tx.send(MultiProofMessage::StateUpdate(source_b.into(), create_state_update(addr_b1, 200)))
@@ -2273,7 +2273,7 @@ mod tests {
         let source = StateChangeSource::PreBlock(StateChangePreBlockSource::BeaconRootContract);
 
         // Queue: first update dispatched immediately, next two should not merge
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr1, 100)))
             .unwrap();
         tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr2, 200)))
@@ -2416,7 +2416,7 @@ mod tests {
         let source = StateChangeSource::Transaction(42);
 
         // Queue: [PrefetchProofs1, PrefetchProofs2, StateUpdate1, StateUpdate2, PrefetchProofs3]
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(targets1)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(targets2)).unwrap();
         tx.send(MultiProofMessage::StateUpdate(source.into(), state_update1)).unwrap();
@@ -2517,7 +2517,7 @@ mod tests {
 
         let source = StateChangeSource::Transaction(99);
 
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch1)).unwrap();
         tx.send(MultiProofMessage::StateUpdate(source.into(), state_update)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch2.clone())).unwrap();
@@ -2613,7 +2613,7 @@ mod tests {
         let source = StateChangeSource::Transaction(42);
 
         // Queue: [Prefetch1, State1, State2, State3, Prefetch2]
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch1.clone())).unwrap();
         tx.send(MultiProofMessage::StateUpdate(
             source.into(),
