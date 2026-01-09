@@ -2,7 +2,7 @@
 
 use crate::args::{
     types::{MaxU32, ZeroAsNoneU64},
-    GasPriceOracleArgs, RpcStateCacheArgs,
+    value_parser_utils, GasPriceOracleArgs, RpcStateCacheArgs,
 };
 use alloy_primitives::Address;
 use alloy_rpc_types_engine::JwtSecret;
@@ -870,8 +870,7 @@ impl TypedValueParser for RpcModuleSelectionValueParser {
         _arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
-        let val =
-            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        let val = value_parser_utils::parse_osstr_to_str(value)?;
         // This will now accept any module name, creating Other(name) for unknowns
         Ok(val
             .parse::<RpcModuleSelection>()

@@ -1,5 +1,6 @@
 //! clap [Args](clap::Args) for debugging purposes
 
+use crate::args::value_parser_utils;
 use alloy_primitives::B256;
 use clap::{
     builder::{PossibleValue, TypedValueParser},
@@ -263,15 +264,10 @@ impl TypedValueParser for InvalidBlockSelectionValueParser {
         arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
-        let val =
-            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        let val = value_parser_utils::parse_osstr_to_str(value)?;
         val.parse::<InvalidBlockSelection>().map_err(|err| {
-            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
             let possible_values = InvalidBlockHookType::all_variant_names().to_vec().join(",");
-            let msg = format!(
-                "Invalid value '{val}' for {arg}: {err}.\n    [possible values: {possible_values}]"
-            );
-            clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
+            value_parser_utils::build_invalid_value_error(val, arg, err, &possible_values)
         })
     }
 

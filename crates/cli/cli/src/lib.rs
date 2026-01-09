@@ -17,6 +17,9 @@ use std::{borrow::Cow, ffi::OsString};
 pub mod chainspec;
 use crate::chainspec::ChainSpecParser;
 
+/// Utility functions for clap value parsers
+mod utils;
+
 /// Reth based node cli.
 ///
 /// This trait is supposed to be implemented by the main struct of the CLI.

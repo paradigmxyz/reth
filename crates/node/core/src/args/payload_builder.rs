@@ -1,4 +1,6 @@
-use crate::{cli::config::PayloadBuilderConfig, version::default_extra_data};
+use crate::{
+    args::value_parser_utils, cli::config::PayloadBuilderConfig, version::default_extra_data,
+};
 use alloy_consensus::constants::MAXIMUM_EXTRA_DATA_SIZE;
 use clap::{
     builder::{RangedU64ValueParser, TypedValueParser},
@@ -179,8 +181,7 @@ impl TypedValueParser for ExtraDataValueParser {
         _arg: Option<&Arg>,
         value: &OsStr,
     ) -> Result<Self::Value, clap::Error> {
-        let val =
-            value.to_str().ok_or_else(|| clap::Error::new(clap::error::ErrorKind::InvalidUtf8))?;
+        let val = value_parser_utils::parse_osstr_to_str(value)?;
         if val.len() > MAXIMUM_EXTRA_DATA_SIZE {
             return Err(clap::Error::raw(
                 clap::error::ErrorKind::InvalidValue,

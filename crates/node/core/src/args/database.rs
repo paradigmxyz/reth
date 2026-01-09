@@ -2,10 +2,9 @@
 
 use std::{fmt, str::FromStr, time::Duration};
 
-use crate::version::default_client_version;
+use crate::{args::value_parser_utils, version::default_client_version};
 use clap::{
     builder::{PossibleValue, TypedValueParser},
-    error::ErrorKind,
     value_parser, Arg, Args, Command, Error,
 };
 use reth_db::{
@@ -106,18 +105,17 @@ impl TypedValueParser for LogLevelValueParser {
         arg: Option<&Arg>,
         value: &std::ffi::OsStr,
     ) -> Result<Self::Value, Error> {
-        let val =
-            value.to_str().ok_or_else(|| Error::raw(ErrorKind::InvalidUtf8, "Invalid UTF-8"))?;
+        let val = value_parser_utils::parse_osstr_to_str(value)?;
 
         val.parse::<LogLevel>().map_err(|err| {
-            let arg = arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned());
+            let arg_name = value_parser_utils::format_arg_name(arg);
             let possible_values = LogLevel::value_variants()
                 .iter()
                 .map(|v| format!("- {:?}: {}", v, v.help_message()))
                 .collect::<Vec<_>>()
                 .join("\n");
             let msg = format!(
-                "Invalid value '{val}' for {arg}: {err}.\n    Possible values:\n{possible_values}"
+                "Invalid value '{val}' for {arg_name}: {err}.\n    Possible values:\n{possible_values}"
             );
             clap::Error::raw(clap::error::ErrorKind::InvalidValue, msg)
         })
