@@ -349,14 +349,26 @@ where
             return Ok(())
         }
 
-        let child_path = self.last_child_path();
-        // TODO theoretically `commit_child` only needs to convert to an `RlpNode` if it's going to
-        // retain the proof, otherwise we could leave the child as-is on the stack and convert it
-        // when popping the branch, giving more time to the DeferredEncoder to do async work.
-        let child_rlp_node = self.commit_child(targets, child_path, child)?;
+        // If state_mask is empty (e.g., cached branch), we can't compute child_path.
+        // Push the child back and defer processing.
+        if let Some(branch) = self.branch_stack.last() {
+            if branch.state_mask.is_empty() {
+                self.child_stack.push(child);
+                return Ok(())
+            }
+        }
 
-        // Replace the child on the stack
-        self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
+        let child_path = self.last_child_path();
+
+        // Only commit immediately if retained for the proof. Otherwise, defer conversion
+        // to pop_branch() to give DeferredEncoder time for async work.
+        if self.should_retain(targets, &child_path, true) {
+            let child_rlp_node = self.commit_child(targets, child_path, child)?;
+            self.child_stack.push(ProofTrieBranchChild::RlpNode(child_rlp_node));
+        } else {
+            self.child_stack.push(child);
+        }
+
         Ok(())
     }
 
@@ -499,15 +511,20 @@ where
             "Stack is missing necessary children ({num_children:?})"
         );
 
-        // Collect children into an `RlpNode` Vec by committing and pushing each of them.
-        for (idx, child) in
-            self.child_stack.drain(self.child_stack.len() - num_children..).enumerate()
-        {
-            let ProofTrieBranchChild::RlpNode(child_rlp_node) = child else {
-                panic!(
-                    "all branch children must have been committed, found {} at index {idx:?}",
-                    std::any::type_name_of_val(&child)
-                );
+        // Collect children into RlpNode Vec. Children are in lexicographic order.
+        for child in self.child_stack.drain(self.child_stack.len() - num_children..) {
+            let child_rlp_node = match child {
+                ProofTrieBranchChild::RlpNode(rlp_node) => rlp_node,
+                uncommitted_child => {
+                    // Convert uncommitted child (not retained for proof) to RlpNode now.
+                    self.rlp_encode_buf.clear();
+                    let (rlp_node, freed_buf) =
+                        uncommitted_child.into_rlp(&mut self.rlp_encode_buf)?;
+                    if let Some(buf) = freed_buf {
+                        self.rlp_nodes_bufs.push(buf);
+                    }
+                    rlp_node
+                }
             };
             rlp_nodes_buf.push(child_rlp_node);
         }
