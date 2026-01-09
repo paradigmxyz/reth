@@ -12,7 +12,7 @@ use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
 use reth_revm::{
     database::{EvmStateProvider, StateProviderDatabase},
-    db::State,
+    db::{bal::EvmDatabaseError, State},
 };
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
@@ -139,7 +139,7 @@ pub trait EstimateCall: Call {
             if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) &&
                 res.result.is_success()
             {
-                return Ok(U256::from(MIN_TRANSACTION_GAS))
+                return Ok(U256::from(MIN_TRANSACTION_GAS));
             }
         }
 
@@ -165,7 +165,7 @@ pub trait EstimateCall: Call {
                 return Err(RpcInvalidTransactionError::GasRequiredExceedsAllowance {
                     gas_limit: tx_env.gas_limit(),
                 }
-                .into_eth_err())
+                .into_eth_err());
             }
             // Propagate other results (successful or other errors).
             ethres => ethres?,
@@ -176,7 +176,7 @@ pub trait EstimateCall: Call {
             ExecutionResult::Halt { reason, .. } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
-                return Err(Self::Error::from_evm_halt(reason, tx_env.gas_limit()))
+                return Err(Self::Error::from_evm_halt(reason, tx_env.gas_limit()));
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -186,7 +186,7 @@ pub trait EstimateCall: Call {
                 } else {
                     // the transaction did revert
                     Err(Self::Error::from_revert(output))
-                }
+                };
             }
         };
 
@@ -246,7 +246,7 @@ pub trait EstimateCall: Call {
             // <https://github.com/ethereum/go-ethereum/blob/a5a4fa7032bb248f5a7c40f4e8df2b131c4186a4/eth/gasestimator/gasestimator.go#L152
             let ratio = (highest_gas_limit - lowest_gas_limit) as f64 / (highest_gas_limit as f64);
             if ratio < ESTIMATE_GAS_ERROR_RATIO {
-                break
+                break;
             };
 
             let mut mid_tx_env = tx_env.clone();
@@ -313,7 +313,7 @@ pub trait EstimateCall: Call {
         max_gas_limit: u64,
     ) -> Result<U256, Self::Error>
     where
-        DB: Database<Error = ProviderError>,
+        DB: Database<Error = EvmDatabaseError<ProviderError>>,
         EthApiError: From<DB::Error>,
     {
         let req_gas_limit = tx_env.gas_limit();
