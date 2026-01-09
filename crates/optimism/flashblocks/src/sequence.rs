@@ -65,7 +65,9 @@ impl FlashBlockPendingSequence {
 
     /// Inserts a new block into the sequence.
     ///
-    /// A [`FlashBlock`] with index 0 resets the set.
+    /// A [`FlashBlock`] with index 0 is treated as the first element of a new sequence.
+    /// The caller is responsible for finalizing or clearing any previous sequence before
+    /// inserting such a block.
     pub fn insert(&mut self, flashblock: FlashBlock) {
         if flashblock.index == 0 {
             trace!(target: "flashblocks", number=%flashblock.block_number(), "Tracking new flashblock sequence");
