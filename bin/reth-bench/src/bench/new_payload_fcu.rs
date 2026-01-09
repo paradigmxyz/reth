@@ -48,7 +48,10 @@ const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Final sync timeout: wait up to 5 minutes for remaining blocks to persist
 const PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Tracks persistence state and statistics during benchmark
+/// Tracks persistence state and statistics during benchmark.
+///
+/// TODO: Consider simplifying after testing is complete - the core functionality
+/// only needs `blocks_sent`, `last_persisted`, and `last_block_number`.
 struct PersistenceTracker {
     blocks_sent: u64,
     last_persisted: u64,
@@ -431,31 +434,11 @@ impl Command {
     /// RPC used for fetching blocks). This derives the WS URL from the engine API URL:
     /// - http://localhost:8551 (engine API) → ws://localhost:8546 (RPC WebSocket)
     fn derive_local_rpc_url(&self) -> eyre::Result<Url> {
-        let engine_url: Url =
-            self.benchmark.engine_rpc_url.parse().wrap_err("Failed to parse engine RPC URL")?;
-
-        let mut local_url = engine_url.clone();
-
-        // Convert http/https to ws/wss
-        match local_url.scheme() {
-            "http" => {
-                local_url.set_scheme("ws").map_err(|_| eyre::eyre!("Failed to set WS scheme"))?
-            }
-            "https" => {
-                local_url.set_scheme("wss").map_err(|_| eyre::eyre!("Failed to set WSS scheme"))?
-            }
-            "ws" | "wss" => {}
-            scheme => return Err(eyre::eyre!("Unsupported URL scheme: {}", scheme)),
-        }
-
-        // Change port from engine API (8551) to standard RPC WebSocket (8546)
-        if local_url.port() == Some(8551) {
-            local_url.set_port(Some(8546)).map_err(|_| eyre::eyre!("Failed to set port"))?;
-        }
+        let local_url = engine_url_to_ws_url(&self.benchmark.engine_rpc_url)?;
 
         debug!(
             target: "reth-bench",
-            engine_url = %engine_url,
+            engine_url = %self.benchmark.engine_rpc_url,
             derived_url = %local_url,
             "Derived local RPC WebSocket URL from engine API URL"
         );
@@ -501,5 +484,85 @@ impl Command {
         info!("Subscribed to persistence notifications");
 
         Ok(subscription.into_stream())
+    }
+}
+
+/// Converts an engine API URL to the corresponding RPC WebSocket URL.
+///
+/// - Converts http/https to ws/wss
+/// - Changes port 8551 (engine API) to 8546 (RPC WebSocket)
+fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
+    let url: Url = engine_url
+        .parse()
+        .wrap_err_with(|| format!("Failed to parse engine RPC URL: {engine_url}"))?;
+
+    let mut ws_url = url.clone();
+
+    match ws_url.scheme() {
+        "http" => ws_url
+            .set_scheme("ws")
+            .map_err(|_| eyre::eyre!("Failed to set WS scheme for URL: {url}"))?,
+        "https" => ws_url
+            .set_scheme("wss")
+            .map_err(|_| eyre::eyre!("Failed to set WSS scheme for URL: {url}"))?,
+        "ws" | "wss" => {}
+        scheme => return Err(eyre::eyre!(
+            "Unsupported URL scheme '{scheme}' for URL: {url}. Expected http, https, ws, or wss."
+        )),
+    }
+
+    if ws_url.port() == Some(8551) {
+        ws_url
+            .set_port(Some(8546))
+            .map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
+    }
+
+    Ok(ws_url)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_engine_url_to_ws_url_http_default_port() {
+        let result = engine_url_to_ws_url("http://localhost:8551").unwrap();
+        assert_eq!(result.scheme(), "ws");
+        assert_eq!(result.host_str(), Some("localhost"));
+        assert_eq!(result.port(), Some(8546));
+    }
+
+    #[test]
+    fn test_engine_url_to_ws_url_https() {
+        let result = engine_url_to_ws_url("https://localhost:8551").unwrap();
+        assert_eq!(result.scheme(), "wss");
+        assert_eq!(result.port(), Some(8546));
+    }
+
+    #[test]
+    fn test_engine_url_to_ws_url_preserves_non_engine_port() {
+        let result = engine_url_to_ws_url("http://localhost:9000").unwrap();
+        assert_eq!(result.scheme(), "ws");
+        assert_eq!(result.port(), Some(9000));
+    }
+
+    #[test]
+    fn test_engine_url_to_ws_url_already_ws() {
+        let result = engine_url_to_ws_url("ws://localhost:8546").unwrap();
+        assert_eq!(result.scheme(), "ws");
+        assert_eq!(result.port(), Some(8546));
+    }
+
+    #[test]
+    fn test_engine_url_to_ws_url_invalid_scheme() {
+        let result = engine_url_to_ws_url("ftp://localhost:8551");
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Unsupported URL scheme"));
+    }
+
+    #[test]
+    fn test_engine_url_to_ws_url_invalid_url() {
+        let result = engine_url_to_ws_url("not a valid url");
+        assert!(result.is_err());
     }
 }

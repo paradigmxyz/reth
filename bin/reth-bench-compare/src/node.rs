@@ -152,7 +152,10 @@ impl NodeManager {
             metrics_arg,
             "--http".to_string(),
             "--http.api".to_string(),
-            "eth".to_string(),
+            "eth,reth".to_string(),
+            "--ws".to_string(),
+            "--ws.api".to_string(),
+            "eth,reth".to_string(),
             "--disable-discovery".to_string(),
             "--trusted-only".to_string(),
         ]);
