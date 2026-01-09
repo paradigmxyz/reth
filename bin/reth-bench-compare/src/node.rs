@@ -367,8 +367,13 @@ impl NodeManager {
         Ok((child, reth_command))
     }
 
-    /// Wait for the node to be ready and return its current tip
-    pub(crate) async fn wait_for_node_ready_and_get_tip(&self) -> Result<u64> {
+    /// Wait for the node to be ready and return its current tip.
+    ///
+    /// Fails early if the node process exits before becoming ready.
+    pub(crate) async fn wait_for_node_ready_and_get_tip(
+        &self,
+        child: &mut tokio::process::Child,
+    ) -> Result<u64> {
         info!("Waiting for node to be ready and synced...");
 
         let max_wait = Duration::from_secs(120); // 2 minutes to allow for sync
@@ -390,6 +395,14 @@ impl NodeManager {
                     iteration,
                     start_time.elapsed()
                 );
+
+                // Check if the node process has exited.
+                if let Some(status) = child.try_wait()? {
+                    return Err(eyre!(
+                        "Node process exited unexpectedly with status: {:?}",
+                        status
+                    ));
+                }
 
                 // First check if RPC is up and node is not syncing
                 match provider.syncing().await {
