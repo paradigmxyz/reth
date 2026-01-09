@@ -20,7 +20,7 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
-/// Default WebSocket RPC port used by reth
+/// Default websocket RPC port used by reth
 const DEFAULT_WS_RPC_PORT: u16 = 8546;
 
 /// Manages reth node lifecycle and operations
