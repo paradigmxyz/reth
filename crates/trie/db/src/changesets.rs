@@ -10,7 +10,9 @@
 use crate::{DatabaseHashedPostState, DatabaseStateRoot, DatabaseTrieCursorFactory};
 use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use parking_lot::RwLock;
-use reth_storage_api::{BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader};
+use reth_storage_api::{
+    BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader, StorageChangeSetReader,
+};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
     changesets::compute_trie_changesets,
@@ -65,7 +67,11 @@ pub fn compute_block_trie_changesets<Provider>(
     block_number: BlockNumber,
 ) -> Result<TrieUpdatesSorted, ProviderError>
 where
-    Provider: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+    Provider: DBProvider
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader,
 {
     debug!(
         target: "trie::changeset_cache",
@@ -175,7 +181,11 @@ pub fn compute_block_trie_updates<Provider>(
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
 where
-    Provider: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+    Provider: DBProvider
+        + StageCheckpointReader
+        + ChangeSetReader
+        + StorageChangeSetReader
+        + BlockNumReader,
 {
     let tx = provider.tx_ref();
 
@@ -323,7 +333,11 @@ impl ChangesetCache {
         provider: &P,
     ) -> ProviderResult<Arc<TrieUpdatesSorted>>
     where
-        P: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+        P: DBProvider
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader,
     {
         // Try cache first (with read lock)
         {
@@ -408,7 +422,11 @@ impl ChangesetCache {
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<TrieUpdatesSorted>
     where
-        P: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+        P: DBProvider
+            + StageCheckpointReader
+            + ChangeSetReader
+            + StorageChangeSetReader
+            + BlockNumReader,
     {
         // Get the database tip block number
         let db_tip_block = provider

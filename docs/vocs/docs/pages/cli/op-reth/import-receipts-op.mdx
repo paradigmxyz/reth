@@ -108,6 +108,9 @@ Static Files:
       --static-files.blocks-per-file.account-change-sets <BLOCKS_PER_FILE_ACCOUNT_CHANGE_SETS>
           Number of blocks per file for the account changesets segment
 
+      --static-files.blocks-per-file.storage-change-sets <BLOCKS_PER_FILE_STORAGE_CHANGE_SETS>
+          Number of blocks per file for the storage changesets segment
+
       --static-files.receipts <RECEIPTS>
           Store receipts in static files instead of the database.
 
@@ -137,6 +140,13 @@ Static Files:
 
           [default: false]
           [possible values: true, false]
+
+      --static-files.storage-change-sets
+          Store storage changesets in static files.
+
+          When enabled, storage changesets will be written to static files on disk instead of the database.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
 RocksDB:
       --rocksdb.all

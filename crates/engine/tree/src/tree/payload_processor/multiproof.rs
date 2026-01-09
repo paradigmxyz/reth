@@ -1523,7 +1523,7 @@ mod tests {
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
-        PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
+        PruneCheckpointReader, StageCheckpointReader, StateProviderBox, StorageChangeSetReader,
     };
     use reth_trie::MultiProof;
     use reth_trie_db::ChangesetCache;
@@ -1550,6 +1550,7 @@ mod tests {
                               + StageCheckpointReader
                               + PruneCheckpointReader
                               + ChangeSetReader
+                              + StorageChangeSetReader
                               + BlockNumReader,
             > + Clone
             + Send

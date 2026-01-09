@@ -6,7 +6,7 @@ use reth_primitives_traits::{GotExpected, SealedHeader};
 use reth_provider::{
     BlockNumReader, ChainStateBlockReader, ChangeSetReader, DBProvider, HeaderProvider,
     ProviderError, PruneCheckpointReader, PruneCheckpointWriter, StageCheckpointReader,
-    StageCheckpointWriter, TrieWriter,
+    StageCheckpointWriter, StorageChangeSetReader, TrieWriter,
 };
 use reth_prune_types::{
     PruneCheckpoint, PruneMode, PruneSegment, MERKLE_CHANGESETS_RETENTION_BLOCKS,
@@ -167,7 +167,8 @@ impl MerkleChangeSets {
             + HeaderProvider
             + ChainStateBlockReader
             + BlockNumReader
-            + ChangeSetReader,
+            + ChangeSetReader
+            + StorageChangeSetReader,
     {
         let target_start = target_range.start;
         let target_end = target_range.end;
@@ -308,6 +309,7 @@ where
         + PruneCheckpointReader
         + PruneCheckpointWriter
         + ChangeSetReader
+        + StorageChangeSetReader
         + BlockNumReader,
 {
     fn id(&self) -> StageId {

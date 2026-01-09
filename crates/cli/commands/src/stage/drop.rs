@@ -90,6 +90,9 @@ impl<C: ChainSpecParser> Command<C> {
                     StaticFileSegment::AccountChangeSets => {
                         writer.prune_account_changesets(highest_block)?;
                     }
+                    StaticFileSegment::StorageChangeSets => {
+                        writer.prune_storage_changesets(highest_block)?;
+                    }
                 }
             }
         }
