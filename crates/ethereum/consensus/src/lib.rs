@@ -84,17 +84,15 @@ where
     B: Block,
     ChainSpec: EthChainSpec<Header = B::Header> + EthereumHardforks + Debug + Send + Sync,
 {
-    type Error = ConsensusError;
-
     fn validate_body_against_header(
         &self,
         body: &B::Body,
         header: &SealedHeader<B::Header>,
-    ) -> Result<(), Self::Error> {
+    ) -> Result<(), ConsensusError> {
         validate_body_against_header(body, header.header())
     }
 
-    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), Self::Error> {
+    fn validate_block_pre_execution(&self, block: &SealedBlock<B>) -> Result<(), ConsensusError> {
         validate_block_pre_execution(block, &self.chain_spec)
     }
 }

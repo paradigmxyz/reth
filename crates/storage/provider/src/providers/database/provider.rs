@@ -17,10 +17,10 @@ use crate::{
     DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, RocksDBProviderFactory,
-    StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
-    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieReader, TrieWriter,
+    PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
+    RocksDBProviderFactory, RocksTxRefArg, StageCheckpointReader, StateProviderBox, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieReader, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -327,6 +327,31 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
+    ///
+    /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
+    pub fn with_rocksdb_batch<F, R>(&self, f: F) -> ProviderResult<R>
+    where
+        F: FnOnce(RocksBatchArg<'_>) -> ProviderResult<(R, Option<RawRocksDBBatch>)>,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb = self.rocksdb_provider();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_batch = rocksdb.batch();
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let rocksdb_batch = ();
+
+        let (result, raw_batch) = f(rocksdb_batch)?;
+
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if let Some(batch) = raw_batch {
+            self.set_pending_rocksdb_batch(batch);
+        }
+        let _ = raw_batch; // silence unused warning when rocksdb feature is disabled
+
+        Ok(result)
+    }
+
     /// Writes executed blocks and state to storage.
     pub fn save_blocks(&self, blocks: Vec<ExecutedBlock<N::Primitives>>) -> ProviderResult<()> {
         if blocks.is_empty() {
@@ -594,6 +619,25 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Returns a reference to the chain specification.
     pub fn chain_spec(&self) -> &N::ChainSpec {
         &self.chain_spec
+    }
+
+    /// Executes a closure with a `RocksDB` transaction for reading.
+    ///
+    /// This helper encapsulates all the cfg-gated `RocksDB` transaction handling for reads.
+    fn with_rocksdb_tx<F, R>(&self, f: F) -> ProviderResult<R>
+    where
+        F: FnOnce(RocksTxRefArg<'_>) -> ProviderResult<R>,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb = self.rocksdb_provider();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_tx = rocksdb.tx();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_tx_ref = &rocksdb_tx;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let rocksdb_tx_ref = ();
+
+        f(rocksdb_tx_ref)
     }
 }
 
@@ -894,18 +938,14 @@ impl<TX: DbTx, N: NodeTypes> AccountReader for DatabaseProvider<TX, N> {
     }
 }
 
-impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
+impl<TX: DbTx + 'static, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
     fn changed_accounts_with_range(
         &self,
-        range: impl RangeBounds<BlockNumber>,
+        range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeSet<Address>> {
-        self.tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .map(|entry| {
-                entry.map(|(_, account_before)| account_before.address).map_err(Into::into)
-            })
-            .collect()
+        let mut reader = EitherReader::new_account_changesets(self)?;
+
+        reader.changed_accounts_with_range(range)
     }
 
     fn basic_accounts(
@@ -923,18 +963,44 @@ impl<TX: DbTx, N: NodeTypes> AccountExtReader for DatabaseProvider<TX, N> {
         &self,
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeMap<Address, Vec<u64>>> {
-        let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+        let highest_static_block = self
+            .static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
-        let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
-            BTreeMap::new(),
-            |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> ProviderResult<_> {
-                let (index, account) = entry?;
-                accounts.entry(account.address).or_default().push(index);
-                Ok(accounts)
-            },
-        )?;
+        if let Some(highest) = highest_static_block &&
+            self.cached_storage_settings().account_changesets_in_static_files
+        {
+            let start = *range.start();
+            let static_end = (*range.end()).min(highest + 1);
 
-        Ok(account_transitions)
+            let mut changed_accounts_and_blocks: BTreeMap<_, Vec<u64>> = BTreeMap::default();
+            if start <= static_end {
+                for block in start..=static_end {
+                    let block_changesets = self.account_block_changeset(block)?;
+                    for changeset in block_changesets {
+                        changed_accounts_and_blocks
+                            .entry(changeset.address)
+                            .or_default()
+                            .push(block);
+                    }
+                }
+            }
+
+            Ok(changed_accounts_and_blocks)
+        } else {
+            let mut changeset_cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+
+            let account_transitions = changeset_cursor.walk_range(range)?.try_fold(
+                BTreeMap::new(),
+                |mut accounts: BTreeMap<Address, Vec<u64>>, entry| -> ProviderResult<_> {
+                    let (index, account) = entry?;
+                    accounts.entry(account.address).or_default().push(index);
+                    Ok(accounts)
+                },
+            )?;
+
+            Ok(account_transitions)
+        }
     }
 }
 
@@ -958,15 +1024,21 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         &self,
         block_number: BlockNumber,
     ) -> ProviderResult<Vec<AccountBeforeTx>> {
-        let range = block_number..=block_number;
-        self.tx
-            .cursor_read::<tables::AccountChangeSets>()?
-            .walk_range(range)?
-            .map(|result| -> ProviderResult<_> {
-                let (_, account_before) = result?;
-                Ok(account_before)
-            })
-            .collect()
+        if self.cached_storage_settings().account_changesets_in_static_files {
+            let static_changesets =
+                self.static_file_provider.account_block_changeset(block_number)?;
+            Ok(static_changesets)
+        } else {
+            let range = block_number..=block_number;
+            self.tx
+                .cursor_read::<tables::AccountChangeSets>()?
+                .walk_range(range)?
+                .map(|result| -> ProviderResult<_> {
+                    let (_, account_before) = result?;
+                    Ok(account_before)
+                })
+                .collect()
+        }
     }
 
     fn get_account_before_block(
@@ -974,12 +1046,58 @@ impl<TX: DbTx, N: NodeTypes> ChangeSetReader for DatabaseProvider<TX, N> {
         block_number: BlockNumber,
         address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
-        self.tx
-            .cursor_dup_read::<tables::AccountChangeSets>()?
-            .seek_by_key_subkey(block_number, address)?
-            .filter(|acc| acc.address == address)
-            .map(Ok)
-            .transpose()
+        if self.cached_storage_settings().account_changesets_in_static_files {
+            Ok(self.static_file_provider.get_account_before_block(block_number, address)?)
+        } else {
+            self.tx
+                .cursor_dup_read::<tables::AccountChangeSets>()?
+                .seek_by_key_subkey(block_number, address)?
+                .filter(|acc| acc.address == address)
+                .map(Ok)
+                .transpose()
+        }
+    }
+
+    fn account_changesets_range(
+        &self,
+        range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        let range = to_range(range);
+        let mut changesets = Vec::new();
+        if self.cached_storage_settings().account_changesets_in_static_files &&
+            let Some(highest) = self
+                .static_file_provider
+                .get_highest_static_file_block(StaticFileSegment::AccountChangeSets)
+        {
+            let static_end = range.end.min(highest + 1);
+            if range.start < static_end {
+                for block in range.start..static_end {
+                    let block_changesets = self.account_block_changeset(block)?;
+                    for changeset in block_changesets {
+                        changesets.push((block, changeset));
+                    }
+                }
+            }
+        } else {
+            // Fetch from database for blocks not in static files
+            let mut cursor = self.tx.cursor_read::<tables::AccountChangeSets>()?;
+            for entry in cursor.walk_range(range)? {
+                let (block_num, account_before) = entry?;
+                changesets.push((block_num, account_before));
+            }
+        }
+
+        Ok(changesets)
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        // check if account changesets are in static files, otherwise just count the changeset
+        // entries in the DB
+        if self.cached_storage_settings().account_changesets_in_static_files {
+            self.static_file_provider.account_changeset_count()
+        } else {
+            Ok(self.tx.entries::<tables::AccountChangeSets>()?)
+        }
     }
 }
 
@@ -1275,7 +1393,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     type Transaction = TxTy<N>;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)
+        self.with_rocksdb_tx(|tx_ref| {
+            let mut reader = EitherReader::new_transaction_hash_numbers(self, tx_ref)?;
+            reader.get_transaction_hash_number(tx_hash)
+        })
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
@@ -1796,22 +1917,18 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
-        // Write account changes
-        tracing::trace!("Writing account changes");
-        let mut account_changeset_cursor =
-            self.tx_ref().cursor_dup_write::<tables::AccountChangeSets>()?;
-
-        for (block_index, mut account_block_reverts) in reverts.accounts.into_iter().enumerate() {
+        // Write account changes to static files
+        tracing::debug!(target: "sync::stages::merkle_changesets", ?first_block, "Writing account changes");
+        for (block_index, account_block_reverts) in reverts.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
-            // Sort accounts by address.
-            account_block_reverts.par_sort_by_key(|a| a.0);
+            let changeset = account_block_reverts
+                .into_iter()
+                .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                .collect::<Vec<_>>();
+            let mut account_changesets_writer =
+                EitherWriter::new_account_changesets(self, block_number)?;
 
-            for (address, info) in account_block_reverts {
-                account_changeset_cursor.append_dup(
-                    block_number,
-                    AccountBeforeTx { address, info: info.map(Into::into) },
-                )?;
-            }
+            account_changesets_writer.append_account_changeset(block_number, changeset)?;
         }
 
         Ok(())
@@ -2051,7 +2168,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         let storage_range = BlockNumberAddress::range(range.clone());
 
         let storage_changeset = self.take::<tables::StorageChangeSets>(storage_range)?;
-        let account_changeset = self.take::<tables::AccountChangeSets>(range)?;
 
         // This is not working for blocks that are not at tip. as plain state is not the last
         // state of end range. We should rename the functions or add support to access
@@ -2059,6 +2175,26 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         // anything.
         let mut plain_accounts_cursor = self.tx.cursor_write::<tables::PlainAccountState>()?;
         let mut plain_storage_cursor = self.tx.cursor_dup_write::<tables::PlainStorageState>()?;
+
+        // if there are static files for this segment, prune them.
+        let highest_changeset_block = self
+            .static_file_provider
+            .get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+        let account_changeset = if let Some(highest_block) = highest_changeset_block &&
+            self.cached_storage_settings().account_changesets_in_static_files
+        {
+            // TODO: add a `take` method that removes and returns the items instead of doing this
+            let changesets = self.account_changesets_range(block + 1..highest_block + 1)?;
+            let mut changeset_writer =
+                self.static_file_provider.latest_writer(StaticFileSegment::AccountChangeSets)?;
+            changeset_writer.prune_account_changesets(block)?;
+
+            changesets
+        } else {
+            // Have to remove from static files if they exist, otherwise remove using `take` for the
+            // changeset tables
+            self.take::<tables::AccountChangeSets>(range)?
+        };
 
         // populate bundle state and reverts from changesets / state cursors, to iterate over,
         // remove, and return later
@@ -2908,10 +3044,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         }
 
         if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
-            for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
-                let hash = transaction.tx_hash();
-                self.tx.put::<tables::TransactionHashNumbers>(*hash, tx_num)?;
-            }
+            self.with_rocksdb_batch(|batch| {
+                let mut writer = EitherWriter::new_transaction_hash_numbers(self, batch)?;
+                for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
+                    let hash = transaction.tx_hash();
+                    writer.put_transaction_hash_number(*hash, tx_num, false)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
             durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
         }
 
@@ -3019,9 +3159,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             .last_tx_num();
 
         if unwind_tx_from <= unwind_tx_to {
-            for (hash, _) in self.transaction_hashes_by_range(unwind_tx_from..(unwind_tx_to + 1))? {
-                self.tx.delete::<tables::TransactionHashNumbers>(hash, None)?;
-            }
+            let hashes = self.transaction_hashes_by_range(unwind_tx_from..(unwind_tx_to + 1))?;
+            self.with_rocksdb_batch(|batch| {
+                let mut writer = EitherWriter::new_transaction_hash_numbers(self, batch)?;
+                for (hash, _) in hashes {
+                    writer.delete_transaction_hash_number(hash)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
         }
 
         EitherWriter::new_senders(self, last_block_number)?.prune_senders(unwind_tx_from, block)?;

@@ -107,13 +107,13 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
         let (db, sfp) = match access {
             AccessRights::RW => (
                 Arc::new(init_db(db_path, self.db.database_args())?),
-                StaticFileProviderBuilder::read_write(sf_path)?
+                StaticFileProviderBuilder::read_write(sf_path)
                     .with_genesis_block_number(genesis_block_number)
                     .build()?,
             ),
             AccessRights::RO | AccessRights::RoInconsistent => {
                 (Arc::new(open_db_read_only(&db_path, self.db.database_args())?), {
-                    let provider = StaticFileProviderBuilder::read_only(sf_path)?
+                    let provider = StaticFileProviderBuilder::read_only(sf_path)
                         .with_genesis_block_number(genesis_block_number)
                         .build()?;
                     provider.watch_directory();
