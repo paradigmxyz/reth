@@ -14,12 +14,17 @@ use crate::{
     OpEthApiError, SequencerClient,
 };
 use alloy_consensus::BlockHeader;
-use alloy_primitives::{B256, U256};
+use alloy_eips::BlockId;
+use alloy_primitives::{Address, B256, U256};
+use alloy_rlp::EMPTY_STRING_CODE;
+use alloy_rpc_types_eth::EIP1186AccountProofResponse;
+use alloy_serde::JsonStorageKey;
 use eyre::WrapErr;
 use op_alloy_network::Optimism;
 pub use receipt::{OpReceiptBuilder, OpReceiptFieldsBuilder};
 use reqwest::Url;
 use reth_chainspec::{EthereumHardforks, Hardforks};
+use reth_errors::RethError;
 use reth_evm::ConfigureEvm;
 use reth_node_api::{FullNodeComponents, FullNodeTypes, HeaderTy, NodeTypes};
 use reth_node_builder::rpc::{EthApiBuilder, EthApiCtx};
@@ -33,11 +38,13 @@ use reth_rpc_eth_api::{
         pending_block::BuildPendingEnv, EthApiSpec, EthFees, EthState, LoadFee, LoadPendingBlock,
         LoadState, SpawnBlocking, Trace,
     },
-    EthApiTypes, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter, RpcNodeCore,
-    RpcNodeCoreExt, RpcTypes,
+    EthApiTypes, FromEthApiError, FromEvmError, FullEthApiServer, RpcConvert, RpcConverter,
+    RpcNodeCore, RpcNodeCoreExt, RpcTypes,
 };
-use reth_rpc_eth_types::{EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock};
-use reth_storage_api::{BlockReaderIdExt, ProviderHeader};
+use reth_rpc_eth_types::{
+    EthApiError, EthStateCache, FeeHistoryCache, GasPriceOracle, PendingBlock,
+};
+use reth_storage_api::{BlockIdReader, BlockReaderIdExt, ProviderHeader};
 use reth_tasks::{
     pool::{BlockingTaskGuard, BlockingTaskPool},
     TaskSpawner,
@@ -316,6 +323,77 @@ where
     #[inline]
     fn max_proof_window(&self) -> u64 {
         self.inner.eth_api.eth_proof_window()
+    }
+
+    /// Returns values stored of given account, with Merkle-proof, at given blocknumber.
+    ///
+    /// This implementation aligns with geth's behavior for empty storage proofs:
+    /// When storage root is empty and storage value is 0, geth returns an empty proof `[]`
+    /// instead of `["0x80"]` (the RLP encoding of empty trie root).
+    fn get_proof(
+        &self,
+        address: Address,
+        keys: Vec<JsonStorageKey>,
+        block_id: Option<BlockId>,
+    ) -> Result<
+        impl std::future::Future<Output = Result<EIP1186AccountProofResponse, Self::Error>> + Send,
+        Self::Error,
+    >
+    where
+        Self: EthApiSpec,
+    {
+        Ok(async move {
+            let _permit = self
+                .acquire_owned()
+                .await
+                .map_err(RethError::other)
+                .map_err(EthApiError::Internal)?;
+
+            let chain_info = self.chain_info().map_err(Self::Error::from_eth_err)?;
+            let block_id = block_id.unwrap_or_default();
+
+            // Check whether the distance to the block exceeds the maximum configured window.
+            // When max_window is 0, it means unlimited (compatible with geth behavior).
+            let max_window = self.max_proof_window();
+            if max_window > 0 {
+                let block_number = self
+                    .provider()
+                    .block_number_for_id(block_id)
+                    .map_err(Self::Error::from_eth_err)?
+                    .ok_or(EthApiError::HeaderNotFound(block_id))?;
+                if chain_info.best_number.saturating_sub(block_number) > max_window {
+                    return Err(EthApiError::ExceedsMaxProofWindow.into());
+                }
+            }
+
+            self.spawn_blocking_io_fut(move |this| async move {
+                let state = this.state_at_block_id(block_id).await?;
+                let storage_keys = keys.iter().map(|key| key.as_b256()).collect::<Vec<_>>();
+                let proof = state
+                    .proof(Default::default(), address, &storage_keys)
+                    .map_err(Self::Error::from_eth_err)?;
+                let mut response = proof.into_eip1186_response(keys);
+
+                // Align with geth's behavior: for empty storage, return empty proof instead of ["0x80"]
+                // geth returns [] when storageTrie is nil (storage root is EmptyRootHash)
+                // reth returns ["0x80"] which is the RLP encoding of empty trie root
+                // Both are valid for proof verification, but we align with geth for RPC compatibility
+                for storage_proof in &mut response.storage_proof {
+                    // Check if this is an empty storage proof:
+                    // - value is 0 (storage slot doesn't exist or is zero)
+                    // - proof contains only the empty trie root marker [0x80]
+                    if storage_proof.value.is_zero()
+                        && storage_proof.proof.len() == 1
+                        && storage_proof.proof[0].as_ref() == [EMPTY_STRING_CODE]
+                    {
+                        storage_proof.proof = vec![];
+                    }
+                }
+
+                Ok(response)
+            })
+            .await
+        })
     }
 }
 

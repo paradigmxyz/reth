@@ -219,10 +219,10 @@ pub struct RpcServerArgs {
     /// The maximum proof window for historical proof generation.
     /// This value allows for generating historical proofs up to
     /// configured number of blocks from current tip (up to `tip - window`).
+    /// Set to 0 for unlimited (compatible with geth behavior).
     #[arg(
         long = "rpc.eth-proof-window",
-        default_value_t = constants::DEFAULT_ETH_PROOF_WINDOW,
-        value_parser = RangedU64ValueParser::<u64>::new().range(..=constants::MAX_ETH_PROOF_WINDOW)
+        default_value_t = constants::DEFAULT_ETH_PROOF_WINDOW
     )]
     pub rpc_eth_proof_window: u64,
 

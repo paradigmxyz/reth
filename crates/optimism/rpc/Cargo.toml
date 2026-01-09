@@ -13,8 +13,11 @@ workspace = true
 
 [dependencies]
 # reth
+reth-errors.workspace = true
 reth-evm.workspace = true
 reth-primitives-traits = { workspace = true, features = ["op"] }
+reth-revm.workspace = true
+reth-rpc-convert.workspace = true
 reth-storage-api.workspace = true
 reth-rpc-eth-api = { workspace = true, features = ["op"] }
 reth-rpc-eth-types.workspace = true
@@ -41,7 +44,11 @@ reth-mantle-forks.workspace = true
 
 # ethereum
 alloy-eips.workspace = true
+alloy-rlp.workspace = true
+alloy-serde.workspace = true
+alloy-evm = { workspace = true, features = ["overrides", "call-util"] }
 alloy-json-rpc.workspace = true
+alloy-network.workspace = true
 alloy-primitives.workspace = true
 alloy-rpc-client.workspace = true
 alloy-rpc-types-eth.workspace = true
@@ -55,7 +62,7 @@ op-alloy-rpc-types.workspace = true
 op-alloy-rpc-types-engine.workspace = true
 op-alloy-rpc-jsonrpsee.workspace = true
 op-alloy-consensus.workspace = true
-revm.workspace = true
+revm = { workspace = true, features = ["optional_balance_check"] }
 op-revm.workspace = true
 
 # async

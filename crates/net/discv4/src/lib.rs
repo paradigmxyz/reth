@@ -3025,7 +3025,6 @@ mod tests {
         }
     }
 
-    #[ignore]
     #[tokio::test]
     async fn test_bootnode_not_in_update_stream() {
         reth_tracing::init_test_tracing();

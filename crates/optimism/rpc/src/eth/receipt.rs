@@ -333,24 +333,40 @@ impl OpReceiptBuilder {
             }
         });
 
+        // Geth only adds L1 fee fields for non-deposit transactions.
+        // For deposit transactions, only depositNonce is included (no L1 fee fields or blobGasUsed).
+        let is_deposit = tx_signed.is_deposit();
+
         // In jovian, we're using the blob gas used field to store the current da
         // footprint's value.
         // We're computing the jovian blob gas used before building the receipt since the inputs get
         // consumed by the `build_receipt` function.
-        chain_spec.is_jovian_active_at_timestamp(timestamp).then(|| {
-            // Estimate the size of the transaction in bytes and multiply by the DA
-            // footprint gas scalar.
-            // Jovian specs: `https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/jovian/exec-engine.md#da-footprint-block-limit`
-            let da_size = estimate_tx_compressed_size(tx_signed.encoded_2718().as_slice())
-                .saturating_div(1_000_000)
-                .saturating_mul(l1_block_info.da_footprint_gas_scalar.unwrap_or_default().into());
+        // Note: blobGasUsed is only set for non-deposit transactions to match geth behavior.
+        if !is_deposit {
+            chain_spec.is_jovian_active_at_timestamp(timestamp).then(|| {
+                // Estimate the size of the transaction in bytes and multiply by the DA
+                // footprint gas scalar.
+                // Jovian specs: `https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/jovian/exec-engine.md#da-footprint-block-limit`
+                let da_size = estimate_tx_compressed_size(tx_signed.encoded_2718().as_slice())
+                    .saturating_div(1_000_000)
+                    .saturating_mul(l1_block_info.da_footprint_gas_scalar.unwrap_or_default().into());
 
-            core_receipt.blob_gas_used = Some(da_size);
-        });
+                core_receipt.blob_gas_used = Some(da_size);
+            });
+        }
 
-        let op_receipt_fields = OpReceiptFieldsBuilder::new(timestamp, block_number)
-            .l1_block_info(chain_spec, tx_signed, l1_block_info)?
-            .build();
+        // Build receipt fields: for deposit transactions, skip L1 fee fields to match geth behavior.
+        let op_receipt_fields = if is_deposit {
+            OpReceiptFieldsBuilder::new(timestamp, block_number)
+                .deposit_nonce(
+                    core_receipt.inner.as_deposit_receipt().and_then(|r| r.deposit_nonce)
+                )
+                .build()
+        } else {
+            OpReceiptFieldsBuilder::new(timestamp, block_number)
+                .l1_block_info(chain_spec, tx_signed, l1_block_info)?
+                .build()
+        };
 
         Ok(Self { core_receipt, op_receipt_fields })
     }

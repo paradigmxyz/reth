@@ -7,6 +7,7 @@ use alloy_network::TransactionBuilder;
 use alloy_primitives::{TxKind, U256};
 use alloy_rpc_types_eth::{state::StateOverride, BlockId};
 use futures::Future;
+use reth_chainspec::MIN_TRANSACTION_GAS;
 use reth_errors::ProviderError;
 use reth_evm::{ConfigureEvm, Database, Evm, EvmEnvFor, EvmFor, TransactionEnv, TxEnvFor};
 use reth_revm::{database::StateProviderDatabase, db::State};
@@ -114,24 +115,23 @@ pub trait EstimateCall: Call {
         // Create EVM instance once and reuse it throughout the entire estimation process
         let mut evm = self.evm_config().evm_with_env(&mut db, evm_env);
 
-        // Mantle not working for basic transfers MIN_TRANSACTION_GAS, so we disable it for now
         // For basic transfers, try using minimum gas before running full binary search
-        // if is_basic_transfer {
-        //     // If the tx is a simple transfer (call to an account with no code) we can
-        //     // shortcircuit. But simply returning
-        //     // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
-        //     // field combos that bump the price up, so we try executing the function
-        //     // with the minimum gas limit to make sure.
-        //     let mut min_tx_env = tx_env.clone();
-        //     min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
+        if is_basic_transfer {
+            // If the tx is a simple transfer (call to an account with no code) we can
+            // shortcircuit. But simply returning
+            // `MIN_TRANSACTION_GAS` is dangerous because there might be additional
+            // field combos that bump the price up, so we try executing the function
+            // with the minimum gas limit to make sure.
+            let mut min_tx_env = tx_env.clone();
+            min_tx_env.set_gas_limit(MIN_TRANSACTION_GAS);
 
-        //     // Reuse the same EVM instance
-        //     if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err)
-        //         && res.result.is_success()
-        //     {
-        //         return Ok(U256::from(MIN_TRANSACTION_GAS));
-        //     }
-        // }
+            // Reuse the same EVM instance
+            if let Ok(res) = evm.transact(min_tx_env).map_err(Self::Error::from_evm_err) &&
+                res.result.is_success()
+            {
+                return Ok(U256::from(MIN_TRANSACTION_GAS))
+            }
+        }
 
         trace!(target: "rpc::eth::estimate", ?tx_env, gas_limit = tx_env.gas_limit(), is_basic_transfer, "Starting gas estimation");
 
@@ -142,8 +142,8 @@ pub trait EstimateCall: Call {
             // retry the transaction with the block's gas limit to determine if
             // the failure was due to insufficient gas.
             Err(err)
-                if err.is_gas_too_high()
-                    && (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
+                if err.is_gas_too_high() &&
+                    (tx_request_gas_limit.is_some() || tx_request_gas_price.is_some()) =>
             {
                 return Self::map_out_of_gas_err(&mut evm, tx_env, max_gas_limit);
             }
@@ -155,19 +155,18 @@ pub trait EstimateCall: Call {
                 return Err(RpcInvalidTransactionError::GasRequiredExceedsAllowance {
                     gas_limit: tx_env.gas_limit(),
                 }
-                .into_eth_err());
+                .into_eth_err())
             }
             // Propagate other results (successful or other errors).
             ethres => ethres?,
         };
 
-        // [TODO]: Maybe not working for Mantle
         let gas_refund = match res.result {
             ExecutionResult::Success { gas_refunded, .. } => gas_refunded,
             ExecutionResult::Halt { reason, .. } => {
                 // here we don't check for invalid opcode because already executed with highest gas
                 // limit
-                return Err(Self::Error::from_evm_halt(reason, tx_env.gas_limit()));
+                return Err(Self::Error::from_evm_halt(reason, tx_env.gas_limit()))
             }
             ExecutionResult::Revert { output, .. } => {
                 // if price or limit was included in the request then we can execute the request
@@ -177,7 +176,7 @@ pub trait EstimateCall: Call {
                 } else {
                     // the transaction did revert
                     Err(RpcInvalidTransactionError::Revert(RevertError::new(output)).into_eth_err())
-                };
+                }
             }
         };
 
@@ -271,7 +270,7 @@ pub trait EstimateCall: Call {
             mid_gas_limit = ((highest_gas_limit as u128 + lowest_gas_limit as u128) / 2) as u64;
         }
 
-        Ok(U256::from(highest_gas_limit.saturating_mul(120) / 100))
+        Ok(U256::from(highest_gas_limit))
     }
 
     /// Estimate gas needed for execution of the `request` at the [`BlockId`].

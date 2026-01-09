@@ -25,7 +25,7 @@ pub struct GasPriceOracleArgs {
     /// The percentile of gas prices to use for the estimate
     #[arg(long = "gpo.percentile", default_value_t = DEFAULT_GAS_PRICE_PERCENTILE)]
     pub percentile: u32,
-    
+
     /// The default gas price to use if there are no blocks to use
     #[arg(long = "gpo.default-suggested-fee")]
     pub default_suggested_fee: Option<U256>,
