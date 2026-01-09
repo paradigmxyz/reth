@@ -550,5 +550,4 @@ mod tests {
         // Should have waited ~3ms total
         assert!(start.elapsed() >= Duration::from_millis(3));
     }
-
 }
