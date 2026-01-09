@@ -104,7 +104,14 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
-    init_genesis_with_settings(factory, StorageSettings::legacy())
+    #[cfg(feature = "edge")]
+    {
+        init_genesis_with_settings(factory, StorageSettings::edge())
+    }
+    #[cfg(not(feature = "edge"))]
+    {
+        init_genesis_with_settings(factory, StorageSettings::legacy())
+    }
 }
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`].
