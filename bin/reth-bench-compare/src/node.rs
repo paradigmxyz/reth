@@ -3,7 +3,9 @@
 use crate::cli::Args;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_client::RpcClient;
+use alloy_rpc_types_engine::JwtSecret;
 use alloy_rpc_types_eth::SyncStatus;
+use alloy_transport::Authorization;
 use alloy_transport_ws::WsConnect;
 use eyre::{eyre, OptionExt, Result, WrapErr};
 #[cfg(unix)]
@@ -36,6 +38,7 @@ pub(crate) struct NodeManager {
     comparison_dir: Option<PathBuf>,
     tracing_endpoint: Option<String>,
     otlp_max_queue_size: usize,
+    jwt_secret_path: PathBuf,
 }
 
 impl NodeManager {
@@ -59,6 +62,7 @@ impl NodeManager {
             comparison_dir: None,
             tracing_endpoint: args.traces.otlp.as_ref().map(|u| u.to_string()),
             otlp_max_queue_size: args.otlp_max_queue_size,
+            jwt_secret_path: args.jwt_secret_path(),
         }
     }
 
@@ -370,17 +374,39 @@ impl NodeManager {
     /// Wait for the node to be ready and return its current tip
     pub(crate) async fn wait_for_node_ready_and_get_tip(&self) -> Result<u64> {
         info!("Waiting for node to be ready and synced...");
+        debug!("JWT secret path: {:?}", self.jwt_secret_path);
 
         let max_wait = Duration::from_secs(120); // 2 minutes to allow for sync
         let check_interval = Duration::from_secs(2);
         let rpc_url = "http://localhost:8545";
 
+        // Load JWT secret for WebSocket authentication
+        debug!("Loading JWT secret for WebSocket authentication");
+        let jwt_str = std::fs::read_to_string(&self.jwt_secret_path)
+            .wrap_err_with(|| format!("Failed to read JWT secret from {:?}", self.jwt_secret_path))?;
+        let jwt = JwtSecret::from_hex(&jwt_str)
+            .wrap_err("Failed to parse JWT secret")?;
+        let claims = alloy_rpc_types_engine::Claims::default();
+        let token = jwt.encode(&claims)
+            .wrap_err("Failed to encode JWT token")?;
+        debug!("JWT token encoded successfully");
+
         // Create Alloy provider
         let url = rpc_url.parse().map_err(|e| eyre!("Invalid RPC URL '{}': {}", rpc_url, e))?;
         let provider = ProviderBuilder::new().connect_http(url);
 
+        let start_time = tokio::time::Instant::now();
+        let mut iteration = 0;
+
         timeout(max_wait, async {
             loop {
+                iteration += 1;
+                debug!(
+                    "Readiness check iteration {} (elapsed: {:?})",
+                    iteration,
+                    start_time.elapsed()
+                );
+
                 // First check if RPC is up and node is not syncing
                 match provider.syncing().await {
                     Ok(sync_result) => {
@@ -389,40 +415,49 @@ impl NodeManager {
                                 debug!("Node is still syncing {sync_info:?}, waiting...");
                             }
                             _ => {
+                                debug!("HTTP RPC is up and node is not syncing, checking block number...");
                                 // Node is not syncing, now get the tip
                                 match provider.get_block_number().await {
                                     Ok(tip) => {
-                                        // Also verify WebSocket RPC is ready
+                                        debug!("HTTP RPC ready at block: {}, checking WebSocket...", tip);
+
+                                        // Also verify WebSocket RPC is ready with JWT authentication
                                         let ws_url = format!("ws://localhost:{}", DEFAULT_WS_RPC_PORT);
-                                        match RpcClient::connect_pubsub(WsConnect::new(&ws_url)).await
+                                        debug!("Attempting WebSocket connection to {} with JWT auth", ws_url);
+                                        let ws_connect = WsConnect::new(&ws_url)
+                                            .with_auth(Authorization::Bearer(token.clone()));
+
+                                        match RpcClient::connect_pubsub(ws_connect).await
                                         {
                                             Ok(_) => {
                                                 info!(
-                                                    "Node is ready (HTTP and WebSocket) at block: {}",
-                                                    tip
+                                                    "Node is ready (HTTP and WebSocket) at block: {} (took {:?}, {} iterations)",
+                                                    tip, start_time.elapsed(), iteration
                                                 );
                                                 return Ok(tip);
                                             }
                                             Err(e) => {
                                                 debug!(
-                                                    "HTTP RPC ready but WebSocket not ready yet: {}",
-                                                    e
+                                                    "HTTP RPC ready but WebSocket not ready yet (iteration {}): {:?}",
+                                                    iteration, e
                                                 );
+                                                debug!("WebSocket error details: {}", e);
                                             }
                                         }
                                     }
                                     Err(e) => {
-                                        debug!("Failed to get block number: {}", e);
+                                        debug!("Failed to get block number (iteration {}): {:?}", iteration, e);
                                     }
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        debug!("Node RPC not ready yet or failed to check sync status: {}", e);
+                        debug!("Node RPC not ready yet or failed to check sync status (iteration {}): {:?}", iteration, e);
                     }
                 }
 
+                debug!("Sleeping for {:?} before next check", check_interval);
                 sleep(check_interval).await;
             }
         })

@@ -356,12 +356,23 @@ impl Command {
 
         // Final sync: wait for remaining blocks (persistence mode only)
         if let Some(ref mut sub) = persistence_sub {
-            if tracker.last_persisted < tracker.last_block_number {
-                info!(
-                    "Waiting for final blocks to persist (current: {}, target: {})",
-                    tracker.last_persisted, tracker.last_block_number
-                );
+            debug!(
+                "Final persistence check - Tracker state: blocks_sent={}, last_persisted={}, last_block_number={}",
+                tracker.blocks_sent, tracker.last_persisted, tracker.last_block_number
+            );
 
+            let remaining_gap = tracker.last_block_number.saturating_sub(tracker.last_persisted);
+            debug!("Calculated remaining gap: {}, threshold: {}", remaining_gap, PERSISTENCE_THRESHOLD);
+
+            if remaining_gap > PERSISTENCE_THRESHOLD {
+                // Only wait if the gap exceeds threshold - more blocks will persist
+                info!(
+                    "Waiting for final blocks to persist (current: {}, target: {}, gap: {})",
+                    tracker.last_persisted, tracker.last_block_number, remaining_gap
+                );
+                debug!("Gap {} > threshold {}, waiting for persistence...", remaining_gap, PERSISTENCE_THRESHOLD);
+
+                let wait_start = std::time::Instant::now();
                 match wait_for_persistence(
                     sub.stream_mut(),
                     tracker.last_block_number,
@@ -370,9 +381,25 @@ impl Command {
                 )
                 .await
                 {
-                    Ok(()) => info!("All blocks persisted successfully"),
-                    Err(e) => warn!("Final sync: {}", e),
+                    Ok(()) => {
+                        info!("All blocks persisted successfully (took {:?})", wait_start.elapsed());
+                    }
+                    Err(e) => {
+                        warn!("Final sync failed after {:?}: {}", wait_start.elapsed(), e);
+                    }
                 }
+            } else if remaining_gap > 0 {
+                // Gap is <= threshold, so final blocks won't be persisted
+                info!(
+                    "Skipping final persistence wait: gap {} <= threshold {}. Last persisted: {}, final block: {}",
+                    remaining_gap, PERSISTENCE_THRESHOLD, tracker.last_persisted, tracker.last_block_number
+                );
+                debug!(
+                    "Engine will not persist final {} blocks because gap does not exceed threshold",
+                    remaining_gap
+                );
+            } else {
+                debug!("No remaining gap - all blocks already persisted");
             }
         }
 
