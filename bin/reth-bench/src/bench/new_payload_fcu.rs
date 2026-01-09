@@ -428,20 +428,38 @@ impl Command {
         Ok(())
     }
 
-    /// Derives the local reth node's WebSocket URL from the engine API URL.
+    /// Gets the WebSocket URL for persistence subscription.
     ///
-    /// The persistence subscription must connect to the local reth node (not the external
-    /// RPC used for fetching blocks). This derives the WS URL from the engine API URL:
+    /// If --ws-rpc-url is explicitly provided, uses that.
+    /// Otherwise, derives from the engine API URL:
     /// - http://localhost:8551 (engine API) → ws://localhost:8546 (RPC WebSocket)
     fn derive_local_rpc_url(&self) -> eyre::Result<Url> {
-        let local_url = engine_url_to_ws_url(&self.benchmark.engine_rpc_url)?;
+        let local_url = if let Some(ref ws_url) = self.benchmark.ws_rpc_url {
+            // Use explicitly provided WebSocket URL
+            let parsed_url: Url = ws_url
+                .parse()
+                .wrap_err_with(|| format!("Failed to parse WebSocket RPC URL: {ws_url}"))?;
 
-        debug!(
-            target: "reth-bench",
-            engine_url = %self.benchmark.engine_rpc_url,
-            derived_url = %local_url,
-            "Derived local RPC WebSocket URL from engine API URL"
-        );
+            info!(
+                target: "reth-bench",
+                ws_url = %parsed_url,
+                "Using explicitly provided WebSocket RPC URL"
+            );
+
+            parsed_url
+        } else {
+            // Derive from engine API URL
+            let derived_url = engine_url_to_ws_url(&self.benchmark.engine_rpc_url)?;
+
+            debug!(
+                target: "reth-bench",
+                engine_url = %self.benchmark.engine_rpc_url,
+                derived_url = %derived_url,
+                "Derived WebSocket URL from engine API URL (use --ws-rpc-url to override)"
+            );
+
+            derived_url
+        };
 
         Ok(local_url)
     }
@@ -490,7 +508,8 @@ impl Command {
 /// Converts an engine API URL to the corresponding RPC WebSocket URL.
 ///
 /// - Converts http/https to ws/wss
-/// - Changes port 8551 (engine API) to 8546 (RPC WebSocket)
+/// - Always uses port 8546 (RPC WebSocket) since the local reth node's WS endpoint
+///   is always on this port regardless of what port the engine API uses
 fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
     let url: Url = engine_url
         .parse()
@@ -511,11 +530,11 @@ fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
         )),
     }
 
-    if ws_url.port() == Some(8551) {
-        ws_url
-            .set_port(Some(8546))
-            .map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
-    }
+    // Always use port 8546 for the WS RPC endpoint, regardless of engine API port.
+    // The engine API can be on any port (8551, 9551, etc.) but the WS RPC is always 8546.
+    ws_url
+        .set_port(Some(8546))
+        .map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
 
     Ok(ws_url)
 }
@@ -540,10 +559,11 @@ mod tests {
     }
 
     #[test]
-    fn test_engine_url_to_ws_url_preserves_non_engine_port() {
-        let result = engine_url_to_ws_url("http://localhost:9000").unwrap();
+    fn test_engine_url_to_ws_url_custom_engine_port() {
+        // Custom engine API ports (like 9551) should still map to WS port 8546
+        let result = engine_url_to_ws_url("http://localhost:9551").unwrap();
         assert_eq!(result.scheme(), "ws");
-        assert_eq!(result.port(), Some(9000));
+        assert_eq!(result.port(), Some(8546));
     }
 
     #[test]
