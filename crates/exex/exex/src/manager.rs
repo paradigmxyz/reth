@@ -687,6 +687,7 @@ mod tests {
         BlockWriter, Chain, DBProvider, DatabaseProviderFactory, TransactionVariant,
     };
     use reth_testing_utils::generators::{self, random_block, BlockParams};
+    use std::collections::BTreeMap;
 
     fn empty_finalized_header_stream() -> ForkChoiceStream<SealedHeader> {
         let (tx, rx) = watch::channel(None);
@@ -788,7 +789,12 @@ mod tests {
         block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
+            new: Arc::new(Chain::new(
+                vec![block1.clone()],
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )),
         };
 
         // Push the first notification
@@ -806,7 +812,12 @@ mod tests {
         block2.set_block_number(20);
 
         let notification2 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block2.clone()], Default::default(), Default::default())),
+            new: Arc::new(Chain::new(
+                vec![block2.clone()],
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )),
         };
 
         exex_manager.push_notification(notification2.clone());
@@ -849,7 +860,12 @@ mod tests {
         block1.set_block_number(10);
 
         let notification1 = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
+            new: Arc::new(Chain::new(
+                vec![block1.clone()],
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )),
         };
 
         exex_manager.push_notification(notification1.clone());
@@ -1077,6 +1093,7 @@ mod tests {
                 vec![Default::default()],
                 Default::default(),
                 Default::default(),
+                Default::default(),
             )),
         };
 
@@ -1144,7 +1161,8 @@ mod tests {
         // Setup a notification
         let notification = ExExNotification::ChainCommitted {
             new: Arc::new(Chain::new(
-                vec![block1.clone(), block2.clone()],
+                vec![Default::default()],
+                Default::default(),
                 Default::default(),
                 Default::default(),
             )),
@@ -1191,7 +1209,12 @@ mod tests {
         block1.set_block_number(10);
 
         let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block1.clone()], Default::default(), Default::default())),
+            new: Arc::new(Chain::new(
+                vec![block1.clone()],
+                Default::default(),
+                Default::default(),
+                Default::default(),
+            )),
         };
 
         let mut cx = Context::from_waker(futures::task::noop_waker_ref());
@@ -1337,10 +1360,20 @@ mod tests {
         );
 
         let genesis_notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![genesis_block.clone()], Default::default(), None)),
+            new: Arc::new(Chain::new(
+                vec![genesis_block.clone()],
+                Default::default(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+            )),
         };
         let notification = ExExNotification::ChainCommitted {
-            new: Arc::new(Chain::new(vec![block.clone()], Default::default(), None)),
+            new: Arc::new(Chain::new(
+                vec![block.clone()],
+                Default::default(),
+                BTreeMap::new(),
+                BTreeMap::new(),
+            )),
         };
 
         let (finalized_headers_tx, rx) = watch::channel(None);

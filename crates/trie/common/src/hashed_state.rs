@@ -542,6 +542,7 @@ impl HashedStorage {
 
 /// Sorted hashed post state optimized for iterating during state trie calculation.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedPostStateSorted {
     /// Sorted collection of account updates. `None` indicates a destroyed account.
     pub accounts: Vec<(B256, Option<Account>)>,
@@ -648,6 +649,7 @@ impl AsRef<Self> for HashedPostStateSorted {
 
 /// Sorted hashed storage optimized for iterating during state trie calculation.
 #[derive(Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedStorageSorted {
     /// Sorted collection of updated storage slots. [`U256::ZERO`] indicates a deleted value.
     pub storage_slots: Vec<(B256, U256)>,
@@ -1632,5 +1634,365 @@ mod tests {
         // Verify the original storage is not consumed
         assert_eq!(storage.storage.len(), 3);
         assert!(storage.wiped);
+    }
+}
+
+/// Bincode-compatible hashed state type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    use super::Account;
+    use alloc::borrow::Cow;
+    use alloy_primitives::{map::B256Map, B256, U256};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::HashedPostState`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie_common::{serde_bincode_compat, HashedPostState};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostState")]
+    ///     hashed_state: HashedPostState,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct HashedPostState<'a> {
+        accounts: Cow<'a, B256Map<Option<Account>>>,
+        storages: B256Map<HashedStorage<'a>>,
+    }
+
+    impl<'a> From<&'a super::HashedPostState> for HashedPostState<'a> {
+        fn from(value: &'a super::HashedPostState) -> Self {
+            Self {
+                accounts: Cow::Borrowed(&value.accounts),
+                storages: value.storages.iter().map(|(k, v)| (*k, v.into())).collect(),
+            }
+        }
+    }
+
+    impl<'a> From<HashedPostState<'a>> for super::HashedPostState {
+        fn from(value: HashedPostState<'a>) -> Self {
+            Self {
+                accounts: value.accounts.into_owned(),
+                storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            }
+        }
+    }
+
+    impl SerializeAs<super::HashedPostState> for HashedPostState<'_> {
+        fn serialize_as<S>(
+            source: &super::HashedPostState,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            HashedPostState::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::HashedPostState> for HashedPostState<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostState, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            HashedPostState::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::HashedStorage`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie_common::{serde_bincode_compat, HashedStorage};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::hashed_state::HashedStorage")]
+    ///     hashed_storage: HashedStorage,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct HashedStorage<'a> {
+        wiped: bool,
+        storage: Cow<'a, B256Map<U256>>,
+    }
+
+    impl<'a> From<&'a super::HashedStorage> for HashedStorage<'a> {
+        fn from(value: &'a super::HashedStorage) -> Self {
+            Self { wiped: value.wiped, storage: Cow::Borrowed(&value.storage) }
+        }
+    }
+
+    impl<'a> From<HashedStorage<'a>> for super::HashedStorage {
+        fn from(value: HashedStorage<'a>) -> Self {
+            Self { wiped: value.wiped, storage: value.storage.into_owned() }
+        }
+    }
+
+    impl SerializeAs<super::HashedStorage> for HashedStorage<'_> {
+        fn serialize_as<S>(source: &super::HashedStorage, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            HashedStorage::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::HashedStorage> for HashedStorage<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedStorage, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            HashedStorage::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::HashedPostStateSorted`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie_common::{serde_bincode_compat, HashedPostStateSorted};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostStateSorted")]
+    ///     hashed_state: HashedPostStateSorted,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct HashedPostStateSorted<'a> {
+        accounts: Cow<'a, [(B256, Option<Account>)]>,
+        storages: B256Map<HashedStorageSorted<'a>>,
+    }
+
+    impl<'a> From<&'a super::HashedPostStateSorted> for HashedPostStateSorted<'a> {
+        fn from(value: &'a super::HashedPostStateSorted) -> Self {
+            Self {
+                accounts: Cow::Borrowed(&value.accounts),
+                storages: value.storages.iter().map(|(k, v)| (*k, v.into())).collect(),
+            }
+        }
+    }
+
+    impl<'a> From<HashedPostStateSorted<'a>> for super::HashedPostStateSorted {
+        fn from(value: HashedPostStateSorted<'a>) -> Self {
+            Self {
+                accounts: value.accounts.into_owned(),
+                storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            }
+        }
+    }
+
+    impl SerializeAs<super::HashedPostStateSorted> for HashedPostStateSorted<'_> {
+        fn serialize_as<S>(
+            source: &super::HashedPostStateSorted,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            HashedPostStateSorted::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::HashedPostStateSorted> for HashedPostStateSorted<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostStateSorted, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            HashedPostStateSorted::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::HashedStorageSorted`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie_common::{serde_bincode_compat, HashedStorageSorted};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::hashed_state::HashedStorageSorted")]
+    ///     hashed_storage: HashedStorageSorted,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct HashedStorageSorted<'a> {
+        storage_slots: Cow<'a, [(B256, U256)]>,
+        wiped: bool,
+    }
+
+    impl<'a> From<&'a super::HashedStorageSorted> for HashedStorageSorted<'a> {
+        fn from(value: &'a super::HashedStorageSorted) -> Self {
+            Self { storage_slots: Cow::Borrowed(&value.storage_slots), wiped: value.wiped }
+        }
+    }
+
+    impl<'a> From<HashedStorageSorted<'a>> for super::HashedStorageSorted {
+        fn from(value: HashedStorageSorted<'a>) -> Self {
+            Self { storage_slots: value.storage_slots.into_owned(), wiped: value.wiped }
+        }
+    }
+
+    impl SerializeAs<super::HashedStorageSorted> for HashedStorageSorted<'_> {
+        fn serialize_as<S>(
+            source: &super::HashedStorageSorted,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            HashedStorageSorted::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::HashedStorageSorted> for HashedStorageSorted<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedStorageSorted, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            HashedStorageSorted::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::{
+            hashed_state::{
+                HashedPostState, HashedPostStateSorted, HashedStorage, HashedStorageSorted,
+            },
+            serde_bincode_compat,
+        };
+        use alloy_primitives::{B256, U256};
+        use reth_primitives_traits::Account;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_hashed_post_state_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostState")]
+                hashed_state: HashedPostState,
+            }
+
+            let mut data = Data { hashed_state: HashedPostState::default() };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_state.accounts.insert(B256::random(), Some(Account::default()));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_state.storages.insert(B256::random(), HashedStorage::default());
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_hashed_storage_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::hashed_state::HashedStorage")]
+                hashed_storage: HashedStorage,
+            }
+
+            let mut data = Data { hashed_storage: HashedStorage::default() };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_storage.wiped = true;
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_storage.storage.insert(B256::random(), U256::from(1));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_hashed_post_state_sorted_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostStateSorted")]
+                hashed_state: HashedPostStateSorted,
+            }
+
+            let mut data = Data { hashed_state: HashedPostStateSorted::default() };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_state.accounts.push((B256::random(), Some(Account::default())));
+            data.hashed_state
+                .accounts
+                .push((B256::random(), Some(Account { nonce: 1, ..Default::default() })));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_state.storages.insert(
+                B256::random(),
+                HashedStorageSorted {
+                    storage_slots: vec![(B256::from([1; 32]), U256::from(10))],
+                    wiped: false,
+                },
+            );
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_hashed_storage_sorted_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::hashed_state::HashedStorageSorted")]
+                hashed_storage: HashedStorageSorted,
+            }
+
+            let mut data = Data {
+                hashed_storage: HashedStorageSorted { storage_slots: Vec::new(), wiped: false },
+            };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_storage.wiped = true;
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_storage.storage_slots.push((B256::random(), U256::from(1)));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
     }
 }
