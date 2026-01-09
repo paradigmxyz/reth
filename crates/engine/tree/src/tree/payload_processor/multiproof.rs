@@ -603,30 +603,31 @@ impl MultiProofTask {
         skip_all,
         fields(accounts = targets.len(), chunks = 0)
     )]
-    fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
-        let proof_targets = self.get_prefetch_proof_targets(targets);
-        self.fetched_proof_targets.extend_ref(&proof_targets);
+    fn on_prefetch_proof(&mut self, mut targets: MultiProofTargets) -> u64 {
+        // Remove already fetched proof targets to avoid redundant work.
+        targets.retain_difference(&self.fetched_proof_targets);
+        self.fetched_proof_targets.extend_ref(&targets);
 
         // Make sure all target accounts have an `AddedRemovedKeySet` in the
         // [`MultiAddedRemovedKeys`]. Even if there are not any known removed keys for the account,
         // we still want to optimistically fetch extension children for the leaf addition case.
-        self.multi_added_removed_keys.touch_accounts(proof_targets.keys().copied());
+        self.multi_added_removed_keys.touch_accounts(targets.keys().copied());
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
         let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
 
-        self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
+        self.metrics.prefetch_proof_targets_accounts_histogram.record(targets.len() as f64);
         self.metrics
             .prefetch_proof_targets_storages_histogram
-            .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+            .record(targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
 
-        let chunking_len = proof_targets.chunking_length();
+        let chunking_len = targets.chunking_length();
         let available_account_workers =
             self.multiproof_manager.proof_worker_handle.available_account_workers();
         let available_storage_workers =
             self.multiproof_manager.proof_worker_handle.available_storage_workers();
         let num_chunks = dispatch_with_chunking(
-            proof_targets,
+            targets,
             chunking_len,
             self.chunk_size,
             self.max_targets_for_chunking,
@@ -670,23 +671,6 @@ impl MultiProofTask {
             "Checking end condition"
         );
         all_proofs_processed && no_pending && updates_finished
-    }
-
-    /// Filters out proof targets that have already been fetched.
-    ///
-    /// Given a set of prefetch `targets`, removes any accounts and storage slots that are
-    /// already present in `fetched_proof_targets`. This avoids redundant proof fetches by
-    /// returning only the targets that still need to be retrieved.
-    fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> MultiProofTargets {
-        let before = targets.chunking_length();
-        targets.retain_difference(&self.fetched_proof_targets);
-        let duplicates = before - targets.chunking_length();
-
-        if duplicates > 0 {
-            trace!(target: "engine::tree::payload_processor::multiproof", duplicates, "Removed duplicate prefetch proof targets");
-        }
-
-        targets
     }
 
     /// Handles state updates.
@@ -1618,87 +1602,6 @@ mod tests {
         assert_eq!(target_slots.len(), 2);
         assert!(target_slots.contains(&slot1));
         assert!(target_slots.contains(&slot2));
-    }
-
-    #[test]
-    fn test_get_prefetch_proof_targets_no_duplicates() {
-        let test_provider_factory = create_test_provider_factory();
-        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
-
-        // populate some targets
-        let mut targets = MultiProofTargets::default();
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-        targets.insert(addr1, std::iter::once(slot1).collect());
-        targets.insert(addr2, std::iter::once(slot2).collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets are the same because there are no fetched proof
-        // targets yet
-        assert_eq!(prefetch_proof_targets, targets);
-
-        // add a different addr and slot to fetched proof targets
-        let addr3 = B256::random();
-        let slot3 = B256::random();
-        test_state_root_task.fetched_proof_targets.insert(addr3, std::iter::once(slot3).collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets are the same because the fetched proof targets
-        // don't overlap with the prefetch targets
-        assert_eq!(prefetch_proof_targets, targets);
-    }
-
-    #[test]
-    fn test_get_prefetch_proof_targets_remove_subset() {
-        let test_provider_factory = create_test_provider_factory();
-        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
-
-        // populate some targe
-        let mut targets = MultiProofTargets::default();
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-        targets.insert(addr1, std::iter::once(slot1).collect());
-        targets.insert(addr2, std::iter::once(slot2).collect());
-
-        // add a subset of the first target to fetched proof targets
-        test_state_root_task.fetched_proof_targets.insert(addr1, std::iter::once(slot1).collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets do not include the subset
-        assert_eq!(prefetch_proof_targets.len(), 1);
-        assert!(!prefetch_proof_targets.contains_key(&addr1));
-        assert!(prefetch_proof_targets.contains_key(&addr2));
-
-        // now add one more slot to the prefetch targets
-        let slot3 = B256::random();
-        targets.get_mut(&addr1).unwrap().insert(slot3);
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets do not include the subset
-        // but include the new slot
-        assert_eq!(prefetch_proof_targets.len(), 2);
-        assert!(prefetch_proof_targets.contains_key(&addr1));
-        assert_eq!(
-            *prefetch_proof_targets.get(&addr1).unwrap(),
-            std::iter::once(slot3).collect::<B256Set>()
-        );
-        assert!(prefetch_proof_targets.contains_key(&addr2));
-        assert_eq!(
-            *prefetch_proof_targets.get(&addr2).unwrap(),
-            std::iter::once(slot2).collect::<B256Set>()
-        );
     }
 
     #[test]
