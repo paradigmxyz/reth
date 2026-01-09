@@ -17,7 +17,7 @@ use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash, TxNumber, B256};
 use alloy_rpc_types_engine::ForkchoiceState;
 use reth_chain_state::{
     BlockState, CanonicalInMemoryState, ForkChoiceNotifications, ForkChoiceSubscriptions,
-    MemoryOverlayStateProvider,
+    MemoryOverlayStateProvider, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_chainspec::ChainInfo;
 use reth_db_api::models::{AccountBeforeTx, BlockNumberAddress, StoredBlockBodyIndices};
@@ -694,6 +694,13 @@ impl<N: ProviderNodeTypes> ForkChoiceSubscriptions for BlockchainProvider<N> {
     fn subscribe_finalized_block(&self) -> ForkChoiceNotifications<Self::Header> {
         let receiver = self.canonical_in_memory_state.subscribe_finalized_block();
         ForkChoiceNotifications(receiver)
+    }
+}
+
+impl<N: ProviderNodeTypes> PersistedBlockSubscriptions for BlockchainProvider<N> {
+    fn subscribe_persisted_block(&self) -> PersistedBlockNotifications {
+        let receiver = self.canonical_in_memory_state.subscribe_persisted_block();
+        PersistedBlockNotifications(receiver)
     }
 }
 
