@@ -80,7 +80,10 @@ impl SparseTrieUpdate {
     /// Construct update from multiproof.
     #[cfg(test)]
     pub(super) fn from_multiproof(multiproof: reth_trie::MultiProof) -> alloy_rlp::Result<Self> {
-        Ok(Self { multiproof: ProofResult::Legacy(multiproof.try_into()?), ..Default::default() })
+        Ok(Self {
+            state: HashedPostState::default(),
+            multiproof: ProofResult::Legacy(multiproof.try_into()?),
+        })
     }
 
     /// Extend update with contents of the other.
@@ -94,7 +97,7 @@ impl SparseTrieUpdate {
 #[derive(Debug)]
 pub(super) enum MultiProofMessage {
     /// Prefetch proof targets
-    PrefetchProofs(MultiProofTargets),
+    PrefetchProofs(VersionedMultiProofTargets),
     /// New state update from transaction execution with its source
     StateUpdate(Source, EvmState),
     /// State update that can be applied to the sparse trie without any new proofs.
@@ -218,6 +221,30 @@ pub(crate) fn evm_state_to_hashed_post_state(update: EvmState) -> HashedPostStat
     hashed_state
 }
 
+/// Extends a `MultiProofTargets` with the contents of a `VersionedMultiProofTargets`,
+/// regardless of which variant the latter is.
+fn extend_multiproof_targets(dest: &mut MultiProofTargets, src: &VersionedMultiProofTargets) {
+    match src {
+        VersionedMultiProofTargets::Legacy(targets) => {
+            dest.extend_ref(targets);
+        }
+        VersionedMultiProofTargets::V2(targets) => {
+            // Add all account targets
+            for target in &targets.account_targets {
+                dest.entry(target.key()).or_default();
+            }
+
+            // Add all storage targets
+            for (hashed_address, slots) in &targets.storage_targets {
+                let slot_set = dest.entry(*hashed_address).or_default();
+                for slot in slots {
+                    slot_set.insert(slot.key());
+                }
+            }
+        }
+    }
+}
+
 /// A set of multiproof targets which can be either in the legacy or V2 representations.
 #[derive(Debug)]
 pub(super) enum VersionedMultiProofTargets {
@@ -250,6 +277,91 @@ impl VersionedMultiProofTargets {
             Self::Legacy(targets) => targets.values().map(|slots| slots.len()).sum::<usize>(),
             Self::V2(targets) => {
                 targets.storage_targets.values().map(|slots| slots.len()).sum::<usize>()
+            }
+        }
+    }
+
+    /// Returns the number of accounts in the multiproof targets.
+    fn len(&self) -> usize {
+        match self {
+            Self::Legacy(targets) => targets.len(),
+            Self::V2(targets) => targets.account_targets.len(),
+        }
+    }
+
+    /// Returns the total storage slot count across all accounts.
+    fn storage_count(&self) -> usize {
+        match self {
+            Self::Legacy(targets) => targets.values().map(|slots| slots.len()).sum(),
+            Self::V2(targets) => targets.storage_targets.values().map(|slots| slots.len()).sum(),
+        }
+    }
+
+    /// Returns the number of items that will be considered during chunking.
+    fn chunking_length(&self) -> usize {
+        match self {
+            Self::Legacy(targets) => targets.chunking_length(),
+            Self::V2(targets) => {
+                // For V2, count accounts + storage slots
+                targets.account_targets.len() +
+                    targets.storage_targets.values().map(|slots| slots.len()).sum::<usize>()
+            }
+        }
+    }
+
+    /// Retains the targets representing the difference with another `MultiProofTargets`.
+    /// Removes all targets that are already present in `other`.
+    fn retain_difference(&mut self, other: &MultiProofTargets) {
+        match self {
+            Self::Legacy(targets) => {
+                targets.retain_difference(other);
+            }
+            Self::V2(targets) => {
+                // Remove account targets that exist in other
+                targets.account_targets.retain(|target| !other.contains_key(&target.key()));
+
+                // For each account in storage_targets, remove slots that exist in other
+                targets.storage_targets.retain(|hashed_address, slots| {
+                    if let Some(other_slots) = other.get(hashed_address) {
+                        slots.retain(|slot| !other_slots.contains(&slot.key()));
+                        !slots.is_empty()
+                    } else {
+                        true
+                    }
+                });
+            }
+        }
+    }
+
+    /// Extends this `VersionedMultiProofTargets` with the contents of another.
+    ///
+    /// Panics if the variants do not match.
+    fn extend(&mut self, other: Self) {
+        match (self, other) {
+            (Self::Legacy(dest), Self::Legacy(src)) => {
+                dest.extend(src);
+            }
+            (Self::V2(dest), Self::V2(src)) => {
+                dest.account_targets.extend(src.account_targets);
+                for (addr, slots) in src.storage_targets {
+                    dest.storage_targets.entry(addr).or_default().extend(slots);
+                }
+            }
+            _ => panic!("Cannot extend VersionedMultiProofTargets with mismatched variants"),
+        }
+    }
+
+    /// Chunks this `VersionedMultiProofTargets` into smaller chunks of the given size.
+    fn chunks(self, chunk_size: usize) -> Vec<Self> {
+        match self {
+            Self::Legacy(targets) => {
+                MultiProofTargets::chunks(targets, chunk_size).map(Self::Legacy).collect()
+            }
+            Self::V2(targets) => {
+                // For V2, we need to chunk the targets
+                // For now, just return a single chunk
+                // TODO: Implement proper chunking for V2 targets
+                vec![Self::V2(targets)]
             }
         }
     }
@@ -652,20 +764,24 @@ impl MultiProofTask {
     fn on_prefetch_proof(&mut self, mut targets: VersionedMultiProofTargets) -> u64 {
         // Remove already fetched proof targets to avoid redundant work.
         targets.retain_difference(&self.fetched_proof_targets);
-        self.fetched_proof_targets.extend_ref(&targets);
+        extend_multiproof_targets(&mut self.fetched_proof_targets, &targets);
 
-        // Make sure all target accounts have an `AddedRemovedKeySet` in the
+        // For Legacy multiproofs, make sure all target accounts have an `AddedRemovedKeySet` in the
         // [`MultiAddedRemovedKeys`]. Even if there are not any known removed keys for the account,
         // we still want to optimistically fetch extension children for the leaf addition case.
-        self.multi_added_removed_keys.touch_accounts(targets.keys().copied());
-
-        // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        // V2 multiproofs don't need this.
+        let multi_added_removed_keys =
+            if let VersionedMultiProofTargets::Legacy(legacy_targets) = &targets {
+                self.multi_added_removed_keys.touch_accounts(legacy_targets.keys().copied());
+                Some(Arc::new(self.multi_added_removed_keys.clone()))
+            } else {
+                None
+            };
 
         self.metrics.prefetch_proof_targets_accounts_histogram.record(targets.len() as f64);
         self.metrics
             .prefetch_proof_targets_storages_histogram
-            .record(targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+            .record(targets.storage_count() as f64);
 
         let chunking_len = targets.chunking_length();
         let available_account_workers =
@@ -679,7 +795,7 @@ impl MultiProofTask {
             self.max_targets_for_chunking,
             available_account_workers,
             available_storage_workers,
-            MultiProofTargets::chunks,
+            VersionedMultiProofTargets::chunks,
             |proof_targets| {
                 self.multiproof_manager.dispatch(MultiproofInput {
                     source: None,
@@ -687,7 +803,7 @@ impl MultiProofTask {
                     proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
-                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                    multi_added_removed_keys: multi_added_removed_keys.clone(),
                 });
             },
         );
@@ -786,7 +902,7 @@ impl MultiProofTask {
                     &multi_added_removed_keys,
                     self.v2_proofs_enabled,
                 );
-                spawned_proof_targets.extend_ref(&proof_targets);
+                extend_multiproof_targets(&mut spawned_proof_targets, &proof_targets);
 
                 self.multiproof_manager.dispatch(MultiproofInput {
                     source: Some(source),
@@ -886,7 +1002,14 @@ impl MultiProofTask {
                             batch_metrics.proofs_processed += 1;
                             if let Some(combined_update) = self.on_proof(
                                 sequence_number,
-                                SparseTrieUpdate { state, multiproof: Default::default() },
+                                SparseTrieUpdate {
+                                    state,
+                                    multiproof: ProofResult::Legacy(DecodedMultiProof {
+                                        account_subtree: Default::default(),
+                                        branch_node_masks: Default::default(),
+                                        storages: Default::default(),
+                                    }),
+                                },
                             ) {
                                 let _ = self.to_sparse_trie.send(combined_update);
                             }
@@ -913,8 +1036,7 @@ impl MultiProofTask {
                 }
 
                 let account_targets = merged_targets.len();
-                let storage_targets =
-                    merged_targets.values().map(|slots| slots.len()).sum::<usize>();
+                let storage_targets = merged_targets.storage_count();
                 batch_metrics.prefetch_proofs_requested += self.on_prefetch_proof(merged_targets);
                 trace!(
                     target: "engine::tree::payload_processor::multiproof",
@@ -1028,7 +1150,14 @@ impl MultiProofTask {
 
                 if let Some(combined_update) = self.on_proof(
                     sequence_number,
-                    SparseTrieUpdate { state, multiproof: Default::default() },
+                    SparseTrieUpdate {
+                        state,
+                        multiproof: ProofResult::Legacy(DecodedMultiProof {
+                            account_subtree: Default::default(),
+                            branch_node_masks: Default::default(),
+                            storages: Default::default(),
+                        }),
+                    },
                 ) {
                     let _ = self.to_sparse_trie.send(combined_update);
                 }
@@ -1231,7 +1360,7 @@ struct MultiproofBatchCtx {
     /// received.
     updates_finished_time: Option<Instant>,
     /// Reusable buffer for accumulating prefetch targets during batching.
-    accumulated_prefetch_targets: Vec<MultiProofTargets>,
+    accumulated_prefetch_targets: Vec<VersionedMultiProofTargets>,
 }
 
 impl MultiproofBatchCtx {
@@ -1300,7 +1429,7 @@ fn get_proof_targets(
                 .collect::<Vec<_>>();
 
             if !changed_slots.is_empty() {
-                targets.account_targets.push(*hashed_address.into());
+                targets.account_targets.push((*hashed_address).into());
                 targets.storage_targets.insert(*hashed_address, changed_slots);
             }
         }
@@ -1311,7 +1440,7 @@ fn get_proof_targets(
 
         // first collect all new accounts (not previously fetched)
         for hashed_address in state_update.accounts.keys() {
-            if !fetched_proof_targets.contains_key(&hashed_address) {
+            if !fetched_proof_targets.contains_key(hashed_address) {
                 targets.insert(*hashed_address, HashSet::default());
             }
         }

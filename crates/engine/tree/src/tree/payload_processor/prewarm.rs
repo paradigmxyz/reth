@@ -16,7 +16,7 @@ use crate::tree::{
     payload_processor::{
         bal::{total_slots, BALSlotIter},
         executor::WorkloadExecutor,
-        multiproof::MultiProofMessage,
+        multiproof::{MultiProofMessage, VersionedMultiProofTargets},
         ExecutionCache as PayloadExecutionCache,
     },
     precompile_cache::{CachedPrecompile, PrecompileCacheMap},
@@ -243,7 +243,9 @@ where
         }
 
         if let Some((proof_targets, to_multi_proof)) = targets.zip(self.to_multi_proof.as_ref()) {
-            let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(proof_targets));
+            let _ = to_multi_proof.send(MultiProofMessage::PrefetchProofs(
+                VersionedMultiProofTargets::Legacy(proof_targets),
+            ));
         }
     }
 
