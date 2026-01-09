@@ -11,8 +11,8 @@ use crate::{
     bench::{
         context::BenchContext,
         output::{
-            CombinedResult, NewPayloadResult, PersistenceStats, TotalGasOutput, TotalGasRow,
-            COMBINED_OUTPUT_SUFFIX, GAS_OUTPUT_SUFFIX, PERSISTENCE_STATS_SUFFIX,
+            CombinedResult, NewPayloadResult, TotalGasOutput, TotalGasRow, COMBINED_OUTPUT_SUFFIX,
+            GAS_OUTPUT_SUFFIX,
         },
     },
     valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload},
@@ -61,62 +61,25 @@ const PERSISTENCE_THRESHOLD: u64 = DEFAULT_PERSISTENCE_THRESHOLD;
 const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
 const PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(300);
 
+/// Tracks persistence state for the benchmark.
 struct PersistenceTracker {
     blocks_sent: u64,
     last_persisted: u64,
     last_block_number: u64,
-    wait_count: u64,
-    total_wait_time: Duration,
-    max_gap: u64,
-    gap_sum: u64,
-    gap_count: u64,
 }
 
 impl PersistenceTracker {
     fn new() -> Self {
-        Self {
-            blocks_sent: 0,
-            last_persisted: 0,
-            last_block_number: 0,
-            wait_count: 0,
-            total_wait_time: Duration::ZERO,
-            max_gap: 0,
-            gap_sum: 0,
-            gap_count: 0,
-        }
+        Self { blocks_sent: 0, last_persisted: 0, last_block_number: 0 }
     }
 
     fn record_block(&mut self, block_number: u64) {
         self.blocks_sent += 1;
         self.last_block_number = block_number;
-
-        let current_gap = block_number.saturating_sub(self.last_persisted);
-        self.max_gap = self.max_gap.max(current_gap);
-        self.gap_sum += current_gap;
-        self.gap_count += 1;
     }
 
     fn should_wait(&self) -> bool {
-        self.blocks_sent % (PERSISTENCE_THRESHOLD + 1) == 0
-    }
-
-    fn record_wait(&mut self, elapsed: Duration, persisted: u64) {
-        self.wait_count += 1;
-        self.total_wait_time += elapsed;
-        self.last_persisted = persisted;
-    }
-
-    fn into_stats(self) -> PersistenceStats {
-        PersistenceStats {
-            wait_count: self.wait_count,
-            total_wait_time: self.total_wait_time,
-            max_gap: self.max_gap,
-            avg_gap: if self.gap_count > 0 {
-                self.gap_sum as f64 / self.gap_count as f64
-            } else {
-                0.0
-            },
-        }
+        self.blocks_sent.is_multiple_of(PERSISTENCE_THRESHOLD + 1)
     }
 }
 
@@ -327,7 +290,6 @@ impl Command {
                         "Waiting for persistence"
                     );
 
-                    let wait_start = Instant::now();
                     wait_for_persistence(
                         sub.stream_mut(),
                         block_number,
@@ -335,9 +297,7 @@ impl Command {
                         PERSISTENCE_CHECKPOINT_TIMEOUT,
                     )
                     .await?;
-
-                    tracker.record_wait(wait_start.elapsed(), tracker.last_persisted);
-                    debug!(target: "reth-bench", elapsed = ?wait_start.elapsed(), "Persistence caught up");
+                    debug!(target: "reth-bench", persisted = tracker.last_persisted, "Persistence caught up");
                 }
             }
 
@@ -356,23 +316,14 @@ impl Command {
 
         // Final sync: wait for remaining blocks (persistence mode only)
         if let Some(ref mut sub) = persistence_sub {
-            debug!(
-                "Final persistence check - Tracker state: blocks_sent={}, last_persisted={}, last_block_number={}",
-                tracker.blocks_sent, tracker.last_persisted, tracker.last_block_number
-            );
-
             let remaining_gap = tracker.last_block_number.saturating_sub(tracker.last_persisted);
-            debug!("Calculated remaining gap: {}, threshold: {}", remaining_gap, PERSISTENCE_THRESHOLD);
 
             if remaining_gap > PERSISTENCE_THRESHOLD {
-                // Only wait if the gap exceeds threshold - more blocks will persist
                 info!(
                     "Waiting for final blocks to persist (current: {}, target: {}, gap: {})",
                     tracker.last_persisted, tracker.last_block_number, remaining_gap
                 );
-                debug!("Gap {} > threshold {}, waiting for persistence...", remaining_gap, PERSISTENCE_THRESHOLD);
 
-                let wait_start = std::time::Instant::now();
                 match wait_for_persistence(
                     sub.stream_mut(),
                     tracker.last_block_number,
@@ -381,32 +332,19 @@ impl Command {
                 )
                 .await
                 {
-                    Ok(()) => {
-                        info!("All blocks persisted successfully (took {:?})", wait_start.elapsed());
-                    }
-                    Err(e) => {
-                        warn!("Final sync failed after {:?}: {}", wait_start.elapsed(), e);
-                    }
+                    Ok(()) => info!("All blocks persisted successfully"),
+                    Err(e) => warn!("Final sync: {}", e),
                 }
             } else if remaining_gap > 0 {
-                // Gap is <= threshold, so final blocks won't be persisted
                 info!(
-                    "Skipping final persistence wait: gap {} <= threshold {}. Last persisted: {}, final block: {}",
-                    remaining_gap, PERSISTENCE_THRESHOLD, tracker.last_persisted, tracker.last_block_number
+                    "Skipping final persistence wait: gap {} <= threshold {}",
+                    remaining_gap, PERSISTENCE_THRESHOLD
                 );
-                debug!(
-                    "Engine will not persist final {} blocks because gap does not exceed threshold",
-                    remaining_gap
-                );
-            } else {
-                debug!("No remaining gap - all blocks already persisted");
             }
         }
 
         let (gas_output_results, combined_results): (_, Vec<CombinedResult>) =
             results.into_iter().unzip();
-
-        let persistence_stats = tracker.into_stats();
 
         // Write CSV output files
         if let Some(ref path) = self.benchmark.output {
@@ -426,38 +364,18 @@ impl Command {
             }
             writer.flush()?;
 
-            if wait_time_mode.is_none() {
-                let output_path = path.join(PERSISTENCE_STATS_SUFFIX);
-                info!("Writing persistence stats to file: {:?}", output_path);
-                let mut writer = Writer::from_path(&output_path)?;
-                writer.serialize(&persistence_stats)?;
-                writer.flush()?;
-            }
-
             info!("Finished writing benchmark output files to {:?}.", path);
         }
 
         let gas_output = TotalGasOutput::new(gas_output_results)?;
 
-        if wait_time_mode.is_none() {
-            info!(
-                total_duration=?gas_output.total_duration,
-                total_gas_used=?gas_output.total_gas_used,
-                blocks_processed=?gas_output.blocks_processed,
-                persistence_waits=?persistence_stats.wait_count,
-                persistence_wait_time=?persistence_stats.total_wait_time,
-                "Total Ggas/s: {:.4}",
-                gas_output.total_gigagas_per_second()
-            );
-        } else {
-            info!(
-                total_duration=?gas_output.total_duration,
-                total_gas_used=?gas_output.total_gas_used,
-                blocks_processed=?gas_output.blocks_processed,
-                "Total Ggas/s: {:.4}",
-                gas_output.total_gigagas_per_second()
-            );
-        }
+        info!(
+            total_duration=?gas_output.total_duration,
+            total_gas_used=?gas_output.total_gas_used,
+            blocks_processed=?gas_output.blocks_processed,
+            "Total Ggas/s: {:.4}",
+            gas_output.total_gigagas_per_second()
+        );
 
         Ok(())
     }
@@ -476,9 +394,7 @@ impl Command {
         }
     }
 
-    async fn setup_persistence_subscription(
-        &self,
-    ) -> eyre::Result<PersistenceSubscription> {
+    async fn setup_persistence_subscription(&self) -> eyre::Result<PersistenceSubscription> {
         let auth_jwt = self
             .benchmark
             .auth_jwtsecret
