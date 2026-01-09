@@ -17,10 +17,10 @@ use crate::{
     DBProvider, EitherReader, EitherWriter, EitherWriterDestination, HashingWriter, HeaderProvider,
     HeaderSyncGapProvider, HistoricalStateProvider, HistoricalStateProviderRef, HistoryWriter,
     LatestStateProvider, LatestStateProviderRef, OriginalValuesKnown, ProviderError,
-    PruneCheckpointReader, PruneCheckpointWriter, RevertsInit, RocksDBProviderFactory,
-    StageCheckpointReader, StateProviderBox, StateWriter, StaticFileProviderFactory, StatsReader,
-    StorageReader, StorageTrieWriter, TransactionVariant, TransactionsProvider,
-    TransactionsProviderExt, TrieReader, TrieWriter,
+    PruneCheckpointReader, PruneCheckpointWriter, RawRocksDBBatch, RevertsInit, RocksBatchArg,
+    RocksDBProviderFactory, RocksTxRefArg, StageCheckpointReader, StateProviderBox, StateWriter,
+    StaticFileProviderFactory, StatsReader, StorageReader, StorageTrieWriter, TransactionVariant,
+    TransactionsProvider, TransactionsProviderExt, TrieReader, TrieWriter,
 };
 use alloy_consensus::{
     transaction::{SignerRecoverable, TransactionMeta, TxHashRef},
@@ -327,6 +327,31 @@ impl<TX, N: NodeTypes> AsRef<Self> for DatabaseProvider<TX, N> {
 }
 
 impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
+    /// Executes a closure with a `RocksDB` batch, automatically registering it for commit.
+    ///
+    /// This helper encapsulates all the cfg-gated `RocksDB` batch handling.
+    pub fn with_rocksdb_batch<F, R>(&self, f: F) -> ProviderResult<R>
+    where
+        F: FnOnce(RocksBatchArg<'_>) -> ProviderResult<(R, Option<RawRocksDBBatch>)>,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb = self.rocksdb_provider();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_batch = rocksdb.batch();
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let rocksdb_batch = ();
+
+        let (result, raw_batch) = f(rocksdb_batch)?;
+
+        #[cfg(all(unix, feature = "rocksdb"))]
+        if let Some(batch) = raw_batch {
+            self.set_pending_rocksdb_batch(batch);
+        }
+        let _ = raw_batch; // silence unused warning when rocksdb feature is disabled
+
+        Ok(result)
+    }
+
     /// Writes executed blocks and state to storage.
     pub fn save_blocks(&self, blocks: Vec<ExecutedBlock<N::Primitives>>) -> ProviderResult<()> {
         if blocks.is_empty() {
@@ -594,6 +619,25 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Returns a reference to the chain specification.
     pub fn chain_spec(&self) -> &N::ChainSpec {
         &self.chain_spec
+    }
+
+    /// Executes a closure with a `RocksDB` transaction for reading.
+    ///
+    /// This helper encapsulates all the cfg-gated `RocksDB` transaction handling for reads.
+    fn with_rocksdb_tx<F, R>(&self, f: F) -> ProviderResult<R>
+    where
+        F: FnOnce(RocksTxRefArg<'_>) -> ProviderResult<R>,
+    {
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb = self.rocksdb_provider();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_tx = rocksdb.tx();
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let rocksdb_tx_ref = &rocksdb_tx;
+        #[cfg(not(all(unix, feature = "rocksdb")))]
+        let rocksdb_tx_ref = ();
+
+        f(rocksdb_tx_ref)
     }
 }
 
@@ -1349,7 +1393,10 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> TransactionsProvider for Datab
     type Transaction = TxTy<N>;
 
     fn transaction_id(&self, tx_hash: TxHash) -> ProviderResult<Option<TxNumber>> {
-        Ok(self.tx.get::<tables::TransactionHashNumbers>(tx_hash)?)
+        self.with_rocksdb_tx(|tx_ref| {
+            let mut reader = EitherReader::new_transaction_hash_numbers(self, tx_ref)?;
+            reader.get_transaction_hash_number(tx_hash)
+        })
     }
 
     fn transaction_by_id(&self, id: TxNumber) -> ProviderResult<Option<Self::Transaction>> {
@@ -2997,10 +3044,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         }
 
         if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
-            for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
-                let hash = transaction.tx_hash();
-                self.tx.put::<tables::TransactionHashNumbers>(*hash, tx_num)?;
-            }
+            self.with_rocksdb_batch(|batch| {
+                let mut writer = EitherWriter::new_transaction_hash_numbers(self, batch)?;
+                for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
+                    let hash = transaction.tx_hash();
+                    writer.put_transaction_hash_number(*hash, tx_num, false)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
             durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
         }
 
@@ -3108,9 +3159,14 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             .last_tx_num();
 
         if unwind_tx_from <= unwind_tx_to {
-            for (hash, _) in self.transaction_hashes_by_range(unwind_tx_from..(unwind_tx_to + 1))? {
-                self.tx.delete::<tables::TransactionHashNumbers>(hash, None)?;
-            }
+            let hashes = self.transaction_hashes_by_range(unwind_tx_from..(unwind_tx_to + 1))?;
+            self.with_rocksdb_batch(|batch| {
+                let mut writer = EitherWriter::new_transaction_hash_numbers(self, batch)?;
+                for (hash, _) in hashes {
+                    writer.delete_transaction_hash_number(hash)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
         }
 
         EitherWriter::new_senders(self, last_block_number)?.prune_senders(unwind_tx_from, block)?;
