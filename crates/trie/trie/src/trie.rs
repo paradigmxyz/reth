@@ -601,7 +601,7 @@ where
     pub fn root(self) -> Result<B256, StorageRootError> {
         match self.calculate(false)? {
             StorageRootProgress::Complete(root, _, _) => Ok(root),
-            StorageRootProgress::Progress(..) => unreachable!(), // update retenion is disabled
+            StorageRootProgress::Progress(..) => unreachable!(), // update retention is disabled
         }
     }
 
