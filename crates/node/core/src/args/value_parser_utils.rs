@@ -3,7 +3,7 @@
 use clap::{error::ErrorKind, Arg, Error};
 use std::ffi::OsStr;
 
-/// Converts an OsStr to UTF-8, returning InvalidUtf8 error on failure.
+/// Converts an `OsStr` to UTF-8, returning `InvalidUtf8` error on failure.
 pub fn parse_osstr_to_str(value: &OsStr) -> Result<&str, Error> {
     value.to_str().ok_or_else(|| Error::new(ErrorKind::InvalidUtf8))
 }
@@ -13,7 +13,7 @@ pub fn format_arg_name(arg: Option<&Arg>) -> String {
     arg.map(|a| a.to_string()).unwrap_or_else(|| "...".to_owned())
 }
 
-/// Builds a standardized InvalidValue error with possible values listed.
+/// Builds a standardized `InvalidValue` error with possible values listed.
 pub fn build_invalid_value_error<E: std::fmt::Display>(
     val: &str,
     arg: Option<&Arg>,
@@ -26,4 +26,3 @@ pub fn build_invalid_value_error<E: std::fmt::Display>(
     );
     Error::raw(ErrorKind::InvalidValue, msg)
 }
-
