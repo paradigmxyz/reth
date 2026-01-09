@@ -1275,9 +1275,9 @@ fn get_proof_targets(
     let mut targets = MultiProofTargets::default();
 
     // first collect all new accounts (not previously fetched)
-    for &hashed_address in state_update.accounts.keys() {
-        if !fetched_proof_targets.contains_key(&hashed_address) {
-            targets.insert(hashed_address, HashSet::default());
+    for hashed_address in state_update.accounts.keys() {
+        if !fetched_proof_targets.contains_key(hashed_address) {
+            targets.insert(*hashed_address, HashSet::default());
         }
     }
 
