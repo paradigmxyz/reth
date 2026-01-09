@@ -92,13 +92,13 @@ At the end of the `execute()` function, a familiar value is returned, `Ok(ExecOu
 
 <br>
 
-## MerkleUnwindStage
+## MerkleStage (unwind)
 
-The `MerkleUnwindStage` is responsible for unwinding the Merkle Patricia trie when reorgs occur or when there's a need to roll back state changes. This ensures the trie remains consistent with the chain's canonical history by reverting changes beyond the unwind point. It typically runs before the hashing stages to unwind trie state during reorgs or rollbacks.
+The `MerkleStage` (unwind mode) is responsible for unwinding the Merkle Patricia trie when reorgs occur or when there's a need to roll back state changes. This ensures the trie remains consistent with the chain's canonical history by reverting changes beyond the unwind point. It typically runs before the hashing stages to unwind trie state during reorgs or rollbacks.
 
-## MerkleExecuteStage
+## MerkleStage (execute)
 
-The `MerkleExecuteStage` runs after `AccountHashingStage` and `StorageHashingStage` and is responsible for constructing or updating the state root based on the latest hashed account and storage data. It processes state changes from executed transactions and maintains the state root included in block headers.
+The `MerkleStage` (execute mode) runs after `AccountHashingStage` and `StorageHashingStage` and is responsible for constructing or updating the state root based on the latest hashed account and storage data. It processes state changes from executed transactions and maintains the state root included in block headers.
 
 <br>
 
