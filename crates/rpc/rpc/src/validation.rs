@@ -59,7 +59,7 @@ where
     /// Create a new instance of the [`ValidationApi`]
     pub fn new(
         provider: Provider,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         evm_config: E,
         config: ValidationApiConfig,
         task_spawner: Box<dyn TaskSpawner>,
@@ -561,7 +561,7 @@ pub struct ValidationApiInner<Provider, E: ConfigureEvm, T: PayloadTypes> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// Consensus implementation.
-    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Execution payload validator.
     payload_validator:
         Arc<dyn PayloadValidator<T, Block = <E::Primitives as NodePrimitives>::Block>>,

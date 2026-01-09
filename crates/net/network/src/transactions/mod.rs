@@ -2000,7 +2000,7 @@ impl<N: NetworkPrimitives> PeerMetadata<N> {
         &self.request_tx
     }
 
-    /// Return a
+    /// Returns a mutable reference to the seen transactions LRU cache.
     pub const fn seen_transactions_mut(&mut self) -> &mut LruCache<TxHash> {
         &mut self.seen_transactions
     }

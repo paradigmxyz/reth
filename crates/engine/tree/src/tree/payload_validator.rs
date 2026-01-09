@@ -34,13 +34,12 @@ use reth_primitives_traits::{
     SealedHeader, SignerRecoverable,
 };
 use reth_provider::{
-    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockReader,
-    DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome, HashedPostStateProvider,
-    ProviderError, PruneCheckpointReader, StageCheckpointReader, StateProvider,
-    StateProviderFactory, StateReader, TrieReader,
+    providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
+    ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome,
+    HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
+    StateProvider, StateProviderFactory, StateReader, TrieReader,
 };
 use reth_revm::db::State;
-use reth_storage_errors::db::DatabaseError;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
@@ -112,7 +111,7 @@ where
     /// Provider for database access.
     provider: P,
     /// Consensus implementation for validation.
-    consensus: Arc<dyn FullConsensus<Evm::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<Evm::Primitives>>,
     /// EVM configuration.
     evm_config: Evm,
     /// Configuration for the tree.
@@ -136,8 +135,15 @@ impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
 where
     N: NodePrimitives,
     P: DatabaseProviderFactory<
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + TrieReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
+        + ChangeSetReader
+        + BlockNumReader
         + StateProviderFactory
         + StateReader
         + HashedPostStateProvider
@@ -149,7 +155,7 @@ where
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         provider: P,
-        consensus: Arc<dyn FullConsensus<N, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<N>>,
         evm_config: Evm,
         validator: V,
         config: TreeConfig,
@@ -713,8 +719,7 @@ where
 
         Ok(StateRoot::new(&provider, &provider)
             .with_prefix_sets(prefix_sets.freeze())
-            .root_with_updates()
-            .map_err(Into::<DatabaseError>::into)?)
+            .root_with_updates()?)
     }
 
     /// Validates the block after execution.
@@ -1080,16 +1085,33 @@ where
             ancestors,
         );
         let deferred_handle_task = deferred_trie_data.clone();
-        let deferred_compute_duration =
-            self.metrics.block_validation.deferred_trie_compute_duration.clone();
+        let block_validation_metrics = self.metrics.block_validation.clone();
 
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
         let compute_trie_input_task = move || {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
-                let _ = deferred_handle_task.wait_cloned();
-                deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
+                let computed = deferred_handle_task.wait_cloned();
+                block_validation_metrics
+                    .deferred_trie_compute_duration
+                    .record(compute_start.elapsed().as_secs_f64());
+
+                // Record sizes of the computed trie data
+                block_validation_metrics
+                    .hashed_post_state_size
+                    .record(computed.hashed_state.total_len() as f64);
+                block_validation_metrics
+                    .trie_updates_sorted_size
+                    .record(computed.trie_updates.total_len() as f64);
+                if let Some(anchored) = &computed.anchored_trie_input {
+                    block_validation_metrics
+                        .anchored_overlay_trie_updates_size
+                        .record(anchored.trie_input.nodes.total_len() as f64);
+                    block_validation_metrics
+                        .anchored_overlay_hashed_state_size
+                        .record(anchored.trie_input.state.total_len() as f64);
+                }
             }));
 
             if result.is_err() {
@@ -1185,10 +1207,17 @@ pub trait EngineValidator<
 impl<N, Types, P, Evm, V> EngineValidator<Types> for BasicEngineValidator<P, Evm, V>
 where
     P: DatabaseProviderFactory<
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + TrieReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader
+                          + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory
         + StateReader
+        + ChangeSetReader
+        + BlockNumReader
         + HashedPostStateProvider
         + Clone
         + 'static,

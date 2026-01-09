@@ -477,7 +477,7 @@ where
 
         // Apply per-segment blocks_per_file configuration
         let static_file_provider =
-            StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
+            StaticFileProviderBuilder::read_write(self.data_dir().static_files())
                 .with_metrics()
                 .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
                 .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
@@ -664,7 +664,9 @@ where
                         }
                     })
                     .build(),
-            ).with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
+                self.data_dir().pprof_dumps(),
+            )
+            .with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
 
             MetricServer::new(config).serve().await?;
         }
@@ -1040,14 +1042,34 @@ where
             Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>,
         )>,
     ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<T::Types>>>> {
+        self.exex_launcher(installed_exex).launch().await
+    }
+
+    /// Creates an [`ExExLauncher`] for the installed ExExes.
+    ///
+    /// This returns the launcher before calling `.launch()`, allowing custom configuration
+    /// such as setting the WAL blocks warning threshold for L2 chains with faster block times:
+    ///
+    /// ```ignore
+    /// ctx.exex_launcher(exexes)
+    ///     .with_wal_blocks_warning(768)  // For 2-second block times
+    ///     .launch()
+    ///     .await
+    /// ```
+    #[allow(clippy::type_complexity)]
+    pub fn exex_launcher(
+        &self,
+        installed_exex: Vec<(
+            String,
+            Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>,
+        )>,
+    ) -> ExExLauncher<NodeAdapter<T, CB::Components>> {
         ExExLauncher::new(
             self.head(),
             self.node_adapter().clone(),
             installed_exex,
             self.configs().clone(),
         )
-        .launch()
-        .await
     }
 
     /// Creates the ERA import source based on node configuration.

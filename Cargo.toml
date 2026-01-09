@@ -487,7 +487,7 @@ revm-inspectors = "0.33.2"
 alloy-chains = { version = "0.2.5", default-features = false }
 alloy-dyn-abi = "1.4.1"
 alloy-eip2124 = { version = "0.2.0", default-features = false }
-alloy-eip7928 = { version = "0.1.0" }
+alloy-eip7928 = { version = "0.1.0", default-features = false }
 alloy-evm = { version = "0.25.1", default-features = false }
 alloy-primitives = { version = "1.5.0", default-features = false, features = ["map-foldhash"] }
 alloy-rlp = { version = "0.3.10", default-features = false, features = ["core-net"] }
@@ -684,6 +684,7 @@ ethereum_ssz = "0.9.0"
 ethereum_ssz_derive = "0.9.0"
 
 # allocators
+jemalloc_pprof = { version = "0.8", default-features = false }
 tikv-jemalloc-ctl = "0.6"
 tikv-jemallocator = "0.6"
 tracy-client = "0.18.0"
