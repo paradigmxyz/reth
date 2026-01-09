@@ -171,6 +171,8 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
+edge = ["reth-ethereum-cli/edge"]
+
 [[bin]]
 name = "reth"
 path = "src/main.rs"
