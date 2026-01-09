@@ -505,11 +505,15 @@ impl Command {
     }
 }
 
-/// Converts an engine API URL to the corresponding RPC WebSocket URL.
+/// Converts an engine API URL to the corresponding RPC WebSocket URL as a fallback.
 ///
+/// This is used when --ws-rpc-url is not explicitly provided. It makes a best-effort attempt
+/// to derive the WebSocket URL from the engine API URL:
 /// - Converts http/https to ws/wss
-/// - Always uses port 8546 (RPC WebSocket) since the local reth node's WS endpoint
-///   is always on this port regardless of what port the engine API uses
+/// - Always uses port 8546 (standard RPC WebSocket port)
+///
+/// Note: This assumes the WebSocket server is on port 8546. If your setup uses a different
+/// port, use --ws-rpc-url to specify the correct URL explicitly.
 fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
     let url: Url = engine_url
         .parse()
@@ -525,16 +529,16 @@ fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
             .set_scheme("wss")
             .map_err(|_| eyre::eyre!("Failed to set WSS scheme for URL: {url}"))?,
         "ws" | "wss" => {}
-        scheme => return Err(eyre::eyre!(
+        scheme => {
+            return Err(eyre::eyre!(
             "Unsupported URL scheme '{scheme}' for URL: {url}. Expected http, https, ws, or wss."
-        )),
+        ))
+        }
     }
 
     // Always use port 8546 for the WS RPC endpoint, regardless of engine API port.
     // The engine API can be on any port (8551, 9551, etc.) but the WS RPC is always 8546.
-    ws_url
-        .set_port(Some(8546))
-        .map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
+    ws_url.set_port(Some(8546)).map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
 
     Ok(ws_url)
 }
