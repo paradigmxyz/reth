@@ -7732,7 +7732,9 @@ version = "1.9.3"
 dependencies = [
  "alloy-primitives",
  "alloy-provider",
+ "alloy-rpc-client",
  "alloy-rpc-types-eth",
+ "alloy-transport-ws",
  "chrono",
  "clap",
  "csv",

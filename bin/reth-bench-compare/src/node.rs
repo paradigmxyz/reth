@@ -2,7 +2,9 @@
 
 use crate::cli::Args;
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::SyncStatus;
+use alloy_transport_ws::WsConnect;
 use eyre::{eyre, OptionExt, Result, WrapErr};
 #[cfg(unix)]
 use nix::sys::signal::{killpg, Signal};
@@ -17,6 +19,9 @@ use tokio::{
     time::{sleep, timeout},
 };
 use tracing::{debug, info, warn};
+
+/// Default WebSocket RPC port used by reth
+const DEFAULT_WS_RPC_PORT: u16 = 8546;
 
 /// Manages reth node lifecycle and operations
 pub(crate) struct NodeManager {
@@ -387,8 +392,24 @@ impl NodeManager {
                                 // Node is not syncing, now get the tip
                                 match provider.get_block_number().await {
                                     Ok(tip) => {
-                                        info!("Node is ready and not syncing at block: {}", tip);
-                                        return Ok(tip);
+                                        // Also verify WebSocket RPC is ready
+                                        let ws_url = format!("ws://localhost:{}", DEFAULT_WS_RPC_PORT);
+                                        match RpcClient::connect_pubsub(WsConnect::new(&ws_url)).await
+                                        {
+                                            Ok(_) => {
+                                                info!(
+                                                    "Node is ready (HTTP and WebSocket) at block: {}",
+                                                    tip
+                                                );
+                                                return Ok(tip);
+                                            }
+                                            Err(e) => {
+                                                debug!(
+                                                    "HTTP RPC ready but WebSocket not ready yet: {}",
+                                                    e
+                                                );
+                                            }
+                                        }
                                     }
                                     Err(e) => {
                                         debug!("Failed to get block number: {}", e);
