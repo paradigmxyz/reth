@@ -351,11 +351,11 @@ where
 
         // If state_mask is empty (e.g., cached branch), we can't compute child_path.
         // Push the child back and defer processing.
-        if let Some(branch) = self.branch_stack.last() {
-            if branch.state_mask.is_empty() {
-                self.child_stack.push(child);
-                return Ok(())
-            }
+        if let Some(branch) = self.branch_stack.last()
+            && branch.state_mask.is_empty()
+        {
+            self.child_stack.push(child);
+            return Ok(())
         }
 
         let child_path = self.last_child_path();
