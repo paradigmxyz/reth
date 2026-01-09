@@ -208,6 +208,12 @@ pub(crate) struct Args {
     /// When "all" is specified, the flag is NOT passed to any run.
     #[arg(long, value_name = "TARGET")]
     pub disable_startup_sync_state_idle: Option<DisableStartupSyncStateIdle>,
+
+    /// Compile baseline and feature refs in parallel using git worktrees.
+    /// Creates temporary worktrees in the output directory for each ref,
+    /// allowing both builds to run concurrently with separate target directories.
+    #[arg(long)]
+    pub parallel_compilation: bool,
 }
 
 impl Args {
@@ -457,56 +463,68 @@ async fn run_compilation_phase(
         compilation_manager.ensure_samply_available()?;
     }
 
-    let refs = [&args.baseline_ref, &args.feature_ref];
-    let ref_types = ["baseline", "feature"];
-
-    // First, resolve all refs to commits using a HashMap to avoid race conditions where a ref is
-    // pushed to mid-run.
+    // Resolve refs to commits to avoid race conditions where a ref is pushed mid-run
     let mut ref_commits = std::collections::HashMap::new();
-    for &git_ref in &refs {
+    for git_ref in [&args.baseline_ref, &args.feature_ref] {
         if !ref_commits.contains_key(git_ref) {
             git_manager.switch_ref(git_ref)?;
             let commit = git_manager.get_current_commit()?;
+            info!("Reference {} resolves to commit: {}", git_ref, &commit[..8]);
             ref_commits.insert(git_ref.clone(), commit);
-            info!("Reference {} resolves to commit: {}", git_ref, &ref_commits[git_ref][..8]);
         }
-    }
-
-    // Now compile each ref using the resolved commits
-    for (i, &git_ref) in refs.iter().enumerate() {
-        let ref_type = ref_types[i];
-        let commit = &ref_commits[git_ref];
-
-        // Get per-build features and rustflags
-        let features = match ref_type {
-            "baseline" => args.baseline_features.as_ref().unwrap_or(&args.features),
-            "feature" => args.feature_features.as_ref().unwrap_or(&args.features),
-            _ => &args.features,
-        };
-        let rustflags = match ref_type {
-            "baseline" => args.baseline_rustflags.as_ref().unwrap_or(&args.rustflags),
-            "feature" => args.feature_rustflags.as_ref().unwrap_or(&args.rustflags),
-            _ => &args.rustflags,
-        };
-
-        info!(
-            "Compiling {} binary for reference: {} (commit: {})",
-            ref_type,
-            git_ref,
-            &commit[..8]
-        );
-
-        // Switch to target reference
-        git_manager.switch_ref(git_ref)?;
-
-        // Compile reth (with caching)
-        compilation_manager.compile_reth(commit, is_optimism, features, rustflags)?;
-
-        info!("Completed compilation for {} reference", ref_type);
     }
 
     let baseline_commit = ref_commits[&args.baseline_ref].clone();
     let feature_commit = ref_commits[&args.feature_ref].clone();
+
+    let baseline_features = args.baseline_features.as_ref().unwrap_or(&args.features);
+    let baseline_rustflags = args.baseline_rustflags.as_ref().unwrap_or(&args.rustflags);
+    let feature_features = args.feature_features.as_ref().unwrap_or(&args.features);
+    let feature_rustflags = args.feature_rustflags.as_ref().unwrap_or(&args.rustflags);
+
+    if args.parallel_compilation {
+        info!("Using parallel compilation with git worktrees");
+        compilation_manager.compile_reth_parallel(
+            &baseline_commit,
+            &feature_commit,
+            is_optimism,
+            baseline_features,
+            baseline_rustflags,
+            feature_features,
+            feature_rustflags,
+        )?;
+    } else {
+        let refs = [&args.baseline_ref, &args.feature_ref];
+        let ref_types = ["baseline", "feature"];
+
+        for (i, &git_ref) in refs.iter().enumerate() {
+            let ref_type = ref_types[i];
+            let commit = &ref_commits[git_ref];
+
+            let features = match ref_type {
+                "baseline" => baseline_features,
+                "feature" => feature_features,
+                _ => &args.features,
+            };
+            let rustflags = match ref_type {
+                "baseline" => baseline_rustflags,
+                "feature" => feature_rustflags,
+                _ => &args.rustflags,
+            };
+
+            info!(
+                "Compiling {} binary for reference: {} (commit: {})",
+                ref_type,
+                git_ref,
+                &commit[..8]
+            );
+
+            git_manager.switch_ref(git_ref)?;
+            compilation_manager.compile_reth(commit, is_optimism, features, rustflags)?;
+
+            info!("Completed compilation for {} reference", ref_type);
+        }
+    }
 
     info!("Compilation phase completed");
     Ok((baseline_commit, feature_commit))
