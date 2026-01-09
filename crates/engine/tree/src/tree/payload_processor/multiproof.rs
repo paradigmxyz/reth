@@ -1082,6 +1082,7 @@ impl MultiProofTask {
             }
 
             let mut now = Instant::now();
+            let mut proof_now = Instant::now();
 
             // Use select_biased! to prioritize proof results over new requests.
             // This prevents new work from starving completed proofs and keeps workers healthy.
@@ -1089,7 +1090,6 @@ impl MultiProofTask {
                 recv(self.proof_result_rx) -> proof_msg => {
                     match proof_msg {
                         Ok(proof_result) => {
-                            info!("received new multiproof result");
                             batch_metrics.proofs_processed += 1;
 
                             self.metrics
@@ -1097,6 +1097,9 @@ impl MultiProofTask {
                                 .record(proof_result.elapsed);
 
                             self.multiproof_manager.on_calculation_complete();
+
+                            info!("received new multiproof result after {:?}, took {:?}", proof_now.elapsed(), proof_result.elapsed);
+                            proof_now = Instant::now();
 
                             // Convert ProofResultMessage to SparseTrieUpdate
                             match proof_result.result {
@@ -1116,6 +1119,7 @@ impl MultiProofTask {
                                     if let Some(combined_update) =
                                         self.on_proof(proof_result.sequence_number, update)
                                     {
+                                        info!("dispatch proof result combined update");
                                         let _ = self.to_sparse_trie.send(combined_update);
                                     }
                                 }
