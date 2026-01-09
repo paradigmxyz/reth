@@ -88,6 +88,19 @@ use std::{
 };
 use tracing::{debug, trace};
 
+#[cfg(feature = "triedb")]
+use {
+    alloy_consensus::constants::KECCAK_EMPTY,
+    alloy_primitives::{StorageKey, StorageValue, U256},
+    alloy_trie::EMPTY_ROOT_HASH,
+    reth_storage_api::PlainPostState,
+    std::time::Instant,
+    triedb::{
+        account::Account as TrieDBAccount,
+        path::{AddressPath, StoragePath},
+    },
+};
+
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
 
@@ -368,10 +381,42 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         //  * hashed state
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
-        // Insert the blocks
+        // Insert the blocks and merge state changes for triedb
+        #[cfg(feature = "triedb")]
+        let mut merged_plain_state = PlainPostState::default();
+
         for block in blocks {
             let trie_data = block.trie_data();
             let ExecutedBlock { recovered_block, execution_output, .. } = block;
+
+            #[cfg(feature = "triedb")]
+            {
+                // Collect state changes for TrieDB batch write
+                let bundle_state = &execution_output.bundle;
+                for (address, bundle_account) in bundle_state.state() {
+                    let account = if bundle_account.was_destroyed() || bundle_account.info.is_none()
+                    {
+                        None
+                    } else {
+                        bundle_account
+                            .info
+                            .as_ref()
+                            .map(|info| reth_primitives_traits::Account::from(info))
+                    };
+
+                    merged_plain_state.accounts.insert(*address, account);
+
+                    let storage_map = merged_plain_state
+                        .storages
+                        .entry(*address)
+                        .or_insert_with(HashMap::default);
+                    for (slot, storage_slot) in &bundle_account.storage {
+                        let slot_b256 = B256::from_slice(&slot.to_be_bytes::<32>());
+                        storage_map.insert(slot_b256, storage_slot.present_value);
+                    }
+                }
+            }
+
             let block_number = recovered_block.number();
             self.insert_block(&recovered_block)?;
 
@@ -391,6 +436,95 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         // Update pipeline progress
         self.update_pipeline_stages(last_block_number, false)?;
+
+        // Write merged state to triedb
+        #[cfg(feature = "triedb")]
+        {
+            let start = Instant::now();
+            let mut tx = self.triedb_provider.inner_db().begin_rw().map_err(|e| {
+                ProviderError::TrieWitnessError(format!(
+                    "Failed to begin triedb transaction: {e:?}"
+                ))
+            })?;
+
+            // First, write all storage slots for each address
+            for (address, storage) in &merged_plain_state.storages {
+                let address_path = AddressPath::for_address(*address);
+
+                for (storage_key, storage_value) in storage {
+                    let raw_slot = U256::from_be_slice(storage_key.as_slice());
+                    let storage_path = StoragePath::for_address_path_and_slot(
+                        address_path.clone(),
+                        StorageKey::from(raw_slot),
+                    );
+
+                    if storage_value.is_zero() {
+                        // Delete storage slot
+                        tx.set_storage_slot(storage_path, None).map_err(|e| {
+                            ProviderError::TrieWitnessError(format!(
+                                "Failed to set triedb storage slot: {e:?}"
+                            ))
+                        })?;
+                    } else {
+                        // Set storage slot
+                        let storage_value_triedb = StorageValue::from_be_slice(
+                            storage_value.to_be_bytes::<32>().as_slice(),
+                        );
+                        tx.set_storage_slot(storage_path, Some(storage_value_triedb)).map_err(
+                            |e| {
+                                ProviderError::TrieWitnessError(format!(
+                                    "Failed to set triedb storage slot: {e:?}"
+                                ))
+                            },
+                        )?;
+                    }
+                }
+            }
+
+            // Then, write accounts (storage roots will be computed automatically by triedb)
+            for (address, account_opt) in &merged_plain_state.accounts {
+                let address_path = AddressPath::for_address(*address);
+
+                if let Some(account) = account_opt {
+                    // Account exists or is being updated
+                    // Storage root will be computed from the storage we just wrote
+                    let trie_account = TrieDBAccount::new(
+                        account.nonce,
+                        account.balance,
+                        EMPTY_ROOT_HASH, // Will be computed from storage
+                        account.bytecode_hash.unwrap_or(KECCAK_EMPTY),
+                    );
+                    tx.set_account(address_path, Some(trie_account)).map_err(|e| {
+                        ProviderError::TrieWitnessError(format!(
+                            "Failed to set triedb account: {e:?}"
+                        ))
+                    })?;
+                } else {
+                    // Account is being destroyed
+                    tx.set_account(address_path, None).map_err(|e| {
+                        ProviderError::TrieWitnessError(format!(
+                            "Failed to delete triedb account: {e:?}"
+                        ))
+                    })?;
+                }
+            }
+
+            // Commit the triedb transaction
+            tx.commit().map_err(|e| {
+                ProviderError::TrieWitnessError(format!(
+                    "Failed to commit triedb transaction: {e:?}"
+                ))
+            })?;
+
+            let elapsed = start.elapsed().as_millis();
+            tracing::info!(
+                target: "providers::db",
+                elapsed_ms = elapsed,
+                num_accounts = merged_plain_state.accounts.len(),
+                num_storage_changes = merged_plain_state.storages.len(),
+                "✅ Saved merged state to TrieDB"
+            );
+        }
 
         debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
 
