@@ -4031,9 +4031,9 @@ dependencies = [
 
 [[package]]
 name = "fixed-cache"
-version = "0.1.3"
+version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ba59b6c98ba422a13f17ee1305c995cb5742bba7997f5b4d9af61b2ff0ffb213"
+checksum = "3c468bde9b2db8d745d7c9fc33964f1923c6222f0211e10ffd818e6f28b4e190"
 dependencies = [
  "equivalent",
  "typeid",
