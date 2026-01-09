@@ -57,7 +57,7 @@ pub struct Command {
     /// `reth_subscribePersistedBlock` subscription. This ensures the benchmark
     /// doesn't outpace persistence.
     ///
-    /// The subscription uses the regular RPC WebSocket endpoint (no JWT required).
+    /// The subscription uses the regular RPC websocket endpoint (no JWT required).
     #[arg(long, default_value = "false", verbatim_doc_comment)]
     wait_for_persistence: bool,
 
@@ -222,7 +222,7 @@ impl Command {
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
             info!(%combined_result);
 
-            if let Some(ref mut w) = waiter {
+            if let Some(w) = &mut waiter {
                 w.on_block(block_number).await?;
             }
 
@@ -277,7 +277,7 @@ impl Command {
         Ok(())
     }
 
-    /// Returns the WebSocket RPC URL used for the persistence subscription.
+    /// Returns the websocket RPC URL used for the persistence subscription.
     ///
     /// Preference:
     /// - If `--ws-rpc-url` is provided, use it directly.
@@ -306,6 +306,7 @@ impl Command {
         }
     }
 
+    /// Establishes a websocket connection and subscribes to `reth_subscribePersistedBlock`.
     async fn setup_persistence_subscription(&self) -> eyre::Result<PersistenceSubscription> {
         let ws_url = self.derive_ws_rpc_url()?;
 
@@ -328,13 +329,13 @@ impl Command {
     }
 }
 
-/// Converts an engine API URL to the default RPC WebSocket URL.
+/// Converts an engine API URL to the default RPC websocket URL.
 ///
 /// Transformations:
 /// - `http`  → `ws`
 /// - `https` → `wss`
 /// - `ws` / `wss` keep their scheme
-/// - Port is always set to `8546`, reth's default RPC WebSocket port.
+/// - Port is always set to `8546`, reth's default RPC websocket port.
 ///
 /// This is used when we only know the engine API URL (typically `:8551`) but
 /// need to connect to the node's WS RPC endpoint for persistence events.
@@ -413,11 +414,14 @@ struct PersistenceSubscription {
 }
 
 impl PersistenceSubscription {
-    fn new(provider: RootProvider<Ethereum>, stream: SubscriptionStream<BlockNumHash>) -> Self {
+    const fn new(
+        provider: RootProvider<Ethereum>,
+        stream: SubscriptionStream<BlockNumHash>,
+    ) -> Self {
         Self { _provider: provider, stream }
     }
 
-    fn stream_mut(&mut self) -> &mut SubscriptionStream<BlockNumHash> {
+    const fn stream_mut(&mut self) -> &mut SubscriptionStream<BlockNumHash> {
         &mut self.stream
     }
 }
@@ -439,7 +443,7 @@ struct PersistenceWaiter {
 }
 
 impl PersistenceWaiter {
-    fn with_duration(wait_time: Duration) -> Self {
+    const fn with_duration(wait_time: Duration) -> Self {
         Self {
             wait_time: Some(wait_time),
             subscription: None,
@@ -450,7 +454,7 @@ impl PersistenceWaiter {
         }
     }
 
-    fn with_subscription(
+    const fn with_subscription(
         subscription: PersistenceSubscription,
         threshold: u64,
         timeout: Duration,
@@ -466,6 +470,7 @@ impl PersistenceWaiter {
     }
 
     /// Called once per block. Waits based on the configured mode.
+    #[allow(clippy::manual_is_multiple_of)]
     async fn on_block(&mut self, block_number: u64) -> eyre::Result<()> {
         if let Some(wait_time) = self.wait_time {
             tokio::time::sleep(wait_time).await;
@@ -533,19 +538,17 @@ mod tests {
         assert!(engine_url_to_ws_url("not a valid url").is_err());
     }
 
-    #[test]
-    fn test_persistence_wait_threshold() {
-        // With threshold=2, should wait after blocks 3, 6, 9, etc.
-        // blocks_sent % (threshold + 1) == 0
-        let threshold = 2u64;
+    #[tokio::test]
+    async fn test_waiter_with_duration() {
+        let mut waiter = PersistenceWaiter::with_duration(Duration::from_millis(1));
 
-        let should_wait = |blocks_sent: u64| blocks_sent % (threshold + 1) == 0;
+        let start = Instant::now();
+        waiter.on_block(1).await.unwrap();
+        waiter.on_block(2).await.unwrap();
+        waiter.on_block(3).await.unwrap();
 
-        assert!(!should_wait(1)); // block 1
-        assert!(!should_wait(2)); // block 2
-        assert!(should_wait(3)); // block 3: (threshold + 1)
-        assert!(!should_wait(4)); // block 4
-        assert!(!should_wait(5)); // block 5
-        assert!(should_wait(6)); // block 6: 2 * (threshold + 1)
+        // Should have waited ~3ms total
+        assert!(start.elapsed() >= Duration::from_millis(3));
     }
+
 }
