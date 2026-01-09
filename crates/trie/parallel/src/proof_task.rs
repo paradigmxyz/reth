@@ -30,7 +30,7 @@
 //! ```
 
 use crate::{
-    root::ParallelStateRootError, stats::ParallelTrieTracker,
+    root::ParallelStateRootError, stats::ParallelTrieTracker, targets_v2::MultiProofTargetsV2,
     value_encoder::AsyncAccountValueEncoder, StorageRootTargets,
 };
 use alloy_primitives::{
@@ -1851,23 +1851,6 @@ impl StorageProofInput {
                 *hashed_address
             }
         }
-    }
-}
-
-/// A set of account and storage V2 proof targets. The account and storage targets do not need to
-/// necessarily overlap.
-#[derive(Debug, Default)]
-pub struct MultiProofTargetsV2 {
-    /// The set of account proof targets to generate proofs for.
-    pub account_targets: Vec<proof_v2::Target>,
-    /// The sets of storage proof targets to generate proofs for.
-    pub storage_targets: B256Map<Vec<proof_v2::Target>>,
-}
-
-impl MultiProofTargetsV2 {
-    /// Returns true is there are no account or storage targets.
-    pub fn is_empty(&self) -> bool {
-        self.account_targets.is_empty() && self.storage_targets.is_empty()
     }
 }
 

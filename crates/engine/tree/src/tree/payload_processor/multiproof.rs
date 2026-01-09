@@ -17,9 +17,10 @@ use reth_trie::{
 use reth_trie_parallel::{
     proof::ParallelProof,
     proof_task::{
-        AccountMultiproofInput, MultiProofTargetsV2, ProofResult, ProofResultContext,
-        ProofResultMessage, ProofWorkerHandle,
+        AccountMultiproofInput, ProofResult, ProofResultContext, ProofResultMessage,
+        ProofWorkerHandle,
     },
+    targets_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2},
 };
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
@@ -352,16 +353,13 @@ impl VersionedMultiProofTargets {
     }
 
     /// Chunks this `VersionedMultiProofTargets` into smaller chunks of the given size.
-    fn chunks(self, chunk_size: usize) -> Vec<Self> {
+    fn chunks(self, chunk_size: usize) -> Box<dyn Iterator<Item = Self>> {
         match self {
             Self::Legacy(targets) => {
-                MultiProofTargets::chunks(targets, chunk_size).map(Self::Legacy).collect()
+                Box::new(MultiProofTargets::chunks(targets, chunk_size).map(Self::Legacy))
             }
             Self::V2(targets) => {
-                // For V2, we need to chunk the targets
-                // For now, just return a single chunk
-                // TODO: Implement proper chunking for V2 targets
-                vec![Self::V2(targets)]
+                Box::new(ChunkedMultiProofTargetsV2::new(targets, chunk_size).map(Self::V2))
             }
         }
     }
