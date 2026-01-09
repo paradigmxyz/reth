@@ -117,7 +117,7 @@ impl LeafValueEncoder for AsyncAccountValueEncoder {
     type DeferredEncoder = AsyncAccountDeferredValueEncoder;
 
     fn deferred_encoder(
-        &self,
+        &mut self,
         hashed_address: B256,
         account: Self::Value,
     ) -> Self::DeferredEncoder {

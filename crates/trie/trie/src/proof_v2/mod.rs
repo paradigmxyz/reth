@@ -642,7 +642,7 @@ where
     )]
     fn calculate_key_range<'a>(
         &mut self,
-        value_encoder: &VE,
+        value_encoder: &mut VE,
         targets: &mut TargetsCursor<'a>,
         hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
         lower_bound: Nibbles,
@@ -651,7 +651,7 @@ where
         // A helper closure for mapping entries returned from the `hashed_cursor`, converting the
         // key to Nibbles and immediately creating the DeferredValueEncoder so that encoding of the
         // leaf value can begin ASAP.
-        let map_hashed_cursor_entry = |(key_b256, val): (B256, _)| {
+        let mut map_hashed_cursor_entry = |(key_b256, val): (B256, _)| {
             debug_assert_eq!(key_b256.len(), 32);
             // SAFETY: key is a B256 and so is exactly 32-bytes.
             let key = unsafe { Nibbles::unpack_unchecked(key_b256.as_slice()) };
@@ -670,7 +670,7 @@ where
 
             let lower_key = B256::right_padding_from(&lower_bound.pack());
             *hashed_cursor_current =
-                self.hashed_cursor.seek(lower_key)?.map(map_hashed_cursor_entry);
+                self.hashed_cursor.seek(lower_key)?.map(&mut map_hashed_cursor_entry);
         }
 
         // Loop over all keys in the range, calling `push_leaf` on each.
@@ -680,7 +680,7 @@ where
             let (key, val) =
                 core::mem::take(hashed_cursor_current).expect("while-let checks for Some");
             self.push_leaf(targets, key, val)?;
-            *hashed_cursor_current = self.hashed_cursor.next()?.map(map_hashed_cursor_entry);
+            *hashed_cursor_current = self.hashed_cursor.next()?.map(&mut map_hashed_cursor_entry);
         }
 
         trace!(target: TRACE_TARGET, "No further keys within range");
@@ -1116,7 +1116,7 @@ where
     )]
     fn proof_subtrie<'a>(
         &mut self,
-        value_encoder: &VE,
+        value_encoder: &mut VE,
         trie_cursor_state: &mut TrieCursorState,
         hashed_cursor_current: &mut Option<(Nibbles, VE::DeferredEncoder)>,
         sub_trie_targets: SubTrieTargets<'a>,
@@ -1245,7 +1245,7 @@ where
     /// See docs on [`Self::proof`] for expected behavior.
     fn proof_inner(
         &mut self,
-        value_encoder: &VE,
+        value_encoder: &mut VE,
         targets: &mut [Target],
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         // If there are no targets then nothing could be returned, return early.
@@ -1296,7 +1296,7 @@ where
     #[instrument(target = TRACE_TARGET, level = "trace", skip_all)]
     pub fn proof(
         &mut self,
-        value_encoder: &VE,
+        value_encoder: &mut VE,
         targets: &mut [Target],
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
         self.trie_cursor.reset();
@@ -1332,9 +1332,6 @@ where
         hashed_address: B256,
         targets: &mut [Target],
     ) -> Result<Vec<ProofTrieNode>, StateProofError> {
-        /// Static storage value encoder instance used by all storage proofs.
-        static STORAGE_VALUE_ENCODER: StorageValueEncoder = StorageValueEncoder;
-
         self.hashed_cursor.set_hashed_address(hashed_address);
 
         // Shortcut: check if storage is empty
@@ -1351,8 +1348,9 @@ where
         // been checked.
         self.trie_cursor.set_hashed_address(hashed_address);
 
-        // Use the static StorageValueEncoder and pass it to proof_inner
-        self.proof_inner(&STORAGE_VALUE_ENCODER, targets)
+        // Create a mutable storage value encoder
+        let mut storage_value_encoder = StorageValueEncoder;
+        self.proof_inner(&mut storage_value_encoder, targets)
     }
 
     /// Computes the root hash from a set of proof nodes.
@@ -1630,13 +1628,13 @@ mod tests {
                 InstrumentedHashedCursor::new(hashed_cursor, &mut hashed_cursor_metrics);
 
             // Call ProofCalculator::proof with account targets
-            let value_encoder = SyncAccountValueEncoder::new(
+            let mut value_encoder = SyncAccountValueEncoder::new(
                 self.trie_cursor_factory.clone(),
                 self.hashed_cursor_factory.clone(),
             );
             let mut proof_calculator = ProofCalculator::new(trie_cursor, hashed_cursor);
             let proof_v2_result =
-                proof_calculator.proof(&value_encoder, &mut targets_vec.clone())?;
+                proof_calculator.proof(&mut value_encoder, &mut targets_vec.clone())?;
 
             // Output metrics
             trace!(target: TRACE_TARGET, ?trie_cursor_metrics, "V2 trie cursor metrics");

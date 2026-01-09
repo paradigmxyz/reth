@@ -1279,13 +1279,13 @@ where
         let storage_proof_receivers =
             dispatch_v2_storage_proofs(&self.storage_work_tx, &account_targets, storage_targets)?;
 
-        let value_encoder = AsyncAccountValueEncoder::new(
+        let mut value_encoder = AsyncAccountValueEncoder::new(
             self.storage_work_tx.clone(),
             storage_proof_receivers,
             self.cached_storage_roots.clone(),
         );
 
-        let proof = v2_calculator.proof(&value_encoder, &mut account_targets)?;
+        let proof = v2_calculator.proof(&mut value_encoder, &mut account_targets)?;
         todo!()
     }
 
