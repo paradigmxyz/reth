@@ -17,17 +17,23 @@ use tracing::{debug, error, info, warn};
 pub(crate) struct BenchmarkRunner {
     rpc_url: String,
     jwt_secret: String,
-    wait_time: Option<String>,
     warmup_blocks: u64,
 }
 
 impl BenchmarkRunner {
     /// Create a new `BenchmarkRunner` from CLI arguments
     pub(crate) fn new(args: &Args) -> Self {
+        // Log deprecation warning if wait_time was provided
+        if args.wait_time.is_some() {
+            warn!(
+                "--wait-time is deprecated and will be ignored. \
+                 reth-bench now uses persistence-based flow instead of fixed wait times."
+            );
+        }
+
         Self {
             rpc_url: args.get_rpc_url(),
             jwt_secret: args.jwt_secret_path().to_string_lossy().to_string(),
-            wait_time: args.wait_time.clone(),
             warmup_blocks: args.get_warmup_blocks(),
         }
     }
@@ -182,10 +188,8 @@ impl BenchmarkRunner {
             &output_dir.to_string_lossy(),
         ]);
 
-        // Add wait-time argument if provided
-        if let Some(ref wait_time) = self.wait_time {
-            cmd.args(["--wait-time", wait_time]);
-        }
+        // Note: --wait-time is deprecated and not passed to reth-bench.
+        // reth-bench now uses persistence-based flow instead of fixed wait times.
 
         cmd.env("RUST_LOG_STYLE", "never")
             .stdout(std::process::Stdio::piped())

@@ -7704,6 +7704,7 @@ dependencies = [
  "csv",
  "eyre",
  "futures",
+ "http",
  "humantime",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
@@ -7719,6 +7720,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
+ "tokio-tungstenite",
  "tower",
  "tracing",
 ]
@@ -10412,6 +10414,7 @@ dependencies = [
  "reth-storage-api",
  "reth-tasks",
  "reth-testing-utils",
+ "reth-tokio-util",
  "reth-transaction-pool",
  "reth-trie-common",
  "revm",

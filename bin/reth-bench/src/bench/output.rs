@@ -15,6 +15,37 @@ pub(crate) const COMBINED_OUTPUT_SUFFIX: &str = "combined_latency.csv";
 /// This is the suffix for new payload output csv files.
 pub(crate) const NEW_PAYLOAD_OUTPUT_SUFFIX: &str = "new_payload_latency.csv";
 
+/// This is the suffix for persistence stats csv files.
+pub(crate) const PERSISTENCE_STATS_SUFFIX: &str = "persistence_stats.csv";
+
+/// Statistics about persistence waits during the benchmark.
+#[derive(Debug)]
+pub(crate) struct PersistenceStats {
+    /// Number of times we waited for persistence
+    pub(crate) wait_count: u64,
+    /// Total time spent waiting for persistence
+    pub(crate) total_wait_time: Duration,
+    /// Maximum gap observed between sent and persisted blocks
+    pub(crate) max_gap: u64,
+    /// Average gap observed
+    pub(crate) avg_gap: f64,
+}
+
+impl Serialize for PersistenceStats {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::ser::Serializer,
+    {
+        let total_wait_time_ms = self.total_wait_time.as_millis() as u64;
+        let mut state = serializer.serialize_struct("PersistenceStats", 4)?;
+        state.serialize_field("wait_count", &self.wait_count)?;
+        state.serialize_field("total_wait_time_ms", &total_wait_time_ms)?;
+        state.serialize_field("max_gap_blocks", &self.max_gap)?;
+        state.serialize_field("avg_gap_blocks", &self.avg_gap)?;
+        state.end()
+    }
+}
+
 /// This represents the results of a single `newPayload` call in the benchmark, containing the gas
 /// used and the `newPayload` latency.
 #[derive(Debug)]

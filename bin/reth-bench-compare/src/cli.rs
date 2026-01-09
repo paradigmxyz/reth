@@ -115,7 +115,10 @@ pub(crate) struct Args {
     pub profile: bool,
 
     /// Wait time between engine API calls (passed to reth-bench)
-    #[arg(long, value_name = "DURATION")]
+    ///
+    /// **DEPRECATED**: This flag is deprecated and will be ignored.
+    /// reth-bench now uses persistence-based flow instead of fixed wait times.
+    #[arg(long, value_name = "DURATION", hide = true)]
     pub wait_time: Option<String>,
 
     /// Number of blocks to run for cache warmup after clearing caches.

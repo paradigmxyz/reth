@@ -7,40 +7,48 @@ use futures::StreamExt;
 use jsonrpsee::{core::RpcResult, PendingSubscriptionSink, SubscriptionMessage, SubscriptionSink};
 use jsonrpsee_types::ErrorObject;
 use reth_chain_state::{CanonStateNotificationStream, CanonStateSubscriptions};
+use reth_engine_primitives::ConsensusEngineEvent;
 use reth_errors::RethResult;
+use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
 use reth_rpc_api::RethApiServer;
 use reth_rpc_eth_types::{EthApiError, EthResult};
 use reth_rpc_server_types::result::internal_rpc_err;
 use reth_storage_api::{BlockReaderIdExt, ChangeSetReader, StateProviderFactory};
 use reth_tasks::TaskSpawner;
+use reth_tokio_util::{EventSender, EventStream};
 use tokio::sync::oneshot;
 
 /// `reth` API implementation.
 ///
 /// This type provides the functionality for handling `reth` prototype RPC requests.
-pub struct RethApi<Provider> {
-    inner: Arc<RethApiInner<Provider>>,
+pub struct RethApi<Provider, N: NodePrimitives = EthPrimitives> {
+    inner: Arc<RethApiInner<Provider, N>>,
 }
 
 // === impl RethApi ===
 
-impl<Provider> RethApi<Provider> {
+impl<Provider, N: NodePrimitives> RethApi<Provider, N> {
     /// The provider that can interact with the chain.
     pub fn provider(&self) -> &Provider {
         &self.inner.provider
     }
 
     /// Create a new instance of the [`RethApi`]
-    pub fn new(provider: Provider, task_spawner: Box<dyn TaskSpawner>) -> Self {
-        let inner = Arc::new(RethApiInner { provider, task_spawner });
+    pub fn new(
+        provider: Provider,
+        task_spawner: Box<dyn TaskSpawner>,
+        engine_events: EventSender<ConsensusEngineEvent<N>>,
+    ) -> Self {
+        let inner = Arc::new(RethApiInner { provider, task_spawner, engine_events });
         Self { inner }
     }
 }
 
-impl<Provider> RethApi<Provider>
+impl<Provider, N> RethApi<Provider, N>
 where
     Provider: BlockReaderIdExt + ChangeSetReader + StateProviderFactory + 'static,
+    N: NodePrimitives,
 {
     /// Executes the future on a new blocking task.
     async fn on_blocking_task<C, F, R>(&self, c: C) -> EthResult<R>
@@ -91,13 +99,14 @@ where
 }
 
 #[async_trait]
-impl<Provider> RethApiServer for RethApi<Provider>
+impl<Provider, N> RethApiServer for RethApi<Provider, N>
 where
     Provider: BlockReaderIdExt
         + ChangeSetReader
         + StateProviderFactory
-        + CanonStateSubscriptions
+        + CanonStateSubscriptions<Primitives = N>
         + 'static,
+    N: NodePrimitives,
 {
     /// Handler for `reth_getBalanceChangesInBlock`
     async fn reth_get_balance_changes_in_block(
@@ -116,6 +125,20 @@ where
         let stream = self.provider().canonical_state_stream();
         self.inner.task_spawner.spawn(Box::pin(async move {
             let _ = pipe_from_stream(sink, stream).await;
+        }));
+
+        Ok(())
+    }
+
+    /// Handler for `reth_subscribeLatestPersistedBlock`
+    async fn reth_subscribe_latest_persisted_block(
+        &self,
+        pending: PendingSubscriptionSink,
+    ) -> jsonrpsee::core::SubscriptionResult {
+        let sink = pending.accept().await?;
+        let stream = self.inner.engine_events.new_listener();
+        self.inner.task_spawner.spawn(Box::pin(async move {
+            let _ = pipe_persisted_blocks(sink, stream).await;
         }));
 
         Ok(())
@@ -152,21 +175,60 @@ async fn pipe_from_stream<N: NodePrimitives>(
     }
 }
 
-impl<Provider> std::fmt::Debug for RethApi<Provider> {
+/// Pipes persisted block events to the subscription sink.
+async fn pipe_persisted_blocks<N: NodePrimitives>(
+    sink: SubscriptionSink,
+    mut stream: EventStream<ConsensusEngineEvent<N>>,
+) -> Result<(), ErrorObject<'static>> {
+    loop {
+        tokio::select! {
+            _ = sink.closed() => {
+                // connection dropped
+                break Ok(())
+            }
+            maybe_event = stream.next() => {
+                match maybe_event {
+                    Some(ConsensusEngineEvent::LatestPersistedBlock(block)) => {
+                        let msg = SubscriptionMessage::new(
+                            sink.method_name(),
+                            sink.subscription_id(),
+                            &block
+                        ).map_err(|e| internal_rpc_err(e.to_string()))?;
+
+                        if sink.send(msg).await.is_err() {
+                            break Ok(());
+                        }
+                    }
+                    Some(_) => {
+                        // Ignore other events
+                    }
+                    None => {
+                        // stream ended
+                        break Ok(())
+                    }
+                }
+            }
+        }
+    }
+}
+
+impl<Provider, N: NodePrimitives> std::fmt::Debug for RethApi<Provider, N> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("RethApi").finish_non_exhaustive()
     }
 }
 
-impl<Provider> Clone for RethApi<Provider> {
+impl<Provider, N: NodePrimitives> Clone for RethApi<Provider, N> {
     fn clone(&self) -> Self {
         Self { inner: Arc::clone(&self.inner) }
     }
 }
 
-struct RethApiInner<Provider> {
+struct RethApiInner<Provider, N: NodePrimitives> {
     /// The provider that can interact with the chain.
     provider: Provider,
     /// The type that can spawn tasks which would otherwise block.
     task_spawner: Box<dyn TaskSpawner>,
+    /// Engine events sender for subscribing to consensus engine events.
+    engine_events: EventSender<ConsensusEngineEvent<N>>,
 }
