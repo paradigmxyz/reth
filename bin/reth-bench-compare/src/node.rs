@@ -398,10 +398,7 @@ impl NodeManager {
 
                 // Check if the node process has exited.
                 if let Some(status) = child.try_wait()? {
-                    return Err(eyre!(
-                        "Node process exited unexpectedly with status: {:?}",
-                        status
-                    ));
+                    return Err(eyre!("Node process exited unexpectedly with {status}"));
                 }
 
                 // First check if RPC is up and node is not syncing
