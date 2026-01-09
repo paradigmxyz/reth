@@ -9,9 +9,9 @@ use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceipt
 use op_revm::constants::{GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT};
 use op_revm::estimate_tx_compressed_size;
 use reth_chainspec::ChainSpecProvider;
+use reth_mantle_forks::MantleHardforks;
 use reth_node_api::NodePrimitives;
 use reth_optimism_evm::RethL1BlockInfo;
-use reth_mantle_forks::MantleHardforks;
 use reth_optimism_primitives::OpReceipt;
 use reth_primitives_traits::SealedBlock;
 use reth_rpc_eth_api::{
@@ -206,26 +206,25 @@ impl OpReceiptFieldsBuilder {
             .then_some(f64::from(l1_block_info.l1_base_fee_scalar) / 1_000_000.0);
 
         self.l1_base_fee = Some(l1_block_info.l1_base_fee.saturating_to());
-        // self.l1_base_fee_scalar = Some(l1_block_info.l1_base_fee_scalar.saturating_to());
-        // self.l1_blob_base_fee = l1_block_info.l1_blob_base_fee.map(|fee| fee.saturating_to());
-        // self.l1_blob_base_fee_scalar =
-        //     l1_block_info.l1_blob_base_fee_scalar.map(|scalar| scalar.saturating_to());
+        self.l1_base_fee_scalar = Some(l1_block_info.l1_base_fee_scalar.saturating_to());
+        self.l1_blob_base_fee = l1_block_info.l1_blob_base_fee.map(|fee| fee.saturating_to());
+        self.l1_blob_base_fee_scalar =
+            l1_block_info.l1_blob_base_fee_scalar.map(|scalar| scalar.saturating_to());
 
-        // // If the operator fee params are both set to 0, we don't add them to the receipt.
-        // let operator_fee_scalar_has_non_zero_value: bool =
-        //     l1_block_info.operator_fee_scalar.is_some_and(|scalar| !scalar.is_zero());
+        // If the operator fee params are both set to 0, we don't add them to the receipt.
+        let operator_fee_scalar_has_non_zero_value: bool =
+            l1_block_info.operator_fee_scalar.is_some_and(|scalar| !scalar.is_zero());
 
-        // let operator_fee_constant_has_non_zero_value =
-        //     l1_block_info.operator_fee_constant.is_some_and(|constant| !constant.is_zero());
+        let operator_fee_constant_has_non_zero_value =
+            l1_block_info.operator_fee_constant.is_some_and(|constant| !constant.is_zero());
 
-        // if operator_fee_scalar_has_non_zero_value || operator_fee_constant_has_non_zero_value {
-        //     self.operator_fee_scalar =
-        //         l1_block_info.operator_fee_scalar.map(|scalar| scalar.saturating_to());
-        //     self.operator_fee_constant =
-        //         l1_block_info.operator_fee_constant.map(|constant| constant.saturating_to());
-        // }
+        if operator_fee_scalar_has_non_zero_value || operator_fee_constant_has_non_zero_value {
+            self.operator_fee_scalar =
+                l1_block_info.operator_fee_scalar.map(|scalar| scalar.saturating_to());
+            self.operator_fee_constant =
+                l1_block_info.operator_fee_constant.map(|constant| constant.saturating_to());
+        }
 
-        // self.da_footprint_gas_scalar = l1_block_info.da_footprint_gas_scalar;
         self.token_ratio = Some(l1_block_info.token_ratio.saturating_to());
 
         self.da_footprint_gas_scalar = l1_block_info.da_footprint_gas_scalar;
@@ -349,7 +348,9 @@ impl OpReceiptBuilder {
                 // Jovian specs: `https://github.com/ethereum-optimism/specs/blob/main/specs/protocol/jovian/exec-engine.md#da-footprint-block-limit`
                 let da_size = estimate_tx_compressed_size(tx_signed.encoded_2718().as_slice())
                     .saturating_div(1_000_000)
-                    .saturating_mul(l1_block_info.da_footprint_gas_scalar.unwrap_or_default().into());
+                    .saturating_mul(
+                        l1_block_info.da_footprint_gas_scalar.unwrap_or_default().into(),
+                    );
 
                 core_receipt.blob_gas_used = Some(da_size);
             });
@@ -359,7 +360,7 @@ impl OpReceiptBuilder {
         let op_receipt_fields = if is_deposit {
             OpReceiptFieldsBuilder::new(timestamp, block_number)
                 .deposit_nonce(
-                    core_receipt.inner.as_deposit_receipt().and_then(|r| r.deposit_nonce)
+                    core_receipt.inner.as_deposit_receipt().and_then(|r| r.deposit_nonce),
                 )
                 .build()
         } else {
@@ -386,15 +387,13 @@ impl OpReceiptBuilder {
 mod test {
     use super::*;
     use alloy_consensus::{transaction::TransactionMeta, Block, BlockBody, Eip658Value, TxEip7702};
-    use alloy_op_hardforks::{
-        OP_MAINNET_ISTHMUS_TIMESTAMP, OP_MAINNET_JOVIAN_TIMESTAMP,
-    };
+    use alloy_op_hardforks::{OP_MAINNET_ISTHMUS_TIMESTAMP, OP_MAINNET_JOVIAN_TIMESTAMP};
     use alloy_primitives::{hex, Address, Bytes, Signature, U256};
     use op_alloy_consensus::OpTypedTransaction;
     use op_alloy_network::eip2718::Decodable2718;
-    use reth_optimism_forks::OpHardforks;
     use reth_mantle_forks::MantleChainHardforks;
     use reth_optimism_chainspec::{BASE_MAINNET, OP_MAINNET};
+    use reth_optimism_forks::OpHardforks;
     use reth_optimism_primitives::{OpPrimitives, OpTransactionSigned};
     use reth_primitives_traits::Recovered;
 

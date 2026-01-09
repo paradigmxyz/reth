@@ -40,7 +40,7 @@ use reth_revm::{
 use reth_storage_api::{errors::ProviderError, DBProvider, StateProvider, StateProviderFactory, DatabaseProviderFactory};
 use reth_transaction_pool::{BestTransactionsAttributes, PoolTransaction, TransactionPool};
 use revm::context::{Block, BlockEnv};
-use std::{io, marker::PhantomData, sync::Arc};
+use std::{marker::PhantomData, sync::Arc};
 use tracing::{debug, trace, warn};
 
 /// Optimism's payload builder

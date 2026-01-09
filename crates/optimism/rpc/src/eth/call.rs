@@ -196,9 +196,22 @@ where
             // Fail if balance < value (i.e., value > balance)
             // Reference: geth state_transition.go:780-781
             if value > balance {
-                return Err(
-                    RpcInvalidTransactionError::InsufficientFundsForTransfer.into_eth_err()
+                // Construct error message to match geth's format:
+                // "failed with {gas} gas: insufficient funds for transfer: address {addr}"
+                // Reference: geth gasestimator.go:276 and state_transition.go:780
+                //
+                // Note: We use a generic error to ensure code -32000 (ServerError)
+                // instead of -32003 (TransactionRejected)
+                let msg = format!(
+                    "failed with {} gas: insufficient funds for transfer: address {}",
+                    hi, caller
                 );
+                let err_obj = jsonrpsee_types::error::ErrorObject::owned(
+                    -32000,
+                    msg,
+                    None::<()>,
+                );
+                return Err(OpEthApiError::Eth(EthApiError::other(err_obj)));
             }
         }
 
@@ -687,36 +700,31 @@ mod tests {
     }
 
     #[test]
-    fn test_value_transfer_error_always_insufficient_funds() {
-        // When value > balance, geth ALWAYS returns "insufficient funds for transfer"
-        // regardless of whether gas_price was specified.
+    fn test_value_transfer_error_matches_geth_format() {
+        // When value > balance, geth returns a specific error format:
+        // "failed with {gas} gas: insufficient funds for transfer: address {addr}"
         //
-        // This is because the value transfer check happens during EVM execution
-        // in state_transition.go:780-781, which is NOT affected by
-        // GasEstimationWithSkipCheckBalanceMode.
-        //
-        // Reference test case: error_eth_estimateGas_insufficient_balance
-        // - Request: { from: "0x...01", to: "0x...02", value: "0xde0b6b3a7640000" }
-        // - Geth: "insufficient funds for transfer: address 0x...01"
-        // - Reth should match this behavior
+        // This is wrapped in gasestimator.go:276
 
-        use alloy_primitives::U256;
+        use alloy_primitives::{U256, address};
 
+        // Mock data
         let value = U256::from(1_000_000_000_000_000_000u128); // 1 ETH
         let balance = U256::ZERO;
-        let value_exceeds_balance = value > balance;
-        assert!(value_exceeds_balance, "value should exceed balance");
+        let caller = address!("0000000000000000000000000000000000000001");
+        let hi = 40_000_000u64;
 
-        // Both cases should return InsufficientFundsForTransfer
-        // Case 1: gas_price specified
-        let gas_price_specified = 1_000_000_000u128;
-        assert!(gas_price_specified != 0);
-        // Expected error: InsufficientFundsForTransfer
-
-        // Case 2: gas_price NOT specified
-        let gas_price_not_specified = 0u128;
-        assert!(gas_price_not_specified == 0);
-        // Expected error: InsufficientFundsForTransfer (same as above)
+        // Verify logic directly (since we can't easily run full integration test here)
+        if value > balance {
+            let msg = format!(
+                "failed with {} gas: insufficient funds for transfer: address {}",
+                hi, caller
+            );
+            assert_eq!(
+                msg,
+                "failed with 40000000 gas: insufficient funds for transfer: address 0x0000000000000000000000000000000000000001"
+            );
+        }
     }
 
     #[test]

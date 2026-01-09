@@ -1,6 +1,6 @@
 //! Optimism-specific implementation and utilities for the executor
 
-use crate::{error::L1BlockInfoError, revm_spec_by_timestamp_after_bedrock, OpBlockExecutionError};
+use crate::{error::L1BlockInfoError, OpBlockExecutionError};
 use alloy_consensus::Transaction;
 use alloy_primitives::{hex, U16, U256};
 use op_revm::L1BlockInfo;
@@ -143,17 +143,19 @@ pub fn parse_l1_info_tx_ecotone(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
-    // let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
-    //     OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
-    // })?;
+    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
+        OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
+    })?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion))?;
-    // let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
-    //     .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
+    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
+        .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
 
     Ok(L1BlockInfo {
         l1_base_fee,
         l1_base_fee_scalar,
+        l1_blob_base_fee: Some(l1_blob_base_fee),
+        l1_blob_base_fee_scalar: Some(l1_blob_base_fee_scalar),
         ..Default::default()
     })
 }
@@ -196,27 +198,27 @@ pub fn parse_l1_info_tx_isthmus(data: &[u8]) -> Result<L1BlockInfo, OpBlockExecu
 
     let l1_base_fee_scalar = U256::try_from_be_slice(&data[..4])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeScalarConversion))?;
-    let _l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
+    let l1_blob_base_fee_scalar = U256::try_from_be_slice(&data[4..8]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeScalarConversion)
     })?;
     let l1_base_fee = U256::try_from_be_slice(&data[32..64])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BaseFeeConversion))?;
-    let _l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
+    let l1_blob_base_fee = U256::try_from_be_slice(&data[64..96])
         .ok_or(OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::BlobBaseFeeConversion))?;
-    let _operator_fee_scalar = U256::try_from_be_slice(&data[160..164]).ok_or({
+    let operator_fee_scalar = U256::try_from_be_slice(&data[160..164]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::OperatorFeeScalarConversion)
     })?;
-    let _operator_fee_constant = U256::try_from_be_slice(&data[164..172]).ok_or({
+    let operator_fee_constant = U256::try_from_be_slice(&data[164..172]).ok_or({
         OpBlockExecutionError::L1BlockInfo(L1BlockInfoError::OperatorFeeConstantConversion)
     })?;
 
     Ok(L1BlockInfo {
         l1_base_fee,
         l1_base_fee_scalar,
-        // l1_blob_base_fee: Some(l1_blob_base_fee),
-        // l1_blob_base_fee_scalar: Some(l1_blob_base_fee_scalar),
-        // operator_fee_scalar: Some(operator_fee_scalar),
-        // operator_fee_constant: Some(operator_fee_constant),
+        l1_blob_base_fee: Some(l1_blob_base_fee),
+        l1_blob_base_fee_scalar: Some(l1_blob_base_fee_scalar),
+        operator_fee_scalar: Some(operator_fee_scalar),
+        operator_fee_constant: Some(operator_fee_constant),
         ..Default::default()
     })
 }
@@ -336,7 +338,7 @@ impl RethL1BlockInfo for L1BlockInfo {
             return Ok(U256::ZERO);
         }
 
-        let spec_id = revm_spec_by_timestamp_after_bedrock(&chain_spec, timestamp);
+        let spec_id = chain_spec.revm_spec_at_timestamp(timestamp);
         Ok(self.calculate_tx_l1_cost(input, spec_id))
     }
 
@@ -346,7 +348,7 @@ impl RethL1BlockInfo for L1BlockInfo {
         timestamp: u64,
         input: &[u8],
     ) -> Result<U256, BlockExecutionError> {
-        let spec_id = revm_spec_by_timestamp_after_bedrock(&chain_spec, timestamp);
+        let spec_id = chain_spec.revm_spec_at_timestamp(timestamp);
         Ok(self.data_gas(input, spec_id))
     }
 }
