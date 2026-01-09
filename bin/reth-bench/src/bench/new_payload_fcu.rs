@@ -37,6 +37,26 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use url::Url;
 
+/// Wrapper that keeps both the subscription stream and the underlying provider alive.
+/// The provider must be kept alive for the subscription to continue receiving events.
+struct PersistenceSubscription {
+    _provider: RootProvider<Ethereum>,
+    stream: SubscriptionStream<BlockNumHash>,
+}
+
+impl PersistenceSubscription {
+    fn new(provider: RootProvider<Ethereum>, stream: SubscriptionStream<BlockNumHash>) -> Self {
+        Self { _provider: provider, stream }
+    }
+
+    fn stream_mut(&mut self) -> &mut SubscriptionStream<BlockNumHash> {
+        &mut self.stream
+    }
+}
+
+/// Persistence threshold: wait for persistence after every (N+1) blocks.
+/// This matches the engine's behavior which persists when gap > N.
+/// With DEFAULT_PERSISTENCE_THRESHOLD=2, waits at blocks 3, 6, 9, etc.
 const PERSISTENCE_THRESHOLD: u64 = DEFAULT_PERSISTENCE_THRESHOLD;
 const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
 const PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(300);
@@ -184,8 +204,8 @@ impl Command {
             }
         };
 
-        // Set up persistence subscription stream only if using persistence mode
-        let mut persistence_stream = if wait_time_mode.is_none() {
+        // Set up persistence subscription only if using persistence mode
+        let mut persistence_sub = if wait_time_mode.is_none() {
             Some(self.setup_persistence_subscription().await?)
         } else {
             None
@@ -295,7 +315,7 @@ impl Command {
             // Handle waiting based on mode
             if let Some(wait_duration) = wait_time_mode {
                 tokio::time::sleep(wait_duration).await;
-            } else if let Some(ref mut stream) = persistence_stream {
+            } else if let Some(ref mut sub) = persistence_sub {
                 tracker.record_block(block_number);
 
                 if tracker.should_wait() {
@@ -309,7 +329,7 @@ impl Command {
 
                     let wait_start = Instant::now();
                     wait_for_persistence(
-                        stream,
+                        sub.stream_mut(),
                         block_number,
                         &mut tracker.last_persisted,
                         PERSISTENCE_CHECKPOINT_TIMEOUT,
@@ -335,7 +355,7 @@ impl Command {
         }
 
         // Final sync: wait for remaining blocks (persistence mode only)
-        if let Some(ref mut stream) = persistence_stream {
+        if let Some(ref mut sub) = persistence_sub {
             if tracker.last_persisted < tracker.last_block_number {
                 info!(
                     "Waiting for final blocks to persist (current: {}, target: {})",
@@ -343,7 +363,7 @@ impl Command {
                 );
 
                 match wait_for_persistence(
-                    stream,
+                    sub.stream_mut(),
                     tracker.last_block_number,
                     &mut tracker.last_persisted,
                     PERSISTENCE_TIMEOUT,
@@ -431,7 +451,7 @@ impl Command {
 
     async fn setup_persistence_subscription(
         &self,
-    ) -> eyre::Result<SubscriptionStream<BlockNumHash>> {
+    ) -> eyre::Result<PersistenceSubscription> {
         let auth_jwt = self
             .benchmark
             .auth_jwtsecret
@@ -459,7 +479,9 @@ impl Command {
             .wrap_err("Failed to subscribe to persistence notifications")?;
 
         info!("Subscribed to persistence notifications");
-        Ok(subscription.into_stream())
+
+        // Keep both provider and stream alive together
+        Ok(PersistenceSubscription::new(provider, subscription.into_stream()))
     }
 }
 
