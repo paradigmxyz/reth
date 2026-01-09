@@ -3,7 +3,7 @@ use reth_chainspec::MAINNET;
 use reth_db::{
     test_utils::{
         create_test_rocksdb_dir, create_test_rw_db, create_test_rw_db_with_path,
-        create_test_static_files_dir,
+        create_test_static_files_dir, create_test_triedb_dir,
     },
     DatabaseEnv,
 };
@@ -22,6 +22,7 @@ use reth_primitives_traits::{Account, SealedBlock, SealedHeader, StorageEntry};
 use reth_provider::{
     providers::{
         RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter,
+        TrieDBProvider,
     },
     test_utils::MockNodeTypesWithDB,
     HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory, StatsReader,
@@ -37,6 +38,7 @@ use tempfile::TempDir;
 pub struct TestStageDB {
     pub factory: ProviderFactory<MockNodeTypesWithDB>,
     pub temp_static_files_dir: TempDir,
+    pub temp_triedb_dir: TempDir,
 }
 
 impl Default for TestStageDB {
@@ -44,13 +46,16 @@ impl Default for TestStageDB {
     fn default() -> Self {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
         let (_, rocksdb_dir_path) = create_test_rocksdb_dir();
+        let (triedb_dir, triedb_dir_path) = create_test_triedb_dir();
         Self {
             temp_static_files_dir: static_dir,
+            temp_triedb_dir: triedb_dir,
             factory: ProviderFactory::new(
                 create_test_rw_db(),
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
                 RocksDBProvider::builder(rocksdb_dir_path).with_default_tables().build().unwrap(),
+                TrieDBProvider::builder(&triedb_dir_path).build().unwrap(),
             )
             .expect("failed to create test provider factory"),
         }
@@ -61,14 +66,17 @@ impl TestStageDB {
     pub fn new(path: &Path) -> Self {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
         let (_, rocksdb_dir_path) = create_test_rocksdb_dir();
+        let (triedb_dir, triedb_dir_path) = create_test_triedb_dir();
 
         Self {
             temp_static_files_dir: static_dir,
+            temp_triedb_dir: triedb_dir,
             factory: ProviderFactory::new(
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
                 RocksDBProvider::builder(rocksdb_dir_path).with_default_tables().build().unwrap(),
+                TrieDBProvider::builder(&triedb_dir_path).build().unwrap(),
             )
             .expect("failed to create test provider factory"),
         }

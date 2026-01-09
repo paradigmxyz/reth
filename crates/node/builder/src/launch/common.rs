@@ -65,7 +65,10 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider, TrieDBProvider},
+    providers::{
+        NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider,
+        TrieDBProvider,
+    },
     BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
     ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
     StaticFileProviderFactory,

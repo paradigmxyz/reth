@@ -27,6 +27,7 @@ reth-prune-types.workspace = true
 reth-stages-types.workspace = true
 reth-trie = { workspace = true, features = ["metrics"] }
 reth-trie-db = { workspace = true, features = ["metrics"] }
+reth-trie-common.workspace = true
 reth-nippy-jar.workspace = true
 reth-codecs.workspace = true
 reth-chain-state.workspace = true
@@ -92,7 +93,7 @@ tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 [features]
 default = []
 rocksdb = ["dep:rocksdb"]
-triedb = ["dep:triedb"]
+triedb = ["dep:triedb", "reth-storage-api/triedb", "reth-chain-state/triedb"]
 test-utils = [
     "reth-db/test-utils",
     "reth-nippy-jar/test-utils",

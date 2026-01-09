@@ -39,6 +39,8 @@ pub(crate) mod rocksdb;
 pub(crate) mod triedb;
 
 pub use rocksdb::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksTx};
+#[cfg(feature = "triedb")]
+pub use triedb::state_root_with_updates_triedb;
 pub use triedb::{TrieDBBatch, TrieDBBuilder, TrieDBProvider, TrieDBTx};
 
 /// Helper trait to bound [`NodeTypes`] so that combined with database they satisfy

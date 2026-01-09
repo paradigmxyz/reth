@@ -4,6 +4,6 @@ use crate::providers::TrieDBProvider;
 ///
 /// This trait provides access to the `TrieDB` provider
 pub trait TrieDBProviderFactory {
-    /// Returns the `TrieDB` provider.
-    fn triedb_provider(&self) -> TrieDBProvider;
+    /// Returns a reference to the `TrieDB` provider.
+    fn triedb_provider(&self) -> &TrieDBProvider;
 }

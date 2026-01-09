@@ -8067,6 +8067,7 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.17",
  "tracing",
+ "triedb",
 ]
 
 [[package]]
@@ -8801,6 +8802,7 @@ dependencies = [
  "reth-storage-errors",
  "reth-trie-common",
  "revm",
+ "tracing",
 ]
 
 [[package]]
@@ -9749,22 +9751,26 @@ name = "reth-optimism-node"
 version = "1.9.3"
 dependencies = [
  "alloy-consensus",
+ "alloy-eips",
  "alloy-genesis",
  "alloy-network",
  "alloy-op-hardforks",
  "alloy-primitives",
  "alloy-rpc-types-engine",
  "alloy-rpc-types-eth",
+ "alloy-sol-types",
  "clap",
  "eyre",
  "futures",
  "op-alloy-consensus",
  "op-alloy-network",
+ "op-alloy-rpc-types",
  "op-alloy-rpc-types-engine",
  "op-revm",
  "reth-chainspec",
  "reth-consensus",
  "reth-db",
+ "reth-db-common",
  "reth-e2e-test-utils",
  "reth-engine-local",
  "reth-evm",
@@ -9783,6 +9789,7 @@ dependencies = [
  "reth-optimism-storage",
  "reth-optimism-txpool",
  "reth-payload-builder",
+ "reth-payload-primitives",
  "reth-payload-util",
  "reth-primitives-traits",
  "reth-provider",
@@ -9801,6 +9808,7 @@ dependencies = [
  "serde",
  "serde_json",
  "tokio",
+ "tracing",
  "url",
 ]
 
@@ -10152,6 +10160,7 @@ dependencies = [
  "reth-testing-utils",
  "reth-tracing",
  "reth-trie",
+ "reth-trie-common",
  "reth-trie-db",
  "revm-database",
  "revm-database-interface",

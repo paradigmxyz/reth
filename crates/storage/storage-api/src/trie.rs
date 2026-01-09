@@ -1,11 +1,24 @@
 use alloc::vec::Vec;
-use alloy_primitives::{Address, BlockNumber, Bytes, B256};
-use reth_storage_errors::provider::ProviderResult;
+use alloy_primitives::{map::HashMap, Address, BlockNumber, Bytes, B256, U256};
+use reth_primitives_traits::Account;
+use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie_common::{
     updates::{StorageTrieUpdatesSorted, TrieUpdates, TrieUpdatesSorted},
     AccountProof, HashedPostState, HashedStorage, MultiProof, MultiProofTargets, StorageMultiProof,
     StorageProof, TrieInput,
 };
+
+/// Plain (unhashed) post state used for TrieDB state root computation.
+///
+/// Unlike [`HashedPostState`] which uses hashed addresses as keys, this structure
+/// uses raw addresses, allowing TrieDB to handle the hashing internally.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PlainPostState {
+    /// Mapping of address to account info, `None` if destroyed.
+    pub accounts: HashMap<Address, Option<Account>>,
+    /// Mapping of address to storage entries (slot -> value).
+    pub storages: HashMap<Address, HashMap<B256, U256>>,
+}
 
 /// A type that can compute the state root of a given post state.
 #[auto_impl::auto_impl(&, Box, Arc)]
@@ -37,6 +50,24 @@ pub trait StateRootProvider {
         &self,
         input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)>;
+
+    /// Returns the state root of the `PlainPostState` on top of the current state with trie
+    /// updates to be committed to the database.
+    ///
+    /// This method uses TrieDB for state root computation when available. Unlike other methods
+    /// which take `HashedPostState` with pre-hashed addresses, this takes `PlainPostState` with
+    /// unhashed addresses, allowing TrieDB to handle the hashing internally.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if TrieDB is not available for this provider.
+    fn state_root_with_updates_plain(
+        &self,
+        plain_state: PlainPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        let _ = plain_state;
+        Err(ProviderError::UnsupportedProvider)
+    }
 }
 
 /// A type that can compute the storage root for a given account.

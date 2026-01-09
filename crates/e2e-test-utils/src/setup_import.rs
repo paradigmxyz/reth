@@ -111,6 +111,7 @@ pub async fn setup_engine_with_chain_import(
         let db_path = datadir.join("db");
         let static_files_path = datadir.join("static_files");
         let rocksdb_dir_path = datadir.join("rocksdb");
+        let triedb_dir_path = datadir.join("triedb");
 
         // Initialize the database using init_db (same as CLI import command)
         // Use the same database arguments as the node will use
@@ -127,6 +128,7 @@ pub async fn setup_engine_with_chain_import(
             chain_spec.clone(),
             reth_provider::providers::StaticFileProvider::read_write(static_files_path.clone())?,
             reth_provider::providers::RocksDBProvider::builder(rocksdb_dir_path).build().unwrap(),
+            reth_provider::providers::TrieDBProvider::builder(&triedb_dir_path).build().unwrap(),
         )?;
 
         // Initialize genesis if needed

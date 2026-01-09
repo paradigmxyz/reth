@@ -106,8 +106,14 @@ impl<N> ProviderFactoryBuilder<N> {
     where
         N: NodeTypesForProvider,
     {
-        let ReadOnlyConfig { db_dir, db_args, static_files_dir, rocksdb_dir, triedb_dir, watch_static_files } =
-            config.into();
+        let ReadOnlyConfig {
+            db_dir,
+            db_args,
+            static_files_dir,
+            rocksdb_dir,
+            triedb_dir,
+            watch_static_files,
+        } = config.into();
         self.db(Arc::new(open_db_read_only(db_dir, db_args)?))
             .chainspec(chainspec)
             .static_file(StaticFileProvider::read_only(static_files_dir, watch_static_files)?)
@@ -213,7 +219,7 @@ impl ReadOnlyConfig {
         db_dir: impl AsRef<Path>,
         static_files_dir: impl AsRef<Path>,
         rocksdb_dir: impl AsRef<Path>,
-        triedb_dir: impl AsRef<Path>
+        triedb_dir: impl AsRef<Path>,
     ) -> Self {
         Self {
             db_dir: db_dir.as_ref().into(),
@@ -377,7 +383,8 @@ where
     pub fn triedb_provider(
         self,
         triedb_provider: TrieDBProvider,
-    ) -> TypesAnd5<N, DB, Arc<C>, StaticFileProvider<N::Primitives>, RocksDBProvider, TrieDBProvider> {
+    ) -> TypesAnd5<N, DB, Arc<C>, StaticFileProvider<N::Primitives>, RocksDBProvider, TrieDBProvider>
+    {
         TypesAnd5::new(self.val_1, self.val_2, self.val_3, self.val_4, triedb_provider)
     }
 }
@@ -400,7 +407,15 @@ impl<N, Val1, Val2, Val3, Val4, Val5> TypesAnd5<N, Val1, Val2, Val3, Val4, Val5>
     }
 }
 
-impl<N, DB> TypesAnd5<N, DB, Arc<N::ChainSpec>, StaticFileProvider<N::Primitives>, RocksDBProvider, TrieDBProvider>
+impl<N, DB>
+    TypesAnd5<
+        N,
+        DB,
+        Arc<N::ChainSpec>,
+        StaticFileProvider<N::Primitives>,
+        RocksDBProvider,
+        TrieDBProvider,
+    >
 where
     N: NodeTypesForProvider,
     DB: Database + DatabaseMetrics + Clone + Unpin + 'static,

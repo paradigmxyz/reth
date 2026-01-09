@@ -129,8 +129,14 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
         let triedb_provider = TrieDBProvider::builder(data_dir.triedb()).build()?;
 
-        let provider_factory =
-            self.create_provider_factory(&config, db, sfp, rocksdb_provider, triedb_provider, access)?;
+        let provider_factory = self.create_provider_factory(
+            &config,
+            db,
+            sfp,
+            rocksdb_provider,
+            triedb_provider,
+            access,
+        )?;
         if access.is_read_write() {
             debug!(target: "reth::cli", chain=%self.chain.chain(), genesis=?self.chain.genesis_hash(), "Initializing genesis");
             init_genesis_with_settings(&provider_factory, self.static_files.to_settings())?;

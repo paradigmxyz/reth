@@ -6,7 +6,7 @@ use crate::{
         database::{chain::ChainStorage, metrics},
         rocksdb::RocksDBProvider,
         static_file::StaticFileWriter,
-        TrieDBProvider, NodeTypesForProvider, StaticFileProvider,
+        NodeTypesForProvider, StaticFileProvider, TrieDBProvider,
     },
     to_range,
     traits::{
@@ -208,7 +208,14 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
     /// State provider for latest state
     pub fn latest<'a>(&'a self) -> Box<dyn StateProvider + 'a> {
         trace!(target: "providers::db", "Returning latest state provider");
-        Box::new(LatestStateProviderRef::new(self))
+        #[cfg(feature = "triedb")]
+        {
+            Box::new(LatestStateProviderRef::new_with_triedb(self, &self.triedb_provider))
+        }
+        #[cfg(not(feature = "triedb"))]
+        {
+            Box::new(LatestStateProviderRef::new(self))
+        }
     }
 
     /// Storage provider for state at that given block hash
@@ -464,7 +471,15 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         // if the block number is the same as the currently best block number on disk we can use the
         // latest state provider here
         if block_number == self.best_block_number().unwrap_or_default() {
-            return Ok(Box::new(LatestStateProvider::new(self)))
+            #[cfg(feature = "triedb")]
+            {
+                let triedb_provider = self.triedb_provider.clone();
+                return Ok(Box::new(LatestStateProvider::new_with_triedb(self, triedb_provider)))
+            }
+            #[cfg(not(feature = "triedb"))]
+            {
+                return Ok(Box::new(LatestStateProvider::new(self)))
+            }
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.

@@ -26,6 +26,11 @@ use revm::{
     database::{states::bundle_state::BundleRetention, BundleState, State},
 };
 
+#[cfg(feature = "triedb")]
+use alloy_primitives::map::HashMap;
+#[cfg(feature = "triedb")]
+use reth_storage_api::PlainPostState;
+
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
 pub trait Executor<DB: Database>: Sized {
@@ -513,11 +518,57 @@ where
         // merge all transitions into bundle state
         db.merge_transitions(BundleRetention::Reverts);
 
-        // calculate the state root
-        let hashed_state = state.hashed_post_state(&db.bundle_state);
-        let (state_root, trie_updates) = state
-            .state_root_with_updates(hashed_state.clone())
-            .map_err(BlockExecutionError::other)?;
+        // Calculate state root using TrieDB (unhashed) or MDBX (hashed)
+        let (state_root, trie_updates, hashed_state);
+
+        #[cfg(feature = "triedb")]
+        {
+            // Convert BundleState to PlainPostState for TrieDB computation
+            let mut plain_state = PlainPostState::default();
+
+            for (address, bundle_account) in db.bundle_state.state() {
+                let account = if bundle_account.was_destroyed() || bundle_account.info.is_none() {
+                    None
+                } else {
+                    bundle_account
+                        .info
+                        .as_ref()
+                        .map(|info| reth_primitives_traits::Account::from(info))
+                };
+                plain_state.accounts.insert(*address, account);
+
+                let mut storage_map = HashMap::default();
+                for (slot, storage_slot) in &bundle_account.storage {
+                    // Convert U256 slot to B256 (32-byte representation)
+                    let slot_b256 = B256::from_slice(&slot.to_be_bytes::<32>());
+                    storage_map.insert(slot_b256, storage_slot.present_value);
+                }
+                if !storage_map.is_empty() {
+                    plain_state.storages.insert(*address, storage_map);
+                }
+            }
+
+            // Compute state root using TrieDB via the StateProvider trait
+            (state_root, trie_updates) = state
+                .state_root_with_updates_plain(plain_state)
+                .map_err(BlockExecutionError::other)?;
+
+            // TrieDB doesn't use hashed state, provide empty default
+            hashed_state = HashedPostState::default();
+
+            tracing::info!(target: "evm", ?state_root, "State root computed via TrieDB");
+        }
+
+        #[cfg(not(feature = "triedb"))]
+        {
+            // Hash the post state for MDBX trie computation
+            hashed_state = state.hashed_post_state(&db.bundle_state);
+            (state_root, trie_updates) = state
+                .state_root_with_updates(hashed_state.clone())
+                .map_err(BlockExecutionError::other)?;
+
+            tracing::info!(target: "evm", ?state_root, "State root computed via MDBX");
+        }
 
         let (transactions, senders) =
             self.transactions.into_iter().map(|tx| tx.into_parts()).unzip();

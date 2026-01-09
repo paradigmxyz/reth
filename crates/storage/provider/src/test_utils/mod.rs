@@ -1,5 +1,7 @@
 use crate::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider, TrieDBProvider},
+    providers::{
+        NodeTypesForProvider, ProviderNodeTypes, RocksDBBuilder, StaticFileProvider, TrieDBProvider,
+    },
     HashingWriter, ProviderFactory, TrieWriter,
 };
 use alloy_primitives::B256;

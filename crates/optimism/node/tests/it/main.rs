@@ -8,4 +8,6 @@ mod rpc;
 
 mod custom_genesis;
 
+mod engine;
+
 const fn main() {}

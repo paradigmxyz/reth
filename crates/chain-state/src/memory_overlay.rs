@@ -4,8 +4,8 @@ use alloy_primitives::{keccak256, Address, BlockNumber, Bytes, StorageKey, Stora
 use reth_errors::ProviderResult;
 use reth_primitives_traits::{Account, Bytecode, NodePrimitives};
 use reth_storage_api::{
-    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, StateProofProvider,
-    StateProvider, StateProviderBox, StateRootProvider, StorageRootProvider,
+    AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, PlainPostState,
+    StateProofProvider, StateProvider, StateProviderBox, StateRootProvider, StorageRootProvider,
 };
 use reth_trie::{
     updates::TrieUpdates, AccountProof, HashedPostState, HashedStorage, MultiProof,
@@ -144,6 +144,52 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
     ) -> ProviderResult<(B256, TrieUpdates)> {
         input.prepend_self(self.trie_input().clone());
         self.historical.state_root_from_nodes_with_updates(input)
+    }
+
+    fn state_root_with_updates_plain(
+        &self,
+        plain_state: PlainPostState,
+    ) -> ProviderResult<(B256, TrieUpdates)> {
+        use alloy_primitives::map::HashMap;
+
+        // Build PlainPostState from in-memory blocks
+        let mut merged_state = PlainPostState::default();
+
+        for block in self.in_memory.iter() {
+            let bundle_state = &block.execution_output.bundle;
+            for (address, bundle_account) in bundle_state.state() {
+                let account = if bundle_account.was_destroyed() || bundle_account.info.is_none() {
+                    None
+                } else {
+                    bundle_account
+                        .info
+                        .as_ref()
+                        .map(|info| reth_primitives_traits::Account::from(info))
+                };
+                merged_state.accounts.insert(*address, account);
+
+                let storage_map =
+                    merged_state.storages.entry(*address).or_insert_with(HashMap::default);
+                for (slot, storage_slot) in &bundle_account.storage {
+                    let slot_b256 = B256::from_slice(&slot.to_be_bytes::<32>());
+                    storage_map.insert(slot_b256, storage_slot.present_value);
+                }
+            }
+        }
+
+        // Merge with incoming plain_state (incoming state takes precedence)
+        for (address, account) in plain_state.accounts {
+            merged_state.accounts.insert(address, account);
+        }
+
+        for (address, storage) in plain_state.storages {
+            let merged_storage =
+                merged_state.storages.entry(address).or_insert_with(HashMap::default);
+            merged_storage.extend(storage);
+        }
+
+        // Delegate to historical provider
+        self.historical.state_root_with_updates_plain(merged_state)
     }
 }
 
