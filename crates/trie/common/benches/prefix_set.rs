@@ -248,48 +248,4 @@ mod implementations {
         }
     }
 
-    #[derive(Default)]
-    #[allow(dead_code)]
-    pub struct VecBinarySearchWithLastFoundPrefixSet {
-        keys: Vec<Nibbles>,
-        last_found_idx: usize,
-        sorted: bool,
-    }
-
-    impl PrefixSetMutAbstraction for VecBinarySearchWithLastFoundPrefixSet {
-        type Frozen = Self;
-
-        fn insert(&mut self, key: Nibbles) {
-            self.sorted = false;
-            self.keys.push(key);
-        }
-
-        fn freeze(self) -> Self::Frozen {
-            self
-        }
-    }
-
-    impl PrefixSetAbstraction for VecBinarySearchWithLastFoundPrefixSet {
-        fn contains(&mut self, prefix: Nibbles) -> bool {
-            if !self.sorted {
-                self.keys.sort();
-                self.sorted = true;
-            }
-
-            while self.last_found_idx > 0 && self.keys[self.last_found_idx] > prefix {
-                self.last_found_idx -= 1;
-            }
-
-            match self.keys[self.last_found_idx..].binary_search(&prefix) {
-                Ok(_) => true,
-                Err(idx) => match self.keys.get(idx) {
-                    Some(key) => {
-                        self.last_found_idx = idx;
-                        key.starts_with(&prefix)
-                    }
-                    None => false, // prefix > last key
-                },
-            }
-        }
-    }
 }
