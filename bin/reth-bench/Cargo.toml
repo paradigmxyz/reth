@@ -26,8 +26,9 @@ reth-tracing.workspace = true
 # alloy
 alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
+alloy-network.workspace = true
 alloy-primitives.workspace = true
-alloy-provider = { workspace = true, features = ["engine-api", "reqwest-rustls-tls"], default-features = false }
+alloy-provider = { workspace = true, features = ["engine-api", "pubsub", "reqwest-rustls-tls"], default-features = false }
 alloy-pubsub.workspace = true
 alloy-rpc-client = { workspace = true, features = ["pubsub"] }
 alloy-rpc-types-engine.workspace = true
@@ -41,10 +42,6 @@ op-alloy-rpc-types-engine = { workspace = true, features = ["serde"] }
 # reqwest
 reqwest = { workspace = true, default-features = false, features = ["rustls-tls-native-roots"] }
 
-# websocket
-tokio-tungstenite = { workspace = true, features = ["rustls-tls-native-roots"] }
-http.workspace = true
-
 # tower
 tower.workspace = true
 
@@ -54,6 +51,9 @@ tracing.workspace = true
 # serde
 serde.workspace = true
 serde_json.workspace = true
+
+# url parsing
+url.workspace = true
 
 # async
 async-trait.workspace = true

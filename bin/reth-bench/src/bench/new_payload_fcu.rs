@@ -18,22 +18,24 @@ use crate::{
     valid_payload::{block_to_new_payload, call_forkchoice_updated, call_new_payload},
 };
 use alloy_eips::BlockNumHash;
-use alloy_provider::Provider;
+use alloy_network::Ethereum;
+use alloy_provider::{Provider, RootProvider};
+use alloy_pubsub::SubscriptionStream;
+use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_engine::{ForkchoiceState, JwtSecret};
+use alloy_transport::Authorization;
+use alloy_transport_ws::WsConnect;
 use clap::Parser;
 use csv::Writer;
 use eyre::{Context, OptionExt};
-use futures::{SinkExt, StreamExt};
+use futures::StreamExt;
 use humantime::parse_duration;
-use reqwest::Url;
 use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
-use serde_json::{json, Value};
 use std::time::{Duration, Instant};
-use tokio::sync::mpsc;
-use tokio_tungstenite::{connect_async_with_config, tungstenite::Message};
 use tracing::{debug, info, warn};
+use url::Url;
 
 /// Persistence threshold: wait for persistence after every (N+1) blocks.
 /// This matches the engine's behavior which persists when gap > N.
@@ -46,17 +48,102 @@ const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
 /// Final sync timeout: wait up to 5 minutes for remaining blocks to persist
 const PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(300);
 
-fn parse_block_number(value: &Value) -> Option<u64> {
-    if let Some(number) = value.as_u64() {
-        return Some(number);
+/// Tracks persistence state and statistics during benchmark
+struct PersistenceTracker {
+    blocks_sent: u64,
+    last_persisted: u64,
+    last_block_number: u64,
+    wait_count: u64,
+    total_wait_time: Duration,
+    max_gap: u64,
+    gap_sum: u64,
+    gap_count: u64,
+}
+
+impl PersistenceTracker {
+    fn new() -> Self {
+        Self {
+            blocks_sent: 0,
+            last_persisted: 0,
+            last_block_number: 0,
+            wait_count: 0,
+            total_wait_time: Duration::ZERO,
+            max_gap: 0,
+            gap_sum: 0,
+            gap_count: 0,
+        }
     }
 
-    let number_str = value.as_str()?;
-    if let Some(hex) = number_str.strip_prefix("0x") {
-        u64::from_str_radix(hex, 16).ok()
-    } else {
-        number_str.parse::<u64>().ok()
+    fn record_block(&mut self, block_number: u64) {
+        self.blocks_sent += 1;
+        self.last_block_number = block_number;
+
+        let current_gap = block_number.saturating_sub(self.last_persisted);
+        if current_gap > self.max_gap {
+            self.max_gap = current_gap;
+        }
+        self.gap_sum += current_gap;
+        self.gap_count += 1;
     }
+
+    fn should_wait(&self) -> bool {
+        self.blocks_sent % (PERSISTENCE_THRESHOLD + 1) == 0
+    }
+
+    fn record_wait(&mut self, elapsed: Duration, persisted: u64) {
+        self.wait_count += 1;
+        self.total_wait_time += elapsed;
+        self.last_persisted = persisted;
+    }
+
+    fn into_stats(self) -> PersistenceStats {
+        PersistenceStats {
+            wait_count: self.wait_count,
+            total_wait_time: self.total_wait_time,
+            max_gap: self.max_gap,
+            avg_gap: if self.gap_count > 0 {
+                self.gap_sum as f64 / self.gap_count as f64
+            } else {
+                0.0
+            },
+        }
+    }
+}
+
+/// Wait for persistence to catch up to target block
+async fn wait_for_persistence(
+    stream: &mut SubscriptionStream<BlockNumHash>,
+    target: u64,
+    last_persisted: &mut u64,
+    timeout: Duration,
+) -> eyre::Result<()> {
+    tokio::time::timeout(timeout, async {
+        while *last_persisted < target {
+            match stream.next().await {
+                Some(persisted) => {
+                    *last_persisted = persisted.number;
+                    debug!(
+                        target: "reth-bench",
+                        persisted_block = ?last_persisted,
+                        "Received persistence notification"
+                    );
+                }
+                None => {
+                    return Err(eyre::eyre!("Persistence subscription closed unexpectedly"));
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| {
+        eyre::eyre!(
+            "Persistence timeout: target block {} not persisted within {:?}. Last persisted: {}",
+            target,
+            timeout,
+            last_persisted
+        )
+    })?
 }
 
 /// `reth benchmark new-payload-fcu` command
@@ -107,8 +194,8 @@ impl Command {
             }
         };
 
-        // Set up persistence subscription only if using persistence mode (before moving self)
-        let mut persistence_rx = if wait_time_mode.is_none() {
+        // Set up persistence subscription stream only if using persistence mode
+        let mut persistence_stream = if wait_time_mode.is_none() {
             Some(self.setup_persistence_subscription().await?)
         } else {
             None
@@ -174,19 +261,7 @@ impl Command {
             }
         });
 
-        // Persistence tracking state (only used in persistence mode)
-        let mut blocks_sent: u64 = 0;
-        let mut last_persisted_block: u64 = 0;
-        let mut last_block_number: u64 = 0;
-
-        // Persistence stats tracking (only used in persistence mode)
-        let mut persistence_wait_count: u64 = 0;
-        let mut total_persistence_wait_time = Duration::ZERO;
-        let mut max_gap: u64 = 0;
-        let mut gap_sum: u64 = 0;
-        let mut gap_count: u64 = 0;
-
-        // put results in a summary vec so they can be printed at the end
+        let mut tracker = PersistenceTracker::new();
         let mut results = Vec::new();
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
@@ -197,16 +272,12 @@ impl Command {
             total_wait_time += wait_start.elapsed();
             result
         } {
-            // just put gas used here
             let gas_used = block.header.gas_used;
             let block_number = block.header.number;
             let transaction_count = block.transactions.len() as u64;
 
-            last_block_number = block_number;
-
             debug!(target: "reth-bench", ?block_number, "Sending payload");
 
-            // construct fcu to call
             let forkchoice_state = ForkchoiceState {
                 head_block_hash: head,
                 safe_block_hash: safe,
@@ -221,7 +292,6 @@ impl Command {
 
             call_forkchoice_updated(&auth_provider, version, forkchoice_state, None).await?;
 
-            // calculate the total duration and the fcu latency, record
             let total_latency = start.elapsed();
             let fcu_latency = total_latency - new_payload_result.latency;
             let combined_result = CombinedResult {
@@ -234,94 +304,36 @@ impl Command {
 
             // Handle waiting based on mode
             if let Some(wait_duration) = wait_time_mode {
-                // Wait-time mode: sleep for fixed duration
                 tokio::time::sleep(wait_duration).await;
-            } else if let Some(ref mut rx) = persistence_rx {
-                // Persistence mode: wait every N blocks
-                blocks_sent += 1;
+            } else if let Some(ref mut stream) = persistence_stream {
+                tracker.record_block(block_number);
 
-                // Track gap for stats
-                let current_gap = block_number.saturating_sub(last_persisted_block);
-                if current_gap > max_gap {
-                    max_gap = current_gap;
-                }
-                gap_sum += current_gap;
-                gap_count += 1;
-
-                // Wait after every (N+1) blocks to match engine's "gap > N" persistence trigger
-                // With PERSISTENCE_THRESHOLD=2, this waits at blocks 3, 6, 9, etc.
-                if blocks_sent.is_multiple_of(PERSISTENCE_THRESHOLD + 1) {
-                    let target_block = block_number;
+                if tracker.should_wait() {
                     debug!(
                         target: "reth-bench",
-                        ?target_block,
-                        ?last_persisted_block,
-                        blocks_sent,
-                        "Waiting for persistence (sent {} blocks, engine should persist at gap > {})",
-                        blocks_sent,
-                        PERSISTENCE_THRESHOLD
+                        target_block = ?block_number,
+                        last_persisted = ?tracker.last_persisted,
+                        blocks_sent = tracker.blocks_sent,
+                        "Waiting for persistence"
                     );
 
                     let wait_start = Instant::now();
-                    let wait_result = tokio::time::timeout(PERSISTENCE_CHECKPOINT_TIMEOUT, async {
-                        while last_persisted_block < target_block {
-                            match rx.recv().await {
-                                Some(persisted) => {
-                                    last_persisted_block = persisted.number;
-                                    debug!(
-                                        target: "reth-bench",
-                                        persisted_block = ?last_persisted_block,
-                                        "Received persistence notification"
-                                    );
-                                }
-                                None => {
-                                    return Err(eyre::eyre!(
-                                        "Persistence subscription closed unexpectedly"
-                                    ));
-                                }
-                            }
-                        }
-                        Ok(last_persisted_block)
-                    })
-                    .await;
+                    wait_for_persistence(
+                        stream,
+                        block_number,
+                        &mut tracker.last_persisted,
+                        PERSISTENCE_CHECKPOINT_TIMEOUT,
+                    )
+                    .await?;
 
-                    match wait_result {
-                        Ok(Ok(persisted)) => {
-                            last_persisted_block = persisted;
-                            let wait_elapsed = wait_start.elapsed();
-                            total_persistence_wait_time += wait_elapsed;
-                            persistence_wait_count += 1;
-
-                            debug!(
-                                target: "reth-bench",
-                                ?wait_elapsed,
-                                "Persistence caught up"
-                            );
-                        }
-                        Ok(Err(e)) => {
-                            return Err(e.wrap_err("Benchmark failed"));
-                        }
-                        Err(_) => {
-                            return Err(eyre::eyre!(
-                                "Persistence timeout at block {}: no persistence notification \
-                                 received within {:?}. Last persisted: {}. Benchmark failed.",
-                                target_block,
-                                PERSISTENCE_CHECKPOINT_TIMEOUT,
-                                last_persisted_block
-                            ));
-                        }
-                    }
+                    tracker.record_wait(wait_start.elapsed(), tracker.last_persisted);
+                    debug!(target: "reth-bench", elapsed = ?wait_start.elapsed(), "Persistence caught up");
                 }
             }
 
-            // current duration since the start of the benchmark minus the time
-            // waiting for blocks
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
-
-            // convert gas used to gigagas, then compute gigagas per second
             info!(%combined_result);
 
-            // record the current result
             let gas_row =
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
             results.push((gas_row, combined_result));
@@ -332,49 +344,24 @@ impl Command {
             return Err(error);
         }
 
-        // Final sync: wait for all remaining blocks to be persisted (persistence mode only)
-        if wait_time_mode.is_none() &&
-            let Some(ref mut rx) = persistence_rx &&
-            last_persisted_block < last_block_number
-        {
-            info!(
-                "Waiting for final blocks to persist (current: {}, target: {})",
-                last_persisted_block, last_block_number
-            );
+        // Final sync: wait for remaining blocks (persistence mode only)
+        if let Some(ref mut stream) = persistence_stream {
+            if tracker.last_persisted < tracker.last_block_number {
+                info!(
+                    "Waiting for final blocks to persist (current: {}, target: {})",
+                    tracker.last_persisted, tracker.last_block_number
+                );
 
-            let final_sync_result = tokio::time::timeout(PERSISTENCE_TIMEOUT, async {
-                while last_persisted_block < last_block_number {
-                    match rx.recv().await {
-                        Some(persisted) => {
-                            last_persisted_block = persisted.number;
-                            debug!(
-                                target: "reth-bench",
-                                persisted_block = ?last_persisted_block,
-                                "Final sync: received persistence notification"
-                            );
-                        }
-                        None => {
-                            return Err(eyre::eyre!("Persistence subscription closed"));
-                        }
-                    }
-                }
-                Ok(())
-            })
-            .await;
-
-            match final_sync_result {
-                Ok(Ok(())) => {
-                    info!("All blocks persisted successfully");
-                }
-                Ok(Err(e)) => {
-                    warn!("Final sync failed: {}", e);
-                }
-                Err(_) => {
-                    warn!(
-                        "Persistence timeout: not all blocks persisted within {:?}. \
-                                 Last persisted: {}, target: {}",
-                        PERSISTENCE_TIMEOUT, last_persisted_block, last_block_number
-                    );
+                match wait_for_persistence(
+                    stream,
+                    tracker.last_block_number,
+                    &mut tracker.last_persisted,
+                    PERSISTENCE_TIMEOUT,
+                )
+                .await
+                {
+                    Ok(()) => info!("All blocks persisted successfully"),
+                    Err(e) => warn!("Final sync: {}", e),
                 }
             }
         }
@@ -382,17 +369,10 @@ impl Command {
         let (gas_output_results, combined_results): (_, Vec<CombinedResult>) =
             results.into_iter().unzip();
 
-        // Calculate persistence stats (only meaningful in persistence mode)
-        let persistence_stats = PersistenceStats {
-            wait_count: persistence_wait_count,
-            total_wait_time: total_persistence_wait_time,
-            max_gap,
-            avg_gap: if gap_count > 0 { gap_sum as f64 / gap_count as f64 } else { 0.0 },
-        };
+        let persistence_stats = tracker.into_stats();
 
-        // write the csv output to files
+        // Write CSV output files
         if let Some(ref path) = self.benchmark.output {
-            // first write the combined results to a file
             let output_path = path.join(COMBINED_OUTPUT_SUFFIX);
             info!("Writing engine api call latency output to file: {:?}", output_path);
             let mut writer = Writer::from_path(&output_path)?;
@@ -401,7 +381,6 @@ impl Command {
             }
             writer.flush()?;
 
-            // now write the gas output to a file
             let output_path = path.join(GAS_OUTPUT_SUFFIX);
             info!("Writing total gas output to file: {:?}", output_path);
             let mut writer = Writer::from_path(&output_path)?;
@@ -410,7 +389,6 @@ impl Command {
             }
             writer.flush()?;
 
-            // write persistence stats to a file (only in persistence mode)
             if wait_time_mode.is_none() {
                 let output_path = path.join(PERSISTENCE_STATS_SUFFIX);
                 info!("Writing persistence stats to file: {:?}", output_path);
@@ -422,7 +400,6 @@ impl Command {
             info!("Finished writing benchmark output files to {:?}.", path);
         }
 
-        // accumulate the results and calculate the overall Ggas/s
         let gas_output = TotalGasOutput::new(gas_output_results)?;
 
         if wait_time_mode.is_none() {
@@ -448,131 +425,51 @@ impl Command {
         Ok(())
     }
 
-    /// Set up WebSocket connection and subscribe to persistence notifications
-    async fn setup_persistence_subscription(&self) -> eyre::Result<mpsc::Receiver<BlockNumHash>> {
-        let auth_jwt =
-            self.benchmark.auth_jwtsecret.clone().ok_or_else(|| {
-                eyre::eyre!("--jwt-secret must be provided for authenticated RPC")
-            })?;
+    /// Set up WebSocket subscription for persistence notifications using Alloy pubsub
+    async fn setup_persistence_subscription(
+        &self,
+    ) -> eyre::Result<SubscriptionStream<BlockNumHash>> {
+        let auth_jwt = self
+            .benchmark
+            .auth_jwtsecret
+            .clone()
+            .ok_or_else(|| eyre::eyre!("--jwt-secret must be provided for persistence mode"))?;
+
         let jwt_str = std::fs::read_to_string(&auth_jwt)?;
         let jwt = JwtSecret::from_hex(&jwt_str)?;
 
-        // Convert HTTP URL to WebSocket URL for subscription
+        // Convert HTTP URL to WebSocket URL
         let mut ws_url: Url = self.rpc_url.parse()?;
         match ws_url.scheme() {
-            "http" => {
-                ws_url.set_scheme("ws").map_err(|_| eyre::eyre!("Failed to set WS scheme"))?
-            }
+            "http" => ws_url.set_scheme("ws").map_err(|_| eyre::eyre!("Failed to set WS scheme"))?,
             "https" => {
                 ws_url.set_scheme("wss").map_err(|_| eyre::eyre!("Failed to set WSS scheme"))?
             }
-            "ws" | "wss" => {} // Already WebSocket
+            "ws" | "wss" => {}
             scheme => return Err(eyre::eyre!("Unsupported URL scheme: {}", scheme)),
         }
 
-        // Create JWT authorization header
+        // Build JWT authorization
         let claims = alloy_rpc_types_engine::Claims::default();
         let token = jwt.encode(&claims)?;
-        let auth_header = format!("Bearer {}", token);
 
         info!("Connecting to WebSocket at {} for persistence subscription", ws_url);
 
-        // Build WebSocket request with auth header
-        let ws_request = http::Request::builder()
-            .uri(ws_url.as_str())
-            .header("Authorization", &auth_header)
-            .header("Host", ws_url.host_str().unwrap_or("localhost"))
-            .header("Connection", "Upgrade")
-            .header("Upgrade", "websocket")
-            .header("Sec-WebSocket-Version", "13")
-            .header(
-                "Sec-WebSocket-Key",
-                tokio_tungstenite::tungstenite::handshake::client::generate_key(),
-            )
-            .body(())
-            .wrap_err("Failed to build WebSocket request")?;
-
-        let (ws_stream, _) = connect_async_with_config(ws_request, None, false)
+        // Create WS client with pubsub support
+        let ws_connect = WsConnect::new(ws_url.to_string()).with_auth(Authorization::Bearer(token));
+        let client = RpcClient::connect_pubsub(ws_connect)
             .await
-            .wrap_err("Failed to connect to WebSocket for persistence subscription")?;
+            .wrap_err("Failed to connect to WebSocket")?;
+        let provider: RootProvider<Ethereum> = RootProvider::new(client);
 
-        let (mut ws_sink, mut ws_stream) = ws_stream.split();
-
-        // Subscribe to latest persisted block notifications via JSON-RPC
-        let subscribe_request = json!({
-            "jsonrpc": "2.0",
-            "id": 1,
-            "method": "reth_subscribePersistedBlock",
-            "params": []
-        });
-
-        ws_sink
-            .send(Message::Text(subscribe_request.to_string().into()))
+        // Subscribe to persistence notifications
+        let subscription = provider
+            .subscribe_to::<BlockNumHash>("reth_subscribePersistedBlock")
             .await
-            .wrap_err("Failed to send subscription request")?;
+            .wrap_err("Failed to subscribe to persistence notifications")?;
 
-        // Wait for subscription confirmation
-        let sub_response = ws_stream
-            .next()
-            .await
-            .ok_or_else(|| eyre::eyre!("WebSocket closed before subscription response"))?
-            .wrap_err("Failed to receive subscription response")?;
+        info!("Subscribed to persistence notifications");
 
-        let sub_id: String = match sub_response {
-            Message::Text(text) => {
-                let resp: Value = serde_json::from_str(&text)
-                    .wrap_err("Failed to parse subscription response")?;
-                resp["result"]
-                    .as_str()
-                    .ok_or_else(|| eyre::eyre!("Invalid subscription response: {}", text))?
-                    .to_string()
-            }
-            _ => return Err(eyre::eyre!("Unexpected message type from subscription")),
-        };
-
-        info!("Subscribed to persistence notifications (subscription_id={})", sub_id);
-
-        // Create channel for persistence notifications
-        let (persistence_tx, persistence_rx) = mpsc::channel::<BlockNumHash>(100);
-
-        // Spawn task to receive persistence notifications
-        tokio::spawn(async move {
-            while let Some(msg_result) = ws_stream.next().await {
-                match msg_result {
-                    Ok(Message::Text(text)) => {
-                        if let Ok(notification) = serde_json::from_str::<Value>(&text) {
-                            // Check if this is a subscription notification
-                            if notification.get("method").map(|m| m.as_str()) ==
-                                Some(Some("reth_subscribePersistedBlock")) &&
-                                let Some(params) =
-                                    notification.get("params").and_then(|p| p.get("result")) &&
-                                let (Some(number), Some(hash)) = (
-                                    params.get("number").and_then(parse_block_number),
-                                    params.get("hash").and_then(|h| h.as_str()),
-                                )
-                            {
-                                let block_num_hash =
-                                    BlockNumHash { number, hash: hash.parse().unwrap_or_default() };
-                                debug!(
-                                    "Received persistence notification persisted_block={}",
-                                    block_num_hash.number
-                                );
-                                if persistence_tx.send(block_num_hash).await.is_err() {
-                                    break;
-                                }
-                            }
-                        }
-                    }
-                    Ok(Message::Close(_)) => break,
-                    Err(e) => {
-                        tracing::error!("WebSocket error: {}", e);
-                        break;
-                    }
-                    _ => {}
-                }
-            }
-        });
-
-        Ok(persistence_rx)
+        Ok(subscription.into_stream())
     }
 }
