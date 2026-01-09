@@ -442,7 +442,6 @@ impl PersistenceWaiter {
     }
 
     /// Called once per block. Waits for persistence when the threshold is reached.
-    #[allow(clippy::manual_is_multiple_of)]
     async fn on_block(&mut self, block_number: u64) -> eyre::Result<()> {
         self.blocks_sent += 1;
 
