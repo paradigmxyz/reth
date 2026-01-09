@@ -103,7 +103,7 @@ pub use eth::EthHandlers;
 mod metrics;
 use crate::middleware::RethRpcMiddleware;
 pub use metrics::{MeteredBatchRequestsFuture, MeteredRequestFuture, RpcRequestMetricsService};
-use reth_chain_state::CanonStateSubscriptions;
+use reth_chain_state::{CanonStateSubscriptions, PersistedBlockSubscriptions};
 use reth_rpc::eth::sim_bundle::EthSimBundle;
 
 // Rpc rate limiter
@@ -311,6 +311,7 @@ where
     N: NodePrimitives,
     Provider: FullRpcProvider<Block = N::Block, Receipt = N::Receipt, Header = N::BlockHeader>
         + CanonStateSubscriptions<Primitives = N>
+        + PersistedBlockSubscriptions
         + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
@@ -655,7 +656,8 @@ where
             Transaction = N::SignedTx,
         > + AccountReader
         + ChangeSetReader
-        + CanonStateSubscriptions,
+        + CanonStateSubscriptions
+        + PersistedBlockSubscriptions,
     Network: NetworkInfo + Peers + Clone + 'static,
     EthApi: EthApiServer<
             RpcTxReq<EthApi::NetworkTypes>,
@@ -843,6 +845,7 @@ where
     N: NodePrimitives,
     Provider: FullRpcProvider<Block = N::Block>
         + CanonStateSubscriptions<Primitives = N>
+        + PersistedBlockSubscriptions
         + AccountReader
         + ChangeSetReader,
     Pool: TransactionPool + Clone + 'static,
