@@ -886,7 +886,10 @@ mod tests {
 mod rocksdb_tests {
     use super::*;
     use crate::{
-        providers::rocksdb::{RocksDBBuilder, RocksDBProvider},
+        providers::{
+            rocksdb::{RocksDBBuilder, RocksDBProvider},
+            HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,
+        },
         test_utils::create_test_provider_factory,
         RocksDBProviderFactory,
     };
@@ -894,6 +897,7 @@ mod rocksdb_tests {
     use reth_db_api::{
         models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
         tables,
+        transaction::DbTxMut,
     };
     use reth_storage_api::{DatabaseProviderFactory, StorageSettings};
     use tempfile::TempDir;
@@ -1123,6 +1127,362 @@ mod rocksdb_tests {
 
         // Verify deletion
         assert_eq!(provider.get::<tables::AccountsHistory>(key).unwrap(), None);
+    }
+
+    // ==================== Parametrized Backend Equivalence Tests ====================
+    //
+    // These tests verify that MDBX and RocksDB produce identical results for history lookups.
+    // Each scenario sets up the same data in both backends and asserts identical HistoryInfo.
+
+    /// Query parameters for a history lookup test case.
+    struct HistoryQuery {
+        block_number: BlockNumber,
+        lowest_available: Option<BlockNumber>,
+        expected: HistoryInfo,
+    }
+
+    /// Runs the same account history queries against both MDBX and `RocksDB` backends,
+    /// asserting they produce identical results.
+    fn run_account_history_scenario(
+        scenario_name: &str,
+        address: Address,
+        shards: &[(BlockNumber, Vec<BlockNumber>)], // (shard_highest_block, blocks_in_shard)
+        queries: &[HistoryQuery],
+    ) {
+        // Setup MDBX
+        let factory = create_test_provider_factory();
+        let mdbx_provider = factory.database_provider_rw().unwrap();
+        {
+            let tx = mdbx_provider.tx_ref();
+            let mut cursor = tx.cursor_write::<tables::AccountsHistory>().unwrap();
+            for (highest_block, blocks) in shards {
+                let key = ShardedKey::new(address, *highest_block);
+                let value = IntegerList::new(blocks.clone()).unwrap();
+                cursor.upsert(key, &value).unwrap();
+            }
+        }
+        mdbx_provider.commit().unwrap();
+
+        // Setup RocksDB
+        let (temp_dir, rocks_provider) = create_rocksdb_provider();
+        for (highest_block, blocks) in shards {
+            let key = ShardedKey::new(address, *highest_block);
+            let value = IntegerList::new(blocks.clone()).unwrap();
+            rocks_provider.put::<tables::AccountsHistory>(key, &value).unwrap();
+        }
+
+        // Run queries against both backends
+        let mdbx_ro = factory.database_provider_ro().unwrap();
+        let rocks_tx = rocks_provider.tx();
+
+        for (i, query) in queries.iter().enumerate() {
+            // MDBX query via HistoricalStateProviderRef
+            let lowest_blocks = LowestAvailableBlocks {
+                account_history_block_number: query.lowest_available,
+                storage_history_block_number: None,
+            };
+            let mdbx_state = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+                &mdbx_ro,
+                query.block_number,
+                lowest_blocks,
+            );
+            let mdbx_result = mdbx_state.account_history_lookup(address).unwrap();
+
+            // RocksDB query
+            let rocks_result = rocks_tx
+                .account_history_info(address, query.block_number, query.lowest_available)
+                .unwrap();
+
+            // Assert both backends produce identical results
+            assert_eq!(
+                mdbx_result,
+                rocks_result,
+                "Backend mismatch in scenario '{}' query {}: block={}, lowest={:?}\n\
+                 MDBX: {:?}, RocksDB: {:?}",
+                scenario_name,
+                i,
+                query.block_number,
+                query.lowest_available,
+                mdbx_result,
+                rocks_result
+            );
+
+            // Also verify against expected result
+            assert_eq!(
+                mdbx_result,
+                query.expected,
+                "Unexpected result in scenario '{}' query {}: block={}, lowest={:?}\n\
+                 Got: {:?}, Expected: {:?}",
+                scenario_name,
+                i,
+                query.block_number,
+                query.lowest_available,
+                mdbx_result,
+                query.expected
+            );
+        }
+
+        rocks_tx.rollback().unwrap();
+        drop(temp_dir);
+    }
+
+    /// Runs the same storage history queries against both MDBX and `RocksDB` backends,
+    /// asserting they produce identical results.
+    fn run_storage_history_scenario(
+        scenario_name: &str,
+        address: Address,
+        storage_key: B256,
+        shards: &[(BlockNumber, Vec<BlockNumber>)], // (shard_highest_block, blocks_in_shard)
+        queries: &[HistoryQuery],
+    ) {
+        // Setup MDBX
+        let factory = create_test_provider_factory();
+        let mdbx_provider = factory.database_provider_rw().unwrap();
+        {
+            let tx = mdbx_provider.tx_ref();
+            let mut cursor = tx.cursor_write::<tables::StoragesHistory>().unwrap();
+            for (highest_block, blocks) in shards {
+                let key = StorageShardedKey::new(address, storage_key, *highest_block);
+                let value = IntegerList::new(blocks.clone()).unwrap();
+                cursor.upsert(key, &value).unwrap();
+            }
+        }
+        mdbx_provider.commit().unwrap();
+
+        // Setup RocksDB
+        let (temp_dir, rocks_provider) = create_rocksdb_provider();
+        for (highest_block, blocks) in shards {
+            let key = StorageShardedKey::new(address, storage_key, *highest_block);
+            let value = IntegerList::new(blocks.clone()).unwrap();
+            rocks_provider.put::<tables::StoragesHistory>(key, &value).unwrap();
+        }
+
+        // Run queries against both backends
+        let mdbx_ro = factory.database_provider_ro().unwrap();
+        let rocks_tx = rocks_provider.tx();
+
+        for (i, query) in queries.iter().enumerate() {
+            // MDBX query via HistoricalStateProviderRef
+            let lowest_blocks = LowestAvailableBlocks {
+                account_history_block_number: None,
+                storage_history_block_number: query.lowest_available,
+            };
+            let mdbx_state = HistoricalStateProviderRef::new_with_lowest_available_blocks(
+                &mdbx_ro,
+                query.block_number,
+                lowest_blocks,
+            );
+            let mdbx_result = mdbx_state.storage_history_lookup(address, storage_key).unwrap();
+
+            // RocksDB query
+            let rocks_result = rocks_tx
+                .storage_history_info(
+                    address,
+                    storage_key,
+                    query.block_number,
+                    query.lowest_available,
+                )
+                .unwrap();
+
+            // Assert both backends produce identical results
+            assert_eq!(
+                mdbx_result,
+                rocks_result,
+                "Backend mismatch in scenario '{}' query {}: block={}, lowest={:?}\n\
+                 MDBX: {:?}, RocksDB: {:?}",
+                scenario_name,
+                i,
+                query.block_number,
+                query.lowest_available,
+                mdbx_result,
+                rocks_result
+            );
+
+            // Also verify against expected result
+            assert_eq!(
+                mdbx_result,
+                query.expected,
+                "Unexpected result in scenario '{}' query {}: block={}, lowest={:?}\n\
+                 Got: {:?}, Expected: {:?}",
+                scenario_name,
+                i,
+                query.block_number,
+                query.lowest_available,
+                mdbx_result,
+                query.expected
+            );
+        }
+
+        rocks_tx.rollback().unwrap();
+        drop(temp_dir);
+    }
+
+    /// Tests account history lookups across both MDBX and `RocksDB` backends.
+    ///
+    /// Covers the following scenarios from PR2's `RocksDB`-only tests:
+    /// 1. Single shard - basic lookups within one shard
+    /// 2. Multiple shards - `prev()` shard detection and transitions
+    /// 3. No history - query address with no entries
+    /// 4. Pruned before first entry - `lowest_available` boundary behavior
+    #[test]
+    fn test_account_history_info_both_backends() {
+        let address = Address::from([0x42; 20]);
+
+        // Scenario 1: Single shard with blocks [100, 200, 300]
+        run_account_history_scenario(
+            "single_shard",
+            address,
+            &[(u64::MAX, vec![100, 200, 300])],
+            &[
+                // Before first entry -> NotYetWritten
+                HistoryQuery {
+                    block_number: 50,
+                    lowest_available: None,
+                    expected: HistoryInfo::NotYetWritten,
+                },
+                // Between entries -> InChangeset(next_write)
+                HistoryQuery {
+                    block_number: 150,
+                    lowest_available: None,
+                    expected: HistoryInfo::InChangeset(200),
+                },
+                // Exact match on entry -> InChangeset(same_block)
+                HistoryQuery {
+                    block_number: 300,
+                    lowest_available: None,
+                    expected: HistoryInfo::InChangeset(300),
+                },
+                // After last entry in last shard -> InPlainState
+                HistoryQuery {
+                    block_number: 500,
+                    lowest_available: None,
+                    expected: HistoryInfo::InPlainState,
+                },
+            ],
+        );
+
+        // Scenario 2: Multiple shards - tests prev() shard detection
+        run_account_history_scenario(
+            "multiple_shards",
+            address,
+            &[
+                (500, vec![100, 200, 300, 400, 500]), // First shard ends at 500
+                (u64::MAX, vec![600, 700, 800]),      // Last shard
+            ],
+            &[
+                // Before first shard, no prev -> NotYetWritten
+                HistoryQuery {
+                    block_number: 50,
+                    lowest_available: None,
+                    expected: HistoryInfo::NotYetWritten,
+                },
+                // Within first shard
+                HistoryQuery {
+                    block_number: 150,
+                    lowest_available: None,
+                    expected: HistoryInfo::InChangeset(200),
+                },
+                // Between shards - prev() should find first shard
+                HistoryQuery {
+                    block_number: 550,
+                    lowest_available: None,
+                    expected: HistoryInfo::InChangeset(600),
+                },
+                // After all entries
+                HistoryQuery {
+                    block_number: 900,
+                    lowest_available: None,
+                    expected: HistoryInfo::InPlainState,
+                },
+            ],
+        );
+
+        // Scenario 3: No history for address
+        let address_without_history = Address::from([0x43; 20]);
+        run_account_history_scenario(
+            "no_history",
+            address_without_history,
+            &[], // No shards for this address
+            &[HistoryQuery {
+                block_number: 150,
+                lowest_available: None,
+                expected: HistoryInfo::NotYetWritten,
+            }],
+        );
+
+        // Scenario 4: Query at pruning boundary
+        // Note: We test block >= lowest_available because HistoricalStateProviderRef
+        // errors on blocks below the pruning boundary before doing the lookup.
+        // The RocksDB implementation doesn't have this check at the same level.
+        // This tests that when pruning IS available, both backends agree.
+        run_account_history_scenario(
+            "with_pruning_boundary",
+            address,
+            &[(u64::MAX, vec![100, 200, 300])],
+            &[
+                // At pruning boundary -> InChangeset(first entry after block)
+                HistoryQuery {
+                    block_number: 100,
+                    lowest_available: Some(100),
+                    expected: HistoryInfo::InChangeset(100),
+                },
+                // After pruning boundary, between entries
+                HistoryQuery {
+                    block_number: 150,
+                    lowest_available: Some(100),
+                    expected: HistoryInfo::InChangeset(200),
+                },
+            ],
+        );
+    }
+
+    /// Tests storage history lookups across both MDBX and `RocksDB` backends.
+    #[test]
+    fn test_storage_history_info_both_backends() {
+        let address = Address::from([0x42; 20]);
+        let storage_key = B256::from([0x01; 32]);
+        let other_storage_key = B256::from([0x02; 32]);
+
+        // Single shard with blocks [100, 200, 300]
+        run_storage_history_scenario(
+            "storage_single_shard",
+            address,
+            storage_key,
+            &[(u64::MAX, vec![100, 200, 300])],
+            &[
+                // Before first entry -> NotYetWritten
+                HistoryQuery {
+                    block_number: 50,
+                    lowest_available: None,
+                    expected: HistoryInfo::NotYetWritten,
+                },
+                // Between entries -> InChangeset(next_write)
+                HistoryQuery {
+                    block_number: 150,
+                    lowest_available: None,
+                    expected: HistoryInfo::InChangeset(200),
+                },
+                // After last entry -> InPlainState
+                HistoryQuery {
+                    block_number: 500,
+                    lowest_available: None,
+                    expected: HistoryInfo::InPlainState,
+                },
+            ],
+        );
+
+        // No history for different storage key
+        run_storage_history_scenario(
+            "storage_no_history",
+            address,
+            other_storage_key,
+            &[], // No shards for this storage key
+            &[HistoryQuery {
+                block_number: 150,
+                lowest_available: None,
+                expected: HistoryInfo::NotYetWritten,
+            }],
+        );
     }
 
     /// Test that `RocksDB` commits happen at `provider.commit()` level, not at writer level.
