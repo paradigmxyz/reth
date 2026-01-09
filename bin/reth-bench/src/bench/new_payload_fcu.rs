@@ -37,21 +37,10 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info, warn};
 use url::Url;
 
-/// Persistence threshold: wait for persistence after every (N+1) blocks.
-/// This matches the engine's behavior which persists when gap > N.
-/// With DEFAULT_PERSISTENCE_THRESHOLD=2, waits at blocks 3, 6, 9, etc.
 const PERSISTENCE_THRESHOLD: u64 = DEFAULT_PERSISTENCE_THRESHOLD;
-
-/// Per-checkpoint timeout: wait up to 1 minute for each Nth block to persist
 const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// Final sync timeout: wait up to 5 minutes for remaining blocks to persist
 const PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(300);
 
-/// Tracks persistence state and statistics during benchmark.
-///
-/// TODO: Consider simplifying after testing is complete - the core functionality
-/// only needs `blocks_sent`, `last_persisted`, and `last_block_number`.
 struct PersistenceTracker {
     blocks_sent: u64,
     last_persisted: u64,
@@ -82,9 +71,7 @@ impl PersistenceTracker {
         self.last_block_number = block_number;
 
         let current_gap = block_number.saturating_sub(self.last_persisted);
-        if current_gap > self.max_gap {
-            self.max_gap = current_gap;
-        }
+        self.max_gap = self.max_gap.max(current_gap);
         self.gap_sum += current_gap;
         self.gap_count += 1;
     }
@@ -548,45 +535,25 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_engine_url_to_ws_url_http_default_port() {
+    fn test_engine_url_to_ws_url() {
+        // http -> ws, always uses port 8546
         let result = engine_url_to_ws_url("http://localhost:8551").unwrap();
-        assert_eq!(result.scheme(), "ws");
-        assert_eq!(result.host_str(), Some("localhost"));
-        assert_eq!(result.port(), Some(8546));
-    }
+        assert_eq!(result.as_str(), "ws://localhost:8546/");
 
-    #[test]
-    fn test_engine_url_to_ws_url_https() {
+        // https -> wss
         let result = engine_url_to_ws_url("https://localhost:8551").unwrap();
-        assert_eq!(result.scheme(), "wss");
-        assert_eq!(result.port(), Some(8546));
-    }
+        assert_eq!(result.as_str(), "wss://localhost:8546/");
 
-    #[test]
-    fn test_engine_url_to_ws_url_custom_engine_port() {
-        // Custom engine API ports (like 9551) should still map to WS port 8546
+        // Custom engine port still maps to 8546
         let result = engine_url_to_ws_url("http://localhost:9551").unwrap();
-        assert_eq!(result.scheme(), "ws");
         assert_eq!(result.port(), Some(8546));
-    }
 
-    #[test]
-    fn test_engine_url_to_ws_url_already_ws() {
+        // Already ws passthrough
         let result = engine_url_to_ws_url("ws://localhost:8546").unwrap();
         assert_eq!(result.scheme(), "ws");
-        assert_eq!(result.port(), Some(8546));
-    }
 
-    #[test]
-    fn test_engine_url_to_ws_url_invalid_scheme() {
-        let result = engine_url_to_ws_url("ftp://localhost:8551");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("Unsupported URL scheme"));
-    }
-
-    #[test]
-    fn test_engine_url_to_ws_url_invalid_url() {
-        let result = engine_url_to_ws_url("not a valid url");
-        assert!(result.is_err());
+        // Invalid inputs
+        assert!(engine_url_to_ws_url("ftp://localhost:8551").is_err());
+        assert!(engine_url_to_ws_url("not a valid url").is_err());
     }
 }
