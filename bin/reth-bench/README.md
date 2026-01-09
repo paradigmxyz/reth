@@ -31,9 +31,13 @@ Otherwise, running `make maxperf` at the root of the repo should be sufficient f
 `reth-bench` contains different commands to benchmark different patterns of engine API calls.
 The `reth-bench new-payload-fcu` command is the most representative of ethereum mainnet live sync, alternating between sending `engine_newPayload` calls and `engine_forkchoiceUpdated` calls.
 
-By default, `new-payload-fcu` uses persistence-based flow, waiting for every Nth block to be
-persisted via the `reth_subscribeLatestPersistedBlock` subscription (currently N=2). If you pass
-`--wait-time <duration>`, it switches to fixed wait-time mode and disables persistence waits.
+The `new-payload-fcu` command supports two optional waiting modes that can be used together or independently:
+- `--wait-time <duration>`: Fixed sleep interval between blocks (e.g., `--wait-time 100ms`)
+- `--wait-for-persistence`: Waits for blocks to be persisted using the `reth_subscribePersistedBlock` subscription
+
+When using `--wait-for-persistence`, the benchmark waits after every `(threshold + 1)` blocks, where the threshold defaults to the engine's persistence threshold (2). This can be customized with `--persistence-threshold <N>`.
+
+By default, the WebSocket URL for persistence subscriptions is derived from `--engine-rpc-url` (converting to ws:// on port 8546). Use `--ws-rpc-url` to override this.
 
 Below is an overview of how to run a benchmark:
 
