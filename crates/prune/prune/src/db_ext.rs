@@ -5,7 +5,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-use std::{fmt::Debug, ops::RangeBounds};
+use std::ops::RangeBounds;
 use tracing::debug;
 
 pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
@@ -56,7 +56,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
     /// Returns number of rows pruned.
     fn prune_table_with_range<T: Table>(
         &self,
-        keys: impl RangeBounds<T::Key> + Clone + Debug,
+        keys: impl RangeBounds<T::Key>,
         limiter: &mut PruneLimiter,
         mut skip_filter: impl FnMut(&TableRow<T>) -> bool,
         mut delete_callback: impl FnMut(TableRow<T>),
@@ -129,7 +129,7 @@ pub(crate) trait DbTxPruneExt: DbTxMut + DbTx {
     /// Returns number of rows pruned.
     fn prune_dupsort_table_with_range<T: DupSort>(
         &self,
-        keys: impl RangeBounds<T::Key> + Clone + Debug,
+        keys: impl RangeBounds<T::Key>,
         limiter: &mut PruneLimiter,
         mut delete_callback: impl FnMut(TableRow<T>),
     ) -> Result<(usize, bool), DatabaseError> {
