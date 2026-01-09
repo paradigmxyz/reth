@@ -85,6 +85,7 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeFrom, RangeInclusive},
     sync::Arc,
+    time::{Duration, Instant},
 };
 use tracing::{debug, trace};
 
@@ -171,6 +172,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
+    /// Database provider metrics
+    metrics: metrics::DatabaseProviderMetrics,
 }
 
 impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
@@ -296,7 +299,7 @@ impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpe
 
 impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-write transaction.
-    pub const fn new_rw(
+    pub fn new_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
@@ -316,6 +319,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+            metrics: metrics::DatabaseProviderMetrics::default(),
         }
     }
 }
@@ -368,6 +372,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         debug!(target: "providers::db", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
+        // Accumulate durations for each step
+        let mut total_insert_block = Duration::ZERO;
+        let mut total_write_state = Duration::ZERO;
+        let mut total_write_hashed_state = Duration::ZERO;
+        let mut total_write_trie_changesets = Duration::ZERO;
+        let mut total_write_trie_updates = Duration::ZERO;
+
         // TODO: Do performant / batched writes for each type of object
         // instead of a loop over all blocks,
         // meaning:
@@ -381,24 +392,60 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let trie_data = block.trie_data();
             let ExecutedBlock { recovered_block, execution_output, .. } = block;
             let block_number = recovered_block.number();
+
+            let start = Instant::now();
             self.insert_block(&recovered_block)?;
+            total_insert_block += start.elapsed();
 
             // Write state and changesets to the database.
             // Must be written after blocks because of the receipt lookup.
+            let start = Instant::now();
             self.write_state(&execution_output, OriginalValuesKnown::No)?;
+            total_write_state += start.elapsed();
 
             // insert hashes and intermediate merkle nodes
+            let start = Instant::now();
             self.write_hashed_state(&trie_data.hashed_state)?;
+            total_write_hashed_state += start.elapsed();
 
+            let start = Instant::now();
             self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
+            total_write_trie_changesets += start.elapsed();
+
+            let start = Instant::now();
             self.write_trie_updates_sorted(&trie_data.trie_updates)?;
+            total_write_trie_updates += start.elapsed();
         }
 
         // update history indices
+        let start = Instant::now();
         self.update_history_indices(first_number..=last_block_number)?;
+        let duration_update_history_indices = start.elapsed();
 
         // Update pipeline progress
+        let start = Instant::now();
         self.update_pipeline_stages(last_block_number, false)?;
+        let duration_update_pipeline_stages = start.elapsed();
+
+        // Record all metrics at the end
+        self.metrics.record_duration(metrics::Action::SaveBlocksInsertBlock, total_insert_block);
+        self.metrics.record_duration(metrics::Action::SaveBlocksWriteState, total_write_state);
+        self.metrics
+            .record_duration(metrics::Action::SaveBlocksWriteHashedState, total_write_hashed_state);
+        self.metrics.record_duration(
+            metrics::Action::SaveBlocksWriteTrieChangesets,
+            total_write_trie_changesets,
+        );
+        self.metrics
+            .record_duration(metrics::Action::SaveBlocksWriteTrieUpdates, total_write_trie_updates);
+        self.metrics.record_duration(
+            metrics::Action::SaveBlocksUpdateHistoryIndices,
+            duration_update_history_indices,
+        );
+        self.metrics.record_duration(
+            metrics::Action::SaveBlocksUpdatePipelineStages,
+            duration_update_pipeline_stages,
+        );
 
         debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
 
@@ -578,7 +625,7 @@ where
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
-    pub const fn new(
+    pub fn new(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
         static_file_provider: StaticFileProvider<N::Primitives>,
@@ -598,6 +645,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
+            metrics: metrics::DatabaseProviderMetrics::default(),
         }
     }
 
@@ -3016,7 +3064,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         let block_number = block.number();
         let tx_count = block.body().transaction_count() as u64;
 
-        let mut durations_recorder = metrics::DurationsRecorder::default();
+        let mut durations_recorder = metrics::DurationsRecorder::new(&self.metrics);
 
         self.static_file_provider
             .get_writer(block_number, StaticFileSegment::Headers)?
@@ -3090,7 +3138,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             let tx_count = body.as_ref().map(|b| b.transactions().len() as u64).unwrap_or_default();
             let block_indices = StoredBlockBodyIndices { first_tx_num: next_tx_num, tx_count };
 
-            let mut durations_recorder = metrics::DurationsRecorder::default();
+            let mut durations_recorder = metrics::DurationsRecorder::new(&self.metrics);
 
             // insert block meta
             block_indices_cursor.append(*block_number, &block_indices)?;
@@ -3222,7 +3270,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         // `None`.
         let last_block_number = blocks[blocks.len() - 1].number();
 
-        let mut durations_recorder = metrics::DurationsRecorder::default();
+        let mut durations_recorder = metrics::DurationsRecorder::new(&self.metrics);
 
         // Extract account and storage transitions from the bundle reverts BEFORE writing state.
         // This is necessary because with edge storage, changesets are written to static files
