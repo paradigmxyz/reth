@@ -622,7 +622,8 @@ where
             .without_state_clear()
             .build();
 
-        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
+        let spec_id = *env.evm_env.spec_id();
+        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let mut executor = self.evm_config.create_executor(evm, ctx);
@@ -638,7 +639,7 @@ where
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
-                    *env.evm_env.spec_id(),
+                    spec_id,
                     Some(metrics),
                 )
             });

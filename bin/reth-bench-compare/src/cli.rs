@@ -121,6 +121,22 @@ pub(crate) struct Args {
     #[arg(long, value_name = "DURATION", hide = true)]
     pub wait_time: Option<String>,
 
+    /// Wait for blocks to be persisted before sending the next batch (passed to reth-bench).
+    ///
+    /// When enabled, waits for every Nth block to be persisted using the
+    /// `reth_subscribePersistedBlock` subscription. This ensures the benchmark
+    /// doesn't outpace persistence.
+    #[arg(long)]
+    pub wait_for_persistence: bool,
+
+    /// Engine persistence threshold (passed to reth-bench).
+    ///
+    /// The benchmark waits after every `(threshold + 1)` blocks. By default this
+    /// matches the engine's default persistence threshold (2), so waits occur
+    /// at blocks 3, 6, 9, etc.
+    #[arg(long, value_name = "PERSISTENCE_THRESHOLD")]
+    pub persistence_threshold: Option<u64>,
+
     /// Number of blocks to run for cache warmup after clearing caches.
     /// If not specified, defaults to the same as --blocks
     #[arg(long, value_name = "N")]
