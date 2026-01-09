@@ -21,7 +21,7 @@ use reth_trie_parallel::{
     },
 };
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
-use tracing::{debug, error, instrument, trace};
+use tracing::{debug, error, info, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
 #[derive(Clone, Copy)]
@@ -116,6 +116,19 @@ pub(super) enum MultiProofMessage {
     /// This is triggered by block execution, indicating that no additional state updates are
     /// expected.
     FinishedStateUpdates,
+}
+
+impl MultiProofMessage {
+
+    pub fn kind(&self) -> &'static str {
+        match self {
+            MultiProofMessage::PrefetchProofs(_) => "PrefetchProofs",
+            MultiProofMessage::StateUpdate(_, _) => "StateUpdate",
+            MultiProofMessage::EmptyProof { .. } => "EmptyProof",
+            MultiProofMessage::BlockAccessList(_) => "BlockAccessList",
+            MultiProofMessage::FinishedStateUpdates => "FinishedStateUpdates",
+        }
+    }
 }
 
 /// Handle to track proof calculation ordering.
@@ -679,8 +692,11 @@ impl MultiProofTask {
         fields(accounts = update.len(), chunks = 0)
     )]
     fn on_state_update(&mut self, source: Source, update: EvmState) -> u64 {
+        let now = Instant::now();
         let hashed_state_update = evm_state_to_hashed_post_state(update);
-        self.on_hashed_state_update(source, hashed_state_update)
+        let res = self.on_hashed_state_update(source, hashed_state_update);
+        info!("on_state_update took {:?}", now.elapsed());
+        res
     }
 
     /// Processes a hashed state update and dispatches multiproofs as needed.
@@ -821,6 +837,7 @@ impl MultiProofTask {
                         Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
                             let next_count = next_targets.chunking_length();
                             if accumulated_count + next_count > PREFETCH_MAX_BATCH_TARGETS {
+                                info!("exceeded chunk size");
                                 ctx.pending_msg =
                                     Some(MultiProofMessage::PrefetchProofs(next_targets));
                                 break;
@@ -839,16 +856,21 @@ impl MultiProofTask {
                             }
                         }
                         Ok(other_msg) => {
+                            info!("interleaved mutltiproof message type {}", other_msg.kind());
                             ctx.pending_msg = Some(other_msg);
                             break;
                         }
-                        Err(_) => break,
+                        Err(_) => {
+                            info!("no more messages");
+                            break
+                        },
                     }
                 }
 
                 // Process all accumulated messages in a single batch
                 let num_batched = ctx.accumulated_prefetch_targets.len();
                 self.metrics.prefetch_batch_size_histogram.record(num_batched as f64);
+                info!("batched {num_batched} multiproofs");
 
                 // Merge all accumulated prefetch targets into a single dispatch payload.
                 // Use drain to preserve the buffer allocation.
@@ -977,6 +999,7 @@ impl MultiProofTask {
                     sequence_number,
                     SparseTrieUpdate { state, multiproof: Default::default() },
                 ) {
+                    info!("Send combined update");
                     let _ = self.to_sparse_trie.send(combined_update);
                 }
 
@@ -1042,6 +1065,7 @@ impl MultiProofTask {
     where
         P: AccountReader,
     {
+        info!("MultiProofTask::run");
         let mut ctx = MultiproofBatchCtx::new(Instant::now());
         let mut batch_metrics = MultiproofBatchMetrics::default();
 
@@ -1057,12 +1081,15 @@ impl MultiProofTask {
                 continue;
             }
 
+            let mut now = Instant::now();
+
             // Use select_biased! to prioritize proof results over new requests.
             // This prevents new work from starving completed proofs and keeps workers healthy.
             crossbeam_channel::select_biased! {
                 recv(self.proof_result_rx) -> proof_msg => {
                     match proof_msg {
                         Ok(proof_result) => {
+                            info!("received new multiproof result");
                             batch_metrics.proofs_processed += 1;
 
                             self.metrics
@@ -1125,7 +1152,9 @@ impl MultiProofTask {
                             return
                         }
                     };
-
+                    let elapsed = now.elapsed();
+                     info!("received new multiproof message {} after {:?}", msg.kind(), elapsed);
+                    now = Instant::now();
                     if self.process_multiproof_message(msg, &mut ctx, &mut batch_metrics, &provider) {
                         break 'main;
                     }

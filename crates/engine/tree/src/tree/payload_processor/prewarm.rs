@@ -45,7 +45,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, trace, warn, Span};
+use tracing::{debug, debug_span, error, info, instrument, trace, warn, Span};
 
 /// Determines the prewarming mode: transaction-based or BAL-based.
 pub(super) enum PrewarmMode<Tx> {
@@ -396,6 +396,7 @@ where
     ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
     {
+        info!("Running Prewarm task");
         // Spawn execution tasks based on mode
         match mode {
             PrewarmMode::Transactions(pending) => {
@@ -408,14 +409,21 @@ where
 
         let mut final_execution_outcome = None;
         let mut finished_execution = false;
+        let mut now = Instant::now();
+        let mut start = Instant::now();
         while let Ok(event) = self.actions_rx.recv() {
             match event {
                 PrewarmTaskEvent::TerminateTransactionExecution => {
+                    let elapsed = start.elapsed();
+                    error!("terminate prewarm execution after {:?}", elapsed);
                     // stop tx processing
                     debug!(target: "engine::tree::prewarm", "Terminating prewarm execution");
                     self.ctx.terminate_execution.store(true, Ordering::Relaxed);
                 }
                 PrewarmTaskEvent::Outcome { proof_targets } => {
+                    let elapsed = now.elapsed();
+                    info!("received new prewarm outcome after {:?}", elapsed);
+                    now = Instant::now();
                     // completed executing a set of transactions
                     self.send_multi_proof_targets(proof_targets);
                 }
@@ -429,6 +437,8 @@ where
                     }
                 }
                 PrewarmTaskEvent::FinishedTxExecution { executed_transactions } => {
+                    let elapsed = start.elapsed();
+                    error!("finished prewarm execution after {:?}", elapsed);
                     trace!(target: "engine::tree::payload_processor::prewarm", "Finished prewarm execution signal");
                     self.ctx.metrics.transactions.set(executed_transactions as f64);
                     self.ctx.metrics.transactions_histogram.record(executed_transactions as f64);

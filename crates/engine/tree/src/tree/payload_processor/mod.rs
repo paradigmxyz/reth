@@ -54,7 +54,7 @@ use std::{
     },
     time::Instant,
 };
-use tracing::{debug, debug_span, instrument, warn, Span};
+use tracing::{debug, debug_span, info, instrument, warn, Span};
 
 pub mod bal;
 mod configured_sparse_trie;
@@ -269,6 +269,7 @@ where
                 None,
             )
         };
+        info!("Spawned prewarm");
 
         // Create and spawn the storage proof task
         let task_ctx = ProofTaskCtx::new(multiproof_provider_factory);
@@ -294,7 +295,9 @@ where
         // spawn multi-proof task
         let parent_span = span.clone();
         let saved_cache = prewarm_handle.saved_cache.clone();
+        info!("Spawning multiproof");
         self.executor.spawn_blocking(move || {
+            info!("spawned MultiProofTask");
             let _enter = parent_span.entered();
             // Build a state provider for the multiproof task
             let provider = provider_builder.build().expect("failed to build provider");
