@@ -348,6 +348,8 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) post_execution_validation_duration: Histogram,
     /// Total duration of the new payload call
     pub(crate) total_duration: Histogram,
+    /// Block size in bytes (in-memory size of validated blocks)
+    pub(crate) block_size_bytes: Histogram,
 }
 
 impl BlockValidationMetrics {

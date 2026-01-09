@@ -28,7 +28,9 @@ use reth_payload_builder::PayloadBuilderHandle;
 use reth_payload_primitives::{
     BuiltPayload, EngineApiMessageVersion, NewPayloadError, PayloadBuilderAttributes, PayloadTypes,
 };
-use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
+use reth_primitives_traits::{
+    InMemorySize, NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader,
+};
 use reth_provider::{
     BlockReader, DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StateProviderBox,
     StateProviderFactory, StateReader, TransactionVariant, TrieReader,
@@ -2571,6 +2573,12 @@ where
 
         self.state.tree_state.insert_executed(executed.clone());
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
+
+        // record block size
+        self.metrics
+            .block_validation
+            .block_size_bytes
+            .record(executed.recovered_block().size() as f64);
 
         // emit insert event
         let elapsed = start.elapsed();
