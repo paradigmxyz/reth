@@ -1,7 +1,7 @@
 use futures::{Stream, StreamExt};
 use pin_project::pin_project;
 use reth_chainspec::EthChainSpec;
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_engine_primitives::{BeaconEngineMessage, ConsensusEngineEvent};
 use reth_engine_tree::{
     backfill::PipelineSync,
@@ -70,7 +70,7 @@ where
     /// Constructor for `EngineService`.
     #[expect(clippy::too_many_arguments)]
     pub fn new<V, C>(
-        consensus: Arc<dyn FullConsensus<N::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<N::Primitives>>,
         chain_spec: Arc<N::ChainSpec>,
         client: Client,
         incoming_requests: EngineMessageStream<N::Payload>,
