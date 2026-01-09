@@ -34,7 +34,7 @@ use reth_cli_runner::CliContext;
 use reth_engine_primitives::config::DEFAULT_PERSISTENCE_THRESHOLD;
 use reth_node_core::args::BenchmarkArgs;
 use std::time::{Duration, Instant};
-use tracing::{debug, info, warn};
+use tracing::{debug, info};
 use url::Url;
 
 /// Wrapper that keeps both the subscription stream and the underlying provider alive.
@@ -45,21 +45,23 @@ struct PersistenceSubscription {
 }
 
 impl PersistenceSubscription {
-    fn new(provider: RootProvider<Ethereum>, stream: SubscriptionStream<BlockNumHash>) -> Self {
+    const fn new(
+        provider: RootProvider<Ethereum>,
+        stream: SubscriptionStream<BlockNumHash>,
+    ) -> Self {
         Self { _provider: provider, stream }
     }
 
-    fn stream_mut(&mut self) -> &mut SubscriptionStream<BlockNumHash> {
+    const fn stream_mut(&mut self) -> &mut SubscriptionStream<BlockNumHash> {
         &mut self.stream
     }
 }
 
 /// Persistence threshold: wait for persistence after every (N+1) blocks.
 /// This matches the engine's behavior which persists when gap > N.
-/// With DEFAULT_PERSISTENCE_THRESHOLD=2, waits at blocks 3, 6, 9, etc.
+/// With `DEFAULT_PERSISTENCE_THRESHOLD=2`, waits at blocks 3, 6, 9, etc.
 const PERSISTENCE_THRESHOLD: u64 = DEFAULT_PERSISTENCE_THRESHOLD;
 const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
-const PERSISTENCE_TIMEOUT: Duration = Duration::from_secs(300);
 
 /// Tracks persistence state for the benchmark.
 struct PersistenceTracker {
@@ -69,17 +71,18 @@ struct PersistenceTracker {
 }
 
 impl PersistenceTracker {
-    fn new() -> Self {
+    const fn new() -> Self {
         Self { blocks_sent: 0, last_persisted: 0, last_block_number: 0 }
     }
 
-    fn record_block(&mut self, block_number: u64) {
+    const fn record_block(&mut self, block_number: u64) {
         self.blocks_sent += 1;
         self.last_block_number = block_number;
     }
 
-    fn should_wait(&self) -> bool {
-        self.blocks_sent.is_multiple_of(PERSISTENCE_THRESHOLD + 1)
+    #[allow(clippy::manual_is_multiple_of)]
+    const fn should_wait(&self) -> bool {
+        self.blocks_sent % (PERSISTENCE_THRESHOLD + 1) == 0
     }
 }
 
@@ -314,34 +317,9 @@ impl Command {
             return Err(error);
         }
 
-        // Final sync: wait for remaining blocks (persistence mode only)
-        if let Some(ref mut sub) = persistence_sub {
-            let remaining_gap = tracker.last_block_number.saturating_sub(tracker.last_persisted);
-
-            if remaining_gap > PERSISTENCE_THRESHOLD {
-                info!(
-                    "Waiting for final blocks to persist (current: {}, target: {}, gap: {})",
-                    tracker.last_persisted, tracker.last_block_number, remaining_gap
-                );
-
-                match wait_for_persistence(
-                    sub.stream_mut(),
-                    tracker.last_block_number,
-                    &mut tracker.last_persisted,
-                    PERSISTENCE_TIMEOUT,
-                )
-                .await
-                {
-                    Ok(()) => info!("All blocks persisted successfully"),
-                    Err(e) => warn!("Final sync: {}", e),
-                }
-            } else if remaining_gap > 0 {
-                info!(
-                    "Skipping final persistence wait: gap {} <= threshold {}",
-                    remaining_gap, PERSISTENCE_THRESHOLD
-                );
-            }
-        }
+        // Drop persistence subscription - we don't need to wait for final blocks to persist
+        // since the benchmark goal is measuring Ggas/s of newPayload/FCU, not persistence.
+        drop(persistence_sub);
 
         let (gas_output_results, combined_results): (_, Vec<CombinedResult>) =
             results.into_iter().unzip();

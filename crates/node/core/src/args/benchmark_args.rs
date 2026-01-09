@@ -45,13 +45,13 @@ pub struct BenchmarkArgs {
     )]
     pub engine_rpc_url: String,
 
-    /// The WebSocket RPC URL to use for persistence subscriptions.
+    /// The `WebSocket` RPC URL to use for persistence subscriptions.
     ///
     /// If not provided, will attempt to derive from engine-rpc-url by:
     /// - Converting http/https to ws/wss
-    /// - Using port 8546 (standard RPC WebSocket port)
+    /// - Using port 8546 (standard RPC `WebSocket` port)
     ///
-    /// Example: ws://localhost:8546
+    /// Example: `ws://localhost:8546`
     #[arg(long, value_name = "WS_RPC_URL", verbatim_doc_comment)]
     pub ws_rpc_url: Option<String>,
 
