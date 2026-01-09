@@ -92,8 +92,6 @@ impl BenchmarkRunner {
             &self.rpc_url,
             "--jwt-secret",
             &self.jwt_secret,
-            "--ws-rpc-url",
-            "ws://localhost:8546", // WebSocket RPC for persistence subscriptions
             "--from",
             &from_block.to_string(),
             "--to",
@@ -176,8 +174,6 @@ impl BenchmarkRunner {
             &self.rpc_url,
             "--jwt-secret",
             &self.jwt_secret,
-            "--ws-rpc-url",
-            "ws://localhost:8546", // WebSocket RPC for persistence subscriptions
             "--from",
             &from_block.to_string(),
             "--to",
