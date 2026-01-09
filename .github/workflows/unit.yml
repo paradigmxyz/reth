@@ -19,7 +19,7 @@ concurrency:
 
 jobs:
   test:
-    name: test / ${{ matrix.type }} / ${{ matrix.storage }} (${{ matrix.partition }}/2)
+    name: test / ${{ matrix.type }} / ${{ matrix.storage }}
     runs-on: depot-ubuntu-latest-4
     env:
       RUST_BACKTRACE: 1
@@ -28,7 +28,6 @@ jobs:
       matrix:
         type: [ethereum, optimism]
         storage: [stable, edge]
-        partition: [1, 2]
         include:
           - type: ethereum
             features: asm-keccak ethereum
@@ -56,7 +55,6 @@ jobs:
             --features "${{ matrix.features }} $EDGE_FEATURES" --locked \
             ${{ matrix.exclude_args }} --workspace \
             --exclude ef-tests --no-tests=warn \
-            --partition hash:${{ matrix.partition }}/2 \
             -E "!kind(test) and not binary(e2e_testsuite)"
 
   state:
