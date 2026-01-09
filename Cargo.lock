@@ -7689,6 +7689,7 @@ version = "1.9.3"
 dependencies = [
  "alloy-eips",
  "alloy-json-rpc",
+ "alloy-network",
  "alloy-primitives",
  "alloy-provider",
  "alloy-pubsub",
@@ -7704,7 +7705,6 @@ dependencies = [
  "csv",
  "eyre",
  "futures",
- "http",
  "humantime",
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
@@ -7721,9 +7721,9 @@ dependencies = [
  "serde_json",
  "thiserror 2.0.17",
  "tokio",
- "tokio-tungstenite",
  "tower",
  "tracing",
+ "url",
 ]
 
 [[package]]

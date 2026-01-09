@@ -425,6 +425,44 @@ impl Command {
         Ok(())
     }
 
+    /// Derives the local reth node's WebSocket URL from the engine API URL.
+    ///
+    /// The persistence subscription must connect to the local reth node (not the external
+    /// RPC used for fetching blocks). This derives the WS URL from the engine API URL:
+    /// - http://localhost:8551 (engine API) → ws://localhost:8546 (RPC WebSocket)
+    fn derive_local_rpc_url(&self) -> eyre::Result<Url> {
+        let engine_url: Url =
+            self.benchmark.engine_rpc_url.parse().wrap_err("Failed to parse engine RPC URL")?;
+
+        let mut local_url = engine_url.clone();
+
+        // Convert http/https to ws/wss
+        match local_url.scheme() {
+            "http" => {
+                local_url.set_scheme("ws").map_err(|_| eyre::eyre!("Failed to set WS scheme"))?
+            }
+            "https" => {
+                local_url.set_scheme("wss").map_err(|_| eyre::eyre!("Failed to set WSS scheme"))?
+            }
+            "ws" | "wss" => {}
+            scheme => return Err(eyre::eyre!("Unsupported URL scheme: {}", scheme)),
+        }
+
+        // Change port from engine API (8551) to standard RPC WebSocket (8546)
+        if local_url.port() == Some(8551) {
+            local_url.set_port(Some(8546)).map_err(|_| eyre::eyre!("Failed to set port"))?;
+        }
+
+        debug!(
+            target: "reth-bench",
+            engine_url = %engine_url,
+            derived_url = %local_url,
+            "Derived local RPC WebSocket URL from engine API URL"
+        );
+
+        Ok(local_url)
+    }
+
     /// Set up WebSocket subscription for persistence notifications using Alloy pubsub
     async fn setup_persistence_subscription(
         &self,
@@ -438,16 +476,8 @@ impl Command {
         let jwt_str = std::fs::read_to_string(&auth_jwt)?;
         let jwt = JwtSecret::from_hex(&jwt_str)?;
 
-        // Convert HTTP URL to WebSocket URL
-        let mut ws_url: Url = self.rpc_url.parse()?;
-        match ws_url.scheme() {
-            "http" => ws_url.set_scheme("ws").map_err(|_| eyre::eyre!("Failed to set WS scheme"))?,
-            "https" => {
-                ws_url.set_scheme("wss").map_err(|_| eyre::eyre!("Failed to set WSS scheme"))?
-            }
-            "ws" | "wss" => {}
-            scheme => return Err(eyre::eyre!("Unsupported URL scheme: {}", scheme)),
-        }
+        // Derive local reth node's WebSocket URL from engine API URL
+        let ws_url = self.derive_local_rpc_url()?;
 
         // Build JWT authorization
         let claims = alloy_rpc_types_engine::Claims::default();
