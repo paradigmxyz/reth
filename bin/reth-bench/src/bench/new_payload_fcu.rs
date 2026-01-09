@@ -278,7 +278,10 @@ impl Command {
                 total_latency,
             };
 
-            // Handle waiting based on mode
+            let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
+            info!(%combined_result);
+
+            // Handle waiting based on mode (after logging, matching original behavior)
             if let Some(wait_duration) = wait_time_mode {
                 tokio::time::sleep(wait_duration).await;
             } else if let Some(ref mut sub) = persistence_sub {
@@ -303,9 +306,6 @@ impl Command {
                     debug!(target: "reth-bench", persisted = tracker.last_persisted, "Persistence caught up");
                 }
             }
-
-            let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
-            info!(%combined_result);
 
             let gas_row =
                 TotalGasRow { block_number, transaction_count, gas_used, time: current_duration };
