@@ -4,13 +4,7 @@ use crate::{
 };
 use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::{Address, BlockNumber, Bytes, StorageKey, StorageValue, B256};
-use reth_db_api::{
-    cursor::{DbCursorRO, DbDupCursorRO},
-    table::Table,
-    tables,
-    transaction::DbTx,
-    BlockNumberList,
-};
+use reth_db_api::{cursor::DbDupCursorRO, tables, transaction::DbTx};
 use reth_primitives_traits::{Account, Bytecode};
 use reth_storage_api::{
     BlockNumReader, BytecodeReader, DBProvider, NodePrimitivesProvider, StateProofProvider,
