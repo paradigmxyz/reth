@@ -13,7 +13,9 @@ use crate::{
     providers::{StaticFileProvider, StaticFileProviderRWRefMut},
     StaticFileProviderFactory,
 };
-use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
+use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
+
+use crate::providers::{needs_prev_shard_check, HistoryInfo};
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -720,6 +722,76 @@ where
             Self::RocksDB(tx) => tx.get::<tables::StoragesHistory>(key),
         }
     }
+
+    /// Lookup storage history and return [`HistoryInfo`] directly.
+    ///
+    /// Uses the rank/select logic to efficiently find the first block >= target
+    /// where the storage slot was modified.
+    pub fn storage_history_info(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        match self {
+            Self::Database(cursor, _) => {
+                // Lookup the history chunk in the history index. If the key does not appear in the
+                // index, the first chunk for the next key will be returned so we filter out chunks
+                // that have a different key.
+                let key = StorageShardedKey::new(address, storage_key, block_number);
+                if let Some(chunk) = cursor
+                    .seek(key)?
+                    .filter(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
+                    .map(|x| x.1)
+                {
+                    // Get the rank of the first entry before or equal to our block.
+                    let mut rank = chunk.rank(block_number);
+
+                    // Adjust the rank, so that we have the rank of the first entry strictly before
+                    // our block (not equal to it).
+                    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+                        rank -= 1;
+                    }
+
+                    let found_block = chunk.select(rank);
+
+                    // If our block is before the first entry in the index chunk and this first
+                    // entry doesn't equal to our block, it might be before the first write ever.
+                    // To check, we look at the previous entry and check if the key is the same.
+                    // This check is worth it, the `cursor.prev()` check is rarely triggered (the
+                    // if will short-circuit) and when it passes we save a full seek into the
+                    // changeset/plain state table.
+                    let is_before_first_write =
+                        needs_prev_shard_check(rank, found_block, block_number) &&
+                            cursor.prev()?.is_none_or(|(k, _)| {
+                                k.address != address || k.sharded_key.key != storage_key
+                            });
+
+                    Ok(HistoryInfo::from_lookup(
+                        found_block,
+                        is_before_first_write,
+                        lowest_available_block_number,
+                    ))
+                } else if lowest_available_block_number.is_some() {
+                    // The key may have been written, but due to pruning we may not have changesets
+                    // and history, so we need to make a plain state lookup.
+                    Ok(HistoryInfo::MaybeInPlainState)
+                } else {
+                    // The key has not been written to at all.
+                    Ok(HistoryInfo::NotYetWritten)
+                }
+            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.storage_history_info(
+                address,
+                storage_key,
+                block_number,
+                lowest_available_block_number,
+            ),
+        }
+    }
 }
 
 impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
@@ -736,6 +808,68 @@ where
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::AccountsHistory>(key),
+        }
+    }
+
+    /// Lookup account history and return [`HistoryInfo`] directly.
+    ///
+    /// Uses the rank/select logic to efficiently find the first block >= target
+    /// where the account was modified.
+    pub fn account_history_info(
+        &mut self,
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        match self {
+            Self::Database(cursor, _) => {
+                // Lookup the history chunk in the history index. If the key does not appear in the
+                // index, the first chunk for the next key will be returned so we filter out chunks
+                // that have a different key.
+                let key = ShardedKey::new(address, block_number);
+                if let Some(chunk) =
+                    cursor.seek(key)?.filter(|(k, _)| k.key == address).map(|x| x.1)
+                {
+                    // Get the rank of the first entry before or equal to our block.
+                    let mut rank = chunk.rank(block_number);
+
+                    // Adjust the rank, so that we have the rank of the first entry strictly before
+                    // our block (not equal to it).
+                    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+                        rank -= 1;
+                    }
+
+                    let found_block = chunk.select(rank);
+
+                    // If our block is before the first entry in the index chunk and this first
+                    // entry doesn't equal to our block, it might be before the first write ever.
+                    // To check, we look at the previous entry and check if the key is the same.
+                    // This check is worth it, the `cursor.prev()` check is rarely triggered (the
+                    // if will short-circuit) and when it passes we save a full seek into the
+                    // changeset/plain state table.
+                    let is_before_first_write =
+                        needs_prev_shard_check(rank, found_block, block_number) &&
+                            cursor.prev()?.is_none_or(|(k, _)| k.key != address);
+
+                    Ok(HistoryInfo::from_lookup(
+                        found_block,
+                        is_before_first_write,
+                        lowest_available_block_number,
+                    ))
+                } else if lowest_available_block_number.is_some() {
+                    // The key may have been written, but due to pruning we may not have changesets
+                    // and history, so we need to make a plain state lookup.
+                    Ok(HistoryInfo::MaybeInPlainState)
+                } else {
+                    // The key has not been written to at all.
+                    Ok(HistoryInfo::NotYetWritten)
+                }
+            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => {
+                tx.account_history_info(address, block_number, lowest_available_block_number)
+            }
         }
     }
 }
