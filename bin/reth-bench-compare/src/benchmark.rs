@@ -96,7 +96,7 @@ impl BenchmarkRunner {
             &from_block.to_string(),
             "--to",
             &to_block.to_string(),
-            "--wait-time=0ms", // We just want to warm up caches.
+            "--wait-time=0ms", // Warmup should avoid persistence waits.
         ]);
 
         cmd.env("RUST_LOG_STYLE", "never")
@@ -182,7 +182,7 @@ impl BenchmarkRunner {
             &output_dir.to_string_lossy(),
         ]);
 
-        // Add wait-time argument if provided
+        // If wait_time is provided, use wait-time mode; otherwise uses persistence-based flow
         if let Some(ref wait_time) = self.wait_time {
             cmd.args(["--wait-time", wait_time]);
         }
