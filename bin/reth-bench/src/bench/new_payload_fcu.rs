@@ -103,16 +103,18 @@ impl Command {
             );
         }
 
-        // Set up persistence waiter only if explicitly enabled
-        let mut persistence_waiter = if self.wait_for_persistence {
-            let sub = self.setup_persistence_subscription().await?;
-            Some(PersistenceWaiter::new(
-                sub,
-                self.persistence_threshold,
-                PERSISTENCE_CHECKPOINT_TIMEOUT,
-            ))
-        } else {
-            None
+        // Set up waiter based on configured options (duration takes precedence)
+        let mut waiter = match (self.wait_time, self.wait_for_persistence) {
+            (Some(duration), _) => Some(PersistenceWaiter::with_duration(duration)),
+            (None, true) => {
+                let sub = self.setup_persistence_subscription().await?;
+                Some(PersistenceWaiter::with_subscription(
+                    sub,
+                    self.persistence_threshold,
+                    PERSISTENCE_CHECKPOINT_TIMEOUT,
+                ))
+            }
+            (None, false) => None,
         };
 
         let BenchContext {
@@ -220,12 +222,8 @@ impl Command {
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
             info!(%combined_result);
 
-            // Handle waiting based on configured options
-            if let Some(wait_duration) = self.wait_time {
-                tokio::time::sleep(wait_duration).await;
-            }
-            if let Some(ref mut waiter) = persistence_waiter {
-                waiter.on_block(block_number).await?;
+            if let Some(ref mut w) = waiter {
+                w.on_block(block_number).await?;
             }
 
             let gas_row =
@@ -238,9 +236,9 @@ impl Command {
             return Err(error);
         }
 
-        // Drop persistence waiter - we don't need to wait for final blocks to persist
+        // Drop waiter - we don't need to wait for final blocks to persist
         // since the benchmark goal is measuring Ggas/s of newPayload/FCU, not persistence.
-        drop(persistence_waiter);
+        drop(waiter);
 
         let (gas_output_results, combined_results): (_, Vec<CombinedResult>) =
             results.into_iter().unzip();
@@ -424,12 +422,16 @@ impl PersistenceSubscription {
     }
 }
 
-/// Encapsulates the persistence waiting logic.
+/// Encapsulates the block waiting logic.
 ///
-/// Provides a simple `on_block()` interface that waits for persistence when the
-/// threshold is reached. Waits after every `(threshold + 1)` blocks.
+/// Provides a simple `on_block()` interface that handles both:
+/// - Fixed duration waits (when `wait_time` is set)
+/// - Persistence-based waits (when `subscription` is set)
+///
+/// For persistence mode, waits after every `(threshold + 1)` blocks.
 struct PersistenceWaiter {
-    subscription: PersistenceSubscription,
+    wait_time: Option<Duration>,
+    subscription: Option<PersistenceSubscription>,
     blocks_sent: u64,
     last_persisted: u64,
     threshold: u64,
@@ -437,12 +439,43 @@ struct PersistenceWaiter {
 }
 
 impl PersistenceWaiter {
-    fn new(subscription: PersistenceSubscription, threshold: u64, timeout: Duration) -> Self {
-        Self { subscription, blocks_sent: 0, last_persisted: 0, threshold, timeout }
+    fn with_duration(wait_time: Duration) -> Self {
+        Self {
+            wait_time: Some(wait_time),
+            subscription: None,
+            blocks_sent: 0,
+            last_persisted: 0,
+            threshold: 0,
+            timeout: Duration::ZERO,
+        }
     }
 
-    /// Called once per block. Waits for persistence when the threshold is reached.
+    fn with_subscription(
+        subscription: PersistenceSubscription,
+        threshold: u64,
+        timeout: Duration,
+    ) -> Self {
+        Self {
+            wait_time: None,
+            subscription: Some(subscription),
+            blocks_sent: 0,
+            last_persisted: 0,
+            threshold,
+            timeout,
+        }
+    }
+
+    /// Called once per block. Waits based on the configured mode.
     async fn on_block(&mut self, block_number: u64) -> eyre::Result<()> {
+        if let Some(wait_time) = self.wait_time {
+            tokio::time::sleep(wait_time).await;
+            return Ok(());
+        }
+
+        let Some(ref mut subscription) = self.subscription else {
+            return Ok(());
+        };
+
         self.blocks_sent += 1;
 
         if self.blocks_sent % (self.threshold + 1) == 0 {
@@ -455,7 +488,7 @@ impl PersistenceWaiter {
             );
 
             wait_for_persistence(
-                self.subscription.stream_mut(),
+                subscription.stream_mut(),
                 block_number,
                 &mut self.last_persisted,
                 self.timeout,
