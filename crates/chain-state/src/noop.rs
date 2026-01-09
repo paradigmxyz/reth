@@ -2,7 +2,7 @@
 
 use crate::{
     CanonStateNotifications, CanonStateSubscriptions, ForkChoiceNotifications,
-    ForkChoiceSubscriptions,
+    ForkChoiceSubscriptions, PersistedBlockNotifications, PersistedBlockSubscriptions,
 };
 use reth_primitives_traits::NodePrimitives;
 use reth_storage_api::noop::NoopProvider;
@@ -25,5 +25,12 @@ impl<C: Send + Sync, N: NodePrimitives> ForkChoiceSubscriptions for NoopProvider
     fn subscribe_finalized_block(&self) -> ForkChoiceNotifications<N::BlockHeader> {
         let (_, rx) = watch::channel(None);
         ForkChoiceNotifications(rx)
+    }
+}
+
+impl<C: Send + Sync, N: NodePrimitives> PersistedBlockSubscriptions for NoopProvider<C, N> {
+    fn subscribe_persisted_block(&self) -> PersistedBlockNotifications {
+        let (_, rx) = watch::channel(None);
+        PersistedBlockNotifications(rx)
     }
 }
