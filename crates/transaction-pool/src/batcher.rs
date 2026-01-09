@@ -71,7 +71,7 @@ where
         let _ = response_tx.send(pool_result);
     }
 
-    /// Process a batch of transaction requests, grouped by origin
+    /// Process a batch of local transaction requests.
     async fn process_batch(pool: &Pool, mut batch: Vec<BatchTxRequest<Pool::Transaction>>) {
         if batch.len() == 1 {
             Self::process_request(pool, batch.remove(0)).await;
