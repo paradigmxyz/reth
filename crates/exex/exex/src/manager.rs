@@ -38,11 +38,14 @@ use tokio_util::sync::{PollSendError, PollSender, ReusableBoxFuture};
 /// or 17 minutes of 1-second blocks.
 pub const DEFAULT_EXEX_MANAGER_CAPACITY: usize = 1024;
 
-/// The maximum number of blocks allowed in the WAL before emitting a warning.
+/// Default maximum number of blocks allowed in the WAL before emitting a warning.
 ///
-/// This constant defines the threshold for the Write-Ahead Log (WAL) size. If the number of blocks
-/// in the WAL exceeds this limit, a warning is logged to indicate potential issues.
-pub const WAL_BLOCKS_WARNING: usize = 128;
+/// This constant defines the default threshold for the Write-Ahead Log (WAL) size. If the number
+/// of blocks in the WAL exceeds this limit, a warning is logged to indicate potential issues.
+///
+/// This value is appropriate for Ethereum mainnet with ~12 second block times. For L2 chains with
+/// faster block times, this value should be increased proportionally to avoid excessive warnings.
+pub const DEFAULT_WAL_BLOCKS_WARNING: usize = 128;
 
 /// The source of the notification.
 ///
@@ -247,6 +250,8 @@ pub struct ExExManager<P, N: NodePrimitives> {
     wal: Wal<N>,
     /// A stream of finalized headers.
     finalized_header_stream: ForkChoiceStream<SealedHeader<N::BlockHeader>>,
+    /// The threshold for the number of blocks in the WAL before emitting a warning.
+    wal_blocks_warning: usize,
 
     /// A handle to the `ExEx` manager.
     handle: ExExManagerHandle<N>,
@@ -306,6 +311,7 @@ where
 
             wal,
             finalized_header_stream,
+            wal_blocks_warning: DEFAULT_WAL_BLOCKS_WARNING,
 
             handle: ExExManagerHandle {
                 exex_tx: handle_tx,
@@ -322,6 +328,16 @@ where
     /// Returns the handle to the manager.
     pub fn handle(&self) -> ExExManagerHandle<N> {
         self.handle.clone()
+    }
+
+    /// Sets the threshold for the number of blocks in the WAL before emitting a warning.
+    ///
+    /// For L2 chains with faster block times, this value should be increased proportionally
+    /// to avoid excessive warnings. For example, a chain with 2-second block times might use
+    /// a value 6x higher than the default.
+    pub const fn with_wal_blocks_warning(mut self, threshold: usize) -> Self {
+        self.wal_blocks_warning = threshold;
+        self
     }
 
     /// Updates the current buffer capacity and notifies all `is_ready` watchers of the manager's
@@ -390,10 +406,11 @@ where
                 .unwrap();
 
             self.wal.finalize(lowest_finished_height)?;
-            if self.wal.num_blocks() > WAL_BLOCKS_WARNING {
+            if self.wal.num_blocks() > self.wal_blocks_warning {
                 warn!(
                     target: "exex::manager",
                     blocks = ?self.wal.num_blocks(),
+                    threshold = self.wal_blocks_warning,
                     "WAL contains too many blocks and is not getting cleared. That will lead to increased disk space usage. Check that you emit the FinishedHeight event from your ExExes."
                 );
             }
