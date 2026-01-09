@@ -27,7 +27,7 @@ use crate::BuiltPayloadConversionError;
 ///
 /// This struct represents a single built block at a point in time. The payload building process
 /// creates a sequence of these payloads, starting with an empty block and progressively including
-/// more transactions as the [`PayloadBuilderService`] runs.
+/// more transactions.
 #[derive(Debug, Clone)]
 pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     /// Identifier of the payload
