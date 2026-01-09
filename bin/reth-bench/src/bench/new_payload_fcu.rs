@@ -1,11 +1,13 @@
 //! Runs the `reth bench` command, calling first newPayload for each block, then calling
 //! forkchoiceUpdated.
 //!
-//! Supports two execution modes:
-//! - **Wait-time mode**: If `--wait-time` is provided, uses fixed sleep intervals between blocks
-//!   and disables persistence waits.
-//! - **Persistence mode**: If `--wait-time` is not provided, waits for every Nth block to be
-//!   persisted using the `reth_subscribePersistedBlock` subscription.
+//! Supports configurable waiting behavior:
+//! - **`--wait-time`**: Fixed sleep interval between blocks.
+//! - **`--wait-for-persistence`**: Waits for every Nth block to be persisted using the
+//!   `reth_subscribePersistedBlock` subscription, where N matches the engine's persistence
+//!   threshold. This ensures the benchmark doesn't outpace persistence.
+//!
+//! Both options can be used together or independently.
 
 use crate::{
     bench::{
@@ -22,8 +24,7 @@ use alloy_network::Ethereum;
 use alloy_provider::{Provider, RootProvider};
 use alloy_pubsub::SubscriptionStream;
 use alloy_rpc_client::RpcClient;
-use alloy_rpc_types_engine::{ForkchoiceState, JwtSecret};
-use alloy_transport::Authorization;
+use alloy_rpc_types_engine::ForkchoiceState;
 use alloy_transport_ws::WsConnect;
 use clap::Parser;
 use csv::Writer;
@@ -37,90 +38,7 @@ use std::time::{Duration, Instant};
 use tracing::{debug, info};
 use url::Url;
 
-/// Wrapper that keeps both the subscription stream and the underlying provider alive.
-/// The provider must be kept alive for the subscription to continue receiving events.
-struct PersistenceSubscription {
-    _provider: RootProvider<Ethereum>,
-    stream: SubscriptionStream<BlockNumHash>,
-}
-
-impl PersistenceSubscription {
-    const fn new(
-        provider: RootProvider<Ethereum>,
-        stream: SubscriptionStream<BlockNumHash>,
-    ) -> Self {
-        Self { _provider: provider, stream }
-    }
-
-    const fn stream_mut(&mut self) -> &mut SubscriptionStream<BlockNumHash> {
-        &mut self.stream
-    }
-}
-
-/// Persistence threshold: wait for persistence after every (N+1) blocks.
-/// This matches the engine's behavior which persists when gap > N.
-/// With `DEFAULT_PERSISTENCE_THRESHOLD=2`, waits at blocks 3, 6, 9, etc.
-const PERSISTENCE_THRESHOLD: u64 = DEFAULT_PERSISTENCE_THRESHOLD;
 const PERSISTENCE_CHECKPOINT_TIMEOUT: Duration = Duration::from_secs(60);
-
-/// Tracks persistence state for the benchmark.
-struct PersistenceTracker {
-    blocks_sent: u64,
-    last_persisted: u64,
-    last_block_number: u64,
-}
-
-impl PersistenceTracker {
-    const fn new() -> Self {
-        Self { blocks_sent: 0, last_persisted: 0, last_block_number: 0 }
-    }
-
-    const fn record_block(&mut self, block_number: u64) {
-        self.blocks_sent += 1;
-        self.last_block_number = block_number;
-    }
-
-    #[allow(clippy::manual_is_multiple_of)]
-    const fn should_wait(&self) -> bool {
-        self.blocks_sent % (PERSISTENCE_THRESHOLD + 1) == 0
-    }
-}
-
-/// Wait for persistence to catch up to target block
-async fn wait_for_persistence(
-    stream: &mut SubscriptionStream<BlockNumHash>,
-    target: u64,
-    last_persisted: &mut u64,
-    timeout: Duration,
-) -> eyre::Result<()> {
-    tokio::time::timeout(timeout, async {
-        while *last_persisted < target {
-            match stream.next().await {
-                Some(persisted) => {
-                    *last_persisted = persisted.number;
-                    debug!(
-                        target: "reth-bench",
-                        persisted_block = ?last_persisted,
-                        "Received persistence notification"
-                    );
-                }
-                None => {
-                    return Err(eyre::eyre!("Persistence subscription closed unexpectedly"));
-                }
-            }
-        }
-        Ok(())
-    })
-    .await
-    .map_err(|_| {
-        eyre::eyre!(
-            "Persistence timeout: target block {} not persisted within {:?}. Last persisted: {}",
-            target,
-            timeout,
-            last_persisted
-        )
-    })?
-}
 
 /// `reth benchmark new-payload-fcu` command
 #[derive(Debug, Parser)]
@@ -130,9 +48,31 @@ pub struct Command {
     rpc_url: String,
 
     /// How long to wait after a forkchoice update before sending the next payload.
-    /// If provided, uses wait-time mode (fixed waits) and disables persistence-based flow.
     #[arg(long, value_name = "WAIT_TIME", value_parser = parse_duration, verbatim_doc_comment)]
     wait_time: Option<Duration>,
+
+    /// Wait for blocks to be persisted before sending the next batch.
+    ///
+    /// When enabled, waits for every Nth block to be persisted using the
+    /// `reth_subscribePersistedBlock` subscription. This ensures the benchmark
+    /// doesn't outpace persistence.
+    ///
+    /// The subscription uses the regular RPC WebSocket endpoint (no JWT required).
+    #[arg(long, default_value = "false", verbatim_doc_comment)]
+    wait_for_persistence: bool,
+
+    /// Engine persistence threshold used for deciding when to wait for persistence.
+    ///
+    /// The benchmark waits after every `(threshold + 1)` blocks. By default this
+    /// matches the engine's `DEFAULT_PERSISTENCE_THRESHOLD` (2), so waits occur
+    /// at blocks 3, 6, 9, etc.
+    #[arg(
+        long = "persistence-threshold",
+        value_name = "PERSISTENCE_THRESHOLD",
+        default_value_t = DEFAULT_PERSISTENCE_THRESHOLD,
+        verbatim_doc_comment
+    )]
+    persistence_threshold: u64,
 
     /// The size of the block buffer (channel capacity) for prefetching blocks from the RPC
     /// endpoint.
@@ -151,28 +91,26 @@ pub struct Command {
 impl Command {
     /// Execute `benchmark new-payload-fcu` command
     pub async fn execute(self, _ctx: CliContext) -> eyre::Result<()> {
-        // Determine which mode to use based on wait_time
-        let wait_time_mode = match self.wait_time {
-            Some(duration) => {
-                info!(
-                    "Using wait-time mode with {}ms delay (persistence disabled)",
-                    duration.as_millis()
-                );
-                Some(duration)
-            }
-            None => {
-                info!(
-                    "Using persistence-based flow (waits after every {} blocks to match engine gap > {} behavior)",
-                    PERSISTENCE_THRESHOLD + 1,
-                    PERSISTENCE_THRESHOLD
-                );
-                None
-            }
-        };
+        // Log mode configuration
+        if let Some(duration) = self.wait_time {
+            info!("Using wait-time mode with {}ms delay between blocks", duration.as_millis());
+        }
+        if self.wait_for_persistence {
+            info!(
+                "Persistence waiting enabled (waits after every {} blocks to match engine gap > {} behavior)",
+                self.persistence_threshold + 1,
+                self.persistence_threshold
+            );
+        }
 
-        // Set up persistence subscription only if using persistence mode
-        let mut persistence_sub = if wait_time_mode.is_none() {
-            Some(self.setup_persistence_subscription().await?)
+        // Set up persistence waiter only if explicitly enabled
+        let mut persistence_waiter = if self.wait_for_persistence {
+            let sub = self.setup_persistence_subscription().await?;
+            Some(PersistenceWaiter::new(
+                sub,
+                self.persistence_threshold,
+                PERSISTENCE_CHECKPOINT_TIMEOUT,
+            ))
         } else {
             None
         };
@@ -237,7 +175,6 @@ impl Command {
             }
         });
 
-        let mut tracker = PersistenceTracker::new();
         let mut results = Vec::new();
         let total_benchmark_duration = Instant::now();
         let mut total_wait_time = Duration::ZERO;
@@ -278,33 +215,17 @@ impl Command {
                 total_latency,
             };
 
+            // Exclude time spent waiting on the block prefetch channel from the benchmark duration.
+            // We want to measure engine throughput, not RPC fetch latency.
             let current_duration = total_benchmark_duration.elapsed() - total_wait_time;
             info!(%combined_result);
 
-            // Handle waiting based on mode (after logging, matching original behavior)
-            if let Some(wait_duration) = wait_time_mode {
+            // Handle waiting based on configured options
+            if let Some(wait_duration) = self.wait_time {
                 tokio::time::sleep(wait_duration).await;
-            } else if let Some(ref mut sub) = persistence_sub {
-                tracker.record_block(block_number);
-
-                if tracker.should_wait() {
-                    debug!(
-                        target: "reth-bench",
-                        target_block = ?block_number,
-                        last_persisted = ?tracker.last_persisted,
-                        blocks_sent = tracker.blocks_sent,
-                        "Waiting for persistence"
-                    );
-
-                    wait_for_persistence(
-                        sub.stream_mut(),
-                        block_number,
-                        &mut tracker.last_persisted,
-                        PERSISTENCE_CHECKPOINT_TIMEOUT,
-                    )
-                    .await?;
-                    debug!(target: "reth-bench", persisted = tracker.last_persisted, "Persistence caught up");
-                }
+            }
+            if let Some(ref mut waiter) = persistence_waiter {
+                waiter.on_block(block_number).await?;
             }
 
             let gas_row =
@@ -317,9 +238,9 @@ impl Command {
             return Err(error);
         }
 
-        // Drop persistence subscription - we don't need to wait for final blocks to persist
+        // Drop persistence waiter - we don't need to wait for final blocks to persist
         // since the benchmark goal is measuring Ggas/s of newPayload/FCU, not persistence.
-        drop(persistence_sub);
+        drop(persistence_waiter);
 
         let (gas_output_results, combined_results): (_, Vec<CombinedResult>) =
             results.into_iter().unzip();
@@ -358,7 +279,17 @@ impl Command {
         Ok(())
     }
 
-    fn derive_local_rpc_url(&self) -> eyre::Result<Url> {
+    /// Returns the WebSocket RPC URL used for the persistence subscription.
+    ///
+    /// Preference:
+    /// - If `--ws-rpc-url` is provided, use it directly.
+    /// - Otherwise, derive a WS RPC URL from `--engine-rpc-url`.
+    ///
+    /// The persistence subscription endpoint (`reth_subscribePersistedBlock`) is exposed on
+    /// the regular RPC server (WS port, usually 8546), not on the engine API port (usually 8551).
+    /// Since `BenchmarkArgs` only has the engine URL by default, we convert the scheme
+    /// (http→ws, https→wss) and force the port to 8546.
+    fn derive_ws_rpc_url(&self) -> eyre::Result<Url> {
         if let Some(ref ws_url) = self.benchmark.ws_rpc_url {
             let parsed: Url = ws_url
                 .parse()
@@ -367,31 +298,25 @@ impl Command {
             Ok(parsed)
         } else {
             let derived = engine_url_to_ws_url(&self.benchmark.engine_rpc_url)?;
-            debug!(target: "reth-bench", engine_url = %self.benchmark.engine_rpc_url, %derived, "Derived WebSocket URL");
+            debug!(
+                target: "reth-bench",
+                engine_url = %self.benchmark.engine_rpc_url,
+                %derived,
+                "Derived WebSocket RPC URL from engine RPC URL"
+            );
             Ok(derived)
         }
     }
 
     async fn setup_persistence_subscription(&self) -> eyre::Result<PersistenceSubscription> {
-        let auth_jwt = self
-            .benchmark
-            .auth_jwtsecret
-            .clone()
-            .ok_or_else(|| eyre::eyre!("--jwt-secret must be provided for persistence mode"))?;
-
-        let jwt_str = std::fs::read_to_string(&auth_jwt)?;
-        let jwt = JwtSecret::from_hex(&jwt_str)?;
-        let ws_url = self.derive_local_rpc_url()?;
-
-        let claims = alloy_rpc_types_engine::Claims::default();
-        let token = jwt.encode(&claims)?;
+        let ws_url = self.derive_ws_rpc_url()?;
 
         info!("Connecting to WebSocket at {} for persistence subscription", ws_url);
 
-        let ws_connect = WsConnect::new(ws_url.to_string()).with_auth(Authorization::Bearer(token));
+        let ws_connect = WsConnect::new(ws_url.to_string());
         let client = RpcClient::connect_pubsub(ws_connect)
             .await
-            .wrap_err("Failed to connect to WebSocket")?;
+            .wrap_err("Failed to connect to WebSocket RPC endpoint")?;
         let provider: RootProvider<Ethereum> = RootProvider::new(client);
 
         let subscription = provider
@@ -401,12 +326,20 @@ impl Command {
 
         info!("Subscribed to persistence notifications");
 
-        // Keep both provider and stream alive together
         Ok(PersistenceSubscription::new(provider, subscription.into_stream()))
     }
 }
 
-/// Converts engine API URL to WS RPC URL (http->ws, https->wss, port 8546).
+/// Converts an engine API URL to the default RPC WebSocket URL.
+///
+/// Transformations:
+/// - `http`  → `ws`
+/// - `https` → `wss`
+/// - `ws` / `wss` keep their scheme
+/// - Port is always set to `8546`, reth's default RPC WebSocket port.
+///
+/// This is used when we only know the engine API URL (typically `:8551`) but
+/// need to connect to the node's WS RPC endpoint for persistence events.
 fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
     let url: Url = engine_url
         .parse()
@@ -434,6 +367,113 @@ fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
     Ok(ws_url)
 }
 
+/// Waits until the persistence subscription reports that `target` has been persisted.
+///
+/// Consumes subscription events until `last_persisted >= target`, or returns an error if:
+/// - the subscription stream ends unexpectedly, or
+/// - `timeout` elapses before `target` is observed.
+async fn wait_for_persistence(
+    stream: &mut SubscriptionStream<BlockNumHash>,
+    target: u64,
+    last_persisted: &mut u64,
+    timeout: Duration,
+) -> eyre::Result<()> {
+    tokio::time::timeout(timeout, async {
+        while *last_persisted < target {
+            match stream.next().await {
+                Some(persisted) => {
+                    *last_persisted = persisted.number;
+                    debug!(
+                        target: "reth-bench",
+                        persisted_block = ?last_persisted,
+                        "Received persistence notification"
+                    );
+                }
+                None => {
+                    return Err(eyre::eyre!("Persistence subscription closed unexpectedly"));
+                }
+            }
+        }
+        Ok(())
+    })
+    .await
+    .map_err(|_| {
+        eyre::eyre!(
+            "Persistence timeout: target block {} not persisted within {:?}. Last persisted: {}",
+            target,
+            timeout,
+            last_persisted
+        )
+    })?
+}
+
+/// Wrapper that keeps both the subscription stream and the underlying provider alive.
+/// The provider must be kept alive for the subscription to continue receiving events.
+struct PersistenceSubscription {
+    _provider: RootProvider<Ethereum>,
+    stream: SubscriptionStream<BlockNumHash>,
+}
+
+impl PersistenceSubscription {
+    fn new(provider: RootProvider<Ethereum>, stream: SubscriptionStream<BlockNumHash>) -> Self {
+        Self { _provider: provider, stream }
+    }
+
+    fn stream_mut(&mut self) -> &mut SubscriptionStream<BlockNumHash> {
+        &mut self.stream
+    }
+}
+
+/// Encapsulates the persistence waiting logic.
+///
+/// Provides a simple `on_block()` interface that waits for persistence when the
+/// threshold is reached. Waits after every `(threshold + 1)` blocks.
+struct PersistenceWaiter {
+    subscription: PersistenceSubscription,
+    blocks_sent: u64,
+    last_persisted: u64,
+    threshold: u64,
+    timeout: Duration,
+}
+
+impl PersistenceWaiter {
+    fn new(subscription: PersistenceSubscription, threshold: u64, timeout: Duration) -> Self {
+        Self { subscription, blocks_sent: 0, last_persisted: 0, threshold, timeout }
+    }
+
+    /// Called once per block. Waits for persistence when the threshold is reached.
+    #[allow(clippy::manual_is_multiple_of)]
+    async fn on_block(&mut self, block_number: u64) -> eyre::Result<()> {
+        self.blocks_sent += 1;
+
+        if self.blocks_sent % (self.threshold + 1) == 0 {
+            debug!(
+                target: "reth-bench",
+                target_block = ?block_number,
+                last_persisted = self.last_persisted,
+                blocks_sent = self.blocks_sent,
+                "Waiting for persistence"
+            );
+
+            wait_for_persistence(
+                self.subscription.stream_mut(),
+                block_number,
+                &mut self.last_persisted,
+                self.timeout,
+            )
+            .await?;
+
+            debug!(
+                target: "reth-bench",
+                persisted = self.last_persisted,
+                "Persistence caught up"
+            );
+        }
+
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -459,5 +499,21 @@ mod tests {
         // Invalid inputs
         assert!(engine_url_to_ws_url("ftp://localhost:8551").is_err());
         assert!(engine_url_to_ws_url("not a valid url").is_err());
+    }
+
+    #[test]
+    fn test_persistence_wait_threshold() {
+        // With threshold=2, should wait after blocks 3, 6, 9, etc.
+        // blocks_sent % (threshold + 1) == 0
+        let threshold = 2u64;
+
+        let should_wait = |blocks_sent: u64| blocks_sent % (threshold + 1) == 0;
+
+        assert!(!should_wait(1)); // block 1
+        assert!(!should_wait(2)); // block 2
+        assert!(should_wait(3)); // block 3: (threshold + 1)
+        assert!(!should_wait(4)); // block 4
+        assert!(!should_wait(5)); // block 5
+        assert!(should_wait(6)); // block 6: 2 * (threshold + 1)
     }
 }
