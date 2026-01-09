@@ -415,43 +415,20 @@ impl Command {
         Ok(())
     }
 
-    /// Gets the WebSocket URL for persistence subscription.
-    ///
-    /// If --ws-rpc-url is explicitly provided, uses that.
-    /// Otherwise, derives from the engine API URL:
-    /// - http://localhost:8551 (engine API) → ws://localhost:8546 (RPC WebSocket)
     fn derive_local_rpc_url(&self) -> eyre::Result<Url> {
-        let local_url = if let Some(ref ws_url) = self.benchmark.ws_rpc_url {
-            // Use explicitly provided WebSocket URL
-            let parsed_url: Url = ws_url
+        if let Some(ref ws_url) = self.benchmark.ws_rpc_url {
+            let parsed: Url = ws_url
                 .parse()
                 .wrap_err_with(|| format!("Failed to parse WebSocket RPC URL: {ws_url}"))?;
-
-            info!(
-                target: "reth-bench",
-                ws_url = %parsed_url,
-                "Using explicitly provided WebSocket RPC URL"
-            );
-
-            parsed_url
+            info!(target: "reth-bench", ws_url = %parsed, "Using provided WebSocket RPC URL");
+            Ok(parsed)
         } else {
-            // Derive from engine API URL
-            let derived_url = engine_url_to_ws_url(&self.benchmark.engine_rpc_url)?;
-
-            debug!(
-                target: "reth-bench",
-                engine_url = %self.benchmark.engine_rpc_url,
-                derived_url = %derived_url,
-                "Derived WebSocket URL from engine API URL (use --ws-rpc-url to override)"
-            );
-
-            derived_url
-        };
-
-        Ok(local_url)
+            let derived = engine_url_to_ws_url(&self.benchmark.engine_rpc_url)?;
+            debug!(target: "reth-bench", engine_url = %self.benchmark.engine_rpc_url, %derived, "Derived WebSocket URL");
+            Ok(derived)
+        }
     }
 
-    /// Set up WebSocket subscription for persistence notifications using Alloy pubsub
     async fn setup_persistence_subscription(
         &self,
     ) -> eyre::Result<SubscriptionStream<BlockNumHash>> {
@@ -463,44 +440,30 @@ impl Command {
 
         let jwt_str = std::fs::read_to_string(&auth_jwt)?;
         let jwt = JwtSecret::from_hex(&jwt_str)?;
-
-        // Derive local reth node's WebSocket URL from engine API URL
         let ws_url = self.derive_local_rpc_url()?;
 
-        // Build JWT authorization
         let claims = alloy_rpc_types_engine::Claims::default();
         let token = jwt.encode(&claims)?;
 
         info!("Connecting to WebSocket at {} for persistence subscription", ws_url);
 
-        // Create WS client with pubsub support
         let ws_connect = WsConnect::new(ws_url.to_string()).with_auth(Authorization::Bearer(token));
         let client = RpcClient::connect_pubsub(ws_connect)
             .await
             .wrap_err("Failed to connect to WebSocket")?;
         let provider: RootProvider<Ethereum> = RootProvider::new(client);
 
-        // Subscribe to persistence notifications
         let subscription = provider
             .subscribe_to::<BlockNumHash>("reth_subscribePersistedBlock")
             .await
             .wrap_err("Failed to subscribe to persistence notifications")?;
 
         info!("Subscribed to persistence notifications");
-
         Ok(subscription.into_stream())
     }
 }
 
-/// Converts an engine API URL to the corresponding RPC WebSocket URL as a fallback.
-///
-/// This is used when --ws-rpc-url is not explicitly provided. It makes a best-effort attempt
-/// to derive the WebSocket URL from the engine API URL:
-/// - Converts http/https to ws/wss
-/// - Always uses port 8546 (standard RPC WebSocket port)
-///
-/// Note: This assumes the WebSocket server is on port 8546. If your setup uses a different
-/// port, use --ws-rpc-url to specify the correct URL explicitly.
+/// Converts engine API URL to WS RPC URL (http->ws, https->wss, port 8546).
 fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
     let url: Url = engine_url
         .parse()
@@ -523,8 +486,6 @@ fn engine_url_to_ws_url(engine_url: &str) -> eyre::Result<Url> {
         }
     }
 
-    // Always use port 8546 for the WS RPC endpoint, regardless of engine API port.
-    // The engine API can be on any port (8551, 9551, etc.) but the WS RPC is always 8546.
     ws_url.set_port(Some(8546)).map_err(|_| eyre::eyre!("Failed to set port for URL: {url}"))?;
 
     Ok(ws_url)
