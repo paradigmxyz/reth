@@ -24,8 +24,10 @@ use crate::BuiltPayloadConversionError;
 /// Contains the built payload.
 ///
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
-/// Therefore, the empty-block here is always available and full-block will be set/updated
-/// afterward.
+///
+/// This struct represents a single built block at a point in time. The payload building process
+/// creates a sequence of these payloads, starting with an empty block and progressively including
+/// more transactions as the [`PayloadBuilderService`] runs.
 #[derive(Debug, Clone)]
 pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     /// Identifier of the payload
