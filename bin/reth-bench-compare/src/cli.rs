@@ -114,8 +114,11 @@ pub(crate) struct Args {
     #[arg(long)]
     pub profile: bool,
 
-    /// Wait time between engine API calls (passed to reth-bench)
-    #[arg(long, value_name = "DURATION")]
+    /// Optional fixed delay between engine API calls (passed to reth-bench).
+    ///
+    /// When set, reth-bench uses wait-time mode and disables persistence-based flow.
+    /// This flag remains for compatibility with older scripts.
+    #[arg(long, value_name = "DURATION", hide = true)]
     pub wait_time: Option<String>,
 
     /// Number of blocks to run for cache warmup after clearing caches.
