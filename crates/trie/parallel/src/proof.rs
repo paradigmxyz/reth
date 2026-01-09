@@ -1,5 +1,4 @@
 use crate::{
-    metrics::ParallelTrieMetrics,
     proof_task::{
         AccountMultiproofInput, ProofResult, ProofResultContext, ProofWorkerHandle,
         StorageProofInput, StorageProofResultMessage,
@@ -35,13 +34,11 @@ pub struct ParallelProof {
     proof_worker_handle: ProofWorkerHandle,
     /// Whether to use V2 storage proofs.
     v2_proofs_enabled: bool,
-    #[cfg(feature = "metrics")]
-    metrics: ParallelTrieMetrics,
 }
 
 impl ParallelProof {
     /// Create new state proof generator.
-    pub fn new(
+    pub const fn new(
         prefix_sets: Arc<TriePrefixSetsMut>,
         proof_worker_handle: ProofWorkerHandle,
     ) -> Self {
@@ -51,8 +48,6 @@ impl ParallelProof {
             multi_added_removed_keys: None,
             proof_worker_handle,
             v2_proofs_enabled: false,
-            #[cfg(feature = "metrics")]
-            metrics: ParallelTrieMetrics::new_with_labels(&[("type", "proof")]),
         }
     }
 
@@ -194,7 +189,6 @@ impl ParallelProof {
         let (result_tx, result_rx) = crossbeam_unbounded();
         let account_multiproof_start_time = Instant::now();
 
-        // TODO switch on v2_enabled
         let input = AccountMultiproofInput::Legacy {
             targets,
             prefix_sets,
@@ -219,7 +213,9 @@ impl ParallelProof {
             )
         })?;
 
-        let ProofResult::Legacy { proof: multiproof } = proof_result_msg.result? else { todo!() };
+        let ProofResult::Legacy(multiproof) = proof_result_msg.result? else {
+            panic!("AccountMultiproofInput::Legacy was submitted, expected legacy result")
+        };
 
         trace!(
             target: "trie::parallel_proof",

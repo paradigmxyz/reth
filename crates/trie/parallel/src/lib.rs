@@ -30,5 +30,5 @@ pub mod metrics;
 #[cfg(feature = "metrics")]
 pub mod proof_task_metrics;
 
-/// Implementation of value encoder for proof_v2
+/// Implementation of value encoder for `proof_v2`
 mod value_encoder;

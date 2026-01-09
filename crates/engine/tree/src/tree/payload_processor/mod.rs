@@ -289,7 +289,8 @@ where
             config.multiproof_chunking_enabled().then_some(config.multiproof_chunk_size()),
             to_multi_proof.clone(),
             from_multi_proof,
-        );
+        )
+        .with_v2_proofs_enabled(v2_proofs_enabled);
 
         // spawn multi-proof task
         let parent_span = span.clone();

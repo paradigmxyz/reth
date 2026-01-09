@@ -13,15 +13,7 @@ use reth_trie::{
     proof_v2::{DeferredValueEncoder, LeafValueEncoder, Target},
     ProofTrieNode,
 };
-use std::{cell::Cell, rc::Rc, sync::Arc};
-
-/// Tracks the receiver used for receiving the results from storage proof jobs, as well as a Cell
-/// which is used to exfiltrate those results after they've been used within the
-/// [`AsyncAccountDeferredValueEncoder`].
-pub(crate) struct DispatchedStorageProof {
-    proof_result_rx: CrossbeamReceiver<StorageProofResultMessage>,
-    proof_nodes: Cell<Option<Result<StorageProofResult, StateProofError>>>,
-}
+use std::{rc::Rc, sync::Arc};
 
 /// Returned from [`AsyncAccountValueEncoder`], used to track an async storage root calculation.
 pub(crate) enum AsyncAccountDeferredValueEncoder {
@@ -29,7 +21,8 @@ pub(crate) enum AsyncAccountDeferredValueEncoder {
         hashed_address: B256,
         account: Account,
         proof_result_rx: Result<CrossbeamReceiver<StorageProofResultMessage>, DatabaseError>,
-        storage_proof_results: Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>,
+        // None if results shouldn't be retained for this dispatched proof.
+        storage_proof_results: Option<Rc<RefCell<B256Map<Vec<ProofTrieNode>>>>>,
     },
     FromCache {
         account: Account,
@@ -59,7 +52,9 @@ impl DeferredValueEncoder for AsyncAccountDeferredValueEncoder {
                     panic!("StorageProofResult is not V2 with root: {result:?}")
                 };
 
-                storage_proof_results.borrow_mut().insert(hashed_address, proof);
+                if let Some(storage_proof_results) = storage_proof_results.as_ref() {
+                    storage_proof_results.borrow_mut().insert(hashed_address, proof);
+                }
 
                 (account, root)
             }
@@ -104,12 +99,39 @@ impl AsyncAccountValueEncoder {
         }
     }
 
-    ///// Consume [`Self`] and return all collected storage proofs which had been dispatched.
-    //pub(crate) fn into_storage_proofs(
-    //    mut self,
-    //) -> Result<B256Map<Vec<ProofTrieNode>>, DatabaseError> {
-    //    let mut storage_proof_results = self.storage_proof_results.into_inner();
-    //}
+    /// Consume [`Self`] and return all collected storage proofs which had been dispatched.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if any deferred encoders produced by [`Self::deferred_encoder`] have not
+    /// been dropped.
+    pub(crate) fn into_storage_proofs(
+        self,
+    ) -> Result<B256Map<Vec<ProofTrieNode>>, StateProofError> {
+        let mut storage_proof_results = Rc::into_inner(self.storage_proof_results)
+            .expect("no deferred encoders are still allocated")
+            .into_inner();
+
+        // Any remaining dispatched proofs need to have their results collected
+        for (hashed_address, rx) in &self.dispatched {
+            let result = rx
+                .recv()
+                .map_err(|_| {
+                    StateProofError::Database(DatabaseError::Other(format!(
+                        "Storage proof channel closed for {hashed_address:?}",
+                    )))
+                })?
+                .result?;
+
+            let StorageProofResult::V2 { proof, .. } = result else {
+                panic!("StorageProofResult is not V2: {result:?}")
+            };
+
+            storage_proof_results.insert(*hashed_address, proof);
+        }
+
+        Ok(storage_proof_results)
+    }
 }
 
 impl LeafValueEncoder for AsyncAccountValueEncoder {
@@ -123,12 +145,12 @@ impl LeafValueEncoder for AsyncAccountValueEncoder {
     ) -> Self::DeferredEncoder {
         // If the proof job has already been dispatched for this account then it's not necessary to
         // dispatch another.
-        if let Some(rx) = self.dispatched.get(&hashed_address) {
+        if let Some(rx) = self.dispatched.remove(&hashed_address) {
             return AsyncAccountDeferredValueEncoder::Dispatched {
                 hashed_address,
                 account,
-                proof_result_rx: Ok(rx.clone()),
-                storage_proof_results: self.storage_proof_results.clone(),
+                proof_result_rx: Ok(rx),
+                storage_proof_results: Some(self.storage_proof_results.clone()),
             }
         }
 
@@ -155,7 +177,7 @@ impl LeafValueEncoder for AsyncAccountValueEncoder {
             hashed_address,
             account,
             proof_result_rx,
-            storage_proof_results: self.storage_proof_results.clone(),
+            storage_proof_results: None,
         }
     }
 }

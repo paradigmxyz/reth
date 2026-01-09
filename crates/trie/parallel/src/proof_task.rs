@@ -599,19 +599,78 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
     }
 }
 
+/// Result of a V2 multiproof calculation.
+#[derive(Debug, Default)]
+pub struct DecodedMultiProofV2 {
+    /// Account trie proof nodes
+    pub account_proofs: Vec<ProofTrieNode>,
+    /// Storage trie proof nodes indexed by account
+    pub storage_proofs: B256Map<Vec<ProofTrieNode>>,
+}
+
+impl DecodedMultiProofV2 {
+    /// Returns true if there are no proofs
+    pub fn is_empty(&self) -> bool {
+        self.account_proofs.is_empty() && self.storage_proofs.is_empty()
+    }
+
+    /// Appends the given multiproof's data to this one.
+    ///
+    /// This implementation does not deduplicate redundant proofs.
+    pub fn extend(&mut self, other: Self) {
+        self.account_proofs.extend(other.account_proofs);
+        for (hashed_address, other_storage_proofs) in other.storage_proofs {
+            self.storage_proofs.entry(hashed_address).or_default().extend(other_storage_proofs);
+        }
+    }
+}
+
 /// Result of a multiproof calculation.
 #[derive(Debug)]
 pub enum ProofResult {
-    Legacy {
-        /// The account multiproof
-        proof: DecodedMultiProof,
-    },
-    V2 {
-        /// Account trie proof nodes
-        account_proofs: Vec<ProofTrieNode>,
-        /// Storage trie proof nodes indexed by account
-        storage_proofs: B256Map<Vec<ProofTrieNode>>,
-    },
+    /// Legacy multiproof calculation result.
+    Legacy(DecodedMultiProof),
+    /// V2 multiproof calculation result.
+    V2(DecodedMultiProofV2),
+}
+
+impl ProofResult {
+    /// Returns true if the result contains no proofs
+    pub fn is_empty(&self) -> bool {
+        match self {
+            Self::Legacy(proof) => proof.is_empty(),
+            Self::V2(proof) => proof.is_empty(),
+        }
+    }
+
+    /// Extends the receiver with the value of the given results.
+    ///
+    /// # Panics
+    ///
+    /// This method panics if the two [`ProofResult`]s are not the same variant.
+    pub fn extend(&mut self, other: Self) {
+        match (self, other) {
+            (Self::Legacy(proof), Self::Legacy(other)) => proof.extend(other),
+            (Self::V2(proof), Self::V2(other)) => proof.extend(other),
+            _ => panic!("mismatched ProofResults, cannot extend one with the other"),
+        }
+    }
+
+    /// Returns the number of account proofs.
+    pub fn account_proofs_len(&self) -> usize {
+        match self {
+            Self::Legacy(proof) => proof.account_subtree.len(),
+            Self::V2(proof) => proof.account_proofs.len(),
+        }
+    }
+
+    /// Returns the total number of storage proofs
+    pub fn storage_proofs_len(&self) -> usize {
+        match self {
+            Self::Legacy(proof) => proof.storages.values().map(|p| p.subtree.len()).sum::<usize>(),
+            Self::V2(proof) => proof.storage_proofs.values().map(|p| p.len()).sum::<usize>(),
+        }
+    }
 }
 
 /// Channel used by worker threads to deliver `ProofResultMessage` items back to
@@ -1249,7 +1308,7 @@ where
             proof_cursor_metrics,
         );
 
-        result.map(|proof| ProofResult::Legacy { proof })
+        result.map(ProofResult::Legacy)
     }
 
     fn compute_v2_account_multiproof<Provider>(
@@ -1259,12 +1318,13 @@ where
             <Provider as HashedCursorFactory>::AccountCursor<'_>,
             AsyncAccountValueEncoder,
         >,
-        mut account_targets: Vec<proof_v2::Target>,
-        storage_targets: B256Map<Vec<proof_v2::Target>>,
+        targets: MultiProofTargetsV2,
     ) -> Result<ProofResult, ParallelStateRootError>
     where
         Provider: TrieCursorFactory + HashedCursorFactory,
     {
+        let MultiProofTargetsV2 { mut account_targets, storage_targets } = targets;
+
         let span = debug_span!(
             target: "trie::proof_task",
             "Account V2 multiproof calculation",
@@ -1285,8 +1345,12 @@ where
             self.cached_storage_roots.clone(),
         );
 
-        let proof = v2_calculator.proof(&mut value_encoder, &mut account_targets)?;
-        todo!()
+        let proof = DecodedMultiProofV2 {
+            account_proofs: v2_calculator.proof(&mut value_encoder, &mut account_targets)?,
+            storage_proofs: value_encoder.into_storage_proofs()?,
+        };
+
+        Ok(ProofResult::V2(proof))
     }
 
     /// Processes an account multiproof request.
@@ -1327,16 +1391,11 @@ where
                     &mut proof_cursor_metrics,
                 ),
             ),
-            AccountMultiproofInput::V2 {
-                account_targets,
-                storage_targets,
-                proof_result_sender,
-            } => (
+            AccountMultiproofInput::V2 { targets, proof_result_sender } => (
                 proof_result_sender,
                 self.compute_v2_account_multiproof::<Provider>(
                     v2_calculator.expect("v2 calculator provided"),
-                    account_targets,
-                    storage_targets,
+                    targets,
                 ),
             ),
         };
@@ -1695,7 +1754,7 @@ fn dispatch_v2_storage_proofs(
         B256Map::with_capacity_and_hasher(account_targets.len(), Default::default());
 
     // Dispatch all proofs for targetted storage slots
-    for (hashed_address, targets) in storage_targets.into_iter() {
+    for (hashed_address, targets) in storage_targets {
         // Create channel for receiving StorageProofResultMessage
         let (result_tx, result_rx) = crossbeam_channel::unbounded();
         let input = StorageProofInput::new(hashed_address, targets);
@@ -1795,6 +1854,23 @@ impl StorageProofInput {
     }
 }
 
+/// A set of account and storage V2 proof targets. The account and storage targets do not need to
+/// necessarily overlap.
+#[derive(Debug, Default)]
+pub struct MultiProofTargetsV2 {
+    /// The set of account proof targets to generate proofs for.
+    pub account_targets: Vec<proof_v2::Target>,
+    /// The sets of storage proof targets to generate proofs for.
+    pub storage_targets: B256Map<Vec<proof_v2::Target>>,
+}
+
+impl MultiProofTargetsV2 {
+    /// Returns true is there are no account or storage targets.
+    pub fn is_empty(&self) -> bool {
+        self.account_targets.is_empty() && self.storage_targets.is_empty()
+    }
+}
+
 /// Input parameters for account multiproof computation.
 #[derive(Debug)]
 pub enum AccountMultiproofInput {
@@ -1813,10 +1889,8 @@ pub enum AccountMultiproofInput {
     },
     /// V2 account multiproof variant
     V2 {
-        /// The set of account proof targets
-        account_targets: Vec<proof_v2::Target>,
-        /// The sets of storage proof targets
-        storage_targets: B256Map<Vec<proof_v2::Target>>,
+        /// The targets for which to compute the multiproof.
+        targets: MultiProofTargetsV2,
         /// Context for sending the proof result.
         proof_result_sender: ProofResultContext,
     },

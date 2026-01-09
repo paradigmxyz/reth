@@ -97,8 +97,8 @@ where
             debug!(
                 target: "engine::root",
                 num_updates,
-                account_proofs = update.multiproof.account_subtree.len(),
-                storage_proofs = update.multiproof.storages.len(),
+                account_proofs = update.multiproof.account_proofs_len(),
+                storage_proofs = update.multiproof.storage_proofs_len(),
                 "Updating sparse trie"
             );
 
