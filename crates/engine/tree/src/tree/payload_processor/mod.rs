@@ -805,7 +805,10 @@ impl ExecutionCache {
                 "Existing cache found"
             );
 
-            if hash_matches && available {
+            if available {
+                if !hash_matches {
+                    c.clear();
+                }
                 return Some(c.clone());
             }
         } else {

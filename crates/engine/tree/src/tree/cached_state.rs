@@ -3,7 +3,7 @@ use alloy_primitives::{
     map::{DefaultHashBuilder, FbBuildHasher},
     Address, StorageKey, StorageValue, B256,
 };
-use fixed_cache::{AnyRef, Stats, StatsHandler};
+use fixed_cache::{AnyRef, CacheConfig, Stats, StatsHandler};
 use metrics::Gauge;
 use reth_errors::ProviderResult;
 use reth_metrics::Metrics;
@@ -64,8 +64,14 @@ const STORAGE_CACHE_ENTRY_SIZE: usize =
 /// Size in bytes of a single account cache entry.
 const ACCOUNT_CACHE_ENTRY_SIZE: usize = fixed_cache_entry_size::<Address, Option<Account>>();
 
+/// Cache configuration with epoch tracking enabled for O(1) cache invalidation.
+struct EpochCacheConfig;
+impl CacheConfig for EpochCacheConfig {
+    const EPOCHS: bool = true;
+}
+
 /// Type alias for the fixed-cache used for accounts and storage.
-type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H>;
+type FixedCache<K, V, H = DefaultHashBuilder> = fixed_cache::Cache<K, V, H, EpochCacheConfig>;
 
 /// A wrapper of a state provider and a shared cache.
 pub(crate) struct CachedStateProvider<S> {
@@ -490,16 +496,27 @@ pub(crate) struct ExecutionCache {
 }
 
 impl ExecutionCache {
+    /// Minimum cache size required when epochs are enabled.
+    /// With EPOCHS=true, fixed-cache requires 12 bottom bits to be zero (2 needed + 10 epoch).
+    const MIN_CACHE_SIZE_WITH_EPOCHS: usize = 1 << 12; // 4096
+
     /// Converts a byte size to number of cache entries, rounding down to a power of two.
     ///
     /// Fixed-cache requires power-of-two sizes for efficient indexing.
+    /// With epochs enabled, the minimum size is 4096 entries.
     pub(crate) const fn bytes_to_entries(size_bytes: usize, entry_size: usize) -> usize {
         let entries = size_bytes / entry_size;
         // Round down to nearest power of two
-        if entries == 0 {
+        let rounded = if entries == 0 {
             1
         } else {
             1 << (usize::BITS - 1 - entries.leading_zeros())
+        };
+        // Ensure minimum size for epoch tracking
+        if rounded < Self::MIN_CACHE_SIZE_WITH_EPOCHS {
+            Self::MIN_CACHE_SIZE_WITH_EPOCHS
+        } else {
+            rounded
         }
     }
 
@@ -669,6 +686,13 @@ impl ExecutionCache {
         Ok(())
     }
 
+    /// Clears all caches, resetting them to empty state.
+    pub(crate) fn clear(&self) {
+        self.code_cache.clear();
+        self.storage_cache.clear();
+        self.account_cache.clear();
+    }
+
     /// Updates the provided metrics with the current stats from the cache's stats handlers,
     /// and resets the stats counters.
     pub(crate) fn update_metrics(&self, metrics: &FixedCacheMetrics) {
@@ -754,6 +778,11 @@ impl SavedCache {
     /// Updates the fixed-cache metrics from the stats handlers.
     pub(crate) fn update_metrics(&self) {
         self.caches.update_metrics(&self.fixed_cache_metrics);
+    }
+
+    /// Clears all caches, resetting them to empty state.
+    pub(crate) fn clear(&self) {
+        self.caches.clear();
     }
 }
 
