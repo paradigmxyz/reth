@@ -1299,7 +1299,7 @@ mod tests {
     use super::*;
     use crate::tree::cached_state::{CachedStateProvider, ExecutionCacheBuilder};
     use alloy_eip7928::{AccountChanges, BalanceChange};
-    use alloy_primitives::{map::B256Set, Address};
+    use alloy_primitives::Address;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
         BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
