@@ -3,9 +3,7 @@
 use crate::cli::Args;
 use alloy_provider::{Provider, ProviderBuilder};
 use alloy_rpc_client::RpcClient;
-use alloy_rpc_types_engine::JwtSecret;
 use alloy_rpc_types_eth::SyncStatus;
-use alloy_transport::Authorization;
 use alloy_transport_ws::WsConnect;
 use eyre::{eyre, OptionExt, Result, WrapErr};
 #[cfg(unix)]
@@ -38,7 +36,6 @@ pub(crate) struct NodeManager {
     comparison_dir: Option<PathBuf>,
     tracing_endpoint: Option<String>,
     otlp_max_queue_size: usize,
-    jwt_secret_path: PathBuf,
 }
 
 impl NodeManager {
@@ -62,7 +59,6 @@ impl NodeManager {
             comparison_dir: None,
             tracing_endpoint: args.traces.otlp.as_ref().map(|u| u.to_string()),
             otlp_max_queue_size: args.otlp_max_queue_size,
-            jwt_secret_path: args.jwt_secret_path(),
         }
     }
 
@@ -374,22 +370,10 @@ impl NodeManager {
     /// Wait for the node to be ready and return its current tip
     pub(crate) async fn wait_for_node_ready_and_get_tip(&self) -> Result<u64> {
         info!("Waiting for node to be ready and synced...");
-        debug!("JWT secret path: {:?}", self.jwt_secret_path);
 
         let max_wait = Duration::from_secs(120); // 2 minutes to allow for sync
         let check_interval = Duration::from_secs(2);
         let rpc_url = "http://localhost:8545";
-
-        // Load JWT secret for WebSocket authentication
-        debug!("Loading JWT secret for WebSocket authentication");
-        let jwt_str = std::fs::read_to_string(&self.jwt_secret_path)
-            .wrap_err_with(|| format!("Failed to read JWT secret from {:?}", self.jwt_secret_path))?;
-        let jwt = JwtSecret::from_hex(&jwt_str)
-            .wrap_err("Failed to parse JWT secret")?;
-        let claims = alloy_rpc_types_engine::Claims::default();
-        let token = jwt.encode(&claims)
-            .wrap_err("Failed to encode JWT token")?;
-        debug!("JWT token encoded successfully");
 
         // Create Alloy provider
         let url = rpc_url.parse().map_err(|e| eyre!("Invalid RPC URL '{}': {}", rpc_url, e))?;
@@ -421,11 +405,10 @@ impl NodeManager {
                                     Ok(tip) => {
                                         debug!("HTTP RPC ready at block: {}, checking WebSocket...", tip);
 
-                                        // Also verify WebSocket RPC is ready with JWT authentication
+                                        // Verify WebSocket RPC is ready (public endpoint, no JWT required)
                                         let ws_url = format!("ws://localhost:{}", DEFAULT_WS_RPC_PORT);
-                                        debug!("Attempting WebSocket connection to {} with JWT auth", ws_url);
-                                        let ws_connect = WsConnect::new(&ws_url)
-                                            .with_auth(Authorization::Bearer(token.clone()));
+                                        debug!("Attempting WebSocket connection to {} (public endpoint)", ws_url);
+                                        let ws_connect = WsConnect::new(&ws_url);
 
                                         match RpcClient::connect_pubsub(ws_connect).await
                                         {
