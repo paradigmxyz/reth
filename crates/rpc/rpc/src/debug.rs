@@ -349,7 +349,7 @@ where
                 tx_index,
                 block.transaction_count()
             ))
-            .into());
+            .into())
         }
 
         let (evm_env, _) = self.eth_api().evm_env_at(block.hash().into()).await?;
@@ -396,7 +396,7 @@ where
         opts: Option<GethDebugTracingCallOptions>,
     ) -> Result<Vec<Vec<GethTrace>>, Eth::Error> {
         if bundles.is_empty() {
-            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into());
+            return Err(EthApiError::InvalidParams(String::from("bundles are empty.")).into())
         }
 
         let StateContext { transaction_index, block_number } = state_context.unwrap_or_default();
