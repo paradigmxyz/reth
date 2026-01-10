@@ -569,8 +569,6 @@ where
                     plain_state.storages.insert(*address, storage_map);
                 }
             }
-
-            // Compute state root using TrieDB via the StateProvider trait
             let start = Instant::now();
             (state_root, trie_updates) = state
                 .state_root_with_updates_plain(plain_state)
@@ -580,7 +578,6 @@ where
             #[cfg(feature = "metrics")]
             STATE_ROOT_METRICS.duration_ms.record(elapsed_ms);
 
-            // TrieDB doesn't use hashed state, provide empty default
             hashed_state = HashedPostState::default();
 
             tracing::info!(target: "evm", ?state_root, elapsed_ms, "State root computed via TrieDB");
@@ -588,10 +585,9 @@ where
 
         #[cfg(not(feature = "triedb"))]
         {
-            // Hash the post state for MDBX trie computation
+            let start = Instant::now();
             hashed_state = state.hashed_post_state(&db.bundle_state);
 
-            let start = Instant::now();
             (state_root, trie_updates) = state
                 .state_root_with_updates(hashed_state.clone())
                 .map_err(BlockExecutionError::other)?;
