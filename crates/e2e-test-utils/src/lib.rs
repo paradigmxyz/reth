@@ -1,7 +1,7 @@
 //! Utilities for end-to-end tests.
 
 use node::NodeTestContext;
-use reth_chainspec::ChainSpec;
+use reth_chainspec::{ChainSpec, Hardforks};
 use reth_db::{test_utils::TempDatabase, DatabaseEnv};
 use reth_network_api::test_utils::PeersHandleProvider;
 use reth_node_builder::{
@@ -151,7 +151,7 @@ where
             > + EngineValidatorAddOn<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             >,
-            ChainSpec: From<ChainSpec> + Clone,
+            ChainSpec: From<ChainSpec> + Clone + Hardforks,
         >,
 {
 }
@@ -162,6 +162,7 @@ impl<T> NodeBuilderHelper for T where
             Payload: PayloadTypes<
                 PayloadBuilderAttributes: From<reth_payload_builder::EthPayloadBuilderAttributes>,
             >,
+            ChainSpec: Hardforks,
         > + Node<
             TmpNodeAdapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             ComponentsBuilder: NodeComponentsBuilder<
@@ -176,7 +177,7 @@ impl<T> NodeBuilderHelper for T where
             > + EngineValidatorAddOn<
                 Adapter<Self, BlockchainProvider<NodeTypesWithDBAdapter<Self, TmpDB>>>,
             >,
-            ChainSpec: From<ChainSpec> + Clone,
+            ChainSpec: From<ChainSpec> + Clone + Hardforks,
         >
 {
 }

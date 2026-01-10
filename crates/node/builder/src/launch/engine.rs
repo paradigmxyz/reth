@@ -10,7 +10,7 @@ use crate::{
 };
 use alloy_consensus::BlockHeader;
 use futures::{stream_select, FutureExt, StreamExt};
-use reth_chainspec::{EthChainSpec, EthereumHardforks};
+use reth_chainspec::{EthChainSpec, EthereumHardforks, Hardforks};
 use reth_engine_service::service::{ChainEvent, EngineService};
 use reth_engine_tree::{
     chain::FromOrchestrator,
@@ -29,7 +29,7 @@ use reth_node_core::{
     exit::NodeExitFuture,
     primitives::Head,
 };
-use reth_node_events::node;
+use reth_node_events::node::{self, HardforkInfo};
 use reth_provider::{
     providers::{BlockchainProvider, NodeTypesForProvider},
     BlockNumReader, MetadataProvider,
@@ -37,7 +37,12 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
-use std::{future::Future, pin::Pin, sync::Arc};
+use std::{
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+    time::{SystemTime, UNIX_EPOCH},
+};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::warn;
@@ -69,7 +74,7 @@ impl EngineNodeLauncher {
     ) -> eyre::Result<NodeHandle<NodeAdapter<T, CB::Components>, AO>>
     where
         T: FullNodeTypes<
-            Types: NodeTypesForProvider,
+            Types: NodeTypesForProvider<ChainSpec: Hardforks>,
             Provider = BlockchainProvider<
                 NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
             >,
@@ -252,12 +257,23 @@ impl EngineNodeLauncher {
             static_file_producer_events.map(Into::into),
         );
 
+        // Collect pending timestamp-based hardforks for activation logging
+        let now = SystemTime::now().duration_since(UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+        let mut pending_hardforks: Vec<HardforkInfo> = ctx
+            .chain_spec()
+            .forks_iter()
+            .filter_map(|(fork, condition)| HardforkInfo::new(fork, condition))
+            .filter(|info| info.timestamp > now)
+            .collect();
+        pending_hardforks.sort_by_key(|info| info.timestamp);
+
         ctx.task_executor().spawn_critical(
             "events task",
             Box::pin(node::handle_events(
                 Some(Box::new(ctx.components().network().clone())),
                 Some(ctx.head().number),
                 events,
+                Some(pending_hardforks),
             )),
         );
 
@@ -414,7 +430,7 @@ impl EngineNodeLauncher {
 impl<T, CB, AO> LaunchNode<NodeBuilderWithComponents<T, CB, AO>> for EngineNodeLauncher
 where
     T: FullNodeTypes<
-        Types: NodeTypesForProvider,
+        Types: NodeTypesForProvider<ChainSpec: Hardforks>,
         Provider = BlockchainProvider<
             NodeTypesWithDBAdapter<<T as FullNodeTypes>::Types, <T as FullNodeTypes>::DB>,
         >,
