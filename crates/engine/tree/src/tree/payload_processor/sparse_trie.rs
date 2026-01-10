@@ -173,7 +173,7 @@ where
         .par_bridge()
         .map(|(address, storage, storage_trie)| {
             let _enter =
-                debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: span.clone(), "storage trie", ?address)
+                debug_span!(target: "engine::tree::payload_processor::sparse_trie", parent: &span, "storage trie", ?address)
                     .entered();
 
             trace!(target: "engine::tree::payload_processor::sparse_trie", "Updating storage");

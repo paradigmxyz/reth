@@ -544,7 +544,7 @@ impl PruneConfig {
 
     /// Returns whether there is any kind of receipt pruning configuration.
     pub fn has_receipts_pruning(&self) -> bool {
-        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
+        self.segments.has_receipts_pruning()
     }
 
     /// Merges values from `other` into `self`.

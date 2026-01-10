@@ -622,7 +622,8 @@ where
             .without_state_clear()
             .build();
 
-        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env.clone());
+        let spec_id = *env.evm_env.spec_id();
+        let evm = self.evm_config.evm_with_env(&mut db, env.evm_env);
         let ctx =
             self.execution_ctx_for(input).map_err(|e| InsertBlockErrorKind::Other(Box::new(e)))?;
         let mut executor = self.evm_config.create_executor(evm, ctx);
@@ -638,7 +639,7 @@ where
                 CachedPrecompile::wrap(
                     precompile,
                     self.precompile_cache_map.cache_for_address(*address),
-                    *env.evm_env.spec_id(),
+                    spec_id,
                     Some(metrics),
                 )
             });
@@ -1085,16 +1086,33 @@ where
             ancestors,
         );
         let deferred_handle_task = deferred_trie_data.clone();
-        let deferred_compute_duration =
-            self.metrics.block_validation.deferred_trie_compute_duration.clone();
+        let block_validation_metrics = self.metrics.block_validation.clone();
 
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
         let compute_trie_input_task = move || {
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
-                let _ = deferred_handle_task.wait_cloned();
-                deferred_compute_duration.record(compute_start.elapsed().as_secs_f64());
+                let computed = deferred_handle_task.wait_cloned();
+                block_validation_metrics
+                    .deferred_trie_compute_duration
+                    .record(compute_start.elapsed().as_secs_f64());
+
+                // Record sizes of the computed trie data
+                block_validation_metrics
+                    .hashed_post_state_size
+                    .record(computed.hashed_state.total_len() as f64);
+                block_validation_metrics
+                    .trie_updates_sorted_size
+                    .record(computed.trie_updates.total_len() as f64);
+                if let Some(anchored) = &computed.anchored_trie_input {
+                    block_validation_metrics
+                        .anchored_overlay_trie_updates_size
+                        .record(anchored.trie_input.nodes.total_len() as f64);
+                    block_validation_metrics
+                        .anchored_overlay_hashed_state_size
+                        .record(anchored.trie_input.state.total_len() as f64);
+                }
             }));
 
             if result.is_err() {

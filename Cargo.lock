@@ -255,7 +255,6 @@ checksum = "926b2c0d34e641cf8b17bf54ce50fda16715b9f68ad878fa6128bae410c6f890"
 dependencies = [
  "alloy-primitives",
  "alloy-rlp",
- "borsh",
  "serde",
 ]
 
@@ -7689,6 +7688,7 @@ version = "1.9.3"
 dependencies = [
  "alloy-eips",
  "alloy-json-rpc",
+ "alloy-network",
  "alloy-primitives",
  "alloy-provider",
  "alloy-pubsub",
@@ -7710,6 +7710,7 @@ dependencies = [
  "reqwest",
  "reth-cli-runner",
  "reth-cli-util",
+ "reth-engine-primitives",
  "reth-fs-util",
  "reth-node-api",
  "reth-node-core",
@@ -7721,6 +7722,7 @@ dependencies = [
  "tokio",
  "tower",
  "tracing",
+ "url",
 ]
 
 [[package]]
@@ -7729,7 +7731,9 @@ version = "1.9.3"
 dependencies = [
  "alloy-primitives",
  "alloy-provider",
+ "alloy-rpc-client",
  "alloy-rpc-types-eth",
+ "alloy-transport-ws",
  "chrono",
  "clap",
  "csv",
@@ -8948,6 +8952,7 @@ dependencies = [
  "reth-tasks",
  "reth-testing-utils",
  "reth-tracing",
+ "reth-trie-common",
  "rmp-serde",
  "secp256k1 0.30.0",
  "tempfile",
@@ -10351,6 +10356,7 @@ version = "1.9.3"
 dependencies = [
  "alloy-consensus",
  "alloy-dyn-abi",
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-evm",
  "alloy-genesis",
@@ -10433,6 +10439,7 @@ dependencies = [
 name = "reth-rpc-api"
 version = "1.9.3"
 dependencies = [
+ "alloy-eip7928",
  "alloy-eips",
  "alloy-genesis",
  "alloy-json-rpc",

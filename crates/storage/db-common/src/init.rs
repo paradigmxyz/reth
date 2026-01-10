@@ -104,7 +104,14 @@ where
         + AsRef<PF::ProviderRW>,
     PF::ChainSpec: EthChainSpec<Header = <PF::Primitives as NodePrimitives>::BlockHeader>,
 {
-    init_genesis_with_settings(factory, StorageSettings::legacy())
+    #[cfg(feature = "edge")]
+    {
+        init_genesis_with_settings(factory, StorageSettings::edge())
+    }
+    #[cfg(not(feature = "edge"))]
+    {
+        init_genesis_with_settings(factory, StorageSettings::legacy())
+    }
 }
 
 /// Write the genesis block if it has not already been written with [`StorageSettings`].
@@ -215,6 +222,13 @@ where
         .get_writer(genesis_block_number, StaticFileSegment::Transactions)?
         .user_header_mut()
         .set_block_range(genesis_block_number, genesis_block_number);
+
+    if genesis_storage_settings.transaction_senders_in_static_files {
+        static_file_provider
+            .get_writer(genesis_block_number, StaticFileSegment::TransactionSenders)?
+            .user_header_mut()
+            .set_block_range(genesis_block_number, genesis_block_number);
+    }
 
     // `commit_unwind`` will first commit the DB and then the static file provider, which is
     // necessary on `init_genesis`.
