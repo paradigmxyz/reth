@@ -179,7 +179,6 @@ fn test_iter_empty_dup_database() {
     assert!(cursor.iter::<(), ()>().next().is_none());
     assert!(cursor.iter_start::<(), ()>().next().is_none());
     assert!(cursor.iter_from::<(), ()>(b"foo").next().is_none());
-    assert!(cursor.iter_from::<(), ()>(b"foo").next().is_none());
     assert!(cursor.iter_dup::<(), ()>().flatten().next().is_none());
     assert!(cursor.iter_dup_start::<(), ()>().flatten().next().is_none());
     assert!(cursor.iter_dup_from::<(), ()>(b"foo").flatten().next().is_none());
