@@ -16,6 +16,7 @@ mod diff;
 mod get;
 mod list;
 mod repair_trie;
+mod search_changesets;
 mod settings;
 mod static_file_header;
 mod stats;
@@ -55,6 +56,8 @@ pub enum Subcommands {
     Clear(clear::Command),
     /// Verifies trie consistency and outputs any inconsistencies
     RepairTrie(repair_trie::Command),
+    /// Searches account and storage changesets for hashed addresses and slots
+    SearchChangesets(search_changesets::Command),
     /// Reads and displays the static file segment header
     StaticFileHeader(static_file_header::Command),
     /// Lists current and local database versions
@@ -169,6 +172,10 @@ impl<C: ChainSpecParser<ChainSpec: EthChainSpec + EthereumHardforks>> Command<C>
                 db_exec!(self.env, tool, N, AccessRights::RoInconsistent, {
                     command.execute(&tool)?;
                 });
+            }
+            Subcommands::SearchChangesets(command) => {
+                let Environment { provider_factory, .. } = self.env.init::<N>(AccessRights::RO)?;
+                command.execute(provider_factory)?;
             }
             Subcommands::Version => {
                 let local_db_version = match get_db_version(&db_path) {
