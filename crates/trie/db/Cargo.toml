@@ -26,6 +26,9 @@ alloy-primitives.workspace = true
 # tracing
 tracing.workspace = true
 
+# rayon
+rayon = { workspace = true, optional = true }
+
 [dev-dependencies]
 # reth
 reth-chainspec.workspace = true
@@ -50,6 +53,21 @@ serde_json.workspace = true
 similar-asserts.workspace = true
 
 [features]
+default = ["std"]
+std = [
+    "dep:rayon",
+    "alloy-consensus/std",
+    "alloy-primitives/std",
+    "alloy-rlp/std",
+    "reth-chainspec/std",
+    "reth-execution-errors/std",
+    "reth-primitives-traits/std",
+    "revm/std",
+    "revm-database/std",
+    "serde_json/std",
+    "reth-trie-common/std",
+    "tracing/std",
+]
 metrics = ["reth-trie/metrics"]
 serde = [
     "similar-asserts/serde",

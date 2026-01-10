@@ -11180,6 +11180,7 @@ dependencies = [
  "alloy-rlp",
  "proptest",
  "proptest-arbitrary-interop",
+ "rayon",
  "reth-chainspec",
  "reth-db",
  "reth-db-api",
