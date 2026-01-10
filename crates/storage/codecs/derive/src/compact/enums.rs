@@ -46,7 +46,7 @@ impl<'a> EnumHandler<'a> {
 
     /// Generates `from_compact` code for an enum variant.
     ///
-    /// `fields_iterator` might look something like \[`EnumVariant`, `EnumUnnamedField`, StructField,
+    /// `fields_iterator` might look something like \[`EnumVariant`, `EnumUnnamedField`, `StructField`,
     /// `EnumVariant`...\].
     pub fn from(&mut self, variant_name: &str, ident: &Ident) {
         let variant_name = format_ident!("{variant_name}");
@@ -89,7 +89,7 @@ impl<'a> EnumHandler<'a> {
 
     /// Generates `to_compact` code for an enum variant.
     ///
-    /// `fields_iterator` might look something like [`EnumVariant`, `EnumUnnamedField`, StructField,
+    /// `fields_iterator` might look something like [`EnumVariant`, `EnumUnnamedField`, `StructField`,
     /// `EnumVariant`...].
     pub fn to(&mut self, variant_name: &str, ident: &Ident) {
         let variant_name = format_ident!("{variant_name}");
