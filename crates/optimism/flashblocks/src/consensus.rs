@@ -1,4 +1,7 @@
-use crate::{FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx};
+use crate::{
+    traits::{FlashblockPayload, FlashblockPayloadBase},
+    FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx,
+};
 use alloy_primitives::B256;
 use alloy_rpc_types_engine::PayloadStatusEnum;
 use op_alloy_rpc_types_engine::OpExecutionData;
@@ -15,25 +18,27 @@ use tracing::*;
 ///
 /// [`FlashBlockService`]: crate::FlashBlockService
 #[derive(Debug)]
-pub struct FlashBlockConsensusClient<P = OpPayloadTypes>
+pub struct FlashBlockConsensusClient<P = OpPayloadTypes, F = FlashBlock>
 where
     P: PayloadTypes,
+    F: FlashblockPayload,
 {
     /// Handle to execution client.
     engine_handle: ConsensusEngineHandle<P>,
     /// Receiver for completed flashblock sequences from `FlashBlockService`.
-    sequence_receiver: FlashBlockCompleteSequenceRx,
+    sequence_receiver: FlashBlockCompleteSequenceRx<F>,
 }
 
-impl<P> FlashBlockConsensusClient<P>
+impl<P, F> FlashBlockConsensusClient<P, F>
 where
     P: PayloadTypes,
-    P::ExecutionData: for<'a> TryFrom<&'a FlashBlockCompleteSequence, Error: std::fmt::Display>,
+    F: FlashblockPayload,
+    P::ExecutionData: for<'a> TryFrom<&'a FlashBlockCompleteSequence<F>, Error: std::fmt::Display>,
 {
-    /// Create a new `FlashBlockConsensusClient` with the given Op engine and sequence receiver.
+    /// Create a new `FlashBlockConsensusClient` with the given engine handle and sequence receiver.
     pub const fn new(
         engine_handle: ConsensusEngineHandle<P>,
-        sequence_receiver: FlashBlockCompleteSequenceRx,
+        sequence_receiver: FlashBlockCompleteSequenceRx<F>,
     ) -> eyre::Result<Self> {
         Ok(Self { engine_handle, sequence_receiver })
     }
@@ -44,12 +49,12 @@ where
     /// in which case this method uses the `parent_hash` instead to drive the chain forward.
     ///
     /// Returns the block hash to use for FCU (either the new block's hash or the parent hash).
-    async fn submit_new_payload(&self, sequence: &FlashBlockCompleteSequence) -> B256 {
+    async fn submit_new_payload(&self, sequence: &FlashBlockCompleteSequence<F>) -> B256 {
         let payload = match P::ExecutionData::try_from(sequence) {
             Ok(payload) => payload,
             Err(err) => {
                 trace!(target: "flashblocks", %err, "Failed payload conversion, using parent hash");
-                return sequence.payload_base().parent_hash;
+                return sequence.payload_base().parent_hash();
             }
         };
 
@@ -93,11 +98,11 @@ where
     async fn submit_forkchoice_update(
         &self,
         head_block_hash: B256,
-        sequence: &FlashBlockCompleteSequence,
+        sequence: &FlashBlockCompleteSequence<F>,
     ) {
         let block_number = sequence.block_number();
-        let safe_hash = sequence.payload_base().parent_hash;
-        let finalized_hash = sequence.payload_base().parent_hash;
+        let safe_hash = sequence.payload_base().parent_hash();
+        let finalized_hash = sequence.payload_base().parent_hash();
         let fcu_state = alloy_rpc_types_engine::ForkchoiceState {
             head_block_hash,
             safe_block_hash: safe_hash,
@@ -157,10 +162,10 @@ where
     }
 }
 
-impl TryFrom<&FlashBlockCompleteSequence> for OpExecutionData {
+impl TryFrom<&FlashBlockCompleteSequence<FlashBlock>> for OpExecutionData {
     type Error = &'static str;
 
-    fn try_from(sequence: &FlashBlockCompleteSequence) -> Result<Self, Self::Error> {
+    fn try_from(sequence: &FlashBlockCompleteSequence<FlashBlock>) -> Result<Self, Self::Error> {
         let mut data = Self::from_flashblocks_unchecked(sequence);
 
         // If execution outcome is available, use the computed state_root and block_hash.
@@ -320,7 +325,7 @@ mod tests {
             assert!(conversion_result.is_err());
 
             // In the actual run loop, submit_new_payload would return parent_hash
-            assert_eq!(sequence.payload_base().parent_hash, parent_hash);
+            assert_eq!(sequence.payload_base().parent_hash(), parent_hash);
         }
 
         #[test]
@@ -357,7 +362,7 @@ mod tests {
             let sequence = FlashBlockCompleteSequence::new(vec![fb0], None).unwrap();
 
             // Verify the expected forkchoice state
-            assert_eq!(sequence.payload_base().parent_hash, parent_hash);
+            assert_eq!(sequence.payload_base().parent_hash(), parent_hash);
         }
 
         #[test]
@@ -389,7 +394,7 @@ mod tests {
             let sequence = FlashBlockCompleteSequence::new(vec![fb0], None).unwrap();
 
             // The head_block_hash for FCU would be parent_hash (fallback)
-            assert_eq!(sequence.payload_base().parent_hash, parent_hash);
+            assert_eq!(sequence.payload_base().parent_hash(), parent_hash);
         }
     }
 
@@ -426,7 +431,7 @@ mod tests {
             assert!(conversion.is_err());
 
             // But FCU should still happen with parent_hash
-            assert!(sequence.payload_base().parent_hash != B256::ZERO);
+            assert!(sequence.payload_base().parent_hash() != B256::ZERO);
         }
 
         #[test]
