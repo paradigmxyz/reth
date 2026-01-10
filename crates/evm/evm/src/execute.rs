@@ -31,6 +31,28 @@ use alloy_primitives::map::HashMap;
 #[cfg(feature = "triedb")]
 use reth_storage_api::PlainPostState;
 
+use std::time::Instant;
+
+#[cfg(feature = "metrics")]
+use metrics::Histogram;
+#[cfg(feature = "metrics")]
+use reth_metrics::Metrics;
+#[cfg(feature = "metrics")]
+use std::sync::LazyLock;
+
+/// Metrics for state root computation timing during block building.
+#[cfg(feature = "metrics")]
+#[derive(Metrics)]
+#[metrics(scope = "payloads.execution.state_root")]
+struct StateRootMetrics {
+    /// Time taken to compute state root (milliseconds).
+    duration_ms: Histogram,
+}
+
+#[cfg(feature = "metrics")]
+static STATE_ROOT_METRICS: LazyLock<StateRootMetrics> =
+    LazyLock::new(StateRootMetrics::default);
+
 /// A type that knows how to execute a block. It is assumed to operate on a
 /// [`crate::Evm`] internally and use [`State`] as database.
 pub trait Executor<DB: Database>: Sized {
@@ -549,25 +571,36 @@ where
             }
 
             // Compute state root using TrieDB via the StateProvider trait
+            let start = Instant::now();
             (state_root, trie_updates) = state
                 .state_root_with_updates_plain(plain_state)
                 .map_err(BlockExecutionError::other)?;
+            let elapsed_ms = start.elapsed().as_millis() as f64;
+
+            #[cfg(feature = "metrics")]
+            STATE_ROOT_METRICS.duration_ms.record(elapsed_ms);
 
             // TrieDB doesn't use hashed state, provide empty default
             hashed_state = HashedPostState::default();
 
-            tracing::info!(target: "evm", ?state_root, "State root computed via TrieDB");
+            tracing::info!(target: "evm", ?state_root, elapsed_ms, "State root computed via TrieDB");
         }
 
         #[cfg(not(feature = "triedb"))]
         {
             // Hash the post state for MDBX trie computation
             hashed_state = state.hashed_post_state(&db.bundle_state);
+
+            let start = Instant::now();
             (state_root, trie_updates) = state
                 .state_root_with_updates(hashed_state.clone())
                 .map_err(BlockExecutionError::other)?;
+            let elapsed_ms = start.elapsed().as_millis() as f64;
 
-            tracing::info!(target: "evm", ?state_root, "State root computed via MDBX");
+            #[cfg(feature = "metrics")]
+            STATE_ROOT_METRICS.duration_ms.record(elapsed_ms);
+
+            tracing::info!(target: "evm", ?state_root, elapsed_ms, "State root computed via MDBX");
         }
 
         let (transactions, senders) =
