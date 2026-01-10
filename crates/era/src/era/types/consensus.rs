@@ -64,9 +64,21 @@ use snap::{read::FrameDecoder, write::FrameEncoder};
 use std::io::{Read, Write};
 
 /// Maximum allowed decompressed size for a signed beacon block SSZ payload.
+///
+/// This limit serves as a DoS protection mechanism during Snappy decompression.
+/// The value of 256 MiB is chosen to accommodate the largest possible beacon blocks
+/// while preventing excessive memory allocation from malicious or corrupted data.
+///
+/// See also [`CompressedSignedBeaconBlock::decompress`].
 const MAX_DECOMPRESSED_SIGNED_BEACON_BLOCK_BYTES: usize = 256 * 1024 * 1024; // 256 MiB
 
 /// Maximum allowed decompressed size for a beacon state SSZ payload.
+///
+/// This limit serves as a DoS protection mechanism during Snappy decompression.
+/// The value of 2 GiB is chosen to accommodate the largest possible beacon states
+/// while preventing excessive memory allocation from malicious or corrupted data.
+///
+/// See also [`CompressedBeaconState::decompress`].
 const MAX_DECOMPRESSED_BEACON_STATE_BYTES: usize = 2 * 1024 * 1024 * 1024; // 2 GiB
 
 fn decompress_snappy_bounded(
