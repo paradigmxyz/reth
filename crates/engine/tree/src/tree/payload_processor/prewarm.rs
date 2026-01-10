@@ -24,7 +24,6 @@ use crate::tree::{
 };
 use alloy_consensus::transaction::TxHashRef;
 use alloy_eip7928::BlockAccessList;
-use alloy_eips::Typed2718;
 use alloy_evm::Database;
 use alloy_primitives::{keccak256, map::B256Set, B256};
 use crossbeam_channel::Sender as CrossbeamSender;
@@ -32,7 +31,7 @@ use metrics::{Counter, Gauge, Histogram};
 use reth_evm::{execute::ExecutableTxFor, ConfigureEvm, Evm, EvmFor, SpecFor};
 use reth_execution_types::ExecutionOutcome;
 use reth_metrics::Metrics;
-use reth_primitives_traits::NodePrimitives;
+use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{AccountReader, BlockReader, StateProvider, StateProviderFactory, StateReader};
 use reth_revm::{database::StateProviderDatabase, state::EvmState};
 use reth_trie::MultiProofTargets;
@@ -50,7 +49,7 @@ use tracing::{debug, debug_span, instrument, trace, warn, Span};
 /// Determines the prewarming mode: transaction-based or BAL-based.
 pub(super) enum PrewarmMode<Tx> {
     /// Prewarm by executing transactions from a stream.
-    Transactions(Receiver<Tx>),
+    Transactions(Receiver<(usize, Tx)>),
     /// Prewarm by prefetching slots from a Block Access List.
     BlockAccessList(Arc<BlockAccessList>),
 }
@@ -63,19 +62,6 @@ struct IndexedTransaction<Tx> {
     /// The wrapped transaction.
     tx: Tx,
 }
-
-/// Maximum standard Ethereum transaction type value.
-///
-/// Standard transaction types are:
-/// - Type 0: Legacy transactions (original Ethereum)
-/// - Type 1: EIP-2930 (access list transactions)
-/// - Type 2: EIP-1559 (dynamic fee transactions)
-/// - Type 3: EIP-4844 (blob transactions)
-/// - Type 4: EIP-7702 (set code authorization transactions)
-///
-/// Any transaction with a type > 4 is considered a non-standard/system transaction,
-/// typically used by L2s for special purposes (e.g., Optimism deposit transactions use type 126).
-const MAX_STANDARD_TX_TYPE: u8 = 4;
 
 /// A task that is responsible for caching and prewarming the cache by executing transactions
 /// individually in parallel.
@@ -150,7 +136,7 @@ where
     /// subsequent transactions in the block.
     fn spawn_all<Tx>(
         &self,
-        pending: mpsc::Receiver<Tx>,
+        pending: mpsc::Receiver<(usize, Tx)>,
         actions_tx: Sender<PrewarmTaskEvent<N::Receipt>>,
     ) where
         Tx: ExecutableTxFor<Evm> + Clone + Send + 'static,
@@ -179,8 +165,8 @@ where
             let handles = ctx.clone().spawn_workers(workers_needed, &executor, actions_tx.clone(), done_tx.clone());
 
             // Distribute transactions to workers
-            let mut tx_index = 0usize;
-            while let Ok(tx) = pending.recv() {
+            let mut total_tx_executed = 0usize;
+            while let Ok((tx_index, tx)) = pending.recv() {
                 // Stop distributing if termination was requested
                 if ctx.terminate_execution.load(Ordering::Relaxed) {
                     trace!(
@@ -191,7 +177,7 @@ where
                 }
 
                 let indexed_tx = IndexedTransaction { index: tx_index, tx };
-                let is_system_tx = indexed_tx.tx.tx().ty() > MAX_STANDARD_TX_TYPE;
+                let is_system_tx = indexed_tx.tx.tx().is_system_tx();
 
                 // System transactions (type > 4) in the first position set critical metadata
                 // that affects all subsequent transactions (e.g., L1 block info on L2s).
@@ -216,7 +202,7 @@ where
                     let _ = handles[worker_idx].send(indexed_tx);
                 }
 
-                tx_index += 1;
+                total_tx_executed += 1;
             }
 
             // drop handle and wait for all tasks to finish and drop theirs
@@ -225,7 +211,7 @@ where
             while done_rx.recv().is_ok() {}
 
             let _ = actions_tx
-                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: tx_index });
+                .send(PrewarmTaskEvent::FinishedTxExecution { executed_transactions: total_tx_executed });
         });
     }
 
