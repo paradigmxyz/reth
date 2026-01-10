@@ -1,4 +1,3 @@
-use crate::database::EvmStateProvider;
 use alloy_primitives::{Address, B256, U256};
 use core::ops::{Deref, DerefMut};
 use reth_metrics::{
@@ -6,8 +5,7 @@ use reth_metrics::{
     Metrics,
 };
 
-use reth_storage_errors::provider::ProviderError;
-use revm::{bytecode::Bytecode, state::AccountInfo, Database, DatabaseRef};
+use revm::{bytecode::Bytecode, primitives::StorageKey, state::AccountInfo, Database, DatabaseRef};
 use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
@@ -54,9 +52,7 @@ impl AtomicDuration {
     }
 }
 
-/// A [Database] and [`DatabaseRef`] implementation that uses [`EvmStateProvider`] as the underlying
-/// data source.
-pub struct InstrumentedStateProviderDatabase<DB> {
+pub struct InstrumentedDatabase<DB> {
     /// Database
     db: DB,
 
@@ -73,7 +69,7 @@ pub struct InstrumentedStateProviderDatabase<DB> {
     total_account_fetch_latency: AtomicDuration,
 }
 
-impl<DB> InstrumentedStateProviderDatabase<DB> {
+impl<DB> InstrumentedDatabase<DB> {
     /// Create new State with generic `StateProvider`.
     pub fn new(db: DB, source: &'static str) -> Self {
         Self {
@@ -128,19 +124,19 @@ impl<DB> InstrumentedStateProviderDatabase<DB> {
     }
 }
 
-impl<DB> core::fmt::Debug for InstrumentedStateProviderDatabase<DB> {
+impl<DB> core::fmt::Debug for InstrumentedDatabase<DB> {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         f.debug_struct("InstrumentedStateProviderDatabase").finish_non_exhaustive()
     }
 }
 
-impl<DB> AsRef<DB> for InstrumentedStateProviderDatabase<DB> {
+impl<DB> AsRef<DB> for InstrumentedDatabase<DB> {
     fn as_ref(&self) -> &DB {
         self
     }
 }
 
-impl<DB> Deref for InstrumentedStateProviderDatabase<DB> {
+impl<DB> Deref for InstrumentedDatabase<DB> {
     type Target = DB;
 
     fn deref(&self) -> &Self::Target {
@@ -148,41 +144,50 @@ impl<DB> Deref for InstrumentedStateProviderDatabase<DB> {
     }
 }
 
-impl<DB> DerefMut for InstrumentedStateProviderDatabase<DB> {
+impl<DB> DerefMut for InstrumentedDatabase<DB> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.db
     }
 }
 
-impl<DB> Drop for InstrumentedStateProviderDatabase<DB> {
+impl<DB> Drop for InstrumentedDatabase<DB> {
     fn drop(&mut self) {
         self.record_total_latency();
     }
 }
 
-impl<DB: EvmStateProvider> Database for InstrumentedStateProviderDatabase<DB> {
-    type Error = ProviderError;
+impl<DB: Database> Database for InstrumentedDatabase<DB> {
+    type Error = DB::Error;
 
     /// Retrieves basic account information for a given address.
     ///
     /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
     /// `None` if it doesn't, or an error if encountered.
     fn basic(&mut self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
-        self.basic_ref(address)
+        let start = Instant::now();
+        let res = self.db.basic(address);
+        self.record_account_fetch(start.elapsed());
+        res
     }
 
     /// Retrieves the bytecode associated with a given code hash.
     ///
     /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash(&mut self, code_hash: B256) -> Result<Bytecode, Self::Error> {
-        self.code_by_hash_ref(code_hash)
+        let start = Instant::now();
+        let res = self.db.code_by_hash(code_hash);
+        self.record_code_fetch(start.elapsed());
+        res
     }
 
     /// Retrieves the storage value at a specific index for a given address.
     ///
     /// Returns `Ok` with the storage value, or the default value if not found.
     fn storage(&mut self, address: Address, index: U256) -> Result<U256, Self::Error> {
-        self.storage_ref(address, index)
+        let start = Instant::now();
+        let res = self.db.storage(address, index);
+        self.record_storage_fetch(start.elapsed());
+        res
     }
 
     /// Retrieves the block hash for a given block number.
@@ -190,50 +195,36 @@ impl<DB: EvmStateProvider> Database for InstrumentedStateProviderDatabase<DB> {
     /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     /// Note: It safely casts the `number` to `u64`.
     fn block_hash(&mut self, number: u64) -> Result<B256, Self::Error> {
-        self.block_hash_ref(number)
+        self.db.block_hash(number)
     }
 }
 
-impl<DB: EvmStateProvider> DatabaseRef for InstrumentedStateProviderDatabase<DB> {
-    type Error = <Self as Database>::Error;
+impl<DB: DatabaseRef> DatabaseRef for InstrumentedDatabase<DB> {
+    type Error = DB::Error;
 
-    /// Retrieves basic account information for a given address.
-    ///
-    /// Returns `Ok` with `Some(AccountInfo)` if the account exists,
-    /// `None` if it doesn't, or an error if encountered.
     fn basic_ref(&self, address: Address) -> Result<Option<AccountInfo>, Self::Error> {
         let start = Instant::now();
-        let res = self.basic_account(&address);
+        let res = self.db.basic_ref(address);
         self.record_account_fetch(start.elapsed());
-        Ok(res?.map(Into::into))
+        res
     }
 
-    /// Retrieves the bytecode associated with a given code hash.
-    ///
-    /// Returns `Ok` with the bytecode if found, or the default bytecode otherwise.
     fn code_by_hash_ref(&self, code_hash: B256) -> Result<Bytecode, Self::Error> {
         let start = Instant::now();
-        let res = self.bytecode_by_hash(&code_hash);
+        let res = self.db.code_by_hash_ref(code_hash);
         self.record_code_fetch(start.elapsed());
-        Ok(res?.unwrap_or_default().0)
+        res
     }
 
-    /// Retrieves the storage value at a specific index for a given address.
-    ///
-    /// Returns `Ok` with the storage value, or the default value if not found.
-    fn storage_ref(&self, address: Address, index: U256) -> Result<U256, Self::Error> {
+    fn storage_ref(&self, address: Address, index: StorageKey) -> Result<U256, Self::Error> {
         let start = Instant::now();
-        let res = self.db.storage(address, B256::new(index.to_be_bytes()));
+        let res = self.db.storage_ref(address, index);
         self.record_storage_fetch(start.elapsed());
-        Ok(res?.unwrap_or_default())
+        res
     }
 
-    /// Retrieves the block hash for a given block number.
-    ///
-    /// Returns `Ok` with the block hash if found, or the default hash otherwise.
     fn block_hash_ref(&self, number: u64) -> Result<B256, Self::Error> {
-        // Get the block hash or default hash with an attempt to convert U256 block number to u64
-        Ok(self.db.block_hash(number)?.unwrap_or_default())
+        self.db.block_hash_ref(number)
     }
 }
 

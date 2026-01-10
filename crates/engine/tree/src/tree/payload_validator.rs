@@ -38,7 +38,7 @@ use reth_provider::{
     HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
     StateProvider, StateProviderFactory, StateReader, TrieReader,
 };
-use reth_revm::{db::State, instrumented::InstrumentedStateProviderDatabase};
+use reth_revm::{db::State, instrumented::InstrumentedDatabase};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
@@ -611,12 +611,13 @@ where
     {
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
+        let database = StateProviderDatabase::new(state_provider);
         let mut db = State::builder()
             .with_database(if self.config.state_provider_metrics() {
-                Box::new(InstrumentedStateProviderDatabase::new(state_provider, "engine"))
+                Box::new(InstrumentedDatabase::new(database, "validation"))
                     as Box<dyn alloy_evm::Database<Error = ProviderError>>
             } else {
-                Box::new(StateProviderDatabase::new(state_provider))
+                Box::new(database)
             })
             .with_bundle_update()
             .without_state_clear()
