@@ -1275,7 +1275,7 @@ mod tests {
             false,
             NoopNetwork::default(),
         );
-        let handle = EngineApiTestHandle { chain_spec, provider, from_api: engine_rx };
+        let handle = EngineApiTestHandle { provider, from_api: engine_rx };
         (handle, api)
     }
 
@@ -1293,8 +1293,6 @@ mod tests {
     }
 
     struct EngineApiTestHandle {
-        #[allow(dead_code)]
-        chain_spec: Arc<ChainSpec>,
         provider: Arc<MockEthProvider>,
         from_api: UnboundedReceiver<BeaconEngineMessage<EthEngineTypes>>,
     }
