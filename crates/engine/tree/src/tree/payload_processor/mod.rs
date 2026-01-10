@@ -367,7 +367,7 @@ where
         &self,
         transactions: I,
     ) -> (
-        mpsc::Receiver<WithTxEnv<TxEnvFor<Evm>, I::Recovered>>,
+        mpsc::Receiver<(usize, WithTxEnv<TxEnvFor<Evm>, I::Recovered>)>,
         mpsc::Receiver<Result<WithTxEnv<TxEnvFor<Evm>, I::Recovered>, I::Error>>,
         usize,
     ) {
@@ -389,7 +389,7 @@ where
                 });
                 // Only send Ok(_) variants to prewarming task.
                 if let Ok(tx) = &tx {
-                    let _ = prewarm_tx.send(tx.clone());
+                    let _ = prewarm_tx.send((idx, tx.clone()));
                 }
                 let _ = ooo_tx.send((idx, tx));
             });
@@ -425,7 +425,10 @@ where
     fn spawn_caching_with<P>(
         &self,
         env: ExecutionEnv<Evm>,
-        mut transactions: mpsc::Receiver<impl ExecutableTxFor<Evm> + Clone + Send + 'static>,
+        mut transactions: mpsc::Receiver<(
+            usize,
+            impl ExecutableTxFor<Evm> + Clone + Send + 'static,
+        )>,
         transaction_count_hint: usize,
         provider_builder: StateProviderBuilder<N, P>,
         to_multi_proof: Option<CrossbeamSender<MultiProofMessage>>,
