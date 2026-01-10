@@ -5,8 +5,20 @@ use crate::{
 };
 use std::fmt::Debug;
 
+/// Helper adapter type for accessing [`DbTx`] cursor.
+pub type CursorTy<TX, T> = <TX as DbTx>::Cursor<T>;
+
+/// Helper adapter type for accessing [`DbTx`] dup cursor.
+pub type DupCursorTy<TX, T> = <TX as DbTx>::DupCursor<T>;
+
+/// Helper adapter type for accessing [`DbTxMut`] mutable cursor.
+pub type CursorMutTy<TX, T> = <TX as DbTxMut>::CursorMut<T>;
+
+/// Helper adapter type for accessing [`DbTxMut`] mutable dup cursor.
+pub type DupCursorMutTy<TX, T> = <TX as DbTxMut>::DupCursorMut<T>;
+
 /// Read only transaction
-pub trait DbTx: Debug + Send + Sync {
+pub trait DbTx: Debug + Send {
     /// Cursor type for this read-only transaction
     type Cursor<T: Table>: DbCursorRO<T> + Send + Sync;
     /// `DupCursor` type for this read-only transaction
@@ -37,7 +49,7 @@ pub trait DbTx: Debug + Send + Sync {
 }
 
 /// Read write transaction that allows writing to database
-pub trait DbTxMut: Send + Sync {
+pub trait DbTxMut: Send {
     /// Read-Write Cursor type
     type CursorMut<T: Table>: DbCursorRW<T> + DbCursorRO<T> + Send + Sync;
     /// Read-Write `DupCursor` type

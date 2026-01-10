@@ -23,13 +23,11 @@ reth-node-ethereum.workspace = true
 reth-node-metrics.workspace = true
 reth-rpc-server-types.workspace = true
 reth-tracing.workspace = true
-reth-tracing-otlp.workspace = true
 reth-node-api.workspace = true
 
 # misc
 clap.workspace = true
 eyre.workspace = true
-url.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
@@ -53,7 +51,12 @@ jemalloc = [
     "reth-node-metrics/jemalloc",
 ]
 jemalloc-prof = [
-    "reth-node-core/jemalloc",
+    "jemalloc",
+    "reth-node-metrics/jemalloc-prof",
+]
+jemalloc-symbols = [
+    "jemalloc-prof",
+    "reth-node-metrics/jemalloc-symbols",
 ]
 tracy-allocator = []
 
@@ -83,3 +86,5 @@ min-trace-logs = [
     "tracing/release_max_level_trace",
     "reth-node-core/min-trace-logs",
 ]
+
+edge = ["reth-cli-commands/edge"]

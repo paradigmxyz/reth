@@ -328,7 +328,9 @@ impl EntitiesCheckpoint {
         // Truncate to 2 decimal places, rounding down so that 99.999% becomes 99.99% and not 100%.
         #[cfg(not(feature = "std"))]
         {
-            Some(format!("{:.2}%", (percentage * 100.0) / 100.0))
+            // Manual floor implementation using integer arithmetic for no_std
+            let scaled = (percentage * 100.0) as u64;
+            Some(format!("{:.2}%", scaled as f64 / 100.0))
         }
         #[cfg(feature = "std")]
         Some(format!("{:.2}%", (percentage * 100.0).floor() / 100.0))

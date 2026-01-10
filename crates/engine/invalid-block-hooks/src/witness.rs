@@ -5,7 +5,7 @@ use pretty_assertions::Comparison;
 use reth_engine_primitives::InvalidBlockHook;
 use reth_evm::{execute::Executor, ConfigureEvm};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
-use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderFactory};
+use reth_provider::{BlockExecutionOutput, StateProvider, StateProviderBox, StateProviderFactory};
 use reth_revm::{
     database::StateProviderDatabase,
     db::{BundleState, State},
@@ -80,13 +80,13 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
                     BundleAccountSorted {
                         info: acc.info.clone(),
                         original_info: acc.original_info.clone(),
-                        storage: BTreeMap::from_iter(acc.storage.clone()),
+                        storage: acc.storage.iter().map(|(k, v)| (*k, *v)).collect(),
                         status: acc.status,
                     },
                 )
             })
             .collect(),
-        contracts: BTreeMap::from_iter(bundle_state.contracts.clone()),
+        contracts: bundle_state.contracts.iter().map(|(k, v)| (*k, v.clone())).collect(),
         reverts: bundle_state
             .reverts
             .iter()
@@ -98,7 +98,7 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
                             *addr,
                             AccountRevertSorted {
                                 account: rev.account.clone(),
-                                storage: BTreeMap::from_iter(rev.storage.clone()),
+                                storage: rev.storage.iter().map(|(k, v)| (*k, *v)).collect(),
                                 previous_status: rev.previous_status,
                                 wipe_storage: rev.wipe_storage,
                             },
@@ -114,7 +114,7 @@ fn sort_bundle_state_for_comparison(bundle_state: &BundleState) -> BundleStateSo
 
 /// Extracts execution data including codes, preimages, and hashed state from database
 fn collect_execution_data(
-    mut db: State<StateProviderDatabase<Box<dyn StateProvider>>>,
+    mut db: State<StateProviderDatabase<StateProviderBox>>,
 ) -> eyre::Result<CollectionResult> {
     let bundle_state = db.take_bundle();
     let mut codes = BTreeMap::new();
@@ -280,7 +280,7 @@ where
             let bundle_state_sorted = sort_bundle_state_for_comparison(re_executed_state);
             let output_state_sorted = sort_bundle_state_for_comparison(original_state);
             let filename = format!("{}.bundle_state.diff", block_prefix);
-            let diff_path = self.save_diff(filename, &bundle_state_sorted, &output_state_sorted)?;
+            let diff_path = self.save_diff(filename, &output_state_sorted, &bundle_state_sorted)?;
 
             warn!(
                 target: "engine::invalid_block_hooks::witness",
@@ -310,13 +310,13 @@ where
         if let Some((original_updates, original_root)) = trie_updates {
             if re_executed_root != original_root {
                 let filename = format!("{}.state_root.diff", block_prefix);
-                let diff_path = self.save_diff(filename, &re_executed_root, &original_root)?;
+                let diff_path = self.save_diff(filename, &original_root, &re_executed_root)?;
                 warn!(target: "engine::invalid_block_hooks::witness", ?original_root, ?re_executed_root, diff_path = %diff_path.display(), "State root mismatch after re-execution");
             }
 
             if re_executed_root != block.state_root() {
                 let filename = format!("{}.header_state_root.diff", block_prefix);
-                let diff_path = self.save_diff(filename, &re_executed_root, &block.state_root())?;
+                let diff_path = self.save_diff(filename, &block.state_root(), &re_executed_root)?;
                 warn!(target: "engine::invalid_block_hooks::witness", header_state_root=?block.state_root(), ?re_executed_root, diff_path = %diff_path.display(), "Re-executed state root does not match block state root");
             }
 
@@ -545,9 +545,7 @@ mod tests {
         // Create a State with StateProviderTest
         let state_provider = StateProviderTest::default();
         let mut state = State::builder()
-            .with_database(StateProviderDatabase::new(
-                Box::new(state_provider) as Box<dyn StateProvider>
-            ))
+            .with_database(StateProviderDatabase::new(Box::new(state_provider) as StateProviderBox))
             .with_bundle_update()
             .build();
 

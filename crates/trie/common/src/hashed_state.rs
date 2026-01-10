@@ -9,7 +9,7 @@ use crate::{
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256Map, B256Set, HashMap, HashSet},
+    map::{hash_map, B256Map, HashMap, HashSet},
     Address, B256, U256,
 };
 use itertools::Itertools;
@@ -18,11 +18,12 @@ pub use rayon::*;
 use reth_primitives_traits::Account;
 
 #[cfg(feature = "rayon")]
-use rayon::prelude::{IntoParallelIterator, ParallelIterator};
+use rayon::prelude::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 
 use revm_database::{AccountStatus, BundleAccount};
 
-/// Representation of in-memory hashed state.
+/// In-memory hashed state that stores account and storage changes with keccak256-hashed keys in
+/// hash maps.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedPostState {
@@ -49,7 +50,7 @@ impl HashedPostState {
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoParallelIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
-        let hashed = state
+        state
             .into_par_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
@@ -58,19 +59,14 @@ impl HashedPostState {
                     account.status,
                     account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                 );
-                (hashed_address, (hashed_account, hashed_storage))
-            })
-            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
 
-        let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        for (address, (account, storage)) in hashed {
-            accounts.insert(address, account);
-            if !storage.is_empty() {
-                storages.insert(address, storage);
-            }
-        }
-        Self { accounts, storages }
+                (
+                    hashed_address,
+                    hashed_account,
+                    (!hashed_storage.is_empty()).then_some(hashed_storage),
+                )
+            })
+            .collect()
     }
 
     /// Initialize [`HashedPostState`] from bundle state.
@@ -80,7 +76,7 @@ impl HashedPostState {
     pub fn from_bundle_state<'a, KH: KeyHasher>(
         state: impl IntoIterator<Item = (&'a Address, &'a BundleAccount)>,
     ) -> Self {
-        let hashed = state
+        state
             .into_iter()
             .map(|(address, account)| {
                 let hashed_address = KH::hash_key(address);
@@ -89,19 +85,14 @@ impl HashedPostState {
                     account.status,
                     account.storage.iter().map(|(slot, value)| (slot, &value.present_value)),
                 );
-                (hashed_address, (hashed_account, hashed_storage))
-            })
-            .collect::<Vec<(B256, (Option<Account>, HashedStorage))>>();
 
-        let mut accounts = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        let mut storages = HashMap::with_capacity_and_hasher(hashed.len(), Default::default());
-        for (address, (account, storage)) in hashed {
-            accounts.insert(address, account);
-            if !storage.is_empty() {
-                storages.insert(address, storage);
-            }
-        }
-        Self { accounts, storages }
+                (
+                    hashed_address,
+                    hashed_account,
+                    (!hashed_storage.is_empty()).then_some(hashed_storage),
+                )
+            })
+            .collect()
     }
 
     /// Construct [`HashedPostState`] from a single [`HashedStorage`].
@@ -331,19 +322,40 @@ impl HashedPostState {
         }
     }
 
-    /// Converts hashed post state into [`HashedPostStateSorted`].
-    pub fn into_sorted(self) -> HashedPostStateSorted {
-        let mut updated_accounts = Vec::new();
-        let mut destroyed_accounts = HashSet::default();
-        for (hashed_address, info) in self.accounts {
-            if let Some(info) = info {
-                updated_accounts.push((hashed_address, info));
-            } else {
-                destroyed_accounts.insert(hashed_address);
+    /// Extend this hashed post state with sorted data, converting directly into the unsorted
+    /// `HashMap` representation. This is more efficient than first converting to `HashedPostState`
+    /// and then extending, as it avoids creating intermediate `HashMap` allocations.
+    pub fn extend_from_sorted(&mut self, sorted: &HashedPostStateSorted) {
+        // Reserve capacity for accounts
+        self.accounts.reserve(sorted.accounts.len());
+
+        // Insert accounts (Some = updated, None = destroyed)
+        for (address, account) in &sorted.accounts {
+            self.accounts.insert(*address, *account);
+        }
+
+        // Reserve capacity for storages
+        self.storages.reserve(sorted.storages.len());
+
+        // Extend storages
+        for (hashed_address, sorted_storage) in &sorted.storages {
+            match self.storages.entry(*hashed_address) {
+                hash_map::Entry::Vacant(entry) => {
+                    let mut new_storage = HashedStorage::new(false);
+                    new_storage.extend_from_sorted(sorted_storage);
+                    entry.insert(new_storage);
+                }
+                hash_map::Entry::Occupied(mut entry) => {
+                    entry.get_mut().extend_from_sorted(sorted_storage);
+                }
             }
         }
-        updated_accounts.sort_unstable_by_key(|(address, _)| *address);
-        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+    }
+
+    /// Converts hashed post state into [`HashedPostStateSorted`].
+    pub fn into_sorted(self) -> HashedPostStateSorted {
+        let mut accounts: Vec<_> = self.accounts.into_iter().collect();
+        accounts.sort_unstable_by_key(|(address, _)| *address);
 
         let storages = self
             .storages
@@ -354,30 +366,16 @@ impl HashedPostState {
         HashedPostStateSorted { accounts, storages }
     }
 
-    /// Converts hashed post state into [`HashedPostStateSorted`], but keeping the maps allocated by
-    /// draining.
-    ///
-    /// This effectively clears all the fields in the [`HashedPostStateSorted`].
-    ///
-    /// This allows us to reuse the allocated space. This allocates new space for the sorted hashed
-    /// post state, like `into_sorted`.
-    pub fn drain_into_sorted(&mut self) -> HashedPostStateSorted {
-        let mut updated_accounts = Vec::new();
-        let mut destroyed_accounts = HashSet::default();
-        for (hashed_address, info) in self.accounts.drain() {
-            if let Some(info) = info {
-                updated_accounts.push((hashed_address, info));
-            } else {
-                destroyed_accounts.insert(hashed_address);
-            }
-        }
-        updated_accounts.sort_unstable_by_key(|(address, _)| *address);
-        let accounts = HashedAccountsSorted { accounts: updated_accounts, destroyed_accounts };
+    /// Creates a sorted copy without consuming self.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
+    pub fn clone_into_sorted(&self) -> HashedPostStateSorted {
+        let mut accounts: Vec<_> = self.accounts.iter().map(|(&k, &v)| (k, v)).collect();
+        accounts.sort_unstable_by_key(|(address, _)| *address);
 
         let storages = self
             .storages
-            .drain()
-            .map(|(hashed_address, storage)| (hashed_address, storage.into_sorted()))
+            .iter()
+            .map(|(&hashed_address, storage)| (hashed_address, storage.clone_into_sorted()))
             .collect();
 
         HashedPostStateSorted { accounts, storages }
@@ -387,6 +385,62 @@ impl HashedPostState {
     pub fn clear(&mut self) {
         self.accounts.clear();
         self.storages.clear();
+    }
+}
+
+impl FromIterator<(B256, Option<Account>, Option<HashedStorage>)> for HashedPostState {
+    /// Constructs a [`HashedPostState`] from an iterator of tuples containing:
+    /// - Hashed address (B256)
+    /// - Optional account info (`None` indicates destroyed account)
+    /// - Optional hashed storage
+    ///
+    /// # Important
+    ///
+    /// - The iterator **assumes unique hashed addresses** (B256). If duplicate addresses are
+    ///   present, later entries will overwrite earlier ones for accounts, and storage will be
+    ///   merged.
+    /// - The [`HashedStorage`] **must not be empty** (as determined by
+    ///   [`HashedStorage::is_empty`]). Empty storage should be represented as `None` rather than
+    ///   `Some(empty_storage)`. This ensures the storage map only contains meaningful entries.
+    ///
+    /// Use `(!storage.is_empty()).then_some(storage)` to convert empty storage to `None`.
+    fn from_iter<T: IntoIterator<Item = (B256, Option<Account>, Option<HashedStorage>)>>(
+        iter: T,
+    ) -> Self {
+        let iter = iter.into_iter();
+        let (lower, _) = iter.size_hint();
+        let mut hashed_state = Self::with_capacity(lower);
+
+        for (hashed_address, info, hashed_storage) in iter {
+            hashed_state.accounts.insert(hashed_address, info);
+            if let Some(storage) = hashed_storage {
+                hashed_state.storages.insert(hashed_address, storage);
+            }
+        }
+
+        hashed_state
+    }
+}
+
+#[cfg(feature = "rayon")]
+impl FromParallelIterator<(B256, Option<Account>, Option<HashedStorage>)> for HashedPostState {
+    /// Parallel version of [`FromIterator`] for constructing [`HashedPostState`] from a parallel
+    /// iterator.
+    ///
+    /// See [`FromIterator::from_iter`] for details on the expected input format.
+    ///
+    /// # Important
+    ///
+    /// - The iterator **assumes unique hashed addresses** (B256). If duplicate addresses are
+    ///   present, later entries will overwrite earlier ones for accounts, and storage will be
+    ///   merged.
+    /// - The [`HashedStorage`] **must not be empty**. Empty storage should be `None`.
+    fn from_par_iter<I>(par_iter: I) -> Self
+    where
+        I: IntoParallelIterator<Item = (B256, Option<Account>, Option<HashedStorage>)>,
+    {
+        let vec: Vec<_> = par_iter.into_par_iter().collect();
+        vec.into_iter().collect()
     }
 }
 
@@ -450,43 +504,63 @@ impl HashedStorage {
         self.storage.extend(other.storage.iter().map(|(&k, &v)| (k, v)));
     }
 
+    /// Extend hashed storage with sorted data, converting directly into the unsorted `HashMap`
+    /// representation. This is more efficient than first converting to `HashedStorage` and
+    /// then extending, as it avoids creating intermediate `HashMap` allocations.
+    pub fn extend_from_sorted(&mut self, sorted: &HashedStorageSorted) {
+        if sorted.wiped {
+            self.wiped = true;
+            self.storage.clear();
+        }
+
+        // Reserve capacity for all slots
+        self.storage.reserve(sorted.storage_slots.len());
+
+        // Insert all storage slots
+        for (slot, value) in &sorted.storage_slots {
+            self.storage.insert(*slot, *value);
+        }
+    }
+
     /// Converts hashed storage into [`HashedStorageSorted`].
     pub fn into_sorted(self) -> HashedStorageSorted {
-        let mut non_zero_valued_slots = Vec::new();
-        let mut zero_valued_slots = HashSet::default();
-        for (hashed_slot, value) in self.storage {
-            if value.is_zero() {
-                zero_valued_slots.insert(hashed_slot);
-            } else {
-                non_zero_valued_slots.push((hashed_slot, value));
-            }
-        }
-        non_zero_valued_slots.sort_unstable_by_key(|(key, _)| *key);
+        let mut storage_slots: Vec<_> = self.storage.into_iter().collect();
+        storage_slots.sort_unstable_by_key(|(key, _)| *key);
 
-        HashedStorageSorted { non_zero_valued_slots, zero_valued_slots, wiped: self.wiped }
+        HashedStorageSorted { storage_slots, wiped: self.wiped }
+    }
+
+    /// Creates a sorted copy without consuming self.
+    /// More efficient than `.clone().into_sorted()` as it avoids cloning `HashMap` metadata.
+    pub fn clone_into_sorted(&self) -> HashedStorageSorted {
+        let mut storage_slots: Vec<_> = self.storage.iter().map(|(&k, &v)| (k, v)).collect();
+        storage_slots.sort_unstable_by_key(|(key, _)| *key);
+
+        HashedStorageSorted { storage_slots, wiped: self.wiped }
     }
 }
 
 /// Sorted hashed post state optimized for iterating during state trie calculation.
 #[derive(PartialEq, Eq, Clone, Default, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedPostStateSorted {
-    /// Updated state of accounts.
-    pub accounts: HashedAccountsSorted,
-    /// Map of hashed addresses to hashed storage.
+    /// Sorted collection of account updates. `None` indicates a destroyed account.
+    pub accounts: Vec<(B256, Option<Account>)>,
+    /// Map of hashed addresses to their sorted storage updates.
     pub storages: B256Map<HashedStorageSorted>,
 }
 
 impl HashedPostStateSorted {
     /// Create new instance of [`HashedPostStateSorted`]
     pub const fn new(
-        accounts: HashedAccountsSorted,
+        accounts: Vec<(B256, Option<Account>)>,
         storages: B256Map<HashedStorageSorted>,
     ) -> Self {
         Self { accounts, storages }
     }
 
     /// Returns reference to hashed accounts.
-    pub const fn accounts(&self) -> &HashedAccountsSorted {
+    pub const fn accounts(&self) -> &Vec<(B256, Option<Account>)> {
         &self.accounts
     }
 
@@ -497,23 +571,59 @@ impl HashedPostStateSorted {
 
     /// Returns `true` if there are no account or storage updates.
     pub fn is_empty(&self) -> bool {
-        self.accounts.accounts.is_empty() &&
-            self.accounts.destroyed_accounts.is_empty() &&
-            self.storages.is_empty()
+        self.accounts.is_empty() && self.storages.is_empty()
     }
 
     /// Returns the total number of updates including all accounts and storage updates.
     pub fn total_len(&self) -> usize {
-        self.accounts.accounts.len() +
-            self.accounts.destroyed_accounts.len() +
-            self.storages.values().map(|storage| storage.len()).sum::<usize>()
+        self.accounts.len() + self.storages.values().map(|s| s.len()).sum::<usize>()
+    }
+
+    /// Construct [`TriePrefixSetsMut`] from hashed post state.
+    ///
+    /// The prefix sets contain the hashed account and storage keys that have been changed in the
+    /// post state.
+    pub fn construct_prefix_sets(&self) -> TriePrefixSetsMut {
+        let mut account_prefix_set = PrefixSetMut::with_capacity(self.accounts.len());
+        let mut destroyed_accounts = HashSet::default();
+        for (hashed_address, account) in &self.accounts {
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+            if account.is_none() {
+                destroyed_accounts.insert(*hashed_address);
+            }
+        }
+
+        let mut storage_prefix_sets =
+            B256Map::with_capacity_and_hasher(self.storages.len(), Default::default());
+        for (hashed_address, hashed_storage) in &self.storages {
+            // Ensure account trie covers storage overlays even if account map is empty.
+            account_prefix_set.insert(Nibbles::unpack(hashed_address));
+
+            let prefix_set = if hashed_storage.wiped {
+                PrefixSetMut::all()
+            } else {
+                let mut prefix_set =
+                    PrefixSetMut::with_capacity(hashed_storage.storage_slots.len());
+                prefix_set.extend_keys(
+                    hashed_storage
+                        .storage_slots
+                        .iter()
+                        .map(|(hashed_slot, _)| Nibbles::unpack(hashed_slot)),
+                );
+                prefix_set
+            };
+
+            storage_prefix_sets.insert(*hashed_address, prefix_set);
+        }
+
+        TriePrefixSetsMut { account_prefix_set, storage_prefix_sets, destroyed_accounts }
     }
 
     /// Extends this state with contents of another sorted state.
     /// Entries in `other` take precedence for duplicate keys.
     pub fn extend_ref(&mut self, other: &Self) {
         // Extend accounts
-        self.accounts.extend_ref(&other.accounts);
+        extend_sorted_vec(&mut self.accounts, &other.accounts);
 
         // Extend storages
         for (hashed_address, other_storage) in &other.storages {
@@ -523,6 +633,12 @@ impl HashedPostStateSorted {
                 .or_insert_with(|| other_storage.clone());
         }
     }
+
+    /// Clears all accounts and storage data.
+    pub fn clear(&mut self) {
+        self.accounts.clear();
+        self.storages.clear();
+    }
 }
 
 impl AsRef<Self> for HashedPostStateSorted {
@@ -531,47 +647,12 @@ impl AsRef<Self> for HashedPostStateSorted {
     }
 }
 
-/// Sorted account state optimized for iterating during state trie calculation.
-#[derive(Clone, Eq, PartialEq, Default, Debug)]
-pub struct HashedAccountsSorted {
-    /// Sorted collection of hashed addresses and their account info.
-    pub accounts: Vec<(B256, Account)>,
-    /// Set of destroyed account keys.
-    pub destroyed_accounts: B256Set,
-}
-
-impl HashedAccountsSorted {
-    /// Returns a sorted iterator over updated accounts.
-    pub fn accounts_sorted(&self) -> impl Iterator<Item = (B256, Option<Account>)> {
-        self.accounts
-            .iter()
-            .map(|(address, account)| (*address, Some(*account)))
-            .chain(self.destroyed_accounts.iter().map(|address| (*address, None)))
-            .sorted_by_key(|entry| *entry.0)
-    }
-
-    /// Extends this collection with contents of another sorted collection.
-    /// Entries in `other` take precedence for duplicate keys.
-    pub fn extend_ref(&mut self, other: &Self) {
-        // Updates take precedence over removals, so we want removals from `other` to only apply to
-        // the previous accounts.
-        self.accounts.retain(|(addr, _)| !other.destroyed_accounts.contains(addr));
-
-        // Extend the sorted accounts vector
-        extend_sorted_vec(&mut self.accounts, &other.accounts);
-
-        // Merge destroyed accounts sets
-        self.destroyed_accounts.extend(&other.destroyed_accounts);
-    }
-}
-
 /// Sorted hashed storage optimized for iterating during state trie calculation.
 #[derive(Clone, Eq, PartialEq, Debug)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct HashedStorageSorted {
-    /// Sorted hashed storage slots with non-zero value.
-    pub non_zero_valued_slots: Vec<(B256, U256)>,
-    /// Slots that have been zero valued.
-    pub zero_valued_slots: B256Set,
+    /// Sorted collection of updated storage slots. [`U256::ZERO`] indicates a deleted value.
+    pub storage_slots: Vec<(B256, U256)>,
     /// Flag indicating whether the storage was wiped or not.
     pub wiped: bool,
 }
@@ -582,45 +663,70 @@ impl HashedStorageSorted {
         self.wiped
     }
 
-    /// Returns a sorted iterator over updated storage slots.
-    pub fn storage_slots_sorted(&self) -> impl Iterator<Item = (B256, U256)> {
-        self.non_zero_valued_slots
-            .iter()
-            .map(|(hashed_slot, value)| (*hashed_slot, *value))
-            .chain(self.zero_valued_slots.iter().map(|hashed_slot| (*hashed_slot, U256::ZERO)))
-            .sorted_by_key(|entry| *entry.0)
+    /// Returns reference to updated storage slots.
+    pub fn storage_slots_ref(&self) -> &[(B256, U256)] {
+        &self.storage_slots
     }
 
     /// Returns the total number of storage slot updates.
-    pub fn len(&self) -> usize {
-        self.non_zero_valued_slots.len() + self.zero_valued_slots.len()
+    pub const fn len(&self) -> usize {
+        self.storage_slots.len()
     }
 
     /// Returns `true` if there are no storage slot updates.
-    pub fn is_empty(&self) -> bool {
-        self.non_zero_valued_slots.is_empty() && self.zero_valued_slots.is_empty()
+    pub const fn is_empty(&self) -> bool {
+        self.storage_slots.is_empty()
     }
 
-    /// Extends this storage with contents of another sorted storage.
-    /// Entries in `other` take precedence for duplicate keys.
+    /// Extends the storage slots updates with another set of sorted updates.
+    ///
+    /// If `other` is marked as deleted, this will be marked as deleted and all slots cleared.
+    /// Otherwise, nodes are merged with `other`'s values taking precedence for duplicates.
     pub fn extend_ref(&mut self, other: &Self) {
         if other.wiped {
             // If other is wiped, clear everything and copy from other
             self.wiped = true;
-            self.non_zero_valued_slots.clear();
-            self.zero_valued_slots.clear();
-            self.non_zero_valued_slots.extend_from_slice(&other.non_zero_valued_slots);
-            self.zero_valued_slots.extend(&other.zero_valued_slots);
+            self.storage_slots.clear();
+            self.storage_slots.extend(other.storage_slots.iter().copied());
             return;
         }
 
-        self.non_zero_valued_slots.retain(|(slot, _)| !other.zero_valued_slots.contains(slot));
-
         // Extend the sorted non-zero valued slots
-        extend_sorted_vec(&mut self.non_zero_valued_slots, &other.non_zero_valued_slots);
+        extend_sorted_vec(&mut self.storage_slots, &other.storage_slots);
+    }
+}
 
-        // Merge zero valued slots sets
-        self.zero_valued_slots.extend(&other.zero_valued_slots);
+impl From<HashedStorageSorted> for HashedStorage {
+    fn from(sorted: HashedStorageSorted) -> Self {
+        let mut storage = B256Map::default();
+
+        // Add all storage slots (including zero-valued ones which indicate deletion)
+        for (slot, value) in sorted.storage_slots {
+            storage.insert(slot, value);
+        }
+
+        Self { wiped: sorted.wiped, storage }
+    }
+}
+
+impl From<HashedPostStateSorted> for HashedPostState {
+    fn from(sorted: HashedPostStateSorted) -> Self {
+        let mut accounts =
+            B256Map::with_capacity_and_hasher(sorted.accounts.len(), Default::default());
+
+        // Add all accounts (Some for updated, None for destroyed)
+        for (address, account) in sorted.accounts {
+            accounts.insert(address, account);
+        }
+
+        // Convert storages
+        let storages = sorted
+            .storages
+            .into_iter()
+            .map(|(address, storage)| (address, storage.into()))
+            .collect();
+
+        Self { accounts, storages }
     }
 }
 
@@ -637,11 +743,30 @@ pub struct ChunkedHashedPostState {
     size: usize,
 }
 
+/// Order discriminant for sorting flattened state items.
+/// Ordering: `StorageWipe` < `StorageUpdate` (by slot) < `Account`
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum FlattenedStateOrder {
+    StorageWipe,
+    StorageUpdate(B256),
+    Account,
+}
+
 #[derive(Debug)]
 enum FlattenedHashedPostStateItem {
     Account(Option<Account>),
     StorageWipe,
     StorageUpdate { slot: B256, value: U256 },
+}
+
+impl FlattenedHashedPostStateItem {
+    const fn order(&self) -> FlattenedStateOrder {
+        match self {
+            Self::StorageWipe => FlattenedStateOrder::StorageWipe,
+            Self::StorageUpdate { slot, .. } => FlattenedStateOrder::StorageUpdate(*slot),
+            Self::Account(_) => FlattenedStateOrder::Account,
+        }
+    }
 }
 
 impl ChunkedHashedPostState {
@@ -650,29 +775,22 @@ impl ChunkedHashedPostState {
             .storages
             .into_iter()
             .flat_map(|(address, storage)| {
-                // Storage wipes should go first
-                Some((address, FlattenedHashedPostStateItem::StorageWipe))
-                    .filter(|_| storage.wiped)
+                storage
+                    .wiped
+                    .then_some((address, FlattenedHashedPostStateItem::StorageWipe))
                     .into_iter()
-                    .chain(
-                        storage.storage.into_iter().sorted_unstable_by_key(|(slot, _)| *slot).map(
-                            move |(slot, value)| {
-                                (
-                                    address,
-                                    FlattenedHashedPostStateItem::StorageUpdate { slot, value },
-                                )
-                            },
-                        ),
-                    )
+                    .chain(storage.storage.into_iter().map(move |(slot, value)| {
+                        (address, FlattenedHashedPostStateItem::StorageUpdate { slot, value })
+                    }))
             })
             .chain(hashed_post_state.accounts.into_iter().map(|(address, account)| {
                 (address, FlattenedHashedPostStateItem::Account(account))
             }))
-            // We need stable sort here to preserve the order for each address:
-            // 1. Storage wipes
-            // 2. Storage updates
-            // 3. Account update
-            .sorted_by_key(|(address, _)| *address);
+            // Sort by address, then by item order to ensure correct application sequence:
+            // 1. Storage wipes (must come first to clear storage)
+            // 2. Storage updates (sorted by slot for determinism)
+            // 3. Account updates (can be applied last)
+            .sorted_unstable_by_key(|(address, item)| (*address, item.order()));
 
         Self { flattened, size }
     }
@@ -1159,90 +1277,140 @@ mod tests {
     }
 
     #[test]
+    fn test_chunks_ordering_guarantee() {
+        // Test that chunks preserve the ordering: wipe -> storage updates -> account
+        // Use chunk size of 1 to verify each item comes out in the correct order
+        let addr = B256::from([1; 32]);
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+
+        let state = HashedPostState {
+            accounts: B256Map::from_iter([(addr, Some(Default::default()))]),
+            storages: B256Map::from_iter([(
+                addr,
+                HashedStorage {
+                    wiped: true,
+                    storage: B256Map::from_iter([(slot1, U256::from(1)), (slot2, U256::from(2))]),
+                },
+            )]),
+        };
+
+        let chunks: Vec<_> = state.chunks(1).collect();
+
+        // Should have 4 chunks: 1 wipe + 2 storage updates + 1 account
+        assert_eq!(chunks.len(), 4);
+
+        // First chunk must be the storage wipe
+        assert!(chunks[0].accounts.is_empty());
+        assert_eq!(chunks[0].storages.len(), 1);
+        assert!(chunks[0].storages.get(&addr).unwrap().wiped);
+        assert!(chunks[0].storages.get(&addr).unwrap().storage.is_empty());
+
+        // Next two chunks must be storage updates (order between them doesn't matter)
+        assert!(chunks[1].accounts.is_empty());
+        assert!(!chunks[1].storages.get(&addr).unwrap().wiped);
+        assert_eq!(chunks[1].storages.get(&addr).unwrap().storage.len(), 1);
+
+        assert!(chunks[2].accounts.is_empty());
+        assert!(!chunks[2].storages.get(&addr).unwrap().wiped);
+        assert_eq!(chunks[2].storages.get(&addr).unwrap().storage.len(), 1);
+
+        // Last chunk must be the account update
+        assert_eq!(chunks[3].accounts.len(), 1);
+        assert!(chunks[3].accounts.contains_key(&addr));
+        assert!(chunks[3].storages.is_empty());
+    }
+
+    #[test]
     fn test_hashed_post_state_sorted_extend_ref() {
         // Test extending accounts
         let mut state1 = HashedPostStateSorted {
-            accounts: HashedAccountsSorted {
-                accounts: vec![
-                    (B256::from([1; 32]), Account::default()),
-                    (B256::from([3; 32]), Account::default()),
-                ],
-                destroyed_accounts: B256Set::from_iter([B256::from([5; 32])]),
-            },
+            accounts: vec![
+                (B256::from([1; 32]), Some(Account::default())),
+                (B256::from([3; 32]), Some(Account::default())),
+                (B256::from([5; 32]), None),
+            ],
             storages: B256Map::default(),
         };
 
         let state2 = HashedPostStateSorted {
-            accounts: HashedAccountsSorted {
-                accounts: vec![
-                    (B256::from([2; 32]), Account::default()),
-                    (B256::from([3; 32]), Account { nonce: 1, ..Default::default() }), // Override
-                    (B256::from([4; 32]), Account::default()),
-                ],
-                destroyed_accounts: B256Set::from_iter([B256::from([6; 32])]),
-            },
+            accounts: vec![
+                (B256::from([2; 32]), Some(Account::default())),
+                (B256::from([3; 32]), Some(Account { nonce: 1, ..Default::default() })), /* Override */
+                (B256::from([4; 32]), Some(Account::default())),
+                (B256::from([6; 32]), None),
+            ],
             storages: B256Map::default(),
         };
 
         state1.extend_ref(&state2);
 
         // Check accounts are merged and sorted
-        assert_eq!(state1.accounts.accounts.len(), 4);
-        assert_eq!(state1.accounts.accounts[0].0, B256::from([1; 32]));
-        assert_eq!(state1.accounts.accounts[1].0, B256::from([2; 32]));
-        assert_eq!(state1.accounts.accounts[2].0, B256::from([3; 32]));
-        assert_eq!(state1.accounts.accounts[2].1.nonce, 1); // Should have state2's value
-        assert_eq!(state1.accounts.accounts[3].0, B256::from([4; 32]));
-
-        // Check destroyed accounts are merged
-        assert!(state1.accounts.destroyed_accounts.contains(&B256::from([5; 32])));
-        assert!(state1.accounts.destroyed_accounts.contains(&B256::from([6; 32])));
+        assert_eq!(state1.accounts.len(), 6);
+        assert_eq!(state1.accounts[0].0, B256::from([1; 32]));
+        assert_eq!(state1.accounts[1].0, B256::from([2; 32]));
+        assert_eq!(state1.accounts[2].0, B256::from([3; 32]));
+        assert_eq!(state1.accounts[2].1.unwrap().nonce, 1); // Should have state2's value
+        assert_eq!(state1.accounts[3].0, B256::from([4; 32]));
+        assert_eq!(state1.accounts[4].0, B256::from([5; 32]));
+        assert_eq!(state1.accounts[4].1, None);
+        assert_eq!(state1.accounts[5].0, B256::from([6; 32]));
+        assert_eq!(state1.accounts[5].1, None);
     }
 
     #[test]
     fn test_hashed_storage_sorted_extend_ref() {
         // Test normal extension
         let mut storage1 = HashedStorageSorted {
-            non_zero_valued_slots: vec![
+            storage_slots: vec![
                 (B256::from([1; 32]), U256::from(10)),
                 (B256::from([3; 32]), U256::from(30)),
+                (B256::from([5; 32]), U256::ZERO),
             ],
-            zero_valued_slots: B256Set::from_iter([B256::from([5; 32])]),
             wiped: false,
         };
 
         let storage2 = HashedStorageSorted {
-            non_zero_valued_slots: vec![
+            storage_slots: vec![
                 (B256::from([2; 32]), U256::from(20)),
                 (B256::from([3; 32]), U256::from(300)), // Override
                 (B256::from([4; 32]), U256::from(40)),
+                (B256::from([6; 32]), U256::ZERO),
             ],
-            zero_valued_slots: B256Set::from_iter([B256::from([6; 32])]),
             wiped: false,
         };
 
         storage1.extend_ref(&storage2);
 
-        assert_eq!(storage1.non_zero_valued_slots.len(), 4);
-        assert_eq!(storage1.non_zero_valued_slots[0].0, B256::from([1; 32]));
-        assert_eq!(storage1.non_zero_valued_slots[1].0, B256::from([2; 32]));
-        assert_eq!(storage1.non_zero_valued_slots[2].0, B256::from([3; 32]));
-        assert_eq!(storage1.non_zero_valued_slots[2].1, U256::from(300)); // Should have storage2's value
-        assert_eq!(storage1.non_zero_valued_slots[3].0, B256::from([4; 32]));
-        assert!(storage1.zero_valued_slots.contains(&B256::from([5; 32])));
-        assert!(storage1.zero_valued_slots.contains(&B256::from([6; 32])));
+        assert_eq!(storage1.storage_slots.len(), 6);
+        assert_eq!(storage1.storage_slots[0].0, B256::from([1; 32]));
+        assert_eq!(storage1.storage_slots[0].1, U256::from(10));
+        assert_eq!(storage1.storage_slots[1].0, B256::from([2; 32]));
+        assert_eq!(storage1.storage_slots[1].1, U256::from(20));
+        assert_eq!(storage1.storage_slots[2].0, B256::from([3; 32]));
+        assert_eq!(storage1.storage_slots[2].1, U256::from(300)); // Should have storage2's value
+        assert_eq!(storage1.storage_slots[3].0, B256::from([4; 32]));
+        assert_eq!(storage1.storage_slots[3].1, U256::from(40));
+        assert_eq!(storage1.storage_slots[4].0, B256::from([5; 32]));
+        assert_eq!(storage1.storage_slots[4].1, U256::ZERO);
+        assert_eq!(storage1.storage_slots[5].0, B256::from([6; 32]));
+        assert_eq!(storage1.storage_slots[5].1, U256::ZERO);
         assert!(!storage1.wiped);
 
         // Test wiped storage
         let mut storage3 = HashedStorageSorted {
-            non_zero_valued_slots: vec![(B256::from([1; 32]), U256::from(10))],
-            zero_valued_slots: B256Set::from_iter([B256::from([2; 32])]),
+            storage_slots: vec![
+                (B256::from([1; 32]), U256::from(10)),
+                (B256::from([2; 32]), U256::ZERO),
+            ],
             wiped: false,
         };
 
         let storage4 = HashedStorageSorted {
-            non_zero_valued_slots: vec![(B256::from([3; 32]), U256::from(30))],
-            zero_valued_slots: B256Set::from_iter([B256::from([4; 32])]),
+            storage_slots: vec![
+                (B256::from([3; 32]), U256::from(30)),
+                (B256::from([4; 32]), U256::ZERO),
+            ],
             wiped: true,
         };
 
@@ -1250,10 +1418,88 @@ mod tests {
 
         assert!(storage3.wiped);
         // When wiped, should only have storage4's values
-        assert_eq!(storage3.non_zero_valued_slots.len(), 1);
-        assert_eq!(storage3.non_zero_valued_slots[0].0, B256::from([3; 32]));
-        assert_eq!(storage3.zero_valued_slots.len(), 1);
-        assert!(storage3.zero_valued_slots.contains(&B256::from([4; 32])));
+        assert_eq!(storage3.storage_slots.len(), 2);
+        assert_eq!(storage3.storage_slots[0].0, B256::from([3; 32]));
+        assert_eq!(storage3.storage_slots[0].1, U256::from(30));
+        assert_eq!(storage3.storage_slots[1].0, B256::from([4; 32]));
+        assert_eq!(storage3.storage_slots[1].1, U256::ZERO);
+    }
+
+    /// Test extending with sorted accounts merges correctly into `HashMap`
+    #[test]
+    fn test_hashed_post_state_extend_from_sorted_with_accounts() {
+        let addr1 = B256::random();
+        let addr2 = B256::random();
+
+        let mut state = HashedPostState::default();
+        state.accounts.insert(addr1, Some(Default::default()));
+
+        let mut sorted_state = HashedPostStateSorted::default();
+        sorted_state.accounts.push((addr2, Some(Default::default())));
+
+        state.extend_from_sorted(&sorted_state);
+
+        assert_eq!(state.accounts.len(), 2);
+        assert!(state.accounts.contains_key(&addr1));
+        assert!(state.accounts.contains_key(&addr2));
+    }
+
+    /// Test destroyed accounts (None values) are inserted correctly
+    #[test]
+    fn test_hashed_post_state_extend_from_sorted_with_destroyed_accounts() {
+        let addr1 = B256::random();
+
+        let mut state = HashedPostState::default();
+
+        let mut sorted_state = HashedPostStateSorted::default();
+        sorted_state.accounts.push((addr1, None));
+
+        state.extend_from_sorted(&sorted_state);
+
+        assert!(state.accounts.contains_key(&addr1));
+        assert_eq!(state.accounts.get(&addr1), Some(&None));
+    }
+
+    /// Test non-wiped storage merges both zero and non-zero valued slots
+    #[test]
+    fn test_hashed_storage_extend_from_sorted_non_wiped() {
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+        let slot3 = B256::random();
+
+        let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
+
+        let sorted = HashedStorageSorted {
+            storage_slots: vec![(slot2, U256::from(200)), (slot3, U256::ZERO)],
+            wiped: false,
+        };
+
+        storage.extend_from_sorted(&sorted);
+
+        assert!(!storage.wiped);
+        assert_eq!(storage.storage.len(), 3);
+        assert_eq!(storage.storage.get(&slot1), Some(&U256::from(100)));
+        assert_eq!(storage.storage.get(&slot2), Some(&U256::from(200)));
+        assert_eq!(storage.storage.get(&slot3), Some(&U256::ZERO));
+    }
+
+    /// Test wiped=true clears existing storage and only keeps new slots (critical edge case)
+    #[test]
+    fn test_hashed_storage_extend_from_sorted_wiped() {
+        let slot1 = B256::random();
+        let slot2 = B256::random();
+
+        let mut storage = HashedStorage::from_iter(false, [(slot1, U256::from(100))]);
+
+        let sorted =
+            HashedStorageSorted { storage_slots: vec![(slot2, U256::from(200))], wiped: true };
+
+        storage.extend_from_sorted(&sorted);
+
+        assert!(storage.wiped);
+        // After wipe, old storage should be cleared and only new storage remains
+        assert_eq!(storage.storage.len(), 1);
+        assert_eq!(storage.storage.get(&slot2), Some(&U256::from(200)));
     }
 
     #[test]
@@ -1314,6 +1560,439 @@ mod tests {
                 "chunking_length: {}, size: {}",
                 chunking_length, size
             );
+        }
+    }
+
+    #[test]
+    fn test_clone_into_sorted_equivalence() {
+        let addr1 = B256::from([1; 32]);
+        let addr2 = B256::from([2; 32]);
+        let addr3 = B256::from([3; 32]);
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+        let slot3 = B256::from([3; 32]);
+
+        let state = HashedPostState {
+            accounts: B256Map::from_iter([
+                (addr1, Some(Account { nonce: 1, balance: U256::from(100), bytecode_hash: None })),
+                (addr2, None),
+                (addr3, Some(Account::default())),
+            ]),
+            storages: B256Map::from_iter([
+                (
+                    addr1,
+                    HashedStorage {
+                        wiped: false,
+                        storage: B256Map::from_iter([
+                            (slot1, U256::from(10)),
+                            (slot2, U256::from(20)),
+                        ]),
+                    },
+                ),
+                (
+                    addr2,
+                    HashedStorage {
+                        wiped: true,
+                        storage: B256Map::from_iter([(slot3, U256::ZERO)]),
+                    },
+                ),
+            ]),
+        };
+
+        // clone_into_sorted should produce the same result as clone().into_sorted()
+        let sorted_via_clone = state.clone().into_sorted();
+        let sorted_via_clone_into = state.clone_into_sorted();
+
+        assert_eq!(sorted_via_clone, sorted_via_clone_into);
+
+        // Verify the original state is not consumed
+        assert_eq!(state.accounts.len(), 3);
+        assert_eq!(state.storages.len(), 2);
+    }
+
+    #[test]
+    fn test_hashed_storage_clone_into_sorted_equivalence() {
+        let slot1 = B256::from([1; 32]);
+        let slot2 = B256::from([2; 32]);
+        let slot3 = B256::from([3; 32]);
+
+        let storage = HashedStorage {
+            wiped: true,
+            storage: B256Map::from_iter([
+                (slot1, U256::from(100)),
+                (slot2, U256::ZERO),
+                (slot3, U256::from(300)),
+            ]),
+        };
+
+        // clone_into_sorted should produce the same result as clone().into_sorted()
+        let sorted_via_clone = storage.clone().into_sorted();
+        let sorted_via_clone_into = storage.clone_into_sorted();
+
+        assert_eq!(sorted_via_clone, sorted_via_clone_into);
+
+        // Verify the original storage is not consumed
+        assert_eq!(storage.storage.len(), 3);
+        assert!(storage.wiped);
+    }
+}
+
+/// Bincode-compatible hashed state type serde implementations.
+#[cfg(feature = "serde-bincode-compat")]
+pub mod serde_bincode_compat {
+    use super::Account;
+    use alloc::borrow::Cow;
+    use alloy_primitives::{map::B256Map, B256, U256};
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+    use serde_with::{DeserializeAs, SerializeAs};
+
+    /// Bincode-compatible [`super::HashedPostState`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie_common::{serde_bincode_compat, HashedPostState};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostState")]
+    ///     hashed_state: HashedPostState,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct HashedPostState<'a> {
+        accounts: Cow<'a, B256Map<Option<Account>>>,
+        storages: B256Map<HashedStorage<'a>>,
+    }
+
+    impl<'a> From<&'a super::HashedPostState> for HashedPostState<'a> {
+        fn from(value: &'a super::HashedPostState) -> Self {
+            Self {
+                accounts: Cow::Borrowed(&value.accounts),
+                storages: value.storages.iter().map(|(k, v)| (*k, v.into())).collect(),
+            }
+        }
+    }
+
+    impl<'a> From<HashedPostState<'a>> for super::HashedPostState {
+        fn from(value: HashedPostState<'a>) -> Self {
+            Self {
+                accounts: value.accounts.into_owned(),
+                storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            }
+        }
+    }
+
+    impl SerializeAs<super::HashedPostState> for HashedPostState<'_> {
+        fn serialize_as<S>(
+            source: &super::HashedPostState,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            HashedPostState::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::HashedPostState> for HashedPostState<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostState, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            HashedPostState::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::HashedStorage`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie_common::{serde_bincode_compat, HashedStorage};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::hashed_state::HashedStorage")]
+    ///     hashed_storage: HashedStorage,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct HashedStorage<'a> {
+        wiped: bool,
+        storage: Cow<'a, B256Map<U256>>,
+    }
+
+    impl<'a> From<&'a super::HashedStorage> for HashedStorage<'a> {
+        fn from(value: &'a super::HashedStorage) -> Self {
+            Self { wiped: value.wiped, storage: Cow::Borrowed(&value.storage) }
+        }
+    }
+
+    impl<'a> From<HashedStorage<'a>> for super::HashedStorage {
+        fn from(value: HashedStorage<'a>) -> Self {
+            Self { wiped: value.wiped, storage: value.storage.into_owned() }
+        }
+    }
+
+    impl SerializeAs<super::HashedStorage> for HashedStorage<'_> {
+        fn serialize_as<S>(source: &super::HashedStorage, serializer: S) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            HashedStorage::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::HashedStorage> for HashedStorage<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedStorage, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            HashedStorage::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::HashedPostStateSorted`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie_common::{serde_bincode_compat, HashedPostStateSorted};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostStateSorted")]
+    ///     hashed_state: HashedPostStateSorted,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct HashedPostStateSorted<'a> {
+        accounts: Cow<'a, [(B256, Option<Account>)]>,
+        storages: B256Map<HashedStorageSorted<'a>>,
+    }
+
+    impl<'a> From<&'a super::HashedPostStateSorted> for HashedPostStateSorted<'a> {
+        fn from(value: &'a super::HashedPostStateSorted) -> Self {
+            Self {
+                accounts: Cow::Borrowed(&value.accounts),
+                storages: value.storages.iter().map(|(k, v)| (*k, v.into())).collect(),
+            }
+        }
+    }
+
+    impl<'a> From<HashedPostStateSorted<'a>> for super::HashedPostStateSorted {
+        fn from(value: HashedPostStateSorted<'a>) -> Self {
+            Self {
+                accounts: value.accounts.into_owned(),
+                storages: value.storages.into_iter().map(|(k, v)| (k, v.into())).collect(),
+            }
+        }
+    }
+
+    impl SerializeAs<super::HashedPostStateSorted> for HashedPostStateSorted<'_> {
+        fn serialize_as<S>(
+            source: &super::HashedPostStateSorted,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            HashedPostStateSorted::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::HashedPostStateSorted> for HashedPostStateSorted<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedPostStateSorted, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            HashedPostStateSorted::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    /// Bincode-compatible [`super::HashedStorageSorted`] serde implementation.
+    ///
+    /// Intended to use with the [`serde_with::serde_as`] macro in the following way:
+    /// ```rust
+    /// use reth_trie_common::{serde_bincode_compat, HashedStorageSorted};
+    /// use serde::{Deserialize, Serialize};
+    /// use serde_with::serde_as;
+    ///
+    /// #[serde_as]
+    /// #[derive(Serialize, Deserialize)]
+    /// struct Data {
+    ///     #[serde_as(as = "serde_bincode_compat::hashed_state::HashedStorageSorted")]
+    ///     hashed_storage: HashedStorageSorted,
+    /// }
+    /// ```
+    #[derive(Debug, Serialize, Deserialize)]
+    pub struct HashedStorageSorted<'a> {
+        storage_slots: Cow<'a, [(B256, U256)]>,
+        wiped: bool,
+    }
+
+    impl<'a> From<&'a super::HashedStorageSorted> for HashedStorageSorted<'a> {
+        fn from(value: &'a super::HashedStorageSorted) -> Self {
+            Self { storage_slots: Cow::Borrowed(&value.storage_slots), wiped: value.wiped }
+        }
+    }
+
+    impl<'a> From<HashedStorageSorted<'a>> for super::HashedStorageSorted {
+        fn from(value: HashedStorageSorted<'a>) -> Self {
+            Self { storage_slots: value.storage_slots.into_owned(), wiped: value.wiped }
+        }
+    }
+
+    impl SerializeAs<super::HashedStorageSorted> for HashedStorageSorted<'_> {
+        fn serialize_as<S>(
+            source: &super::HashedStorageSorted,
+            serializer: S,
+        ) -> Result<S::Ok, S::Error>
+        where
+            S: Serializer,
+        {
+            HashedStorageSorted::from(source).serialize(serializer)
+        }
+    }
+
+    impl<'de> DeserializeAs<'de, super::HashedStorageSorted> for HashedStorageSorted<'de> {
+        fn deserialize_as<D>(deserializer: D) -> Result<super::HashedStorageSorted, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            HashedStorageSorted::deserialize(deserializer).map(Into::into)
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use crate::{
+            hashed_state::{
+                HashedPostState, HashedPostStateSorted, HashedStorage, HashedStorageSorted,
+            },
+            serde_bincode_compat,
+        };
+        use alloy_primitives::{B256, U256};
+        use reth_primitives_traits::Account;
+        use serde::{Deserialize, Serialize};
+        use serde_with::serde_as;
+
+        #[test]
+        fn test_hashed_post_state_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostState")]
+                hashed_state: HashedPostState,
+            }
+
+            let mut data = Data { hashed_state: HashedPostState::default() };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_state.accounts.insert(B256::random(), Some(Account::default()));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_state.storages.insert(B256::random(), HashedStorage::default());
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_hashed_storage_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::hashed_state::HashedStorage")]
+                hashed_storage: HashedStorage,
+            }
+
+            let mut data = Data { hashed_storage: HashedStorage::default() };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_storage.wiped = true;
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_storage.storage.insert(B256::random(), U256::from(1));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_hashed_post_state_sorted_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::hashed_state::HashedPostStateSorted")]
+                hashed_state: HashedPostStateSorted,
+            }
+
+            let mut data = Data { hashed_state: HashedPostStateSorted::default() };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_state.accounts.push((B256::random(), Some(Account::default())));
+            data.hashed_state
+                .accounts
+                .push((B256::random(), Some(Account { nonce: 1, ..Default::default() })));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_state.storages.insert(
+                B256::random(),
+                HashedStorageSorted {
+                    storage_slots: vec![(B256::from([1; 32]), U256::from(10))],
+                    wiped: false,
+                },
+            );
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+        }
+
+        #[test]
+        fn test_hashed_storage_sorted_bincode_roundtrip() {
+            #[serde_as]
+            #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
+            struct Data {
+                #[serde_as(as = "serde_bincode_compat::hashed_state::HashedStorageSorted")]
+                hashed_storage: HashedStorageSorted,
+            }
+
+            let mut data = Data {
+                hashed_storage: HashedStorageSorted { storage_slots: Vec::new(), wiped: false },
+            };
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_storage.wiped = true;
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
+
+            data.hashed_storage.storage_slots.push((B256::random(), U256::from(1)));
+            let encoded = bincode::serialize(&data).unwrap();
+            let decoded: Data = bincode::deserialize(&encoded).unwrap();
+            assert_eq!(decoded, data);
         }
     }
 }

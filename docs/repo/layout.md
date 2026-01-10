@@ -40,10 +40,19 @@ All binaries are stored in [`bin`](../../bin).
 These crates are related to the database.
 
 - [`storage/codecs`](../../crates/storage/codecs): Different storage codecs.
+- [`storage/codecs/derive`](../../crates/storage/codecs/derive): Derive macros for storage codecs.
 - [`storage/libmdbx-rs`](../../crates/storage/libmdbx-rs): Rust bindings for [libmdbx](https://github.com/erthink/libmdbx). A fork of an earlier Apache-licensed version of [libmdbx-rs][libmdbx-rs].
 - [`storage/db`](../../crates/storage/db): Strongly typed Database abstractions (transactions, cursors, tables) over lower level database backends.
   - Implemented backends: mdbx
+- [`storage/db-api`](../../crates/storage/db-api): High-level database access traits used across storage crates.
+- [`storage/db-common`](../../crates/storage/db-common): Shared database helpers and utilities.
+- [`storage/db-models`](../../crates/storage/db-models): Typed database models for on-disk tables.
+- [`storage/storage-api`](../../crates/storage/storage-api): Storage-facing APIs used by higher-level components.
 - [`storage/provider`](../../crates/storage/provider): Traits which provide a higher level api over the database to access the Ethereum state and historical data (transactions, blocks etc.)
+- [`storage/rpc-provider`](../../crates/storage/rpc-provider): Storage provider implementations tailored for RPC access patterns.
+- [`storage/errors`](../../crates/storage/errors): Common error types used by storage crates.
+- [`storage/nippy-jar`](../../crates/storage/nippy-jar): Compressed columnar storage for historical data.
+- [`storage/zstd-compressors`](../../crates/storage/zstd-compressors): Zstandard-based compressors used by storage components.
 
 
 ### Networking
@@ -62,16 +71,21 @@ The networking component mainly lives in [`net/network`](../../crates/net/networ
   - Contains: Peer banlist.
 - [`net/network-api`](../../crates/net/network-api): Contains traits that define the networking component as a whole. Other components that interface with the network stack only need to depend on this crate for the relevant types.
 - [`net/nat`](../../crates/net/nat): A small helper crate that resolves the external IP of the running node using various methods (such as a manually provided IP, using UPnP etc.)
+- [`net/network-types`](../../crates/net/network-types): Common networking types (peer identifiers, capabilities, messages, etc.).
+- [`net/p2p`](../../crates/net/p2p): Higher-level P2P networking helpers and utilities.
+- [`net/peers`](../../crates/net/peers): Peer set management, scoring and reputation support.
 
 #### Discovery
 
 - [`net/discv4`](../../crates/net/discv4): An implementation of the [discv4][discv4] protocol
+- [`net/discv5`](../../crates/net/discv5): An implementation of the discv5 node discovery protocol.
 - [`net/dns`](../../crates/net/dns): An implementation of node discovery via DNS ([EIP-1459][eip-1459])
 
 #### Protocol
 
 - [`net/eth-wire`](../../crates/net/eth-wire): Implements the `eth` wire protocol and the ``RLPx`` networking stack.
 - [`net/ecies`](../../crates/net/ecies): Implementation of the Elliptic Curve Integrated Encryption Scheme used in the ``RLPx`` handshake.
+- [`net/eth-wire-types`](../../crates/net/eth-wire-types): Common types used by the `eth` wire protocol and RLPx networking stack.
 
 #### Downloaders
 
@@ -81,7 +95,9 @@ The networking component mainly lives in [`net/network`](../../crates/net/networ
 
 Different consensus mechanisms.
 
-- [`consensus/common`](../../crates/consensus/common): Common consensus functions and traits (e.g. fee calculation)
+- [`consensus/common`](../../crates/consensus/common): Common consensus functions and traits (e.g. fee calculation).
+- [`consensus/consensus`](../../crates/consensus/consensus): Core consensus engine interfaces and implementations.
+- [`consensus/debug-client`](../../crates/consensus/debug-client): Utilities for interacting with the consensus engine in debugging and testing scenarios.
 
 ### Execution
 
@@ -96,7 +112,9 @@ Crates related to transaction execution.
 
 These crates implement the main syncing drivers of reth.
 
-- [`stages`](../../crates/stages): A pipelined sync, including implementation of various stages. This is used during initial sync and is faster than the tree-like structure for longer sync ranges.
+- [`stages/api`](../../crates/stages/api): Public API for the staged sync pipeline.
+- [`stages/stages`](../../crates/stages/stages): Implementations of the individual sync stages and the pipeline driver. This is used during initial sync and is faster than the tree-like structure for longer sync ranges.
+- [`stages/types`](../../crates/stages/types): Shared types used by the staged sync pipeline.
 
 ### RPC
 
@@ -146,6 +164,10 @@ Crates related to building and validating payloads (blocks).
 - [`transaction-pool`](../../crates/transaction-pool): An in-memory pending transactions pool.
 - [`payload/builder`](../../crates/payload/builder): Abstractions for payload building and a payload builder service that works with multiple kinds of payload resolvers.
 - [`payload/basic`](../../crates/payload/basic): A basic payload generator.
+- [`payload/builder-primitives`](../../crates/payload/builder-primitives): Common primitives used by payload builders.
+- [`payload/primitives`](../../crates/payload/primitives): Shared types used when building and validating payloads.
+- [`payload/util`](../../crates/payload/util): Utility helpers used by payload building and validation logic.
+- [`payload/validator`](../../crates/payload/validator): Payload validation helpers and utilities.
 
 ### Primitives
 
@@ -159,6 +181,19 @@ These crates define primitive types or algorithms.
 
 Crates related to the Optimism rollup live in [optimism](../../crates/optimism/).
 
+#### Ethereum-Specific Crates
+
+Ethereum mainnet-specific implementations and primitives live in `crates/ethereum/`.
+
+- **reth-ethereum-engine-primitives** (`crates/ethereum/engine-primitives`)  
+  Ethereum-specific types for engine API, consensus messages, and payload attributes.
+
+- **reth-ethereum-forks** (`crates/ethereum/hardforks`)  
+  Mainnet-specific hardfork definitions, activation schedules, and feature flags.
+
+- **reth-ethereum-payload-builder** (`crates/ethereum/payload`)  
+  Ethereum-tailored payload builder implementing mainnet block production rules.
+
 ### Misc
 
 Small utility crates.
@@ -169,6 +204,12 @@ Small utility crates.
 - [`metrics/metrics-derive`](https://github.com/rkrasiuk/metrics-derive): A derive-style API for creating metrics
 - [`metrics/reth-node-metrics`](../../crates/node/metrics/): The implementation of metrics server, recorder, hooks.
 - [`tracing`](../../crates/tracing): A small utility crate to install a uniform [`tracing`][tracing] subscriber
+- [`fs-util`](../../crates/fs-util): Small filesystem utilities shared across the node.
+- [`tokio-util`](../../crates/tokio-util): Tokio-related utilities used by reth.
+- [`static-file`](../../crates/static-file): Utilities for bundling and serving static files.
+- [`tracing-otlp`](../../crates/tracing-otlp): Exporter for sending [`tracing`][tracing] spans to OTLP/OTel backends.
+- [`errors`](../../crates/errors): Common error types shared across multiple crates.
+- [`e2e-test-utils`](../../crates/e2e-test-utils): Helpers for end-to-end tests of the node.
 
 [libmdbx-rs]: https://crates.io/crates/libmdbx
 [discv4]: https://github.com/ethereum/devp2p/blob/master/discv4.md

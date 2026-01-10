@@ -65,37 +65,31 @@ build: ## Build the reth binary into `target` directory.
 	cargo build --bin reth --features "$(FEATURES)" --profile "$(PROFILE)"
 
 # Environment variables for reproducible builds
-# Initialize RUSTFLAGS
-RUST_BUILD_FLAGS =
-# Enable static linking to ensure reproducibility across builds
-RUST_BUILD_FLAGS += --C target-feature=+crt-static
-# Set the linker to use static libgcc to ensure reproducibility across builds
-RUST_BUILD_FLAGS += -C link-arg=-static-libgcc
-# Remove build ID from the binary to ensure reproducibility across builds
-RUST_BUILD_FLAGS += -C link-arg=-Wl,--build-id=none
-# Remove metadata hash from symbol names to ensure reproducible builds
-RUST_BUILD_FLAGS += -C metadata=''
 # Set timestamp from last git commit for reproducible builds
 SOURCE_DATE ?= $(shell git log -1 --pretty=%ct)
-# Disable incremental compilation to avoid non-deterministic artifacts
-CARGO_INCREMENTAL_VAL = 0
-# Set C locale for consistent string handling and sorting
-LOCALE_VAL = C
-# Set UTC timezone for consistent time handling across builds
-TZ_VAL = UTC
 
-.PHONY: build-reproducible
-build-reproducible: ## Build the reth binary into `target` directory with reproducible builds. Only works for x86_64-unknown-linux-gnu currently
+# Extra RUSTFLAGS for reproducible builds. Can be overridden via the environment.
+RUSTFLAGS_REPRODUCIBLE_EXTRA ?=
+
+# `reproducible` only supports reth on x86_64-unknown-linux-gnu
+build-%-reproducible:
+	@if [ "$*" != "reth" ]; then \
+		echo "Error: Reproducible builds are only supported for reth, not $*"; \
+		exit 1; \
+	fi
 	SOURCE_DATE_EPOCH=$(SOURCE_DATE) \
-	RUSTFLAGS="${RUST_BUILD_FLAGS} --remap-path-prefix $$(pwd)=." \
-	CARGO_INCREMENTAL=${CARGO_INCREMENTAL_VAL} \
-	LC_ALL=${LOCALE_VAL} \
-	TZ=${TZ_VAL} \
-	cargo build --bin reth --features "$(FEATURES)" --profile "release" --locked --target x86_64-unknown-linux-gnu
+	RUSTFLAGS="-C symbol-mangling-version=v0 -C strip=none -C link-arg=-Wl,--build-id=none -C metadata='' --remap-path-prefix $$(pwd)=. $(RUSTFLAGS_REPRODUCIBLE_EXTRA)" \
+	LC_ALL=C \
+	TZ=UTC \
+	JEMALLOC_OVERRIDE=/usr/lib/x86_64-linux-gnu/libjemalloc.a \
+	cargo build --bin reth --features "$(FEATURES) jemalloc-unprefixed" --profile "reproducible" --locked --target x86_64-unknown-linux-gnu
 
 .PHONY: build-debug
 build-debug: ## Build the reth binary into `target/debug` directory.
 	cargo build --bin reth --features "$(FEATURES)"
+.PHONY: build-debug-op
+build-debug-op: ## Build the op-reth binary into `target/debug` directory.
+	cargo build --bin op-reth --features "$(FEATURES)" --manifest-path crates/optimism/bin/Cargo.toml
 
 .PHONY: build-op
 build-op: ## Build the op-reth binary into `target` directory.
@@ -154,6 +148,22 @@ op-build-x86_64-apple-darwin:
 	$(MAKE) op-build-native-x86_64-apple-darwin
 op-build-aarch64-apple-darwin:
 	$(MAKE) op-build-native-aarch64-apple-darwin
+
+build-deb-%:
+	@case "$*" in \
+		x86_64-unknown-linux-gnu|aarch64-unknown-linux-gnu|riscv64gc-unknown-linux-gnu) \
+			echo "Building debian package for $*"; \
+			;; \
+		*) \
+			echo "Error: Debian packages are only supported for x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, and riscv64gc-unknown-linux-gnu, not $*"; \
+			exit 1; \
+			;; \
+	esac
+	cargo install cargo-deb@3.6.0 --locked
+	cargo deb --profile $(PROFILE) --no-build --no-dbgsym --no-strip \
+		--target $* \
+		$(if $(VERSION),--deb-version "1~$(VERSION)") \
+		$(if $(VERSION),--output "target/$*/$(PROFILE)/reth-$(VERSION)-$*-$(PROFILE).deb")
 
 # Create a `.tar.gz` containing a binary for a specific target.
 define tarball_release_binary
@@ -266,6 +276,11 @@ docker-build-push-latest: ## Build and push a cross-arch Docker image tagged wit
 docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
 	$(call docker_build_push,nightly,nightly)
 
+.PHONY: docker-build-push-nightly-edge-profiling
+docker-build-push-nightly-edge-profiling: FEATURES := $(FEATURES) edge
+docker-build-push-nightly-edge-profiling: ## Build and push cross-arch Docker image with edge features tagged with `nightly-edge-profiling`.
+	$(call docker_build_push,nightly-edge-profiling,nightly-edge-profiling)
+
 # Create a cross-arch Docker image with the given tags and push it
 define docker_build_push
 	$(MAKE) build-x86_64-unknown-linux-gnu
@@ -317,6 +332,11 @@ op-docker-build-push-latest: ## Build and push a cross-arch Docker image tagged 
 .PHONY: op-docker-build-push-nightly
 op-docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
 	$(call op_docker_build_push,nightly,nightly)
+
+.PHONY: op-docker-build-push-nightly-edge-profiling
+op-docker-build-push-nightly-edge-profiling: FEATURES := $(FEATURES) edge
+op-docker-build-push-nightly-edge-profiling: ## Build and push cross-arch Docker image with edge features tagged with `nightly-edge-profiling`.
+	$(call op_docker_build_push,nightly-edge-profiling,nightly-edge-profiling)
 
 # Note: This requires a buildx builder with emulation support. For example:
 #
@@ -380,9 +400,9 @@ db-tools: ## Compile MDBX debugging tools.
 	@echo "Run \"$(DB_TOOLS_DIR)/mdbx_chk\" for the MDBX db file integrity check."
 
 .PHONY: update-book-cli
-update-book-cli: build-debug ## Update book cli documentation.
+update-book-cli: build-debug build-debug-op## Update book cli documentation.
 	@echo "Updating book cli doc..."
-	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth
+	@./docs/cli/update.sh $(CARGO_TARGET_DIR)/debug/reth $(CARGO_TARGET_DIR)/debug/op-reth
 
 .PHONY: profiling
 profiling: ## Builds `reth` with optimisations, but also symbols.
@@ -511,10 +531,3 @@ pr:
 	make update-book-cli && \
 	cargo docs --document-private-items && \
 	make test
-
-check-features:
-	cargo hack check \
-		--package reth-codecs \
-		--package reth-primitives-traits \
-		--package reth-primitives \
-		--feature-powerset

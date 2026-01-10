@@ -13,7 +13,7 @@
 //!     components::ComponentsBuilder,
 //!     hooks::OnComponentInitializedHook,
 //!     rpc::{EthApiBuilder, EthApiCtx},
-//!     LaunchContext, NodeConfig, RethFullAdapter,
+//!     ConsensusEngineHandle, LaunchContext, NodeConfig, RethFullAdapter,
 //! };
 //! use reth_optimism_chainspec::OP_SEPOLIA;
 //! use reth_optimism_evm::OpEvmConfig;
@@ -67,7 +67,14 @@
 //!         config.cache,
 //!         node.task_executor().clone(),
 //!     );
-//!     let ctx = EthApiCtx { components: node.node_adapter(), config, cache };
+//!     // Create a dummy beacon engine handle for offline mode
+//!     let (tx, _) = tokio::sync::mpsc::unbounded_channel();
+//!     let ctx = EthApiCtx {
+//!         components: node.node_adapter(),
+//!         config,
+//!         cache,
+//!         engine_handle: ConsensusEngineHandle::new(tx),
+//!     };
 //!     let eth_api = OpEthApiBuilder::<Optimism>::default().build_eth_api(ctx).await.unwrap();
 //!
 //!     // build `trace` namespace API
@@ -139,6 +146,7 @@ where
             EngineCapabilities::new(OP_ENGINE_CAPABILITIES.iter().copied()),
             engine_validator,
             ctx.config.engine.accept_execution_requests_hash,
+            ctx.node.network().clone(),
         );
 
         Ok(OpEngineApi::new(inner))

@@ -273,10 +273,6 @@ impl<C: Send + Sync, N: NodePrimitives> TransactionsProvider for NoopProvider<C,
         Ok(None)
     }
 
-    fn transaction_block(&self, _id: TxNumber) -> ProviderResult<Option<BlockNumber>> {
-        Ok(None)
-    }
-
     fn transactions_by_block(
         &self,
         _block_id: BlockHashOrNumber,
@@ -399,6 +395,17 @@ impl<C: Send + Sync, N: NodePrimitives> ChangeSetReader for NoopProvider<C, N> {
         _address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         Ok(None)
+    }
+
+    fn account_changesets_range(
+        &self,
+        _range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        Ok(Vec::default())
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
     }
 }
 

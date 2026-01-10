@@ -61,15 +61,16 @@ mod tests {
         test_utils::create_test_provider_factory, HeaderProvider, StaticFileProviderFactory,
     };
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
-    use alloy_primitives::{map::HashMap, BlockHash, Signature, TxNumber, B256};
+    use alloy_primitives::{Address, BlockHash, Signature, TxNumber, B256, U160, U256};
     use rand::seq::SliceRandom;
-    use reth_db::test_utils::create_test_static_files_dir;
+    use reth_db::{models::AccountBeforeTx, test_utils::create_test_static_files_dir};
     use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
     use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
+    use reth_primitives_traits::Account;
     use reth_static_file_types::{
         find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
     };
-    use reth_storage_api::{ReceiptProvider, TransactionsProvider};
+    use reth_storage_api::{ChangeSetReader, ReceiptProvider, TransactionsProvider};
     use reth_testing_utils::generators::{self, random_header_range};
     use std::{collections::BTreeMap, fmt::Debug, fs, ops::Range, path::Path};
 
@@ -160,11 +161,11 @@ mod tests {
 
         // [ Headers Creation and Commit ]
         {
-            let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)
-                .expect("Failed to create static file provider builder")
-                .with_blocks_per_file(blocks_per_file)
-                .build()
-                .expect("Failed to build static file provider");
+            let sf_rw: StaticFileProvider<EthPrimitives> =
+                StaticFileProviderBuilder::read_write(&static_dir)
+                    .with_blocks_per_file(blocks_per_file)
+                    .build()
+                    .expect("Failed to build static file provider");
 
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers).unwrap();
 
@@ -257,7 +258,6 @@ mod tests {
         // Test cases execution
         {
             let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
-                .expect("Failed to create static file provider builder")
                 .with_blocks_per_file(blocks_per_file)
                 .build()
                 .expect("Failed to build static file provider");
@@ -314,16 +314,27 @@ mod tests {
 
                 // Append transaction/receipt if there's still a transaction count to append
                 if tx_count > 0 {
-                    if segment.is_receipts() {
-                        // Used as ID for validation
-                        receipt.cumulative_gas_used = *next_tx_num;
-                        writer.append_receipt(*next_tx_num, &receipt).unwrap();
-                    } else {
-                        // Used as ID for validation
-                        tx.nonce = *next_tx_num;
-                        let tx: TransactionSigned =
-                            tx.clone().into_signed(Signature::test_signature()).into();
-                        writer.append_transaction(*next_tx_num, &tx).unwrap();
+                    match segment {
+                        StaticFileSegment::Headers | StaticFileSegment::AccountChangeSets => {
+                            panic!("non tx based segment")
+                        }
+                        StaticFileSegment::Transactions => {
+                            // Used as ID for validation
+                            tx.nonce = *next_tx_num;
+                            let tx: TransactionSigned =
+                                tx.clone().into_signed(Signature::test_signature()).into();
+                            writer.append_transaction(*next_tx_num, &tx).unwrap();
+                        }
+                        StaticFileSegment::Receipts => {
+                            // Used as ID for validation
+                            receipt.cumulative_gas_used = *next_tx_num;
+                            writer.append_receipt(*next_tx_num, &receipt).unwrap();
+                        }
+                        StaticFileSegment::TransactionSenders => {
+                            // Used as ID for validation
+                            let sender = Address::from(U160::from(*next_tx_num));
+                            writer.append_transaction_sender(*next_tx_num, &sender).unwrap();
+                        }
                     }
                     *next_tx_num += 1;
                     tx_count -= 1;
@@ -387,11 +398,12 @@ mod tests {
         });
 
         // Ensure transaction index
-        let tx_index = sf_rw.tx_index().read();
-        let expected_tx_index =
-            vec![(8, SegmentRangeInclusive::new(0, 9)), (9, SegmentRangeInclusive::new(20, 29))];
+        let expected_tx_index = BTreeMap::from([
+            (8, SegmentRangeInclusive::new(0, 9)),
+            (9, SegmentRangeInclusive::new(20, 29)),
+        ]);
         assert_eq!(
-            tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+            sf_rw.tx_index(segment),
             (!expected_tx_index.is_empty()).then_some(expected_tx_index),
             "tx index mismatch",
         );
@@ -414,15 +426,22 @@ mod tests {
             last_block: u64,
             expected_tx_tip: Option<u64>,
             expected_file_count: i32,
-            expected_tx_index: Vec<(TxNumber, SegmentRangeInclusive)>,
+            expected_tx_index: BTreeMap<TxNumber, SegmentRangeInclusive>,
         ) -> eyre::Result<()> {
             let mut writer = sf_rw.latest_writer(segment)?;
 
             // Prune transactions or receipts based on the segment type
-            if segment.is_receipts() {
-                writer.prune_receipts(prune_count, last_block)?;
-            } else {
-                writer.prune_transactions(prune_count, last_block)?;
+            match segment {
+                StaticFileSegment::Headers | StaticFileSegment::AccountChangeSets => {
+                    panic!("non tx based segment")
+                }
+                StaticFileSegment::Transactions => {
+                    writer.prune_transactions(prune_count, last_block)?
+                }
+                StaticFileSegment::Receipts => writer.prune_receipts(prune_count, last_block)?,
+                StaticFileSegment::TransactionSenders => {
+                    writer.prune_transaction_senders(prune_count, last_block)?
+                }
             }
             writer.commit()?;
 
@@ -437,18 +456,27 @@ mod tests {
             // Verify that transactions and receipts are returned correctly. Uses
             // cumulative_gas_used & nonce as ids.
             if let Some(id) = expected_tx_tip {
-                if segment.is_receipts() {
-                    assert_eyre(
-                        expected_tx_tip,
-                        sf_rw.receipt(id)?.map(|r| r.cumulative_gas_used),
-                        "tx mismatch",
-                    )?;
-                } else {
-                    assert_eyre(
+                match segment {
+                    StaticFileSegment::Headers | StaticFileSegment::AccountChangeSets => {
+                        panic!("non tx based segment")
+                    }
+                    StaticFileSegment::Transactions => assert_eyre(
                         expected_tx_tip,
                         sf_rw.transaction_by_id(id)?.map(|t| t.nonce()),
                         "tx mismatch",
-                    )?;
+                    )?,
+                    StaticFileSegment::Receipts => assert_eyre(
+                        expected_tx_tip,
+                        sf_rw.receipt(id)?.map(|r| r.cumulative_gas_used),
+                        "receipt mismatch",
+                    )?,
+                    StaticFileSegment::TransactionSenders => assert_eyre(
+                        expected_tx_tip,
+                        sf_rw
+                            .transaction_sender(id)?
+                            .map(|s| u64::try_from(U160::from_be_bytes(s.0.into())).unwrap()),
+                        "sender mismatch",
+                    )?,
                 }
             }
 
@@ -460,9 +488,8 @@ mod tests {
             )?;
 
             // Ensure that the inner tx index (max_tx -> block range) is as expected
-            let tx_index = sf_rw.tx_index().read();
             assert_eyre(
-                tx_index.get(&segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
+                sf_rw.tx_index(segment).map(|index| index.iter().map(|(k, v)| (*k, *v)).collect()),
                 (!expected_tx_index.is_empty()).then_some(expected_tx_index),
                 "tx index mismatch",
             )?;
@@ -474,7 +501,6 @@ mod tests {
             let (static_dir, _) = create_test_static_files_dir();
 
             let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
-                .expect("Failed to create static file provider builder")
                 .with_blocks_per_file(blocks_per_file)
                 .build()
                 .expect("Failed to build static file provider");
@@ -482,7 +508,6 @@ mod tests {
             setup_tx_based_scenario(&sf_rw, segment, blocks_per_file);
 
             let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
-                .expect("Failed to create static file provider builder")
                 .with_blocks_per_file(blocks_per_file)
                 .build()
                 .expect("Failed to build static file provider");
@@ -500,7 +525,7 @@ mod tests {
                     blocks_per_file * 2,
                     Some(highest_tx - 1),
                     initial_file_count,
-                    vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
+                    BTreeMap::from([(highest_tx - 1, SegmentRangeInclusive::new(0, 9))]),
                 ),
                 // Case 1: 10..=19 has no txs. There are no txes in the whole block range, but want
                 // to unwind to block 9. Ensures that the 20..=29 and 10..=19 files
@@ -510,7 +535,7 @@ mod tests {
                     blocks_per_file - 1,
                     Some(highest_tx - 1),
                     files_per_range,
-                    vec![(highest_tx - 1, SegmentRangeInclusive::new(0, 9))],
+                    BTreeMap::from([(highest_tx - 1, SegmentRangeInclusive::new(0, 9))]),
                 ),
                 // Case 2: Prune most txs up to block 1.
                 (
@@ -518,10 +543,10 @@ mod tests {
                     1,
                     Some(0),
                     files_per_range,
-                    vec![(0, SegmentRangeInclusive::new(0, 1))],
+                    BTreeMap::from([(0, SegmentRangeInclusive::new(0, 1))]),
                 ),
                 // Case 3: Prune remaining tx and ensure that file is not deleted.
-                (1, 0, None, files_per_range, vec![]),
+                (1, 0, None, files_per_range, BTreeMap::from([])),
             ];
 
             // Loop through test cases
@@ -564,9 +589,10 @@ mod tests {
         let (static_dir, _) = create_test_static_files_dir();
 
         {
-            let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
-                .with_blocks_per_file(10)
-                .build()?;
+            let sf_rw: StaticFileProvider<EthPrimitives> =
+                StaticFileProviderBuilder::read_write(&static_dir)
+                    .with_blocks_per_file(10)
+                    .build()?;
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
 
             let mut header = Header::default();
@@ -578,21 +604,19 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=15)?.len(), 16);
             assert_eq!(
-                sf_rw.expected_block_index().read().deref(),
-                &HashMap::from([(
-                    StaticFileSegment::Headers,
-                    BTreeMap::from([
-                        (9, SegmentRangeInclusive::new(0, 9)),
-                        (19, SegmentRangeInclusive::new(10, 19))
-                    ])
-                )])
+                sf_rw.expected_block_index(StaticFileSegment::Headers),
+                Some(BTreeMap::from([
+                    (9, SegmentRangeInclusive::new(0, 9)),
+                    (19, SegmentRangeInclusive::new(10, 19))
+                ])),
             )
         }
 
         {
-            let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
-                .with_blocks_per_file(5)
-                .build()?;
+            let sf_rw: StaticFileProvider<EthPrimitives> =
+                StaticFileProviderBuilder::read_write(&static_dir)
+                    .with_blocks_per_file(5)
+                    .build()?;
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
 
             let mut header = Header::default();
@@ -604,22 +628,20 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=22)?.len(), 23);
             assert_eq!(
-                sf_rw.expected_block_index().read().deref(),
-                &HashMap::from([(
-                    StaticFileSegment::Headers,
-                    BTreeMap::from([
-                        (9, SegmentRangeInclusive::new(0, 9)),
-                        (19, SegmentRangeInclusive::new(10, 19)),
-                        (24, SegmentRangeInclusive::new(20, 24))
-                    ])
-                )])
+                sf_rw.expected_block_index(StaticFileSegment::Headers),
+                Some(BTreeMap::from([
+                    (9, SegmentRangeInclusive::new(0, 9)),
+                    (19, SegmentRangeInclusive::new(10, 19)),
+                    (24, SegmentRangeInclusive::new(20, 24))
+                ]))
             )
         }
 
         {
-            let sf_rw = StaticFileProviderBuilder::<EthPrimitives>::read_write(&static_dir)?
-                .with_blocks_per_file(15)
-                .build()?;
+            let sf_rw: StaticFileProvider<EthPrimitives> =
+                StaticFileProviderBuilder::read_write(&static_dir)
+                    .with_blocks_per_file(15)
+                    .build()?;
             let mut header_writer = sf_rw.latest_writer(StaticFileSegment::Headers)?;
 
             let mut header = Header::default();
@@ -631,20 +653,378 @@ mod tests {
 
             assert_eq!(sf_rw.headers_range(0..=40)?.len(), 41);
             assert_eq!(
-                sf_rw.expected_block_index().read().deref(),
-                &HashMap::from([(
-                    StaticFileSegment::Headers,
-                    BTreeMap::from([
-                        (9, SegmentRangeInclusive::new(0, 9)),
-                        (19, SegmentRangeInclusive::new(10, 19)),
-                        (24, SegmentRangeInclusive::new(20, 24)),
-                        (39, SegmentRangeInclusive::new(25, 39)),
-                        (54, SegmentRangeInclusive::new(40, 54))
-                    ])
-                )])
+                sf_rw.expected_block_index(StaticFileSegment::Headers),
+                Some(BTreeMap::from([
+                    (9, SegmentRangeInclusive::new(0, 9)),
+                    (19, SegmentRangeInclusive::new(10, 19)),
+                    (24, SegmentRangeInclusive::new(20, 24)),
+                    (39, SegmentRangeInclusive::new(25, 39)),
+                    (54, SegmentRangeInclusive::new(40, 54))
+                ]))
             )
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn test_account_changeset_static_files() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
+            .expect("Failed to create static file provider");
+
+        // Helper function to generate test changesets
+        fn generate_test_changesets(
+            block_num: u64,
+            addresses: Vec<Address>,
+        ) -> Vec<AccountBeforeTx> {
+            addresses
+                .into_iter()
+                .map(|address| AccountBeforeTx {
+                    address,
+                    info: Some(Account {
+                        nonce: block_num,
+                        balance: U256::from(block_num * 1000),
+                        bytecode_hash: None,
+                    }),
+                })
+                .collect()
+        }
+
+        // Test writing and reading account changesets
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            // Create test data for multiple blocks
+            let test_blocks = 10u64;
+            let addresses_per_block = 5;
+
+            for block_num in 0..test_blocks {
+                // Generate unique addresses for each block
+                let addresses: Vec<Address> = (0..addresses_per_block)
+                    .map(|i| {
+                        let mut addr = Address::ZERO;
+                        addr.0[0] = block_num as u8;
+                        addr.0[1] = i as u8;
+                        addr
+                    })
+                    .collect();
+
+                let changeset = generate_test_changesets(block_num, addresses.clone());
+
+                writer.append_account_changeset(changeset, block_num).unwrap();
+            }
+
+            writer.commit().unwrap();
+        }
+
+        // Verify data can be read back correctly
+        {
+            let provider = sf_rw
+                .get_segment_provider_for_block(StaticFileSegment::AccountChangeSets, 5, None)
+                .unwrap();
+
+            // Check that the segment header has changeset offsets
+            assert!(provider.user_header().changeset_offsets().is_some());
+            let offsets = provider.user_header().changeset_offsets().unwrap();
+            assert_eq!(offsets.len(), 10); // Should have 10 blocks worth of offsets
+
+            // Verify each block has the expected number of changes
+            for (i, offset) in offsets.iter().enumerate() {
+                assert_eq!(offset.num_changes(), 5, "Block {} should have 5 changes", i);
+            }
+        }
+    }
+
+    #[test]
+    fn test_get_account_before_block() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
+            .expect("Failed to create static file provider");
+
+        // Setup test data
+        let test_address = Address::from([1u8; 20]);
+        let other_address = Address::from([2u8; 20]);
+        let missing_address = Address::from([3u8; 20]);
+
+        // Write changesets for multiple blocks
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            // Block 0: test_address and other_address change
+            writer
+                .append_account_changeset(
+                    vec![
+                        AccountBeforeTx {
+                            address: test_address,
+                            info: None, // Account created
+                        },
+                        AccountBeforeTx { address: other_address, info: None },
+                    ],
+                    0,
+                )
+                .unwrap();
+
+            // Block 1: only other_address changes
+            writer
+                .append_account_changeset(
+                    vec![AccountBeforeTx {
+                        address: other_address,
+                        info: Some(Account { nonce: 0, balance: U256::ZERO, bytecode_hash: None }),
+                    }],
+                    1,
+                )
+                .unwrap();
+
+            // Block 2: test_address changes again
+            writer
+                .append_account_changeset(
+                    vec![AccountBeforeTx {
+                        address: test_address,
+                        info: Some(Account {
+                            nonce: 1,
+                            balance: U256::from(1000),
+                            bytecode_hash: None,
+                        }),
+                    }],
+                    2,
+                )
+                .unwrap();
+
+            writer.commit().unwrap();
+        }
+
+        // Test get_account_before_block
+        {
+            // Test retrieving account state before block 0
+            let result = sf_rw.get_account_before_block(0, test_address).unwrap();
+            assert!(result.is_some());
+            let account_before = result.unwrap();
+            assert_eq!(account_before.address, test_address);
+            assert!(account_before.info.is_none()); // Was created in block 0
+
+            // Test retrieving account state before block 2
+            let result = sf_rw.get_account_before_block(2, test_address).unwrap();
+            assert!(result.is_some());
+            let account_before = result.unwrap();
+            assert_eq!(account_before.address, test_address);
+            assert!(account_before.info.is_some());
+            let info = account_before.info.unwrap();
+            assert_eq!(info.nonce, 1);
+            assert_eq!(info.balance, U256::from(1000));
+
+            // Test retrieving account that doesn't exist in changeset for block
+            let result = sf_rw.get_account_before_block(1, test_address).unwrap();
+            assert!(result.is_none()); // test_address didn't change in block 1
+
+            // Test retrieving account that never existed
+            let result = sf_rw.get_account_before_block(2, missing_address).unwrap();
+            assert!(result.is_none());
+
+            // Test other_address changes
+            let result = sf_rw.get_account_before_block(1, other_address).unwrap();
+            assert!(result.is_some());
+            let account_before = result.unwrap();
+            assert_eq!(account_before.address, other_address);
+            assert!(account_before.info.is_some());
+        }
+    }
+
+    #[test]
+    fn test_account_changeset_truncation() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let blocks_per_file = 10;
+        let files_per_range = 3;
+        let file_set_count = 3;
+        let initial_file_count = files_per_range * file_set_count;
+        let tip = blocks_per_file * file_set_count - 1;
+
+        // Setup: Create account changesets for multiple blocks
+        {
+            let sf_rw: StaticFileProvider<EthPrimitives> =
+                StaticFileProviderBuilder::read_write(&static_dir)
+                    .with_blocks_per_file(blocks_per_file)
+                    .build()
+                    .expect("failed to create static file provider");
+
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            for block_num in 0..=tip {
+                // Create varying number of changes per block
+                let num_changes = ((block_num % 5) + 1) as usize;
+                let mut changeset = Vec::with_capacity(num_changes);
+
+                for i in 0..num_changes {
+                    let mut address = Address::ZERO;
+                    address.0[0] = block_num as u8;
+                    address.0[1] = i as u8;
+
+                    changeset.push(AccountBeforeTx {
+                        address,
+                        info: Some(Account {
+                            nonce: block_num,
+                            balance: U256::from(block_num * 1000 + i as u64),
+                            bytecode_hash: None,
+                        }),
+                    });
+                }
+
+                writer.append_account_changeset(changeset, block_num).unwrap();
+            }
+
+            writer.commit().unwrap();
+        }
+
+        // Helper function to validate truncation
+        fn validate_truncation(
+            sf_rw: &StaticFileProvider<EthPrimitives>,
+            static_dir: impl AsRef<Path>,
+            expected_tip: Option<u64>,
+            expected_file_count: u64,
+        ) -> eyre::Result<()> {
+            // Verify highest block
+            let highest_block =
+                sf_rw.get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
+            assert_eyre(highest_block, expected_tip, "block tip mismatch")?;
+
+            // Verify file count
+            assert_eyre(
+                count_files_without_lockfile(static_dir)?,
+                expected_file_count as usize,
+                "file count mismatch",
+            )?;
+
+            if let Some(tip) = expected_tip {
+                // Verify we can still read data up to the tip
+                let provider = sf_rw.get_segment_provider_for_block(
+                    StaticFileSegment::AccountChangeSets,
+                    tip,
+                    None,
+                )?;
+
+                // Check offsets are valid
+                let offsets = provider.user_header().changeset_offsets();
+                assert!(offsets.is_some(), "Should have changeset offsets");
+            }
+
+            Ok(())
+        }
+
+        // Test truncation scenarios
+        let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
+            .with_blocks_per_file(blocks_per_file)
+            .build()
+            .expect("failed to create static file provider");
+
+        // Re-initialize the index to ensure it knows about the written files
+        sf_rw.initialize_index().expect("Failed to initialize index");
+
+        // Case 1: Truncate to block 20 (remove last 9 blocks)
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            writer.prune_account_changesets(20).unwrap();
+            writer.commit().unwrap();
+
+            validate_truncation(&sf_rw, &static_dir, Some(20), initial_file_count)
+                .expect("Truncation validation failed");
+        }
+
+        // Case 2: Truncate to block 9 (should remove 2 files)
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            writer.prune_account_changesets(9).unwrap();
+            writer.commit().unwrap();
+
+            validate_truncation(&sf_rw, &static_dir, Some(9), files_per_range)
+                .expect("Truncation validation failed");
+        }
+
+        // Case 3: Truncate all (should keep block 0)
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+            writer.prune_account_changesets(0).unwrap();
+            writer.commit().unwrap();
+
+            // AccountChangeSets behaves like tx-based segments and keeps at least block 0
+            validate_truncation(&sf_rw, &static_dir, Some(0), files_per_range)
+                .expect("Truncation validation failed");
+        }
+    }
+
+    #[test]
+    fn test_changeset_binary_search() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
+            .expect("Failed to create static file provider");
+
+        // Create a block with many account changes to test binary search
+        let block_num = 0u64;
+        let num_accounts = 100;
+
+        let mut addresses: Vec<Address> = Vec::with_capacity(num_accounts);
+        for i in 0..num_accounts {
+            let mut addr = Address::ZERO;
+            addr.0[0] = (i / 256) as u8;
+            addr.0[1] = (i % 256) as u8;
+            addresses.push(addr);
+        }
+
+        // Write the changeset
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::AccountChangeSets).unwrap();
+
+            let changeset: Vec<AccountBeforeTx> = addresses
+                .iter()
+                .map(|addr| AccountBeforeTx {
+                    address: *addr,
+                    info: Some(Account {
+                        nonce: 1,
+                        balance: U256::from(1000),
+                        bytecode_hash: None,
+                    }),
+                })
+                .collect();
+
+            writer.append_account_changeset(changeset, block_num).unwrap();
+            writer.commit().unwrap();
+        }
+
+        // Test binary search for various addresses
+        {
+            // Test finding first address
+            let result = sf_rw.get_account_before_block(block_num, addresses[0]).unwrap();
+            assert!(result.is_some());
+            assert_eq!(result.unwrap().address, addresses[0]);
+
+            // Test finding last address
+            let result =
+                sf_rw.get_account_before_block(block_num, addresses[num_accounts - 1]).unwrap();
+            assert!(result.is_some());
+            assert_eq!(result.unwrap().address, addresses[num_accounts - 1]);
+
+            // Test finding middle addresses
+            let mid = num_accounts / 2;
+            let result = sf_rw.get_account_before_block(block_num, addresses[mid]).unwrap();
+            assert!(result.is_some());
+            assert_eq!(result.unwrap().address, addresses[mid]);
+
+            // Test not finding address that doesn't exist
+            let mut missing_addr = Address::ZERO;
+            missing_addr.0[0] = 255;
+            missing_addr.0[1] = 255;
+            let result = sf_rw.get_account_before_block(block_num, missing_addr).unwrap();
+            assert!(result.is_none());
+
+            // Test multiple lookups for performance
+            for i in (0..num_accounts).step_by(10) {
+                let result = sf_rw.get_account_before_block(block_num, addresses[i]).unwrap();
+                assert!(result.is_some());
+                assert_eq!(result.unwrap().address, addresses[i]);
+            }
+        }
     }
 }

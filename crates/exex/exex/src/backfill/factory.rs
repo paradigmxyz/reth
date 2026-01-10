@@ -39,7 +39,7 @@ impl<E, P> BackfillJobFactory<E, P> {
     }
 
     /// Sets the prune modes
-    pub const fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
+    pub fn with_prune_modes(mut self, prune_modes: PruneModes) -> Self {
         self.prune_modes = prune_modes;
         self
     }

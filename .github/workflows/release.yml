@@ -22,6 +22,7 @@ env:
   CARGO_TERM_COLOR: always
   DOCKER_IMAGE_NAME_URL: https://ghcr.io/${{ github.repository_owner }}/reth
   DOCKER_OP_IMAGE_NAME_URL: https://ghcr.io/${{ github.repository_owner }}/op-reth
+  RUSTC_WRAPPER: "sccache"
 
 jobs:
   dry-run:
@@ -49,8 +50,9 @@ jobs:
     needs: extract-version
     if: ${{ github.event.inputs.dry_run != 'true' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Verify crate version matches tag
         # Check that the Cargo version starts with the tag,
         # so that Cargo version 1.4.8 can be matched against both v1.4.8 and v1.4.8-rc.1
@@ -78,7 +80,7 @@ jobs:
             profile: maxperf
             allow_fail: false
           - target: x86_64-apple-darwin
-            os: macos-13
+            os: macos-14
             profile: maxperf
             allow_fail: false
           - target: aarch64-apple-darwin
@@ -99,11 +101,12 @@ jobs:
           - command: op-build
             binary: op-reth
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
         with:
           target: ${{ matrix.configs.target }}
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - name: Install cross main
         id: cross_main
         run: |
@@ -141,14 +144,14 @@ jobs:
 
       - name: Upload artifact
         if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz
 
       - name: Upload signature
         if: ${{ github.event.inputs.dry_run != 'true' }}
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v6
         with:
           name: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
           path: ${{ matrix.build.binary }}-${{ needs.extract-version.outputs.VERSION }}-${{ matrix.configs.target }}.tar.gz.asc
@@ -166,11 +169,11 @@ jobs:
     steps:
       # This is necessary for generating the changelog.
       # It has to come before "Download Artifacts" or else it deletes the artifacts.
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Download artifacts
-        uses: actions/download-artifact@v6
+        uses: actions/download-artifact@v7
       - name: Generate full changelog
         id: changelog
         run: |

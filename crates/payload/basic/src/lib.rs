@@ -297,7 +297,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
 /// resolved or the deadline is reached, or until the built payload is marked as frozen:
 /// [`BuildOutcome::Freeze`]. Once a frozen payload is returned, no additional payloads will be
 /// built and this future will wait to be resolved: [`PayloadJob::resolve`] or terminated if the
-/// deadline is reached..
+/// deadline is reached.
 #[derive(Debug)]
 pub struct BasicPayloadJob<Tasks, Builder>
 where
@@ -706,8 +706,16 @@ pub enum BuildOutcome<Payload> {
 }
 
 impl<Payload> BuildOutcome<Payload> {
-    /// Consumes the type and returns the payload if the outcome is `Better`.
+    /// Consumes the type and returns the payload if the outcome is `Better` or `Freeze`.
     pub fn into_payload(self) -> Option<Payload> {
+        match self {
+            Self::Better { payload, .. } | Self::Freeze(payload) => Some(payload),
+            _ => None,
+        }
+    }
+
+    /// Consumes the type and returns the payload if the outcome is `Better` or `Freeze`.
+    pub const fn payload(&self) -> Option<&Payload> {
         match self {
             Self::Better { payload, .. } | Self::Freeze(payload) => Some(payload),
             _ => None,
@@ -717,6 +725,11 @@ impl<Payload> BuildOutcome<Payload> {
     /// Returns true if the outcome is `Better`.
     pub const fn is_better(&self) -> bool {
         matches!(self, Self::Better { .. })
+    }
+
+    /// Returns true if the outcome is `Freeze`.
+    pub const fn is_frozen(&self) -> bool {
+        matches!(self, Self::Freeze { .. })
     }
 
     /// Returns true if the outcome is `Aborted`.

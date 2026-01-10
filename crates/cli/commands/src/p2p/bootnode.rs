@@ -60,7 +60,7 @@ impl Command {
         if self.v5 {
             info!("Starting discv5");
             let config = Config::builder(self.addr).build();
-            let (_discv5, updates, _local_enr_discv5) = Discv5::start(&sk, config).await?;
+            let (_discv5, updates) = Discv5::start(&sk, config).await?;
             discv5_updates = Some(updates);
         };
 

@@ -1,0 +1,13 @@
+[Unit]
+Description=Modular, contributor-friendly and blazing-fast implementation of the Ethereum protocol
+Wants=network-online.target
+After=network.target network-online.target
+
+[Service]
+Type=exec
+DynamicUser=yes
+StateDirectory=reth
+ExecStart=/usr/bin/reth node --datadir %S/reth --log.file.max-files 0
+
+[Install]
+WantedBy=multi-user.target

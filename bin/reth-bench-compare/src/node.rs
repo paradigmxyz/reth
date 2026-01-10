@@ -2,7 +2,9 @@
 
 use crate::cli::Args;
 use alloy_provider::{Provider, ProviderBuilder};
+use alloy_rpc_client::RpcClient;
 use alloy_rpc_types_eth::SyncStatus;
+use alloy_transport_ws::WsConnect;
 use eyre::{eyre, OptionExt, Result, WrapErr};
 #[cfg(unix)]
 use nix::sys::signal::{killpg, Signal};
@@ -18,6 +20,9 @@ use tokio::{
 };
 use tracing::{debug, info, warn};
 
+/// Default websocket RPC port used by reth
+const DEFAULT_WS_RPC_PORT: u16 = 8546;
+
 /// Manages reth node lifecycle and operations
 pub(crate) struct NodeManager {
     datadir: Option<String>,
@@ -29,6 +34,8 @@ pub(crate) struct NodeManager {
     output_dir: PathBuf,
     additional_reth_args: Vec<String>,
     comparison_dir: Option<PathBuf>,
+    tracing_endpoint: Option<String>,
+    otlp_max_queue_size: usize,
 }
 
 impl NodeManager {
@@ -42,8 +49,16 @@ impl NodeManager {
             binary_path: None,
             enable_profiling: args.profile,
             output_dir: args.output_dir_path(),
-            additional_reth_args: args.reth_args.clone(),
+            // Filter out empty strings to prevent invalid arguments being passed to reth node
+            additional_reth_args: args
+                .reth_args
+                .iter()
+                .filter(|s| !s.is_empty())
+                .cloned()
+                .collect(),
             comparison_dir: None,
+            tracing_endpoint: args.traces.otlp.as_ref().map(|u| u.to_string()),
+            otlp_max_queue_size: args.otlp_max_queue_size,
         }
     }
 
@@ -119,6 +134,7 @@ impl NodeManager {
         &self,
         binary_path_str: &str,
         additional_args: &[String],
+        ref_type: &str,
     ) -> (Vec<String>, String) {
         let mut reth_args = vec![binary_path_str.to_string(), "node".to_string()];
 
@@ -141,10 +157,20 @@ impl NodeManager {
             metrics_arg,
             "--http".to_string(),
             "--http.api".to_string(),
-            "eth".to_string(),
+            "eth,reth".to_string(),
+            "--ws".to_string(),
+            "--ws.api".to_string(),
+            "eth,reth".to_string(),
             "--disable-discovery".to_string(),
             "--trusted-only".to_string(),
         ]);
+
+        // Add tracing arguments if OTLP endpoint is configured
+        if let Some(ref endpoint) = self.tracing_endpoint {
+            info!("Enabling OTLP tracing export to: {} (service: reth-{})", endpoint, ref_type);
+            // Endpoint requires equals per clap settings in reth
+            reth_args.push(format!("--tracing-otlp={}", endpoint));
+        }
 
         // Add any additional arguments passed via command line (common to both baseline and
         // feature)
@@ -193,6 +219,14 @@ impl NodeManager {
         cmd.arg("--");
         cmd.args(reth_args);
 
+        // Enable tracing-samply
+        if supports_samply_flags(&reth_args[0]) {
+            cmd.arg("--log.samply");
+        }
+
+        // Set environment variable to disable log styling
+        cmd.env("RUST_LOG_STYLE", "never");
+
         Ok(cmd)
     }
 
@@ -200,32 +234,42 @@ impl NodeManager {
     fn create_direct_command(&self, reth_args: &[String]) -> Command {
         let binary_path = &reth_args[0];
 
-        if self.use_sudo {
+        let mut cmd = if self.use_sudo {
             info!("Starting reth node with sudo...");
-            let mut cmd = Command::new("sudo");
-            cmd.args(reth_args);
-            cmd
+            let mut sudo_cmd = Command::new("sudo");
+            sudo_cmd.args(reth_args);
+            sudo_cmd
         } else {
             info!("Starting reth node...");
-            let mut cmd = Command::new(binary_path);
-            cmd.args(&reth_args[1..]); // Skip the binary path since it's the command
-            cmd
-        }
+            let mut reth_cmd = Command::new(binary_path);
+            reth_cmd.args(&reth_args[1..]); // Skip the binary path since it's the command
+            reth_cmd
+        };
+
+        // Set environment variable to disable log styling
+        cmd.env("RUST_LOG_STYLE", "never");
+
+        cmd
     }
 
     /// Start a reth node using the specified binary path and return the process handle
+    /// along with the formatted reth command string for reporting.
     pub(crate) async fn start_node(
         &mut self,
         binary_path: &std::path::Path,
         _git_ref: &str,
         ref_type: &str,
         additional_args: &[String],
-    ) -> Result<tokio::process::Child> {
+    ) -> Result<(tokio::process::Child, String)> {
         // Store the binary path for later use (e.g., in unwind_to_block)
         self.binary_path = Some(binary_path.to_path_buf());
 
         let binary_path_str = binary_path.to_string_lossy();
-        let (reth_args, _) = self.build_reth_args(&binary_path_str, additional_args);
+        let (reth_args, _) = self.build_reth_args(&binary_path_str, additional_args, ref_type);
+
+        // Format the reth command string for reporting
+        let reth_command = shlex::try_join(reth_args.iter().map(|s| s.as_str()))
+            .wrap_err("Failed to format reth command string")?;
 
         // Log additional arguments if any
         if !self.additional_reth_args.is_empty() {
@@ -245,6 +289,15 @@ impl NodeManager {
         #[cfg(unix)]
         {
             cmd.process_group(0);
+        }
+
+        // Set high queue size to prevent trace dropping during benchmarks
+        if self.tracing_endpoint.is_some() {
+            cmd.env("OTEL_BSP_MAX_QUEUE_SIZE", self.otlp_max_queue_size.to_string()); // Traces
+            cmd.env("OTEL_BLRP_MAX_QUEUE_SIZE", "10000"); // Logs
+
+            // Set service name to differentiate baseline vs feature runs in Jaeger
+            cmd.env("OTEL_SERVICE_NAME", format!("reth-{}", ref_type));
         }
 
         debug!("Executing reth command: {cmd:?}");
@@ -311,11 +364,16 @@ impl NodeManager {
         // Give the node a moment to start up
         sleep(Duration::from_secs(5)).await;
 
-        Ok(child)
+        Ok((child, reth_command))
     }
 
-    /// Wait for the node to be ready and return its current tip
-    pub(crate) async fn wait_for_node_ready_and_get_tip(&self) -> Result<u64> {
+    /// Wait for the node to be ready and return its current tip.
+    ///
+    /// Fails early if the node process exits before becoming ready.
+    pub(crate) async fn wait_for_node_ready_and_get_tip(
+        &self,
+        child: &mut tokio::process::Child,
+    ) -> Result<u64> {
         info!("Waiting for node to be ready and synced...");
 
         let max_wait = Duration::from_secs(120); // 2 minutes to allow for sync
@@ -326,8 +384,23 @@ impl NodeManager {
         let url = rpc_url.parse().map_err(|e| eyre!("Invalid RPC URL '{}': {}", rpc_url, e))?;
         let provider = ProviderBuilder::new().connect_http(url);
 
+        let start_time = tokio::time::Instant::now();
+        let mut iteration = 0;
+
         timeout(max_wait, async {
             loop {
+                iteration += 1;
+                debug!(
+                    "Readiness check iteration {} (elapsed: {:?})",
+                    iteration,
+                    start_time.elapsed()
+                );
+
+                // Check if the node process has exited.
+                if let Some(status) = child.try_wait()? {
+                    return Err(eyre!("Node process exited unexpectedly with {status}"));
+                }
+
                 // First check if RPC is up and node is not syncing
                 match provider.syncing().await {
                     Ok(sync_result) => {
@@ -336,24 +409,48 @@ impl NodeManager {
                                 debug!("Node is still syncing {sync_info:?}, waiting...");
                             }
                             _ => {
+                                debug!("HTTP RPC is up and node is not syncing, checking block number...");
                                 // Node is not syncing, now get the tip
                                 match provider.get_block_number().await {
                                     Ok(tip) => {
-                                        info!("Node is ready and not syncing at block: {}", tip);
-                                        return Ok(tip);
+                                        debug!("HTTP RPC ready at block: {}, checking WebSocket...", tip);
+
+                                        // Verify WebSocket RPC is ready (public endpoint, no JWT required)
+                                        let ws_url = format!("ws://localhost:{}", DEFAULT_WS_RPC_PORT);
+                                        debug!("Attempting WebSocket connection to {} (public endpoint)", ws_url);
+                                        let ws_connect = WsConnect::new(&ws_url);
+
+                                        match RpcClient::connect_pubsub(ws_connect).await
+                                        {
+                                            Ok(_) => {
+                                                info!(
+                                                    "Node is ready (HTTP and WebSocket) at block: {} (took {:?}, {} iterations)",
+                                                    tip, start_time.elapsed(), iteration
+                                                );
+                                                return Ok(tip);
+                                            }
+                                            Err(e) => {
+                                                debug!(
+                                                    "HTTP RPC ready but WebSocket not ready yet (iteration {}): {:?}",
+                                                    iteration, e
+                                                );
+                                                debug!("WebSocket error details: {}", e);
+                                            }
+                                        }
                                     }
                                     Err(e) => {
-                                        debug!("Failed to get block number: {}", e);
+                                        debug!("Failed to get block number (iteration {}): {:?}", iteration, e);
                                     }
                                 }
                             }
                         }
                     }
                     Err(e) => {
-                        debug!("Node RPC not ready yet or failed to check sync status: {}", e);
+                        debug!("Node RPC not ready yet or failed to check sync status (iteration {}): {:?}", iteration, e);
                     }
                 }
 
+                debug!("Sleeping for {:?} before next check", check_interval);
                 sleep(check_interval).await;
             }
         })
@@ -363,7 +460,7 @@ impl NodeManager {
 
     /// Stop the reth node gracefully
     pub(crate) async fn stop_node(&self, child: &mut tokio::process::Child) -> Result<()> {
-        let pid = child.id().expect("Child process ID should be available");
+        let pid = child.id().ok_or_eyre("Child process ID should be available")?;
 
         // Check if the process has already exited
         match child.try_wait() {
@@ -468,6 +565,9 @@ impl NodeManager {
 
         cmd.args(["to-block", &block_number.to_string()]);
 
+        // Set environment variable to disable log styling
+        cmd.env("RUST_LOG_STYLE", "never");
+
         // Debug log the command
         debug!("Executing reth unwind command: {:?}", cmd);
 
@@ -508,4 +608,17 @@ impl NodeManager {
         info!("Unwound to block: {}", block_number);
         Ok(())
     }
+}
+
+fn supports_samply_flags(bin: &str) -> bool {
+    let mut cmd = std::process::Command::new(bin);
+    // NOTE: The flag to check must come before --help.
+    // We pass --help as a shortcut to not execute any command.
+    cmd.args(["--log.samply", "--help"]);
+    debug!(?cmd, "Checking samply flags support");
+    let Ok(output) = cmd.output() else {
+        return false;
+    };
+    debug!(?output, "Samply flags support check");
+    output.status.success()
 }

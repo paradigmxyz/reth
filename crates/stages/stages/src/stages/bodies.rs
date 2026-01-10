@@ -202,10 +202,7 @@ where
 
         // Write bodies to database.
         provider.append_block_bodies(
-            buffer
-                .into_iter()
-                .map(|response| (response.block_number(), response.into_body()))
-                .collect(),
+            buffer.iter().map(|response| (response.block_number(), response.body())).collect(),
         )?;
 
         // The stage is "done" if:
@@ -772,8 +769,9 @@ mod tests {
                     *range.start()..*range.end() + 1,
                     |cursor, number| cursor.get_two::<HeaderWithHashMask<Header>>(number.into()),
                 )? {
-                    let (header, hash) = header?;
-                    self.headers.push_back(SealedHeader::new(header, hash));
+                    if let Some((header, hash)) = header? {
+                        self.headers.push_back(SealedHeader::new(header, hash));
+                    }
                 }
 
                 Ok(())

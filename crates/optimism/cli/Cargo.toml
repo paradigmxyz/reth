@@ -44,7 +44,6 @@ reth-optimism-evm.workspace = true
 reth-cli-runner.workspace = true
 reth-node-builder = { workspace = true, features = ["op"] }
 reth-tracing.workspace = true
-reth-tracing-otlp.workspace = true
 
 # eth
 alloy-eips.workspace = true
@@ -56,7 +55,6 @@ alloy-rlp.workspace = true
 futures-util.workspace = true
 derive_more.workspace = true
 serde.workspace = true
-url.workspace = true
 clap = { workspace = true, features = ["derive", "env"] }
 
 tokio = { workspace = true, features = ["sync", "macros", "time", "rt-multi-thread"] }
@@ -92,6 +90,14 @@ jemalloc = [
     "reth-node-core/jemalloc",
     "reth-node-metrics/jemalloc",
 ]
+jemalloc-prof = [
+    "jemalloc",
+    "reth-node-metrics/jemalloc-prof",
+]
+jemalloc-symbols = [
+    "jemalloc-prof",
+    "reth-node-metrics/jemalloc-symbols",
+]
 
 dev = [
     "dep:proptest",
@@ -107,5 +113,6 @@ serde = [
     "reth-optimism-primitives/serde",
     "reth-primitives-traits/serde",
     "reth-optimism-chainspec/serde",
-    "url/serde",
 ]
+
+edge = ["reth-cli-commands/edge"]

@@ -194,6 +194,7 @@ impl OpNode {
             .with_min_suggested_priority_fee(self.args.min_suggested_priority_fee)
             .with_historical_rpc(self.args.historical_rpc.clone())
             .with_flashblocks(self.args.flashblocks_url.clone())
+            .with_flashblock_consensus(self.args.flashblock_consensus)
     }
 
     /// Instantiates the [`ProviderFactoryBuilder`] for an opstack node.
@@ -217,13 +218,14 @@ impl OpNode {
     /// use reth_db::open_db_read_only;
     /// use reth_optimism_chainspec::OpChainSpecBuilder;
     /// use reth_optimism_node::OpNode;
-    /// use reth_provider::providers::StaticFileProvider;
+    /// use reth_provider::providers::{RocksDBProvider, StaticFileProvider};
     /// use std::sync::Arc;
     ///
     /// let factory = OpNode::provider_factory_builder()
     ///     .db(Arc::new(open_db_read_only("db", Default::default()).unwrap()))
     ///     .chainspec(OpChainSpecBuilder::base_mainnet().build().into())
     ///     .static_file(StaticFileProvider::read_only("db/static_files", false).unwrap())
+    ///     .rocksdb_provider(RocksDBProvider::builder("db/rocksdb").build().unwrap())
     ///     .build_provider_factory();
     /// ```
     pub fn provider_factory_builder() -> ProviderFactoryBuilder<Self> {
@@ -695,6 +697,8 @@ pub struct OpAddOnsBuilder<NetworkT, RpcMiddleware = Identity> {
     tokio_runtime: Option<tokio::runtime::Handle>,
     /// A URL pointing to a secure websocket service that streams out flashblocks.
     flashblocks_url: Option<Url>,
+    /// Enable flashblock consensus client to drive chain forward.
+    flashblock_consensus: bool,
 }
 
 impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
@@ -711,6 +715,7 @@ impl<NetworkT> Default for OpAddOnsBuilder<NetworkT> {
             rpc_middleware: Identity::new(),
             tokio_runtime: None,
             flashblocks_url: None,
+            flashblock_consensus: false,
         }
     }
 }
@@ -779,6 +784,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             tokio_runtime,
             _nt,
             flashblocks_url,
+            flashblock_consensus,
             ..
         } = self;
         OpAddOnsBuilder {
@@ -793,12 +799,19 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             rpc_middleware,
             tokio_runtime,
             flashblocks_url,
+            flashblock_consensus,
         }
     }
 
     /// With a URL pointing to a flashblocks secure websocket subscription.
     pub fn with_flashblocks(mut self, flashblocks_url: Option<Url>) -> Self {
         self.flashblocks_url = flashblocks_url;
+        self
+    }
+
+    /// With a flashblock consensus client to drive chain forward.
+    pub const fn with_flashblock_consensus(mut self, flashblock_consensus: bool) -> Self {
+        self.flashblock_consensus = flashblock_consensus;
         self
     }
 }
@@ -826,6 +839,7 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
             rpc_middleware,
             tokio_runtime,
             flashblocks_url,
+            flashblock_consensus,
             ..
         } = self;
 
@@ -835,7 +849,8 @@ impl<NetworkT, RpcMiddleware> OpAddOnsBuilder<NetworkT, RpcMiddleware> {
                     .with_sequencer(sequencer_url.clone())
                     .with_sequencer_headers(sequencer_headers.clone())
                     .with_min_suggested_priority_fee(min_suggested_priority_fee)
-                    .with_flashblocks(flashblocks_url),
+                    .with_flashblocks(flashblocks_url)
+                    .with_flashblock_consensus(flashblock_consensus),
                 PVB::default(),
                 EB::default(),
                 EVB::default(),

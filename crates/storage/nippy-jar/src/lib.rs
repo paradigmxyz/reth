@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fs::File,
-    io::Read,
+    io::{Read, Write},
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -215,6 +215,11 @@ impl<H: NippyJarHeader> NippyJar<H> {
         Ok(bincode::deserialize_from(reader)?)
     }
 
+    /// Serializes an instance of [`Self`] to a [`Write`] type.
+    pub fn save_to_writer<W: Write>(&self, writer: W) -> Result<(), NippyJarError> {
+        Ok(bincode::serialize_into(writer, self)?)
+    }
+
     /// Returns the path for the data file
     pub fn data_path(&self) -> &Path {
         self.path.as_ref()
@@ -258,9 +263,7 @@ impl<H: NippyJarHeader> NippyJar<H> {
 
     /// Writes all necessary configuration to file.
     fn freeze_config(&self) -> Result<(), NippyJarError> {
-        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| {
-            bincode::serialize_into(file, &self)
-        })?)
+        Ok(reth_fs_util::atomic_write_file(&self.config_path(), |file| self.save_to_writer(file))?)
     }
 }
 
@@ -1038,10 +1041,10 @@ mod tests {
         assert_eq!(writer.rows(), 0);
         assert_eq!(writer.max_row_size(), 0);
         assert_eq!(File::open(writer.data_path()).unwrap().metadata().unwrap().len() as usize, 0);
-        // Only the byte that indicates how many bytes per offset should be left
+        // Offset size byte (1) + final offset (8) = 9 bytes
         assert_eq!(
             File::open(writer.offsets_path()).unwrap().metadata().unwrap().len() as usize,
-            1
+            9
         );
         writer.commit().unwrap();
         assert!(!writer.is_dirty());

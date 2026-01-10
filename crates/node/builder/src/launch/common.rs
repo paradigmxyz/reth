@@ -42,7 +42,7 @@ use reth_chainspec::{Chain, EthChainSpec, EthereumHardforks};
 use reth_config::{config::EtlConfig, PruneConfig};
 use reth_consensus::noop::NoopConsensus;
 use reth_db_api::{database::Database, database_metrics::DatabaseMetrics};
-use reth_db_common::init::{init_genesis, InitStorageError};
+use reth_db_common::init::{init_genesis_with_settings, InitStorageError};
 use reth_downloaders::{bodies::noop::NoopBodiesDownloader, headers::noop::NoopHeaderDownloader};
 use reth_engine_local::MiningMode;
 use reth_evm::{noop::NoopEvmConfig, ConfigureEvm};
@@ -65,9 +65,10 @@ use reth_node_metrics::{
     version::VersionInfo,
 };
 use reth_provider::{
-    providers::{NodeTypesForProvider, ProviderNodeTypes, StaticFileProvider},
-    BlockHashReader, BlockNumReader, ProviderError, ProviderFactory, ProviderResult,
-    StageCheckpointReader, StaticFileProviderBuilder, StaticFileProviderFactory,
+    providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
+    BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
+    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
+    StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -165,11 +166,14 @@ impl LaunchContext {
         // Update the config with the command line arguments
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;
 
+        // Merge static file CLI arguments with config file, giving priority to CLI
+        toml_config.static_files = config.static_files.merge_with_config(toml_config.static_files);
+
         Ok(toml_config)
     }
 
     /// Save prune config to the toml file if node is a full node or has custom pruning CLI
-    /// arguments.
+    /// arguments. Also migrates deprecated prune config values to new defaults.
     fn save_pruning_config<ChainSpec>(
         reth_config: &mut reth_config::Config,
         config: &NodeConfig<ChainSpec>,
@@ -178,15 +182,22 @@ impl LaunchContext {
     where
         ChainSpec: EthChainSpec + reth_chainspec::EthereumHardforks,
     {
+        let mut should_save = reth_config.prune.segments.migrate();
+
         if let Some(prune_config) = config.prune_config() {
             if reth_config.prune != prune_config {
                 reth_config.set_prune_config(prune_config);
-                info!(target: "reth::cli", "Saving prune config to toml file");
-                reth_config.save(config_path.as_ref())?;
+                should_save = true;
             }
         } else if !reth_config.prune.is_default() {
             warn!(target: "reth::cli", "Pruning configuration is present in the config file, but no CLI arguments are provided. Using config from file.");
         }
+
+        if should_save {
+            info!(target: "reth::cli", "Saving prune config to toml file");
+            reth_config.save(config_path.as_ref())?;
+        }
+
         Ok(())
     }
 
@@ -405,14 +416,13 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         ChainSpec: reth_chainspec::EthereumHardforks,
     {
-        let toml_config = self.toml_config().prune.clone();
         let Some(mut node_prune_config) = self.node_config().prune_config() else {
             // No CLI config is set, use the toml config.
-            return toml_config;
+            return self.toml_config().prune.clone();
         };
 
         // Otherwise, use the CLI configuration and merge with toml config.
-        node_prune_config.merge(toml_config);
+        node_prune_config.merge(self.toml_config().prune.clone());
         node_prune_config
     }
 
@@ -444,11 +454,7 @@ impl<R, ChainSpec: EthChainSpec> LaunchContextWith<Attached<WithConfigs<ChainSpe
     where
         Pool: TransactionPool + Unpin,
     {
-        if let Some(interval) = self.node_config().dev.block_time {
-            MiningMode::interval(interval)
-        } else {
-            MiningMode::instant(pool, self.node_config().dev.block_max_transactions)
-        }
+        self.node_config().dev_mining_mode(pool)
     }
 }
 
@@ -465,32 +471,81 @@ where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
         Evm: ConfigureEvm<Primitives = N::Primitives> + 'static,
     {
+        // Validate static files configuration
+        let static_files_config = &self.toml_config().static_files;
+        static_files_config.validate()?;
+
+        // Apply per-segment blocks_per_file configuration
         let static_file_provider =
-            StaticFileProviderBuilder::read_write(self.data_dir().static_files())?
+            StaticFileProviderBuilder::read_write(self.data_dir().static_files())
                 .with_metrics()
+                .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
+                .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
-        let factory =
-            ProviderFactory::new(self.right().clone(), self.chain_spec(), static_file_provider)?
-                .with_prune_modes(self.prune_modes());
+        // Initialize RocksDB provider with metrics, statistics, and default tables
+        let rocksdb_provider = RocksDBProvider::builder(self.data_dir().rocksdb())
+            .with_default_tables()
+            .with_metrics()
+            .with_statistics()
+            .build()?;
 
-        let has_receipt_pruning = self.toml_config().prune.has_receipts_pruning();
+        let factory = ProviderFactory::new(
+            self.right().clone(),
+            self.chain_spec(),
+            static_file_provider,
+            rocksdb_provider,
+        )?
+        .with_prune_modes(self.prune_modes());
 
-        // Check for consistency between database and static files. If it fails, it unwinds to
-        // the first block that's consistent between database and static files.
-        if let Some(unwind_target) = factory
+        // Keep MDBX, static files, and RocksDB aligned. If any check fails, unwind to the
+        // earliest consistent block.
+        //
+        // Order matters:
+        // 1) heal static files (no pruning)
+        // 2) check RocksDB (needs static-file tx data)
+        // 3) check static-file checkpoints vs MDBX (may prune)
+        //
+        // Compute one unwind target and run a single unwind.
+
+        let provider_ro = factory.database_provider_ro()?;
+
+        // Step 1: heal file-level inconsistencies (no pruning)
+        factory.static_file_provider().check_file_consistency(&provider_ro)?;
+
+        // Step 2: RocksDB consistency check (needs static files tx data)
+        let rocksdb_unwind = factory.rocksdb_provider().check_consistency(&provider_ro)?;
+
+        // Step 3: Static file checkpoint consistency (may prune)
+        let static_file_unwind = factory
             .static_file_provider()
-            .check_consistency(&factory.provider()?, has_receipt_pruning)?
-        {
+            .check_consistency(&provider_ro)?
+            .map(|target| match target {
+                PipelineTarget::Unwind(block) => block,
+                PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
+            });
+
+        // Take the minimum block number to ensure all storage layers are consistent.
+        let unwind_target = [rocksdb_unwind, static_file_unwind].into_iter().flatten().min();
+
+        if let Some(unwind_block) = unwind_target {
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
-            // instead.
+            // instead. Unwinding to 0 would leave MDBX with a huge free list size.
+            let inconsistency_source = match (rocksdb_unwind, static_file_unwind) {
+                (Some(_), Some(_)) => "RocksDB and static file",
+                (Some(_), None) => "RocksDB",
+                (None, Some(_)) => "static file",
+                (None, None) => unreachable!(),
+            };
             assert_ne!(
-                unwind_target,
-                PipelineTarget::Unwind(0),
-                "A static file <> database inconsistency was found that would trigger an unwind to block 0"
+                unwind_block, 0,
+                "A {} inconsistency was found that would trigger an unwind to block 0",
+                inconsistency_source
             );
 
-            info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
+            let unwind_target = PipelineTarget::Unwind(unwind_block);
+
+            info!(target: "reth::cli", %unwind_target, %inconsistency_source, "Executing unwind after consistency check.");
 
             let (_tip_tx, tip_rx) = watch::channel(B256::ZERO);
 
@@ -524,7 +579,7 @@ where
                 }),
             );
             rx.await?.inspect_err(|err| {
-                error!(target: "reth::cli", unwind_target = %unwind_target, %err, "failed to run unwind")
+                error!(target: "reth::cli", %unwind_target, %inconsistency_source, %err, "failed to run unwind")
             })?;
         }
 
@@ -593,7 +648,7 @@ where
                     target_triple: version_metadata().vergen_cargo_target_triple.as_ref(),
                     build_profile: version_metadata().build_profile_name.as_ref(),
                 },
-                ChainSpecInfo { name: self.left().config.chain.chain().to_string() },
+                ChainSpecInfo { name: self.chain_id().to_string() },
                 self.task_executor().clone(),
                 Hooks::builder()
                     .with_hook({
@@ -609,7 +664,9 @@ where
                         }
                     })
                     .build(),
-            ).with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
+                self.data_dir().pprof_dumps(),
+            )
+            .with_push_gateway(self.node_config().metrics.push_gateway_url.clone(), self.node_config().metrics.push_gateway_interval);
 
             MetricServer::new(config).serve().await?;
         }
@@ -619,13 +676,19 @@ where
 
     /// Convenience function to [`Self::init_genesis`]
     pub fn with_genesis(self) -> Result<Self, InitStorageError> {
-        init_genesis(self.provider_factory())?;
+        init_genesis_with_settings(
+            self.provider_factory(),
+            self.node_config().static_files.to_settings(),
+        )?;
         Ok(self)
     }
 
     /// Write the genesis block and state if it has not already been written
     pub fn init_genesis(&self) -> Result<B256, InitStorageError> {
-        init_genesis(self.provider_factory())
+        init_genesis_with_settings(
+            self.provider_factory(),
+            self.node_config().static_files.to_settings(),
+        )
     }
 
     /// Creates a new `WithMeteredProvider` container and attaches it to the
@@ -908,28 +971,44 @@ where
     ///
     /// A target block hash if the pipeline is inconsistent, otherwise `None`.
     pub fn check_pipeline_consistency(&self) -> ProviderResult<Option<B256>> {
+        // We skip the era stage if it's not enabled
+        let era_enabled = self.era_import_source().is_some();
+        let mut all_stages =
+            StageId::ALL.into_iter().filter(|id| era_enabled || id != &StageId::Era);
+
+        // Get the expected first stage based on config.
+        let first_stage = all_stages.next().expect("there must be at least one stage");
+
         // If no target was provided, check if the stages are congruent - check if the
         // checkpoint of the last stage matches the checkpoint of the first.
         let first_stage_checkpoint = self
             .blockchain_db()
-            .get_stage_checkpoint(*StageId::ALL.first().unwrap())?
+            .get_stage_checkpoint(first_stage)?
             .unwrap_or_default()
             .block_number;
 
-        // Skip the first stage as we've already retrieved it and comparing all other checkpoints
-        // against it.
-        for stage_id in StageId::ALL.iter().skip(1) {
+        // Compare all other stages against the first
+        for stage_id in all_stages {
             let stage_checkpoint = self
                 .blockchain_db()
-                .get_stage_checkpoint(*stage_id)?
+                .get_stage_checkpoint(stage_id)?
                 .unwrap_or_default()
                 .block_number;
 
             // If the checkpoint of any stage is less than the checkpoint of the first stage,
             // retrieve and return the block hash of the latest header and use it as the target.
+            debug!(
+                target: "consensus::engine",
+                first_stage_id = %first_stage,
+                first_stage_checkpoint,
+                stage_id = %stage_id,
+                stage_checkpoint = stage_checkpoint,
+                "Checking stage against first stage",
+            );
             if stage_checkpoint < first_stage_checkpoint {
                 debug!(
                     target: "consensus::engine",
+                    first_stage_id = %first_stage,
                     first_stage_checkpoint,
                     inconsistent_stage_id = %stage_id,
                     inconsistent_stage_checkpoint = stage_checkpoint,
@@ -963,14 +1042,34 @@ where
             Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>,
         )>,
     ) -> eyre::Result<Option<ExExManagerHandle<PrimitivesTy<T::Types>>>> {
+        self.exex_launcher(installed_exex).launch().await
+    }
+
+    /// Creates an [`ExExLauncher`] for the installed ExExes.
+    ///
+    /// This returns the launcher before calling `.launch()`, allowing custom configuration
+    /// such as setting the WAL blocks warning threshold for L2 chains with faster block times:
+    ///
+    /// ```ignore
+    /// ctx.exex_launcher(exexes)
+    ///     .with_wal_blocks_warning(768)  // For 2-second block times
+    ///     .launch()
+    ///     .await
+    /// ```
+    #[allow(clippy::type_complexity)]
+    pub fn exex_launcher(
+        &self,
+        installed_exex: Vec<(
+            String,
+            Box<dyn crate::exex::BoxedLaunchExEx<NodeAdapter<T, CB::Components>>>,
+        )>,
+    ) -> ExExLauncher<NodeAdapter<T, CB::Components>> {
         ExExLauncher::new(
             self.head(),
             self.node_adapter().clone(),
             installed_exex,
             self.configs().clone(),
         )
-        .launch()
-        .await
     }
 
     /// Creates the ERA import source based on node configuration.
@@ -1014,7 +1113,13 @@ where
     }
 
     /// Spawns the [`EthStatsService`] service if configured.
-    pub async fn spawn_ethstats(&self) -> eyre::Result<()> {
+    pub async fn spawn_ethstats<St>(&self, mut engine_events: St) -> eyre::Result<()>
+    where
+        St: Stream<Item = reth_engine_primitives::ConsensusEngineEvent<PrimitivesTy<T::Types>>>
+            + Send
+            + Unpin
+            + 'static,
+    {
         let Some(url) = self.node_config().debug.ethstats.as_ref() else { return Ok(()) };
 
         let network = self.components().network().clone();
@@ -1024,7 +1129,37 @@ where
         info!(target: "reth::cli", "Starting EthStats service at {}", url);
 
         let ethstats = EthStatsService::new(url, network, provider, pool).await?;
-        tokio::spawn(async move { ethstats.run().await });
+
+        // If engine events are provided, spawn listener for new payload reporting
+        let ethstats_for_events = ethstats.clone();
+        let task_executor = self.task_executor().clone();
+        task_executor.spawn(Box::pin(async move {
+            while let Some(event) = engine_events.next().await {
+                use reth_engine_primitives::ConsensusEngineEvent;
+                match event {
+                    ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
+                    ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {
+                        let block_hash = executed.recovered_block.num_hash().hash;
+                        let block_number = executed.recovered_block.num_hash().number;
+                        if let Err(e) = ethstats_for_events
+                            .report_new_payload(block_hash, block_number, duration)
+                            .await
+                        {
+                            debug!(
+                                target: "ethstats",
+                                "Failed to report new payload: {}", e
+                            );
+                        }
+                    }
+                    _ => {
+                        // Ignore other event types for ethstats reporting
+                    }
+                }
+            }
+        }));
+
+        // Spawn main ethstats service
+        task_executor.spawn(Box::pin(async move { ethstats.run().await }));
 
         Ok(())
     }
@@ -1172,7 +1307,6 @@ mod tests {
                     storage_history_before: None,
                     bodies_pre_merge: false,
                     bodies_distance: None,
-                    #[expect(deprecated)]
                     receipts_log_filter: None,
                     bodies_before: None,
                 },
