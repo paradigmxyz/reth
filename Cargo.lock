@@ -10130,6 +10130,7 @@ dependencies = [
  "alloy-rpc-types-engine",
  "alloy-trie",
  "assert_matches",
+ "codspeed-criterion-compat",
  "dashmap 6.1.0",
  "eyre",
  "itertools 0.14.0",
@@ -10879,6 +10880,7 @@ dependencies = [
  "reth-trie-common",
  "revm-database",
  "serde_json",
+ "tracing",
 ]
 
 [[package]]

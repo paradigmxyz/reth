@@ -66,6 +66,7 @@ pub trait StateRootProvider {
         plain_state: PlainPostState,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         let _ = plain_state;
+        tracing::error!(target: "provider", provider_type = std::any::type_name::<Self>(), "state_root_with_updates_plain called on provider without triedb support");
         Err(ProviderError::UnsupportedProvider)
     }
 }

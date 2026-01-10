@@ -241,7 +241,10 @@ impl<TX: DbTx + 'static, N: NodeTypes> DatabaseProvider<TX, N> {
         if block_number == self.best_block_number().unwrap_or_default() &&
             block_number == self.last_block_number().unwrap_or_default()
         {
-            return Ok(Box::new(LatestStateProviderRef::new(self)))
+            #[cfg(feature = "triedb")]
+            return Ok(Box::new(LatestStateProviderRef::new_with_triedb(self, &self.triedb_provider)));
+            #[cfg(not(feature = "triedb"))]
+            return Ok(Box::new(LatestStateProviderRef::new(self)));
         }
 
         // +1 as the changeset that we want is the one that was applied after this block.
@@ -624,6 +627,12 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
         let storage_history_prune_checkpoint =
             self.get_prune_checkpoint(PruneSegment::StorageHistory)?;
 
+        #[cfg(feature = "triedb")]
+        let mut state_provider = {
+            let triedb = self.triedb_provider.clone();
+            HistoricalStateProvider::new_with_triedb(self, block_number, &triedb)
+        };
+        #[cfg(not(feature = "triedb"))]
         let mut state_provider = HistoricalStateProvider::new(self, block_number);
 
         // If we pruned account or storage history, we can't return state on every historical block.

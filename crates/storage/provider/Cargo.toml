@@ -89,6 +89,7 @@ assert_matches.workspace = true
 rand.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
+criterion.workspace = true
 
 [features]
 default = []
@@ -111,3 +112,7 @@ test-utils = [
     "revm-state",
     "tokio",
 ]
+
+[[bench]]
+name = "bench_state_root_overlay"
+harness = false

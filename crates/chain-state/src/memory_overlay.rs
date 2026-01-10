@@ -12,7 +12,7 @@ use reth_trie::{
     MultiProofTargets, StorageMultiProof, TrieInput,
 };
 use revm_database::BundleState;
-use std::{borrow::Cow, sync::OnceLock};
+use std::{borrow::Cow, sync::OnceLock, time::Instant};
 
 /// A state provider that stores references to in-memory blocks along with their state as well as a
 /// reference of the historical state provider for fallback lookups.
@@ -143,7 +143,14 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         input.prepend_self(self.trie_input().clone());
-        self.historical.state_root_from_nodes_with_updates(input)
+        let start = Instant::now();
+        let ret = self.historical.state_root_from_nodes_with_updates(input);
+        let elapsed = start.elapsed().as_millis();
+        tracing::info!(
+            "MemoryOverlayStateProviderRef state_root_from_nodes_with_updates, elapsed={}ms",
+            elapsed
+        );
+        ret
     }
 
     fn state_root_with_updates_plain(
@@ -189,7 +196,12 @@ impl<N: NodePrimitives> StateRootProvider for MemoryOverlayStateProviderRef<'_, 
         }
 
         // Delegate to historical provider
-        self.historical.state_root_with_updates_plain(merged_state)
+        tracing::debug!(target: "provider", "MemoryOverlayStateProviderRef delegating state_root_with_updates_plain to historical provider");
+        let result = self.historical.state_root_with_updates_plain(merged_state);
+        if result.is_err() {
+            tracing::error!(target: "provider", "MemoryOverlayStateProviderRef: historical provider failed state_root_with_updates_plain");
+        }
+        result
     }
 }
 

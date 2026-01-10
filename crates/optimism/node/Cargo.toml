@@ -95,7 +95,7 @@ tracing.workspace = true
 
 [features]
 default = ["reth-codec"]
-triedb = ["reth-provider/triedb", "reth-evm/triedb", "reth-db-common/triedb"]
+triedb = ["reth-provider/triedb", "reth-evm/triedb", "reth-db-common/triedb", "reth-optimism-storage/triedb"]
 asm-keccak = [
     "alloy-primitives/asm-keccak",
     "reth-optimism-node/asm-keccak",
