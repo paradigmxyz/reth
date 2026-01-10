@@ -10340,7 +10340,9 @@ version = "1.9.3"
 dependencies = [
  "alloy-consensus",
  "alloy-primitives",
+ "metrics",
  "reth-ethereum-forks",
+ "reth-metrics",
  "reth-primitives-traits",
  "reth-storage-api",
  "reth-storage-errors",

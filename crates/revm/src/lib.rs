@@ -21,6 +21,9 @@ pub mod cancelled;
 /// Contains glue code for integrating reth database into revm's [Database].
 pub mod database;
 
+/// Similar to [`database`] but instrumented for account/storage/code fetching latency metrics.
+pub mod instrumented;
+
 pub use revm::{database as db, inspector};
 
 /// Common test helpers

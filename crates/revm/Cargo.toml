@@ -13,9 +13,10 @@ workspace = true
 
 [dependencies]
 # reth
+reth-metrics.workspace = true
 reth-primitives-traits.workspace = true
-reth-storage-errors.workspace = true
 reth-storage-api.workspace = true
+reth-storage-errors.workspace = true
 reth-trie = { workspace = true, optional = true }
 
 # alloy
@@ -23,6 +24,8 @@ alloy-primitives.workspace = true
 
 # revm
 revm.workspace = true
+
+metrics.workspace = true
 
 [dev-dependencies]
 reth-trie.workspace = true

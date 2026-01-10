@@ -3,7 +3,6 @@
 use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    instrumented_state::InstrumentedStateProvider,
     payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
     precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
     sparse_trie::StateRootComputeOutcome,
@@ -39,7 +38,7 @@ use reth_provider::{
     HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
     StateProvider, StateProviderFactory, StateReader, TrieReader,
 };
-use reth_revm::db::State;
+use reth_revm::{db::State, instrumented::InstrumentedStateProviderDatabase};
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
@@ -436,10 +435,6 @@ where
                 Box::new(CachedStateProvider::new(state_provider, caches, cache_metrics));
         };
 
-        if self.config.state_provider_metrics() {
-            state_provider = Box::new(InstrumentedStateProvider::new(state_provider, "engine"));
-        }
-
         // Execute the block and handle any execution errors
         let (output, senders) = match self.execute_block(state_provider, env, &input, &mut handle) {
             Ok(output) => output,
@@ -617,7 +612,12 @@ where
         debug!(target: "engine::tree::payload_validator", "Executing block");
 
         let mut db = State::builder()
-            .with_database(StateProviderDatabase::new(state_provider))
+            .with_database(if self.config.state_provider_metrics() {
+                Box::new(InstrumentedStateProviderDatabase::new(state_provider, "engine"))
+                    as Box<dyn alloy_evm::Database<Error = ProviderError>>
+            } else {
+                Box::new(StateProviderDatabase::new(state_provider))
+            })
             .with_bundle_update()
             .without_state_clear()
             .build();
