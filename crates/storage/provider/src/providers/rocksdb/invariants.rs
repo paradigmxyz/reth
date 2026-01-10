@@ -162,6 +162,15 @@ impl RocksDBProvider {
                     "MDBX empty but static files have data, pruning all TransactionHashNumbers"
                 );
                 self.prune_transaction_hash_numbers_in_range(provider, 0..=highest_tx)?;
+
+                if checkpoint > 0 {
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        checkpoint,
+                        "Checkpoint set but MDBX TransactionBlocks is empty while static files have data, unwind needed"
+                    );
+                    return Ok(Some(0));
+                }
             }
             (None, None) => {
                 // Both MDBX and static files are empty.
@@ -647,6 +656,71 @@ mod tests {
                 "RocksDB should be empty after pruning"
             );
         }
+    }
+
+    #[test]
+    fn test_check_consistency_mdbx_empty_static_files_have_data_with_checkpoint_needs_unwind() {
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::TransactionHashNumbers>()
+            .build()
+            .unwrap();
+
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+        );
+
+        let mut rng = generators::rng();
+        let blocks = generators::random_block_range(
+            &mut rng,
+            0..=2,
+            BlockRangeParams { parent: Some(B256::ZERO), tx_count: 2..3, ..Default::default() },
+        );
+
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            let mut tx_count = 0u64;
+            for block in &blocks {
+                provider
+                    .insert_block(&block.clone().try_recover().expect("recover block"))
+                    .unwrap();
+                for tx in &block.body().transactions {
+                    let hash = tx.trie_hash();
+                    rocksdb.put::<tables::TransactionHashNumbers>(hash, &tx_count).unwrap();
+                    tx_count += 1;
+                }
+            }
+            provider.commit().unwrap();
+        }
+
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            let mut cursor = provider.tx_ref().cursor_write::<tables::TransactionBlocks>().unwrap();
+            let mut to_delete = Vec::new();
+            let mut walker = cursor.walk(Some(0)).unwrap();
+            while let Some((tx_num, _)) = walker.next().transpose().unwrap() {
+                to_delete.push(tx_num);
+            }
+            drop(walker);
+            for tx_num in to_delete {
+                cursor.seek_exact(tx_num).unwrap();
+                cursor.delete_current().unwrap();
+            }
+            provider
+                .save_stage_checkpoint(StageId::TransactionLookup, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(
+            result,
+            Some(0),
+            "Should require unwind to block 0 when checkpoint is set but MDBX TransactionBlocks is empty while static files have data"
+        );
     }
 
     #[test]
