@@ -43,14 +43,14 @@ impl Compact for AlloyWithdrawal {
     }
 
     fn from_compact(buf: &[u8], len: usize) -> (Self, &[u8]) {
-        let (withdrawal, _) = Withdrawal::from_compact(buf, len);
+        let (withdrawal, new_buf) = Withdrawal::from_compact(buf, len);
         let alloy_withdrawal = Self {
             index: withdrawal.index,
             validator_index: withdrawal.validator_index,
             address: withdrawal.address,
             amount: withdrawal.amount,
         };
-        (alloy_withdrawal, buf)
+        (alloy_withdrawal, new_buf)
     }
 }
 
