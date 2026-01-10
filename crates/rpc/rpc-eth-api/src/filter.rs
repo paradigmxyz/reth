@@ -3,6 +3,7 @@
 use alloy_json_rpc::RpcObject;
 use alloy_rpc_types_eth::{Filter, FilterChanges, FilterId, Log, PendingTransactionFilterKind};
 use jsonrpsee::{core::RpcResult, proc_macros::rpc};
+use reth_rpc_eth_types::LogsWithCursor;
 use std::future::Future;
 
 /// Rpc Interface for poll-based ethereum filter API.
@@ -39,15 +40,31 @@ pub trait EthFilterApi<T: RpcObject> {
     /// Returns logs matching given filter object.
     #[method(name = "getLogs")]
     async fn logs(&self, filter: Filter) -> RpcResult<Vec<Log>>;
+
+    /// Returns logs matching given filter object with cursor-based pagination.
+    #[method(name = "getLogsWithCursor")]
+    async fn logs_with_cursor(
+        &self,
+        filter: Filter,
+        cursor: Option<String>,
+    ) -> RpcResult<LogsWithCursor>;
 }
 
 /// Limits for logs queries
-#[derive(Default, Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy)]
 pub struct QueryLimits {
     /// Maximum number of blocks that could be scanned per filter
     pub max_blocks_per_filter: Option<u64>,
     /// Maximum number of logs that can be returned in a response
     pub max_logs_per_response: Option<usize>,
+    /// Page size for cursor-based pagination (default: `10_000`)
+    pub cursor_page_size: usize,
+}
+
+impl Default for QueryLimits {
+    fn default() -> Self {
+        Self { max_blocks_per_filter: None, max_logs_per_response: None, cursor_page_size: 10_000 }
+    }
 }
 
 impl QueryLimits {
