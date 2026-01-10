@@ -290,90 +290,105 @@ impl EngineNodeLauncher {
         let startup_sync_state_idle = ctx.node_config().debug.startup_sync_state_idle;
 
         info!(target: "reth::cli", "Starting consensus engine");
-        let consensus_engine = async move {
-            if let Some(initial_target) = initial_target {
-                debug!(target: "reth::cli", %initial_target,  "start backfill sync");
-                // network_handle's sync state is already initialized at Syncing
-                engine_service.orchestrator_mut().start_backfill_sync(initial_target);
-            } else if startup_sync_state_idle {
-                network_handle.update_sync_state(SyncState::Idle);
-            }
+        ctx.task_executor().spawn_critical_with_graceful_shutdown_signal(
+            "consensus engine",
+            |graceful_shutdown| async move {
+                if let Some(initial_target) = initial_target {
+                    debug!(target: "reth::cli", %initial_target,  "start backfill sync");
+                    // network_handle's sync state is already initialized at Syncing
+                    engine_service.orchestrator_mut().start_backfill_sync(initial_target);
+                } else if startup_sync_state_idle {
+                    network_handle.update_sync_state(SyncState::Idle);
+                }
 
-            let mut res = Ok(());
-            let mut shutdown_rx = shutdown_rx.fuse();
+                let mut res = Ok(());
+                let mut shutdown_rx = shutdown_rx.fuse();
+                let mut graceful_shutdown = graceful_shutdown.fuse();
 
-            // advance the chain and await payloads built locally to add into the engine api
-            // tree handler to prevent re-execution if that block is received as payload from
-            // the CL
-            loop {
-                tokio::select! {
-                    shutdown_req = &mut shutdown_rx => {
-                        if let Ok(req) = shutdown_req {
-                            debug!(target: "reth::cli", "received engine shutdown request");
+                // advance the chain and await payloads built locally to add into the engine api
+                // tree handler to prevent re-execution if that block is received as payload from
+                // the CL
+                loop {
+                    tokio::select! {
+                        // Graceful shutdown signal from task manager
+                        _ = &mut graceful_shutdown => {
+                            info!(target: "reth::cli", "received graceful shutdown signal, persisting in-memory blocks");
+                            let (done_tx, done_rx) = tokio::sync::oneshot::channel();
                             engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(
-                                FromOrchestrator::Terminate { tx: req.done_tx }.into()
+                                FromOrchestrator::Terminate { tx: done_tx }.into()
                             );
+                            // Wait for persistence to complete before exiting
+                            let _ = done_rx.await;
+                            break;
                         }
-                    }
-                    payload = built_payloads.select_next_some() => {
-                        if let Some(executed_block) = payload.executed_block() {
-                            debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
-                            engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
+                        // Explicit shutdown request via RPC
+                        shutdown_req = &mut shutdown_rx => {
+                            if let Ok(req) = shutdown_req {
+                                debug!(target: "reth::cli", "received engine shutdown request");
+                                engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(
+                                    FromOrchestrator::Terminate { tx: req.done_tx }.into()
+                                );
+                            }
                         }
-                    }
-                    event = engine_service.next() => {
-                        let Some(event) = event else { break };
-                        debug!(target: "reth::cli", "Event: {event}");
-                        match event {
-                            ChainEvent::BackfillSyncFinished => {
-                                if terminate_after_backfill {
-                                    debug!(target: "reth::cli", "Terminating after initial backfill");
+                        payload = built_payloads.select_next_some() => {
+                            if let Some(executed_block) = payload.executed_block() {
+                                debug!(target: "reth::cli", block=?executed_block.recovered_block.num_hash(),  "inserting built payload");
+                                engine_service.orchestrator_mut().handler_mut().handler_mut().on_event(EngineApiRequest::InsertExecutedBlock(executed_block.into_executed_payload()).into());
+                            }
+                        }
+                        event = engine_service.next() => {
+                            let Some(event) = event else { break };
+                            debug!(target: "reth::cli", "Event: {event}");
+                            match event {
+                                ChainEvent::BackfillSyncFinished => {
+                                    if terminate_after_backfill {
+                                        debug!(target: "reth::cli", "Terminating after initial backfill");
+                                        break
+                                    }
+                                    if startup_sync_state_idle {
+                                        network_handle.update_sync_state(SyncState::Idle);
+                                    }
+                                }
+                                ChainEvent::BackfillSyncStarted => {
+                                    network_handle.update_sync_state(SyncState::Syncing);
+                                }
+                                ChainEvent::FatalError => {
+                                    error!(target: "reth::cli", "Fatal error in consensus engine");
+                                    res = Err(eyre::eyre!("Fatal error in consensus engine"));
                                     break
                                 }
-                                if startup_sync_state_idle {
-                                    network_handle.update_sync_state(SyncState::Idle);
-                                }
-                            }
-                            ChainEvent::BackfillSyncStarted => {
-                                network_handle.update_sync_state(SyncState::Syncing);
-                            }
-                            ChainEvent::FatalError => {
-                                error!(target: "reth::cli", "Fatal error in consensus engine");
-                                res = Err(eyre::eyre!("Fatal error in consensus engine"));
-                                break
-                            }
-                            ChainEvent::Handler(ev) => {
-                                if let Some(head) = ev.canonical_header() {
-                                    // Once we're progressing via live sync, we can consider the node is not syncing anymore
-                                    network_handle.update_sync_state(SyncState::Idle);
-                                    let head_block = Head {
-                                        number: head.number(),
-                                        hash: head.hash(),
-                                        difficulty: head.difficulty(),
-                                        timestamp: head.timestamp(),
-                                        total_difficulty: chainspec.final_paris_total_difficulty()
-                                            .filter(|_| chainspec.is_paris_active_at_block(head.number()))
-                                            .unwrap_or_default(),
-                                    };
-                                    network_handle.update_status(head_block);
+                                ChainEvent::Handler(ev) => {
+                                    if let Some(head) = ev.canonical_header() {
+                                        // Once we're progressing via live sync, we can consider the node is not syncing anymore
+                                        network_handle.update_sync_state(SyncState::Idle);
+                                        let head_block = Head {
+                                            number: head.number(),
+                                            hash: head.hash(),
+                                            difficulty: head.difficulty(),
+                                            timestamp: head.timestamp(),
+                                            total_difficulty: chainspec.final_paris_total_difficulty()
+                                                .filter(|_| chainspec.is_paris_active_at_block(head.number()))
+                                                .unwrap_or_default(),
+                                        };
+                                        network_handle.update_status(head_block);
 
-                                    let updated = BlockRangeUpdate {
-                                        earliest: provider.earliest_block_number().unwrap_or_default(),
-                                        latest: head.number(),
-                                        latest_hash: head.hash(),
-                                    };
-                                    network_handle.update_block_range(updated);
+                                        let updated = BlockRangeUpdate {
+                                            earliest: provider.earliest_block_number().unwrap_or_default(),
+                                            latest: head.number(),
+                                            latest_hash: head.hash(),
+                                        };
+                                        network_handle.update_block_range(updated);
+                                    }
+                                    event_sender.notify(ev);
                                 }
-                                event_sender.notify(ev);
                             }
                         }
                     }
                 }
-            }
 
-            let _ = exit.send(res);
-        };
-        ctx.task_executor().spawn_critical("consensus engine", Box::pin(consensus_engine));
+                let _ = exit.send(res);
+            },
+        );
 
         let engine_events_for_ethstats = engine_events.new_listener();
 
