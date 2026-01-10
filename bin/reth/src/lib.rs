@@ -25,7 +25,7 @@
 //! - `jemalloc-unprefixed`: Uses unprefixed jemalloc symbols.
 //! - `tracy-allocator`: Enables [Tracy](https://github.com/wolfpld/tracy) profiler allocator
 //!   integration for memory profiling.
-//! - `snmalloc`: Uses [snmalloc](https://github.com/snmalloc/snmalloc) as the global allocator. Use
+//! - `snmalloc`: Uses [snmalloc](https://github.com/microsoft/snmalloc) as the global allocator. Use
 //!   `--no-default-features` when enabling this, as jemalloc takes precedence.
 //! - `snmalloc-native`: Uses snmalloc with native CPU optimizations. Use `--no-default-features`
 //!   when enabling this.
