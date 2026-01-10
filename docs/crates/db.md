@@ -297,4 +297,4 @@ This chapter was packed with information, so let's do a quick review. The databa
 
 # Next Chapter
 
-[Next Chapter]()
+[Next Chapter](eth-wire.md)
