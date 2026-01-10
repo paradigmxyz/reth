@@ -13,6 +13,20 @@ use core::hash::Hash;
 
 pub use alloy_consensus::crypto::RecoveryError;
 
+/// Maximum standard Ethereum transaction type value.
+///
+/// Standard transaction types are:
+/// - Type 0: Legacy transactions (original Ethereum)
+/// - Type 1: EIP-2930 (access list transactions)
+/// - Type 2: EIP-1559 (dynamic fee transactions)
+/// - Type 3: EIP-4844 (blob transactions)
+/// - Type 4: EIP-7702 (set code authorization transactions)
+///
+/// Any transaction with a type > 4 is considered a non-standard/system transaction,
+/// typically used by L2s for special purposes (e.g., Optimism deposit transactions use type
+/// 126).
+const MAX_STANDARD_TX_TYPE: u8 = 4;
+
 /// Helper trait that unifies all behaviour required by block to support full node operations.
 pub trait FullSignedTx: SignedTransaction + MaybeCompact + MaybeSerdeBincodeCompat {}
 impl<T> FullSignedTx for T where T: SignedTransaction + MaybeCompact + MaybeSerdeBincodeCompat {}
@@ -48,6 +62,11 @@ pub trait SignedTransaction:
     + TxHashRef
     + IsTyped2718
 {
+    /// Returns whether this transaction is a system transaction
+    fn is_system_tx(&self) -> bool {
+        self.ty() > MAX_STANDARD_TX_TYPE
+    }
+
     /// Returns whether this transaction type can be __broadcasted__ as full transaction over the
     /// network.
     ///
