@@ -65,6 +65,14 @@ impl NodeState {
         self.peers_info.as_ref().map(|info| info.num_connected_peers()).unwrap_or_default()
     }
 
+    fn num_inbound_peers(&self) -> usize {
+        self.peers_info.as_ref().map(|info| info.num_inbound_peers()).unwrap_or_default()
+    }
+
+    fn num_outbound_peers(&self) -> usize {
+        self.peers_info.as_ref().map(|info| info.num_outbound_peers()).unwrap_or_default()
+    }
+
     fn build_current_stage(
         &self,
         stage_id: StageId,
@@ -413,6 +421,8 @@ where
                         info!(
                             target: "reth::cli",
                             connected_peers = this.state.num_connected_peers(),
+                            inbound = this.state.num_inbound_peers(),
+                            outbound = this.state.num_outbound_peers(),
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
                             target = %OptionalField(*target),
@@ -425,6 +435,8 @@ where
                         info!(
                             target: "reth::cli",
                             connected_peers = this.state.num_connected_peers(),
+                            inbound = this.state.num_inbound_peers(),
+                            outbound = this.state.num_outbound_peers(),
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
                             target = %OptionalField(*target),
@@ -436,6 +448,8 @@ where
                         info!(
                             target: "reth::cli",
                             connected_peers = this.state.num_connected_peers(),
+                            inbound = this.state.num_inbound_peers(),
+                            outbound = this.state.num_outbound_peers(),
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
                             target = %OptionalField(*target),
@@ -447,6 +461,8 @@ where
                         info!(
                             target: "reth::cli",
                             connected_peers = this.state.num_connected_peers(),
+                            inbound = this.state.num_inbound_peers(),
+                            outbound = this.state.num_outbound_peers(),
                             stage = %stage_id,
                             checkpoint = checkpoint.block_number,
                             target = %OptionalField(*target),
@@ -464,6 +480,8 @@ where
                         info!(
                             target: "reth::cli",
                             connected_peers = this.state.num_connected_peers(),
+                            inbound = this.state.num_inbound_peers(),
+                            outbound = this.state.num_outbound_peers(),
                             %latest_block,
                             "Status"
                         );
@@ -471,6 +489,8 @@ where
                         info!(
                             target: "reth::cli",
                             connected_peers = this.state.num_connected_peers(),
+                            inbound = this.state.num_inbound_peers(),
+                            outbound = this.state.num_outbound_peers(),
                             "Status"
                         );
                     }
