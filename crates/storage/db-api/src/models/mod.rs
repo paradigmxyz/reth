@@ -29,8 +29,8 @@ pub use blocks::*;
 pub use integer_list::IntegerList;
 pub use metadata::*;
 pub use reth_db_models::{
-    AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StoredBlockBodyIndices,
-    StoredBlockWithdrawals,
+    AccountBeforeTx, ClientVersion, StaticFileBlockWithdrawals, StorageBeforeTx,
+    StoredBlockBodyIndices, StoredBlockWithdrawals,
 };
 pub use sharded_key::ShardedKey;
 
@@ -233,6 +233,7 @@ impl_compression_for_compact!(
     StaticFileBlockWithdrawals,
     Bytecode,
     AccountBeforeTx,
+    StorageBeforeTx,
     TransactionSigned,
     CompactU256,
     StageCheckpoint,

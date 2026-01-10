@@ -54,6 +54,11 @@ pub enum StaticFileSegment {
     /// * address 0xbb, account info
     /// * address 0xcc, account info
     AccountChangeSets,
+    /// Static File segment responsible for the `StorageChangeSets` table.
+    ///
+    /// Storage changeset static files append block-by-block changesets sorted by address and
+    /// storage slot.
+    StorageChangeSets,
 }
 
 impl StaticFileSegment {
@@ -70,6 +75,7 @@ impl StaticFileSegment {
             Self::Receipts => "receipts",
             Self::TransactionSenders => "transaction-senders",
             Self::AccountChangeSets => "account-change-sets",
+            Self::StorageChangeSets => "storage-change-sets",
         }
     }
 
@@ -82,6 +88,7 @@ impl StaticFileSegment {
             Self::Receipts,
             Self::TransactionSenders,
             Self::AccountChangeSets,
+            Self::StorageChangeSets,
         ]
         .into_iter()
     }
@@ -98,7 +105,8 @@ impl StaticFileSegment {
             Self::Transactions |
             Self::Receipts |
             Self::TransactionSenders |
-            Self::AccountChangeSets => 1,
+            Self::AccountChangeSets |
+            Self::StorageChangeSets => 1,
         }
     }
 
@@ -160,14 +168,14 @@ impl StaticFileSegment {
     pub const fn is_tx_based(&self) -> bool {
         match self {
             Self::Receipts | Self::Transactions | Self::TransactionSenders => true,
-            Self::Headers | Self::AccountChangeSets => false,
+            Self::Headers | Self::AccountChangeSets | Self::StorageChangeSets => false,
         }
     }
 
-    /// Returns `true` if the segment is [`StaticFileSegment::AccountChangeSets`]
+    /// Returns `true` if the segment is change-based.
     pub const fn is_change_based(&self) -> bool {
         match self {
-            Self::AccountChangeSets => true,
+            Self::AccountChangeSets | Self::StorageChangeSets => true,
             Self::Receipts | Self::Transactions | Self::Headers | Self::TransactionSenders => false,
         }
     }
@@ -179,7 +187,8 @@ impl StaticFileSegment {
             Self::Receipts |
             Self::Transactions |
             Self::TransactionSenders |
-            Self::AccountChangeSets => false,
+            Self::AccountChangeSets |
+            Self::StorageChangeSets => false,
         }
     }
 
@@ -258,10 +267,10 @@ impl<'de> Visitor<'de> for SegmentHeaderVisitor {
         let tx_range =
             seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(2, &self))?;
 
-        let segment =
+        let segment: StaticFileSegment =
             seq.next_element()?.ok_or_else(|| serde::de::Error::invalid_length(3, &self))?;
 
-        let changeset_offsets = if segment == StaticFileSegment::AccountChangeSets {
+        let changeset_offsets = if segment.is_change_based() {
             // Try to read the 5th field (changeset_offsets)
             // If it doesn't exist (old format), this will return None
             match seq.next_element()? {
@@ -308,8 +317,8 @@ impl Serialize for SegmentHeader {
     where
         S: Serializer,
     {
-        // We serialize an extra field, the changeset offsets, for account changesets
-        let len = if self.segment.is_account_change_sets() { 5 } else { 4 };
+        // We serialize an extra field, the changeset offsets, for change-based segments
+        let len = if self.segment.is_change_based() { 5 } else { 4 };
 
         let mut state = serializer.serialize_struct("SegmentHeader", len)?;
         state.serialize_field("expected_block_range", &self.expected_block_range)?;
@@ -317,7 +326,7 @@ impl Serialize for SegmentHeader {
         state.serialize_field("tx_range", &self.tx_range)?;
         state.serialize_field("segment", &self.segment)?;
 
-        if self.segment.is_account_change_sets() {
+        if self.segment.is_change_based() {
             state.serialize_field("changeset_offsets", &self.changeset_offsets)?;
         }
 
@@ -672,6 +681,12 @@ mod tests {
                 None,
             ),
             (
+                StaticFileSegment::StorageChangeSets,
+                1_123_233..=11_223_233,
+                "static_file_storage-change-sets_1123233_11223233",
+                None,
+            ),
+            (
                 StaticFileSegment::Headers,
                 2..=30,
                 "static_file_headers_2_30_none_lz4",
@@ -754,6 +769,13 @@ mod tests {
                 segment: StaticFileSegment::AccountChangeSets,
                 changeset_offsets: Some(vec![ChangesetOffset { offset: 1, num_changes: 1 }; 100]),
             },
+            SegmentHeader {
+                expected_block_range: SegmentRangeInclusive::new(0, 200),
+                block_range: Some(SegmentRangeInclusive::new(0, 100)),
+                tx_range: None,
+                segment: StaticFileSegment::StorageChangeSets,
+                changeset_offsets: Some(vec![ChangesetOffset { offset: 1, num_changes: 1 }; 100]),
+            },
         ];
         // Check that we test all segments
         assert_eq!(
@@ -787,6 +809,7 @@ mod tests {
                 StaticFileSegment::Receipts => "receipts",
                 StaticFileSegment::TransactionSenders => "transaction-senders",
                 StaticFileSegment::AccountChangeSets => "account-change-sets",
+                StaticFileSegment::StorageChangeSets => "storage-change-sets",
             };
             assert_eq!(static_str, expected_str);
         }
@@ -805,6 +828,7 @@ mod tests {
                 StaticFileSegment::Receipts => "Receipts",
                 StaticFileSegment::TransactionSenders => "TransactionSenders",
                 StaticFileSegment::AccountChangeSets => "AccountChangeSets",
+                StaticFileSegment::StorageChangeSets => "StorageChangeSets",
             };
             assert_eq!(ser, format!("\"{expected_str}\""));
         }

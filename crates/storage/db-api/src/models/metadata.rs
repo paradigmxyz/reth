@@ -31,6 +31,9 @@ pub struct StorageSettings {
     /// Whether this node should read and write account changesets from static files.
     #[serde(default)]
     pub account_changesets_in_static_files: bool,
+    /// Whether this node should read and write storage changesets from static files.
+    #[serde(default)]
+    pub storage_changesets_in_static_files: bool,
 }
 
 impl StorageSettings {
@@ -44,6 +47,7 @@ impl StorageSettings {
             receipts_in_static_files: true,
             transaction_senders_in_static_files: true,
             account_changesets_in_static_files: true,
+            storage_changesets_in_static_files: true,
             storages_history_in_rocksdb: false,
             transaction_hash_numbers_in_rocksdb: false,
             account_history_in_rocksdb: false,
@@ -63,6 +67,7 @@ impl StorageSettings {
             transaction_hash_numbers_in_rocksdb: false,
             account_history_in_rocksdb: false,
             account_changesets_in_static_files: false,
+            storage_changesets_in_static_files: false,
         }
     }
 
@@ -99,6 +104,12 @@ impl StorageSettings {
     /// Sets the `account_changesets_in_static_files` flag to the provided value.
     pub const fn with_account_changesets_in_static_files(mut self, value: bool) -> Self {
         self.account_changesets_in_static_files = value;
+        self
+    }
+
+    /// Sets the `storage_changesets_in_static_files` flag to the provided value.
+    pub const fn with_storage_changesets_in_static_files(mut self, value: bool) -> Self {
+        self.storage_changesets_in_static_files = value;
         self
     }
 }

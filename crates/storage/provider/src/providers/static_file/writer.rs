@@ -6,7 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
 use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
-use reth_db::models::AccountBeforeTx;
+use reth_db::models::{AccountBeforeTx, StorageBeforeTx};
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
@@ -56,6 +56,11 @@ enum PruneStrategy {
         /// The target block number to prune to.
         last_block: BlockNumber,
     },
+    /// Prune storage changesets to a target block number.
+    StorageChangeSets {
+        /// The target block number to prune to.
+        last_block: BlockNumber,
+    },
 }
 
 /// Static file writers for every known [`StaticFileSegment`].
@@ -69,6 +74,7 @@ pub(crate) struct StaticFileWriters<N> {
     receipts: RwLock<Option<StaticFileProviderRW<N>>>,
     transaction_senders: RwLock<Option<StaticFileProviderRW<N>>>,
     account_change_sets: RwLock<Option<StaticFileProviderRW<N>>>,
+    storage_change_sets: RwLock<Option<StaticFileProviderRW<N>>>,
 }
 
 impl<N> Default for StaticFileWriters<N> {
@@ -79,6 +85,7 @@ impl<N> Default for StaticFileWriters<N> {
             receipts: Default::default(),
             transaction_senders: Default::default(),
             account_change_sets: Default::default(),
+            storage_change_sets: Default::default(),
         }
     }
 }
@@ -95,6 +102,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             StaticFileSegment::Receipts => self.receipts.write(),
             StaticFileSegment::TransactionSenders => self.transaction_senders.write(),
             StaticFileSegment::AccountChangeSets => self.account_change_sets.write(),
+            StaticFileSegment::StorageChangeSets => self.storage_change_sets.write(),
         };
 
         if write_guard.is_none() {
@@ -113,6 +121,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             &self.receipts,
             &self.transaction_senders,
             &self.account_change_sets,
+            &self.storage_change_sets,
         ] {
             let mut writer = writer_lock.write();
             if let Some(writer) = writer.as_mut() {
@@ -131,6 +140,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             &self.receipts,
             &self.transaction_senders,
             &self.account_change_sets,
+            &self.storage_change_sets,
         ] {
             let writer = writer_lock.read();
             if let Some(writer) = writer.as_ref() &&
@@ -322,6 +332,9 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 }
                 PruneStrategy::AccountChangeSets { last_block } => {
                     self.prune_account_changeset_data(last_block)?
+                }
+                PruneStrategy::StorageChangeSets { last_block } => {
+                    self.prune_storage_changeset_data(last_block)?
                 }
             }
         }
@@ -531,7 +544,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Commits to the configuration file at the end
     fn truncate_changesets(&mut self, last_block: u64) -> ProviderResult<()> {
         let segment = self.writer.user_header().segment();
-        debug_assert_eq!(segment, StaticFileSegment::AccountChangeSets);
+        debug_assert!(segment.is_change_based());
 
         // Get the current block range
         let current_block_end = self
@@ -1011,6 +1024,41 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         Ok(())
     }
 
+    /// Appends a block storage changeset to the static file.
+    ///
+    /// It **CALLS** `increment_block()`.
+    pub fn append_storage_changeset(
+        &mut self,
+        mut changeset: Vec<StorageBeforeTx>,
+        block_number: u64,
+    ) -> ProviderResult<()> {
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::StorageChangeSets);
+        let start = Instant::now();
+
+        self.increment_block(block_number)?;
+        self.ensure_no_queued_prune()?;
+
+        // sort by address + storage key
+        changeset.sort_by_key(|change| (change.address, change.key));
+
+        let mut count: u64 = 0;
+        for change in changeset {
+            self.append_change(&change)?;
+            count += 1;
+        }
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operations(
+                StaticFileSegment::StorageChangeSets,
+                StaticFileProviderOperation::Append,
+                count,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
     /// Adds an instruction to prune `to_delete` transactions during commit.
     ///
     /// Note: `last_block` refers to the block the unwinds ends at.
@@ -1060,6 +1108,12 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     pub fn prune_account_changesets(&mut self, last_block: u64) -> ProviderResult<()> {
         debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::AccountChangeSets);
         self.queue_prune(PruneStrategy::AccountChangeSets { last_block })
+    }
+
+    /// Adds an instruction to prune storage changesets until the given block.
+    pub fn prune_storage_changesets(&mut self, last_block: u64) -> ProviderResult<()> {
+        debug_assert_eq!(self.writer.user_header().segment(), StaticFileSegment::StorageChangeSets);
+        self.queue_prune(PruneStrategy::StorageChangeSets { last_block })
     }
 
     /// Adds an instruction to prune elements during commit using the specified strategy.
@@ -1113,6 +1167,25 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 StaticFileSegment::AccountChangeSets,
+                StaticFileProviderOperation::Prune,
+                Some(start.elapsed()),
+            );
+        }
+
+        Ok(())
+    }
+
+    /// Prunes the last storage changesets from the data file.
+    fn prune_storage_changeset_data(&mut self, last_block: BlockNumber) -> ProviderResult<()> {
+        let start = Instant::now();
+
+        debug_assert!(self.writer.user_header().segment() == StaticFileSegment::StorageChangeSets);
+
+        self.truncate_changesets(last_block)?;
+
+        if let Some(metrics) = &self.metrics {
+            metrics.record_segment_operation(
+                StaticFileSegment::StorageChangeSets,
                 StaticFileProviderOperation::Prune,
                 Some(start.elapsed()),
             );

@@ -37,7 +37,7 @@ use reth_provider::{
     providers::OverlayStateProviderFactory, BlockExecutionOutput, BlockNumReader, BlockReader,
     ChangeSetReader, DatabaseProviderFactory, DatabaseProviderROFactory, ExecutionOutcome,
     HashedPostStateProvider, ProviderError, PruneCheckpointReader, StageCheckpointReader,
-    StateProvider, StateProviderFactory, StateReader, TrieReader,
+    StateProvider, StateProviderFactory, StateReader, StorageChangeSetReader, TrieReader,
 };
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
@@ -140,6 +140,7 @@ where
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
+                          + StorageChangeSetReader
                           + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + ChangeSetReader
@@ -1213,6 +1214,7 @@ where
                           + StageCheckpointReader
                           + PruneCheckpointReader
                           + ChangeSetReader
+                          + StorageChangeSetReader
                           + BlockNumReader,
         > + BlockReader<Header = N::BlockHeader>
         + StateProviderFactory

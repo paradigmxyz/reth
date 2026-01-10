@@ -63,14 +63,19 @@ mod tests {
     use alloy_consensus::{Header, SignableTransaction, Transaction, TxLegacy};
     use alloy_primitives::{Address, BlockHash, Signature, TxNumber, B256, U160, U256};
     use rand::seq::SliceRandom;
-    use reth_db::{models::AccountBeforeTx, test_utils::create_test_static_files_dir};
+    use reth_db::{
+        models::{AccountBeforeTx, StorageBeforeTx},
+        test_utils::create_test_static_files_dir,
+    };
     use reth_db_api::{transaction::DbTxMut, CanonicalHeaders, HeaderNumbers, Headers};
     use reth_ethereum_primitives::{EthPrimitives, Receipt, TransactionSigned};
     use reth_primitives_traits::Account;
     use reth_static_file_types::{
         find_fixed_range, SegmentRangeInclusive, DEFAULT_BLOCKS_PER_STATIC_FILE,
     };
-    use reth_storage_api::{ChangeSetReader, ReceiptProvider, TransactionsProvider};
+    use reth_storage_api::{
+        ChangeSetReader, ReceiptProvider, StorageChangeSetReader, TransactionsProvider,
+    };
     use reth_testing_utils::generators::{self, random_header_range};
     use std::{collections::BTreeMap, fmt::Debug, fs, ops::Range, path::Path};
 
@@ -315,7 +320,9 @@ mod tests {
                 // Append transaction/receipt if there's still a transaction count to append
                 if tx_count > 0 {
                     match segment {
-                        StaticFileSegment::Headers | StaticFileSegment::AccountChangeSets => {
+                        StaticFileSegment::Headers |
+                        StaticFileSegment::AccountChangeSets |
+                        StaticFileSegment::StorageChangeSets => {
                             panic!("non tx based segment")
                         }
                         StaticFileSegment::Transactions => {
@@ -432,7 +439,9 @@ mod tests {
 
             // Prune transactions or receipts based on the segment type
             match segment {
-                StaticFileSegment::Headers | StaticFileSegment::AccountChangeSets => {
+                StaticFileSegment::Headers |
+                StaticFileSegment::AccountChangeSets |
+                StaticFileSegment::StorageChangeSets => {
                     panic!("non tx based segment")
                 }
                 StaticFileSegment::Transactions => {
@@ -457,7 +466,9 @@ mod tests {
             // cumulative_gas_used & nonce as ids.
             if let Some(id) = expected_tx_tip {
                 match segment {
-                    StaticFileSegment::Headers | StaticFileSegment::AccountChangeSets => {
+                    StaticFileSegment::Headers |
+                    StaticFileSegment::AccountChangeSets |
+                    StaticFileSegment::StorageChangeSets => {
                         panic!("non tx based segment")
                     }
                     StaticFileSegment::Transactions => assert_eyre(
@@ -1024,6 +1035,313 @@ mod tests {
                 let result = sf_rw.get_account_before_block(block_num, addresses[i]).unwrap();
                 assert!(result.is_some());
                 assert_eq!(result.unwrap().address, addresses[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn test_storage_changeset_static_files() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
+            .expect("Failed to create static file provider");
+
+        // Test writing and reading storage changesets
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+
+            // Create test data for multiple blocks
+            let test_blocks = 10u64;
+            let entries_per_block = 5;
+
+            for block_num in 0..test_blocks {
+                let changeset = (0..entries_per_block)
+                    .map(|i| {
+                        let mut addr = Address::ZERO;
+                        addr.0[0] = block_num as u8;
+                        addr.0[1] = i as u8;
+                        StorageBeforeTx {
+                            address: addr,
+                            key: B256::with_last_byte(i as u8),
+                            value: U256::from(block_num * 1000 + i as u64),
+                        }
+                    })
+                    .collect::<Vec<_>>();
+
+                writer.append_storage_changeset(changeset, block_num).unwrap();
+            }
+
+            writer.commit().unwrap();
+        }
+
+        // Verify data can be read back correctly
+        {
+            let provider = sf_rw
+                .get_segment_provider_for_block(StaticFileSegment::StorageChangeSets, 5, None)
+                .unwrap();
+
+            // Check that the segment header has changeset offsets
+            assert!(provider.user_header().changeset_offsets().is_some());
+            let offsets = provider.user_header().changeset_offsets().unwrap();
+            assert_eq!(offsets.len(), 10); // Should have 10 blocks worth of offsets
+
+            // Verify each block has the expected number of changes
+            for (i, offset) in offsets.iter().enumerate() {
+                assert_eq!(offset.num_changes(), 5, "Block {} should have 5 changes", i);
+            }
+        }
+    }
+
+    #[test]
+    fn test_get_storage_before_block() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
+            .expect("Failed to create static file provider");
+
+        let test_address = Address::from([1u8; 20]);
+        let other_address = Address::from([2u8; 20]);
+        let missing_address = Address::from([3u8; 20]);
+        let test_key = B256::with_last_byte(1);
+        let other_key = B256::with_last_byte(2);
+
+        // Write changesets for multiple blocks
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+
+            // Block 0: test_address and other_address change
+            writer
+                .append_storage_changeset(
+                    vec![
+                        StorageBeforeTx { address: test_address, key: test_key, value: U256::ZERO },
+                        StorageBeforeTx {
+                            address: other_address,
+                            key: other_key,
+                            value: U256::from(5),
+                        },
+                    ],
+                    0,
+                )
+                .unwrap();
+
+            // Block 1: only other_address changes
+            writer
+                .append_storage_changeset(
+                    vec![StorageBeforeTx {
+                        address: other_address,
+                        key: other_key,
+                        value: U256::from(7),
+                    }],
+                    1,
+                )
+                .unwrap();
+
+            // Block 2: test_address changes again
+            writer
+                .append_storage_changeset(
+                    vec![StorageBeforeTx {
+                        address: test_address,
+                        key: test_key,
+                        value: U256::from(9),
+                    }],
+                    2,
+                )
+                .unwrap();
+
+            writer.commit().unwrap();
+        }
+
+        // Test get_storage_before_block
+        {
+            let result = sf_rw.get_storage_before_block(0, test_address, test_key).unwrap();
+            assert!(result.is_some());
+            let entry = result.unwrap();
+            assert_eq!(entry.key, test_key);
+            assert_eq!(entry.value, U256::ZERO);
+
+            let result = sf_rw.get_storage_before_block(2, test_address, test_key).unwrap();
+            assert!(result.is_some());
+            let entry = result.unwrap();
+            assert_eq!(entry.key, test_key);
+            assert_eq!(entry.value, U256::from(9));
+
+            let result = sf_rw.get_storage_before_block(1, test_address, test_key).unwrap();
+            assert!(result.is_none());
+
+            let result = sf_rw.get_storage_before_block(2, missing_address, test_key).unwrap();
+            assert!(result.is_none());
+
+            let result = sf_rw.get_storage_before_block(1, other_address, other_key).unwrap();
+            assert!(result.is_some());
+            let entry = result.unwrap();
+            assert_eq!(entry.key, other_key);
+        }
+    }
+
+    #[test]
+    fn test_storage_changeset_truncation() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let blocks_per_file = 10;
+        let files_per_range = 3;
+        let file_set_count = 3;
+        let initial_file_count = files_per_range * file_set_count;
+        let tip = blocks_per_file * file_set_count - 1;
+
+        // Setup: Create storage changesets for multiple blocks
+        {
+            let sf_rw: StaticFileProvider<EthPrimitives> =
+                StaticFileProviderBuilder::read_write(&static_dir)
+                    .with_blocks_per_file(blocks_per_file)
+                    .build()
+                    .expect("failed to create static file provider");
+
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+
+            for block_num in 0..=tip {
+                let num_changes = ((block_num % 5) + 1) as usize;
+                let mut changeset = Vec::with_capacity(num_changes);
+
+                for i in 0..num_changes {
+                    let mut address = Address::ZERO;
+                    address.0[0] = block_num as u8;
+                    address.0[1] = i as u8;
+
+                    changeset.push(StorageBeforeTx {
+                        address,
+                        key: B256::with_last_byte(i as u8),
+                        value: U256::from(block_num * 1000 + i as u64),
+                    });
+                }
+
+                writer.append_storage_changeset(changeset, block_num).unwrap();
+            }
+
+            writer.commit().unwrap();
+        }
+
+        fn validate_truncation(
+            sf_rw: &StaticFileProvider<EthPrimitives>,
+            static_dir: impl AsRef<Path>,
+            expected_tip: Option<u64>,
+            expected_file_count: u64,
+        ) -> eyre::Result<()> {
+            let highest_block =
+                sf_rw.get_highest_static_file_block(StaticFileSegment::StorageChangeSets);
+            assert_eyre(highest_block, expected_tip, "block tip mismatch")?;
+
+            assert_eyre(
+                count_files_without_lockfile(static_dir)?,
+                expected_file_count as usize,
+                "file count mismatch",
+            )?;
+
+            if let Some(tip) = expected_tip {
+                let provider = sf_rw.get_segment_provider_for_block(
+                    StaticFileSegment::StorageChangeSets,
+                    tip,
+                    None,
+                )?;
+                let offsets = provider.user_header().changeset_offsets();
+                assert!(offsets.is_some(), "Should have changeset offsets");
+            }
+
+            Ok(())
+        }
+
+        let sf_rw = StaticFileProviderBuilder::read_write(&static_dir)
+            .with_blocks_per_file(blocks_per_file)
+            .build()
+            .expect("failed to create static file provider");
+
+        sf_rw.initialize_index().expect("Failed to initialize index");
+
+        // Case 1: Truncate to block 20
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            writer.prune_storage_changesets(20).unwrap();
+            writer.commit().unwrap();
+
+            validate_truncation(&sf_rw, &static_dir, Some(20), initial_file_count)
+                .expect("Truncation validation failed");
+        }
+
+        // Case 2: Truncate to block 9
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            writer.prune_storage_changesets(9).unwrap();
+            writer.commit().unwrap();
+
+            validate_truncation(&sf_rw, &static_dir, Some(9), files_per_range)
+                .expect("Truncation validation failed");
+        }
+
+        // Case 3: Truncate all (should keep block 0)
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            writer.prune_storage_changesets(0).unwrap();
+            writer.commit().unwrap();
+
+            validate_truncation(&sf_rw, &static_dir, Some(0), files_per_range)
+                .expect("Truncation validation failed");
+        }
+    }
+
+    #[test]
+    fn test_storage_changeset_binary_search() {
+        let (static_dir, _) = create_test_static_files_dir();
+
+        let sf_rw = StaticFileProvider::<EthPrimitives>::read_write(&static_dir)
+            .expect("Failed to create static file provider");
+
+        let block_num = 0u64;
+        let num_slots = 100;
+        let address = Address::from([4u8; 20]);
+
+        let mut keys: Vec<B256> = Vec::with_capacity(num_slots);
+        for i in 0..num_slots {
+            keys.push(B256::with_last_byte(i as u8));
+        }
+
+        {
+            let mut writer = sf_rw.latest_writer(StaticFileSegment::StorageChangeSets).unwrap();
+            let changeset = keys
+                .iter()
+                .enumerate()
+                .map(|(i, key)| StorageBeforeTx { address, key: *key, value: U256::from(i as u64) })
+                .collect::<Vec<_>>();
+
+            writer.append_storage_changeset(changeset, block_num).unwrap();
+            writer.commit().unwrap();
+        }
+
+        {
+            let result = sf_rw.get_storage_before_block(block_num, address, keys[0]).unwrap();
+            assert!(result.is_some());
+            let entry = result.unwrap();
+            assert_eq!(entry.key, keys[0]);
+            assert_eq!(entry.value, U256::from(0));
+
+            let result =
+                sf_rw.get_storage_before_block(block_num, address, keys[num_slots - 1]).unwrap();
+            assert!(result.is_some());
+            let entry = result.unwrap();
+            assert_eq!(entry.key, keys[num_slots - 1]);
+
+            let mid = num_slots / 2;
+            let result = sf_rw.get_storage_before_block(block_num, address, keys[mid]).unwrap();
+            assert!(result.is_some());
+            let entry = result.unwrap();
+            assert_eq!(entry.key, keys[mid]);
+
+            let missing_key = B256::with_last_byte(255);
+            let result = sf_rw.get_storage_before_block(block_num, address, missing_key).unwrap();
+            assert!(result.is_none());
+
+            for i in (0..num_slots).step_by(10) {
+                let result = sf_rw.get_storage_before_block(block_num, address, keys[i]).unwrap();
+                assert!(result.is_some());
+                assert_eq!(result.unwrap().key, keys[i]);
             }
         }
     }

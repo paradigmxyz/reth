@@ -17,20 +17,20 @@ use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
-    models::AccountBeforeTx,
+    models::{AccountBeforeTx, StorageBeforeTx},
     static_file::TransactionSenderMask,
     table::Value,
     transaction::{CursorMutTy, CursorTy, DbTx, DbTxMut, DupCursorMutTy, DupCursorTy},
 };
 use reth_db_api::{
     cursor::DbCursorRW,
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    models::{storage_sharded_key::StorageShardedKey, BlockNumberAddress, ShardedKey},
     tables,
     tables::BlockNumberList,
 };
 use reth_errors::ProviderError;
 use reth_node_types::NodePrimitives;
-use reth_primitives_traits::ReceiptTy;
+use reth_primitives_traits::{ReceiptTy, StorageEntry};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
@@ -171,6 +171,27 @@ impl<'a> EitherWriter<'a, (), ()> {
         }
     }
 
+    /// Creates a new [`EitherWriter`] for storage changesets based on storage settings.
+    pub fn new_storage_changesets<P>(
+        provider: &'a P,
+        block_number: BlockNumber,
+    ) -> ProviderResult<DupEitherWriterTy<'a, P, tables::StorageChangeSets>>
+    where
+        P: DBProvider + NodePrimitivesProvider + StorageSettingsCache + StaticFileProviderFactory,
+        P::Tx: DbTxMut,
+    {
+        if provider.cached_storage_settings().storage_changesets_in_static_files {
+            Ok(EitherWriter::StaticFile(
+                provider
+                    .get_static_file_writer(block_number, StaticFileSegment::StorageChangeSets)?,
+            ))
+        } else {
+            Ok(EitherWriter::Database(
+                provider.tx_ref().cursor_dup_write::<tables::StorageChangeSets>()?,
+            ))
+        }
+    }
+
     /// Returns the destination for writing receipts.
     ///
     /// The rules are as follows:
@@ -202,6 +223,19 @@ impl<'a> EitherWriter<'a, (), ()> {
         provider: &P,
     ) -> EitherWriterDestination {
         if provider.cached_storage_settings().account_changesets_in_static_files {
+            EitherWriterDestination::StaticFile
+        } else {
+            EitherWriterDestination::Database
+        }
+    }
+
+    /// Returns the destination for writing storage changesets.
+    ///
+    /// This determines the destination based solely on storage settings.
+    pub fn storage_changesets_destination<P: DBProvider + StorageSettingsCache>(
+        provider: &P,
+    ) -> EitherWriterDestination {
+        if provider.cached_storage_settings().storage_changesets_in_static_files {
             EitherWriterDestination::StaticFile
         } else {
             EitherWriterDestination::Database
@@ -544,6 +578,41 @@ where
     }
 }
 
+impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
+where
+    CURSOR: DbDupCursorRW<tables::StorageChangeSets>,
+{
+    /// Append storage changeset for a block.
+    ///
+    /// NOTE: This _sorts_ the changesets by address and storage key before appending.
+    pub fn append_storage_changeset(
+        &mut self,
+        block_number: BlockNumber,
+        mut changeset: Vec<StorageBeforeTx>,
+    ) -> ProviderResult<()> {
+        changeset.par_sort_by_key(|change| (change.address, change.key));
+
+        match self {
+            Self::Database(cursor) => {
+                for change in changeset {
+                    let storage_id = BlockNumberAddress((block_number, change.address));
+                    cursor.append_dup(
+                        storage_id,
+                        StorageEntry { key: change.key, value: change.value },
+                    )?;
+                }
+            }
+            Self::StaticFile(writer) => {
+                writer.append_storage_changeset(changeset, block_number)?;
+            }
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(_) => return Err(ProviderError::UnsupportedProvider),
+        }
+
+        Ok(())
+    }
+}
+
 /// Represents a source for reading data, either from database, static files, or `RocksDB`.
 #[derive(Debug, Display)]
 pub enum EitherReader<'a, CURSOR, N> {
@@ -819,6 +888,19 @@ impl EitherWriterDestination {
     {
         // Write account changesets to static files only if they're explicitly enabled
         if provider.cached_storage_settings().account_changesets_in_static_files {
+            Self::StaticFile
+        } else {
+            Self::Database
+        }
+    }
+
+    /// Returns the destination for writing storage changesets based on storage settings.
+    pub fn storage_changesets<P>(provider: &P) -> Self
+    where
+        P: StorageSettingsCache,
+    {
+        // Write storage changesets to static files only if they're explicitly enabled
+        if provider.cached_storage_settings().storage_changesets_in_static_files {
             Self::StaticFile
         } else {
             Self::Database
