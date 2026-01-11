@@ -279,7 +279,7 @@ pub struct Config {
     /// Additional kv-pairs (besides tcp port, udp port and fork) that should be advertised to
     /// peers by including in local node record.
     pub(super) other_enr_kv_pairs: Vec<(&'static [u8], Bytes)>,
-    /// Interval in seconds at which to run a lookup up query with to populate kbuckets.
+    /// Interval in seconds at which to run a lookup up query to populate kbuckets.
     pub(super) lookup_interval: u64,
     /// Interval in seconds at which to run pulse lookup queries at bootstrap to boost kbucket
     /// population.
