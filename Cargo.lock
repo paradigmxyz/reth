@@ -11275,6 +11275,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-tracing",
  "reth-trie",
  "reth-trie-common",
  "reth-trie-db",
