@@ -301,7 +301,7 @@ impl Default for BasicPayloadJobGeneratorConfig {
 /// resolved or the deadline is reached, or until the built payload is marked as frozen:
 /// [`BuildOutcome::Freeze`]. Once a frozen payload is returned, no additional payloads will be
 /// built and this future will wait to be resolved: [`PayloadJob::resolve`] or terminated if the
-/// deadline is reached..
+/// deadline is reached.
 #[derive(Debug)]
 pub struct BasicPayloadJob<Tasks, Builder>
 where

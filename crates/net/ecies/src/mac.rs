@@ -57,7 +57,7 @@ impl MAC {
         self.hasher.update(data);
         let prev = self.digest();
         let aes = Aes256Enc::new_from_slice(self.secret.as_ref()).unwrap();
-        let mut encrypted = self.digest().0;
+        let mut encrypted = prev.0;
 
         aes.encrypt_padded::<NoPadding>(&mut encrypted, B128::len_bytes()).unwrap();
         for i in 0..16 {

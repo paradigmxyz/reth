@@ -1,35 +1,22 @@
-# reth recover storage-tries
+# reth db settings set receipts
 
-Recover the node by deleting dangling storage tries
+Store receipts in static files instead of the database
 
 ```bash
-$ reth recover storage-tries --help
+$ reth db settings set receipts --help
 ```
 ```txt
-Usage: reth recover storage-tries [OPTIONS]
+Usage: reth db settings set receipts [OPTIONS] <VALUE>
+
+Arguments:
+  <VALUE>
+          [possible values: true, false]
 
 Options:
   -h, --help
           Print help (see a summary with '-h')
 
 Datadir:
-      --datadir <DATA_DIR>
-          The path to the data dir for all reth files and subdirectories.
-
-          Defaults to the OS-specific data directory:
-
-          - Linux: `$XDG_DATA_HOME/reth/` or `$HOME/.local/share/reth/`
-          - Windows: `{FOLDERID_RoamingAppData}/reth/`
-          - macOS: `$HOME/Library/Application Support/reth/`
-
-          [default: default]
-
-      --datadir.static-files <PATH>
-          The absolute path to store static files in.
-
-      --config <FILE>
-          The path to the configuration file to use
-
       --chain <CHAIN_OR_PATH>
           The chain this node is running.
           Possible values are either a built-in chain or the path to a chain specification file.
@@ -38,37 +25,6 @@ Datadir:
               mainnet, sepolia, holesky, hoodi, dev
 
           [default: mainnet]
-
-Database:
-      --db.log-level <LOG_LEVEL>
-          Database logging level. Levels higher than "notice" require a debug build
-
-          Possible values:
-          - fatal:   Enables logging for critical conditions, i.e. assertion failures
-          - error:   Enables logging for error conditions
-          - warn:    Enables logging for warning conditions
-          - notice:  Enables logging for normal but significant condition
-          - verbose: Enables logging for verbose informational
-          - debug:   Enables logging for debug-level messages
-          - trace:   Enables logging for trace debug-level messages
-          - extra:   Enables logging for extra debug-level messages
-
-      --db.exclusive <EXCLUSIVE>
-          Open environment in exclusive/monopolistic mode. Makes it possible to open a database on an NFS volume
-
-          [possible values: true, false]
-
-      --db.max-size <MAX_SIZE>
-          Maximum database size (e.g., 4TB, 8MB)
-
-      --db.growth-step <GROWTH_STEP>
-          Database growth step (e.g., 4GB, 4KB)
-
-      --db.read-transaction-timeout <READ_TRANSACTION_TIMEOUT>
-          Read transaction timeout in seconds, 0 means no timeout
-
-      --db.max-readers <MAX_READERS>
-          Maximum number of readers allowed to access the database concurrently
 
 Logging:
       --log.stdout.format <FORMAT>
@@ -134,7 +90,7 @@ Logging:
 
           Possible values:
           - always: Colors on
-          - auto:   Colors on
+          - auto:   Auto-detect
           - never:  Colors off
 
           [default: always]
@@ -151,4 +107,46 @@ Display:
 
   -q, --quiet
           Silence all log output
+
+Tracing:
+      --tracing-otlp[=<URL>]
+          Enable `Opentelemetry` tracing export to an OTLP endpoint.
+
+          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/traces` - gRPC: `http://localhost:4317`
+
+          Example: --tracing-otlp=http://collector:4318/v1/traces
+
+          [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
+
+      --tracing-otlp-protocol <PROTOCOL>
+          OTLP transport protocol to use for exporting traces.
+
+          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
+
+          Defaults to HTTP if not specified.
+
+          Possible values:
+          - http: HTTP/Protobuf transport, port 4318, requires `/v1/traces` path
+          - grpc: gRPC transport, port 4317
+
+          [env: OTEL_EXPORTER_OTLP_PROTOCOL=]
+          [default: http]
+
+      --tracing-otlp.filter <FILTER>
+          Set a filter directive for the OTLP tracer. This controls the verbosity of spans and events sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
+
+          Example: --tracing-otlp.filter=info,reth=debug,hyper_util=off
+
+          Defaults to TRACE if not specified.
+
+          [default: debug]
+
+      --tracing-otlp.sample-ratio <RATIO>
+          Trace sampling ratio to control the percentage of traces to export.
+
+          Valid range: 0.0 to 1.0 - 1.0, default: Sample all traces - 0.01: Sample 1% of traces - 0.0: Disable sampling
+
+          Example: --tracing-otlp.sample-ratio=0.0.
+
+          [env: OTEL_TRACES_SAMPLER_ARG=]
 ```

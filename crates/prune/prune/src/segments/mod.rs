@@ -235,7 +235,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -273,7 +273,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -319,7 +319,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }
@@ -355,7 +355,7 @@ mod tests {
         for block in &blocks {
             provider_rw
                 .insert_block(
-                    block.clone().try_recover().expect("failed to seal block with senders"),
+                    &block.clone().try_recover().expect("failed to seal block with senders"),
                 )
                 .expect("failed to insert block");
         }

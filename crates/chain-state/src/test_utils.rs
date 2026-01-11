@@ -92,7 +92,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         &mut self,
         number: BlockNumber,
         parent_hash: B256,
-    ) -> RecoveredBlock<reth_ethereum_primitives::Block> {
+    ) -> SealedBlock<reth_ethereum_primitives::Block> {
         let mut rng = rand::rng();
 
         let mock_tx = |nonce: u64| -> Recovered<_> {
@@ -117,7 +117,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             .map(|_| {
                 let tx = mock_tx(self.signer_build_account_info.nonce);
                 self.signer_build_account_info.nonce += 1;
-                self.signer_build_account_info.balance -= signer_balance_decrease;
+                self.signer_build_account_info.balance -= Self::single_tx_cost();
                 tx
             })
             .collect();
@@ -167,17 +167,14 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             ..Default::default()
         };
 
-        let block = SealedBlock::from_sealed_parts(
+        SealedBlock::from_sealed_parts(
             SealedHeader::seal_slow(header),
             BlockBody {
                 transactions: transactions.into_iter().map(|tx| tx.into_inner()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },
-        );
-
-        RecoveredBlock::try_recover_sealed_with_senders(block, vec![self.signer; num_txs as usize])
-            .unwrap()
+        )
     }
 
     /// Creates a fork chain with the given base block.
@@ -191,7 +188,9 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         for _ in 0..length {
             let block = self.generate_random_block(parent.number + 1, parent.hash());
-            parent = block.clone_sealed_block();
+            parent = block.clone();
+            let senders = vec![self.signer; block.body().transactions.len()];
+            let block = block.with_senders(senders);
             fork.push(block);
         }
 
@@ -205,9 +204,8 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
     ) -> ExecutedBlock {
-        let block_with_senders = self.generate_random_block(block_number, parent_hash);
-
-        let (block, senders) = block_with_senders.split_sealed();
+        let block = self.generate_random_block(block_number, parent_hash);
+        let senders = vec![self.signer; block.body().transactions.len()];
         let trie_data = ComputedTrieData::default();
         ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),

@@ -1,17 +1,16 @@
 //! Contains [Chain], a chain of blocks and their final state.
 
 use crate::ExecutionOutcome;
-use alloc::{borrow::Cow, collections::BTreeMap, vec::Vec};
+use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc, vec::Vec};
 use alloy_consensus::{transaction::Recovered, BlockHeader};
 use alloy_eips::{eip1898::ForkBlock, eip2718::Encodable2718, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxHash};
 use core::{fmt, ops::RangeInclusive};
 use reth_primitives_traits::{
-    transaction::signed::SignedTransaction, Block, BlockBody, NodePrimitives, RecoveredBlock,
-    SealedHeader,
+    transaction::signed::SignedTransaction, Block, BlockBody, IndexedTx, NodePrimitives,
+    RecoveredBlock, SealedHeader,
 };
-use reth_trie_common::updates::TrieUpdates;
-use revm::database::BundleState;
+use reth_trie_common::{updates::TrieUpdatesSorted, HashedPostStateSorted};
 
 /// A chain of blocks and their final state.
 ///
@@ -35,11 +34,18 @@ pub struct Chain<N: NodePrimitives = reth_ethereum_primitives::EthPrimitives> {
     ///
     /// Additionally, it includes the individual state changes that led to the current state.
     execution_outcome: ExecutionOutcome<N::Receipt>,
-    /// State trie updates after block is added to the chain.
-    /// NOTE: Currently, trie updates are present only for
-    /// single-block chains that extend the canonical chain.
-    trie_updates: Option<TrieUpdates>,
+    /// State trie updates for each block in the chain, keyed by block number.
+    trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
+    /// Hashed post state for each block in the chain, keyed by block number.
+    hashed_state: BTreeMap<BlockNumber, Arc<HashedPostStateSorted>>,
 }
+
+type ChainTxReceiptMeta<'a, N> = (
+    &'a RecoveredBlock<<N as NodePrimitives>::Block>,
+    IndexedTx<'a, <N as NodePrimitives>::Block>,
+    &'a <N as NodePrimitives>::Receipt,
+    &'a [<N as NodePrimitives>::Receipt],
+);
 
 impl<N: NodePrimitives> Default for Chain<N> {
     fn default() -> Self {
@@ -47,6 +53,7 @@ impl<N: NodePrimitives> Default for Chain<N> {
             blocks: Default::default(),
             execution_outcome: Default::default(),
             trie_updates: Default::default(),
+            hashed_state: Default::default(),
         }
     }
 }
@@ -60,22 +67,27 @@ impl<N: NodePrimitives> Chain<N> {
     pub fn new(
         blocks: impl IntoIterator<Item = RecoveredBlock<N::Block>>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_updates: Option<TrieUpdates>,
+        trie_updates: BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
+        hashed_state: BTreeMap<BlockNumber, Arc<HashedPostStateSorted>>,
     ) -> Self {
         let blocks =
             blocks.into_iter().map(|b| (b.header().number(), b)).collect::<BTreeMap<_, _>>();
         debug_assert!(!blocks.is_empty(), "Chain should have at least one block");
 
-        Self { blocks, execution_outcome, trie_updates }
+        Self { blocks, execution_outcome, trie_updates, hashed_state }
     }
 
     /// Create new Chain from a single block and its state.
     pub fn from_block(
         block: RecoveredBlock<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
-        trie_updates: Option<TrieUpdates>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        hashed_state: Arc<HashedPostStateSorted>,
     ) -> Self {
-        Self::new([block], execution_outcome, trie_updates)
+        let block_number = block.header().number();
+        let trie_updates_map = BTreeMap::from([(block_number, trie_updates)]);
+        let hashed_state_map = BTreeMap::from([(block_number, hashed_state)]);
+        Self::new([block], execution_outcome, trie_updates_map, hashed_state_map)
     }
 
     /// Get the blocks in this chain.
@@ -93,14 +105,37 @@ impl<N: NodePrimitives> Chain<N> {
         self.blocks.values().map(|block| block.clone_sealed_header())
     }
 
-    /// Get cached trie updates for this chain.
-    pub const fn trie_updates(&self) -> Option<&TrieUpdates> {
-        self.trie_updates.as_ref()
+    /// Get all trie updates for this chain.
+    pub const fn trie_updates(&self) -> &BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>> {
+        &self.trie_updates
     }
 
-    /// Remove cached trie updates for this chain.
+    /// Get trie updates for a specific block number.
+    pub fn trie_updates_at(&self, block_number: BlockNumber) -> Option<&Arc<TrieUpdatesSorted>> {
+        self.trie_updates.get(&block_number)
+    }
+
+    /// Remove all trie updates for this chain.
     pub fn clear_trie_updates(&mut self) {
-        self.trie_updates.take();
+        self.trie_updates.clear();
+    }
+
+    /// Get all hashed states for this chain.
+    pub const fn hashed_state(&self) -> &BTreeMap<BlockNumber, Arc<HashedPostStateSorted>> {
+        &self.hashed_state
+    }
+
+    /// Get hashed state for a specific block number.
+    pub fn hashed_state_at(
+        &self,
+        block_number: BlockNumber,
+    ) -> Option<&Arc<HashedPostStateSorted>> {
+        self.hashed_state.get(&block_number)
+    }
+
+    /// Remove all hashed states for this chain.
+    pub fn clear_hashed_state(&mut self) {
+        self.hashed_state.clear();
     }
 
     /// Get execution outcome of this chain
@@ -111,12 +146,6 @@ impl<N: NodePrimitives> Chain<N> {
     /// Get mutable execution outcome of this chain
     pub const fn execution_outcome_mut(&mut self) -> &mut ExecutionOutcome<N::Receipt> {
         &mut self.execution_outcome
-    }
-
-    /// Prepends the given state to the current state.
-    pub fn prepend_state(&mut self, state: BundleState) {
-        self.execution_outcome.prepend_state(state);
-        self.trie_updates.take(); // invalidate cached trie updates
     }
 
     /// Return true if chain is empty and has no blocks.
@@ -154,11 +183,23 @@ impl<N: NodePrimitives> Chain<N> {
     /// Destructure the chain into its inner components:
     /// 1. The blocks contained in the chain.
     /// 2. The execution outcome representing the final state.
-    /// 3. The optional trie updates.
+    /// 3. The trie updates map.
+    /// 4. The hashed state map.
+    #[allow(clippy::type_complexity)]
     pub fn into_inner(
         self,
-    ) -> (ChainBlocks<'static, N::Block>, ExecutionOutcome<N::Receipt>, Option<TrieUpdates>) {
-        (ChainBlocks { blocks: Cow::Owned(self.blocks) }, self.execution_outcome, self.trie_updates)
+    ) -> (
+        ChainBlocks<'static, N::Block>,
+        ExecutionOutcome<N::Receipt>,
+        BTreeMap<BlockNumber, Arc<TrieUpdatesSorted>>,
+        BTreeMap<BlockNumber, Arc<HashedPostStateSorted>>,
+    ) {
+        (
+            ChainBlocks { blocks: Cow::Owned(self.blocks) },
+            self.execution_outcome,
+            self.trie_updates,
+            self.hashed_state,
+        )
     }
 
     /// Destructure the chain into its inner components:
@@ -183,6 +224,24 @@ impl<N: NodePrimitives> Chain<N> {
         &self,
     ) -> impl Iterator<Item = (&RecoveredBlock<N::Block>, &Vec<N::Receipt>)> + '_ {
         self.blocks_iter().zip(self.block_receipts_iter())
+    }
+
+    /// Finds a transaction by hash and returns it along with its corresponding receipt data.
+    ///
+    /// Returns `None` if the transaction is not found in this chain.
+    pub fn find_transaction_and_receipt_by_hash(
+        &self,
+        tx_hash: TxHash,
+    ) -> Option<ChainTxReceiptMeta<'_, N>> {
+        for (block, receipts) in self.blocks_and_receipts() {
+            let Some(indexed_tx) = block.find_indexed(tx_hash) else {
+                continue;
+            };
+            let receipt = receipts.get(indexed_tx.index())?;
+            return Some((block, indexed_tx, receipt, receipts.as_slice()));
+        }
+
+        None
     }
 
     /// Get the block at which this chain forked.
@@ -270,10 +329,14 @@ impl<N: NodePrimitives> Chain<N> {
         &mut self,
         block: RecoveredBlock<N::Block>,
         execution_outcome: ExecutionOutcome<N::Receipt>,
+        trie_updates: Arc<TrieUpdatesSorted>,
+        hashed_state: Arc<HashedPostStateSorted>,
     ) {
-        self.blocks.insert(block.header().number(), block);
+        let block_number = block.header().number();
+        self.blocks.insert(block_number, block);
         self.execution_outcome.extend(execution_outcome);
-        self.trie_updates.take(); // reset
+        self.trie_updates.insert(block_number, trie_updates);
+        self.hashed_state.insert(block_number, hashed_state);
     }
 
     /// Merge two chains by appending the given chain into the current one.
@@ -292,7 +355,8 @@ impl<N: NodePrimitives> Chain<N> {
         // Insert blocks from other chain
         self.blocks.extend(other.blocks);
         self.execution_outcome.extend(other.execution_outcome);
-        self.trie_updates.take(); // reset
+        self.trie_updates.extend(other.trie_updates);
+        self.hashed_state.extend(other.hashed_state);
 
         Ok(())
     }
@@ -417,14 +481,13 @@ pub struct BlockReceipts<T = reth_ethereum_primitives::Receipt> {
 #[cfg(feature = "serde-bincode-compat")]
 pub(super) mod serde_bincode_compat {
     use crate::{serde_bincode_compat, ExecutionOutcome};
-    use alloc::{borrow::Cow, collections::BTreeMap};
+    use alloc::{borrow::Cow, collections::BTreeMap, sync::Arc};
     use alloy_primitives::BlockNumber;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_primitives_traits::{
         serde_bincode_compat::{RecoveredBlock, SerdeBincodeCompat},
         Block, NodePrimitives,
     };
-    use reth_trie_common::serde_bincode_compat::updates::TrieUpdates;
     use serde::{ser::SerializeMap, Deserialize, Deserializer, Serialize, Serializer};
     use serde_with::{DeserializeAs, SerializeAs};
 
@@ -444,6 +507,7 @@ pub(super) mod serde_bincode_compat {
     /// }
     /// ```
     #[derive(Debug, Serialize, Deserialize)]
+    #[serde(bound = "")]
     pub struct Chain<'a, N = EthPrimitives>
     where
         N: NodePrimitives<
@@ -452,7 +516,19 @@ pub(super) mod serde_bincode_compat {
     {
         blocks: RecoveredBlocks<'a, N::Block>,
         execution_outcome: serde_bincode_compat::ExecutionOutcome<'a, N::Receipt>,
-        trie_updates: Option<TrieUpdates<'a>>,
+        #[serde(default, rename = "trie_updates_legacy")]
+        _trie_updates_legacy:
+            Option<reth_trie_common::serde_bincode_compat::updates::TrieUpdates<'a>>,
+        #[serde(default)]
+        trie_updates: BTreeMap<
+            BlockNumber,
+            reth_trie_common::serde_bincode_compat::updates::TrieUpdatesSorted<'a>,
+        >,
+        #[serde(default)]
+        hashed_state: BTreeMap<
+            BlockNumber,
+            reth_trie_common::serde_bincode_compat::hashed_state::HashedPostStateSorted<'a>,
+        >,
     }
 
     #[derive(Debug)]
@@ -505,7 +581,17 @@ pub(super) mod serde_bincode_compat {
             Self {
                 blocks: RecoveredBlocks(Cow::Borrowed(&value.blocks)),
                 execution_outcome: value.execution_outcome.as_repr(),
-                trie_updates: value.trie_updates.as_ref().map(Into::into),
+                _trie_updates_legacy: None,
+                trie_updates: value
+                    .trie_updates
+                    .iter()
+                    .map(|(k, v)| (*k, v.as_ref().into()))
+                    .collect(),
+                hashed_state: value
+                    .hashed_state
+                    .iter()
+                    .map(|(k, v)| (*k, v.as_ref().into()))
+                    .collect(),
             }
         }
     }
@@ -520,7 +606,16 @@ pub(super) mod serde_bincode_compat {
             Self {
                 blocks: value.blocks.0.into_owned(),
                 execution_outcome: ExecutionOutcome::from_repr(value.execution_outcome),
-                trie_updates: value.trie_updates.map(Into::into),
+                trie_updates: value
+                    .trie_updates
+                    .into_iter()
+                    .map(|(k, v)| (k, Arc::new(v.into())))
+                    .collect(),
+                hashed_state: value
+                    .hashed_state
+                    .into_iter()
+                    .map(|(k, v)| (k, Arc::new(v.into())))
+                    .collect(),
             }
         }
     }
@@ -564,6 +659,8 @@ pub(super) mod serde_bincode_compat {
 
         #[test]
         fn test_chain_bincode_roundtrip() {
+            use alloc::collections::BTreeMap;
+
             #[serde_as]
             #[derive(Debug, PartialEq, Eq, Serialize, Deserialize)]
             struct Data {
@@ -578,7 +675,8 @@ pub(super) mod serde_bincode_compat {
                     vec![RecoveredBlock::arbitrary(&mut arbitrary::Unstructured::new(&bytes))
                         .unwrap()],
                     Default::default(),
-                    None,
+                    BTreeMap::new(),
+                    BTreeMap::new(),
                 ),
             };
 
@@ -595,7 +693,7 @@ mod tests {
     use alloy_consensus::TxType;
     use alloy_primitives::{Address, B256};
     use reth_ethereum_primitives::Receipt;
-    use revm::{primitives::HashMap, state::AccountInfo};
+    use revm::{database::BundleState, primitives::HashMap, state::AccountInfo};
 
     #[test]
     fn chain_append() {
@@ -678,8 +776,12 @@ mod tests {
         let mut block_state_extended = execution_outcome1;
         block_state_extended.extend(execution_outcome2);
 
-        let chain: Chain =
-            Chain::new(vec![block1.clone(), block2.clone()], block_state_extended, None);
+        let chain: Chain = Chain::new(
+            vec![block1.clone(), block2.clone()],
+            block_state_extended,
+            BTreeMap::new(),
+            BTreeMap::new(),
+        );
 
         // return tip state
         assert_eq!(

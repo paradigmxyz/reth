@@ -20,6 +20,7 @@ reth-trie-common.workspace = true
 reth-chain-state.workspace = true
 
 # ethereum
+alloy-eip7928 = { workspace = true, features = ["serde"] }
 alloy-eips.workspace = true
 alloy-json-rpc.workspace = true
 alloy-primitives.workspace = true
@@ -35,9 +36,11 @@ alloy-serde.workspace = true
 alloy-rpc-types-beacon.workspace = true
 alloy-rpc-types-engine.workspace = true
 alloy-genesis.workspace = true
+serde = { workspace = true, features = ["derive"] }
 
 # misc
 jsonrpsee = { workspace = true, features = ["server", "macros"] }
+serde_json.workspace = true
 
 [features]
 client = [
@@ -45,3 +48,8 @@ client = [
     "jsonrpsee/async-client",
     "reth-rpc-eth-api/client",
 ]
+
+[dev-dependencies]
+serde_json = { workspace = true }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+jsonrpsee = { workspace = true, features = ["client", "async-client", "http-client"] }

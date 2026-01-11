@@ -22,7 +22,7 @@ use reth_transaction_pool::error::{
 use revm::context_interface::result::{
     EVMError, HaltReason, InvalidHeader, InvalidTransaction, OutOfGasError,
 };
-use revm_inspectors::tracing::MuxError;
+use revm_inspectors::tracing::{DebugInspectorError, MuxError};
 use std::convert::Infallible;
 use tokio::sync::oneshot::error::RecvError;
 
@@ -164,8 +164,8 @@ pub enum EthApiError {
     #[error("Invalid bytecode: {0}")]
     InvalidBytecode(String),
     /// Error encountered when converting a transaction type
-    #[error("Transaction conversion error")]
-    TransactionConversionError,
+    #[error(transparent)]
+    TransactionConversionError(#[from] TransactionConversionError),
     /// Error thrown when tracing with a muxTracer fails
     #[error(transparent)]
     MuxTracerError(#[from] MuxError),
@@ -201,7 +201,7 @@ pub enum EthApiError {
 }
 
 impl EthApiError {
-    /// crates a new [`EthApiError::Other`] variant.
+    /// Creates a new [`EthApiError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
@@ -273,7 +273,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::Signing(_) |
             EthApiError::BothStateAndStateDiffInOverride(_) |
             EthApiError::InvalidTracerConfig |
-            EthApiError::TransactionConversionError |
+            EthApiError::TransactionConversionError(_) |
             EthApiError::InvalidRewardPercentiles |
             EthApiError::InvalidBytecode(_) => invalid_params_rpc_err(error.to_string()),
             EthApiError::InvalidTransaction(err) => err.into(),
@@ -333,12 +333,6 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
                 )
             }
         }
-    }
-}
-
-impl From<TransactionConversionError> for EthApiError {
-    fn from(_: TransactionConversionError) -> Self {
-        Self::TransactionConversionError
     }
 }
 
@@ -409,6 +403,25 @@ impl From<revm_inspectors::tracing::js::JsInspectorError> for EthApiError {
                 Self::InternalJsTracerError(err.to_string())
             }
             err => Self::InvalidParams(err.to_string()),
+        }
+    }
+}
+
+impl<Err> From<DebugInspectorError<Err>> for EthApiError
+where
+    Err: core::error::Error + Send + Sync + 'static,
+{
+    fn from(error: DebugInspectorError<Err>) -> Self {
+        match error {
+            DebugInspectorError::InvalidTracerConfig => Self::InvalidTracerConfig,
+            DebugInspectorError::UnsupportedTracer => Self::Unsupported("unsupported tracer"),
+            DebugInspectorError::JsTracerNotEnabled => {
+                Self::Unsupported("JS Tracer is not enabled")
+            }
+            DebugInspectorError::MuxInspector(err) => err.into(),
+            DebugInspectorError::Database(err) => Self::Internal(RethError::other(err)),
+            #[cfg(feature = "js-tracer")]
+            DebugInspectorError::JsInspector(err) => err.into(),
         }
     }
 }
@@ -641,7 +654,7 @@ pub enum RpcInvalidTransactionError {
     /// The transaction is before Spurious Dragon and has a chain ID
     #[error("transactions before Spurious Dragon should not have a chain ID")]
     OldLegacyChainId,
-    /// The transitions is before Berlin and has access list
+    /// The transaction is before Berlin and has access list
     #[error("transactions before Berlin should not have access list")]
     AccessListNotSupported,
     /// `max_fee_per_blob_gas` is not supported for blocks before the Cancun hardfork.
@@ -687,7 +700,7 @@ pub enum RpcInvalidTransactionError {
 }
 
 impl RpcInvalidTransactionError {
-    /// crates a new [`RpcInvalidTransactionError::Other`] variant.
+    /// Creates a new [`RpcInvalidTransactionError::Other`] variant.
     pub fn other<E: ToRpcError>(err: E) -> Self {
         Self::Other(Box::new(err))
     }
@@ -865,7 +878,7 @@ pub struct RevertError {
 impl RevertError {
     /// Wraps the output bytes
     ///
-    /// Note: this is intended to wrap an revm output
+    /// Note: this is intended to wrap a revm output
     pub fn new(output: Bytes) -> Self {
         if output.is_empty() {
             Self { output: None }
