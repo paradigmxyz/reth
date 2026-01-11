@@ -24,12 +24,12 @@ pub mod primitives {
 
 /// Re-export of `reth_rpc_*` crates.
 pub mod rpc {
-    /// Re-exported from `reth_rpc::rpc`.
+    /// Re-exported from `reth_rpc_server_types::result`.
     pub mod result {
         pub use reth_rpc_server_types::result::*;
     }
 
-    /// Re-exported from `reth_rpc::eth`.
+    /// Re-exported from `reth_rpc_convert`.
     pub mod compat {
         pub use reth_rpc_convert::*;
     }
