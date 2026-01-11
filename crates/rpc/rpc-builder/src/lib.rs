@@ -1663,7 +1663,7 @@ impl TransportRpcModules {
         self
     }
 
-    /// Sets the [`RpcModule`] for the http transport.
+    /// Sets the [`RpcModule`] for the ipc transport.
     /// This will overwrite current module, if any.
     pub fn with_ipc(mut self, ipc: RpcModule<()>) -> Self {
         self.ipc = Some(ipc);
