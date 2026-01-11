@@ -183,7 +183,7 @@ impl ProviderError {
         other.downcast_ref()
     }
 
-    /// Returns true if the this type is a [`ProviderError::Other`] of that error
+    /// Returns true if this type is a [`ProviderError::Other`] of that error
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
         self.as_other().map(|err| err.is::<T>()).unwrap_or(false)

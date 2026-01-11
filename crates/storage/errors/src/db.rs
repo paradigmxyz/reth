@@ -32,7 +32,7 @@ pub enum DatabaseError {
     /// Failed to commit transaction changes into the database.
     #[error("failed to commit transaction changes: {_0}")]
     Commit(DatabaseErrorInfo),
-    /// Failed to initiate a transaction.
+    /// Failed to initialize a transaction.
     #[error("failed to initialize a transaction: {_0}")]
     InitTx(DatabaseErrorInfo),
     /// Failed to initialize a cursor.
