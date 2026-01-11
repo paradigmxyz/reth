@@ -346,16 +346,12 @@ where
 
     /// Returns transactions in the pool that can be propagated
     pub fn pooled_transactions(&self) -> Vec<Arc<ValidPoolTransaction<T::Transaction>>> {
-        let mut out = Vec::new();
-        self.append_pooled_transactions(&mut out);
-        out
+        self.pooled_transactions_max(usize::MAX)
     }
 
     /// Returns hashes of transactions in the pool that can be propagated.
     pub fn pooled_transactions_hashes(&self) -> Vec<TxHash> {
-        let mut out = Vec::new();
-        self.append_pooled_transactions_hashes(&mut out);
-        out
+        self.pooled_transactions_hashes_max(usize::MAX)
     }
 
     /// Returns only the first `max` transactions in the pool that can be propagated.
@@ -373,9 +369,7 @@ where
         &self,
         out: &mut Vec<Arc<ValidPoolTransaction<T::Transaction>>>,
     ) {
-        out.extend(
-            self.get_pool_data().all().transactions_iter().filter(|tx| tx.propagate).cloned(),
-        );
+        self.append_pooled_transactions_max(usize::MAX, out);
     }
 
     /// Extends the given vector with pooled transactions for the given hashes that are allowed to
@@ -408,13 +402,7 @@ where
     /// Extends the given vector with the hashes of all transactions in the pool that can be
     /// propagated.
     pub fn append_pooled_transactions_hashes(&self, out: &mut Vec<TxHash>) {
-        out.extend(
-            self.get_pool_data()
-                .all()
-                .transactions_iter()
-                .filter(|tx| tx.propagate)
-                .map(|tx| *tx.hash()),
-        );
+        out.extend(self.pooled_transactions_hashes_max(usize::MAX));
     }
 
     /// Extends the given vector with only the first `max` transactions in the pool that can be
