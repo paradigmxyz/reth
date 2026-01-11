@@ -6922,7 +6922,7 @@ mod tests {
             },
         ];
 
-        // Create a sparse trie and reveal nodes with the specific structure from prompt.md
+        // Create a sparse trie and reveal nodes
         let mut trie = ParallelSparseTrie::default()
             .with_root(
                 TrieNode::Extension(ExtensionNode {
