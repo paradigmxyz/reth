@@ -188,7 +188,7 @@ impl PruneModes {
             if let Some(PruneMode::Distance(limit)) = prune_mode {
                 // check if distance exceeds the configured limit
                 if distance > *limit {
-                    // but only if have haven't pruned the target yet, if we dont have a checkpoint
+                    // but only if we haven't pruned the target yet, if we don't have a checkpoint
                     // yet, it's fully unpruned yet
                     let pruned_height = checkpoint
                         .and_then(|checkpoint| checkpoint.1.block_number)
