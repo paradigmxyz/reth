@@ -390,10 +390,7 @@ where
         retain_updates: bool,
     ) -> SparseStateTrieResult<ProofNodesMetricValues> {
         let FilterMappedProofNodes { root_node, nodes, new_nodes, metric_values } =
-            map_proof_nodes(
-                storage_subtree.subtree,
-                &storage_subtree.branch_node_masks,
-            )?;
+            map_proof_nodes(storage_subtree.subtree, &storage_subtree.branch_node_masks)?;
 
         if let Some(root_node) = root_node {
             // Reveal root node if it wasn't already.
@@ -487,11 +484,10 @@ where
             } else {
                 // Reveal non-root state trie node.
                 // reveal_node will check if path was already revealed and skip if so.
-                self.state.as_revealed_mut().ok_or(SparseTrieErrorKind::Blind)?.reveal_node(
-                    path,
-                    trie_node,
-                    None,
-                )?;
+                self.state
+                    .as_revealed_mut()
+                    .ok_or(SparseTrieErrorKind::Blind)?
+                    .reveal_node(path, trie_node, None)?;
             }
         }
 
@@ -1276,11 +1272,7 @@ mod tests {
         // Check root node
         assert_eq!(
             decoded.root_node,
-            Some(ProofTrieNode {
-                path: Nibbles::default(),
-                node: branch,
-                masks: None,
-            })
+            Some(ProofTrieNode { path: Nibbles::default(), node: branch, masks: None })
         );
 
         // Check number of nodes (order may vary due to HashMap iteration)
