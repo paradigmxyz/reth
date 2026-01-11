@@ -744,7 +744,7 @@ vergen-git2 = "1.0.5"
 # networking
 ipnet = "2.11"
 
-# [patch.crates-io]
+[patch.crates-io]
 # alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-contract = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
 # alloy-eips = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
@@ -789,3 +789,34 @@ ipnet = "2.11"
 
 # alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
 # alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "a69f0b45a6b0286e16072cb8399e02ce6ceca353" }
+
+# alloy-consensus = { git = "https://github.com/alloy-rs/alloy", rev = "3049f232fbb44d1909883e154eb38ec5962f53a3" }
+
+# alloy-hardforks = { git = "https://github.com/Rimeeeeee/hardforks", branch = "amsterdam" }
+# alloy-op-hardforks = { git = "https://github.com/Rimeeeeee/hardforks", branch = "amsterdam" }
+# op-alloy-consensus = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
+# op-alloy-network = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
+# op-alloy-rpc-types = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
+# op-alloy-rpc-types-engine = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
+# op-alloy-rpc-jsonrpsee = { git = "https://github.com/alloy-rs/op-alloy", rev = "a79d6fc" }
+#
+# jsonrpsee = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+# jsonrpsee-core = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+# jsonrpsee-server = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+# jsonrpsee-http-client = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+# jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
+
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "f1842b0" }
+
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "8c125c1" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "8c125c1" }
+
+# revm
+revm = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
+revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
+revm-database = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
+revm-state = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
+revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
+revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
+revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
+op-revm = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
