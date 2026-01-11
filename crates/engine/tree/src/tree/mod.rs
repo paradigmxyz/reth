@@ -35,7 +35,6 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_trie::TrieInputSorted;
 use revm::state::EvmState;
 use state::TreeState;
 use std::{
@@ -1787,87 +1786,7 @@ where
             number: self.persistence_state.last_persisted_block.number,
             hash: self.persistence_state.last_persisted_block.hash,
         });
-
-        // Spawn background task to rebuild the overlay for the remaining in-memory chain.
-        // This pre-computes the overlay anchored to the new persisted block, so the first
-        // block after persist hits the O(1) reuse path instead of O(N) rebuild.
-        self.spawn_tip_overlay_rebuild_after_persist();
-
         Ok(())
-    }
-
-    /// Spawns a background task to rebuild the trie overlay for the in-memory chain tip.
-    ///
-    /// After persistence, the anchor hash changes and the old overlay cannot be reused.
-    /// Without pre-computation, the first block after persist would pay O(N) rebuild cost
-    /// on the critical validation path, causing p99 latency spikes.
-    ///
-    /// This method spawns a background task that:
-    /// 1. Collects all remaining in-memory blocks (oldest to newest)
-    /// 2. Builds a cumulative overlay from their already-computed trie data
-    /// 3. Updates the tip block's cached overlay with the new anchor
-    ///
-    /// The task uses non-blocking `try_trie_data()` to avoid competing with block validation.
-    /// If any block's trie data is still pending, the task bails out early - the next block
-    /// validation will trigger the synchronous rebuild as usual.
-    ///
-    /// Since persist runs every ~500ms and blocks arrive every ~12s, the background task
-    /// almost always finishes before the next block needs the overlay.
-    fn spawn_tip_overlay_rebuild_after_persist(&self) {
-        let anchor_hash = self.persistence_state.last_persisted_block.hash;
-        let in_mem = self.canonical_in_memory_state.clone();
-
-        rayon::spawn(move || {
-            // Early exit if there are no in-memory canonical blocks left
-            let Some(head_state) = in_mem.head_state() else {
-                return;
-            };
-
-            // Collect the chain [newest -> oldest]
-            let chain: Vec<_> = head_state.iter().collect();
-            if chain.is_empty() {
-                return;
-            }
-
-            // Build cumulative overlay from the remaining in-memory blocks.
-            // Use try_trie_data() to avoid blocking - if any block's trie data is not
-            // yet computed, bail out and let the normal validation path handle it.
-            let mut overlay = TrieInputSorted::default();
-            {
-                let state_mut = Arc::make_mut(&mut overlay.state);
-                let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-
-                // Iterate in reverse order (oldest to newest) so later state takes precedence
-                for block_state in chain.iter().rev() {
-                    // Non-blocking: skip if trie data not ready yet
-                    let Some(trie_data) = block_state.block_ref().try_trie_data() else {
-                        // Trie data not ready - bail out entirely.
-                        // The next block validation will handle the rebuild synchronously.
-                        trace!(
-                            target: "engine::tree",
-                            block_hash = ?block_state.hash(),
-                            "Background overlay rebuild bailed: trie data not ready"
-                        );
-                        return;
-                    };
-                    state_mut.extend_ref(trie_data.hashed_state.as_ref());
-                    nodes_mut.extend_ref(trie_data.trie_updates.as_ref());
-                }
-            }
-
-            // Update the tip's cached overlay with the new anchor and cumulative overlay.
-            // The tip is the first element in the chain (newest).
-            let tip_state = &chain[0];
-            let tip_trie_handle = tip_state.block_ref().trie_data_handle();
-            tip_trie_handle.update_cached_overlay(anchor_hash, Arc::new(overlay));
-
-            trace!(
-                target: "engine::tree",
-                num_blocks = chain.len(),
-                ?anchor_hash,
-                "Rebuilt trie overlay for tip after persist"
-            );
-        });
     }
 
     /// Return an [`ExecutedBlock`] from database or in-memory state by hash.

@@ -851,15 +851,6 @@ impl<N: NodePrimitives> ExecutedBlock<N> {
         self.trie_data.clone()
     }
 
-    /// Returns trie data if already computed, without blocking or computing.
-    ///
-    /// This is useful for background tasks that should not compete with block validation.
-    /// Returns `None` if the trie data is still pending (not yet computed by the async task).
-    #[inline]
-    pub fn try_trie_data(&self) -> Option<ComputedTrieData> {
-        self.trie_data.try_get()
-    }
-
     /// Returns the hashed state result of the execution outcome.
     ///
     /// May compute trie data synchronously if the deferred task hasn't completed.
