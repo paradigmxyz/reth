@@ -190,7 +190,7 @@ pub trait DbTxMut: Send + Sync {
         + Send
         + Sync;
 
-    /// Put value to database
+    /// Put value in database
     fn put<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError>;
     /// Append value with the largest key to database (fast path)
     fn append<T: Table>(&self, key: T::Key, value: T::Value) -> Result<(), DatabaseError> {
