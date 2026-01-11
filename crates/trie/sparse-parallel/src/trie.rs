@@ -339,7 +339,12 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
                     if let Some(reveal_path) = reveal_path {
                         let subtrie = self.subtrie_for_path_mut(&reveal_path);
-                        if subtrie.nodes.get(&reveal_path).expect("node must exist").is_hash() {
+                        let reveal_masks = if subtrie
+                            .nodes
+                            .get(&reveal_path)
+                            .expect("node must exist")
+                            .is_hash()
+                        {
                             debug!(
                                 target: "trie::parallel_sparse",
                                 child_path = ?reveal_path,
@@ -360,12 +365,19 @@ impl SparseTrieInterface for ParallelSparseTrie {
                                 );
                                 let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
                                 subtrie.reveal_node(reveal_path, &decoded, masks)?;
+                                masks
                             } else {
                                 return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
                                     path: reveal_path,
                                 }
                                 .into())
                             }
+                        } else {
+                            None
+                        };
+
+                        if let Some(masks) = reveal_masks {
+                            self.branch_node_masks.insert(reveal_path, masks);
                         }
                     }
 
@@ -436,7 +448,11 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
             // If we didn't update the target leaf, we need to call update_leaf on the subtrie
             // to ensure that the leaf is updated correctly.
-            subtrie.update_leaf(full_path, value, provider, retain_updates)?;
+            if let Some((revealed_path, revealed_masks)) =
+                subtrie.update_leaf(full_path, value, provider, retain_updates)?
+            {
+                self.branch_node_masks.insert(revealed_path, revealed_masks);
+            }
         }
 
         Ok(())
@@ -1232,7 +1248,7 @@ impl ParallelSparseTrie {
     ) -> SparseTrieResult<SparseNode> {
         let remaining_child_subtrie = self.subtrie_for_path_mut(remaining_child_path);
 
-        let remaining_child_node = match remaining_child_subtrie
+        let (remaining_child_node, remaining_child_masks) = match remaining_child_subtrie
             .nodes
             .get(remaining_child_path)
             .unwrap()
@@ -1258,7 +1274,10 @@ impl ParallelSparseTrie {
                     );
                     let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
                     remaining_child_subtrie.reveal_node(*remaining_child_path, &decoded, masks)?;
-                    remaining_child_subtrie.nodes.get(remaining_child_path).unwrap().clone()
+                    (
+                        remaining_child_subtrie.nodes.get(remaining_child_path).unwrap().clone(),
+                        masks,
+                    )
                 } else {
                     return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
                         path: *remaining_child_path,
@@ -1266,8 +1285,14 @@ impl ParallelSparseTrie {
                     .into())
                 }
             }
-            node => node.clone(),
+            // The node is already revealed so we don't need to return its masks here, as they don't
+            // need to be inserted.
+            node => (node.clone(), None),
         };
+
+        if let Some(masks) = remaining_child_masks {
+            self.branch_node_masks.insert(*remaining_child_path, masks);
+        }
 
         // If `recurse_into_extension` is true, and the remaining child is an extension node, then
         // its child will be ensured to be revealed as well. This is required for generation of
@@ -1636,9 +1661,9 @@ impl SparseSubtrie {
     ///
     /// # Returns
     ///
-    /// Returns the `Ok` if the update is successful.
+    /// Returns the path and masks of any blinded node revealed as a result of updating the leaf.
     ///
-    /// Note: If an update requires revealing a blinded node, an error is returned if the blinded
+    /// If an update requires revealing a blinded node, an error is returned if the blinded
     /// provider returns an error.
     pub fn update_leaf(
         &mut self,
@@ -1646,16 +1671,17 @@ impl SparseSubtrie {
         value: Vec<u8>,
         provider: impl TrieNodeProvider,
         retain_updates: bool,
-    ) -> SparseTrieResult<()> {
+    ) -> SparseTrieResult<Option<(Nibbles, BranchNodeMasks)>> {
         debug_assert!(full_path.starts_with(&self.path));
         let existing = self.inner.values.insert(full_path, value);
         if existing.is_some() {
             // trie structure unchanged, return immediately
-            return Ok(())
+            return Ok(None)
         }
 
         // Here we are starting at the root of the subtrie, and traversing from there.
         let mut current = Some(self.path);
+        let mut revealed = None;
         while let Some(current_path) = current {
             match self.update_next_node(current_path, &full_path, retain_updates)? {
                 LeafUpdateStep::Continue { next_node } => {
@@ -1685,6 +1711,12 @@ impl SparseSubtrie {
                             );
                             let masks = BranchNodeMasks::from_optional(hash_mask, tree_mask);
                             self.reveal_node(reveal_path, &decoded, masks)?;
+
+                            debug_assert_eq!(
+                                revealed, None,
+                                "Only a single blinded node should be revealed during update_leaf"
+                            );
+                            revealed = masks.map(|masks| (reveal_path, masks));
                         } else {
                             return Err(SparseTrieErrorKind::NodeNotFoundInProvider {
                                 path: reveal_path,
@@ -1701,7 +1733,7 @@ impl SparseSubtrie {
             }
         }
 
-        Ok(())
+        Ok(revealed)
     }
 
     /// Processes the current node, returning what to do next in the leaf update process.
@@ -6802,5 +6834,138 @@ mod tests {
         assert_matches!(result, Err(LeafLookupError::BlindedNode { path, hash })
             if path == path_to_blind && hash == blinded_hash
         );
+    }
+
+    #[test]
+    fn test_mainnet_block_24185431_storage_0x6ba784ee() {
+        reth_tracing::init_test_tracing();
+
+        // Reveal branch at 0x3 with full state
+        let mut branch_0x3_hashes = vec![
+            B256::from(hex!("fc11ba8de4b220b8f19a09f0676c69b8e18bae1350788392640069e59b41733d")),
+            B256::from(hex!("8afe085cc6685680bd8ba4bac6e65937a4babf737dc5e7413d21cdda958e8f74")),
+            B256::from(hex!("c7b6f7c0fc601a27aece6ec178fd9be17cdee77c4884ecfbe1ee459731eb57da")),
+            B256::from(hex!("71c1aec60db78a2deb4e10399b979a2ed5be42b4ee0c0a17c614f9ddc9f9072e")),
+            B256::from(hex!("e9261302e7c0b77930eaf1851b585210906cd01e015ab6be0f7f3c0cc947c32a")),
+            B256::from(hex!("38ce8f369c56bd77fabdf679b27265b1f8d0a54b09ef612c8ee8ddfc6b3fab95")),
+            B256::from(hex!("7b507a8936a28c5776b647d1c4bda0bbbb3d0d227f16c5f5ebba58d02e31918d")),
+            B256::from(hex!("0f456b9457a824a81e0eb555aa861461acb38674dcf36959b3b26deb24ed0af9")),
+            B256::from(hex!("2145420289652722ad199ba932622e3003c779d694fa5a2acfb2f77b0782b38a")),
+            B256::from(hex!("2c1a04dce1a9e2f1cfbf8806edce50a356dfa58e7e7c542c848541502613b796")),
+            B256::from(hex!("dad7ca55186ac8f40d4450dc874166df8267b44abc07e684d9507260f5712df3")),
+            B256::from(hex!("3a8c2a1d7d2423e92965ec29014634e7f0307ded60b1a63d28c86c3222b24236")),
+            B256::from(hex!("4e9929e6728b3a7bf0db6a0750ab376045566b556c9c605e606ecb8ec25200d7")),
+            B256::from(hex!("1797c36f98922f52292c161590057a1b5582d5503e3370bcfbf6fd939f3ec98b")),
+            B256::from(hex!("9e514589a9c9210b783c19fa3f0b384bbfaefe98f10ea189a2bfc58c6bf000a1")),
+            B256::from(hex!("85bdaabbcfa583cbd049650e41d3d19356bd833b3ed585cf225a3548557c7fa3")),
+        ];
+        let branch_0x3_node = create_branch_node_with_children(
+            &[0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0x8, 0x9, 0xa, 0xb, 0xc, 0xd, 0xe, 0xf],
+            branch_0x3_hashes.iter().map(RlpNode::word_rlp),
+        );
+
+        // Reveal branch at 0x31
+        let branch_0x31_hashes = vec![B256::from(hex!(
+            "3ca994ba59ce70b83fee1f01731c8dac4fdd0f70ade79bf9b0695c4c53531aab"
+        ))];
+        let branch_0x31_node = create_branch_node_with_children(
+            &[0xc],
+            branch_0x31_hashes.into_iter().map(|h| RlpNode::word_rlp(&h)),
+        );
+
+        // Reveal leaf at 0x31b0b645a6c4a0a1bb3d2f0c1d31c39f4aba2e3b015928a8eef7161e28388b81
+        let leaf_path = hex!("31b0b645a6c4a0a1bb3d2f0c1d31c39f4aba2e3b015928a8eef7161e28388b81");
+        let leaf_nibbles = Nibbles::unpack(leaf_path.as_slice());
+        let leaf_value = hex!("0009ae8ce8245bff").to_vec();
+
+        // Reveal branch at 0x31c
+        let branch_0x31c_hashes = vec![
+            B256::from(hex!("1a68fdb36b77e9332b49a977faf800c22d0199e6cecf44032bb083c78943e540")),
+            B256::from(hex!("cd4622c6df6fd7172c7fed1b284ef241e0f501b4c77b675ef10c612bd0948a7a")),
+            B256::from(hex!("abf3603d2f991787e21f1709ee4c7375d85dfc506995c0435839fccf3fe2add4")),
+        ];
+        let branch_0x31c_node = create_branch_node_with_children(
+            &[0x3, 0x7, 0xc],
+            branch_0x31c_hashes.into_iter().map(|h| RlpNode::word_rlp(&h)),
+        );
+        let mut branch_0x31c_node_encoded = Vec::new();
+        branch_0x31c_node.encode(&mut branch_0x31c_node_encoded);
+
+        // Create a mock provider and preload 0x31c onto it, it will be revealed during remove_leaf.
+        let mut provider = MockTrieNodeProvider::new();
+        provider.add_revealed_node(
+            Nibbles::from_nibbles([0x3, 0x1, 0xc]),
+            RevealedNode {
+                node: branch_0x31c_node_encoded.into(),
+                tree_mask: Some(0.into()),
+                hash_mask: Some(4096.into()),
+            },
+        );
+
+        // Reveal the trie structure using ProofTrieNode
+        let proof_nodes = vec![
+            ProofTrieNode {
+                path: Nibbles::from_nibbles([0x3]),
+                node: branch_0x3_node,
+                masks: Some(BranchNodeMasks {
+                    tree_mask: TrieMask::new(26099),
+                    hash_mask: TrieMask::new(65535),
+                }),
+            },
+            ProofTrieNode {
+                path: Nibbles::from_nibbles([0x3, 0x1]),
+                node: branch_0x31_node,
+                masks: Some(BranchNodeMasks {
+                    tree_mask: TrieMask::new(4096),
+                    hash_mask: TrieMask::new(4096),
+                }),
+            },
+        ];
+
+        // Create a sparse trie and reveal nodes
+        let mut trie = ParallelSparseTrie::default()
+            .with_root(
+                TrieNode::Extension(ExtensionNode {
+                    key: Nibbles::from_nibbles([0x3]),
+                    child: RlpNode::word_rlp(&B256::ZERO),
+                }),
+                None,
+                true,
+            )
+            .expect("root revealed");
+
+        trie.reveal_nodes(proof_nodes).unwrap();
+
+        // Update the leaf in order to reveal it in the trie
+        trie.update_leaf(leaf_nibbles, leaf_value, &provider).unwrap();
+
+        // Now delete the leaf
+        trie.remove_leaf(&leaf_nibbles, &provider).unwrap();
+
+        // Compute the root to trigger updates
+        let _ = trie.root();
+
+        // Assert the resulting branch node updates
+        let updates = trie.updates_ref();
+
+        // Check that the branch at 0x3 was updated with the expected structure
+        let branch_0x3_update = updates
+            .updated_nodes
+            .get(&Nibbles::from_nibbles([0x3]))
+            .expect("Branch at 0x3 should be in updates");
+
+        // We no longer expect to track the hash for child 1
+        branch_0x3_hashes.remove(1);
+
+        // Expected structure from prompt.md
+        let expected_branch = BranchNodeCompact::new(
+            0b1111111111111111,
+            0b0110010111110011,
+            0b1111111111111101,
+            branch_0x3_hashes,
+            None,
+        );
+
+        assert_eq!(branch_0x3_update, &expected_branch);
     }
 }
