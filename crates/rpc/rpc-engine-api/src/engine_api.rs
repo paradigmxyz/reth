@@ -1271,7 +1271,7 @@ mod tests {
             task_executor,
             client,
             EngineCapabilities::default(),
-            EthereumEngineValidator::new(chain_spec.clone()),
+            EthereumEngineValidator::new(chain_spec),
             false,
             NoopNetwork::default(),
         );
