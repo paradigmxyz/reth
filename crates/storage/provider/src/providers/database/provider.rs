@@ -64,7 +64,7 @@ use reth_storage_api::{
     NodePrimitivesProvider, StateProvider, StorageChangeSetReader, StorageSettingsCache,
     TryIntoHistoricalStateProvider,
 };
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     trie_cursor::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
@@ -372,80 +372,381 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
         debug!(target: "providers::db", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
-        // Accumulate durations for each step
-        let mut total_insert_block = Duration::ZERO;
-        let mut total_write_state = Duration::ZERO;
-        let mut total_write_hashed_state = Duration::ZERO;
-        let mut total_write_trie_changesets = Duration::ZERO;
-        let mut total_write_trie_updates = Duration::ZERO;
+        // Pre-compute starting transaction number for all blocks.
+        // This allows parallel writes without MDBX reads in static file tasks.
+        let starting_tx_num = self
+            .tx
+            .cursor_read::<tables::TransactionBlocks>()?
+            .last()?
+            .map(|(n, _)| n + 1)
+            .unwrap_or_default();
 
-        // TODO: Do performant / batched writes for each type of object
-        // instead of a loop over all blocks,
-        // meaning:
-        //  * blocks
-        //  * state
-        //  * hashed state
-        //  * trie updates (cannot naively extend, need helper)
-        //  * indices (already done basically)
-        // Insert the blocks
-        for block in blocks {
-            let trie_data = block.trie_data();
-            let ExecutedBlock { recovered_block, execution_output, .. } = block;
-            let block_number = recovered_block.number();
-
-            let start = Instant::now();
-            self.insert_block(&recovered_block)?;
-            total_insert_block += start.elapsed();
-
-            // Write state and changesets to the database.
-            // Must be written after blocks because of the receipt lookup.
-            let start = Instant::now();
-            self.write_state(&execution_output, OriginalValuesKnown::No)?;
-            total_write_state += start.elapsed();
-
-            // insert hashes and intermediate merkle nodes
-            let start = Instant::now();
-            self.write_hashed_state(&trie_data.hashed_state)?;
-            total_write_hashed_state += start.elapsed();
-
-            let start = Instant::now();
-            self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
-            total_write_trie_changesets += start.elapsed();
-
-            let start = Instant::now();
-            self.write_trie_updates_sorted(&trie_data.trie_updates)?;
-            total_write_trie_updates += start.elapsed();
+        // Pre-compute block body indices for all blocks
+        let mut block_body_indices = Vec::with_capacity(blocks.len());
+        let mut next_tx_num = starting_tx_num;
+        for block in &blocks {
+            let tx_count = block.recovered_block.body().transaction_count() as u64;
+            block_body_indices.push(StoredBlockBodyIndices { first_tx_num: next_tx_num, tx_count });
+            next_tx_num += tx_count;
         }
 
-        // update history indices
-        let start = Instant::now();
-        self.update_history_indices(first_number..=last_block_number)?;
-        let duration_update_history_indices = start.elapsed();
+        // Determine destinations for EitherWriter upfront (before spawning threads)
+        let receipts_destination = EitherWriter::receipts_destination(self);
+        let senders_destination = EitherWriterDestination::senders(self);
 
-        // Update pipeline progress
-        let start = Instant::now();
-        self.update_pipeline_stages(last_block_number, false)?;
-        let duration_update_pipeline_stages = start.elapsed();
+        // Pre-compute pruning decisions
+        let tip = self.last_block_number()?.max(last_block_number);
+        let prunable_receipts = (receipts_destination.is_database() ||
+            self.static_file_provider()
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none()) &&
+            PruneMode::Distance(self.minimum_pruning_distance).should_prune(first_number, tip);
+        let has_contract_log_filter = !self.prune_modes.receipts_log_filter.is_empty();
+        let contract_log_pruner =
+            self.prune_modes.receipts_log_filter.group_by_block(tip, None)?;
 
-        // Record all metrics at the end
-        self.metrics.record_duration(metrics::Action::SaveBlocksInsertBlock, total_insert_block);
-        self.metrics.record_duration(metrics::Action::SaveBlocksWriteState, total_write_state);
+        // Clone Arc references for parallel tasks
+        let static_file_provider = self.static_file_provider.clone();
+
+        // Accumulate static file durations
+        let total_static_files: std::sync::Mutex<Duration> =
+            std::sync::Mutex::new(Duration::ZERO);
+
+        // Extract prune modes outside thread::scope to avoid capturing `self` in closures
+        let receipts_prune_mode = self.prune_modes.receipts;
+        let should_write_senders =
+            self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full());
+
+        // Use thread::scope for parallel execution with borrowed data
+        std::thread::scope(|scope| -> ProviderResult<()> {
+            // === STATIC FILE WRITERS (parallel) ===
+
+            // Task 1: Write headers to static files
+            let headers_handle = scope.spawn(|| -> ProviderResult<Duration> {
+                let start = Instant::now();
+                let mut writer =
+                    static_file_provider.get_writer(first_number, StaticFileSegment::Headers)?;
+                for block in &blocks {
+                    let recovered = block.recovered_block();
+                    writer.append_header(recovered.header(), &recovered.hash())?;
+                }
+                Ok(start.elapsed())
+            });
+
+            // Task 2: Write transactions to static files
+            let transactions_handle = scope.spawn(|| -> ProviderResult<Duration> {
+                let start = Instant::now();
+                let mut writer = static_file_provider
+                    .get_writer(first_number, StaticFileSegment::Transactions)?;
+                for (block, indices) in blocks.iter().zip(&block_body_indices) {
+                    let recovered = block.recovered_block();
+                    writer.increment_block(recovered.number())?;
+                    let mut tx_num = indices.first_tx_num;
+                    for tx in recovered.body().transactions() {
+                        writer.append_transaction(tx_num, tx)?;
+                        tx_num += 1;
+                    }
+                }
+                Ok(start.elapsed())
+            });
+
+            // Task 3: Write receipts to static files (if destination is static file)
+            let receipts_handle = if receipts_destination.is_static_file() {
+                Some(scope.spawn(|| -> ProviderResult<Duration> {
+                    let start = Instant::now();
+                    let mut writer =
+                        static_file_provider.get_writer(first_number, StaticFileSegment::Receipts)?;
+
+                    // Prepare set of addresses which logs should not be pruned.
+                    let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+                    for (_, addresses) in contract_log_pruner.range(..first_number) {
+                        allowed_addresses.extend(addresses.iter().copied());
+                    }
+
+                    for (block_idx, (block, indices)) in
+                        blocks.iter().zip(&block_body_indices).enumerate()
+                    {
+                        let block_number = first_number + block_idx as u64;
+                        writer.increment_block(block_number)?;
+
+                        // Skip writing receipts if pruning configuration requires us to.
+                        if prunable_receipts &&
+                            receipts_prune_mode
+                                .is_some_and(|mode| mode.should_prune(block_number, tip))
+                        {
+                            continue
+                        }
+
+                        // If there are new addresses to retain after this block number, track
+                        // them
+                        if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                            allowed_addresses.extend(new_addresses.iter().copied());
+                        }
+
+                        let receipts = &block.execution_output.receipts[block_idx];
+                        for (idx, receipt) in receipts.iter().enumerate() {
+                            let receipt_idx = indices.first_tx_num + idx as u64;
+                            // Skip writing receipt if log filter is active and it does not
+                            // have any logs to retain
+                            if prunable_receipts &&
+                                has_contract_log_filter &&
+                                !receipt
+                                    .logs()
+                                    .iter()
+                                    .any(|log| allowed_addresses.contains(&log.address))
+                            {
+                                continue
+                            }
+                            writer.append_receipt(receipt_idx, receipt)?;
+                        }
+                    }
+                    Ok(start.elapsed())
+                }))
+            } else {
+                None
+            };
+
+            // Task 4: Write senders to static files (if destination is static file)
+            let senders_handle = if senders_destination.is_static_file() && should_write_senders {
+                Some(scope.spawn(|| -> ProviderResult<Duration> {
+                    let start = Instant::now();
+                    let mut writer = static_file_provider
+                        .get_writer(first_number, StaticFileSegment::TransactionSenders)?;
+                    for (block, indices) in blocks.iter().zip(&block_body_indices) {
+                        let recovered = block.recovered_block();
+                        writer.increment_block(recovered.number())?;
+                        let mut tx_num = indices.first_tx_num;
+                        for sender in recovered.senders_iter() {
+                            writer.append_transaction_sender(tx_num, sender)?;
+                            tx_num += 1;
+                        }
+                    }
+                    Ok(start.elapsed())
+                }))
+            } else {
+                None
+            };
+
+            // === MDBX WRITES (in main thread) ===
+
+            // Write block body indices and transaction block mappings
+            {
+                let mut block_indices_cursor =
+                    self.tx.cursor_write::<tables::BlockBodyIndices>()?;
+                let mut tx_block_cursor = self.tx.cursor_write::<tables::TransactionBlocks>()?;
+
+                for (block, indices) in blocks.iter().zip(&block_body_indices) {
+                    let block_number = block.recovered_block.number();
+                    block_indices_cursor.append(block_number, indices)?;
+
+                    if indices.tx_count > 0 {
+                        tx_block_cursor.append(indices.last_tx_num(), &block_number)?;
+                    }
+                }
+            }
+
+            // Write header numbers
+            for block in &blocks {
+                let recovered = block.recovered_block();
+                self.tx.put::<tables::HeaderNumbers>(recovered.hash(), recovered.number())?;
+            }
+
+            // Write senders to MDBX (if destination is database)
+            if senders_destination.is_database() && should_write_senders {
+                let mut senders_cursor =
+                    self.tx.cursor_write::<tables::TransactionSenders>()?;
+                for (block, indices) in blocks.iter().zip(&block_body_indices) {
+                    let mut tx_num = indices.first_tx_num;
+                    for sender in block.recovered_block.senders_iter() {
+                        senders_cursor.append(tx_num, sender)?;
+                        tx_num += 1;
+                    }
+                }
+            }
+
+            // Write transaction hash -> number mapping
+            if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
+                self.with_rocksdb_batch(|batch| {
+                    let mut writer = EitherWriter::new_transaction_hash_numbers(self, batch)?;
+                    for (block, indices) in blocks.iter().zip(&block_body_indices) {
+                        let mut tx_num = indices.first_tx_num;
+                        for tx in block.recovered_block.body().transactions() {
+                            writer.put_transaction_hash_number(*tx.tx_hash(), tx_num, false)?;
+                            tx_num += 1;
+                        }
+                    }
+                    Ok(((), writer.into_raw_rocksdb_batch()))
+                })?;
+            }
+
+            // Write block bodies (ommers, withdrawals, etc.) via storage handler
+            let bodies: Vec<_> = blocks
+                .iter()
+                .map(|b| (b.recovered_block.number(), Some(b.recovered_block.body())))
+                .collect();
+            self.storage.writer().write_block_bodies(self, bodies)?;
+
+            // Write receipts to MDBX (if destination is database)
+            if receipts_destination.is_database() {
+                let mut receipts_cursor = self
+                    .tx
+                    .cursor_write::<tables::Receipts<ReceiptTy<N>>>()?;
+
+                // Prepare set of addresses which logs should not be pruned.
+                let mut allowed_addresses: HashSet<Address, _> = HashSet::new();
+                for (_, addresses) in contract_log_pruner.range(..first_number) {
+                    allowed_addresses.extend(addresses.iter().copied());
+                }
+
+                for (block_idx, (block, indices)) in
+                    blocks.iter().zip(&block_body_indices).enumerate()
+                {
+                    let block_number = first_number + block_idx as u64;
+
+                    // Skip writing receipts if pruning configuration requires us to.
+                    if prunable_receipts &&
+                        self.prune_modes
+                            .receipts
+                            .is_some_and(|mode| mode.should_prune(block_number, tip))
+                    {
+                        continue
+                    }
+
+                    // If there are new addresses to retain after this block number, track them
+                    if let Some(new_addresses) = contract_log_pruner.get(&block_number) {
+                        allowed_addresses.extend(new_addresses.iter().copied());
+                    }
+
+                    let receipts = &block.execution_output.receipts[block_idx];
+                    for (idx, receipt) in receipts.iter().enumerate() {
+                        let receipt_idx = indices.first_tx_num + idx as u64;
+                        // Skip writing receipt if log filter is active and it does not have
+                        // any logs to retain
+                        if prunable_receipts &&
+                            has_contract_log_filter &&
+                            !receipt
+                                .logs()
+                                .iter()
+                                .any(|log| allowed_addresses.contains(&log.address))
+                        {
+                            continue
+                        }
+                        receipts_cursor.append(receipt_idx, receipt)?;
+                    }
+                }
+            }
+
+            // Write state reverts and changes
+            let write_state_start = Instant::now();
+            for block in &blocks {
+                let (plain_state, reverts) = block
+                    .execution_output
+                    .bundle
+                    .to_plain_state_and_reverts(OriginalValuesKnown::No);
+                self.write_state_reverts(reverts, block.recovered_block.number())?;
+                self.write_state_changes(plain_state)?;
+            }
+            let duration_write_state = write_state_start.elapsed();
+
+            // Write hashed state and trie updates
+            let mut duration_write_hashed_state = Duration::ZERO;
+            let mut duration_write_trie_changesets = Duration::ZERO;
+            let mut duration_write_trie_updates = Duration::ZERO;
+            for block in &blocks {
+                let trie_data = block.trie_data();
+                let block_number = block.recovered_block.number();
+
+                let start = Instant::now();
+                self.write_hashed_state(&trie_data.hashed_state)?;
+                duration_write_hashed_state += start.elapsed();
+
+                let start = Instant::now();
+                self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
+                duration_write_trie_changesets += start.elapsed();
+
+                let start = Instant::now();
+                self.write_trie_updates_sorted(&trie_data.trie_updates)?;
+                duration_write_trie_updates += start.elapsed();
+            }
+
+            // Update history indices
+            let start = Instant::now();
+            self.update_history_indices(first_number..=last_block_number)?;
+            let duration_update_history_indices = start.elapsed();
+
+            // Update pipeline progress
+            let start = Instant::now();
+            self.update_pipeline_stages(last_block_number, false)?;
+            let duration_update_pipeline_stages = start.elapsed();
+
+            // Record MDBX metrics
+            self.metrics
+                .record_duration(metrics::Action::SaveBlocksWriteState, duration_write_state);
+            self.metrics.record_duration(
+                metrics::Action::SaveBlocksWriteHashedState,
+                duration_write_hashed_state,
+            );
+            self.metrics.record_duration(
+                metrics::Action::SaveBlocksWriteTrieChangesets,
+                duration_write_trie_changesets,
+            );
+            self.metrics.record_duration(
+                metrics::Action::SaveBlocksWriteTrieUpdates,
+                duration_write_trie_updates,
+            );
+            self.metrics.record_duration(
+                metrics::Action::SaveBlocksUpdateHistoryIndices,
+                duration_update_history_indices,
+            );
+            self.metrics.record_duration(
+                metrics::Action::SaveBlocksUpdatePipelineStages,
+                duration_update_pipeline_stages,
+            );
+
+            // === JOIN STATIC FILE TASKS ===
+            let mut static_file_duration = Duration::ZERO;
+
+            // Join headers task
+            static_file_duration += headers_handle.join().map_err(|e| {
+                ProviderError::other(StaticFileWriterError::new(format!(
+                    "Headers static file task panicked: {e:?}"
+                )))
+            })??;
+
+            // Join transactions task
+            static_file_duration += transactions_handle.join().map_err(|e| {
+                ProviderError::other(StaticFileWriterError::new(format!(
+                    "Transactions static file task panicked: {e:?}"
+                )))
+            })??;
+
+            // Join receipts task (if spawned)
+            if let Some(handle) = receipts_handle {
+                static_file_duration += handle.join().map_err(|e| {
+                    ProviderError::other(StaticFileWriterError::new(format!(
+                        "Receipts static file task panicked: {e:?}"
+                    )))
+                })??;
+            }
+
+            // Join senders task (if spawned)
+            if let Some(handle) = senders_handle {
+                static_file_duration += handle.join().map_err(|e| {
+                    ProviderError::other(StaticFileWriterError::new(format!(
+                        "Senders static file task panicked: {e:?}"
+                    )))
+                })??;
+            }
+
+            *total_static_files.lock().unwrap() = static_file_duration;
+
+            Ok(())
+        })?;
+
+        // Record static files metric (insert_block now represents static file writes)
+        let static_files_duration = *total_static_files.lock().unwrap();
         self.metrics
-            .record_duration(metrics::Action::SaveBlocksWriteHashedState, total_write_hashed_state);
-        self.metrics.record_duration(
-            metrics::Action::SaveBlocksWriteTrieChangesets,
-            total_write_trie_changesets,
-        );
-        self.metrics
-            .record_duration(metrics::Action::SaveBlocksWriteTrieUpdates, total_write_trie_updates);
-        self.metrics.record_duration(
-            metrics::Action::SaveBlocksUpdateHistoryIndices,
-            duration_update_history_indices,
-        );
-        self.metrics.record_duration(
-            metrics::Action::SaveBlocksUpdatePipelineStages,
-            duration_update_pipeline_stages,
-        );
+            .record_duration(metrics::Action::SaveBlocksInsertBlock, static_files_duration);
 
         debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
 
