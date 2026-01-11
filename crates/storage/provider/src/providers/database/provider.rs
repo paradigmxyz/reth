@@ -1296,7 +1296,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> BlockReader for DatabaseProvid
             let Some(header) = self.header_by_number(number)?
         {
             // If the body indices are not found, this means that the transactions either do not
-             // exist in the database yet, or they do exist but are not indexed.
+            // exist in the database yet, or they do exist but are not indexed.
             // If they exist but are not indexed, we don't have enough
             // information to return the block anyways, so we return `None`.
             let Some(transactions) = self.transactions_by_block(number.into())? else {
