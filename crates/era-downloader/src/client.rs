@@ -85,7 +85,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
                     let mut hasher = Sha256::new();
 
                     while let Some(item) = stream.next().await.transpose()? {
-                        io::copy(&mut item.as_ref(), &mut file).await?;
+                        file.write_all(item.as_ref()).await?;
                         hasher.update(item);
                     }
 
@@ -225,7 +225,7 @@ impl<Http: HttpClient + Clone> EraClient<Http> {
         let mut file = File::create(path).await?;
 
         while let Some(item) = stream.next().await.transpose()? {
-            io::copy(&mut item.as_ref(), &mut file).await?;
+            file.write_all(item.as_ref()).await?;
         }
 
         Ok(())
