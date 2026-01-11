@@ -492,37 +492,39 @@ where
         BPF::AccountNodeProvider: TrieNodeProvider + Send + Sync,
         BPF::StorageNodeProvider: TrieNodeProvider + Send + Sync,
     {
-        // Reuse a stored SparseStateTrie, or create a new one using the desired configuration if
-        // there's none to reuse.
         let cleared_sparse_trie = Arc::clone(&self.sparse_state_trie);
-        let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
-            let default_trie = SparseTrie::blind_from(if self.disable_parallel_sparse_trie {
-                ConfiguredSparseTrie::Serial(Default::default())
-            } else {
-                ConfiguredSparseTrie::Parallel(Box::new(
-                    ParallelSparseTrie::default()
-                        .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
-                ))
-            });
-            ClearedSparseStateTrie::from_state_trie(
-                SparseStateTrie::new()
-                    .with_accounts_trie(default_trie.clone())
-                    .with_default_storage_trie(default_trie)
-                    .with_updates(true),
-            )
-        });
-
-        let task =
-            SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
-                sparse_trie_rx,
-                proof_worker_handle,
-                self.trie_metrics.clone(),
-                sparse_state_trie,
-            );
-
+        let disable_parallel_sparse_trie = self.disable_parallel_sparse_trie;
+        let trie_metrics = self.trie_metrics.clone();
         let span = Span::current();
+
         self.executor.spawn_blocking(move || {
             let _enter = span.entered();
+
+            // Reuse a stored SparseStateTrie, or create a new one using the desired configuration
+            // if there's none to reuse.
+            let sparse_state_trie = cleared_sparse_trie.lock().take().unwrap_or_else(|| {
+                let default_trie = SparseTrie::blind_from(if disable_parallel_sparse_trie {
+                    ConfiguredSparseTrie::Serial(Default::default())
+                } else {
+                    ConfiguredSparseTrie::Parallel(Box::new(
+                        ParallelSparseTrie::default()
+                            .with_parallelism_thresholds(PARALLEL_SPARSE_TRIE_PARALLELISM_THRESHOLDS),
+                    ))
+                });
+                ClearedSparseStateTrie::from_state_trie(
+                    SparseStateTrie::new()
+                        .with_accounts_trie(default_trie.clone())
+                        .with_default_storage_trie(default_trie)
+                        .with_updates(true),
+                )
+            });
+
+            let task = SparseTrieTask::<_, ConfiguredSparseTrie, ConfiguredSparseTrie>::new_with_cleared_trie(
+                sparse_trie_rx,
+                proof_worker_handle,
+                trie_metrics,
+                sparse_state_trie,
+            );
 
             let (result, trie) = task.run();
             // Send state root computation result
