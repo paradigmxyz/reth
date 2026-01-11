@@ -79,7 +79,7 @@ pub struct UnboundedMeteredReceiver<T> {
     metrics: MeteredReceiverMetrics,
 }
 
-// === impl MeteredReceiver ===
+// === impl UnboundedMeteredReceiver ===
 
 impl<T> UnboundedMeteredReceiver<T> {
     /// Creates a new [`UnboundedMeteredReceiver`] wrapping around the provided
