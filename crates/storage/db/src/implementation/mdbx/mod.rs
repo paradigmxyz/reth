@@ -362,8 +362,6 @@ impl DatabaseEnv {
         let mode = match kind {
             DatabaseEnvKind::RO => Mode::ReadOnly,
             DatabaseEnvKind::RW => {
-                // enable writemap mode in RW mode
-                inner_env.write_map();
                 Mode::ReadWrite { sync_mode: args.sync_mode }
             }
         };

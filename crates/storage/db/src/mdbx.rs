@@ -57,8 +57,8 @@ pub fn open_db_read_only(
         .with_context(|| format!("Could not open database at path: {}", path.display()))
 }
 
-/// Opens up an existing database. Read/Write mode with `WriteMap` enabled. It doesn't create it or
-/// create tables if missing.
+/// Opens up an existing database. Read/Write mode. It doesn't create it or create tables if
+/// missing.
 pub fn open_db(path: impl AsRef<Path>, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
     fn open(path: &Path, args: DatabaseArguments) -> eyre::Result<DatabaseEnv> {
         let client_version = args.client_version().clone();
