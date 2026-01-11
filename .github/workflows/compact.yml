@@ -13,12 +13,12 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUSTC_WRAPPER: "sccache"
 
 name: compact-codec
 jobs:
   compact-codec:
-    runs-on:
-      group: Reth
+    runs-on: depot-ubuntu-latest
     strategy:
       matrix:
         bin:
@@ -27,6 +27,7 @@ jobs:
     steps:
       - uses: rui314/setup-mold@v1
       - uses: dtolnay/rust-toolchain@stable
+      - uses: mozilla-actions/sccache-action@v0.0.9
       - uses: Swatinem/rust-cache@v2
         with:
           cache-on-failure: true

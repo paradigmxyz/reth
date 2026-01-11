@@ -17,6 +17,7 @@ use reth_metrics::{
 use reth_primitives_traits::SignedTransaction;
 use reth_trie::updates::TrieUpdates;
 use revm::database::{states::bundle_state::BundleRetention, State};
+use revm_primitives::Address;
 use std::time::Instant;
 use tracing::{debug_span, trace};
 
@@ -62,9 +63,10 @@ impl EngineApiMetrics {
     pub(crate) fn execute_metered<E, DB>(
         &self,
         executor: E,
-        transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
+        mut transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
+        transaction_count: usize,
         state_hook: Box<dyn OnStateHook>,
-    ) -> Result<BlockExecutionOutput<E::Receipt>, BlockExecutionError>
+    ) -> Result<(BlockExecutionOutput<E::Receipt>, Vec<Address>), BlockExecutionError>
     where
         DB: alloy_evm::Database,
         E: BlockExecutor<Evm: Evm<DB: BorrowMut<State<DB>>>, Transaction: SignedTransaction>,
@@ -74,22 +76,46 @@ impl EngineApiMetrics {
         // be accessible.
         let wrapper = MeteredStateHook { metrics: self.executor.clone(), inner_hook: state_hook };
 
+        let mut senders = Vec::with_capacity(transaction_count);
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
         let f = || {
-            executor.apply_pre_execution_changes()?;
-            for tx in transactions {
+            let start = Instant::now();
+            debug_span!(target: "engine::tree", "pre execution")
+                .entered()
+                .in_scope(|| executor.apply_pre_execution_changes())?;
+            self.executor.pre_execution_histogram.record(start.elapsed());
+
+            let exec_span = debug_span!(target: "engine::tree", "execution").entered();
+            loop {
+                let start = Instant::now();
+                let Some(tx) = transactions.next() else { break };
+                self.executor.transaction_wait_histogram.record(start.elapsed());
+
                 let tx = tx?;
+                senders.push(*tx.signer());
+
                 let span =
                     debug_span!(target: "engine::tree", "execute tx", tx_hash=?tx.tx().tx_hash());
                 let enter = span.entered();
                 trace!(target: "engine::tree", "Executing transaction");
+                let start = Instant::now();
                 let gas_used = executor.execute_transaction(tx)?;
+                self.executor.transaction_execution_histogram.record(start.elapsed());
 
                 // record the tx gas used
                 enter.record("gas_used", gas_used);
             }
-            executor.finish().map(|(evm, result)| (evm.into_db(), result))
+            drop(exec_span);
+
+            let start = Instant::now();
+            let result = debug_span!(target: "engine::tree", "finish")
+                .entered()
+                .in_scope(|| executor.finish())
+                .map(|(evm, result)| (evm.into_db(), result));
+            self.executor.post_execution_histogram.record(start.elapsed());
+
+            result
         };
 
         // Use metered to execute and track timing/gas metrics
@@ -100,7 +126,9 @@ impl EngineApiMetrics {
         })?;
 
         // merge transitions into bundle state
-        db.borrow_mut().merge_transitions(BundleRetention::Reverts);
+        debug_span!(target: "engine::tree", "merge transitions")
+            .entered()
+            .in_scope(|| db.borrow_mut().merge_transitions(BundleRetention::Reverts));
         let output = BlockExecutionOutput { result, state: db.borrow_mut().take_bundle() };
 
         // Update the metrics for the number of accounts, storage slots and bytecodes updated
@@ -113,7 +141,7 @@ impl EngineApiMetrics {
         self.executor.storage_slots_updated_histogram.record(storage_slots as f64);
         self.executor.bytecodes_updated_histogram.record(bytecodes as f64);
 
-        Ok(output)
+        Ok((output, senders))
     }
 }
 
@@ -293,7 +321,7 @@ impl NewPayloadStatusMetrics {
 }
 
 /// Metrics for non-execution related block validation.
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "sync.block_validation")]
 pub(crate) struct BlockValidationMetrics {
     /// Total number of storage tries updated in the state root calculation
@@ -320,6 +348,14 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) post_execution_validation_duration: Histogram,
     /// Total duration of the new payload call
     pub(crate) total_duration: Histogram,
+    /// Size of `HashedPostStateSorted` (`total_len`)
+    pub(crate) hashed_post_state_size: Histogram,
+    /// Size of `TrieUpdatesSorted` (`total_len`)
+    pub(crate) trie_updates_sorted_size: Histogram,
+    /// Size of `AnchoredTrieInput` overlay `TrieUpdatesSorted` (`total_len`)
+    pub(crate) anchored_overlay_trie_updates_size: Histogram,
+    /// Size of `AnchoredTrieInput` overlay `HashedPostStateSorted` (`total_len`)
+    pub(crate) anchored_overlay_hashed_state_size: Histogram,
 }
 
 impl BlockValidationMetrics {
@@ -502,6 +538,7 @@ mod tests {
         let _result = metrics.execute_metered::<_, EmptyDB>(
             executor,
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+            input.transaction_count(),
             state_hook,
         );
 
@@ -558,6 +595,7 @@ mod tests {
         let _result = metrics.execute_metered::<_, EmptyDB>(
             executor,
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+            input.transaction_count(),
             state_hook,
         );
 

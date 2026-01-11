@@ -1,7 +1,10 @@
 use alloy_primitives::{keccak256, Address, BlockNumber, TxHash, TxNumber, B256};
 use reth_chainspec::MAINNET;
 use reth_db::{
-    test_utils::{create_test_rw_db, create_test_rw_db_with_path, create_test_static_files_dir},
+    test_utils::{
+        create_test_rocksdb_dir, create_test_rw_db, create_test_rw_db_with_path,
+        create_test_static_files_dir,
+    },
     DatabaseEnv,
 };
 use reth_db_api::{
@@ -17,9 +20,12 @@ use reth_db_api::{
 use reth_ethereum_primitives::{Block, EthPrimitives, Receipt};
 use reth_primitives_traits::{Account, SealedBlock, SealedHeader, StorageEntry};
 use reth_provider::{
-    providers::{StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter},
+    providers::{
+        RocksDBProvider, StaticFileProvider, StaticFileProviderRWRefMut, StaticFileWriter,
+    },
     test_utils::MockNodeTypesWithDB,
-    HistoryWriter, ProviderError, ProviderFactory, StaticFileProviderFactory, StatsReader,
+    DatabaseProviderFactory, EitherWriter, HistoryWriter, ProviderError, ProviderFactory,
+    RocksBatchArg, StaticFileProviderFactory, StatsReader,
 };
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_errors::provider::ProviderResult;
@@ -38,12 +44,14 @@ impl Default for TestStageDB {
     /// Create a new instance of [`TestStageDB`]
     fn default() -> Self {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
+        let (_, rocksdb_dir_path) = create_test_rocksdb_dir();
         Self {
             temp_static_files_dir: static_dir,
             factory: ProviderFactory::new(
                 create_test_rw_db(),
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
+                RocksDBProvider::builder(rocksdb_dir_path).with_default_tables().build().unwrap(),
             )
             .expect("failed to create test provider factory"),
         }
@@ -53,6 +61,7 @@ impl Default for TestStageDB {
 impl TestStageDB {
     pub fn new(path: &Path) -> Self {
         let (static_dir, static_dir_path) = create_test_static_files_dir();
+        let (_, rocksdb_dir_path) = create_test_rocksdb_dir();
 
         Self {
             temp_static_files_dir: static_dir,
@@ -60,6 +69,7 @@ impl TestStageDB {
                 create_test_rw_db_with_path(path),
                 MAINNET.clone(),
                 StaticFileProvider::read_write(static_dir_path).unwrap(),
+                RocksDBProvider::builder(rocksdb_dir_path).with_default_tables().build().unwrap(),
             )
             .expect("failed to create test provider factory"),
         }
@@ -82,6 +92,30 @@ impl TestStageDB {
         F: FnOnce(&<DatabaseEnv as Database>::TX) -> ProviderResult<Ok>,
     {
         f(self.factory.provider()?.tx_ref())
+    }
+
+    /// Invoke a callback with a provider that can be used to create transactions or fetch from
+    /// static files.
+    pub fn query_with_provider<F, Ok>(&self, f: F) -> ProviderResult<Ok>
+    where
+        F: FnOnce(
+            <ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::Provider,
+        ) -> ProviderResult<Ok>,
+    {
+        f(self.factory.provider()?)
+    }
+
+    /// Invoke a callback with a writable provider, committing afterwards.
+    pub fn commit_with_provider<F>(&self, f: F) -> ProviderResult<()>
+    where
+        F: FnOnce(
+            &<ProviderFactory<MockNodeTypesWithDB> as DatabaseProviderFactory>::ProviderRW,
+        ) -> ProviderResult<()>,
+    {
+        let provider = self.factory.provider_rw()?;
+        f(&provider)?;
+        provider.commit().expect("failed to commit");
+        Ok(())
     }
 
     /// Check if the table is empty
@@ -294,10 +328,13 @@ impl TestStageDB {
     where
         I: IntoIterator<Item = (TxHash, TxNumber)>,
     {
-        self.commit(|tx| {
-            tx_hash_numbers.into_iter().try_for_each(|(tx_hash, tx_num)| {
-                // Insert into tx hash numbers table.
-                Ok(tx.put::<tables::TransactionHashNumbers>(tx_hash, tx_num)?)
+        self.commit_with_provider(|provider| {
+            provider.with_rocksdb_batch(|batch: RocksBatchArg<'_>| {
+                let mut writer = EitherWriter::new_transaction_hash_numbers(provider, batch)?;
+                for (tx_hash, tx_num) in tx_hash_numbers {
+                    writer.put_transaction_hash_number(tx_hash, tx_num, false)?;
+                }
+                Ok(((), writer.into_raw_rocksdb_batch()))
             })
         })
     }

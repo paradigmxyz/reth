@@ -3,25 +3,21 @@ use reth_metrics::Metrics;
 use std::time::{Duration, Instant};
 
 #[derive(Debug)]
-pub(crate) struct DurationsRecorder {
+pub(crate) struct DurationsRecorder<'a> {
     start: Instant,
-    current_metrics: DatabaseProviderMetrics,
+    current_metrics: &'a DatabaseProviderMetrics,
     pub(crate) actions: Vec<(Action, Duration)>,
     latest: Option<Duration>,
 }
 
-impl Default for DurationsRecorder {
-    fn default() -> Self {
-        Self {
-            start: Instant::now(),
-            actions: Vec::new(),
-            latest: None,
-            current_metrics: DatabaseProviderMetrics::default(),
-        }
+impl<'a> DurationsRecorder<'a> {
+    /// Creates a new durations recorder with the given metrics instance.
+    pub(crate) fn new(metrics: &'a DatabaseProviderMetrics) -> Self {
+        Self { start: Instant::now(), actions: Vec::new(), latest: None, current_metrics: metrics }
     }
 }
 
-impl DurationsRecorder {
+impl<'a> DurationsRecorder<'a> {
     /// Records the duration since last record, saves it for future logging and instantly reports as
     /// a metric with `action` label.
     pub(crate) fn record_relative(&mut self, action: Action) {
@@ -47,12 +43,19 @@ pub(crate) enum Action {
     GetNextTxNum,
     InsertTransactionSenders,
     InsertTransactionHashNumbers,
+    SaveBlocksInsertBlock,
+    SaveBlocksWriteState,
+    SaveBlocksWriteHashedState,
+    SaveBlocksWriteTrieChangesets,
+    SaveBlocksWriteTrieUpdates,
+    SaveBlocksUpdateHistoryIndices,
+    SaveBlocksUpdatePipelineStages,
 }
 
 /// Database provider metrics
 #[derive(Metrics)]
 #[metrics(scope = "storage.providers.database")]
-struct DatabaseProviderMetrics {
+pub(crate) struct DatabaseProviderMetrics {
     /// Duration of insert block
     insert_block: Histogram,
     /// Duration of insert state
@@ -76,6 +79,20 @@ struct DatabaseProviderMetrics {
     insert_transaction_senders: Histogram,
     /// Duration of insert transaction hash numbers
     insert_transaction_hash_numbers: Histogram,
+    /// Duration of `insert_block` in `save_blocks`
+    save_blocks_insert_block: Histogram,
+    /// Duration of `write_state` in `save_blocks`
+    save_blocks_write_state: Histogram,
+    /// Duration of `write_hashed_state` in `save_blocks`
+    save_blocks_write_hashed_state: Histogram,
+    /// Duration of `write_trie_changesets` in `save_blocks`
+    save_blocks_write_trie_changesets: Histogram,
+    /// Duration of `write_trie_updates` in `save_blocks`
+    save_blocks_write_trie_updates: Histogram,
+    /// Duration of `update_history_indices` in `save_blocks`
+    save_blocks_update_history_indices: Histogram,
+    /// Duration of `update_pipeline_stages` in `save_blocks`
+    save_blocks_update_pipeline_stages: Histogram,
 }
 
 impl DatabaseProviderMetrics {
@@ -94,6 +111,23 @@ impl DatabaseProviderMetrics {
             Action::InsertTransactionSenders => self.insert_transaction_senders.record(duration),
             Action::InsertTransactionHashNumbers => {
                 self.insert_transaction_hash_numbers.record(duration)
+            }
+            Action::SaveBlocksInsertBlock => self.save_blocks_insert_block.record(duration),
+            Action::SaveBlocksWriteState => self.save_blocks_write_state.record(duration),
+            Action::SaveBlocksWriteHashedState => {
+                self.save_blocks_write_hashed_state.record(duration)
+            }
+            Action::SaveBlocksWriteTrieChangesets => {
+                self.save_blocks_write_trie_changesets.record(duration)
+            }
+            Action::SaveBlocksWriteTrieUpdates => {
+                self.save_blocks_write_trie_updates.record(duration)
+            }
+            Action::SaveBlocksUpdateHistoryIndices => {
+                self.save_blocks_update_history_indices.record(duration)
+            }
+            Action::SaveBlocksUpdatePipelineStages => {
+                self.save_blocks_update_pipeline_stages.record(duration)
             }
         }
     }

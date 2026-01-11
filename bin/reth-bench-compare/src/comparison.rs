@@ -21,6 +21,8 @@ pub(crate) struct ComparisonGenerator {
     feature_ref_name: String,
     baseline_results: Option<BenchmarkResults>,
     feature_results: Option<BenchmarkResults>,
+    baseline_command: Option<String>,
+    feature_command: Option<String>,
 }
 
 /// Represents the results from a single benchmark run
@@ -37,7 +39,8 @@ pub(crate) struct BenchmarkResults {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct CombinedLatencyRow {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(default)]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub new_payload_latency: u128,
 }
@@ -46,7 +49,8 @@ pub(crate) struct CombinedLatencyRow {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct TotalGasRow {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(default)]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub time: u128,
 }
@@ -89,11 +93,13 @@ pub(crate) struct RefInfo {
     pub summary: BenchmarkSummary,
     pub start_timestamp: Option<DateTime<Utc>>,
     pub end_timestamp: Option<DateTime<Utc>>,
+    pub reth_command: Option<String>,
 }
 
 /// Summary of the comparison between references.
 ///
 /// Percent deltas are `(feature - baseline) / baseline * 100`:
+/// - `new_payload_latency_mean_change_percent`: percent changes of the per-block means.
 /// - `new_payload_latency_p50_change_percent` / p90 / p99: percent changes of the respective
 ///   per-block percentiles.
 /// - `per_block_latency_change_mean_percent` / `per_block_latency_change_median_percent` are the
@@ -111,6 +117,7 @@ pub(crate) struct ComparisonSummary {
     pub per_block_latency_change_median_percent: f64,
     pub per_block_latency_change_std_dev_percent: f64,
     pub new_payload_total_latency_change_percent: f64,
+    pub new_payload_latency_mean_change_percent: f64,
     pub new_payload_latency_p50_change_percent: f64,
     pub new_payload_latency_p90_change_percent: f64,
     pub new_payload_latency_p99_change_percent: f64,
@@ -122,7 +129,8 @@ pub(crate) struct ComparisonSummary {
 #[derive(Debug, Serialize)]
 pub(crate) struct BlockComparison {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub baseline_new_payload_latency: u128,
     pub feature_new_payload_latency: u128,
@@ -142,6 +150,8 @@ impl ComparisonGenerator {
             feature_ref_name: args.feature_ref.clone(),
             baseline_results: None,
             feature_results: None,
+            baseline_command: None,
+            feature_command: None,
         }
     }
 
@@ -206,6 +216,21 @@ impl ComparisonGenerator {
         Ok(())
     }
 
+    /// Set the reth command for a reference
+    pub(crate) fn set_ref_command(&mut self, ref_type: &str, command: String) -> Result<()> {
+        match ref_type {
+            "baseline" => {
+                self.baseline_command = Some(command);
+            }
+            "feature" => {
+                self.feature_command = Some(command);
+            }
+            _ => return Err(eyre!("Unknown reference type: {}", ref_type)),
+        }
+
+        Ok(())
+    }
+
     /// Generate the final comparison report
     pub(crate) async fn generate_comparison_report(&self) -> Result<()> {
         info!("Generating comparison report...");
@@ -230,12 +255,14 @@ impl ComparisonGenerator {
                 summary: baseline.summary.clone(),
                 start_timestamp: baseline.start_timestamp,
                 end_timestamp: baseline.end_timestamp,
+                reth_command: self.baseline_command.clone(),
             },
             feature: RefInfo {
                 ref_name: feature.ref_name.clone(),
                 summary: feature.summary.clone(),
                 start_timestamp: feature.start_timestamp,
                 end_timestamp: feature.end_timestamp,
+                reth_command: self.feature_command.clone(),
             },
             comparison_summary,
             per_block_comparisons,
@@ -420,6 +447,10 @@ impl ComparisonGenerator {
             per_block_latency_change_median_percent,
             per_block_latency_change_std_dev_percent,
             new_payload_total_latency_change_percent,
+            new_payload_latency_mean_change_percent: calc_percent_change(
+                baseline.mean_new_payload_latency_ms,
+                feature.mean_new_payload_latency_ms,
+            ),
             new_payload_latency_p50_change_percent: calc_percent_change(
                 baseline.median_new_payload_latency_ms,
                 feature.median_new_payload_latency_ms,
@@ -551,6 +582,10 @@ impl ComparisonGenerator {
             summary.new_payload_total_latency_change_percent
         );
         println!(
+            "  NewPayload Latency mean:           {:+.2}%",
+            summary.new_payload_latency_mean_change_percent
+        );
+        println!(
             "  NewPayload Latency p50:           {:+.2}%",
             summary.new_payload_latency_p50_change_percent
         );
@@ -599,6 +634,9 @@ impl ComparisonGenerator {
                 end.format("%Y-%m-%d %H:%M:%S UTC")
             );
         }
+        if let Some(ref cmd) = report.baseline.reth_command {
+            println!("  Command: {}", cmd);
+        }
         println!();
 
         println!("Feature Summary:");
@@ -627,6 +665,9 @@ impl ComparisonGenerator {
                 start.format("%Y-%m-%d %H:%M:%S UTC"),
                 end.format("%Y-%m-%d %H:%M:%S UTC")
             );
+        }
+        if let Some(ref cmd) = report.feature.reth_command {
+            println!("  Command: {}", cmd);
         }
         println!();
     }
