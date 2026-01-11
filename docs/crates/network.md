@@ -16,7 +16,7 @@ Let's take a look at how the main Reth CLI (i.e., a default-configured full node
 
 The network management task is the one primarily used in the pipeline to interact with the P2P network. Apart from managing connectivity to the node's peers, it provides a couple of interfaces for sending _outbound_ requests.
 
-Let's take a look at what the provided interfaces are, how they're used in the pipeline, and take a brief glance under the hood to highlight some important structs and traits in the network management task.
+Let's take a look at what the provided interfaces are, how they're used in the pipeline, and take a glance under the hood to highlight some important structs and traits in the network management task.
 
 ### Use of the Network in the Node
 
