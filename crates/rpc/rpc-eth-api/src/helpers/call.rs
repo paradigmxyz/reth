@@ -25,15 +25,15 @@ use reth_evm::{
 };
 use reth_node_api::BlockBody;
 use reth_primitives_traits::Recovered;
-use reth_revm::{database::StateProviderDatabase, db::State};
+use reth_revm::{cancelled::CancelOnDrop, database::StateProviderDatabase, db::State};
 use reth_rpc_convert::{RpcConvert, RpcTxReq};
 use reth_rpc_eth_types::{
     cache::db::StateProviderTraitObjWrapper,
-    error::FromEthApiError,
+    error::{AsEthApiError, FromEthApiError},
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
+use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
@@ -159,6 +159,13 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                         .context_for_next_block(&parent, this.next_env_attributes(&parent)?)
                         .map_err(RethError::other)
                         .map_err(Self::Error::from_eth_err)?;
+                    let map_err = |e: EthApiError| -> Self::Error {
+                        match e.as_simulate_error() {
+                            Some(sim_err) => Self::Error::from_eth_err(EthApiError::other(sim_err)),
+                            None => Self::Error::from_eth_err(e),
+                        }
+                    };
+
                     let (result, results) = if trace_transfers {
                         // prepare inspector to capture transfer inside the evm so they are recorded
                         // and included in logs
@@ -173,7 +180,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             default_gas_limit,
                             chain_id,
                             this.converter(),
-                        )?
+                        )
+                        .map_err(map_err)?
                     } else {
                         let evm = this.evm_config().evm_with_env(&mut db, evm_env);
                         let builder = this.evm_config().create_block_builder(evm, &parent, ctx);
@@ -183,7 +191,8 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
                             default_gas_limit,
                             chain_id,
                             this.converter(),
-                        )?
+                        )
+                        .map_err(map_err)?
                     };
 
                     parent = result.block.clone_sealed_header();
@@ -212,6 +221,7 @@ pub trait EthCall: EstimateCall + Call + LoadPendingBlock + LoadBlock + FullEthA
         overrides: EvmOverrides,
     ) -> impl Future<Output = Result<Bytes, Self::Error>> + Send {
         async move {
+            let _permit = self.acquire_owned_blocking_io().await;
             let res =
                 self.transact_call_at(request, block_number.unwrap_or_default(), overrides).await?;
 
@@ -481,11 +491,11 @@ pub trait Call:
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
         R: Send + 'static,
-        F: FnOnce(Self, &dyn StateProvider) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
     {
         self.spawn_blocking_io_fut(move |this| async move {
             let state = this.state_at_block_id(at).await?;
-            f(this, &state)
+            f(this, state)
         })
     }
 
@@ -526,6 +536,11 @@ pub trait Call:
     }
 
     /// Executes the call request at the given [`BlockId`].
+    ///
+    /// This spawns a new task that obtains the state for the given [`BlockId`] and then transacts
+    /// the call [`Self::transact`]. If the future is dropped before the (blocking) transact
+    /// call is invoked, then the task is cancelled early, (for example if the request is terminated
+    /// early client-side).
     fn transact_call_at(
         &self,
         request: RpcTxReq<<Self::RpcConvert as RpcConvert>::Network>,
@@ -535,10 +550,23 @@ pub trait Call:
     where
         Self: LoadPendingBlock,
     {
-        let this = self.clone();
-        self.spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
-            this.transact(db, evm_env, tx_env)
-        })
+        async move {
+            let guard = CancelOnDrop::default();
+            let cancel = guard.clone();
+            let this = self.clone();
+
+            let res = self
+                .spawn_with_call_at(request, at, overrides, move |db, evm_env, tx_env| {
+                    if cancel.is_cancelled() {
+                        // callsite dropped the guard
+                        return Err(EthApiError::InternalEthError.into())
+                    }
+                    this.transact(db, evm_env, tx_env)
+                })
+                .await;
+            drop(guard);
+            res
+        }
     }
 
     /// Executes the closure with the state that corresponds to the given [`BlockId`] on a new task
@@ -638,7 +666,7 @@ pub trait Call:
             };
             let (tx, tx_info) = transaction.split();
 
-            let (evm_env, _) = self.evm_env_at(block.hash().into()).await?;
+            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in

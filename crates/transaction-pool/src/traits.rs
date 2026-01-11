@@ -283,6 +283,16 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Queued)
     }
 
+    /// Returns a new Stream that yields new transactions added to the blob sub-pool.
+    ///
+    /// This is a convenience wrapper around [`Self::new_transactions_listener`] that filters for
+    /// [`SubPool::Blob`](crate::SubPool).
+    fn new_blob_pool_transactions_listener(
+        &self,
+    ) -> NewSubpoolTransactionStream<Self::Transaction> {
+        NewSubpoolTransactionStream::new(self.new_transactions_listener(), SubPool::Blob)
+    }
+
     /// Returns the _hashes_ of all transactions in the pool that are allowed to be propagated.
     ///
     /// This excludes hashes that aren't allowed to be propagated.
@@ -335,6 +345,21 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         tx_hashes: Vec<TxHash>,
         limit: GetPooledTransactionLimit,
     ) -> Vec<<Self::Transaction as PoolTransaction>::Pooled>;
+
+    /// Extends the given vector with pooled transactions for the given hashes that are allowed to
+    /// be propagated.
+    ///
+    /// This adheres to the expected behavior of [`Self::get_pooled_transaction_elements`].
+    ///
+    /// Consumer: P2P
+    fn append_pooled_transaction_elements(
+        &self,
+        tx_hashes: &[TxHash],
+        limit: GetPooledTransactionLimit,
+        out: &mut Vec<<Self::Transaction as PoolTransaction>::Pooled>,
+    ) {
+        out.extend(self.get_pooled_transaction_elements(tx_hashes.to_vec(), limit));
+    }
 
     /// Returns the pooled transaction variant for the given transaction hash.
     ///
@@ -628,6 +653,15 @@ pub trait TransactionPool: Clone + Debug + Send + Sync {
         &self,
         versioned_hashes: &[B256],
     ) -> Result<Option<Vec<BlobAndProofV2>>, BlobStoreError>;
+
+    /// Return the [`BlobAndProofV2`]s for a list of blob versioned hashes.
+    ///
+    /// The response is always the same length as the request. Missing or older-version blobs are
+    /// returned as `None` elements.
+    fn get_blobs_for_versioned_hashes_v3(
+        &self,
+        versioned_hashes: &[B256],
+    ) -> Result<Vec<Option<BlobAndProofV2>>, BlobStoreError>;
 }
 
 /// Extension for [`TransactionPool`] trait that allows to set the current block info.
@@ -689,12 +723,12 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
 
     /// Returns an iterator over all pending [`Recovered`] transactions.
     pub fn pending_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.pending.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.pending.iter().map(|tx| tx.transaction.clone_into_consensus())
     }
 
     /// Returns an iterator over all queued [`Recovered`] transactions.
     pub fn queued_recovered(&self) -> impl Iterator<Item = Recovered<T::Consensus>> + '_ {
-        self.queued.iter().map(|tx| tx.transaction.clone().into_consensus())
+        self.queued.iter().map(|tx| tx.transaction.clone_into_consensus())
     }
 
     /// Returns an iterator over all transactions, both pending and queued.
@@ -702,7 +736,7 @@ impl<T: PoolTransaction> AllPoolTransactions<T> {
         self.pending
             .iter()
             .chain(self.queued.iter())
-            .map(|tx| tx.transaction.clone().into_consensus())
+            .map(|tx| tx.transaction.clone_into_consensus())
     }
 }
 
@@ -1583,7 +1617,7 @@ pub struct PoolSize {
     pub queued_size: usize,
     /// Number of all transactions of all sub-pools
     ///
-    /// Note: this is the sum of ```pending + basefee + queued```
+    /// Note: this is the sum of ```pending + basefee + queued + blob```
     pub total: usize,
 }
 

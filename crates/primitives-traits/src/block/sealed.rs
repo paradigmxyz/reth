@@ -179,7 +179,7 @@ impl<B: Block> SealedBlock<B> {
 
     /// Recovers all senders from the transactions in the block.
     ///
-    /// Returns `None` if any of the transactions fail to recover the sender.
+    /// Returns an error if any of the transactions fail to recover the sender.
     pub fn senders(&self) -> Result<Vec<Address>, RecoveryError> {
         self.body().recover_signers()
     }
@@ -363,6 +363,11 @@ impl<B: crate::test_utils::TestBlock> SealedBlock<B> {
     /// Updates the block number.
     pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
         self.header.set_block_number(number)
+    }
+
+    /// Updates the block timestamp.
+    pub fn set_timestamp(&mut self, timestamp: u64) {
+        self.header.set_timestamp(timestamp)
     }
 
     /// Updates the block state root.

@@ -1,4 +1,4 @@
-#!/usr/bin/env -S cargo +nightly -Zscript
+#!/usr/bin/env -S cargo -Zscript
 ---
 [package]
 edition = "2021"
@@ -61,6 +61,10 @@ struct Args {
     /// Whether to update the root SUMMARY.mdx file
     #[arg(long)]
     root_summary: bool,
+
+    /// Whether to generate TypeScript sidebar files
+    #[arg(long)]
+    sidebar: bool,
 
     /// Print verbose output
     #[arg(short, long)]
@@ -140,8 +144,16 @@ fn main() -> io::Result<()> {
         if args.verbose {
             println!("Updating root summary in \"{}\"", path.to_string_lossy());
         }
-        // TODO: This is where we update the cli reference sidebar.ts
         update_root_summary(path, &root_summary)?;
+    }
+
+    // Generate TypeScript sidebar files.
+    if args.sidebar {
+        let vocs_dir = Path::new(args.root_dir.as_str()).join("vocs");
+        if args.verbose {
+            println!("Generating TypeScript sidebar files in \"{}\"", vocs_dir.display());
+        }
+        generate_sidebar_files(&vocs_dir, &output, args.verbose)?;
     }
 
     Ok(())
@@ -245,6 +257,196 @@ fn update_root_summary(root_dir: &Path, root_summary: &str) -> io::Result<()> {
 
     // Simply write the root summary content to the file
     write_file(&summary_file, root_summary)
+}
+
+/// Generates TypeScript sidebar files for each command.
+fn generate_sidebar_files(
+    vocs_dir: &Path,
+    output: &[(Cmd, String)],
+    verbose: bool,
+) -> io::Result<()> {
+    // Group commands by their root command name (reth or op-reth)
+    // Also create a map of commands to their help output
+    let mut commands_by_root: std::collections::HashMap<String, Vec<&Cmd>> =
+        std::collections::HashMap::new();
+    let mut help_map: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+
+    for (cmd, help_output) in output {
+        let root_name = cmd.command_name().to_string();
+        commands_by_root.entry(root_name.clone()).or_insert_with(Vec::new).push(cmd);
+        // Store help output for each command using its string representation as key
+        help_map.insert(cmd.to_string(), help_output.clone());
+    }
+
+    // Generate sidebar file for each root command
+    for (root_name, cmds) in commands_by_root {
+        // Get root help output
+        let root_help = help_map.get(&root_name).map(|s| s.as_str());
+        let sidebar_content = generate_sidebar_ts(&root_name, cmds, root_help, &help_map)?;
+        let file_name = match root_name.as_str() {
+            "reth" => "sidebar-cli-reth.ts",
+            "op-reth" => "sidebar-cli-op-reth.ts",
+            _ => {
+                if verbose {
+                    println!("Skipping unknown command: {}", root_name);
+                }
+                continue;
+            }
+        };
+
+        let sidebar_file = vocs_dir.join(file_name);
+        if verbose {
+            println!("Writing sidebar file: {}", sidebar_file.display());
+        }
+        write_file(&sidebar_file, &sidebar_content)?;
+    }
+
+    Ok(())
+}
+
+/// Generates TypeScript code for a sidebar file.
+fn generate_sidebar_ts(
+    root_name: &str,
+    commands: Vec<&Cmd>,
+    root_help: Option<&str>,
+    help_map: &std::collections::HashMap<String, String>,
+) -> io::Result<String> {
+    // Find all top-level commands (commands with exactly one subcommand)
+    let mut top_level_commands: Vec<&Cmd> =
+        commands.iter().copied().filter(|cmd| cmd.subcommands.len() == 1).collect();
+
+    // Remove duplicates using a set
+    let mut seen = std::collections::HashSet::new();
+    top_level_commands.retain(|cmd| {
+        let key = &cmd.subcommands[0];
+        seen.insert(key.clone())
+    });
+
+    // Sort by the order they appear in help output, not alphabetically
+    if let Some(help) = root_help {
+        let help_order = parse_sub_commands(help);
+        top_level_commands.sort_by(|a, b| {
+            let a_name = &a.subcommands[0];
+            let b_name = &b.subcommands[0];
+            let a_pos = help_order.iter().position(|x| x == a_name).unwrap_or(usize::MAX);
+            let b_pos = help_order.iter().position(|x| x == b_name).unwrap_or(usize::MAX);
+            a_pos.cmp(&b_pos)
+        });
+    }
+
+    // Generate TypeScript code
+    let var_name = match root_name {
+        "reth" => "rethCliSidebar",
+        "op-reth" => "opRethCliSidebar",
+        _ => "cliSidebar",
+    };
+
+    let mut ts_code = String::from("import { SidebarItem } from \"vocs\";\n\n");
+    ts_code.push_str(&format!("export const {}: SidebarItem = {{\n", var_name));
+    ts_code.push_str(&format!("    text: \"{}\",\n", root_name));
+    ts_code.push_str(&format!("    link: \"/cli/{}\",\n", root_name));
+    ts_code.push_str("    collapsed: false,\n");
+    ts_code.push_str("    items: [\n");
+
+    for (idx, cmd) in top_level_commands.iter().enumerate() {
+        let is_last = idx == top_level_commands.len() - 1;
+        if let Some(item_str) = build_sidebar_item(root_name, cmd, &commands, 1, help_map, is_last)
+        {
+            ts_code.push_str(&item_str);
+        }
+    }
+
+    ts_code.push_str("    ]\n");
+    ts_code.push_str("};\n\n");
+
+    Ok(ts_code)
+}
+
+/// Builds a sidebar item for a command and its children.
+/// Returns TypeScript code string.
+fn build_sidebar_item(
+    root_name: &str,
+    cmd: &Cmd,
+    all_commands: &[&Cmd],
+    depth: usize,
+    help_map: &std::collections::HashMap<String, String>,
+    is_last: bool,
+) -> Option<String> {
+    let full_cmd_name = cmd.to_string();
+    let link_path = format!("/cli/{}", full_cmd_name.replace(" ", "/"));
+
+    // Find all direct child commands (commands whose subcommands start with this command's
+    // subcommands)
+    let mut children: Vec<&Cmd> = all_commands
+        .iter()
+        .copied()
+        .filter(|other_cmd| {
+            other_cmd.subcommands.len() == cmd.subcommands.len() + 1 &&
+                other_cmd.subcommands[..cmd.subcommands.len()] == cmd.subcommands[..]
+        })
+        .collect();
+
+    // Sort children by the order they appear in help output, not alphabetically
+    if children.len() > 1 {
+        // Get help output for this command to determine subcommand order
+        if let Some(help_output) = help_map.get(&full_cmd_name) {
+            let help_order = parse_sub_commands(help_output);
+            children.sort_by(|a, b| {
+                let a_name = a.subcommands.last().unwrap();
+                let b_name = b.subcommands.last().unwrap();
+                let a_pos = help_order.iter().position(|x| x == a_name).unwrap_or(usize::MAX);
+                let b_pos = help_order.iter().position(|x| x == b_name).unwrap_or(usize::MAX);
+                a_pos.cmp(&b_pos)
+            });
+        } else {
+            // Fall back to alphabetical if we can't get help
+            children
+                .sort_by(|a, b| a.subcommands.last().unwrap().cmp(b.subcommands.last().unwrap()));
+        }
+    }
+
+    let indent = "        ".repeat(depth);
+    let mut item_str = String::new();
+
+    item_str.push_str(&format!("{}{{\n", indent));
+    item_str.push_str(&format!("{}    text: \"{}\",\n", indent, full_cmd_name));
+    item_str.push_str(&format!("{}    link: \"{}\"", indent, link_path));
+
+    if !children.is_empty() {
+        item_str.push_str(",\n");
+        item_str.push_str(&format!("{}    collapsed: true,\n", indent));
+        item_str.push_str(&format!("{}    items: [\n", indent));
+
+        for (idx, child_cmd) in children.iter().enumerate() {
+            let child_is_last = idx == children.len() - 1;
+            if let Some(child_str) = build_sidebar_item(
+                root_name,
+                child_cmd,
+                all_commands,
+                depth + 1,
+                help_map,
+                child_is_last,
+            ) {
+                item_str.push_str(&child_str);
+            }
+        }
+
+        item_str.push_str(&format!("{}    ]\n", indent));
+        if is_last {
+            item_str.push_str(&format!("{}}}\n", indent));
+        } else {
+            item_str.push_str(&format!("{}}},\n", indent));
+        }
+    } else {
+        item_str.push_str("\n");
+        if is_last {
+            item_str.push_str(&format!("{}}}\n", indent));
+        } else {
+            item_str.push_str(&format!("{}}},\n", indent));
+        }
+    }
+
+    Some(item_str)
 }
 
 /// Preprocesses the help output of a command.

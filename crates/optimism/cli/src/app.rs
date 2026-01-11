@@ -67,7 +67,7 @@ where
         self.init_tracing(&runner)?;
 
         // Install the prometheus recorder to be sure to record all metrics
-        let _ = install_prometheus_recorder();
+        install_prometheus_recorder();
 
         let components = |spec: Arc<OpChainSpec>| {
             (OpExecutorProvider::optimism(spec.clone()), Arc::new(OpBeaconConsensus::new(spec)))
@@ -98,7 +98,9 @@ where
                 runner.run_blocking_until_ctrl_c(command.execute::<OpNode>())
             }
             Commands::DumpGenesis(command) => runner.run_blocking_until_ctrl_c(command.execute()),
-            Commands::Db(command) => runner.run_blocking_until_ctrl_c(command.execute::<OpNode>()),
+            Commands::Db(command) => {
+                runner.run_blocking_command_until_exit(|ctx| command.execute::<OpNode>(ctx))
+            }
             Commands::Stage(command) => {
                 runner.run_command_until_exit(|ctx| command.execute::<OpNode, _>(ctx, components))
             }
