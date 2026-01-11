@@ -596,13 +596,6 @@ mod tests {
     const STORAGE: B256 =
         b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
 
-    const fn assert_state_provider<T: StateProvider>() {}
-    #[expect(dead_code)]
-    const fn assert_historical_state_provider<
-        T: DBProvider + BlockNumReader + BlockHashReader + ChangeSetReader,
-    >() {
-        assert_state_provider::<HistoricalStateProvider<T>>();
-    }
 
     #[test]
     fn history_provider_get_account() {
