@@ -316,6 +316,162 @@ where
         }
     }
 
+    /// Reveals a V2 decoded multiproof by converting it to the legacy format.
+    ///
+    /// V2 multiproofs use a simpler format where proof nodes are stored as vectors rather than
+    /// hashmaps. This method converts them to the legacy format and delegates to existing reveal
+    /// methods.
+    #[instrument(
+        skip_all,
+        fields(
+            account_nodes = multiproof.account_proofs.len(),
+            storages = multiproof.storage_proofs.len()
+        )
+    )]
+    pub fn reveal_decoded_multiproof_v2(
+        &mut self,
+        multiproof: reth_trie_common::DecodedMultiProofV2,
+    ) -> SparseStateTrieResult<()> {
+        // Extract branch node masks from the account proof nodes before consuming them
+        let branch_node_masks: BranchNodeMasksMap = multiproof
+            .account_proofs
+            .iter()
+            .filter_map(|proof_node| proof_node.masks.map(|masks| (proof_node.path.clone(), masks)))
+            .collect();
+
+        // Convert account proofs from Vec<ProofTrieNode> to DecodedProofNodes
+        let account_subtree: DecodedProofNodes = multiproof
+            .account_proofs
+            .into_iter()
+            .map(|proof_node| (proof_node.path, proof_node.node))
+            .collect();
+
+        // First reveal the account proof nodes
+        self.reveal_decoded_account_multiproof(account_subtree, branch_node_masks)?;
+
+        #[cfg(not(feature = "std"))]
+        // If nostd then serially reveal storage proof nodes for each storage trie
+        {
+            for (account, storage_proofs) in multiproof.storage_proofs {
+                // Extract metadata before consuming the storage_proofs vec
+                let storage_branch_node_masks: BranchNodeMasksMap = storage_proofs
+                    .iter()
+                    .filter_map(|proof_node| {
+                        proof_node.masks.map(|masks| (proof_node.path.clone(), masks))
+                    })
+                    .collect();
+
+                // Find the storage root from the first proof node (root should be at empty path)
+                let root = storage_proofs
+                    .iter()
+                    .find(|p| p.path.is_empty())
+                    .map(|p| {
+                        // Hash the root node to get the storage root
+                        alloy_primitives::keccak256(alloy_rlp::encode(&p.node))
+                    })
+                    .unwrap_or(EMPTY_ROOT_HASH);
+
+                // Convert storage proofs from Vec<ProofTrieNode> to DecodedProofNodes
+                let storage_subtree: DecodedProofNodes = storage_proofs
+                    .into_iter()
+                    .map(|proof_node| (proof_node.path, proof_node.node))
+                    .collect();
+
+                let decoded_storage = DecodedStorageMultiProof {
+                    root,
+                    subtree: storage_subtree,
+                    branch_node_masks: storage_branch_node_masks,
+                };
+
+                self.reveal_decoded_storage_multiproof(account, decoded_storage)?;
+            }
+
+            Ok(())
+        }
+
+        #[cfg(feature = "std")]
+        // If std then reveal storage proofs in parallel
+        {
+            use rayon::iter::{ParallelBridge, ParallelIterator};
+
+            let retain_updates = self.retain_updates;
+
+            // Process all storage trie revealings in parallel, having first removed the
+            // `reveal_nodes` tracking and `SparseTrie`s for each account from their HashMaps.
+            // These will be returned after processing.
+            let results: Vec<_> = multiproof
+                .storage_proofs
+                .into_iter()
+                .map(|(account, storage_proofs)| {
+                    let revealed_nodes = self.storage.take_or_create_revealed_paths(&account);
+                    let trie = self.storage.take_or_create_trie(&account);
+
+                    // Convert storage proofs to DecodedStorageMultiProof
+                    let storage_subtree: DecodedProofNodes = storage_proofs
+                        .iter()
+                        .map(|proof_node| (proof_node.path.clone(), proof_node.node.clone()))
+                        .collect();
+
+                    let storage_branch_node_masks: BranchNodeMasksMap = storage_proofs
+                        .iter()
+                        .filter_map(|proof_node| {
+                            proof_node.masks.map(|masks| (proof_node.path.clone(), masks))
+                        })
+                        .collect();
+
+                    // Find the storage root from the first proof node (root should be at empty
+                    // path)
+                    let root = storage_proofs
+                        .iter()
+                        .find(|p| p.path.is_empty())
+                        .map(|p| {
+                            // Hash the root node to get the storage root
+                            alloy_primitives::keccak256(alloy_rlp::encode(&p.node))
+                        })
+                        .unwrap_or(EMPTY_ROOT_HASH);
+
+                    let decoded_storage = DecodedStorageMultiProof {
+                        root,
+                        subtree: storage_subtree,
+                        branch_node_masks: storage_branch_node_masks,
+                    };
+
+                    (account, decoded_storage, revealed_nodes, trie)
+                })
+                .par_bridge()
+                .map(|(account, decoded_storage, mut revealed_nodes, mut trie)| {
+                    let result = Self::reveal_decoded_storage_multiproof_inner(
+                        account,
+                        decoded_storage,
+                        &mut revealed_nodes,
+                        &mut trie,
+                        retain_updates,
+                    );
+                    (account, result, revealed_nodes, trie)
+                })
+                .collect();
+
+            let mut any_err = Ok(());
+            for (account, result, revealed_nodes, trie) in results {
+                self.storage.revealed_paths.insert(account, revealed_nodes);
+                self.storage.tries.insert(account, trie);
+                if let Ok(_metric_values) = result {
+                    #[cfg(feature = "metrics")]
+                    {
+                        self.metrics
+                            .increment_total_storage_nodes(_metric_values.total_nodes as u64);
+                        self.metrics
+                            .increment_skipped_storage_nodes(_metric_values.skipped_nodes as u64);
+                    }
+                } else {
+                    any_err = result.map(|_| ());
+                }
+            }
+
+            any_err
+        }
+    }
+
     /// Reveals an account multiproof.
     pub fn reveal_account_multiproof(
         &mut self,

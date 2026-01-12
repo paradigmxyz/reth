@@ -161,11 +161,7 @@ where
             trie.reveal_decoded_multiproof(decoded)?;
         }
         ProofResult::V2(decoded_v2) => {
-            // TODO(mediocregopher): Once reveal_decoded_multiproof_v2 is implemented on
-            // SparseStateTrie, replace this unimplemented with:
-            // trie.reveal_decoded_multiproof_v2(decoded_v2)?;
-            let _ = decoded_v2;
-            unimplemented!("V2 multiproof reveal not yet implemented on SparseStateTrie")
+            trie.reveal_decoded_multiproof_v2(decoded_v2)?;
         }
     }
     let reveal_multiproof_elapsed = started_at.elapsed();

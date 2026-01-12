@@ -51,8 +51,8 @@ use reth_trie::{
     proof_v2,
     trie_cursor::{InstrumentedTrieCursor, TrieCursorFactory, TrieCursorMetricsCache},
     walker::TrieWalker,
-    DecodedMultiProof, DecodedStorageMultiProof, HashBuilder, HashedPostState, MultiProofTargets,
-    Nibbles, ProofTrieNode, TRIE_ACCOUNT_RLP_MAX_SIZE,
+    DecodedMultiProof, DecodedMultiProofV2, DecodedStorageMultiProof, HashBuilder, HashedPostState,
+    MultiProofTargets, Nibbles, ProofTrieNode, TRIE_ACCOUNT_RLP_MAX_SIZE,
 };
 use reth_trie_common::{
     added_removed_keys::MultiAddedRemovedKeys,
@@ -595,32 +595,6 @@ impl TrieNodeProvider for ProofTaskTrieNodeProvider {
                     .map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?;
                 rx.recv().map_err(|error| SparseTrieErrorKind::Other(Box::new(error)))?
             }
-        }
-    }
-}
-
-/// Result of a V2 multiproof calculation.
-#[derive(Debug, Default)]
-pub struct DecodedMultiProofV2 {
-    /// Account trie proof nodes
-    pub account_proofs: Vec<ProofTrieNode>,
-    /// Storage trie proof nodes indexed by account
-    pub storage_proofs: B256Map<Vec<ProofTrieNode>>,
-}
-
-impl DecodedMultiProofV2 {
-    /// Returns true if there are no proofs
-    pub fn is_empty(&self) -> bool {
-        self.account_proofs.is_empty() && self.storage_proofs.is_empty()
-    }
-
-    /// Appends the given multiproof's data to this one.
-    ///
-    /// This implementation does not deduplicate redundant proofs.
-    pub fn extend(&mut self, other: Self) {
-        self.account_proofs.extend(other.account_proofs);
-        for (hashed_address, other_storage_proofs) in other.storage_proofs {
-            self.storage_proofs.entry(hashed_address).or_default().extend(other_storage_proofs);
         }
     }
 }
