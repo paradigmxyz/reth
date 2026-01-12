@@ -94,8 +94,6 @@
 
 /// Support for backfill sync mode.
 pub mod backfill;
-/// Caching components for the engine tree.
-pub mod cache;
 /// The type that drives the chain forward.
 pub mod chain;
 /// Support for downloading blocks on demand for live sync.

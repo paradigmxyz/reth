@@ -1,6 +1,5 @@
 use super::*;
 use crate::{
-    cache::changeset_cache::ChangesetCache,
     persistence::PersistenceAction,
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
@@ -8,6 +7,7 @@ use crate::{
         PersistTarget, TreeConfig,
     },
 };
+use reth_trie_db::changesets::ChangesetCacheHandle;
 
 use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS};
 use alloy_primitives::{
@@ -33,7 +33,7 @@ use std::{
     str::FromStr,
     sync::{
         mpsc::{Receiver, Sender},
-        Arc, RwLock,
+        Arc,
     },
 };
 use tokio::sync::oneshot;
@@ -193,7 +193,7 @@ impl TestHarness {
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
-        let changeset_cache = Arc::new(RwLock::new(ChangesetCache::new(EPOCH_SLOTS * 2)));
+        let changeset_cache = ChangesetCacheHandle::new(EPOCH_SLOTS * 2);
         let engine_validator = BasicEngineValidator::new(
             provider.clone(),
             consensus.clone(),
@@ -391,7 +391,7 @@ impl ValidatorTestHarness {
         let provider = harness.provider.clone();
         let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
-        let changeset_cache = Arc::new(RwLock::new(ChangesetCache::new(EPOCH_SLOTS * 2)));
+        let changeset_cache = ChangesetCacheHandle::new(EPOCH_SLOTS * 2);
 
         let validator = BasicEngineValidator::new(
             provider,

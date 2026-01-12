@@ -1,11 +1,9 @@
 //! Builder support for rpc components.
 
 pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
-pub use reth_engine_tree::{
-    cache::changeset_cache::ChangesetCache,
-    tree::{BasicEngineValidator, EngineValidator},
-};
+pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
 pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
+pub use reth_trie_db::changesets::ChangesetCacheHandle;
 
 use crate::{
     invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
@@ -46,7 +44,7 @@ use std::{
     fmt::{self, Debug},
     future::Future,
     ops::{Deref, DerefMut},
-    sync::{Arc, RwLock},
+    sync::Arc,
 };
 use tokio::sync::oneshot;
 
@@ -1345,7 +1343,7 @@ where
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
 
         // Cache size is 2 epochs (64 blocks) to cover the finalization window
-        let changeset_cache = Arc::new(RwLock::new(ChangesetCache::new(EPOCH_SLOTS * 2)));
+        let changeset_cache = ChangesetCacheHandle::new(EPOCH_SLOTS * 2);
 
         Ok(BasicEngineValidator::new(
             ctx.node.provider().clone(),

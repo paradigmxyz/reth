@@ -1,17 +1,14 @@
 //! Types and traits for validating blocks and payloads.
 
-use crate::{
-    cache::changeset_cache::ChangesetCacheHandle,
-    tree::{
-        cached_state::CachedStateProvider,
-        error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-        instrumented_state::InstrumentedStateProvider,
-        payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
-        precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
-        sparse_trie::StateRootComputeOutcome,
-        EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
-        StateProviderDatabase, TreeConfig,
-    },
+use crate::tree::{
+    cached_state::CachedStateProvider,
+    error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
+    instrumented_state::InstrumentedStateProvider,
+    payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
+    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+    sparse_trie::StateRootComputeOutcome,
+    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
+    StateProviderDatabase, TreeConfig,
 };
 use alloy_consensus::transaction::Either;
 use alloy_eip7928::BlockAccessList;
@@ -44,6 +41,7 @@ use reth_provider::{
 };
 use reth_revm::db::State;
 use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
+use reth_trie_db::changesets::ChangesetCacheHandle;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
 use std::{
@@ -440,7 +438,7 @@ where
         // multiproofs)
         let overlay_factory = {
             let TrieInputSorted { nodes, state, .. } = &trie_input;
-            OverlayStateProviderFactory::new(self.provider.clone())
+            OverlayStateProviderFactory::new(self.provider.clone(), self.changeset_cache.clone())
                 .with_block_hash(Some(block_hash_for_overlay))
                 .with_trie_overlay(Some(Arc::clone(nodes)))
                 .with_hashed_state_overlay(Some(Arc::clone(state)))
@@ -1093,7 +1091,7 @@ where
         // Capture block info and cache handle for changeset computation
         let block_hash = block.hash();
         let block_number = block.number();
-        let changeset_cache = Arc::clone(&self.changeset_cache);
+        let changeset_cache = self.changeset_cache.clone();
 
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
@@ -1150,8 +1148,7 @@ where
                             "Computed and caching changesets"
                         );
 
-                        let mut cache = changeset_cache.write().unwrap();
-                        cache.insert(block_hash, block_number, Arc::new(changesets));
+                        changeset_cache.insert(block_hash, block_number, Arc::new(changesets));
                     }
                     Err(e) => {
                         warn!(

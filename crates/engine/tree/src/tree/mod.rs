@@ -1,6 +1,5 @@
 use crate::{
     backfill::{BackfillAction, BackfillSyncState},
-    cache::changeset_cache::ChangesetCacheHandle,
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
@@ -36,6 +35,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
+use reth_trie_db::changesets::ChangesetCacheHandle;
 use revm::state::EvmState;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Instant};
@@ -356,9 +356,7 @@ where
             engine_kind,
             evm_config,
             // Cache size is 2 epochs (64 blocks) to cover the finalization window
-            changeset_cache: Arc::new(std::sync::RwLock::new(
-                crate::cache::changeset_cache::ChangesetCache::new(EPOCH_SLOTS * 2),
-            )),
+            changeset_cache: ChangesetCacheHandle::new(EPOCH_SLOTS * 2),
         }
     }
 

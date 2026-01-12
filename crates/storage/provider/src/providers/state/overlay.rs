@@ -7,7 +7,7 @@ use reth_metrics::Metrics;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader, TrieReader,
 };
 use reth_trie::{
@@ -17,7 +17,8 @@ use reth_trie::{
     HashedPostStateSorted, KeccakKeyHasher,
 };
 use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
+    changesets::ChangesetCacheHandle, DatabaseHashedCursorFactory, DatabaseHashedPostState,
+    DatabaseTrieCursorFactory,
 };
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -67,6 +68,8 @@ pub struct OverlayStateProviderFactory<F> {
     trie_overlay: Option<Arc<TrieUpdatesSorted>>,
     /// Optional hashed state overlay
     hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
+    /// Changeset cache handle for retrieving trie changesets
+    changeset_cache: ChangesetCacheHandle,
     /// Metrics for tracking provider operations
     metrics: OverlayStateProviderMetrics,
     /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
@@ -76,12 +79,13 @@ pub struct OverlayStateProviderFactory<F> {
 
 impl<F> OverlayStateProviderFactory<F> {
     /// Create a new overlay state provider factory
-    pub fn new(factory: F) -> Self {
+    pub fn new(factory: F, changeset_cache: ChangesetCacheHandle) -> Self {
         Self {
             factory,
             block_hash: None,
             trie_overlay: None,
             hashed_state_overlay: None,
+            changeset_cache,
             metrics: OverlayStateProviderMetrics::default(),
             overlay_cache: Default::default(),
         }
@@ -233,16 +237,41 @@ where
             self.get_requested_block_number(provider)? &&
             self.reverts_required(provider, db_tip_block, from_block)?
         {
-            // Collect trie reverts
+            // Collect trie reverts using changeset cache
             let mut trie_reverts = {
                 let _guard =
                     debug_span!(target: "providers::state::overlay", "Retrieving trie reverts")
                         .entered();
 
                 let start = Instant::now();
-                let res = provider.trie_reverts(from_block + 1)?;
+
+                // Use changeset cache to retrieve and accumulate reverts block by block.
+                // Iterate in reverse order (newest to oldest) so that older changesets
+                // take precedence when there are conflicting updates.
+                let mut accumulated_reverts = TrieUpdatesSorted::default();
+
+                for block_number in ((from_block + 1)..=db_tip_block).rev() {
+                    // Get the block hash for this block number
+                    let block_hash = provider.block_hash(block_number)?.ok_or_else(|| {
+                        ProviderError::other(std::io::Error::new(
+                            std::io::ErrorKind::NotFound,
+                            format!("block hash not found for block number {}", block_number),
+                        ))
+                    })?;
+
+                    // Get changesets from cache (or compute on-the-fly)
+                    let changesets =
+                        self.changeset_cache.get_or_compute(block_hash, block_number, provider)?;
+
+                    // Overlay this block's changesets on top of accumulated reverts.
+                    // Since we iterate newest to oldest, older values are added last
+                    // and overwrite any conflicting newer values (oldest changeset values to take
+                    // precedence).
+                    accumulated_reverts.extend_ref(&changesets);
+                }
+
                 retrieve_trie_reverts_duration = start.elapsed();
-                res
+                accumulated_reverts
             };
 
             // Collect state reverts
