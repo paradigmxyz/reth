@@ -20,7 +20,11 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
 };
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{
+    collections::{hash_map::Entry, BTreeMap},
+    sync::Arc,
+    time::Instant,
+};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -55,6 +59,14 @@ const PREFETCH_MAX_BATCH_TARGETS: usize = 512;
 /// Maximum number of prefetch messages to batch together.
 /// Prevents excessive batching even with small messages.
 const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
+
+/// Maximum number of targets to batch together for state updates.
+/// Lower than prefetch because state updates require additional processing (hashing, state
+/// partitioning) before dispatch.
+const STATE_UPDATE_MAX_BATCH_TARGETS: usize = 64;
+
+/// Preallocation hint for state update batching to avoid repeated reallocations on small bursts.
+const STATE_UPDATE_BATCH_PREALLOC: usize = 16;
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
@@ -406,6 +418,8 @@ pub(crate) struct MultiProofTaskMetrics {
 
     /// Histogram of prefetch proof batch sizes (number of messages merged).
     pub prefetch_batch_size_histogram: Histogram,
+    /// Histogram of state update batch sizes (number of messages merged).
+    pub state_update_batch_size_histogram: Histogram,
 
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
@@ -879,6 +893,95 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
+                let update = if self
+                    .multiproof_manager
+                    .proof_worker_handle
+                    .available_account_workers() >
+                    0
+                {
+                    update
+                } else {
+                    // Accumulate messages including the first one; reuse buffer to avoid
+                    // allocations.
+                    let mut accumulated_targets = estimate_evm_state_targets(&update);
+                    ctx.accumulated_state_updates.clear();
+                    ctx.accumulated_state_updates.push(update);
+
+                    // Batch consecutive state update messages up to target limit.
+                    while accumulated_targets < STATE_UPDATE_MAX_BATCH_TARGETS {
+                        match self.rx.try_recv() {
+                            Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
+                                let next_estimate = estimate_evm_state_targets(&next_update);
+                                // Would exceed batch cap; leave pending to dispatch on next
+                                // iteration.
+                                if accumulated_targets + next_estimate >
+                                    STATE_UPDATE_MAX_BATCH_TARGETS
+                                {
+                                    ctx.pending_msg = Some(MultiProofMessage::StateUpdate(
+                                        next_source,
+                                        next_update,
+                                    ));
+                                    break;
+                                }
+                                accumulated_targets += next_estimate;
+                                ctx.accumulated_state_updates.push(next_update);
+                            }
+                            Ok(other_msg) => {
+                                ctx.pending_msg = Some(other_msg);
+                                break;
+                            }
+                            Err(_) => break,
+                        }
+                    }
+
+                    // Process all accumulated messages in a single batch
+                    let num_batched = ctx.accumulated_state_updates.len();
+                    self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
+
+                    // Merge all accumulated updates into a single EvmState payload.
+                    // Use drain to preserve the buffer allocation.
+                    let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
+                    let mut merged_update = accumulated_iter
+                        .next()
+                        .expect("state update batch always has at least one entry");
+                    for next_update in accumulated_iter {
+                        for (address, acc) in next_update {
+                            match merged_update.entry(address) {
+                                Entry::Vacant(vacant) => {
+                                    vacant.insert(acc);
+                                }
+                                Entry::Occupied(mut occupied) => {
+                                    let value = occupied.get_mut();
+
+                                    if value.is_selfdestructed() {
+                                        // If account was selfdestructed before, we can just replace
+                                        // its storage
+                                        value.storage = acc.storage;
+                                    } else {
+                                        // Otherwise, we need to update the existing storage
+                                        for (slot, new_value) in acc.storage {
+                                            match value.storage.entry(slot) {
+                                                Entry::Vacant(vacant) => {
+                                                    vacant.insert(new_value);
+                                                }
+                                                Entry::Occupied(mut occupied) => {
+                                                    occupied.get_mut().present_value =
+                                                        new_value.present_value;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    value.info = acc.info;
+                                    value.status |= acc.status;
+                                    value.transaction_id = acc.transaction_id;
+                                }
+                            }
+                        }
+                    }
+
+                    merged_update
+                };
                 let update_len = update.len();
                 batch_metrics.state_update_proofs_requested += self.on_state_update(source, update);
                 trace!(
@@ -1153,6 +1256,8 @@ struct MultiproofBatchCtx {
     updates_finished_time: Option<Instant>,
     /// Reusable buffer for accumulating prefetch targets during batching.
     accumulated_prefetch_targets: Vec<MultiProofTargets>,
+    /// Reusable buffer for accumulating state updates during batching.
+    accumulated_state_updates: Vec<EvmState>,
 }
 
 impl MultiproofBatchCtx {
@@ -1164,6 +1269,7 @@ impl MultiproofBatchCtx {
             start,
             updates_finished_time: None,
             accumulated_prefetch_targets: Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES),
+            accumulated_state_updates: Vec::with_capacity(STATE_UPDATE_BATCH_PREALLOC),
         }
     }
 
@@ -1268,6 +1374,18 @@ where
 
     dispatch(items);
     1
+}
+
+/// Estimates target count from `EvmState` for batching decisions.
+fn estimate_evm_state_targets(state: &EvmState) -> usize {
+    state
+        .values()
+        .filter(|account| account.is_touched())
+        .map(|account| {
+            let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
+            1 + changed_slots
+        })
+        .sum()
 }
 
 #[cfg(test)]
