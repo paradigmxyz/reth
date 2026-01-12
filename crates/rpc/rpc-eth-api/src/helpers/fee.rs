@@ -97,7 +97,7 @@ pub trait EthFees:
             // For explicit block numbers, validate against chain head before resolution
             if let BlockNumberOrTag::Number(requested) = newest_block {
                 let latest_block =
-                    self.provider().last_block_number().map_err(Self::Error::from_eth_err)?;
+                    self.provider().best_block_number().map_err(Self::Error::from_eth_err)?;
                 if requested > latest_block {
                     return Err(
                         EthApiError::RequestBeyondHead { requested, head: latest_block }.into()
