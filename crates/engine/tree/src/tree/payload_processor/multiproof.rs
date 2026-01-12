@@ -911,20 +911,20 @@ impl MultiProofTask {
                     ctx.merge_state_update(next_source, next_update);
                 }
 
-                let Some((source, update)) = ctx.pending_state_update.take() else {
-                    unreachable!()
-                };
-                let update_len = update.len();
                 if self.multiproof_manager.proof_worker_handle.available_account_workers() > 0 {
+                    let Some((source, update)) = ctx.pending_state_update.take() else {
+                        unreachable!()
+                    };
+                    let update_len = update.len();
                     self.on_state_update(source, update);
+                    trace!(
+                        target: "engine::tree::payload_processor::multiproof",
+                        ?source,
+                        len = update_len,
+                        state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
+                        "Dispatched state update"
+                    );
                 }
-                trace!(
-                    target: "engine::tree::payload_processor::multiproof",
-                    ?source,
-                    len = update_len,
-                    state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
-                    "Dispatched state update"
-                );
 
                 false
             }
