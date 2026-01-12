@@ -9,7 +9,7 @@
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[cfg(feature = "tracy-allocator")]
-use reth_tracing;
+use reth_tracing as _;
 
 pub mod allocator;
 pub mod cancellation;
