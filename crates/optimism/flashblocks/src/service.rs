@@ -98,7 +98,7 @@ where
     }
 
     /// Returns the sender half for the flashblock sequence broadcast channel.
-    pub const fn block_sequence_broadcaster(
+    pub fn block_sequence_broadcaster(
         &self,
     ) -> &tokio::sync::broadcast::Sender<FlashBlockCompleteSequence> {
         self.sequences.block_sequence_broadcaster()
