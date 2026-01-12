@@ -313,6 +313,18 @@ impl<D> ChainPath<D> {
         }
     }
 
+    /// Returns the path to the directory for storing pprof dumps for this chain.
+    ///
+    /// `<DIR>/<CHAIN_ID>/pprof`
+    pub fn pprof_dumps(&self) -> PathBuf {
+        let datadir_args = &self.2;
+        if let Some(pprof_dumps_path) = &datadir_args.pprof_dumps_path {
+            pprof_dumps_path.clone()
+        } else {
+            self.data_dir().join("pprof")
+        }
+    }
+
     /// Returns the path to the `TrieDB` directory.
     ///
     /// `<DIR>/<CHAIN_ID>/triedb`
