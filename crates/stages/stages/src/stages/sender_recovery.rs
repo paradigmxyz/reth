@@ -161,7 +161,6 @@ where
             .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
             .next_tx_num();
 
-        // Prune senders from both database and static files
         EitherWriter::new_senders(provider, unwind_to)?.prune_senders(unwind_tx_from, unwind_to)?;
 
         Ok(UnwindOutput {
