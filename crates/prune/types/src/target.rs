@@ -58,13 +58,7 @@ pub struct PruneModes {
     pub transaction_lookup: Option<PruneMode>,
     /// Receipts pruning configuration. This setting overrides `receipts_log_filter`
     /// and offers improved performance.
-    #[cfg_attr(
-        any(test, feature = "serde"),
-        serde(
-            skip_serializing_if = "Option::is_none",
-            deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<MINIMUM_PRUNING_DISTANCE, _>"
-        )
-    )]
+    #[cfg_attr(any(test, feature = "serde"), serde(skip_serializing_if = "Option::is_none",))]
     pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
     #[cfg_attr(
@@ -85,13 +79,7 @@ pub struct PruneModes {
     )]
     pub storage_history: Option<PruneMode>,
     /// Bodies History pruning configuration.
-    #[cfg_attr(
-        any(test, feature = "serde"),
-        serde(
-            skip_serializing_if = "Option::is_none",
-            deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<MINIMUM_PRUNING_DISTANCE, _>"
-        )
-    )]
+    #[cfg_attr(any(test, feature = "serde"), serde(skip_serializing_if = "Option::is_none",))]
     pub bodies_history: Option<PruneMode>,
     /// Merkle Changesets pruning configuration for `AccountsTrieChangeSets` and
     /// `StoragesTrieChangeSets`.

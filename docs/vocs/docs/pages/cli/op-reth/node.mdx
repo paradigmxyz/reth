@@ -824,6 +824,11 @@ Pruning:
       --full
           Run full node. Only the most recent [`MINIMUM_PRUNING_DISTANCE`] block states are stored
 
+      --minimal
+          Run minimal storage mode with maximum pruning and smaller static files.
+
+          This mode configures the node to use minimal disk space by: - Fully pruning sender recovery, transaction lookup, receipts, and block bodies - Leaving 10,064 blocks for account and storage history - Using 10,000 blocks per static file segment
+
       --prune.block-interval <BLOCK_INTERVAL>
           Minimum pruning interval measured in blocks
 

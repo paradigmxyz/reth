@@ -167,7 +167,8 @@ impl LaunchContext {
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;
 
         // Merge static file CLI arguments with config file, giving priority to CLI
-        toml_config.static_files = config.static_files.merge_with_config(toml_config.static_files);
+        toml_config.static_files =
+            config.static_files.merge_with_config(toml_config.static_files, config.pruning.minimal);
 
         Ok(toml_config)
     }
@@ -1288,6 +1289,7 @@ mod tests {
             let node_config = NodeConfig {
                 pruning: PruningArgs {
                     full: true,
+                    minimal: false,
                     block_interval: None,
                     sender_recovery_full: false,
                     sender_recovery_distance: None,

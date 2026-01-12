@@ -61,14 +61,26 @@ pub struct StaticFilesArgs {
 impl StaticFilesArgs {
     /// Merges the CLI arguments with an existing [`StaticFilesConfig`], giving priority to CLI
     /// args.
-    pub fn merge_with_config(&self, config: StaticFilesConfig) -> StaticFilesConfig {
+    ///
+    /// If `minimal` is true, uses 10,000 blocks per file as the default for headers, transactions,
+    /// and receipts segments.
+    pub fn merge_with_config(&self, config: StaticFilesConfig, minimal: bool) -> StaticFilesConfig {
+        let minimal_blocks_per_file = minimal.then_some(10000);
+
         StaticFilesConfig {
             blocks_per_file: BlocksPerFileConfig {
-                headers: self.blocks_per_file_headers.or(config.blocks_per_file.headers),
+                headers: self
+                    .blocks_per_file_headers
+                    .or(minimal_blocks_per_file)
+                    .or(config.blocks_per_file.headers),
                 transactions: self
                     .blocks_per_file_transactions
+                    .or(minimal_blocks_per_file)
                     .or(config.blocks_per_file.transactions),
-                receipts: self.blocks_per_file_receipts.or(config.blocks_per_file.receipts),
+                receipts: self
+                    .blocks_per_file_receipts
+                    .or(minimal_blocks_per_file)
+                    .or(config.blocks_per_file.receipts),
                 transaction_senders: self
                     .blocks_per_file_transaction_senders
                     .or(config.blocks_per_file.transaction_senders),
