@@ -56,6 +56,7 @@ pub use test_tracer::TestTracer;
 mod formatter;
 mod layers;
 mod test_tracer;
+mod throttle;
 
 use tracing::level_filters::LevelFilter;
 use tracing_appender::non_blocking::WorkerGuard;
