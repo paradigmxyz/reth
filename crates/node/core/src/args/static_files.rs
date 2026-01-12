@@ -56,6 +56,36 @@ pub struct StaticFilesArgs {
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
     #[arg(long = "static-files.account-change-sets")]
     pub account_changesets: bool,
+
+    /// Store transaction hash numbers in RocksDB instead of MDBX.
+    ///
+    /// When enabled, the TransactionHashNumbers index will be stored in RocksDB for better
+    /// performance and reduced MDBX database size.
+    ///
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
+    #[arg(long = "storage.tx-hash-in-rocksdb")]
+    pub tx_hash_in_rocksdb: bool,
+
+    /// Store storage history in RocksDB instead of MDBX.
+    ///
+    /// When enabled, the StoragesHistory index will be stored in RocksDB for better
+    /// performance and reduced MDBX database size.
+    ///
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
+    #[arg(long = "storage.storages-history-in-rocksdb")]
+    pub storages_history_in_rocksdb: bool,
+
+    /// Store account history in RocksDB instead of MDBX.
+    ///
+    /// When enabled, the AccountsHistory index will be stored in RocksDB for better
+    /// performance and reduced MDBX database size.
+    ///
+    /// Note: This setting can only be configured at genesis initialization. Once
+    /// the node has been initialized, changing this flag requires re-syncing from scratch.
+    #[arg(long = "storage.account-history-in-rocksdb")]
+    pub account_history_in_rocksdb: bool,
 }
 
 impl StaticFilesArgs {
@@ -85,5 +115,8 @@ impl StaticFilesArgs {
             .with_receipts_in_static_files(self.receipts)
             .with_transaction_senders_in_static_files(self.transaction_senders)
             .with_account_changesets_in_static_files(self.account_changesets)
+            .with_transaction_hash_numbers_in_rocksdb(self.tx_hash_in_rocksdb)
+            .with_storages_history_in_rocksdb(self.storages_history_in_rocksdb)
+            .with_account_history_in_rocksdb(self.account_history_in_rocksdb)
     }
 }
