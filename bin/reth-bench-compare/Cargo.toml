@@ -71,7 +71,7 @@ jemalloc = [
     "reth-node-core/jemalloc",
 ]
 jemalloc-prof = ["reth-cli-util/jemalloc-prof"]
-tracy-allocator = ["reth-cli-util/tracy-allocator"]
+tracy-allocator = ["reth-cli-util/tracy-allocator", "reth-node-core/tracy"]
 
 min-error-logs = [
     "tracing/release_max_level_error",
