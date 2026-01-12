@@ -645,22 +645,16 @@ impl MultiProofTask {
         num_chunks as u64
     }
 
-    // Returns true if all state updates finished and all proofs processed.
-    fn is_done(
-        &self,
-        proofs_processed: u64,
-        state_update_proofs_requested: u64,
-        prefetch_proofs_requested: u64,
-        updates_finished: bool,
-    ) -> bool {
-        let all_proofs_processed =
-            proofs_processed >= state_update_proofs_requested + prefetch_proofs_requested;
+    /// Returns true if all state updates finished and all pending proofs processed.
+    fn is_done(&self, metrics: &MultiproofBatchMetrics, ctx: &MultiproofBatchCtx) -> bool {
+        let all_proofs_processed = metrics.all_proofs_processed();
         let no_pending = !self.proof_sequencer.has_pending();
+        let updates_finished = ctx.updates_finished();
         trace!(
             target: "engine::tree::payload_processor::multiproof",
-            proofs_processed,
-            state_update_proofs_requested,
-            prefetch_proofs_requested,
+            proofs_processed = metrics.proofs_processed,
+            state_update_proofs_requested = metrics.state_update_proofs_requested,
+            prefetch_proofs_requested = metrics.prefetch_proofs_requested,
             no_pending,
             updates_finished,
             "Checking end condition"
@@ -933,12 +927,7 @@ impl MultiProofTask {
                 ctx.updates_finished_time = Some(Instant::now());
 
                 // Check if we're done (might need to wait for proofs to complete)
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "BAL processed and all proofs complete, ending calculation"
@@ -953,12 +942,7 @@ impl MultiProofTask {
 
                 ctx.updates_finished_time = Some(Instant::now());
 
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "State updates finished and all proofs processed, ending calculation"
@@ -980,12 +964,7 @@ impl MultiProofTask {
                     let _ = self.to_sparse_trie.send(combined_update);
                 }
 
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "State updates finished and all proofs processed, ending calculation"
@@ -1098,12 +1077,7 @@ impl MultiProofTask {
                                 }
                             }
 
-                            if self.is_done(
-                                batch_metrics.proofs_processed,
-                                batch_metrics.state_update_proofs_requested,
-                                batch_metrics.prefetch_proofs_requested,
-                                ctx.updates_finished(),
-                            ) {
+                            if self.is_done(&batch_metrics, &ctx) {
                                 debug!(
                                     target: "engine::tree::payload_processor::multiproof",
                                     "State updates finished and all proofs processed, ending calculation"
@@ -1208,6 +1182,13 @@ struct MultiproofBatchMetrics {
     state_update_proofs_requested: u64,
     /// Number of prefetch proofs requested.
     prefetch_proofs_requested: u64,
+}
+
+impl MultiproofBatchMetrics {
+    /// Returns `true` if all requested proofs have been processed.
+    const fn all_proofs_processed(&self) -> bool {
+        self.proofs_processed >= self.state_update_proofs_requested + self.prefetch_proofs_requested
+    }
 }
 
 /// Returns accounts only with those storages that were not already fetched, and
