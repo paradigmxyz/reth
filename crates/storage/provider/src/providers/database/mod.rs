@@ -309,7 +309,8 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
 
     /// Asserts that the static files and database are consistent. If not,
     /// returns [`ProviderError::MustUnwind`] with the appropriate unwind
-    /// target.
+    /// target. May also return any [`ProviderError`] that
+    /// [`Self::check_consistency`] may return.
     pub fn assert_consistent(self) -> ProviderResult<Self> {
         let (rocksdb_unwind, static_file_unwind) = self.check_consistency()?;
 

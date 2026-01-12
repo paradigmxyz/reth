@@ -1361,7 +1361,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let span = info_span!(
                 "Checking consistency for segment",
                 ?segment,
-                inital_highest_block = tracing::field::Empty,
+                initial_highest_block = tracing::field::Empty,
                 highest_block = tracing::field::Empty,
                 highest_tx = tracing::field::Empty,
             );
@@ -1371,7 +1371,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
             // Heal file-level inconsistencies and get before/after highest block
             let (initial_highest_block, mut highest_block) = self.maybe_heal_segment(segment)?;
-            span.record("inital_highest_block", initial_highest_block);
+            span.record("initial_highest_block", initial_highest_block);
             span.record("highest_block", highest_block);
 
             // Only applies to block-based static files. (Headers)
