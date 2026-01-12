@@ -25,7 +25,6 @@ cfg_if::cfg_if! {
 cfg_if::cfg_if! {
     if #[cfg(feature = "tracy-allocator")] {
         type AllocatorWrapper = tracy_client::ProfiledAllocator<AllocatorInner>;
-        tracy_client::register_demangler!();
         const fn new_allocator_wrapper() -> AllocatorWrapper {
             AllocatorWrapper::new(AllocatorInner {}, 100)
         }
