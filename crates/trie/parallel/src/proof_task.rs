@@ -1381,8 +1381,9 @@ where
             start_time: start,
         } = proof_result_sender;
 
-        let proof_elapsed = proof_start.elapsed();
-        let total_elapsed = start.elapsed();
+        let now = Instant::now();
+        let proof_elapsed = now.duration_since(proof_start);
+        let total_elapsed = now.duration_since(start);
         *account_proofs_processed += 1;
 
         // Send result to MultiProofTask
