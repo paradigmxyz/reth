@@ -1,13 +1,17 @@
 //! Builder support for rpc components.
 
 pub use jsonrpsee::server::middleware::rpc::{RpcService, RpcServiceBuilder};
-pub use reth_engine_tree::tree::{BasicEngineValidator, EngineValidator};
+pub use reth_engine_tree::{
+    cache::changeset_cache::ChangesetCache,
+    tree::{BasicEngineValidator, EngineValidator},
+};
 pub use reth_rpc_builder::{middleware::RethRpcMiddleware, Identity, Stack};
 
 use crate::{
     invalid_block_hook::InvalidBlockHookExt, ConfigureEngineEvm, ConsensusEngineEvent,
     ConsensusEngineHandle,
 };
+use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_rpc_types::engine::ClientVersionV1;
 use alloy_rpc_types_engine::ExecutionData;
 use jsonrpsee::{core::middleware::layer::Either, RpcModule};
@@ -42,7 +46,7 @@ use std::{
     fmt::{self, Debug},
     future::Future,
     ops::{Deref, DerefMut},
-    sync::Arc,
+    sync::{Arc, RwLock},
 };
 use tokio::sync::oneshot;
 
@@ -1339,6 +1343,10 @@ where
         let validator = self.payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
+
+        // Cache size is 2 epochs (64 blocks) to cover the finalization window
+        let changeset_cache = Arc::new(RwLock::new(ChangesetCache::new(EPOCH_SLOTS * 2)));
+
         Ok(BasicEngineValidator::new(
             ctx.node.provider().clone(),
             std::sync::Arc::new(ctx.node.consensus().clone()),
@@ -1346,6 +1354,7 @@ where
             validator,
             tree_config,
             invalid_block_hook,
+            changeset_cache,
         ))
     }
 }

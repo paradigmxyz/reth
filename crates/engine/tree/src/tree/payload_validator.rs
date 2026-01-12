@@ -1,14 +1,17 @@
 //! Types and traits for validating blocks and payloads.
 
-use crate::tree::{
-    cached_state::CachedStateProvider,
-    error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
-    instrumented_state::InstrumentedStateProvider,
-    payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
-    precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
-    sparse_trie::StateRootComputeOutcome,
-    EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
-    StateProviderDatabase, TreeConfig,
+use crate::{
+    cache::changeset_cache::ChangesetCacheHandle,
+    tree::{
+        cached_state::CachedStateProvider,
+        error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
+        instrumented_state::InstrumentedStateProvider,
+        payload_processor::{executor::WorkloadExecutor, PayloadProcessor},
+        precompile_cache::{CachedPrecompile, CachedPrecompileMetrics, PrecompileCacheMap},
+        sparse_trie::StateRootComputeOutcome,
+        EngineApiMetrics, EngineApiTreeState, ExecutionEnv, PayloadHandle, StateProviderBuilder,
+        StateProviderDatabase, TreeConfig,
+    },
 };
 use alloy_consensus::transaction::Either;
 use alloy_eip7928::BlockAccessList;
@@ -129,6 +132,8 @@ where
     metrics: EngineApiMetrics,
     /// Validator for the payload.
     validator: V,
+    /// Changeset cache for in-memory trie changesets
+    changeset_cache: ChangesetCacheHandle,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -160,6 +165,7 @@ where
         validator: V,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
+        changeset_cache: ChangesetCacheHandle,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(
@@ -179,6 +185,7 @@ where
             invalid_block_hook,
             metrics: EngineApiMetrics::default(),
             validator,
+            changeset_cache,
         }
     }
 
@@ -541,7 +548,7 @@ where
             }
 
             let (root, updates) = ensure_ok_post_block!(
-                self.compute_state_root_serial(overlay_factory, &hashed_state),
+                self.compute_state_root_serial(overlay_factory.clone(), &hashed_state),
                 block
             );
             (root, updates, root_time.elapsed())
@@ -578,7 +585,14 @@ where
         // Terminate prewarming task with the shared execution outcome
         handle.terminate_caching(Some(Arc::clone(&execution_outcome)));
 
-        Ok(self.spawn_deferred_trie_task(block, execution_outcome, &ctx, hashed_state, trie_output))
+        Ok(self.spawn_deferred_trie_task(
+            block,
+            execution_outcome,
+            &ctx,
+            hashed_state,
+            trie_output,
+            overlay_factory,
+        ))
     }
 
     /// Return sealed block header from database or in-memory state by hash.
@@ -1052,6 +1066,7 @@ where
         ctx: &TreeCtx<'_, N>,
         hashed_state: HashedPostState,
         trie_output: TrieUpdates,
+        overlay_factory: OverlayStateProviderFactory<P>,
     ) -> ExecutedBlock<N> {
         // Capture parent hash and ancestor overlays for deferred trie input construction.
         let (anchor_hash, overlay_blocks) = ctx
@@ -1075,9 +1090,21 @@ where
         let deferred_handle_task = deferred_trie_data.clone();
         let block_validation_metrics = self.metrics.block_validation.clone();
 
+        // Capture block info and cache handle for changeset computation
+        let block_hash = block.hash();
+        let block_number = block.number();
+        let changeset_cache = Arc::clone(&self.changeset_cache);
+
         // Spawn background task to compute trie data. Calling `wait_cloned` will compute from
         // the stored inputs and cache the result, so subsequent calls return immediately.
         let compute_trie_input_task = move || {
+            let _span = debug_span!(
+                target: "engine::tree::payload_validator",
+                "compute_trie_input_task",
+                block_number
+            )
+            .entered();
+
             let result = panic::catch_unwind(AssertUnwindSafe(|| {
                 let compute_start = Instant::now();
                 let computed = deferred_handle_task.wait_cloned();
@@ -1099,6 +1126,41 @@ where
                     block_validation_metrics
                         .anchored_overlay_hashed_state_size
                         .record(anchored.trie_input.state.total_len() as f64);
+                }
+
+                // Compute and cache changesets using the computed trie_updates
+                let changeset_start = Instant::now();
+
+                // Get a provider from the overlay factory for trie cursor access
+                let changeset_result =
+                    overlay_factory.database_provider_ro().and_then(|provider| {
+                        reth_trie::changesets::compute_trie_changesets(
+                            &provider,
+                            &computed.trie_updates,
+                        )
+                        .map_err(ProviderError::Database)
+                    });
+
+                match changeset_result {
+                    Ok(changesets) => {
+                        debug!(
+                            target: "engine::tree::changeset",
+                            ?block_number,
+                            elapsed = ?changeset_start.elapsed(),
+                            "Computed and caching changesets"
+                        );
+
+                        let mut cache = changeset_cache.write().unwrap();
+                        cache.insert(block_hash, block_number, Arc::new(changesets));
+                    }
+                    Err(e) => {
+                        warn!(
+                            target: "engine::tree::changeset",
+                            ?block_number,
+                            ?e,
+                            "Failed to compute changesets in deferred trie task"
+                        );
+                    }
                 }
             }));
 

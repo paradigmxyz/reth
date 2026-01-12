@@ -1,5 +1,6 @@
 use crate::{
     backfill::{BackfillAction, BackfillSyncState},
+    cache::changeset_cache::ChangesetCacheHandle,
     chain::FromOrchestrator,
     engine::{DownloadRequest, EngineApiEvent, EngineApiKind, EngineApiRequest, FromEngine},
     persistence::PersistenceHandle,
@@ -271,6 +272,8 @@ where
     engine_kind: EngineApiKind,
     /// The EVM configuration.
     evm_config: C,
+    /// Changeset cache for in-memory trie changesets
+    changeset_cache: ChangesetCacheHandle,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -295,6 +298,7 @@ where
             .field("metrics", &self.metrics)
             .field("engine_kind", &self.engine_kind)
             .field("evm_config", &self.evm_config)
+            .field("changeset_cache", &self.changeset_cache)
             .finish()
     }
 }
@@ -351,6 +355,10 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
+            // Cache size is 2 epochs (64 blocks) to cover the finalization window
+            changeset_cache: Arc::new(std::sync::RwLock::new(
+                crate::cache::changeset_cache::ChangesetCache::new(EPOCH_SLOTS * 2),
+            )),
         }
     }
 

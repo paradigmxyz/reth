@@ -141,9 +141,13 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_eips::merge::EPOCH_SLOTS;
     use reth_chainspec::{ChainSpecBuilder, MAINNET};
     use reth_engine_primitives::{BeaconEngineMessage, NoopInvalidBlockHook};
-    use reth_engine_tree::{test_utils::TestPipelineBuilder, tree::BasicEngineValidator};
+    use reth_engine_tree::{
+        cache::changeset_cache::ChangesetCache, test_utils::TestPipelineBuilder,
+        tree::BasicEngineValidator,
+    };
     use reth_ethereum_consensus::EthBeaconConsensus;
     use reth_ethereum_engine_primitives::EthEngineTypes;
     use reth_evm_ethereum::EthEvmConfig;
@@ -156,7 +160,7 @@ mod tests {
     };
     use reth_prune::Pruner;
     use reth_tasks::TokioTaskExecutor;
-    use std::sync::Arc;
+    use std::sync::{Arc, RwLock};
     use tokio::sync::{mpsc::unbounded_channel, watch};
     use tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -188,6 +192,9 @@ mod tests {
         let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);
         let evm_config = EthEvmConfig::new(chain_spec.clone());
 
+        // Cache size is 2 epochs (64 blocks) to cover the finalization window
+        let changeset_cache = Arc::new(RwLock::new(ChangesetCache::new(EPOCH_SLOTS * 2)));
+
         let engine_validator = BasicEngineValidator::new(
             blockchain_db.clone(),
             consensus.clone(),
@@ -195,6 +202,7 @@ mod tests {
             engine_payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            changeset_cache,
         );
 
         let (sync_metrics_tx, _sync_metrics_rx) = unbounded_channel();

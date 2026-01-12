@@ -1,5 +1,6 @@
 use super::*;
 use crate::{
+    cache::changeset_cache::ChangesetCache,
     persistence::PersistenceAction,
     tree::{
         payload_validator::{BasicEngineValidator, TreeCtx, ValidationOutcome},
@@ -8,7 +9,7 @@ use crate::{
     },
 };
 
-use alloy_eips::eip1898::BlockWithParent;
+use alloy_eips::{eip1898::BlockWithParent, merge::EPOCH_SLOTS};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     Bytes, B256,
@@ -32,7 +33,7 @@ use std::{
     str::FromStr,
     sync::{
         mpsc::{Receiver, Sender},
-        Arc,
+        Arc, RwLock,
     },
 };
 use tokio::sync::oneshot;
@@ -192,6 +193,7 @@ impl TestHarness {
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
+        let changeset_cache = Arc::new(RwLock::new(ChangesetCache::new(EPOCH_SLOTS * 2)));
         let engine_validator = BasicEngineValidator::new(
             provider.clone(),
             consensus.clone(),
@@ -199,6 +201,7 @@ impl TestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            changeset_cache,
         );
 
         let tree = EngineApiTreeHandler::new(
@@ -388,6 +391,7 @@ impl ValidatorTestHarness {
         let provider = harness.provider.clone();
         let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
+        let changeset_cache = Arc::new(RwLock::new(ChangesetCache::new(EPOCH_SLOTS * 2)));
 
         let validator = BasicEngineValidator::new(
             provider,
@@ -396,6 +400,7 @@ impl ValidatorTestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
+            changeset_cache,
         );
 
         Self { harness, validator, metrics: TestMetrics::default() }
