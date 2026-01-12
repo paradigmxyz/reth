@@ -493,7 +493,7 @@ where
 
     let expected_state_root = header.state_root();
 
-    // first line can be state root
+    // First line must be the expected state root.
     let dump_state_root = parse_state_root(&mut reader)?;
     if expected_state_root != dump_state_root {
         error!(target: "reth::cli",
@@ -524,7 +524,10 @@ where
 
     info!(target: "reth::cli", "All accounts written to database, starting state root computation (may take some time)");
 
-    // compute and compare state root. this advances the stage checkpoints.
+    // Compute and compare state root.
+    //
+    // NOTE: This writes trie tables (via `TrieWriter`) but does not update stage checkpoints by
+    // itself. Stage checkpoints are updated explicitly below.
     let computed_state_root = compute_state_root(provider_rw, Some(prefix_sets.freeze()))?;
     if computed_state_root == expected_state_root {
         info!(target: "reth::cli",
@@ -783,6 +786,12 @@ mod tests {
         T: Table,
     {
         Ok(tx.cursor_read::<T>()?.walk_range(..)?.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    #[test]
+    fn parse_state_root_requires_root_line() {
+        let mut reader = std::io::BufReader::new(br#"{"balance":"0x0"}\n"#.as_slice());
+        assert!(parse_state_root(&mut reader).is_err());
     }
 
     #[test]
