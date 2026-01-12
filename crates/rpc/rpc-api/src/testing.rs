@@ -42,4 +42,13 @@ pub trait TestingApi {
         &self,
         request: TestingBuildBlockRequestV1,
     ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV5>;
+
+    /// Builds a block using the provided parent, payload attributes, and transactions.
+    ///
+    /// Like testing_buildBlockV1 but skips invalid transactions.
+    #[method(name = "packBlock")]
+    async fn pack_block(
+        &self,
+        request: TestingBuildBlockRequestV1,
+    ) -> jsonrpsee::core::RpcResult<ExecutionPayloadEnvelopeV5>;
 }

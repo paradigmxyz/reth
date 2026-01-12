@@ -115,6 +115,7 @@ impl Command {
             let timestamp = parent_header.timestamp.saturating_add(1);
 
             let request = prepare_payload_request(&chain_spec, timestamp, parent_hash);
+            let new_payload_version = request.new_payload_version;
 
             let (payload, sidecar) = build_payload(&provider, request).await?;
 
@@ -130,8 +131,13 @@ impl Command {
             // Regenerate the payload from the modified block, but keep the original sidecar
             // which contains the actual execution requests data (not just the hash)
             let (payload, _) = ExecutionPayload::from_block_unchecked(block_hash, &block);
-            let (version, params) =
-                payload_to_new_payload(payload, sidecar, false, block.header.withdrawals_root)?;
+            let (version, params) = payload_to_new_payload(
+                payload,
+                sidecar,
+                false,
+                block.header.withdrawals_root,
+                Some(new_payload_version),
+            )?;
 
             debug!(
                 target: "reth-bench",
