@@ -39,9 +39,9 @@ pub struct Command {
     #[arg(long = "jwt-secret", value_name = "JWT_SECRET")]
     jwt_secret: PathBuf,
 
-    /// Optional output directory for benchmark results.
+    /// Output directory for benchmark results and generated payloads.
     #[arg(long, value_name = "OUTPUT")]
-    output: Option<PathBuf>,
+    output: PathBuf,
 }
 
 /// Map a chain ID to a known chain spec.
@@ -64,14 +64,12 @@ impl Command {
         }
 
         // Ensure output directory exists
-        if let Some(ref output) = self.output {
-            if output.is_file() {
-                return Err(eyre::eyre!("Output path must be a directory"));
-            }
-            if !output.exists() {
-                std::fs::create_dir_all(output)?;
-                info!("Created output directory: {:?}", output);
-            }
+        if self.output.is_file() {
+            return Err(eyre::eyre!("Output path must be a directory"));
+        }
+        if !self.output.exists() {
+            std::fs::create_dir_all(&self.output)?;
+            info!("Created output directory: {:?}", self.output);
         }
 
         // Set up authenticated provider (used for both Engine API and eth_ methods)
@@ -115,6 +113,7 @@ impl Command {
             let timestamp = parent_header.timestamp.saturating_add(1);
 
             let request = prepare_payload_request(&chain_spec, timestamp, parent_hash);
+            let new_payload_version = request.new_payload_version;
 
             let (payload, sidecar) = build_payload(&provider, request).await?;
 
@@ -130,8 +129,25 @@ impl Command {
             // Regenerate the payload from the modified block, but keep the original sidecar
             // which contains the actual execution requests data (not just the hash)
             let (payload, _) = ExecutionPayload::from_block_unchecked(block_hash, &block);
-            let (version, params) =
-                payload_to_new_payload(payload, sidecar, false, block.header.withdrawals_root)?;
+            let (version, params) = payload_to_new_payload(
+                payload,
+                sidecar,
+                false,
+                block.header.withdrawals_root,
+                Some(new_payload_version),
+            )?;
+
+            // Save payload to file with version info for replay
+            let payload_path =
+                self.output.join(format!("payload_block_{}.json", block.header.number));
+            let wrapper = serde_json::json!({
+                "version": version as u8,
+                "block_hash": block_hash,
+                "params": params,
+            });
+            let payload_json = serde_json::to_string_pretty(&wrapper)?;
+            std::fs::write(&payload_path, &payload_json)?;
+            info!(block_number = block.header.number, path = %payload_path.display(), "Saved payload");
 
             debug!(
                 target: "reth-bench",
@@ -186,9 +202,7 @@ impl Command {
         let (gas_output_results, combined_results): (Vec<TotalGasRow>, Vec<CombinedResult>) =
             results.into_iter().unzip();
 
-        if let Some(ref path) = self.output {
-            write_benchmark_results(path, &gas_output_results, combined_results)?;
-        }
+        write_benchmark_results(&self.output, &gas_output_results, combined_results)?;
 
         let final_gas_limit = parent_header.gas_limit;
         let gas_output = TotalGasOutput::new(gas_output_results)?;
