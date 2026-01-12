@@ -25,7 +25,7 @@ use reth_node_types::{
 };
 use reth_primitives_traits::{RecoveredBlock, SealedHeader};
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
-use reth_stages_types::{StageCheckpoint, StageId};
+use reth_stages_types::{PipelineTarget, StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, NodePrimitivesProvider, StorageSettings, StorageSettingsCache,
@@ -40,8 +40,7 @@ use std::{
     path::Path,
     sync::Arc,
 };
-
-use tracing::trace;
+use tracing::{instrument, trace};
 
 mod provider;
 pub use provider::{
@@ -284,6 +283,30 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         let state_provider = provider.try_into_history_at_block(block_number)?;
         trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
         Ok(state_provider)
+    }
+
+    /// Checks the consistency between the static files and the database. This
+    /// may result in static files being pruned or otherwise healed to ensure
+    /// consistency. I.e. this MAY result in writes to the static files.
+    #[instrument(err, skip(self))]
+    pub fn check_consistency(&self) -> ProviderResult<(Option<u64>, Option<u64>)> {
+        let provider_ro = self.database_provider_ro()?;
+
+        // Step 1: heal file-level inconsistencies (no pruning)
+        self.static_file_provider().check_file_consistency(&provider_ro)?;
+
+        // Step 2: RocksDB consistency check (needs static files tx data)
+        let rocksdb_unwind = self.rocksdb_provider().check_consistency(&provider_ro)?;
+
+        // Step 3: Static file checkpoint consistency (may prune)
+        let static_file_unwind = self.static_file_provider().check_consistency(&provider_ro)?.map(
+            |target| match target {
+                PipelineTarget::Unwind(block) => block,
+                PipelineTarget::Sync(_) => unreachable!("check_consistency returns Unwind"),
+            },
+        );
+
+        Ok((rocksdb_unwind, static_file_unwind))
     }
 }
 
