@@ -7686,6 +7686,7 @@ dependencies = [
 name = "reth-bench"
 version = "1.9.3"
 dependencies = [
+ "alloy-consensus",
  "alloy-eips",
  "alloy-json-rpc",
  "alloy-network",
@@ -7708,9 +7709,11 @@ dependencies = [
  "op-alloy-consensus",
  "op-alloy-rpc-types-engine",
  "reqwest",
+ "reth-chainspec",
  "reth-cli-runner",
  "reth-cli-util",
  "reth-engine-primitives",
+ "reth-ethereum-primitives",
  "reth-fs-util",
  "reth-node-api",
  "reth-node-core",

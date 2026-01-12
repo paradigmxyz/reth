@@ -49,6 +49,7 @@ impl Command {
             auth_provider,
             mut next_block,
             is_optimism,
+            ..
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let buffer_size = self.rpc_block_buffer_size;

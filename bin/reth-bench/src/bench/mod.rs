@@ -6,6 +6,8 @@ use reth_node_core::args::LogArgs;
 use reth_tracing::FileWorkerGuard;
 
 mod context;
+mod gas_limit_ramp;
+pub(crate) mod helpers;
 mod new_payload_fcu;
 mod new_payload_only;
 mod output;
@@ -26,6 +28,9 @@ pub struct BenchmarkCommand {
 pub enum Subcommands {
     /// Benchmark which calls `newPayload`, then `forkchoiceUpdated`.
     NewPayloadFcu(new_payload_fcu::Command),
+
+    /// Benchmark which builds empty blocks with a ramped gas limit.
+    GasLimitRamp(gas_limit_ramp::Command),
 
     /// Benchmark which only calls subsequent `newPayload` calls.
     NewPayloadOnly(new_payload_only::Command),
@@ -51,6 +56,7 @@ impl BenchmarkCommand {
 
         match self.command {
             Subcommands::NewPayloadFcu(command) => command.execute(ctx).await,
+            Subcommands::GasLimitRamp(command) => command.execute(ctx).await,
             Subcommands::NewPayloadOnly(command) => command.execute(ctx).await,
             Subcommands::SendPayload(command) => command.execute(ctx).await,
         }
