@@ -13,7 +13,9 @@ use reth_rpc_eth_types::{
     fee_history::calculate_reward_percentiles_for_block, utils::checked_blob_gas_used_ratio,
     EthApiError, FeeHistoryCache, FeeHistoryEntry, GasPriceOracle, RpcInvalidTransactionError,
 };
-use reth_storage_api::{BlockIdReader, BlockReaderIdExt, HeaderProvider, ProviderHeader};
+use reth_storage_api::{
+    BlockIdReader, BlockNumReader, BlockReaderIdExt, HeaderProvider, ProviderHeader,
+};
 use tracing::debug;
 
 /// Fee related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
@@ -90,6 +92,17 @@ pub trait EthFees:
             if newest_block.is_pending() {
                 // cap the target block since we don't have fee history for the pending block
                 newest_block = BlockNumberOrTag::Latest;
+            }
+
+            // For explicit block numbers, validate against chain head before resolution
+            if let BlockNumberOrTag::Number(requested) = newest_block {
+                let latest_block =
+                    self.provider().last_block_number().map_err(Self::Error::from_eth_err)?;
+                if requested > latest_block {
+                    return Err(
+                        EthApiError::RequestBeyondHead { requested, head: latest_block }.into()
+                    )
+                }
             }
 
             let end_block = self
