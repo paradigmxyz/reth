@@ -976,10 +976,7 @@ mod tests {
 mod rocksdb_tests {
     use super::*;
     use crate::{
-        providers::{
-            rocksdb::{RocksDBBuilder, RocksDBProvider},
-            HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,
-        },
+        providers::rocksdb::{RocksDBBuilder, RocksDBProvider},
         test_utils::create_test_provider_factory,
         RocksDBProviderFactory,
     };
