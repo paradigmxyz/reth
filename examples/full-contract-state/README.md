@@ -25,8 +25,8 @@ export RETH_DATADIR="/path/to/your/reth/datadir"
 # Set target contract address
 export CONTRACT_ADDRESS="0x0..."
 
-# Run the example
-cargo run --example full-contract-state
+# Run the example (workspace package name)
+cargo run -p example-full-contract-state
 ```
 
 ## Code Structure
