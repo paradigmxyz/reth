@@ -7,7 +7,7 @@ use reth_db_api::{
     table::Value,
     tables,
     transaction::{DbTx, DbTxMut},
-    DbTxUnwindExt, RawValue,
+    RawValue,
 };
 use reth_primitives_traits::{GotExpected, NodePrimitives, SignedTransaction};
 use reth_provider::{
@@ -155,12 +155,14 @@ where
     ) -> Result<UnwindOutput, StageError> {
         let (_, unwind_to, _) = input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        // Lookup latest tx id that we should unwind to
-        let latest_tx_id = provider
+        // Lookup the next tx id after unwind_to block (first tx to remove)
+        let unwind_tx_from = provider
             .block_body_indices(unwind_to)?
             .ok_or(ProviderError::BlockBodyIndicesNotFound(unwind_to))?
-            .last_tx_num();
-        provider.tx_ref().unwind_table_by_num::<tables::TransactionSenders>(latest_tx_id)?;
+            .next_tx_num();
+
+        // Prune senders from both database and static files
+        EitherWriter::new_senders(provider, unwind_to)?.prune_senders(unwind_tx_from, unwind_to)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)
