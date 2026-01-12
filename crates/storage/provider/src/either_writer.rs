@@ -710,7 +710,7 @@ impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::StoragesHistory>,
 {
-    /// Gets a storage history entry.
+    /// Gets a storage history shard entry for the given [`StorageShardedKey`], if present.
     pub fn get_storage_history(
         &mut self,
         key: StorageShardedKey,
@@ -776,7 +776,7 @@ impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
 where
     CURSOR: DbCursorRO<tables::AccountsHistory>,
 {
-    /// Gets an account history entry.
+    /// Gets an account history shard entry for the given [`ShardedKey`], if present.
     pub fn get_account_history(
         &mut self,
         key: ShardedKey<Address>,
@@ -1439,7 +1439,7 @@ mod rocksdb_tests {
     /// 1. Single shard - basic lookups within one shard
     /// 2. Multiple shards - `prev()` shard detection and transitions
     /// 3. No history - query address with no entries
-    /// 4. Pruned before first entry - `lowest_available` boundary behavior
+    /// 4. Pruning boundary - `lowest_available` boundary behavior (block at/after boundary)
     #[test]
     fn test_account_history_info_both_backends() {
         let address = Address::from([0x42; 20]);
@@ -1601,10 +1601,8 @@ mod rocksdb_tests {
         );
     }
 
-    /// Test that `RocksDB` commits happen at `provider.commit()` level, not at writer level.
-    ///
-    /// This ensures all storage commits (MDBX, static files, `RocksDB`) happen atomically
-    /// in a single place, making it easier to reason about commit ordering and consistency.
+    /// Test that `RocksDB` batches created via `EitherWriter` are only made visible when
+    /// `provider.commit()` is called, not when the writer is dropped.
     #[test]
     fn test_rocksdb_commits_at_provider_level() {
         let factory = create_test_provider_factory();
