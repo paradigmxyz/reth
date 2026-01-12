@@ -6,6 +6,7 @@ use reth_chainspec::EthereumHardforks;
 use reth_payload_validator::{cancun, prague, shanghai};
 use reth_primitives_traits::{Block as _, SealedBlock, SignedTransaction};
 use std::sync::Arc;
+use tracing::info;
 
 /// Execution payload validator.
 #[derive(Clone, Debug)]
@@ -77,6 +78,15 @@ where
 
     // First parse the block
     let sealed_block = payload.try_into_block_with_sidecar(&sidecar)?.seal_slow();
+
+    info!(
+        target: "engine::payload_validator",
+        header = ?sealed_block.header(),
+        computed_hash = ?sealed_block.hash(),
+        expected_hash = ?expected_hash,
+        ?sidecar,
+        "Validating payload block hash"
+    );
 
     // Ensure the hash included in the payload matches the block hash
     if expected_hash != sealed_block.hash() {

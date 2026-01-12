@@ -173,7 +173,7 @@ pub(crate) fn block_to_new_payload(
 
     // Convert to execution payload
     let (payload, sidecar) = ExecutionPayload::from_block_slow(&block);
-    payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root)
+    payload_to_new_payload(payload, sidecar, is_optimism, block.withdrawals_root, None)
 }
 
 pub(crate) fn payload_to_new_payload(
@@ -181,18 +181,22 @@ pub(crate) fn payload_to_new_payload(
     sidecar: ExecutionPayloadSidecar,
     is_optimism: bool,
     withdrawals_root: Option<B256>,
+    target_version: Option<EngineApiMessageVersion>,
 ) -> eyre::Result<(EngineApiMessageVersion, serde_json::Value)> {
     let (version, params) = match payload {
         ExecutionPayload::V3(payload) => {
             let cancun = sidecar.cancun().unwrap();
 
             if let Some(prague) = sidecar.prague() {
+                // Use target version if provided (for Osaka), otherwise default to V4
+                let version = target_version.unwrap_or(EngineApiMessageVersion::V4);
+
                 if is_optimism {
                     let withdrawals_root = withdrawals_root.ok_or_else(|| {
                         eyre::eyre!("Missing withdrawals root for Optimism payload")
                     })?;
                     (
-                        EngineApiMessageVersion::V4,
+                        version,
                         serde_json::to_value((
                             OpExecutionPayloadV4 { payload_inner: payload, withdrawals_root },
                             cancun.versioned_hashes.clone(),
@@ -208,7 +212,7 @@ pub(crate) fn payload_to_new_payload(
                         .cloned()
                         .ok_or_else(|| eyre::eyre!("Prague sidecar has hash, not requests"))?;
                     (
-                        EngineApiMessageVersion::V4,
+                        version,
                         serde_json::to_value((
                             payload,
                             cancun.versioned_hashes.clone(),
