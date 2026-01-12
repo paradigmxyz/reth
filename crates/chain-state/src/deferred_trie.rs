@@ -178,8 +178,7 @@ impl DeferredTrieData {
                 Some(AnchoredTrieInput { anchor_hash: parent_anchor, trie_input })
                     if *parent_anchor == anchor_hash =>
                 {
-                    // O(1): Reuse parent's overlay via Arc::clone (refcount bump only).
-                    // COW via Arc::make_mut will clone only if we actually mutate.
+                    // O(1): Reuse parent's overlay
                     TrieInputSorted::new(
                         Arc::clone(&trie_input.nodes),
                         Arc::clone(&trie_input.state),
@@ -188,7 +187,7 @@ impl DeferredTrieData {
                 }
                 // Case 2: Parent exists but anchor mismatch or no cached overlay.
                 // We must rebuild from the ancestors list (which only contains unpersisted blocks).
-                _ => Self::merge_ancestors_into_overlay(ancestors)
+                _ => Self::merge_ancestors_into_overlay(ancestors),
             }
         } else {
             // Case 3: No in-memory ancestors (first block after persisted anchor).
