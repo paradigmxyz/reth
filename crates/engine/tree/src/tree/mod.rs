@@ -2573,7 +2573,8 @@ where
         self.metrics.engine.executed_blocks.set(self.state.tree_state.block_count() as f64);
 
         // emit insert event
-        let elapsed = start.elapsed();
+        let end = Instant::now();
+        let elapsed = end.duration_since(start);
         let engine_event = if is_fork {
             ConsensusEngineEvent::ForkBlockAdded(executed, elapsed)
         } else {
@@ -2584,7 +2585,7 @@ where
         self.metrics
             .engine
             .block_insert_total_duration
-            .record(block_insert_start.elapsed().as_secs_f64());
+            .record(end.duration_since(block_insert_start).as_secs_f64());
         debug!(target: "engine::tree", block=?block_num_hash, "Finished inserting block");
         Ok(InsertPayloadOk::Inserted(BlockStatus::Valid))
     }
