@@ -28,7 +28,7 @@ pub fn get_or_create_jwt_secret_from_path(path: &Path) -> Result<JwtSecret, JwtE
         debug!(target: "reth::cli", ?path, "Reading JWT auth secret file");
         JwtSecret::from_file(path)
     } else {
-        info!(target: "reth::cli", ?path, "Creating JWT auth secret file");
+        debug!(target: "reth::cli", ?path, "Creating JWT auth secret file");
         JwtSecret::try_create_random(path)
     }
 }

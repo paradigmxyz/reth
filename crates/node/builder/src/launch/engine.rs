@@ -99,7 +99,7 @@ impl EngineNodeLauncher {
             // Create the provider factory
             .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>().await?
             .inspect(|_| {
-                info!(target: "reth::cli", "Database opened");
+                debug!(target: "reth::cli", "Database opened");
             })
             .with_prometheus_server().await?
             .inspect(|this| {
@@ -137,7 +137,7 @@ impl EngineNodeLauncher {
 
         let static_file_producer = ctx.static_file_producer();
         let static_file_producer_events = static_file_producer.lock().events();
-        info!(target: "reth::cli", "StaticFileProducer initialized");
+        debug!(target: "reth::cli", "StaticFileProducer initialized");
 
         let consensus = Arc::new(ctx.components().consensus().clone());
 
@@ -168,7 +168,7 @@ impl EngineNodeLauncher {
         }
         let pruner = pruner_builder.build_with_provider_factory(ctx.provider_factory().clone());
         let pruner_events = pruner.events();
-        info!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
+        debug!(target: "reth::cli", prune_config=?ctx.prune_config().unwrap_or_default(), "Pruner initialized");
 
         let event_sender = EventSender::default();
 

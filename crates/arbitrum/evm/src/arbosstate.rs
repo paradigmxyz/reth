@@ -83,7 +83,7 @@ impl<D: Database> ArbosState<D> {
             return Err("ArbOS uninitialized");
         }
 
-        tracing::warn!(target: "arb::arbosstate", "[ITER118] ArbosState::open creating network_fee_account with B256::ZERO and offset={}", NETWORK_FEE_ACCOUNT_OFFSET);
+        tracing::trace!(target: "arb::arbosstate", "[ITER118] ArbosState::open creating network_fee_account with B256::ZERO and offset={}", NETWORK_FEE_ACCOUNT_OFFSET);
         let network_fee_account = StorageBackedAddress::new(state, B256::ZERO, NETWORK_FEE_ACCOUNT_OFFSET);
 
         Ok(Self {
@@ -159,7 +159,7 @@ impl<D: Database> ArbosState<D> {
 
     pub fn get_network_fee_account(&self) -> Result<Address, ()> {
         let result = self.network_fee_account.get();
-        tracing::warn!(target: "arb::arbosstate", "[ITER118] get_network_fee_account result={:?}", result);
+        tracing::trace!(target: "arb::arbosstate", "[ITER118] get_network_fee_account result={:?}", result);
         result
     }
 

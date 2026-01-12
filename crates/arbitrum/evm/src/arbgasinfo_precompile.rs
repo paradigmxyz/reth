@@ -81,7 +81,7 @@ pub fn create_arbgasinfo_precompile() -> DynPrecompile {
 fn arbgasinfo_precompile_handler(mut input: PrecompileInput<'_>) -> PrecompileResult {
     let data = input.data;
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::arbgasinfo_precompile",
         data_len = data.len(),
         caller = ?input.caller,
@@ -95,7 +95,7 @@ fn arbgasinfo_precompile_handler(mut input: PrecompileInput<'_>) -> PrecompileRe
     
     let selector: [u8; 4] = [data[0], data[1], data[2], data[3]];
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::arbgasinfo_precompile",
         selector = ?format!("0x{:02x}{:02x}{:02x}{:02x}", selector[0], selector[1], selector[2], selector[3]),
         "ArbGasInfo selector"

@@ -40,10 +40,10 @@ where
         exec_data: ArbExecutionData,
     ) -> Result<RecoveredBlock<Self::Block>, NewPayloadError> {
         let expected_hash = exec_data.block_hash();
-        tracing::info!(target: "arb-reth::engine", %expected_hash, "arb engine: start ensure_well_formed_payload");
+        tracing::debug!(target: "arb-reth::engine", %expected_hash, "arb engine: start ensure_well_formed_payload");
         let txs_len = exec_data.payload.as_v1().transactions.len();
         let has_pbbr = exec_data.sidecar.parent_beacon_block_root.is_some();
-        tracing::info!(target: "arb-reth::engine", txs_len, has_pbbr, "arb engine: arb payload summary before decode");
+        tracing::debug!(target: "arb-reth::engine", txs_len, has_pbbr, "arb engine: arb payload summary before decode");
 
         let sealed_block = {
             let block = exec_data
@@ -52,8 +52,7 @@ where
                     tracing::warn!(target: "arb-reth::engine", err=%e, "arb engine: failed to decode arb payload");
                     NewPayloadError::Other(format!("failed to decode arb payload: {e}").into())
                 })?;
-            // Debug: log header fields before sealing
-            tracing::info!(
+            tracing::debug!(
                 target: "arb-reth::engine",
                 txs_root=%block.header.transactions_root,
                 state_root=%block.header.state_root,

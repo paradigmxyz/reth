@@ -71,7 +71,7 @@ where
         {
             let provider = ctx.node.provider();
             if let Ok(best) = provider.best_block_number() {
-                reth_tracing::tracing::info!(target: "arb-reth::rpc", best_number = best, "rpc: initial provider head");
+                reth_tracing::tracing::debug!(target: "arb-reth::rpc", best_number = best, "rpc: initial provider head");
             }
         }
 

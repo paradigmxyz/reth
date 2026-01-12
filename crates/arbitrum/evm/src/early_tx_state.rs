@@ -14,7 +14,7 @@ pub fn set_early_tx_gas(tx_hash: B256, gas_used: u64, cumulative_gas: u64) {
 }
 
 pub fn set_early_tx_gas_with_status(tx_hash: B256, gas_used: u64, cumulative_gas: u64, success: bool) {
-    tracing::info!(
+    tracing::debug!(
         target: "arb-reth::gas-tracking",
         tx_hash = ?tx_hash,
         gas_used = gas_used,
@@ -32,7 +32,7 @@ pub fn get_early_tx_gas(tx_hash: &B256) -> Option<(u64, u64, bool)> {
     let result = EARLY_TX_GAS.with(|map| {
         map.borrow().get(tx_hash).copied()
     });
-    tracing::info!(
+    tracing::debug!(
         target: "arb-reth::gas-tracking",
         tx_hash = ?tx_hash,
         found = result.is_some(),
@@ -43,7 +43,7 @@ pub fn get_early_tx_gas(tx_hash: &B256) -> Option<(u64, u64, bool)> {
 }
 
 pub fn clear_early_tx_gas(tx_hash: &B256) {
-    tracing::info!(
+    tracing::debug!(
         target: "arb-reth::gas-tracking",
         tx_hash = ?tx_hash,
         "CLEARING early_tx_gas"

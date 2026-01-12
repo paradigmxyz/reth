@@ -289,26 +289,28 @@ impl NodeState {
     fn handle_consensus_layer_health_event(&self, event: ConsensusLayerHealthEvent) {
         // If pipeline is running, it's fine to not receive any messages from the CL.
         // So we need to report about CL health only when pipeline is idle.
+        // Note: For Arbitrum L2 chains, these warnings are not relevant since consensus
+        // comes from the L1 inbox, not a beacon client. Changed to debug level.
         if self.current_stage.is_none() {
             match event {
                 ConsensusLayerHealthEvent::NeverSeen => {
-                    warn!(
+                    debug!(
                         "Post-merge network, but never seen beacon client. Please launch one to follow the chain!"
                     )
                 }
                 ConsensusLayerHealthEvent::HasNotBeenSeenForAWhile(period) => {
-                    warn!(
+                    debug!(
                         ?period,
                         "Post-merge network, but no beacon client seen for a while. Please launch one to follow the chain!"
                     )
                 }
                 ConsensusLayerHealthEvent::NeverReceivedUpdates => {
-                    warn!(
+                    debug!(
                         "Beacon client online, but never received consensus updates. Please ensure your beacon client is operational to follow the chain!"
                     )
                 }
                 ConsensusLayerHealthEvent::HaveNotReceivedUpdatesForAWhile(period) => {
-                    warn!(
+                    debug!(
                         ?period,
                         "Beacon client online, but no consensus updates received for a while. This may be because of a reth error, or an error in the beacon client! Please investigate reth and beacon client logs!"
                     )
