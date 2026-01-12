@@ -22,8 +22,10 @@ pub(crate) struct PayloadRequest {
     pub(crate) forkchoice_state: ForkchoiceState,
     /// The engine API version for FCU calls.
     pub(crate) fcu_version: EngineApiMessageVersion,
-    /// The getPayload version to use (1-4).
+    /// The getPayload version to use (1-5).
     pub(crate) get_payload_version: u8,
+    /// The newPayload version to use.
+    pub(crate) new_payload_version: EngineApiMessageVersion,
 }
 
 /// Prepare payload attributes and forkchoice state for a new block.
@@ -35,8 +37,9 @@ pub(crate) fn prepare_payload_request(
     let shanghai_active = chain_spec.is_shanghai_active_at_timestamp(timestamp);
     let cancun_active = chain_spec.is_cancun_active_at_timestamp(timestamp);
     let prague_active = chain_spec.is_prague_active_at_timestamp(timestamp);
+    let osaka_active = chain_spec.is_osaka_active_at_timestamp(timestamp);
 
-    // FCU version: V3 for Cancun+Prague, V2 for Shanghai, V1 otherwise
+    // FCU version: V3 for Cancun+Prague+Osaka, V2 for Shanghai, V1 otherwise
     let fcu_version = if cancun_active {
         EngineApiMessageVersion::V3
     } else if shanghai_active {
@@ -45,15 +48,18 @@ pub(crate) fn prepare_payload_request(
         EngineApiMessageVersion::V1
     };
 
-    // getPayload version: 4 for Prague, 3 for Cancun, 2 for Shanghai, 1 otherwise
-    let get_payload_version = if prague_active {
-        4
+    // getPayload version: 5 for Osaka, 4 for Prague, 3 for Cancun, 2 for Shanghai, 1 otherwise
+    // newPayload version: 4 for Prague+Osaka (no V5), 3 for Cancun, 2 for Shanghai, 1 otherwise
+    let (get_payload_version, new_payload_version) = if osaka_active {
+        (5, EngineApiMessageVersion::V4) // Osaka uses getPayloadV5 but newPayloadV4
+    } else if prague_active {
+        (4, EngineApiMessageVersion::V4)
     } else if cancun_active {
-        3
+        (3, EngineApiMessageVersion::V3)
     } else if shanghai_active {
-        2
+        (2, EngineApiMessageVersion::V2)
     } else {
-        1
+        (1, EngineApiMessageVersion::V1)
     };
 
     PayloadRequest {
@@ -71,6 +77,7 @@ pub(crate) fn prepare_payload_request(
         },
         fcu_version,
         get_payload_version,
+        new_payload_version,
     }
 }
 
@@ -128,6 +135,7 @@ pub(crate) async fn get_payload_with_sidecar(
         2 => "engine_getPayloadV2",
         3 => "engine_getPayloadV3",
         4 => "engine_getPayloadV4",
+        5 => "engine_getPayloadV5",
         _ => return Err(eyre::eyre!("Unsupported getPayload version: {}", version)),
     };
 
@@ -178,6 +186,26 @@ pub(crate) async fn get_payload_with_sidecar(
             let prague_fields = PraguePayloadFields::new(envelope.execution_requests);
             Ok((
                 ExecutionPayload::V3(envelope.envelope_inner.execution_payload),
+                ExecutionPayloadSidecar::v4(cancun_fields, prague_fields),
+            ))
+        }
+        5 => {
+            // V5 (Osaka) - use raw request since alloy doesn't have get_payload_v5 yet
+            use alloy_provider::Provider;
+            use alloy_rpc_types_engine::ExecutionPayloadEnvelopeV5;
+
+            let envelope: ExecutionPayloadEnvelopeV5 =
+                provider.client().request(method, (payload_id,)).await?;
+            let versioned_hashes =
+                versioned_hashes_from_commitments(&envelope.blobs_bundle.commitments);
+            let cancun_fields = CancunPayloadFields {
+                parent_beacon_block_root: parent_beacon_block_root
+                    .ok_or_eyre("parent_beacon_block_root required for V5")?,
+                versioned_hashes,
+            };
+            let prague_fields = PraguePayloadFields::new(envelope.execution_requests);
+            Ok((
+                ExecutionPayload::V3(envelope.execution_payload),
                 ExecutionPayloadSidecar::v4(cancun_fields, prague_fields),
             ))
         }
