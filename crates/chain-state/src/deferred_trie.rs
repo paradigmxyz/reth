@@ -223,16 +223,16 @@ impl DeferredTrieData {
     fn merge_ancestors_into_overlay(ancestors: &[Self]) -> TrieInputSorted {
         let mut overlay = TrieInputSorted::default();
 
+        // Get mutable references once outside the loop.
+        // Since overlay is freshly constructed, the Arcs are unique (strong_count == 1),
+        // so Arc::make_mut is a no-op (no clone needed).
+        let state_mut = Arc::make_mut(&mut overlay.state);
+        let nodes_mut = Arc::make_mut(&mut overlay.nodes);
+
         for ancestor in ancestors {
             let ancestor_data = ancestor.wait_cloned();
-            {
-                let state_mut = Arc::make_mut(&mut overlay.state);
-                state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
-            }
-            {
-                let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-                nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
-            }
+            state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
+            nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
         }
         overlay
     }
