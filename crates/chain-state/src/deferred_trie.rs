@@ -172,6 +172,14 @@ impl DeferredTrieData {
             Err(arc) => arc.clone_into_sorted(),
         };
 
+        // Invariant: ancestors must be the contiguous in-memory chain ordered oldest -> newest,
+        // where ancestors.last() is the direct parent. The parent's anchored_trie_input (if present
+        // and anchor-matched) is cumulative for all prior ancestors, enabling O(1) reuse.
+        debug_assert!(
+            ancestors.is_empty() || ancestors.last().is_some(),
+            "ancestors slice must be well-formed"
+        );
+
         // Reuse parent's overlay if available and anchors match.
         // We can only reuse the parent's overlay if it was built on top of the same
         // persisted anchor. If the anchor has changed (e.g., due to persistence),
