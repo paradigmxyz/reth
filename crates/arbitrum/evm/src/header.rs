@@ -230,7 +230,7 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
             let mut buf = [0u8; 8];
             buf.copy_from_slice(&bytes[24..32]);
             let count = u64::from_be_bytes(buf);
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::debug!(
                 target: "arb-evm::header",
                 block_number = input.evm_env.block_env.number.saturating_to::<u64>(),
                 send_count = count,
@@ -245,7 +245,7 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
                 let mut buf = [0u8; 8];
                 buf.copy_from_slice(&bytes[24..32]);
                 let count = u64::from_be_bytes(buf);
-                reth_tracing::tracing::info!(
+                reth_tracing::tracing::debug!(
                     target: "arb-evm::header",
                     block_number = input.evm_env.block_env.number.saturating_to::<u64>(),
                     send_count = count,

@@ -611,7 +611,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Transactions);
         
-        tracing::info!(
+        tracing::debug!(
             target: "reth::static_file",
             tx_num = %tx_num,
             tx_range = ?self.writer.user_header().tx_range(),
@@ -646,7 +646,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
 
         debug_assert!(self.writer.user_header().segment() == StaticFileSegment::Receipts);
         
-        tracing::info!(
+        tracing::debug!(
             target: "reth::static_file",
             tx_num = %tx_num,
             tx_range = ?self.writer.user_header().tx_range(),

@@ -269,7 +269,7 @@ where
 
         let mut attrs2 = attrs.clone();
         attrs2.prev_randao = sealed_parent.mix_hash().unwrap_or_default();
-        reth_tracing::tracing::info!(
+        reth_tracing::tracing::debug!(
             target: "arb::node::follower",
             suggested_fee_recipient = %attrs2.suggested_fee_recipient,
             poster = %poster,
@@ -287,7 +287,7 @@ where
             evm_config.chain_spec().as_ref(),
         )
         .map_err(|e| eyre::eyre!("build_next_env error: {e}"))?;
-        reth_tracing::tracing::info!(
+        reth_tracing::tracing::debug!(
             target: "arb::node::follower",
             suggested_fee_recipient = %next_env.suggested_fee_recipient,
             "follower: next_env suggested_fee_recipient after build_next_env"
@@ -302,7 +302,7 @@ where
             const NITRO_BASE_FEE: u64 = 0x05f5e100;
             next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(NITRO_BASE_FEE));
         } else if let Some(bf) = reth_arbitrum_evm::header::read_l2_base_fee(&state_provider) {
-            reth_tracing::tracing::info!(target: "arb::node::follower", l2_base_fee = bf, "using ArbOS L2 base fee for next block");
+            reth_tracing::tracing::debug!(target: "arb::node::follower", l2_base_fee = bf, "using ArbOS L2 base fee for next block");
             next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(bf));
         } else {
             let parent_bf = sealed_parent.base_fee_per_gas().unwrap_or(0);
@@ -326,7 +326,7 @@ where
                     let change = if delta == 0 { 1 } else { delta };
                     next_bf = parent_bf.saturating_sub(change);
                 }
-                reth_tracing::tracing::info!(target: "arb::node::follower", parent_base_fee = parent_bf, parent_gas_used = parent_gas_used, parent_gas_limit = parent_gas_limit, next_base_fee = next_bf, "computed next base fee via L2 EIP-1559 (fallback)");
+                reth_tracing::tracing::debug!(target: "arb::node::follower", parent_base_fee = parent_bf, parent_gas_used = parent_gas_used, parent_gas_limit = parent_gas_limit, next_base_fee = next_bf, "computed next base fee via L2 EIP-1559 (fallback)");
                 next_env.max_fee_per_gas = Some(alloy_primitives::U256::from(next_bf));
             } else {
                 reth_tracing::tracing::warn!(target: "arb::node::follower", l1_base_fee = %l1_base_fee, "L2 base fee unavailable; falling back to L1 base fee");
@@ -339,7 +339,7 @@ where
         if chain_id == 421_614 {
             next_env.gas_limit = INITIAL_PER_BLOCK_GAS_LIMIT_NITRO;
         } else if let Some(gl) = reth_arbitrum_evm::header::read_l2_per_block_gas_limit(&state_provider) {
-            reth_tracing::tracing::info!(target: "arb::node::follower", derived_gas_limit = gl, "using ArbOS per-block gas limit for next block");
+            reth_tracing::tracing::debug!(target: "arb::node::follower", derived_gas_limit = gl, "using ArbOS per-block gas limit for next block");
             next_env.gas_limit = gl;
         } else {
             reth_tracing::tracing::warn!(target: "arb::node::follower", "failed to read L2_PER_BLOCK_GAS_LIMIT; using Nitro default {}", INITIAL_PER_BLOCK_GAS_LIMIT_NITRO);
@@ -423,7 +423,7 @@ where
             }
             let l2_kind = bytes[0];
             let mut cur = &bytes[1..];
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::trace!(
                 target: "arb::node::decode",
                 l2_kind = l2_kind,
                 payload_len = cur.len(),
@@ -569,7 +569,7 @@ where
         ) -> alloy_primitives::Bytes {
             const SELECTOR: [u8; 4] = [0x6b, 0xf6, 0xa4, 0x2d]; // startBlock(uint256,uint64,uint64,uint64)
             
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::trace!(
                 target: "arb::node::follower",
                 "encode_start_block_data: Using correct startBlock selector={:02x?}",
                 SELECTOR
@@ -583,7 +583,7 @@ where
             let encoded_l2_block_number = abi_encode_u64(l2_block_number);
             let encoded_time_passed = abi_encode_u64(time_passed);
             
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::trace!(
                 target: "arb::node::follower",
                 "Encoding params: l1_base_fee={:02x?}, l1_block_number={:02x?}, l2_block_number={:02x?}, time_passed={:02x?}",
                 &encoded_l1_base_fee[..8],
@@ -597,7 +597,7 @@ where
             out.extend_from_slice(&encoded_l2_block_number);
             out.extend_from_slice(&encoded_time_passed);
             
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::trace!(
                 target: "arb::node::follower",
                 "Final encoded data first 8 bytes: {:02x?}",
                 &out[..std::cmp::min(8, out.len())]
@@ -811,7 +811,7 @@ where
                     },
                 );
                 
-                reth_tracing::tracing::info!(
+                reth_tracing::tracing::trace!(
                     target: "arb::node::follower",
                     "Creating Retry transaction: retry_data_len={}, retry_data_prefix={:02x?}",
                     retry_data.len(),
@@ -820,7 +820,7 @@ where
                 
                 let mut retry_enc = retry_env.encode_typed();
                 
-                reth_tracing::tracing::info!(
+                reth_tracing::tracing::trace!(
                     target: "arb::node::follower",
                     "Retry envelope encoded: type_byte={:02x}, total_len={}, first_4_bytes={:02x?}",
                     retry_enc[0],
@@ -833,7 +833,7 @@ where
                     .map_err(|_| eyre::eyre!("decode retry failed"))?;
                 
                 use reth_primitives_traits::SignedTransaction;
-                reth_tracing::tracing::info!(
+                reth_tracing::tracing::trace!(
                     target: "arb::node::follower",
                     "Decoded Retry transaction: tx_type={:?}, tx_hash={:?}",
                     retry_tx.tx_type(),
@@ -914,7 +914,7 @@ where
                 // batchDataGas = msgBatchGasCost + extraGas (matches Go nitro)
                 let batch_data_gas = msg_batch_gas_cost.saturating_add(extra_gas);
                 
-                reth_tracing::tracing::info!(
+                reth_tracing::tracing::trace!(
                     target: "arb::node::follower",
                     "BatchPostingReport: batch_timestamp={}, batch_poster={}, batch_num={}, batch_data_gas={} (msg_cost={} + extra={}), l1_base_fee={}",
                     batch_timestamp, batch_poster_addr, batch_num, batch_data_gas, msg_batch_gas_cost, extra_gas, l1_base_fee_report
@@ -941,7 +941,7 @@ where
                 let tx = reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut s)
                     .map_err(|e| eyre::eyre!("decode BatchPostingReport internal tx failed: {}", e))?;
                 
-                reth_tracing::tracing::info!(
+                reth_tracing::tracing::trace!(
                     target: "arb::node::follower",
                     "BatchPostingReport: created internal tx with selector 0xb6693771"
                 );
@@ -949,13 +949,13 @@ where
                 vec![tx]
             }
             0xff => {
-                reth_tracing::tracing::info!(target: "arb::node::follower", "follower: skipping invalid placeholder message kind=0xff");
+                reth_tracing::tracing::debug!(target: "arb::node::follower", "follower: skipping invalid placeholder message kind=0xff");
                 Vec::new()
             }
             _ => return Err(eyre::eyre!("unknown L2 message kind")),
         };
         
-        reth_tracing::tracing::info!(
+        reth_tracing::tracing::trace!(
             target: "arb::node::follower",
             "After match: txs.len()={}, tx_types={:?}",
             txs.len(),
@@ -969,7 +969,7 @@ where
             use reth_primitives_traits::SignedTransaction;
             use alloy_consensus::Transaction;
             let input = tx.input();
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::trace!(
                 target: "arb::node::follower",
                 "TX[{}]: type={:?}, hash={:?}, input_len={}, input_prefix={:02x?}",
                 i,
@@ -991,7 +991,7 @@ where
                 is_internal && has_selector
             }).unwrap_or(false);
 
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::trace!(
                 target: "arb::node::follower",
                 l2_block = next_block_number,
                 tx_count_before_startblock = txs.len(),
@@ -1011,7 +1011,7 @@ where
                     time_passed,
                 );
                 
-                reth_tracing::tracing::info!(
+                reth_tracing::tracing::trace!(
                     target: "arb::node::follower",
                     "Creating StartBlock: l1_base_fee={}, l1_block_number={}, l2_block_number={}, time_passed={}, start_data_len={}, start_data_prefix={:02x?}",
                     l1_base_fee,
@@ -1035,7 +1035,7 @@ where
                 
                 use reth_primitives_traits::SignedTransaction;
                 use alloy_consensus::Transaction;
-                reth_tracing::tracing::info!(
+                reth_tracing::tracing::trace!(
                     target: "arb::node::follower",
                     "Created StartBlock tx: type={:?}, hash={:?}, input_len={}, input_prefix={:02x?}",
                     start_tx.tx_type(),
@@ -1046,7 +1046,7 @@ where
                 
                 txs.insert(0, start_tx);
                 
-                reth_tracing::tracing::info!(
+                reth_tracing::tracing::trace!(
                     target: "arb::node::follower",
                     "After StartBlock insertion: txs.len()={}, tx_types={:?}",
                     txs.len(),
@@ -1087,7 +1087,7 @@ where
                 state_provider.account_balance(&sender).ok().flatten().unwrap_or_default();
             let gp = tx.max_fee_per_gas();
             let txh = *tx.tx_hash();
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::debug!(
                 target: "arb::node::follower",
                 tx_type = ?tx.tx_type(),
                 tx_hash = %txh,
@@ -1109,7 +1109,7 @@ where
                     // Scheduled transactions are pushed to the sink by execute_transaction_with_commit_condition
                     let scheduled = reth_arbitrum_evm::scheduled_tx_sink::take();
                     if !scheduled.is_empty() {
-                        reth_tracing::tracing::info!(
+                        reth_tracing::tracing::debug!(
                             target: "arb::node::follower",
                             scheduled_count = scheduled.len(),
                             "Found scheduled transactions after tx execution"
@@ -1119,7 +1119,7 @@ where
                             let mut slice = encoded_tx.as_slice();
                             match reth_arbitrum_primitives::ArbTransactionSigned::decode_2718(&mut slice) {
                                 Ok(scheduled_tx) => {
-                                    reth_tracing::tracing::info!(
+                                    reth_tracing::tracing::debug!(
                                         target: "arb::node::follower",
                                         scheduled_tx_hash = %scheduled_tx.tx_hash(),
                                         scheduled_tx_type = ?scheduled_tx.tx_type(),
@@ -1167,7 +1167,7 @@ where
                 fin_types.push(format!("{:?}", t.tx_type()));
                 fin_hashes.push(format!("{:#x}", t.tx_hash()));
             }
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::debug!(
                 target: "arb::node::follower",
                 finalized_txs = fin_types.len(),
                 finalized_tx_types = ?fin_types,
@@ -1194,7 +1194,7 @@ where
         let header_extra_hex = format!("{:#x}", alloy_primitives::B256::from_slice(&header.extra_data));
 
         let prev_randao_hex = format!("{:#x}", attrs.prev_randao);
-        reth_tracing::tracing::info!(
+        reth_tracing::tracing::debug!(
             target: "arb::node::follower",
             header_hash = %header_hash_hex,
             header_mix = %header_mix_hex,
@@ -1203,13 +1203,13 @@ where
             header_prev_randao = %prev_randao_hex,
             "follower: sealed header after finish"
         );
-        reth_tracing::tracing::info!(
+        reth_tracing::tracing::debug!(
             target: "arb::node::follower",
             header_beneficiary = %header.beneficiary,
             header_nonce = ?header.nonce,
             "follower: sealed header fields"
         );
-        reth_tracing::tracing::info!(
+        reth_tracing::tracing::debug!(
             target: "arb::node::follower",
             assembled_gas_limit = header.gas_limit,
             "follower: assembled block gas limit before import"
@@ -1289,7 +1289,7 @@ where
                 )?;
 
             let hdr = sealed_block.header();
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::debug!(
                 target: "arb::node::follower",
                 number = hdr.number,
                 gas_limit = hdr.gas_limit,

@@ -40,7 +40,7 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
 {
         let reth_execution_types::BlockExecutionResult { receipts, gas_used, .. } = input.output;
 
-        reth_tracing::tracing::info!(
+        reth_tracing::tracing::debug!(
             target: "arb-evm::assemble",
             number = input.evm_env.block_env.number.saturating_to::<u64>(),
             gas_used_from_result = gas_used,
@@ -92,14 +92,14 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
             excess_blob_gas: None,
             requests_hash: None,
         };
-        reth_tracing::tracing::info!(
+        reth_tracing::tracing::debug!(
             target: "arb-evm::assemble",
             number = header.number,
             gas_used = adjusted_gas_used,
             receipts_count = receipts.len(),
             "ArbBlockAssembler: header created with gas_used"
         );
-        reth_tracing::tracing::info!(
+        reth_tracing::tracing::debug!(
             target: "arb-evm::assemble",
             number = header.number,
             beneficiary = %header.beneficiary,
@@ -108,7 +108,7 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         header.difficulty = U256::from(1u64);
         header.nonce = B64::from(input.execution_ctx.delayed_messages_read.to_be_bytes()).into();
 
-        reth_tracing::tracing::info!(
+        reth_tracing::tracing::debug!(
             target: "arb-evm::assemble",
             block_number = header.number,
             exec_ctx_l1_block_num = input.execution_ctx.l1_block_number,
@@ -117,7 +117,7 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
         );
 
         if let Some(mut info) = derive_arb_header_info_from_state(&input) {
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::debug!(
                 target: "arb-evm::assemble",
                 block_number = header.number,
                 send_count = info.send_count,
@@ -143,7 +143,7 @@ impl<ChainSpec: ArbitrumChainSpec> ArbBlockAssembler<ChainSpec> {
                 );
                 info.l1_block_number = input.execution_ctx.l1_block_number;
             }
-            reth_tracing::tracing::info!(
+            reth_tracing::tracing::debug!(
                 target: "arb-evm::assemble",
                 block_number = header.number,
                 final_send_count = info.send_count,

@@ -156,7 +156,7 @@ pub fn try_mark_tx_applied(block_number: u64, send_hash: B256) -> bool {
     // Try to insert the send_hash. Returns true if it was newly inserted.
     let is_new = applied.1.insert(send_hash);
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::applied_txs",
         block_number = block_number,
         send_hash = ?send_hash,
@@ -197,7 +197,7 @@ pub fn update_shadow_accumulator(block_number: u64, new_size: u64, partials: &[(
         }
     }
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::shadow",
         ?thread_id,
         block_number = block_number,
@@ -220,7 +220,7 @@ pub fn get_shadow_size(block_number: u64) -> Option<u64> {
         }
     });
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::shadow",
         ?thread_id,
         requested_block = block_number,
@@ -254,7 +254,7 @@ pub fn clear_shadow_accumulator() {
     let old_state = shadow.as_ref().map(|s| (s.block_number, s.size));
     *shadow = None;
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::shadow",
         ?thread_id,
         ?old_state,
@@ -436,7 +436,7 @@ fn handle_arbos_version(input: &mut PrecompileInput<'_>, exec_id: u64) -> Precom
     // Go nitro returns: 55 + arbosVersion (Nitro starts at version 56)
     let version = 55u64 + arbos_version;
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::arbsys_precompile",
         exec_id = exec_id,
         arbos_version = arbos_version,
@@ -467,7 +467,7 @@ fn handle_arb_block_number(input: &mut PrecompileInput<'_>, exec_id: u64) -> Pre
     // Get the current block number from the EVM context
     let block_number = internals.block_number();
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::arbsys_precompile",
         exec_id = exec_id,
         block_number = ?block_number,
@@ -506,7 +506,7 @@ fn execute_send_tx_to_l1(
     // The cache is set by StartBlock internal tx to ensure determinism across execution passes
     let l1_block_number = get_l1_block_number(internals, block_num_u64)?;
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::arbsys_precompile",
         exec_id = exec_id,
         caller = ?caller,
@@ -534,7 +534,7 @@ fn execute_send_tx_to_l1(
     // Pass block_number so the shadow accumulator can track state across txs in the same block
     let (leaf_num, merkle_events, new_size, partials_to_set) = append_to_merkle_accumulator(internals, send_hash, block_num_u64)?;
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::arbsys_precompile",
         leaf_num = leaf_num,
         send_hash = ?send_hash,
@@ -787,7 +787,7 @@ fn append_to_merkle_accumulator(
         .map_err(|e| PrecompileError::other(format!("sload size failed: {:?}", e)))?;
     let current_size: u64 = current_size_result.data.try_into().unwrap_or(0);
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::arbsys_precompile",
         current_size = current_size,
         block_number = block_number,
@@ -796,7 +796,7 @@ fn append_to_merkle_accumulator(
     
     let new_size = current_size + 1;
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::arbsys_precompile",
         current_size = current_size,
         new_size = new_size,
@@ -907,7 +907,7 @@ fn burn_value_from_precompile(
     // Subtract value (burn)
     account.info.balance = account.info.balance.saturating_sub(value);
     
-    tracing::info!(
+    tracing::debug!(
         target: "arb::arbsys_precompile",
         value = %value,
         new_balance = %account.info.balance,

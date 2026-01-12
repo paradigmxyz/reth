@@ -406,7 +406,7 @@ impl DefaultArbOsHooks {
         
         let was_deleted = tx_state.deleted_empty_accounts.contains(&addr);
         
-        tracing::info!(
+        tracing::debug!(
             target: "arb::evm::execute",
             ?addr,
             account_exists,
@@ -469,7 +469,7 @@ impl DefaultArbOsHooks {
         };
         
         if !needs_touch {
-            tracing::info!(
+            tracing::debug!(
                 target: "arb::evm::execute",
                 ?address,
                 "touch_account: account already exists with data, skipping"
@@ -504,7 +504,7 @@ impl DefaultArbOsHooks {
         // Apply the transition to the state
         state.apply_transition(vec![(address, transition)]);
         
-        tracing::info!(
+        tracing::debug!(
             target: "arb::evm::execute",
             ?address,
             ?previous_status,
@@ -804,7 +804,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 let old_l1_block_number = blockhashes.l1_block_number().unwrap_or(0);
                 let mut l1_block_number = internal_data.l1_block_number;
 
-                tracing::info!(
+                tracing::debug!(
                     target: "arb::evm::execute",
                     "StartBlock internal tx: l1_block_number_raw={}, old_l1_block_number={}, arbos_version={}",
                     l1_block_number, old_l1_block_number, arbos_version
@@ -1140,7 +1140,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     _ => U256::ZERO,
                 };
 
-                tracing::info!(
+                tracing::debug!(
                     sender = ?ctx.sender,
                     deposit_value = ?deposit_value,
                     balance_after_mint = ?balance_after_mint,
@@ -1359,7 +1359,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                     );
                     let _ = Self::burn_balance(state_db, ctx.sender, final_balance);
                 } else {
-                    tracing::info!(
+                    tracing::debug!(
                         sender = ?ctx.sender,
                         "SubmitRetryable: final balance correctly at 0"
                     );
@@ -1737,7 +1737,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
             let max_refund = U256::from_be_slice(&data[96..128]);
             let submission_fee_refund = U256::from_be_slice(&data[128..160]);
             
-            tracing::info!(
+            tracing::debug!(
                 target: "arb-scheduled",
                 "Found RedeemScheduled event: ticket_id={:?} sequence_num={} donated_gas={} gas_donor={:?}",
                 ticket_id, sequence_num, donated_gas, gas_donor
@@ -1766,7 +1766,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 let call_value = retryable.get_callvalue().unwrap_or_default();
                 let calldata = retryable.get_calldata(state_db as *mut _);
                 
-                tracing::info!(
+                tracing::debug!(
                     target: "arb-scheduled",
                     "Constructing retry tx: from={:?} to={:?} value={:?} gas={} calldata_len={}",
                     from, to, call_value, donated_gas, calldata.len()
@@ -1795,7 +1795,7 @@ impl ArbOsHooks for DefaultArbOsHooks {
                 encoded.push(0x68); // ArbRetryTx type byte
                 retry_tx.encode(&mut encoded);
                 
-                tracing::info!(
+                tracing::debug!(
                     target: "arb-scheduled",
                     "Scheduled retry tx: encoded_len={} hash={:?}",
                     encoded.len(),

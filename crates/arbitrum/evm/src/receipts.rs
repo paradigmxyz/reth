@@ -108,7 +108,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     // Internal transactions without early termination gas
                     // This should be rare, but handle it: gasUsed=0, preserve cumulative
                     // Internal txs should always succeed
-                    tracing::info!(
+                    tracing::debug!(
                         target: "arb-reth::receipt-builder",
                         tx_hash = ?tx_hash,
                         evm_gas = gas_used,
@@ -157,7 +157,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     logs,
                 };
                 
-                tracing::info!(
+                tracing::debug!(
                     target: "arb-reth::receipt-builder",
                     tx_hash = ?tx_hash,
                     cumulative_in_receipt = receipt.cumulative_gas_used,

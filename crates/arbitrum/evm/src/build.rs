@@ -564,7 +564,7 @@ where
                 upfront_gas_price
             };
             let needed_fee = alloy_primitives::U256::from(effective_gas_limit) * effective_gas_price;
-            tracing::info!(
+            tracing::debug!(
                 target: "arb::evm::build",
                 tx_type = ?tx.tx().tx_type(),
                 is_sequenced = is_sequenced,
@@ -678,7 +678,7 @@ where
                 // cross-context contamination when the same transaction is executed in multiple contexts.
                 // Each execution context computes its own leaf_num from the database state, and the
                 // canonical context's state changes will be the ones that persist.
-                tracing::info!(
+                tracing::debug!(
                     target: "arb::arbsys_deferred",
                     tx_hash = ?tx_hash,
                     new_size = arbsys_state.new_size,
@@ -706,7 +706,7 @@ where
                     burn_arbsys_balance(state, arbsys_state.value_to_burn);
                 }
                 
-                tracing::info!(
+                tracing::debug!(
                     target: "arb::arbsys_deferred",
                     tx_hash = ?tx_hash,
                     block_number = arbsys_state.block_number,
@@ -864,7 +864,7 @@ where
                         .unwrap_or(false);
                     
                     // Log the status for debugging
-                    tracing::info!(
+                    tracing::trace!(
                         target: "arbitrum::zombie::status",
                         ?addr,
                         status = ?transition_acc.status,
@@ -900,7 +900,7 @@ where
                     if is_deleted && !self.tx_state.zombie_accounts.contains(addr) {
                         // Add to deleted_empty_accounts for CreateZombieIfDeleted to check
                         self.tx_state.deleted_empty_accounts.insert(*addr);
-                        tracing::info!(
+                        tracing::debug!(
                             target: "arbitrum::zombie",
                             ?addr,
                             status = ?transition_acc.status,
@@ -922,7 +922,7 @@ where
             for addr in &self.tx_state.deleted_empty_accounts {
                 // Skip zombie accounts - they should remain in the cache
                 if self.tx_state.zombie_accounts.contains(addr) {
-                    tracing::info!(
+                    tracing::debug!(
                         target: "arbitrum::zombie",
                         ?addr,
                         "Finalise: skipping zombie account (not removing from cache)"
@@ -933,7 +933,7 @@ where
                     // Mark the account as non-existent by setting account to None
                     // This matches geth's behavior where deleted accounts are removed from stateObjects
                     cached.account = None;
-                    tracing::info!(
+                    tracing::debug!(
                         target: "arbitrum::zombie",
                         ?addr,
                         "Finalise: removed deleted empty account from cache"
@@ -1027,7 +1027,7 @@ where
         let block_timestamp = self.exec_ctx.block_timestamp;
         let basefee = self.exec_ctx.basefee;
         
-        tracing::info!(
+        tracing::debug!(
             target: "arb-scheduled",
             logs_count = logs.len(),
             chain_id = chain_id,
@@ -1050,7 +1050,7 @@ where
         );
         
         if !scheduled.is_empty() {
-            tracing::info!(
+            tracing::debug!(
                 target: "arb-scheduled",
                 scheduled_count = scheduled.len(),
                 "Found scheduled transactions to execute"
