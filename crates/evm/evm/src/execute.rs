@@ -31,6 +31,7 @@ use alloy_primitives::map::HashMap;
 #[cfg(feature = "triedb")]
 use reth_storage_api::PlainPostState;
 
+#[cfg(feature = "metrics")]
 use std::time::Instant;
 
 #[cfg(feature = "metrics")]
@@ -569,34 +570,32 @@ where
                     plain_state.storages.insert(*address, storage_map);
                 }
             }
+            #[cfg(feature = "metrics")]
             let start = Instant::now();
+
             (state_root, trie_updates) = state
                 .state_root_with_updates_plain(plain_state)
                 .map_err(BlockExecutionError::other)?;
-            let elapsed_ms = start.elapsed().as_millis() as f64;
 
             #[cfg(feature = "metrics")]
-            STATE_ROOT_METRICS.duration_ms.record(elapsed_ms);
+            STATE_ROOT_METRICS.duration_ms.record(start.elapsed().as_millis() as f64);
 
             hashed_state = HashedPostState::default();
-
-            tracing::info!(target: "evm", ?state_root, elapsed_ms, "State root computed via TrieDB");
         }
 
         #[cfg(not(feature = "triedb"))]
         {
+            #[cfg(feature = "metrics")]
             let start = Instant::now();
+
             hashed_state = state.hashed_post_state(&db.bundle_state);
 
             (state_root, trie_updates) = state
                 .state_root_with_updates(hashed_state.clone())
                 .map_err(BlockExecutionError::other)?;
-            let elapsed_ms = start.elapsed().as_millis() as f64;
 
             #[cfg(feature = "metrics")]
-            STATE_ROOT_METRICS.duration_ms.record(elapsed_ms);
-
-            tracing::info!(target: "evm", ?state_root, elapsed_ms, "State root computed via MDBX");
+            STATE_ROOT_METRICS.duration_ms.record(start.elapsed().as_millis() as f64);
         }
 
         let (transactions, senders) =
