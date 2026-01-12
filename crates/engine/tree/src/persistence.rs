@@ -367,7 +367,10 @@ mod tests {
         let (tx, rx) = crossbeam_channel::bounded(1);
 
         persistence_handle.save_blocks(blocks, tx).unwrap();
-        let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
+        let BlockNumHash { hash: actual_hash, number: _ } = rx
+            .recv_timeout(std::time::Duration::from_secs(10))
+            .expect("test timed out")
+            .expect("no hash returned");
         assert_eq!(last_hash, actual_hash);
     }
 
@@ -385,7 +388,10 @@ mod tests {
 
             persistence_handle.save_blocks(blocks, tx).unwrap();
 
-            let BlockNumHash { hash: actual_hash, number: _ } = rx.recv().unwrap().unwrap();
+            let BlockNumHash { hash: actual_hash, number: _ } = rx
+                .recv_timeout(std::time::Duration::from_secs(10))
+                .expect("test timed out")
+                .expect("no hash returned");
             assert_eq!(last_hash, actual_hash);
         }
     }
