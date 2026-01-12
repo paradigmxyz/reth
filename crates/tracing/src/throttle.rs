@@ -1,5 +1,36 @@
 //! Throttling utilities for rate-limiting expression execution.
 
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        LazyLock,
+    },
+    time::Instant,
+};
+
+/// Sentinel value indicating the throttle has never run.
+#[doc(hidden)]
+pub const NOT_YET_RUN: u64 = u64::MAX;
+
+/// Checks if enough time has passed since the last run. Implementation detail for [`throttle!`].
+#[doc(hidden)]
+pub fn should_run(start: &LazyLock<Instant>, last: &AtomicU64, duration_millis: u64) -> bool {
+    let now = start.elapsed().as_millis() as u64;
+    let last_val = last.load(Ordering::Relaxed);
+
+    if last_val == NOT_YET_RUN {
+        return last
+            .compare_exchange(NOT_YET_RUN, now, Ordering::Relaxed, Ordering::Relaxed)
+            .is_ok();
+    }
+
+    if now.saturating_sub(last_val) >= duration_millis {
+        last.compare_exchange(last_val, now, Ordering::Relaxed, Ordering::Relaxed).is_ok()
+    } else {
+        false
+    }
+}
+
 /// Throttles the execution of an expression to run at most once per specified duration.
 ///
 /// Uses static variables with lazy initialization to track the last execution time.
@@ -19,34 +50,12 @@
 #[macro_export]
 macro_rules! throttle {
     ($duration:expr, || $expr:expr) => {{
-        fn should_run(duration: ::core::time::Duration) -> bool {
-            use ::core::sync::atomic::Ordering;
+        static START: ::std::sync::LazyLock<::std::time::Instant> =
+            ::std::sync::LazyLock::new(::std::time::Instant::now);
+        static LAST: ::core::sync::atomic::AtomicU64 =
+            ::core::sync::atomic::AtomicU64::new($crate::__private::THROTTLE_NOT_YET_RUN);
 
-            const NOT_YET_RUN: u64 = u64::MAX;
-
-            static START: ::std::sync::LazyLock<::std::time::Instant> =
-                ::std::sync::LazyLock::new(::std::time::Instant::now);
-            static LAST: ::std::sync::atomic::AtomicU64 =
-                ::std::sync::atomic::AtomicU64::new(NOT_YET_RUN);
-
-            let now = START.elapsed().as_millis() as u64;
-            let last = LAST.load(Ordering::Relaxed);
-
-            if last == NOT_YET_RUN {
-                return LAST
-                    .compare_exchange(NOT_YET_RUN, now, Ordering::Relaxed, Ordering::Relaxed)
-                    .is_ok();
-            }
-
-            let duration_nanos = duration.as_millis() as u64;
-            if now.saturating_sub(last) >= duration_nanos {
-                LAST.compare_exchange(last, now, Ordering::Relaxed, Ordering::Relaxed).is_ok()
-            } else {
-                false
-            }
-        }
-
-        if should_run($duration) {
+        if $crate::__private::should_throttle(&START, &LAST, $duration.as_millis() as u64) {
             $expr
         }
     }};

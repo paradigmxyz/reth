@@ -53,6 +53,11 @@ pub use formatter::LogFormat;
 pub use layers::{FileInfo, FileWorkerGuard, Layers};
 pub use test_tracer::TestTracer;
 
+#[doc(hidden)]
+pub mod __private {
+    pub use super::throttle::*;
+}
+
 mod formatter;
 mod layers;
 mod test_tracer;
