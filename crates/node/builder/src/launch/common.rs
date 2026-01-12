@@ -161,7 +161,7 @@ impl LaunchContext {
 
         Self::save_pruning_config_if_full_node(&mut toml_config, config, &config_path)?;
 
-        info!(target: "reth::cli", path = ?config_path, "Configuration loaded");
+        debug!(target: "reth::cli", path = ?config_path, "Configuration loaded");
 
         // Update the config with the command line arguments
         toml_config.peers.trusted_nodes_only = config.network.trusted_only;

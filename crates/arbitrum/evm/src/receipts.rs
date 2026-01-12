@@ -53,7 +53,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                 use revm::context::result::ExecutionResult;
                 match &ctx.result {
                     ExecutionResult::Success { reason, gas_used, .. } => {
-                        tracing::warn!(
+                        tracing::trace!(
                             target: "arb-reth::receipt-builder",
                             tx_hash = ?tx_hash,
                             status = true,
@@ -64,7 +64,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                         );
                     }
                     ExecutionResult::Revert { gas_used, output } => {
-                        tracing::warn!(
+                        tracing::trace!(
                             target: "arb-reth::receipt-builder",
                             tx_hash = ?tx_hash,
                             status = false,
@@ -75,7 +75,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                         );
                     }
                     ExecutionResult::Halt { reason, gas_used } => {
-                        tracing::warn!(
+                        tracing::trace!(
                             target: "arb-reth::receipt-builder",
                             tx_hash = ?tx_hash,
                             status = false,
@@ -91,7 +91,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                 // because Internal transactions can also go through early termination
                 // Early-terminated txs (SubmitRetryable, Internal, Deposit) should use the stored success flag
                 let (actual_gas_used, cumulative_gas, early_status) = if let Some((early_gas, early_cumulative, early_success)) = crate::get_early_tx_gas(&tx_hash) {
-                    tracing::warn!(
+                    tracing::trace!(
                         target: "arb-reth::receipt-builder",
                         tx_hash = ?tx_hash,
                         early_gas = early_gas,
@@ -120,7 +120,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                     // No early gas data - calculate cumulative by adding gas_used to current
                     // Use the EVM result for status
                     let cumulative = ctx.cumulative_gas_used + gas_used;
-                    tracing::warn!(
+                    tracing::trace!(
                         target: "arb-reth::receipt-builder",
                         tx_hash = ?tx_hash,
                         evm_gas = gas_used,
@@ -141,7 +141,7 @@ impl ArbReceiptBuilder for ArbRethReceiptBuilder {
                 if !extra.is_empty() {
                     logs.append(&mut extra);
                 }
-                tracing::warn!(
+                tracing::trace!(
                     target: "arb-reth::receipt-builder",
                     tx_hash = ?tx_hash,
                     evm_logs = evm_log_count,

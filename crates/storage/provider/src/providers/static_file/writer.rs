@@ -235,7 +235,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     pub fn commit(&mut self) -> ProviderResult<()> {
         let start = Instant::now();
 
-        tracing::info!(
+        tracing::debug!(
             target: "reth::static_file",
             segment = ?self.writer.user_header().segment(),
             block_range = ?self.writer.user_header().block_range(),

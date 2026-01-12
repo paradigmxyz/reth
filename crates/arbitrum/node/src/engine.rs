@@ -109,12 +109,12 @@ where
             .with_persistence_threshold(100_000)
             .with_skip_state_root_validation(true);
 
-        tracing::info!(
+        tracing::debug!(
             target: "arb-reth::engine",
             "arb engine: building tree validator with legacy_state_root=true, state_root_fallback=true, parallel_sparse_trie=false, persistence_threshold=100000, skip_state_root_validation=true (trust sequencer)"
         );
 
-        tracing::info!(
+        tracing::debug!(
             target: "arb-reth::engine",
             "arb engine: withdrawals presence checks disabled via ArbEngineValidator"
         );

@@ -253,7 +253,7 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
                 );
                 count
             } else {
-                reth_tracing::tracing::warn!(
+                reth_tracing::tracing::trace!(
                     target: "arb-evm::header",
                     block_number = input.evm_env.block_env.number.saturating_to::<u64>(),
                     "send_count slot NOT FOUND in bundle_state, falling back to state_provider"
@@ -262,7 +262,7 @@ pub fn derive_arb_header_info_from_state<F: for<'a> alloy_evm::block::BlockExecu
             }
         }
     } else {
-        reth_tracing::tracing::warn!(
+        reth_tracing::tracing::trace!(
             target: "arb-evm::header",
             block_number = input.evm_env.block_env.number.saturating_to::<u64>(),
             "ARBOS account NOT FOUND in bundle_state, falling back to state_provider"

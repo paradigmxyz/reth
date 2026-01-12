@@ -322,7 +322,7 @@ fn arbsys_precompile_handler(mut input: PrecompileInput<'_>) -> PrecompileResult
     let selector: [u8; 4] = [data[0], data[1], data[2], data[3]];
     
     // Log execution pass info
-    tracing::warn!(
+    tracing::trace!(
         target: "arb::arbsys_precompile",
         exec_id = exec_id,
         selector = ?selector,

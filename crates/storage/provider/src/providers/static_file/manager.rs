@@ -768,7 +768,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             info!(target: "reth::cli", "Skipping storage consistency verification due to RETH_DISABLE_STATIC_FILES=1");
             return Ok(None);
         }
-        info!(target: "reth::cli", "Verifying storage consistency.");
+        debug!(target: "reth::cli", "Verifying storage consistency.");
 
         let mut unwind_target: Option<BlockNumber> = None;
         let mut update_unwind_target = |new_target: BlockNumber| {

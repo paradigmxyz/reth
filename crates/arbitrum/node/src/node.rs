@@ -249,13 +249,13 @@ where
                             std::thread::sleep(std::time::Duration::from_millis(250));
                             continue;
                         }
-                        reth_tracing::tracing::error!(target: "arb::node::follower", want_parent=%parent_hash, "missing parent header after retries");
+                        reth_tracing::tracing::warn!(target: "arb::node::follower", want_parent=%parent_hash, "missing parent header after retries (will backfill)");
                         return Err(eyre::eyre!("missing parent header"));
                     }
                 }
             }
         };
-        reth_tracing::tracing::info!(target: "arb::node::follower", parent=%parent_hash, parent_gas_limit = sealed_parent.gas_limit(), "follower: loaded parent header");
+        reth_tracing::tracing::trace!(target: "arb::node::follower", parent=%parent_hash, parent_gas_limit = sealed_parent.gas_limit(), "follower: loaded parent header");
 
         let l2_owned: Vec<u8> = l2msg_bytes.to_vec();
 
@@ -347,14 +347,14 @@ where
         }
 
         let next_block_number = sealed_parent.number() + 1;
-        reth_tracing::tracing::warn!(
+        reth_tracing::tracing::trace!(
             target: "arb::node::follower",
             "🔍 BLOCK_START: Creating block {} from message kind {}, delayed_messages_read {}",
             next_block_number,
             kind,
             delayed_messages_read
         );
-        reth_tracing::tracing::info!(target: "arb::node::follower", poster = %poster, next_block_number, "follower: keeping suggested_fee_recipient from attrs");
+        reth_tracing::tracing::trace!(target: "arb::node::follower", poster = %poster, next_block_number, "follower: keeping suggested_fee_recipient from attrs");
 
         let mut builder = evm_config
             .builder_for_next_block(&mut db, &sealed_parent, next_env)
@@ -643,7 +643,7 @@ where
             3 => {
                 let first = l2_owned.first().copied().unwrap_or(0xff);
                 let len = l2_owned.len();
-                reth_tracing::tracing::info!(target: "arb::node::follower", l2_payload_len = len, l2_first_byte = first, "follower: L2_MESSAGE payload summary");
+                reth_tracing::tracing::trace!(target: "arb::node::follower", l2_payload_len = len, l2_first_byte = first, "follower: L2_MESSAGE payload summary");
                 // Match Go behavior: if parsing fails, log warning and produce empty tx list
                 // See: nitro/arbos/block_processor.go:192-195
                 let parsed_txs = match parse_l2_message_to_txs(&l2_owned, chain_id_u256, poster, request_id) {
@@ -657,7 +657,7 @@ where
                         Vec::new()
                     }
                 };
-                reth_tracing::tracing::info!(
+                reth_tracing::tracing::trace!(
                     target: "arb::node::follower",
                     tx_count = parsed_txs.len(),
                     "L2_MESSAGE_PARSED: Derived {} transactions from L1 message",
@@ -1059,7 +1059,7 @@ where
             use reth_primitives_traits::SignedTransaction;
             let tx_hashes: Vec<alloy_primitives::B256> = txs.iter().map(|t| *t.tx_hash()).collect();
             let tx_types: Vec<String> = txs.iter().map(|t| format!("{:?}", t.tx_type())).collect();
-            reth_tracing::tracing::warn!(
+            reth_tracing::tracing::trace!(
                 target: "arb::node::follower",
                 "🔍 FINAL_TX_LIST: block={} kind={} tx_count={} types={:?} hashes={:?}",
                 next_block_number,
@@ -1070,9 +1070,9 @@ where
             );
         }
 
-        reth_tracing::tracing::info!(target: "arb::node::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
+        reth_tracing::tracing::trace!(target: "arb::node::follower", txs_len = txs.len(), "follower: executing txs (including StartBlock)");
 
-        reth_tracing::tracing::info!(target: "arb::node::follower", tx_count = txs.len(), "follower: built tx list");
+        reth_tracing::tracing::trace!(target: "arb::node::follower", tx_count = txs.len(), "follower: built tx list");
         use reth_primitives_traits::{Recovered, SignerRecoverable, SignedTransaction};
         
         // Use a VecDeque to allow adding scheduled transactions (like retry txs) during execution
