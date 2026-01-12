@@ -112,6 +112,16 @@ impl<F> OverlayStateProviderFactory<F> {
         self.hashed_state_overlay = hashed_state_overlay;
         self
     }
+
+    /// Extends the existing hashed state overlay with the given [`HashedPostStateSorted`].
+    pub fn with_extended_hashed_state_overlay(mut self, other: HashedPostStateSorted) -> Self {
+        if let Some(overlay) = self.hashed_state_overlay.as_mut() {
+            Arc::make_mut(overlay).extend_ref(&other);
+        } else {
+            self.hashed_state_overlay = Some(Arc::new(other))
+        }
+        self
+    }
 }
 
 impl<F> OverlayStateProviderFactory<F>
