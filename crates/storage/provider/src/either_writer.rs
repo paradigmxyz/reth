@@ -10,7 +10,9 @@ use std::{
 #[cfg(all(unix, feature = "rocksdb"))]
 use crate::providers::rocksdb::RocksDBBatch;
 use crate::{
-    providers::{StaticFileProvider, StaticFileProviderRWRefMut},
+    providers::{
+        needs_prev_shard_check, HistoryInfo, StaticFileProvider, StaticFileProviderRWRefMut,
+    },
     StaticFileProviderFactory,
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber};
@@ -720,6 +722,54 @@ where
             Self::RocksDB(tx) => tx.get::<tables::StoragesHistory>(key),
         }
     }
+
+    /// Lookup storage history and return [`HistoryInfo`].
+    pub fn storage_history_info(
+        &mut self,
+        address: Address,
+        storage_key: alloy_primitives::B256,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        match self {
+            Self::Database(cursor, _) => {
+                let key = StorageShardedKey::new(address, storage_key, block_number);
+                if let Some(chunk) = cursor
+                    .seek(key)?
+                    .filter(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
+                    .map(|x| x.1)
+                {
+                    let mut rank = chunk.rank(block_number);
+                    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+                        rank -= 1;
+                    }
+                    let found_block = chunk.select(rank);
+                    let is_before_first_write =
+                        needs_prev_shard_check(rank, found_block, block_number) &&
+                            cursor.prev()?.is_none_or(|(k, _)| {
+                                k.address != address || k.sharded_key.key != storage_key
+                            });
+                    Ok(HistoryInfo::from_lookup(
+                        found_block,
+                        is_before_first_write,
+                        lowest_available_block_number,
+                    ))
+                } else if lowest_available_block_number.is_some() {
+                    Ok(HistoryInfo::MaybeInPlainState)
+                } else {
+                    Ok(HistoryInfo::NotYetWritten)
+                }
+            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => tx.storage_history_info(
+                address,
+                storage_key,
+                block_number,
+                lowest_available_block_number,
+            ),
+        }
+    }
 }
 
 impl<CURSOR, N: NodePrimitives> EitherReader<'_, CURSOR, N>
@@ -736,6 +786,46 @@ where
             Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::AccountsHistory>(key),
+        }
+    }
+
+    /// Lookup account history and return [`HistoryInfo`].
+    pub fn account_history_info(
+        &mut self,
+        address: Address,
+        block_number: BlockNumber,
+        lowest_available_block_number: Option<BlockNumber>,
+    ) -> ProviderResult<HistoryInfo> {
+        match self {
+            Self::Database(cursor, _) => {
+                let key = ShardedKey::new(address, block_number);
+                if let Some(chunk) =
+                    cursor.seek(key)?.filter(|(k, _)| k.key == address).map(|x| x.1)
+                {
+                    let mut rank = chunk.rank(block_number);
+                    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+                        rank -= 1;
+                    }
+                    let found_block = chunk.select(rank);
+                    let is_before_first_write =
+                        needs_prev_shard_check(rank, found_block, block_number) &&
+                            cursor.prev()?.is_none_or(|(k, _)| k.key != address);
+                    Ok(HistoryInfo::from_lookup(
+                        found_block,
+                        is_before_first_write,
+                        lowest_available_block_number,
+                    ))
+                } else if lowest_available_block_number.is_some() {
+                    Ok(HistoryInfo::MaybeInPlainState)
+                } else {
+                    Ok(HistoryInfo::NotYetWritten)
+                }
+            }
+            Self::StaticFile(_, _) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(tx) => {
+                tx.account_history_info(address, block_number, lowest_available_block_number)
+            }
         }
     }
 }
@@ -899,7 +989,9 @@ mod rocksdb_tests {
         tables,
         transaction::DbTxMut,
     };
+    use reth_ethereum_primitives::EthPrimitives;
     use reth_storage_api::{DatabaseProviderFactory, StorageSettings};
+    use std::marker::PhantomData;
     use tempfile::TempDir;
 
     fn create_rocksdb_provider() -> (TempDir, RocksDBProvider) {
@@ -1141,6 +1233,16 @@ mod rocksdb_tests {
         expected: HistoryInfo,
     }
 
+    // Type aliases for cursor types (needed for EitherWriter/EitherReader type inference)
+    type AccountsHistoryWriteCursor =
+        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RW, tables::AccountsHistory>;
+    type StoragesHistoryWriteCursor =
+        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RW, tables::StoragesHistory>;
+    type AccountsHistoryReadCursor =
+        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RO, tables::AccountsHistory>;
+    type StoragesHistoryReadCursor =
+        reth_db::mdbx::cursor::Cursor<reth_db::mdbx::RO, tables::StoragesHistory>;
+
     /// Runs the same account history queries against both MDBX and `RocksDB` backends,
     /// asserting they produce identical results.
     fn run_account_history_scenario(
@@ -1149,47 +1251,53 @@ mod rocksdb_tests {
         shards: &[(BlockNumber, Vec<BlockNumber>)], // (shard_highest_block, blocks_in_shard)
         queries: &[HistoryQuery],
     ) {
-        // Setup MDBX
+        // Setup MDBX and RocksDB with identical data using EitherWriter
         let factory = create_test_provider_factory();
         let mdbx_provider = factory.database_provider_rw().unwrap();
-        {
-            let tx = mdbx_provider.tx_ref();
-            let mut cursor = tx.cursor_write::<tables::AccountsHistory>().unwrap();
-            for (highest_block, blocks) in shards {
-                let key = ShardedKey::new(address, *highest_block);
-                let value = IntegerList::new(blocks.clone()).unwrap();
-                cursor.upsert(key, &value).unwrap();
-            }
-        }
-        mdbx_provider.commit().unwrap();
-
-        // Setup RocksDB
         let (temp_dir, rocks_provider) = create_rocksdb_provider();
+
+        // Create writers for both backends
+        let mut mdbx_writer: EitherWriter<'_, AccountsHistoryWriteCursor, EthPrimitives> =
+            EitherWriter::Database(
+                mdbx_provider.tx_ref().cursor_write::<tables::AccountsHistory>().unwrap(),
+            );
+        let mut rocks_writer: EitherWriter<'_, AccountsHistoryWriteCursor, EthPrimitives> =
+            EitherWriter::RocksDB(rocks_provider.batch());
+
+        // Write identical data to both backends in a single loop
         for (highest_block, blocks) in shards {
             let key = ShardedKey::new(address, *highest_block);
             let value = IntegerList::new(blocks.clone()).unwrap();
-            rocks_provider.put::<tables::AccountsHistory>(key, &value).unwrap();
+            mdbx_writer.put_account_history(key.clone(), &value).unwrap();
+            rocks_writer.put_account_history(key, &value).unwrap();
         }
 
-        // Run queries against both backends
+        // Commit both backends
+        drop(mdbx_writer);
+        mdbx_provider.commit().unwrap();
+        if let EitherWriter::RocksDB(batch) = rocks_writer {
+            batch.commit().unwrap();
+        }
+
+        // Run queries against both backends using EitherReader
         let mdbx_ro = factory.database_provider_ro().unwrap();
         let rocks_tx = rocks_provider.tx();
 
         for (i, query) in queries.iter().enumerate() {
-            // MDBX query via HistoricalStateProviderRef
-            let lowest_blocks = LowestAvailableBlocks {
-                account_history_block_number: query.lowest_available,
-                storage_history_block_number: None,
-            };
-            let mdbx_state = HistoricalStateProviderRef::new_with_lowest_available_blocks(
-                &mdbx_ro,
-                query.block_number,
-                lowest_blocks,
-            );
-            let mdbx_result = mdbx_state.account_history_lookup(address).unwrap();
+            // MDBX query via EitherReader
+            let mut mdbx_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
+                EitherReader::Database(
+                    mdbx_ro.tx_ref().cursor_read::<tables::AccountsHistory>().unwrap(),
+                    PhantomData,
+                );
+            let mdbx_result = mdbx_reader
+                .account_history_info(address, query.block_number, query.lowest_available)
+                .unwrap();
 
-            // RocksDB query
-            let rocks_result = rocks_tx
+            // RocksDB query via EitherReader
+            let mut rocks_reader: EitherReader<'_, AccountsHistoryReadCursor, EthPrimitives> =
+                EitherReader::RocksDB(&rocks_tx);
+            let rocks_result = rocks_reader
                 .account_history_info(address, query.block_number, query.lowest_available)
                 .unwrap();
 
@@ -1235,47 +1343,58 @@ mod rocksdb_tests {
         shards: &[(BlockNumber, Vec<BlockNumber>)], // (shard_highest_block, blocks_in_shard)
         queries: &[HistoryQuery],
     ) {
-        // Setup MDBX
+        // Setup MDBX and RocksDB with identical data using EitherWriter
         let factory = create_test_provider_factory();
         let mdbx_provider = factory.database_provider_rw().unwrap();
-        {
-            let tx = mdbx_provider.tx_ref();
-            let mut cursor = tx.cursor_write::<tables::StoragesHistory>().unwrap();
-            for (highest_block, blocks) in shards {
-                let key = StorageShardedKey::new(address, storage_key, *highest_block);
-                let value = IntegerList::new(blocks.clone()).unwrap();
-                cursor.upsert(key, &value).unwrap();
-            }
-        }
-        mdbx_provider.commit().unwrap();
-
-        // Setup RocksDB
         let (temp_dir, rocks_provider) = create_rocksdb_provider();
+
+        // Create writers for both backends
+        let mut mdbx_writer: EitherWriter<'_, StoragesHistoryWriteCursor, EthPrimitives> =
+            EitherWriter::Database(
+                mdbx_provider.tx_ref().cursor_write::<tables::StoragesHistory>().unwrap(),
+            );
+        let mut rocks_writer: EitherWriter<'_, StoragesHistoryWriteCursor, EthPrimitives> =
+            EitherWriter::RocksDB(rocks_provider.batch());
+
+        // Write identical data to both backends in a single loop
         for (highest_block, blocks) in shards {
             let key = StorageShardedKey::new(address, storage_key, *highest_block);
             let value = IntegerList::new(blocks.clone()).unwrap();
-            rocks_provider.put::<tables::StoragesHistory>(key, &value).unwrap();
+            mdbx_writer.put_storage_history(key.clone(), &value).unwrap();
+            rocks_writer.put_storage_history(key, &value).unwrap();
         }
 
-        // Run queries against both backends
+        // Commit both backends
+        drop(mdbx_writer);
+        mdbx_provider.commit().unwrap();
+        if let EitherWriter::RocksDB(batch) = rocks_writer {
+            batch.commit().unwrap();
+        }
+
+        // Run queries against both backends using EitherReader
         let mdbx_ro = factory.database_provider_ro().unwrap();
         let rocks_tx = rocks_provider.tx();
 
         for (i, query) in queries.iter().enumerate() {
-            // MDBX query via HistoricalStateProviderRef
-            let lowest_blocks = LowestAvailableBlocks {
-                account_history_block_number: None,
-                storage_history_block_number: query.lowest_available,
-            };
-            let mdbx_state = HistoricalStateProviderRef::new_with_lowest_available_blocks(
-                &mdbx_ro,
-                query.block_number,
-                lowest_blocks,
-            );
-            let mdbx_result = mdbx_state.storage_history_lookup(address, storage_key).unwrap();
+            // MDBX query via EitherReader
+            let mut mdbx_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
+                EitherReader::Database(
+                    mdbx_ro.tx_ref().cursor_read::<tables::StoragesHistory>().unwrap(),
+                    PhantomData,
+                );
+            let mdbx_result = mdbx_reader
+                .storage_history_info(
+                    address,
+                    storage_key,
+                    query.block_number,
+                    query.lowest_available,
+                )
+                .unwrap();
 
-            // RocksDB query
-            let rocks_result = rocks_tx
+            // RocksDB query via EitherReader
+            let mut rocks_reader: EitherReader<'_, StoragesHistoryReadCursor, EthPrimitives> =
+                EitherReader::RocksDB(&rocks_tx);
+            let rocks_result = rocks_reader
                 .storage_history_info(
                     address,
                     storage_key,
