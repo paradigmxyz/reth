@@ -13,7 +13,7 @@ use reth_db_api::{
     BlockNumberList, DatabaseError,
 };
 use reth_etl::Collector;
-use reth_node_types::NodePrimitives;
+use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
     providers::StaticFileProvider, to_range, BlockReader, DBProvider, EitherWriter, ProviderError,
     RocksDBProviderFactory, StaticFileProviderFactory, StorageSettingsCache,
@@ -184,6 +184,7 @@ where
 /// `Address.StorageKey`). It flushes indices to disk when reaching a shard's max length
 /// (`NUM_OF_INDICES_IN_SHARD`) or when the partial key changes, ensuring the last previous partial
 /// key shard is stored.
+#[allow(dead_code)]
 pub(crate) fn load_history_indices<Provider, H, P>(
     provider: &Provider,
     mut collector: Collector<H::Key, H::Value>,
@@ -268,6 +269,7 @@ where
 }
 
 /// Shard and insert the indices list according to [`LoadMode`] and its length.
+#[allow(dead_code)]
 pub(crate) fn load_indices<H, C, P>(
     cursor: &mut C,
     partial_key: P,
@@ -326,10 +328,10 @@ impl LoadMode {
     }
 }
 
-/// Loads storage history indices from a collector into the database using EitherWriter.
+/// Loads storage history indices from a collector into the database using `EitherWriter`.
 ///
-/// This is a specialized version of [`load_history_indices`] for [`tables::StoragesHistory`]
-/// that supports writing to either MDBX or RocksDB based on storage settings.
+/// This is a specialized version of [`load_history_indices`] for `tables::StoragesHistory`
+/// that supports writing to either `MDBX` or `RocksDB` based on storage settings.
 pub(crate) fn load_storages_history_indices<Provider, P>(
     provider: &Provider,
     mut collector: Collector<
@@ -350,7 +352,9 @@ where
 {
     // Create RocksDB batch if feature enabled
     #[cfg(all(unix, feature = "rocksdb"))]
-    let rocksdb_batch = provider.rocksdb_provider().batch();
+    let rocksdb = provider.rocksdb_provider();
+    #[cfg(all(unix, feature = "rocksdb"))]
+    let rocksdb_batch = rocksdb.batch();
     #[cfg(not(all(unix, feature = "rocksdb")))]
     let rocksdb_batch = ();
 
@@ -437,7 +441,7 @@ fn load_storages_history_shard<P, CURSOR, N>(
     partial_key: P,
     list: &mut Vec<BlockNumber>,
     sharded_key_factory: &impl Fn(P, BlockNumber) -> StorageShardedKey,
-    append_only: bool,
+    _append_only: bool,
     mode: LoadMode,
 ) -> Result<(), StageError>
 where
@@ -471,10 +475,10 @@ where
     Ok(())
 }
 
-/// Loads account history indices from a collector into the database using EitherWriter.
+/// Loads account history indices from a collector into the database using `EitherWriter`.
 ///
-/// This is a specialized version of [`load_history_indices`] for [`tables::AccountsHistory`]
-/// that supports writing to either MDBX or RocksDB based on storage settings.
+/// This is a specialized version of [`load_history_indices`] for `tables::AccountsHistory`
+/// that supports writing to either `MDBX` or `RocksDB` based on storage settings.
 pub(crate) fn load_accounts_history_indices<Provider, P>(
     provider: &Provider,
     mut collector: Collector<
@@ -495,7 +499,9 @@ where
 {
     // Create RocksDB batch if feature enabled
     #[cfg(all(unix, feature = "rocksdb"))]
-    let rocksdb_batch = provider.rocksdb_provider().batch();
+    let rocksdb = provider.rocksdb_provider();
+    #[cfg(all(unix, feature = "rocksdb"))]
+    let rocksdb_batch = rocksdb.batch();
     #[cfg(not(all(unix, feature = "rocksdb")))]
     let rocksdb_batch = ();
 
@@ -582,7 +588,7 @@ fn load_accounts_history_shard<P, CURSOR, N>(
     partial_key: P,
     list: &mut Vec<BlockNumber>,
     sharded_key_factory: &impl Fn(P, BlockNumber) -> ShardedKey<Address>,
-    append_only: bool,
+    _append_only: bool,
     mode: LoadMode,
 ) -> Result<(), StageError>
 where

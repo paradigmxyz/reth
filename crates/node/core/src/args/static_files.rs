@@ -57,30 +57,30 @@ pub struct StaticFilesArgs {
     #[arg(long = "static-files.account-change-sets")]
     pub account_changesets: bool,
 
-    /// Store transaction hash numbers in RocksDB instead of MDBX.
+    /// Store transaction hash numbers in `RocksDB` instead of `MDBX`.
     ///
-    /// When enabled, the TransactionHashNumbers index will be stored in RocksDB for better
-    /// performance and reduced MDBX database size.
+    /// When enabled, the `TransactionHashNumbers` index will be stored in `RocksDB` for better
+    /// performance and reduced `MDBX` database size.
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
     #[arg(long = "storage.tx-hash-in-rocksdb")]
     pub tx_hash_in_rocksdb: bool,
 
-    /// Store storage history in RocksDB instead of MDBX.
+    /// Store storage history in `RocksDB` instead of `MDBX`.
     ///
-    /// When enabled, the StoragesHistory index will be stored in RocksDB for better
-    /// performance and reduced MDBX database size.
+    /// When enabled, the `StoragesHistory` index will be stored in `RocksDB` for better
+    /// performance and reduced `MDBX` database size.
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
     #[arg(long = "storage.storages-history-in-rocksdb")]
     pub storages_history_in_rocksdb: bool,
 
-    /// Store account history in RocksDB instead of MDBX.
+    /// Store account history in `RocksDB` instead of `MDBX`.
     ///
-    /// When enabled, the AccountsHistory index will be stored in RocksDB for better
-    /// performance and reduced MDBX database size.
+    /// When enabled, the `AccountsHistory` index will be stored in `RocksDB` for better
+    /// performance and reduced `MDBX` database size.
     ///
     /// Note: This setting can only be configured at genesis initialization. Once
     /// the node has been initialized, changing this flag requires re-syncing from scratch.
