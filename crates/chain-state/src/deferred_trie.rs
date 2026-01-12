@@ -114,8 +114,8 @@ impl DeferredTrieData {
     /// # Arguments
     /// * `hashed_state` - Unsorted hashed post-state from execution
     /// * `trie_updates` - Unsorted trie updates from state root computation
-    /// * `anchor_hash` - The persisted ancestor hash (metadata for the result)
-    /// * `ancestors` - Deferred trie data from ancestor blocks
+    /// * `anchor_hash` - The persisted ancestor hash this trie input is anchored to
+    /// * `ancestors` - Deferred trie data from ancestor blocks for merging
     pub fn pending(
         hashed_state: Arc<HashedPostState>,
         trie_updates: Arc<TrieUpdates>,
