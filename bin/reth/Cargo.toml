@@ -133,7 +133,10 @@ tracy-allocator = [
     "reth-ethereum-cli/tracy-allocator",
     "tracy",
 ]
-tracy = ["reth-ethereum-cli/tracy"]
+tracy = [
+    "reth-ethereum-cli/tracy",
+    "reth-node-core/tracy",
+]
 
 # Because jemalloc is default and preferred over snmalloc when both features are
 # enabled, `--no-default-features` should be used when enabling snmalloc or
