@@ -116,6 +116,11 @@ jemalloc-prof = [
     "reth-cli-util/jemalloc",
     "reth-cli-util/jemalloc-prof",
     "reth-ethereum-cli/jemalloc-prof",
+    "reth-node-metrics/jemalloc-prof",
+]
+jemalloc-symbols = [
+    "jemalloc-prof",
+    "reth-ethereum-cli/jemalloc-symbols",
 ]
 jemalloc-unprefixed = [
     "reth-cli-util/jemalloc-unprefixed",
@@ -165,6 +170,8 @@ min-trace-logs = [
     "reth-ethereum-cli/min-trace-logs",
     "reth-node-core/min-trace-logs",
 ]
+
+edge = ["reth-ethereum-cli/edge"]
 
 [[bin]]
 name = "reth"

@@ -4,7 +4,7 @@ use crate::{stats::ParallelTrieTracker, storage_root_targets::StorageRootTargets
 use alloy_primitives::B256;
 use alloy_rlp::{BufMut, Encodable};
 use itertools::Itertools;
-use reth_execution_errors::StorageRootError;
+use reth_execution_errors::{StateProofError, StorageRootError};
 use reth_provider::{DatabaseProviderROFactory, ProviderError};
 use reth_storage_errors::db::DatabaseError;
 use reth_trie::{
@@ -252,6 +252,15 @@ impl From<ParallelStateRootError> for ProviderError {
 impl From<alloy_rlp::Error> for ParallelStateRootError {
     fn from(error: alloy_rlp::Error) -> Self {
         Self::Provider(ProviderError::Rlp(error))
+    }
+}
+
+impl From<StateProofError> for ParallelStateRootError {
+    fn from(error: StateProofError) -> Self {
+        match error {
+            StateProofError::Database(err) => Self::Provider(ProviderError::Database(err)),
+            StateProofError::Rlp(err) => Self::Provider(ProviderError::Rlp(err)),
+        }
     }
 }
 
