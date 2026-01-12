@@ -151,7 +151,7 @@ where
         if last_block.is_some() {
             let provider_rw = self.provider.database_provider_rw()?;
 
-            provider_rw.save_blocks(blocks)?;
+            provider_rw.save_blocks_parallel(blocks)?;
             provider_rw.commit()?;
         }
 

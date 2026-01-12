@@ -85,6 +85,7 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeFrom, RangeInclusive},
     sync::Arc,
+    thread,
     time::{Duration, Instant},
 };
 use tracing::{debug, trace};
@@ -448,6 +449,271 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         );
 
         debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+
+        Ok(())
+    }
+
+    /// Writes executed blocks and state to storage using parallel writes.
+    ///
+    /// This is an optimized version of [`save_blocks`] that parallelizes:
+    /// - Static file writes (Headers, Transactions) in separate threads
+    /// - MDBX writes (indices, senders, state, trie) in parallel with static files
+    ///
+    /// The caller is responsible for committing the provider after this returns.
+    pub fn save_blocks_parallel(
+        &self,
+        blocks: Vec<ExecutedBlock<N::Primitives>>,
+    ) -> ProviderResult<()> {
+        if blocks.is_empty() {
+            debug!(target: "providers::db", "Attempted to write empty block range");
+            return Ok(());
+        }
+
+        let first_block = blocks.first().unwrap().recovered_block();
+        let last_block = blocks.last().unwrap().recovered_block();
+        let first_number = first_block.number();
+        let last_block_number = last_block.number();
+        let block_count = blocks.len();
+
+        debug!(target: "providers::db", block_count = %block_count, "Writing blocks and execution data to storage (parallel)");
+
+        // Pre-calculate tx_nums for all blocks
+        let first_tx_num = self
+            .tx
+            .cursor_read::<tables::TransactionBlocks>()?
+            .last()?
+            .map(|(n, _)| n + 1)
+            .unwrap_or_default();
+
+        let mut block_tx_info: Vec<(BlockNumber, TxNumber, u64)> = Vec::with_capacity(block_count);
+        let mut next_tx_num = first_tx_num;
+        for block in &blocks {
+            let block_number = block.recovered_block().number();
+            let tx_count = block.recovered_block().body().transaction_count() as u64;
+            block_tx_info.push((block_number, next_tx_num, tx_count));
+            next_tx_num += tx_count;
+        }
+
+        let static_file_provider = &self.static_file_provider;
+        let write_senders = self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full());
+        let write_tx_lookup = self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full());
+
+        let parallel_start = Instant::now();
+
+        // Run SF writes in parallel threads while MDBX writes happen on the main thread.
+        // Note: MDBX operations use self.tx which isn't Sync, so they must run on main thread.
+        // Senders are written to MDBX (not SF) in this parallel version.
+        let (sf_durations, mdbx_durations) = thread::scope(|s| {
+            // SF HEADERS THREAD
+            let headers_handle = s.spawn(|| {
+                let start = Instant::now();
+                for block in &blocks {
+                    let recovered = block.recovered_block();
+                    static_file_provider
+                        .get_writer(recovered.number(), StaticFileSegment::Headers)
+                        .expect("get header writer")
+                        .append_header(recovered.header(), &recovered.hash())
+                        .expect("append header");
+                }
+                start.elapsed()
+            });
+
+            // SF TRANSACTIONS THREAD
+            let txs_handle = s.spawn(|| {
+                let start = Instant::now();
+                for (i, block) in blocks.iter().enumerate() {
+                    let (block_number, first_tx_num, _) = block_tx_info[i];
+                    let recovered = block.recovered_block();
+
+                    let mut writer = static_file_provider
+                        .get_writer(block_number, StaticFileSegment::Transactions)
+                        .expect("get tx writer");
+                    writer.increment_block(block_number).expect("increment tx block");
+
+                    for (tx_num, tx) in
+                        (first_tx_num..).zip(recovered.body().transactions_iter())
+                    {
+                        writer.append_transaction(tx_num, tx).expect("append tx");
+                    }
+                }
+                start.elapsed()
+            });
+
+            // MDBX writes on main thread (TX isn't Sync so can't spawn)
+            let mdbx_durations = {
+                let mut total_insert_indices = Duration::ZERO;
+                let mut total_write_state = Duration::ZERO;
+                let mut total_write_hashed_state = Duration::ZERO;
+                let mut total_write_trie_changesets = Duration::ZERO;
+                let mut total_write_trie_updates = Duration::ZERO;
+
+                let mut header_numbers_cursor = self
+                    .tx
+                    .cursor_write::<tables::HeaderNumbers>()
+                    .expect("header numbers cursor");
+                let mut block_body_indices_cursor = self
+                    .tx
+                    .cursor_write::<tables::BlockBodyIndices>()
+                    .expect("block body indices cursor");
+                let mut tx_blocks_cursor = self
+                    .tx
+                    .cursor_write::<tables::TransactionBlocks>()
+                    .expect("tx blocks cursor");
+                let mut tx_hash_cursor = if write_tx_lookup {
+                    Some(
+                        self.tx
+                            .cursor_write::<tables::TransactionHashNumbers>()
+                            .expect("tx hash numbers cursor"),
+                    )
+                } else {
+                    None
+                };
+                let mut senders_cursor = if write_senders {
+                    Some(
+                        self.tx
+                            .cursor_write::<tables::TransactionSenders>()
+                            .expect("senders cursor"),
+                    )
+                } else {
+                    None
+                };
+
+                for (i, block) in blocks.iter().enumerate() {
+                    let (block_number, first_tx_num, tx_count) = block_tx_info[i];
+                    let recovered = block.recovered_block();
+                    let trie_data = block.trie_data();
+                    let execution_output = block.execution_outcome();
+
+                    // Insert indices
+                    let start = Instant::now();
+                    header_numbers_cursor
+                        .insert(recovered.hash(), &block_number)
+                        .expect("insert header number");
+
+                    if let Some(ref mut cursor) = tx_hash_cursor {
+                        for (tx_num, tx) in
+                            (first_tx_num..).zip(recovered.body().transactions_iter())
+                        {
+                            cursor
+                                .insert(*tx.tx_hash(), &tx_num)
+                                .expect("insert tx hash number");
+                        }
+                    }
+
+                    // Write senders to MDBX
+                    if let Some(ref mut cursor) = senders_cursor {
+                        for (tx_num, sender) in
+                            (first_tx_num..).zip(recovered.senders_iter())
+                        {
+                            cursor
+                                .append(tx_num, sender)
+                                .expect("append sender");
+                        }
+                    }
+
+                    let indices = StoredBlockBodyIndices { first_tx_num, tx_count };
+                    block_body_indices_cursor
+                        .append(block_number, &indices)
+                        .expect("append block body indices");
+
+                    if tx_count > 0 {
+                        let last_tx_num = first_tx_num + tx_count - 1;
+                        tx_blocks_cursor
+                            .append(last_tx_num, &block_number)
+                            .expect("append tx blocks");
+                    }
+                    total_insert_indices += start.elapsed();
+
+                    // Write state
+                    let start = Instant::now();
+                    self.write_state(&execution_output, OriginalValuesKnown::No)
+                        .expect("write_state failed");
+                    total_write_state += start.elapsed();
+
+                    // Write hashed state
+                    let start = Instant::now();
+                    self.write_hashed_state(&trie_data.hashed_state)
+                        .expect("write_hashed_state failed");
+                    total_write_hashed_state += start.elapsed();
+
+                    // Write trie changesets
+                    let start = Instant::now();
+                    self.write_trie_changesets(block_number, &trie_data.trie_updates, None)
+                        .expect("write_trie_changesets failed");
+                    total_write_trie_changesets += start.elapsed();
+
+                    // Write trie updates
+                    let start = Instant::now();
+                    self.write_trie_updates_sorted(&trie_data.trie_updates)
+                        .expect("write_trie_updates failed");
+                    total_write_trie_updates += start.elapsed();
+                }
+
+                (
+                    total_insert_indices,
+                    total_write_state,
+                    total_write_hashed_state,
+                    total_write_trie_changesets,
+                    total_write_trie_updates,
+                )
+            };
+
+            // Join SF threads
+            let headers_time = headers_handle.join().expect("Headers thread panicked");
+            let txs_time = txs_handle.join().expect("Txs thread panicked");
+
+            ((headers_time, txs_time), mdbx_durations)
+        });
+
+        let parallel_time = parallel_start.elapsed();
+        let (headers_time, txs_time) = sf_durations;
+        let (
+            total_insert_indices,
+            total_write_state,
+            total_write_hashed_state,
+            total_write_trie_changesets,
+            total_write_trie_updates,
+        ) = mdbx_durations;
+
+        // Update history indices (sequential)
+        let start = Instant::now();
+        self.update_history_indices(first_number..=last_block_number)?;
+        let duration_update_history_indices = start.elapsed();
+
+        // Update pipeline progress (sequential)
+        let start = Instant::now();
+        self.update_pipeline_stages(last_block_number, false)?;
+        let duration_update_pipeline_stages = start.elapsed();
+
+        // Record metrics
+        self.metrics.record_duration(
+            metrics::Action::SaveBlocksInsertBlock,
+            total_insert_indices + headers_time + txs_time,
+        );
+        self.metrics.record_duration(metrics::Action::SaveBlocksWriteState, total_write_state);
+        self.metrics
+            .record_duration(metrics::Action::SaveBlocksWriteHashedState, total_write_hashed_state);
+        self.metrics.record_duration(
+            metrics::Action::SaveBlocksWriteTrieChangesets,
+            total_write_trie_changesets,
+        );
+        self.metrics
+            .record_duration(metrics::Action::SaveBlocksWriteTrieUpdates, total_write_trie_updates);
+        self.metrics.record_duration(
+            metrics::Action::SaveBlocksUpdateHistoryIndices,
+            duration_update_history_indices,
+        );
+        self.metrics.record_duration(
+            metrics::Action::SaveBlocksUpdatePipelineStages,
+            duration_update_pipeline_stages,
+        );
+
+        debug!(
+            target: "providers::db",
+            range = ?first_number..=last_block_number,
+            ?parallel_time,
+            "Appended block data (parallel)"
+        );
 
         Ok(())
     }
