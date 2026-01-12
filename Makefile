@@ -276,6 +276,11 @@ docker-build-push-latest: ## Build and push a cross-arch Docker image tagged wit
 docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
 	$(call docker_build_push,nightly,nightly)
 
+.PHONY: docker-build-push-nightly-edge-profiling
+docker-build-push-nightly-edge-profiling: FEATURES := $(FEATURES) edge
+docker-build-push-nightly-edge-profiling: ## Build and push cross-arch Docker image with edge features tagged with `nightly-edge-profiling`.
+	$(call docker_build_push,nightly-edge-profiling,nightly-edge-profiling)
+
 # Create a cross-arch Docker image with the given tags and push it
 define docker_build_push
 	$(MAKE) build-x86_64-unknown-linux-gnu
@@ -327,6 +332,11 @@ op-docker-build-push-latest: ## Build and push a cross-arch Docker image tagged 
 .PHONY: op-docker-build-push-nightly
 op-docker-build-push-nightly: ## Build and push cross-arch Docker image tagged with the latest git tag with a `-nightly` suffix, and `latest-nightly`.
 	$(call op_docker_build_push,nightly,nightly)
+
+.PHONY: op-docker-build-push-nightly-edge-profiling
+op-docker-build-push-nightly-edge-profiling: FEATURES := $(FEATURES) edge
+op-docker-build-push-nightly-edge-profiling: ## Build and push cross-arch Docker image with edge features tagged with `nightly-edge-profiling`.
+	$(call op_docker_build_push,nightly-edge-profiling,nightly-edge-profiling)
 
 # Note: This requires a buildx builder with emulation support. For example:
 #

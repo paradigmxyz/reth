@@ -215,11 +215,10 @@ impl Environment {
 
         for result in cursor.iter_slices() {
             let (_key, value) = result?;
-            if value.len() < size_of::<usize>() {
+            if value.len() < size_of::<u32>() {
                 return Err(Error::Corrupted)
             }
-
-            let s = &value[..size_of::<usize>()];
+            let s = &value[..size_of::<u32>()];
             freelist += NativeEndian::read_u32(s) as usize;
         }
 
