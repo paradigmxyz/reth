@@ -1,7 +1,5 @@
 use crate::{
-    changesets_utils::{
-        storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
-    },
+    changesets_utils::StorageRevertsIter,
     providers::{
         database::{chain::ChainStorage, metrics},
         rocksdb::RocksDBProvider,
@@ -66,9 +64,10 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
+    changesets::storage_trie_wiped_changeset_iter,
     trie_cursor::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
-        TrieCursorIter,
+        TrieCursorIter, TrieStorageCursor,
     },
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
@@ -2619,22 +2618,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
 
         let mut changeset_cursor =
             self.tx_ref().cursor_dup_write::<tables::StoragesTrieChangeSets>()?;
+        let curr_values_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
 
-        // We hold two cursors to the same table because we use them simultaneously when an
-        // account's storage is wiped. We keep them outside the for-loop so they can be re-used
-        // between accounts.
-        let changed_curr_values_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
-        let wiped_nodes_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
-
-        // DatabaseStorageTrieCursor requires ownership of the cursor. The easiest way to deal with
-        // this is to create this outer variable with an initial dummy account, and overwrite it on
-        // every loop for every real account.
-        let mut changed_curr_values_cursor = DatabaseStorageTrieCursor::new(
-            changed_curr_values_cursor,
-            B256::default(), // Will be set per iteration
-        );
-        let mut wiped_nodes_cursor = DatabaseStorageTrieCursor::new(
-            wiped_nodes_cursor,
+        // Wrap the cursor in DatabaseStorageTrieCursor
+        let mut db_storage_cursor = DatabaseStorageTrieCursor::new(
+            curr_values_cursor,
             B256::default(), // Will be set per iteration
         );
 
@@ -2644,43 +2632,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         for (hashed_address, storage_trie_updates) in storage_tries {
             let changeset_key = BlockNumberHashedAddress((block_number, *hashed_address));
 
-            // Update the hashed address for the cursors
-            changed_curr_values_cursor =
-                DatabaseStorageTrieCursor::new(changed_curr_values_cursor.cursor, *hashed_address);
+            // Update the hashed address for the cursor
+            db_storage_cursor.set_hashed_address(*hashed_address);
 
             // Get the overlay updates, or use empty updates
             let overlay = updates_overlay.unwrap_or(&empty_updates);
 
             // Wrap the cursor in InMemoryTrieCursor with the overlay
-            let mut in_memory_changed_cursor = InMemoryTrieCursor::new_storage(
-                &mut changed_curr_values_cursor,
-                overlay,
-                *hashed_address,
-            );
+            let mut in_memory_storage_cursor =
+                InMemoryTrieCursor::new_storage(&mut db_storage_cursor, overlay, *hashed_address);
 
-            // Create an iterator which produces the current values of all updated paths, or None if
-            // they are currently unset.
-            let curr_values_of_changed = StorageTrieCurrentValuesIter::new(
-                storage_trie_updates.storage_nodes.iter().map(|e| e.0),
-                &mut in_memory_changed_cursor,
-            )?;
+            let changed_paths = storage_trie_updates.storage_nodes.iter().map(|e| e.0);
 
             if storage_trie_updates.is_deleted() {
-                // Create an iterator that starts from the beginning of the storage trie for this
-                // account
-                wiped_nodes_cursor =
-                    DatabaseStorageTrieCursor::new(wiped_nodes_cursor.cursor, *hashed_address);
+                let all_nodes = TrieCursorIter::new(&mut in_memory_storage_cursor);
 
-                // Wrap the wiped nodes cursor in InMemoryTrieCursor with the overlay
-                let mut in_memory_wiped_cursor = InMemoryTrieCursor::new_storage(
-                    &mut wiped_nodes_cursor,
-                    overlay,
-                    *hashed_address,
-                );
-
-                let all_nodes = TrieCursorIter::new(&mut in_memory_wiped_cursor);
-
-                for wiped in storage_trie_wiped_changeset_iter(curr_values_of_changed, all_nodes)? {
+                for wiped in storage_trie_wiped_changeset_iter(changed_paths, all_nodes)? {
                     let (path, node) = wiped?;
                     num_written += 1;
                     changeset_cursor.append_dup(
@@ -2689,8 +2656,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
                     )?;
                 }
             } else {
-                for curr_value in curr_values_of_changed {
-                    let (path, node) = curr_value?;
+                for path in changed_paths {
+                    let node = in_memory_storage_cursor.seek_exact(path)?.map(|(_, node)| node);
                     num_written += 1;
                     changeset_cursor.append_dup(
                         changeset_key,

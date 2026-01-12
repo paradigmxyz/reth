@@ -2,6 +2,7 @@
 
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 
+pub mod changesets;
 mod hashed_cursor;
 mod prefix_set;
 mod proof;
