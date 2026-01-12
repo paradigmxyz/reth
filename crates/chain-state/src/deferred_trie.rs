@@ -848,7 +848,7 @@ mod tests {
             Arc::new(block4_hashed),
             Arc::new(TrieUpdates::default()),
             new_anchor, // Different anchor - simulates post-persist
-            vec![block1.clone(), block2_ready.clone(), block3_ready.clone()],
+            vec![block1, block2_ready, block3_ready],
         );
 
         let result = block4.wait_cloned();
