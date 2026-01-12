@@ -44,7 +44,7 @@ pub struct ComputedTrieData {
 /// The `anchor_hash` is metadata indicating which persisted base state this overlay
 /// sits on top of. It is CRITICAL for overlay reuse decisions: an overlay built on top
 /// of Anchor A cannot be reused for a block anchored to Anchor B, as it would result
-/// in incorrect state application.
+/// in an incorrect state.
 #[derive(Clone, Debug)]
 pub struct AnchoredTrieInput {
     /// The persisted ancestor hash this trie input is anchored to.
@@ -61,10 +61,6 @@ struct DeferredTrieMetrics {
     deferred_trie_async_ready: Counter,
     /// Number of times deferred trie data required synchronous computation (fallback path).
     deferred_trie_sync_fallback: Counter,
-    /// Number of times trie overlay was reused from parent (O(1) optimization).
-    deferred_trie_overlay_reused: Counter,
-    /// Number of times trie overlay was rebuilt from ancestors (fallback/persist).
-    deferred_trie_overlay_rebuilt: Counter,
 }
 
 static DEFERRED_TRIE_METRICS: LazyLock<DeferredTrieMetrics> =
@@ -182,20 +178,17 @@ impl DeferredTrieData {
                 Some(AnchoredTrieInput { anchor_hash: parent_anchor, trie_input })
                     if *parent_anchor == anchor_hash =>
                 {
-                    // O(1): Reuse parent's overlay
-                    DEFERRED_TRIE_METRICS.deferred_trie_overlay_reused.increment(1);
+                    // O(1): Reuse parent's overlay via Arc::clone (refcount bump only).
+                    // COW via Arc::make_mut will clone only if we actually mutate.
                     TrieInputSorted::new(
-                        Arc::new((*trie_input.nodes).clone()),
-                        Arc::new((*trie_input.state).clone()),
+                        Arc::clone(&trie_input.nodes),
+                        Arc::clone(&trie_input.state),
                         Default::default(), // prefix_sets are per-block, not cumulative
                     )
                 }
                 // Case 2: Parent exists but anchor mismatch or no cached overlay.
                 // We must rebuild from the ancestors list (which only contains unpersisted blocks).
-                _ => {
-                    DEFERRED_TRIE_METRICS.deferred_trie_overlay_rebuilt.increment(1);
-                    Self::merge_ancestors_into_overlay(ancestors)
-                }
+                _ => Self::merge_ancestors_into_overlay(ancestors)
             }
         } else {
             // Case 3: No in-memory ancestors (first block after persisted anchor).
@@ -204,13 +197,12 @@ impl DeferredTrieData {
         };
 
         // Extend overlay with current block's sorted data.
-        {
-            let state_mut = Arc::make_mut(&mut overlay.state);
-            state_mut.extend_ref(sorted_hashed_state.as_ref());
+        // Only trigger COW clone if there's actually data to add.
+        if !sorted_hashed_state.is_empty() {
+            Arc::make_mut(&mut overlay.state).extend_ref(sorted_hashed_state.as_ref());
         }
-        {
-            let nodes_mut = Arc::make_mut(&mut overlay.nodes);
-            nodes_mut.extend_ref(sorted_trie_updates.as_ref());
+        if !sorted_trie_updates.is_empty() {
+            Arc::make_mut(&mut overlay.nodes).extend_ref(sorted_trie_updates.as_ref());
         }
 
         ComputedTrieData::with_trie_input(
