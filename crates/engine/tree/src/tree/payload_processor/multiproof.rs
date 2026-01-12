@@ -893,97 +893,31 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                let update = if self
-                    .multiproof_manager
-                    .proof_worker_handle
-                    .available_account_workers() >
-                    0
-                {
-                    update
-                } else {
-                    // Accumulate messages including the first one; reuse buffer to avoid
-                    // allocations.
-                    let mut accumulated_targets = estimate_evm_state_targets(&update);
-                    ctx.accumulated_state_updates.clear();
-                    ctx.accumulated_state_updates.push(update);
+                ctx.merge_state_update(source, update);
 
-                    // Batch consecutive state update messages up to target limit.
-                    while accumulated_targets < STATE_UPDATE_MAX_BATCH_TARGETS {
-                        match self.rx.try_recv() {
-                            Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                                let next_estimate = estimate_evm_state_targets(&next_update);
-                                // Would exceed batch cap; leave pending to dispatch on next
-                                // iteration.
-                                if accumulated_targets + next_estimate >
-                                    STATE_UPDATE_MAX_BATCH_TARGETS
-                                {
-                                    ctx.pending_msg = Some(MultiProofMessage::StateUpdate(
-                                        next_source,
-                                        next_update,
-                                    ));
-                                    break;
-                                }
-                                accumulated_targets += next_estimate;
-                                ctx.accumulated_state_updates.push(next_update);
-                            }
-                            Ok(other_msg) => {
-                                ctx.pending_msg = Some(other_msg);
-                                break;
-                            }
-                            Err(_) => break,
+                // Batch consecutive state update messages.
+                while self.multiproof_manager.proof_worker_handle.pending_account_tasks() > 0 {
+                    let (next_source, next_update) = match self.rx.try_recv() {
+                        Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
+                            (next_source, next_update)
                         }
-                    }
-
-                    // Process all accumulated messages in a single batch
-                    let num_batched = ctx.accumulated_state_updates.len();
-                    self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
-
-                    // Merge all accumulated updates into a single EvmState payload.
-                    // Use drain to preserve the buffer allocation.
-                    let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
-                    let mut merged_update = accumulated_iter
-                        .next()
-                        .expect("state update batch always has at least one entry");
-                    for next_update in accumulated_iter {
-                        for (address, acc) in next_update {
-                            match merged_update.entry(address) {
-                                Entry::Vacant(vacant) => {
-                                    vacant.insert(acc);
-                                }
-                                Entry::Occupied(mut occupied) => {
-                                    let value = occupied.get_mut();
-
-                                    if value.is_selfdestructed() {
-                                        // If account was selfdestructed before, we can just replace
-                                        // its storage
-                                        value.storage = acc.storage;
-                                    } else {
-                                        // Otherwise, we need to update the existing storage
-                                        for (slot, new_value) in acc.storage {
-                                            match value.storage.entry(slot) {
-                                                Entry::Vacant(vacant) => {
-                                                    vacant.insert(new_value);
-                                                }
-                                                Entry::Occupied(mut occupied) => {
-                                                    occupied.get_mut().present_value =
-                                                        new_value.present_value;
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    value.info = acc.info;
-                                    value.status |= acc.status;
-                                    value.transaction_id = acc.transaction_id;
-                                }
-                            }
+                        Ok(other_msg) => {
+                            ctx.pending_msg = Some(other_msg);
+                            break
                         }
-                    }
+                        Err(_) => break,
+                    };
 
-                    merged_update
+                    ctx.merge_state_update(next_source, next_update);
+                }
+
+                let Some((source, update)) = ctx.pending_state_update.take() else {
+                    unreachable!()
                 };
                 let update_len = update.len();
-                batch_metrics.state_update_proofs_requested += self.on_state_update(source, update);
+                if self.multiproof_manager.proof_worker_handle.available_account_workers() == 0 {
+                    self.on_state_update(source, update);
+                }
                 trace!(
                     target: "engine::tree::payload_processor::multiproof",
                     ?source,
@@ -1153,6 +1087,10 @@ impl MultiProofTask {
 
                             self.multiproof_manager.on_calculation_complete();
 
+                            if self.multiproof_manager.proof_worker_handle.pending_account_tasks() == 0 && let Some((source, update)) = ctx.pending_state_update.take()  {
+                                self.on_state_update(source, update);
+                            }
+
                             // Convert ProofResultMessage to SparseTrieUpdate
                             match proof_result.result {
                                 Ok(proof_result_data) => {
@@ -1257,7 +1195,7 @@ struct MultiproofBatchCtx {
     /// Reusable buffer for accumulating prefetch targets during batching.
     accumulated_prefetch_targets: Vec<MultiProofTargets>,
     /// Reusable buffer for accumulating state updates during batching.
-    accumulated_state_updates: Vec<EvmState>,
+    pending_state_update: Option<(Source, EvmState)>,
 }
 
 impl MultiproofBatchCtx {
@@ -1269,13 +1207,53 @@ impl MultiproofBatchCtx {
             start,
             updates_finished_time: None,
             accumulated_prefetch_targets: Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES),
-            accumulated_state_updates: Vec::with_capacity(STATE_UPDATE_BATCH_PREALLOC),
+            pending_state_update: Default::default(),
         }
     }
 
     /// Returns `true` if all state updates have been received.
     const fn updates_finished(&self) -> bool {
         self.updates_finished_time.is_some()
+    }
+
+    fn merge_state_update(&mut self, source: Source, new: EvmState) {
+        let Some((_, updates)) = &mut self.pending_state_update else {
+            self.pending_state_update = Some((source, new));
+            return;
+        };
+
+        for (address, acc) in new {
+            match updates.entry(address) {
+                Entry::Vacant(vacant) => {
+                    vacant.insert(acc);
+                }
+                Entry::Occupied(mut occupied) => {
+                    let value = occupied.get_mut();
+
+                    if value.is_selfdestructed() {
+                        // If account was selfdestructed before, we can just replace
+                        // its storage
+                        value.storage = acc.storage;
+                    } else {
+                        // Otherwise, we need to update the existing storage
+                        for (slot, new_value) in acc.storage {
+                            match value.storage.entry(slot) {
+                                Entry::Vacant(vacant) => {
+                                    vacant.insert(new_value);
+                                }
+                                Entry::Occupied(mut occupied) => {
+                                    occupied.get_mut().present_value = new_value.present_value;
+                                }
+                            }
+                        }
+                    }
+
+                    value.info = acc.info;
+                    value.status |= acc.status;
+                    value.transaction_id = acc.transaction_id;
+                }
+            }
+        }
     }
 }
 
