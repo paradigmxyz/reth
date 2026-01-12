@@ -1,6 +1,6 @@
 use crate::{
-    in_memory::ExecutedBlockWithTrieUpdates, CanonStateNotification, CanonStateNotifications,
-    CanonStateSubscriptions, ExecutedTrieUpdates,
+    in_memory::ExecutedBlock, CanonStateNotification, CanonStateNotifications,
+    CanonStateSubscriptions, ComputedTrieData,
 };
 use alloy_consensus::{Header, SignableTransaction, TxEip1559, TxReceipt, EMPTY_ROOT_HASH};
 use alloy_eips::{
@@ -23,11 +23,10 @@ use reth_primitives_traits::{
     SignedTransaction,
 };
 use reth_storage_api::NodePrimitivesProvider;
-use reth_trie::{root::state_root_unhashed, HashedPostState};
+use reth_trie::root::state_root_unhashed;
 use revm_database::BundleState;
 use revm_state::AccountInfo;
 use std::{
-    collections::HashMap,
     ops::Range,
     sync::{Arc, Mutex},
 };
@@ -93,7 +92,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
         &mut self,
         number: BlockNumber,
         parent_hash: B256,
-    ) -> RecoveredBlock<reth_ethereum_primitives::Block> {
+    ) -> SealedBlock<reth_ethereum_primitives::Block> {
         let mut rng = rand::rng();
 
         let mock_tx = |nonce: u64| -> Recovered<_> {
@@ -118,7 +117,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             .map(|_| {
                 let tx = mock_tx(self.signer_build_account_info.nonce);
                 self.signer_build_account_info.nonce += 1;
-                self.signer_build_account_info.balance -= signer_balance_decrease;
+                self.signer_build_account_info.balance -= Self::single_tx_cost();
                 tx
             })
             .collect();
@@ -146,12 +145,10 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             mix_hash: B256::random(),
             gas_limit: ETHEREUM_BLOCK_GAS_LIMIT_30M,
             base_fee_per_gas: Some(INITIAL_BASE_FEE),
-            transactions_root: calculate_transaction_root(
-                &transactions.clone().into_iter().map(|tx| tx.into_inner()).collect::<Vec<_>>(),
-            ),
+            transactions_root: calculate_transaction_root(&transactions),
             receipts_root: calculate_receipt_root(&receipts),
             beneficiary: Address::random(),
-            state_root: state_root_unhashed(HashMap::from([(
+            state_root: state_root_unhashed([(
                 self.signer,
                 Account {
                     balance: initial_signer_balance - signer_balance_decrease,
@@ -159,7 +156,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                     ..Default::default()
                 }
                 .into_trie_account(EMPTY_ROOT_HASH),
-            )])),
+            )]),
             // use the number as the timestamp so it is monotonically increasing
             timestamp: number +
                 EthereumHardfork::Cancun.activation_timestamp(self.chain_spec.chain).unwrap(),
@@ -170,17 +167,14 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
             ..Default::default()
         };
 
-        let block = SealedBlock::from_sealed_parts(
+        SealedBlock::from_sealed_parts(
             SealedHeader::seal_slow(header),
             BlockBody {
                 transactions: transactions.into_iter().map(|tx| tx.into_inner()).collect(),
                 ommers: Vec::new(),
                 withdrawals: Some(vec![].into()),
             },
-        );
-
-        RecoveredBlock::try_recover_sealed_with_senders(block, vec![self.signer; num_txs as usize])
-            .unwrap()
+        )
     }
 
     /// Creates a fork chain with the given base block.
@@ -194,24 +188,26 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
 
         for _ in 0..length {
             let block = self.generate_random_block(parent.number + 1, parent.hash());
-            parent = block.clone_sealed_block();
+            parent = block.clone();
+            let senders = vec![self.signer; block.body().transactions.len()];
+            let block = block.with_senders(senders);
             fork.push(block);
         }
 
         fork
     }
 
-    /// Gets an [`ExecutedBlockWithTrieUpdates`] with [`BlockNumber`], receipts and parent hash.
+    /// Gets an [`ExecutedBlock`] with [`BlockNumber`], receipts and parent hash.
     fn get_executed_block(
         &mut self,
         block_number: BlockNumber,
         receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
-    ) -> ExecutedBlockWithTrieUpdates {
-        let block_with_senders = self.generate_random_block(block_number, parent_hash);
-
-        let (block, senders) = block_with_senders.split_sealed();
-        ExecutedBlockWithTrieUpdates::new(
+    ) -> ExecutedBlock {
+        let block = self.generate_random_block(block_number, parent_hash);
+        let senders = vec![self.signer; block.body().transactions.len()];
+        let trie_data = ComputedTrieData::default();
+        ExecutedBlock::new(
             Arc::new(RecoveredBlock::new_sealed(block, senders)),
             Arc::new(ExecutionOutcome::new(
                 BundleState::default(),
@@ -219,27 +215,26 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
                 block_number,
                 vec![Requests::default()],
             )),
-            Arc::new(HashedPostState::default()),
-            ExecutedTrieUpdates::empty(),
+            trie_data,
         )
     }
 
-    /// Generates an [`ExecutedBlockWithTrieUpdates`] that includes the given receipts.
+    /// Generates an [`ExecutedBlock`] that includes the given receipts.
     pub fn get_executed_block_with_receipts(
         &mut self,
         receipts: Vec<Vec<Receipt>>,
         parent_hash: B256,
-    ) -> ExecutedBlockWithTrieUpdates {
+    ) -> ExecutedBlock {
         let number = rand::rng().random::<u64>();
         self.get_executed_block(number, receipts, parent_hash)
     }
 
-    /// Generates an [`ExecutedBlockWithTrieUpdates`] with the given [`BlockNumber`].
+    /// Generates an [`ExecutedBlock`] with the given [`BlockNumber`].
     pub fn get_executed_block_with_number(
         &mut self,
         block_number: BlockNumber,
         parent_hash: B256,
-    ) -> ExecutedBlockWithTrieUpdates {
+    ) -> ExecutedBlock {
         self.get_executed_block(block_number, vec![vec![]], parent_hash)
     }
 
@@ -247,7 +242,7 @@ impl<N: NodePrimitives> TestBlockBuilder<N> {
     pub fn get_executed_blocks(
         &mut self,
         range: Range<u64>,
-    ) -> impl Iterator<Item = ExecutedBlockWithTrieUpdates> + '_ {
+    ) -> impl Iterator<Item = ExecutedBlock> + '_ {
         let mut parent_hash = B256::default();
         range.map(move |number| {
             let current_parent_hash = parent_hash;

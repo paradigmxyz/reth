@@ -19,15 +19,16 @@ use crate::{
         BlockRangeInfo, EthVersion, SessionId,
     },
 };
+use alloy_eips::merge::EPOCH_SLOTS;
 use alloy_primitives::Sealable;
 use futures::{stream::Fuse, SinkExt, StreamExt};
 use metrics::Gauge;
 use reth_eth_wire::{
     errors::{EthHandshakeError, EthStreamError},
-    message::{EthBroadcastMessage, MessageError, RequestPair},
+    message::{EthBroadcastMessage, MessageError},
     Capabilities, DisconnectP2P, DisconnectReason, EthMessage, NetworkPrimitives, NewBlockPayload,
 };
-use reth_eth_wire_types::RawCapabilityMessage;
+use reth_eth_wire_types::{message::RequestPair, RawCapabilityMessage};
 use reth_metrics::common::mpsc::MeteredPollSender;
 use reth_network_api::PeerRequest;
 use reth_network_p2p::error::RequestError;
@@ -43,10 +44,12 @@ use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::PollSender;
 use tracing::{debug, trace};
 
-/// The recommended interval at which a new range update should be sent to the remote peer.
+/// The recommended interval at which to check if a new range update should be sent to the remote
+/// peer.
 ///
-/// This is set to 120 seconds (2 minutes) as per the Ethereum specification for eth69.
-pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(120);
+/// Updates are only sent when the block height has advanced by at least one epoch (32 blocks)
+/// since the last update. The interval is set to one epoch duration in seconds.
+pub(super) const RANGE_UPDATE_INTERVAL: Duration = Duration::from_secs(EPOCH_SLOTS * 12);
 
 // Constants for timeout updating.
 
@@ -126,8 +129,12 @@ pub(crate) struct ActiveSession<N: NetworkPrimitives> {
     /// This represents the range of blocks that this node can serve to other peers.
     pub(crate) local_range_info: BlockRangeInfo,
     /// Optional interval for sending periodic range updates to the remote peer (eth69+)
-    /// Recommended frequency is ~2 minutes per spec
+    /// The interval is set to one epoch duration (~6.4 minutes), but updates are only sent when
+    /// the block height has advanced by at least one epoch (32 blocks) since the last update
     pub(crate) range_update_interval: Option<Interval>,
+    /// The last latest block number we sent in a range update
+    /// Used to avoid sending unnecessary updates when block height hasn't changed significantly
+    pub(crate) last_sent_latest_block: Option<u64>,
 }
 
 impl<N: NetworkPrimitives> ActiveSession<N> {
@@ -230,16 +237,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::NewPooledTransactionHashes68(msg) => {
-                if msg.hashes.len() != msg.types.len() || msg.hashes.len() != msg.sizes.len() {
-                    return OnIncomingMessageOutcome::BadMessage {
-                        error: EthStreamError::TransactionHashesInvalidLenOfFields {
-                            hashes_len: msg.hashes.len(),
-                            types_len: msg.types.len(),
-                            sizes_len: msg.sizes.len(),
-                        },
-                        message: EthMessage::NewPooledTransactionHashes68(msg),
-                    }
-                }
                 self.try_emit_broadcast(PeerMessage::PooledTransactions(msg.into())).into()
             }
             EthMessage::GetBlockHeaders(req) => {
@@ -273,11 +270,17 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                     on_request!(req, Receipts, GetReceipts)
                 }
             }
+            EthMessage::GetReceipts70(req) => {
+                on_request!(req, Receipts70, GetReceipts70)
+            }
             EthMessage::Receipts(resp) => {
                 on_response!(resp, GetReceipts)
             }
             EthMessage::Receipts69(resp) => {
                 on_response!(resp, GetReceipts69)
+            }
+            EthMessage::Receipts70(resp) => {
+                on_response!(resp, GetReceipts70)
             }
             EthMessage::BlockRangeUpdate(msg) => {
                 // Validate that earliest <= latest according to the spec
@@ -287,6 +290,16 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
                             "invalid block range: earliest ({}) > latest ({})",
                             msg.earliest, msg.latest
                         ))),
+                        message: EthMessage::BlockRangeUpdate(msg),
+                    };
+                }
+
+                // Validate that the latest hash is not zero
+                if msg.latest_hash.is_zero() {
+                    return OnIncomingMessageOutcome::BadMessage {
+                        error: EthStreamError::InvalidMessage(MessageError::Other(
+                            "invalid block range: latest_hash cannot be zero".to_string(),
+                        )),
                         message: EthMessage::BlockRangeUpdate(msg),
                     };
                 }
@@ -304,9 +317,9 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
     /// Handle an internal peer request that will be sent to the remote.
     fn on_internal_peer_request(&mut self, request: PeerRequest<N>, deadline: Instant) {
         let request_id = self.next_id();
-
         trace!(?request, peer_id=?self.remote_peer_id, ?request_id, "sending request to peer");
-        let msg = request.create_request_message(request_id);
+        let msg = request.create_request_message(request_id).map_versioned(self.conn.version());
+
         self.queued_outgoing.push_back(msg.into());
         let req = InflightRequest {
             request: RequestState::Waiting(request),
@@ -728,21 +741,32 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
         }
 
         if let Some(interval) = &mut this.range_update_interval {
-            // queue in new range updates if the interval is ready
+            // Check if we should send a range update based on block height changes
             while interval.poll_tick(cx).is_ready() {
-                this.queued_outgoing.push_back(
-                    EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
-                );
+                let current_latest = this.local_range_info.latest();
+                let should_send = if let Some(last_sent) = this.last_sent_latest_block {
+                    // Only send if block height has advanced by at least one epoch (32 blocks)
+                    current_latest.saturating_sub(last_sent) >= EPOCH_SLOTS
+                } else {
+                    true // First update, always send
+                };
+
+                if should_send {
+                    this.queued_outgoing.push_back(
+                        EthMessage::BlockRangeUpdate(this.local_range_info.to_message()).into(),
+                    );
+                    this.last_sent_latest_block = Some(current_latest);
+                }
             }
         }
 
         while this.internal_request_timeout_interval.poll_tick(cx).is_ready() {
             // check for timed out requests
-            if this.check_timed_out_requests(Instant::now()) {
-                if let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx) {
-                    let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
-                    this.pending_message_to_session = Some(msg);
-                }
+            if this.check_timed_out_requests(Instant::now()) &&
+                let Poll::Ready(Ok(_)) = this.to_session_manager.poll_reserve(cx)
+            {
+                let msg = ActiveSessionMessage::ProtocolBreach { peer_id: this.remote_peer_id };
+                this.pending_message_to_session = Some(msg);
             }
         }
 
@@ -896,6 +920,16 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
     }
 }
 
+impl<N: NetworkPrimitives> Drop for QueuedOutgoingMessages<N> {
+    fn drop(&mut self) {
+        // Ensure gauge is decremented for any remaining items to avoid metric leak on teardown.
+        let remaining = self.messages.len();
+        if remaining > 0 {
+            self.count.decrement(remaining as f64);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1044,6 +1078,7 @@ mod tests {
                             alloy_primitives::B256::ZERO,
                         ),
                         range_update_interval: None,
+                        last_sent_latest_block: None,
                     }
                 }
                 ev => {

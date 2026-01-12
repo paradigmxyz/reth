@@ -39,6 +39,11 @@ pub trait ChainSpecParser: Clone + Send + Sync + 'static {
     /// List of supported chains.
     const SUPPORTED_CHAINS: &'static [&'static str];
 
+    /// The default value for the chain spec parser.
+    fn default_value() -> Option<&'static str> {
+        Self::SUPPORTED_CHAINS.first().copied()
+    }
+
     /// Parses the given string into a chain spec.
     ///
     /// # Arguments

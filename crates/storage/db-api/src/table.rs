@@ -139,6 +139,9 @@ pub trait TableImporter: DbTxMut {
     }
 
     /// Imports table data from another transaction within a range.
+    ///
+    /// This method works correctly with both regular and `DupSort` tables. For `DupSort` tables,
+    /// all duplicate entries within the range are preserved during import.
     fn import_table_with_range<T: Table, R: DbTx>(
         &self,
         source_tx: &R,

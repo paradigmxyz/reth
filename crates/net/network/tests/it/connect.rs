@@ -428,7 +428,7 @@ async fn test_trusted_peer_only() {
     let outgoing_peer_id1 = event_stream.next_session_established().await.unwrap();
     assert_eq!(outgoing_peer_id1, *handle1.peer_id());
 
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_secs(2)).await;
     assert_eq!(handle.num_connected_peers(), 2);
 
     // check that handle0 and handle1 both have peers.
@@ -735,4 +735,52 @@ async fn test_connect_peer_in_different_network_should_fail() {
 
     let removed_peer_id = event_stream.peer_removed().await.unwrap();
     assert_eq!(removed_peer_id, *peer_handle.peer_id());
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_reconnect_trusted() {
+    reth_tracing::init_test_tracing();
+
+    let net = Testnet::create(2).await;
+
+    let mut handles = net.handles();
+    let handle0 = handles.next().unwrap();
+    let handle1 = handles.next().unwrap();
+
+    drop(handles);
+    let _handle = net.spawn();
+
+    let mut listener0 = NetworkEventStream::new(handle0.event_listener());
+
+    // Connect the two peers
+    handle0.add_peer(*handle1.peer_id(), handle1.local_addr());
+    handle1.add_peer(*handle0.peer_id(), handle0.local_addr());
+    let peer = listener0.next_session_established().await.unwrap();
+    assert_eq!(peer, *handle1.peer_id());
+    assert_eq!(handle0.num_connected_peers(), 1);
+
+    // Add handle1 as a trusted peer
+    handle0.add_trusted_peer(*handle1.peer_id(), handle1.local_addr());
+
+    // Trigger disconnect from handle0
+    handle0.disconnect_peer(*handle1.peer_id());
+
+    // Wait for the session to close
+    let (peer, reason) = listener0.next_session_closed().await.unwrap();
+    assert_eq!(peer, *handle1.peer_id());
+    assert_eq!(handle0.num_connected_peers(), 0);
+    println!("Disconnect reason: {:?}", reason);
+
+    // Await that handle1 (trusted peer) reconnects automatically
+    let reconnect_result =
+        tokio::time::timeout(Duration::from_secs(60), listener0.next_session_established()).await;
+
+    match reconnect_result {
+        Ok(Some(peer)) => {
+            assert_eq!(peer, *handle1.peer_id());
+            assert_eq!(handle0.num_connected_peers(), 1);
+        }
+        Ok(None) => panic!("Event stream ended without reconnection"),
+        Err(_) => panic!("Trusted peer did not reconnect in time"),
+    }
 }

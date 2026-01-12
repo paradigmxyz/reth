@@ -7,7 +7,8 @@ use crate::{
     },
     BuilderContext, ConfigureEvm, FullNodeTypes,
 };
-use reth_consensus::{noop::NoopConsensus, ConsensusError, FullConsensus};
+use reth_chainspec::EthChainSpec;
+use reth_consensus::{noop::NoopConsensus, FullConsensus};
 use reth_network::{types::NetPrimitivesFor, EthNetworkPrimitives, NetworkPrimitives};
 use reth_network_api::{noop::NoopNetwork, FullNetwork};
 use reth_node_api::{BlockTy, BodyTy, HeaderTy, NodeTypes, PrimitivesTy, ReceiptTy, TxTy};
@@ -454,8 +455,7 @@ where
         + Unpin
         + 'static,
     EVM: ConfigureEvm<Primitives = PrimitivesTy<Node::Types>> + 'static,
-    Cons:
-        FullConsensus<PrimitivesTy<Node::Types>, Error = ConsensusError> + Clone + Unpin + 'static,
+    Cons: FullConsensus<PrimitivesTy<Node::Types>> + Clone + Unpin + 'static,
 {
     type Components = Components<Node, Net, Pool, EVM, Cons>;
 
@@ -515,10 +515,10 @@ where
 
     async fn build_network(
         self,
-        _ctx: &BuilderContext<N>,
+        ctx: &BuilderContext<N>,
         _pool: Pool,
     ) -> eyre::Result<Self::Network> {
-        Ok(NoopNetwork::new())
+        Ok(NoopNetwork::new().with_chain_id(ctx.chain_spec().chain_id()))
     }
 }
 

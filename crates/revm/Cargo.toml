@@ -68,3 +68,4 @@ optional-checks = [
     "optional-eip3607",
     "optional-no-base-fee",
 ]
+memory_limit = ["revm/memory_limit"]

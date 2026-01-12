@@ -33,7 +33,7 @@ pub enum ECIESErrorImpl {
     #[error(transparent)]
     IO(std::io::Error),
     /// Error when checking the HMAC tag against the tag on the message being decrypted
-    #[error("tag check failure in read_header")]
+    #[error("tag check failure in decrypt_message")]
     TagCheckDecryptFailed,
     /// Error when checking the HMAC tag against the tag on the header
     #[error("tag check failure in read_header")]
@@ -47,8 +47,8 @@ pub enum ECIESErrorImpl {
     /// Error when parsing ACK data
     #[error("invalid ack data")]
     InvalidAckData,
-    /// Error when reading the header if its length is <3
-    #[error("invalid body data")]
+    /// Error when reading/parsing the `RLPx` header
+    #[error("invalid header")]
     InvalidHeader,
     /// Error when interacting with secp256k1
     #[error(transparent)]

@@ -1,15 +1,11 @@
 #![expect(unreachable_pub)]
-use alloy_primitives::{Address, B256, U256};
+use alloy_primitives::{Address, B256};
 use itertools::concat;
 use reth_db::{test_utils::TempDatabase, Database, DatabaseEnv};
-use reth_db_api::{
-    cursor::DbCursorRO,
-    tables,
-    transaction::{DbTx, DbTxMut},
-};
 use reth_primitives_traits::{Account, SealedBlock, SealedHeader};
 use reth_provider::{
-    test_utils::MockNodeTypesWithDB, DatabaseProvider, DatabaseProviderFactory, TrieWriter,
+    test_utils::MockNodeTypesWithDB, DBProvider, DatabaseProvider, DatabaseProviderFactory,
+    TrieWriter,
 };
 use reth_stages::{
     stages::{AccountHashingStage, StorageHashingStage},
@@ -161,9 +157,10 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
 
         let offset = transitions.len() as u64;
 
-        let provider_rw = db.factory.provider_rw().unwrap();
         db.insert_changesets(transitions, None).unwrap();
-        provider_rw.write_trie_updates(&updates).unwrap();
+
+        let provider_rw = db.factory.provider_rw().unwrap();
+        provider_rw.write_trie_updates(updates).unwrap();
         provider_rw.commit().unwrap();
 
         let (transitions, final_state) = random_changeset_range(
@@ -196,13 +193,6 @@ pub(crate) fn txs_testdata(num_blocks: u64) -> TestStageDB {
         );
 
         db.insert_blocks(blocks.iter(), StorageKind::Static).unwrap();
-
-        // initialize TD
-        db.commit(|tx| {
-            let (head, _) = tx.cursor_read::<tables::Headers>()?.first()?.unwrap_or_default();
-            Ok(tx.put::<tables::HeaderTerminalDifficulties>(head, U256::from(0).into())?)
-        })
-        .unwrap();
     }
 
     db

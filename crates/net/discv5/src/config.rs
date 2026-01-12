@@ -152,10 +152,10 @@ impl ConfigBuilder {
     /// Adds a comma-separated list of enodes, serialized unsigned node records, to boot nodes.
     pub fn add_serialized_unsigned_boot_nodes(mut self, enodes: &[&str]) -> Self {
         for node in enodes {
-            if let Ok(node) = node.parse() {
-                if let Ok(node) = BootNode::from_unsigned(node) {
-                    self.bootstrap_nodes.insert(node);
-                }
+            if let Ok(node) = node.parse() &&
+                let Ok(node) = BootNode::from_unsigned(node)
+            {
+                self.bootstrap_nodes.insert(node);
             }
         }
 
@@ -411,14 +411,14 @@ pub fn discv5_sockets_wrt_rlpx_addr(
             let discv5_socket_ipv6 =
                 discv5_addr_ipv6.map(|ip| SocketAddrV6::new(ip, discv5_port_ipv6, 0, 0));
 
-            if let Some(discv5_addr) = discv5_addr_ipv4 {
-                if discv5_addr != rlpx_addr {
-                    debug!(target: "net::discv5",
-                        %discv5_addr,
-                        %rlpx_addr,
-                        "Overwriting discv5 IPv4 address with RLPx IPv4 address, limited to one advertised IP address per IP version"
-                    );
-                }
+            if let Some(discv5_addr) = discv5_addr_ipv4 &&
+                discv5_addr != rlpx_addr
+            {
+                debug!(target: "net::discv5",
+                    %discv5_addr,
+                    %rlpx_addr,
+                    "Overwriting discv5 IPv4 address with RLPx IPv4 address, limited to one advertised IP address per IP version"
+                );
             }
 
             // overwrite discv5 ipv4 addr with RLPx address. this is since there is no
@@ -430,14 +430,14 @@ pub fn discv5_sockets_wrt_rlpx_addr(
             let discv5_socket_ipv4 =
                 discv5_addr_ipv4.map(|ip| SocketAddrV4::new(ip, discv5_port_ipv4));
 
-            if let Some(discv5_addr) = discv5_addr_ipv6 {
-                if discv5_addr != rlpx_addr {
-                    debug!(target: "net::discv5",
-                        %discv5_addr,
-                        %rlpx_addr,
-                        "Overwriting discv5 IPv6 address with RLPx IPv6 address, limited to one advertised IP address per IP version"
-                    );
-                }
+            if let Some(discv5_addr) = discv5_addr_ipv6 &&
+                discv5_addr != rlpx_addr
+            {
+                debug!(target: "net::discv5",
+                    %discv5_addr,
+                    %rlpx_addr,
+                    "Overwriting discv5 IPv6 address with RLPx IPv6 address, limited to one advertised IP address per IP version"
+                );
             }
 
             // overwrite discv5 ipv6 addr with RLPx address. this is since there is no

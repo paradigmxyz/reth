@@ -32,7 +32,7 @@ where
 {
     /// Determines the head block hash according to Parlia consensus rules:
     /// 1. Follow the highest block number
-    /// 2. For same height blocks, pick the one with lower hash
+    /// 2. For the same height blocks, pick the one with the lower hash
     pub(crate) fn canonical_head(
         &self,
         hash: B256,

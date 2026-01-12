@@ -10,7 +10,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod net_if;
 
@@ -19,13 +19,13 @@ pub use net_if::{NetInterfaceError, DEFAULT_NET_IF_NAME};
 use std::{
     fmt,
     future::{poll_fn, Future},
-    net::{AddrParseError, IpAddr},
+    net::{AddrParseError, IpAddr, ToSocketAddrs},
     pin::Pin,
     str::FromStr,
     task::{Context, Poll},
     time::Duration,
 };
-use tracing::{debug, error};
+use tracing::debug;
 
 use crate::net_if::resolve_net_if_ip;
 #[cfg(feature = "serde")]
@@ -38,7 +38,7 @@ const EXTERNAL_IP_APIS: &[&str] =
     &["https://ipinfo.io/ip", "https://icanhazip.com", "https://ifconfig.me"];
 
 /// All builtin resolvers.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Default, Hash)]
+#[derive(Debug, Clone, Eq, PartialEq, Default, Hash)]
 #[cfg_attr(feature = "serde", derive(SerializeDisplay, DeserializeFromStr))]
 pub enum NatResolver {
     /// Resolve with any available resolver.
@@ -50,6 +50,14 @@ pub enum NatResolver {
     PublicIp,
     /// Use the given [`IpAddr`]
     ExternalIp(IpAddr),
+    /// Use the given domain name as the external address to expose to peers.
+    /// This is behaving essentially the same as [`NatResolver::ExternalIp`], but supports domain
+    /// names. Domain names are resolved to IP addresses using the OS's resolver. The first IP
+    /// address found is used.
+    /// This may be useful in docker bridge networks where containers are usually queried by DNS
+    /// instead of direct IP addresses.
+    /// Note: the domain shouldn't include a port number. Only the IP address is resolved.
+    ExternalAddr(String),
     /// Resolve external IP via the network interface.
     NetIf,
     /// Resolve nothing
@@ -62,10 +70,17 @@ impl NatResolver {
         external_addr_with(self).await
     }
 
-    /// Returns the external ip, if it is [`NatResolver::ExternalIp`]
-    pub const fn as_external_ip(self) -> Option<IpAddr> {
+    /// Returns the fixed ip, if it is [`NatResolver::ExternalIp`] or [`NatResolver::ExternalAddr`].
+    ///
+    /// In the case of [`NatResolver::ExternalAddr`], it will return the first IP address found for
+    /// the domain.
+    pub fn as_external_ip(self, port: u16) -> Option<IpAddr> {
         match self {
             Self::ExternalIp(ip) => Some(ip),
+            Self::ExternalAddr(domain) => format!("{domain}:{port}")
+                .to_socket_addrs()
+                .ok()
+                .and_then(|mut addrs| addrs.next().map(|addr| addr.ip())),
             _ => None,
         }
     }
@@ -78,6 +93,7 @@ impl fmt::Display for NatResolver {
             Self::Upnp => f.write_str("upnp"),
             Self::PublicIp => f.write_str("publicip"),
             Self::ExternalIp(ip) => write!(f, "extip:{ip}"),
+            Self::ExternalAddr(domain) => write!(f, "extaddr:{domain}"),
             Self::NetIf => f.write_str("netif"),
             Self::None => f.write_str("none"),
         }
@@ -106,12 +122,15 @@ impl FromStr for NatResolver {
             "publicip" | "public-ip" => Self::PublicIp,
             "netif" => Self::NetIf,
             s => {
-                let Some(ip) = s.strip_prefix("extip:") else {
+                if let Some(ip) = s.strip_prefix("extip:") {
+                    Self::ExternalIp(ip.parse()?)
+                } else if let Some(domain) = s.strip_prefix("extaddr:") {
+                    Self::ExternalAddr(domain.to_string())
+                } else {
                     return Err(ParseNatResolverError::UnknownVariant(format!(
                         "Unknown Nat Resolver: {s}"
-                    )))
-                };
-                Self::ExternalIp(ip.parse()?)
+                    )));
+                }
             }
         };
         Ok(r)
@@ -180,7 +199,7 @@ impl ResolveNatInterval {
     ///    `None` if the attempt was unsuccessful.
     pub fn poll_tick(&mut self, cx: &mut Context<'_>) -> Poll<Option<IpAddr>> {
         if self.interval.poll_tick(cx).is_ready() {
-            self.future = Some(Box::pin(self.resolver.external_addr()));
+            self.future = Some(Box::pin(self.resolver.clone().external_addr()));
         }
 
         if let Some(mut fut) = self.future.take() {
@@ -212,6 +231,9 @@ pub async fn external_addr_with(resolver: NatResolver) -> Option<IpAddr> {
                 );
             })
             .ok(),
+        NatResolver::ExternalAddr(domain) => {
+            domain.to_socket_addrs().ok().and_then(|mut addrs| addrs.next().map(|addr| addr.ip()))
+        }
         NatResolver::None => None,
     }
 }
@@ -245,7 +267,7 @@ async fn resolve_external_ip_url(url: &str) -> Option<IpAddr> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::net::Ipv4Addr;
+    use std::net::{Ipv4Addr, Ipv6Addr};
 
     #[tokio::test]
     #[ignore]
@@ -268,6 +290,18 @@ mod tests {
     }
 
     #[test]
+    fn as_external_ip_test() {
+        let resolver = NatResolver::ExternalAddr("localhost".to_string());
+        let ip = resolver.as_external_ip(30303).expect("localhost should be resolvable");
+
+        if ip.is_ipv4() {
+            assert_eq!(ip, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        } else {
+            assert_eq!(ip, IpAddr::V6(Ipv6Addr::LOCALHOST));
+        }
+    }
+
+    #[test]
     fn test_from_str() {
         assert_eq!(NatResolver::Any, "any".parse().unwrap());
         assert_eq!(NatResolver::None, "none".parse().unwrap());
@@ -275,6 +309,6 @@ mod tests {
         let ip = NatResolver::ExternalIp(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
         let s = "extip:0.0.0.0";
         assert_eq!(ip, s.parse().unwrap());
-        assert_eq!(ip.to_string().as_str(), s);
+        assert_eq!(ip.to_string(), s);
     }
 }

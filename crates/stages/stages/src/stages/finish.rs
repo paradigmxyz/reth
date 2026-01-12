@@ -72,7 +72,7 @@ mod tests {
             let start = input.checkpoint().block_number;
             let mut rng = generators::rng();
             let head = random_header(&mut rng, start, None);
-            self.db.insert_headers_with_td(std::iter::once(&head))?;
+            self.db.insert_headers(std::iter::once(&head))?;
 
             // use previous progress as seed size
             let end = input.target.unwrap_or_default() + 1;
@@ -82,7 +82,7 @@ mod tests {
             }
 
             let mut headers = random_header_range(&mut rng, start + 1..end, head.hash());
-            self.db.insert_headers_with_td(headers.iter())?;
+            self.db.insert_headers(headers.iter())?;
             headers.insert(0, head);
             Ok(headers)
         }

@@ -28,8 +28,6 @@ pub struct OpL1BlockInfo {
     l1_block_info: RwLock<L1BlockInfo>,
     /// Current block timestamp.
     timestamp: AtomicU64,
-    /// Current block number.
-    number: AtomicU64,
 }
 
 impl OpL1BlockInfo {
@@ -43,7 +41,7 @@ impl OpL1BlockInfo {
 #[derive(Debug, Clone)]
 pub struct OpTransactionValidator<Client, Tx> {
     /// The type that performs the actual validation.
-    inner: EthTransactionValidator<Client, Tx>,
+    inner: Arc<EthTransactionValidator<Client, Tx>>,
     /// Additional block info required for validation.
     block_info: Arc<OpL1BlockInfo>,
     /// If true, ensure that the transaction's sender has enough balance to cover the L1 gas fee
@@ -90,7 +88,8 @@ impl<Client, Tx> OpTransactionValidator<Client, Tx> {
 
 impl<Client, Tx> OpTransactionValidator<Client, Tx>
 where
-    Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
+    Client:
+        ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt + Sync,
     Tx: EthPoolTransaction + OpPooledTx,
 {
     /// Create a new [`OpTransactionValidator`].
@@ -103,7 +102,6 @@ where
             // so that we will accept txs into the pool before the first block
             if block.header().number() == 0 {
                 this.block_info.timestamp.store(block.header().timestamp(), Ordering::Relaxed);
-                this.block_info.number.store(block.header().number(), Ordering::Relaxed);
             } else {
                 this.update_l1_block_info(block.header(), block.body().transactions().first());
             }
@@ -118,7 +116,7 @@ where
         block_info: OpL1BlockInfo,
     ) -> Self {
         Self {
-            inner,
+            inner: Arc::new(inner),
             block_info: Arc::new(block_info),
             require_l1_data_gas_fee: true,
             supervisor_client: None,
@@ -141,10 +139,9 @@ where
         T: Transaction,
     {
         self.block_info.timestamp.store(header.timestamp(), Ordering::Relaxed);
-        self.block_info.number.store(header.number(), Ordering::Relaxed);
 
-        if let Some(Ok(cost_addition)) = tx.map(reth_optimism_evm::extract_l1_info_from_tx) {
-            *self.block_info.l1_block_info.write() = cost_addition;
+        if let Some(Ok(l1_block_info)) = tx.map(reth_optimism_evm::extract_l1_info_from_tx) {
+            *self.block_info.l1_block_info.write() = l1_block_info;
         }
 
         if self.chain_spec().is_interop_active_at_timestamp(header.timestamp()) {
@@ -181,7 +178,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
+        state: &mut Option<Box<dyn AccountInfoReader + Send>>,
     ) -> TransactionValidationOutcome<Tx> {
         if transaction.is_eip4844() {
             return TransactionValidationOutcome::Invalid(
@@ -293,7 +290,8 @@ where
 
 impl<Client, Tx> TransactionValidator for OpTransactionValidator<Client, Tx>
 where
-    Client: ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt,
+    Client:
+        ChainSpecProvider<ChainSpec: OpHardforks> + StateProviderFactory + BlockReaderIdExt + Sync,
     Tx: EthPoolTransaction + OpPooledTx,
 {
     type Transaction = Tx;

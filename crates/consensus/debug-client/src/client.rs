@@ -84,7 +84,6 @@ where
     /// blocks.
     pub async fn run(self) {
         let mut previous_block_hashes = AllocRingBuffer::new(64);
-
         let mut block_stream = {
             let (tx, rx) = mpsc::channel::<P::Block>(64);
             let block_provider = self.block_provider.clone();

@@ -22,9 +22,9 @@
 //! # use reth_config::config::StageConfig;
 //! # use reth_ethereum_primitives::EthPrimitives;
 //! # use std::sync::Arc;
-//! # use reth_consensus::{FullConsensus, ConsensusError};
+//! # use reth_consensus::FullConsensus;
 //!
-//! # fn create(exec: impl ConfigureEvm<Primitives = EthPrimitives> + 'static, consensus: impl FullConsensus<EthPrimitives, Error = ConsensusError> + 'static) {
+//! # fn create(exec: impl ConfigureEvm<Primitives = EthPrimitives> + 'static, consensus: impl FullConsensus<EthPrimitives> + 'static) {
 //!
 //! let provider_factory = create_test_provider_factory();
 //! let static_file_producer =
@@ -39,22 +39,22 @@
 use crate::{
     stages::{
         AccountHashingStage, BodyStage, EraImportSource, EraStage, ExecutionStage, FinishStage,
-        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleStage,
-        PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage, StorageHashingStage,
-        TransactionLookupStage,
+        HeaderStage, IndexAccountHistoryStage, IndexStorageHistoryStage, MerkleChangeSets,
+        MerkleStage, PruneSenderRecoveryStage, PruneStage, SenderRecoveryStage,
+        StorageHashingStage, TransactionLookupStage,
     },
     StageSet, StageSetBuilder,
 };
 use alloy_primitives::B256;
 use reth_config::config::StageConfig;
-use reth_consensus::{ConsensusError, FullConsensus};
+use reth_consensus::FullConsensus;
 use reth_evm::ConfigureEvm;
 use reth_network_p2p::{bodies::downloader::BodyDownloader, headers::downloader::HeaderDownloader};
 use reth_primitives_traits::{Block, NodePrimitives};
 use reth_provider::HeaderSyncGapProvider;
 use reth_prune_types::PruneModes;
 use reth_stages_api::Stage;
-use std::{ops::Not, sync::Arc};
+use std::sync::Arc;
 use tokio::sync::watch;
 
 /// A set containing all stages to run a fully syncing instance of reth.
@@ -66,6 +66,7 @@ use tokio::sync::watch;
 /// - [`FinishStage`]
 ///
 /// This expands to the following series of stages:
+/// - [`EraStage`] (optional, for ERA1 import)
 /// - [`HeaderStage`]
 /// - [`BodyStage`]
 /// - [`SenderRecoveryStage`]
@@ -75,6 +76,7 @@ use tokio::sync::watch;
 /// - [`AccountHashingStage`]
 /// - [`StorageHashingStage`]
 /// - [`MerkleStage`] (execute)
+/// - [`MerkleChangeSets`]
 /// - [`TransactionLookupStage`]
 /// - [`IndexStorageHistoryStage`]
 /// - [`IndexAccountHistoryStage`]
@@ -92,7 +94,7 @@ where
     /// Executor factory needs for execution stage
     evm_config: E,
     /// Consensus instance
-    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
     /// Prune configuration for every segment that can be pruned
@@ -110,7 +112,7 @@ where
     pub fn new(
         provider: Provider,
         tip: watch::Receiver<B256>,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         header_downloader: H,
         body_downloader: B,
         evm_config: E,
@@ -145,7 +147,7 @@ where
     pub fn add_offline_stages<Provider>(
         default_offline: StageSetBuilder<Provider>,
         evm_config: E,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         stages_config: StageConfig,
         prune_modes: PruneModes,
     ) -> StageSetBuilder<Provider>
@@ -269,8 +271,14 @@ where
         Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
-        StageSetBuilder::default()
-            .add_stage(EraStage::new(self.era_import_source, self.stages_config.etl.clone()))
+        let mut builder = StageSetBuilder::default();
+
+        if self.era_import_source.is_some() {
+            builder = builder
+                .add_stage(EraStage::new(self.era_import_source, self.stages_config.etl.clone()));
+        }
+
+        builder
             .add_stage(HeaderStage::new(
                 self.provider,
                 self.header_downloader,
@@ -296,7 +304,7 @@ pub struct OfflineStages<E: ConfigureEvm> {
     /// Executor factory needs for execution stage
     evm_config: E,
     /// Consensus instance for validating blocks.
-    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
     /// Prune configuration for every segment that can be pruned
@@ -307,7 +315,7 @@ impl<E: ConfigureEvm> OfflineStages<E> {
     /// Create a new set of offline stages with default values.
     pub const fn new(
         evm_config: E,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         stages_config: StageConfig,
         prune_modes: PruneModes,
     ) -> Self {
@@ -336,12 +344,12 @@ where
                 stages_config: self.stages_config.clone(),
                 prune_modes: self.prune_modes.clone(),
             })
-            // If any prune modes are set, add the prune stage.
-            .add_stage_opt(self.prune_modes.is_empty().not().then(|| {
-                // Prune stage should be added after all hashing stages, because otherwise it will
-                // delete
-                PruneStage::new(self.prune_modes.clone(), self.stages_config.prune.commit_threshold)
-            }))
+            // Prune stage should be added after all hashing stages, because otherwise it will
+            // delete
+            .add_stage(PruneStage::new(
+                self.prune_modes.clone(),
+                self.stages_config.prune.commit_threshold,
+            ))
     }
 }
 
@@ -352,7 +360,7 @@ pub struct ExecutionStages<E: ConfigureEvm> {
     /// Executor factory that will create executors.
     evm_config: E,
     /// Consensus instance for validating blocks.
-    consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+    consensus: Arc<dyn FullConsensus<E::Primitives>>,
     /// Configuration for each stage in the pipeline
     stages_config: StageConfig,
 }
@@ -361,7 +369,7 @@ impl<E: ConfigureEvm> ExecutionStages<E> {
     /// Create a new set of execution stages with default values.
     pub const fn new(
         executor_provider: E,
-        consensus: Arc<dyn FullConsensus<E::Primitives, Error = ConsensusError>>,
+        consensus: Arc<dyn FullConsensus<E::Primitives>>,
         stages_config: StageConfig,
     ) -> Self {
         Self { evm_config: executor_provider, consensus, stages_config }
@@ -387,6 +395,13 @@ where
 }
 
 /// A set containing all stages that hash account state.
+///
+/// This includes:
+/// - [`MerkleStage`] (unwind)
+/// - [`AccountHashingStage`]
+/// - [`StorageHashingStage`]
+/// - [`MerkleStage`] (execute)
+/// - [`MerkleChangeSets`]
 #[derive(Debug, Default)]
 #[non_exhaustive]
 pub struct HashingStages {
@@ -399,6 +414,7 @@ where
     MerkleStage: Stage<Provider>,
     AccountHashingStage: Stage<Provider>,
     StorageHashingStage: Stage<Provider>,
+    MerkleChangeSets: Stage<Provider>,
 {
     fn builder(self) -> StageSetBuilder<Provider> {
         StageSetBuilder::default()
@@ -415,6 +431,7 @@ where
                 self.stages_config.merkle.rebuild_threshold,
                 self.stages_config.merkle.incremental_threshold,
             ))
+            .add_stage(MerkleChangeSets::new())
     }
 }
 

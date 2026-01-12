@@ -13,7 +13,7 @@ use reth_codecs_derive::add_arbitrary_tests;
 /// unsupported fields are stripped out.
 #[derive(Clone, Debug, PartialEq, Eq, Copy)]
 pub struct UnifiedStatus {
-    /// The eth protocol version (e.g. eth/66 to eth/69).
+    /// The eth protocol version (e.g. eth/66 to eth/70).
     pub version: EthVersion,
     /// The chain ID identifying the peer’s network.
     pub chain: Chain,
@@ -157,7 +157,7 @@ impl StatusBuilder {
         self.status
     }
 
-    /// Sets the eth protocol version (e.g., eth/66, eth/69).
+    /// Sets the eth protocol version (e.g., eth/66, eth/70).
     pub const fn version(mut self, version: EthVersion) -> Self {
         self.status.version = version;
         self
@@ -365,21 +365,21 @@ impl Debug for StatusEth69 {
         if f.alternate() {
             write!(
                 f,
-                "Status {{\n\tversion: {:?},\n\tchain: {:?},\n\tblockhash: {},\n\tgenesis: {},\n\tforkid: {:X?}\n}}",
-                self.version, self.chain, hexed_blockhash, hexed_genesis, self.forkid
+                "StatusEth69 {{\n\tversion: {:?},\n\tchain: {:?},\n\tgenesis: {},\n\tforkid: {:X?},\n\tearliest: {},\n\tlatest: {},\n\tblockhash: {}\n}}",
+                self.version, self.chain, hexed_genesis, self.forkid, self.earliest, self.latest, hexed_blockhash
             )
         } else {
             write!(
                 f,
-                "Status {{ version: {:?}, chain: {:?}, blockhash: {}, genesis: {}, forkid: {:X?} }}",
-                self.version, self.chain, hexed_blockhash, hexed_genesis, self.forkid
+                "StatusEth69 {{ version: {:?}, chain: {:?}, genesis: {}, forkid: {:X?}, earliest: {}, latest: {}, blockhash: {} }}",
+                self.version, self.chain, hexed_genesis, self.forkid, self.earliest, self.latest, hexed_blockhash
             )
         }
     }
 }
 
-/// `StatusMessage` can store either the Legacy version (with TD) or the
-/// eth/69 version (omits TD).
+/// `StatusMessage` can store either the Legacy version (with TD), or the eth/69+/eth/70 version
+/// (omits TD, includes block range).
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum StatusMessage {
@@ -461,7 +461,7 @@ mod tests {
     use alloy_consensus::constants::MAINNET_GENESIS_HASH;
     use alloy_genesis::Genesis;
     use alloy_hardforks::{EthereumHardfork, ForkHash, ForkId, Head};
-    use alloy_primitives::{hex, B256, U256};
+    use alloy_primitives::{b256, hex, B256, U256};
     use alloy_rlp::{Decodable, Encodable};
     use rand::Rng;
     use reth_chainspec::{Chain, ChainSpec, ForkCondition, NamedChain};
@@ -516,10 +516,7 @@ mod tests {
             .chain(Chain::mainnet())
             .genesis(MAINNET_GENESIS_HASH)
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
-            .blockhash(
-                B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
-                    .unwrap(),
-            )
+            .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .earliest_block(Some(1))
             .latest_block(Some(2))
             .total_difficulty(None)
@@ -538,13 +535,28 @@ mod tests {
             .chain(Chain::sepolia())
             .genesis(MAINNET_GENESIS_HASH)
             .forkid(ForkId { hash: ForkHash([0xaa, 0xbb, 0xcc, 0xdd]), next: 0 })
-            .blockhash(
-                B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
-                    .unwrap(),
-            )
+            .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .total_difficulty(Some(U256::from(42u64)))
             .earliest_block(None)
             .latest_block(None)
+            .build();
+
+        let status_message = unified_status.into_message();
+        let roundtripped_unified_status = UnifiedStatus::from_message(status_message);
+        assert_eq!(unified_status, roundtripped_unified_status);
+    }
+
+    #[test]
+    fn roundtrip_eth70() {
+        let unified_status = UnifiedStatus::builder()
+            .version(EthVersion::Eth70)
+            .chain(Chain::mainnet())
+            .genesis(MAINNET_GENESIS_HASH)
+            .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
+            .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
+            .total_difficulty(None)
+            .earliest_block(Some(1))
+            .latest_block(Some(2))
             .build();
 
         let status_message = unified_status.into_message();
@@ -578,10 +590,7 @@ mod tests {
             .chain(Chain::from_named(NamedChain::Mainnet))
             .genesis(MAINNET_GENESIS_HASH)
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
-            .blockhash(
-                B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
-                    .unwrap(),
-            )
+            .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .earliest_block(Some(15_537_394))
             .latest_block(Some(18_000_000))
             .build()
@@ -617,10 +626,7 @@ mod tests {
             .forkid(ForkId { hash: ForkHash([0xb7, 0x15, 0x07, 0x7d]), next: 0 })
             .earliest_block(Some(15_537_394))
             .latest_block(Some(18_000_000))
-            .blockhash(
-                B256::from_str("feb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d")
-                    .unwrap(),
-            )
+            .blockhash(b256!("0xfeb27336ca7923f8fab3bd617fcb6e75841538f71c1bcfc267d7838489d9e13d"))
             .build()
             .into_message();
 

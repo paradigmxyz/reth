@@ -8,7 +8,7 @@ use reth_db_api::{
 use reth_network_p2p::bodies::{downloader::BodyDownloader, response::BlockResponse};
 use reth_provider::{
     providers::StaticFileWriter, BlockReader, BlockWriter, DBProvider, ProviderError,
-    StaticFileProviderFactory, StatsReader, StorageLocation,
+    StaticFileProviderFactory, StatsReader,
 };
 use reth_stages_api::{
     EntitiesCheckpoint, ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId,
@@ -202,12 +202,7 @@ where
 
         // Write bodies to database.
         provider.append_block_bodies(
-            buffer
-                .into_iter()
-                .map(|response| (response.block_number(), response.into_body()))
-                .collect(),
-            // We are writing transactions directly to static files.
-            StorageLocation::StaticFiles,
+            buffer.iter().map(|response| (response.block_number(), response.body())).collect(),
         )?;
 
         // The stage is "done" if:
@@ -230,7 +225,7 @@ where
         self.buffer.take();
 
         ensure_consistency(provider, Some(input.unwind_to))?;
-        provider.remove_bodies_above(input.unwind_to, StorageLocation::Both)?;
+        provider.remove_bodies_above(input.unwind_to)?;
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(input.unwind_to)
@@ -582,7 +577,7 @@ mod tests {
                         ..Default::default()
                     },
                 );
-                self.db.insert_headers_with_td(blocks.iter().map(|block| block.sealed_header()))?;
+                self.db.insert_headers(blocks.iter().map(|block| block.sealed_header()))?;
                 if let Some(progress) = blocks.get(start as usize) {
                     // Insert last progress data
                     {
@@ -702,11 +697,10 @@ mod tests {
 
                         // Validate sequentiality only after prev progress,
                         // since the data before is mocked and can contain gaps
-                        if number > prev_progress {
-                            if let Some(prev_key) = prev_number {
+                        if number > prev_progress
+                            && let Some(prev_key) = prev_number {
                                 assert_eq!(prev_key + 1, number, "Body entries must be sequential");
                             }
-                        }
 
                         // Validate that the current entry is below or equals to the highest allowed block
                         assert!(
@@ -775,8 +769,9 @@ mod tests {
                     *range.start()..*range.end() + 1,
                     |cursor, number| cursor.get_two::<HeaderWithHashMask<Header>>(number.into()),
                 )? {
-                    let (header, hash) = header?;
-                    self.headers.push_back(SealedHeader::new(header, hash));
+                    if let Some((header, hash)) = header? {
+                        self.headers.push_back(SealedHeader::new(header, hash));
+                    }
                 }
 
                 Ok(())

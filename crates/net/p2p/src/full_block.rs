@@ -10,7 +10,7 @@ use crate::{
 use alloy_consensus::BlockHeader;
 use alloy_primitives::{Sealable, B256};
 use core::marker::PhantomData;
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::Consensus;
 use reth_eth_wire_types::{EthNetworkPrimitives, HeadersDirection, NetworkPrimitives};
 use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{SealedBlock, SealedHeader};
@@ -34,7 +34,7 @@ where
     Client: BlockClient,
 {
     client: Client,
-    consensus: Arc<dyn Consensus<Client::Block, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<Client::Block>>,
 }
 
 impl<Client> FullBlockClient<Client>
@@ -42,10 +42,7 @@ where
     Client: BlockClient,
 {
     /// Creates a new instance of `FullBlockClient`.
-    pub fn new(
-        client: Client,
-        consensus: Arc<dyn Consensus<Client::Block, Error = ConsensusError>>,
-    ) -> Self {
+    pub fn new(client: Client, consensus: Arc<dyn Consensus<Client::Block>>) -> Self {
         Self { client, consensus }
     }
 
@@ -122,7 +119,7 @@ where
     Client: BlockClient,
 {
     client: Client,
-    consensus: Arc<dyn Consensus<Client::Block, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<Client::Block>>,
     hash: B256,
     request: FullBlockRequest<Client>,
     header: Option<SealedHeader<Client::Header>>,
@@ -280,18 +277,18 @@ where
     Client: BlockClient,
 {
     fn poll(&mut self, cx: &mut Context<'_>) -> Poll<ResponseResult<Client::Header, Client::Body>> {
-        if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                self.header = None;
-                return Poll::Ready(ResponseResult::Header(res))
-            }
+        if let Some(fut) = Pin::new(&mut self.header).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            self.header = None;
+            return Poll::Ready(ResponseResult::Header(res))
         }
 
-        if let Some(fut) = Pin::new(&mut self.body).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                self.body = None;
-                return Poll::Ready(ResponseResult::Body(res))
-            }
+        if let Some(fut) = Pin::new(&mut self.body).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            self.body = None;
+            return Poll::Ready(ResponseResult::Body(res))
         }
 
         Poll::Pending
@@ -334,7 +331,7 @@ where
     /// The client used to fetch headers and bodies.
     client: Client,
     /// The consensus instance used to validate the blocks.
-    consensus: Arc<dyn Consensus<Client::Block, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<Client::Block>>,
     /// The block hash to start fetching from (inclusive).
     start_hash: B256,
     /// How many blocks to fetch: `len([start_hash, ..]) == count`
@@ -621,18 +618,18 @@ where
         &mut self,
         cx: &mut Context<'_>,
     ) -> Poll<RangeResponseResult<Client::Header, Client::Body>> {
-        if let Some(fut) = Pin::new(&mut self.headers).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                self.headers = None;
-                return Poll::Ready(RangeResponseResult::Header(res))
-            }
+        if let Some(fut) = Pin::new(&mut self.headers).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            self.headers = None;
+            return Poll::Ready(RangeResponseResult::Header(res))
         }
 
-        if let Some(fut) = Pin::new(&mut self.bodies).as_pin_mut() {
-            if let Poll::Ready(res) = fut.poll(cx) {
-                self.bodies = None;
-                return Poll::Ready(RangeResponseResult::Body(res))
-            }
+        if let Some(fut) = Pin::new(&mut self.bodies).as_pin_mut() &&
+            let Poll::Ready(res) = fut.poll(cx)
+        {
+            self.bodies = None;
+            return Poll::Ready(RangeResponseResult::Body(res))
         }
 
         Poll::Pending

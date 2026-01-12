@@ -33,6 +33,7 @@ where
     ) -> Self {
         let (finalized_block, _) = watch::channel(finalized);
         let (safe_block, _) = watch::channel(safe);
+        let (persisted_block, _) = watch::channel(None);
 
         Self {
             inner: Arc::new(ChainInfoInner {
@@ -42,6 +43,7 @@ where
                 canonical_head: RwLock::new(head),
                 safe_block,
                 finalized_block,
+                persisted_block,
             }),
         }
     }
@@ -77,24 +79,29 @@ where
         self.inner.finalized_block.borrow().clone()
     }
 
-    /// Returns the canonical head of the chain.
+    /// Returns the `BlockNumHash` of the canonical head.
     pub fn get_canonical_num_hash(&self) -> BlockNumHash {
         self.inner.canonical_head.read().num_hash()
     }
 
-    /// Returns the canonical head of the chain.
+    /// Returns the block number of the canonical head.
     pub fn get_canonical_block_number(&self) -> BlockNumber {
         self.inner.canonical_head_number.load(Ordering::Relaxed)
     }
 
-    /// Returns the safe header of the chain.
+    /// Returns the `BlockNumHash` of the safe header.
     pub fn get_safe_num_hash(&self) -> Option<BlockNumHash> {
         self.inner.safe_block.borrow().as_ref().map(SealedHeader::num_hash)
     }
 
-    /// Returns the finalized header of the chain.
+    /// Returns the `BlockNumHash` of the finalized header.
     pub fn get_finalized_num_hash(&self) -> Option<BlockNumHash> {
         self.inner.finalized_block.borrow().as_ref().map(SealedHeader::num_hash)
+    }
+
+    /// Returns the `BlockNumHash` of the persisted block.
+    pub fn get_persisted_num_hash(&self) -> Option<BlockNumHash> {
+        *self.inner.persisted_block.borrow()
     }
 
     /// Sets the canonical head of the chain.
@@ -130,6 +137,18 @@ where
         });
     }
 
+    /// Sets the persisted block of the chain.
+    pub fn set_persisted(&self, num_hash: BlockNumHash) {
+        self.inner.persisted_block.send_if_modified(|current| {
+            if current.map(|b| b.hash) != Some(num_hash.hash) {
+                let _ = current.replace(num_hash);
+                return true
+            }
+
+            false
+        });
+    }
+
     /// Subscribe to the finalized block.
     pub fn subscribe_finalized_block(
         &self,
@@ -140,6 +159,11 @@ where
     /// Subscribe to the safe block.
     pub fn subscribe_safe_block(&self) -> watch::Receiver<Option<SealedHeader<N::BlockHeader>>> {
         self.inner.safe_block.subscribe()
+    }
+
+    /// Subscribe to the persisted block.
+    pub fn subscribe_persisted_block(&self) -> watch::Receiver<Option<BlockNumHash>> {
+        self.inner.persisted_block.subscribe()
     }
 }
 
@@ -159,11 +183,14 @@ struct ChainInfoInner<N: NodePrimitives = reth_ethereum_primitives::EthPrimitive
     safe_block: watch::Sender<Option<SealedHeader<N::BlockHeader>>>,
     /// The block that the beacon node considers finalized.
     finalized_block: watch::Sender<Option<SealedHeader<N::BlockHeader>>>,
+    /// The last block that was persisted to disk.
+    persisted_block: watch::Sender<Option<BlockNumHash>>,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use alloy_primitives::B256;
     use reth_ethereum_primitives::EthPrimitives;
     use reth_testing_utils::{generators, generators::random_header};
 
@@ -337,5 +364,29 @@ mod tests {
 
         // Assert that the BlockNumHash returned matches the safe header
         assert_eq!(tracker.get_safe_num_hash(), Some(safe_header.num_hash()));
+    }
+
+    #[test]
+    fn test_set_persisted() {
+        let mut rng = generators::rng();
+        let header = random_header(&mut rng, 10, None);
+        let tracker: ChainInfoTracker<EthPrimitives> = ChainInfoTracker::new(header, None, None);
+
+        // Initial state: persisted block should be None
+        assert!(tracker.get_persisted_num_hash().is_none());
+
+        // Set a persisted block
+        let num_hash1 = BlockNumHash::new(10, B256::random());
+        tracker.set_persisted(num_hash1);
+        assert_eq!(tracker.get_persisted_num_hash(), Some(num_hash1));
+
+        // Setting the same block again should not change anything
+        tracker.set_persisted(num_hash1);
+        assert_eq!(tracker.get_persisted_num_hash(), Some(num_hash1));
+
+        // Set a different block
+        let num_hash2 = BlockNumHash::new(20, B256::random());
+        tracker.set_persisted(num_hash2);
+        assert_eq!(tracker.get_persisted_num_hash(), Some(num_hash2));
     }
 }

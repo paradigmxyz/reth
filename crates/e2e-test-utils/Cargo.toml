@@ -16,7 +16,6 @@ reth-tracing.workspace = true
 reth-db = { workspace = true, features = ["test-utils"] }
 reth-network-api.workspace = true
 reth-network-p2p.workspace = true
-reth-rpc-layer.workspace = true
 reth-rpc-server-types.workspace = true
 reth-rpc-builder.workspace = true
 reth-rpc-eth-api.workspace = true
@@ -32,17 +31,14 @@ reth-tokio-util.workspace = true
 reth-stages-types.workspace = true
 reth-network-peers.workspace = true
 reth-engine-local.workspace = true
+reth-engine-primitives.workspace = true
 reth-tasks.workspace = true
 reth-node-ethereum.workspace = true
 reth-ethereum-primitives.workspace = true
 reth-cli-commands.workspace = true
 reth-config.workspace = true
 reth-consensus.workspace = true
-reth-evm.workspace = true
-reth-static-file.workspace = true
-reth-ethereum-consensus.workspace = true
 reth-primitives.workspace = true
-reth-prune-types.workspace = true
 reth-db-common.workspace = true
 reth-primitives-traits.workspace = true
 
@@ -64,7 +60,6 @@ alloy-rpc-types-engine.workspace = true
 alloy-network.workspace = true
 alloy-consensus = { workspace = true, features = ["kzg"] }
 alloy-provider = { workspace = true, features = ["reqwest"] }
-alloy-genesis.workspace = true
 
 futures-util.workspace = true
 eyre.workspace = true

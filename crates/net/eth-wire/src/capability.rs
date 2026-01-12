@@ -134,7 +134,7 @@ impl SharedCapability {
     /// Returns the number of protocol messages supported by this capability.
     pub const fn num_messages(&self) -> u8 {
         match self {
-            Self::Eth { version, .. } => EthMessageID::max(*version) + 1,
+            Self::Eth { version, .. } => EthMessageID::message_count(*version),
             Self::UnknownCapability { messages, .. } => *messages,
         }
     }
@@ -418,6 +418,8 @@ mod tests {
             Capability::new_static("eth", 66),
             Capability::new_static("eth", 67),
             Capability::new_static("eth", 68),
+            Capability::new_static("eth", 69),
+            Capability::new_static("eth", 70),
         ]
         .into();
 
@@ -425,6 +427,8 @@ mod tests {
         assert!(capabilities.supports_eth_v66());
         assert!(capabilities.supports_eth_v67());
         assert!(capabilities.supports_eth_v68());
+        assert!(capabilities.supports_eth_v69());
+        assert!(capabilities.supports_eth_v70());
     }
 
     #[test]

@@ -9,7 +9,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 #[global_allocator]
 static ALLOC: reth_cli_util::allocator::Allocator = reth_cli_util::allocator::new_allocator();
@@ -23,18 +23,19 @@ use bench::BenchmarkCommand;
 use clap::Parser;
 use reth_cli_runner::CliRunner;
 
-fn main() {
+fn main() -> eyre::Result<()> {
     // Enable backtraces unless a RUST_BACKTRACE value has already been explicitly provided.
     if std::env::var_os("RUST_BACKTRACE").is_none() {
-        std::env::set_var("RUST_BACKTRACE", "1");
+        unsafe {
+            std::env::set_var("RUST_BACKTRACE", "1");
+        }
     }
 
+    color_eyre::install()?;
+
     // Run until either exit or sigint or sigterm
-    let runner = CliRunner::try_default_runtime().unwrap();
-    runner
-        .run_command_until_exit(|ctx| {
-            let command = BenchmarkCommand::parse();
-            command.execute(ctx)
-        })
-        .unwrap();
+    let runner = CliRunner::try_default_runtime()?;
+    runner.run_command_until_exit(|ctx| BenchmarkCommand::parse().execute(ctx))?;
+
+    Ok(())
 }

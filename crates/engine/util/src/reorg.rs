@@ -253,7 +253,7 @@ where
 {
     // Ensure next payload is valid.
     let next_block =
-        payload_validator.ensure_well_formed_payload(next_payload).map_err(RethError::msg)?;
+        payload_validator.convert_payload_to_block(next_payload).map_err(RethError::msg)?;
 
     // Fetch reorg target block depending on its depth and its parent.
     let mut previous_hash = next_block.parent_hash();
@@ -285,8 +285,8 @@ where
         .with_bundle_update()
         .build();
 
-    let ctx = evm_config.context_for_block(&reorg_target);
-    let evm = evm_config.evm_for_block(&mut state, &reorg_target);
+    let ctx = evm_config.context_for_block(&reorg_target).map_err(RethError::other)?;
+    let evm = evm_config.evm_for_block(&mut state, &reorg_target).map_err(RethError::other)?;
     let mut builder = evm_config.create_block_builder(evm, &reorg_target_parent, ctx);
 
     builder.apply_pre_execution_changes()?;

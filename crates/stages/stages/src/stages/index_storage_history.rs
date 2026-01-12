@@ -70,23 +70,22 @@ where
                 )
             })
             .transpose()?
-            .flatten()
+            .flatten() &&
+            target_prunable_block > input.checkpoint().block_number
         {
-            if target_prunable_block > input.checkpoint().block_number {
-                input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
+            input.checkpoint = Some(StageCheckpoint::new(target_prunable_block));
 
-                // Save prune checkpoint only if we don't have one already.
-                // Otherwise, pruner may skip the unpruned range of blocks.
-                if provider.get_prune_checkpoint(PruneSegment::StorageHistory)?.is_none() {
-                    provider.save_prune_checkpoint(
-                        PruneSegment::StorageHistory,
-                        PruneCheckpoint {
-                            block_number: Some(target_prunable_block),
-                            tx_number: None,
-                            prune_mode,
-                        },
-                    )?;
-                }
+            // Save prune checkpoint only if we don't have one already.
+            // Otherwise, pruner may skip the unpruned range of blocks.
+            if provider.get_prune_checkpoint(PruneSegment::StorageHistory)?.is_none() {
+                provider.save_prune_checkpoint(
+                    PruneSegment::StorageHistory,
+                    PruneCheckpoint {
+                        block_number: Some(target_prunable_block),
+                        tx_number: None,
+                        prune_mode,
+                    },
+                )?;
             }
         }
 

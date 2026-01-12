@@ -1,6 +1,6 @@
 //! Canonical chain state notification trait and types.
 
-use alloy_eips::eip2718::Encodable2718;
+use alloy_eips::{eip2718::Encodable2718, BlockNumHash};
 use derive_more::{Deref, DerefMut};
 use reth_execution_types::{BlockReceipts, Chain};
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedHeader};
@@ -122,13 +122,33 @@ impl<N: NodePrimitives> CanonStateNotification<N> {
         }
     }
 
-    /// Get the new tip of the chain.
+    /// Gets the new tip of the chain.
     ///
     /// Returns the new tip for [`Self::Reorg`] and [`Self::Commit`] variants which commit at least
     /// 1 new block.
+    ///
+    /// # Panics
+    ///
+    /// If chain doesn't have any blocks.
     pub fn tip(&self) -> &RecoveredBlock<N::Block> {
         match self {
             Self::Commit { new } | Self::Reorg { new, .. } => new.tip(),
+        }
+    }
+
+    /// Gets the new tip of the chain.
+    ///
+    /// If the chain has no blocks, it returns `None`. Otherwise, it returns the new tip for
+    /// [`Self::Reorg`] and [`Self::Commit`] variants.
+    pub fn tip_checked(&self) -> Option<&RecoveredBlock<N::Block>> {
+        match self {
+            Self::Commit { new } | Self::Reorg { new, .. } => {
+                if new.is_empty() {
+                    None
+                } else {
+                    Some(new.tip())
+                }
+            }
         }
     }
 
@@ -185,22 +205,22 @@ pub trait ForkChoiceSubscriptions: Send + Sync {
     }
 }
 
-/// A stream for fork choice watch channels (pending, safe or finalized watchers)
+/// A stream that yields values from a `watch::Receiver<Option<T>>`, filtering out `None` values.
 #[derive(Debug)]
 #[pin_project::pin_project]
-pub struct ForkChoiceStream<T> {
+pub struct WatchValueStream<T> {
     #[pin]
     st: WatchStream<Option<T>>,
 }
 
-impl<T: Clone + Sync + Send + 'static> ForkChoiceStream<T> {
-    /// Creates a new `ForkChoiceStream`
+impl<T: Clone + Sync + Send + 'static> WatchValueStream<T> {
+    /// Creates a new [`WatchValueStream`]
     pub fn new(rx: watch::Receiver<Option<T>>) -> Self {
         Self { st: WatchStream::from_changes(rx) }
     }
 }
 
-impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
+impl<T: Clone + Sync + Send + 'static> Stream for WatchValueStream<T> {
     type Item = T;
 
     fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
@@ -214,6 +234,24 @@ impl<T: Clone + Sync + Send + 'static> Stream for ForkChoiceStream<T> {
     }
 }
 
+/// Alias for [`WatchValueStream`] for fork choice watch channels.
+pub type ForkChoiceStream<T> = WatchValueStream<T>;
+
+/// Wrapper around a watch receiver that receives persisted block notifications.
+#[derive(Debug, Deref, DerefMut)]
+pub struct PersistedBlockNotifications(pub watch::Receiver<Option<BlockNumHash>>);
+
+/// A trait that allows subscribing to persisted block events.
+pub trait PersistedBlockSubscriptions: Send + Sync {
+    /// Get notified when a new block is persisted to disk.
+    fn subscribe_persisted_block(&self) -> PersistedBlockNotifications;
+
+    /// Convenience method to get a stream of the persisted blocks.
+    fn persisted_block_stream(&self) -> WatchValueStream<BlockNumHash> {
+        WatchValueStream::new(self.subscribe_persisted_block().0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -222,6 +260,7 @@ mod tests {
     use reth_ethereum_primitives::{Receipt, TransactionSigned, TxType};
     use reth_execution_types::ExecutionOutcome;
     use reth_primitives_traits::SealedBlock;
+    use std::collections::BTreeMap;
 
     #[test]
     fn test_commit_notification() {
@@ -240,7 +279,8 @@ mod tests {
         let chain: Arc<Chain> = Arc::new(Chain::new(
             vec![block1.clone(), block2.clone()],
             ExecutionOutcome::default(),
-            None,
+            BTreeMap::new(),
+            BTreeMap::new(),
         ));
 
         // Create a commit notification
@@ -275,12 +315,17 @@ mod tests {
         block3.set_block_number(3);
         block3.set_hash(block3_hash);
 
-        let old_chain: Arc<Chain> =
-            Arc::new(Chain::new(vec![block1.clone()], ExecutionOutcome::default(), None));
+        let old_chain: Arc<Chain> = Arc::new(Chain::new(
+            vec![block1.clone()],
+            ExecutionOutcome::default(),
+            BTreeMap::new(),
+            BTreeMap::new(),
+        ));
         let new_chain = Arc::new(Chain::new(
             vec![block2.clone(), block3.clone()],
             ExecutionOutcome::default(),
-            None,
+            BTreeMap::new(),
+            BTreeMap::new(),
         ));
 
         // Create a reorg notification
@@ -342,8 +387,12 @@ mod tests {
         let execution_outcome = ExecutionOutcome { receipts, ..Default::default() };
 
         // Create a new chain segment with `block1` and `block2` and the execution outcome.
-        let new_chain: Arc<Chain> =
-            Arc::new(Chain::new(vec![block1.clone(), block2.clone()], execution_outcome, None));
+        let new_chain: Arc<Chain> = Arc::new(Chain::new(
+            vec![block1.clone(), block2.clone()],
+            execution_outcome,
+            BTreeMap::new(),
+            BTreeMap::new(),
+        ));
 
         // Create a commit notification containing the new chain segment.
         let notification = CanonStateNotification::Commit { new: new_chain };
@@ -400,8 +449,12 @@ mod tests {
             ExecutionOutcome { receipts: old_receipts, ..Default::default() };
 
         // Create an old chain segment to be reverted, containing `old_block1`.
-        let old_chain: Arc<Chain> =
-            Arc::new(Chain::new(vec![old_block1.clone()], old_execution_outcome, None));
+        let old_chain: Arc<Chain> = Arc::new(Chain::new(
+            vec![old_block1.clone()],
+            old_execution_outcome,
+            BTreeMap::new(),
+            BTreeMap::new(),
+        ));
 
         // Define block2 for the new chain segment, which will be committed.
         let mut body = BlockBody::<TransactionSigned>::default();
@@ -429,7 +482,12 @@ mod tests {
             ExecutionOutcome { receipts: new_receipts, ..Default::default() };
 
         // Create a new chain segment to be committed, containing `new_block1`.
-        let new_chain = Arc::new(Chain::new(vec![new_block1.clone()], new_execution_outcome, None));
+        let new_chain = Arc::new(Chain::new(
+            vec![new_block1.clone()],
+            new_execution_outcome,
+            BTreeMap::new(),
+            BTreeMap::new(),
+        ));
 
         // Create a reorg notification with both reverted (old) and committed (new) chain segments.
         let notification = CanonStateNotification::Reorg { old: old_chain, new: new_chain };

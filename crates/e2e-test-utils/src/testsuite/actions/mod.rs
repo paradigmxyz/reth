@@ -174,16 +174,13 @@ where
                 ];
 
                 // if we're on a fork, validate it now that it's canonical
-                if let Ok(active_state) = env.active_node_state() {
-                    if let Some(fork_base) = active_state.current_fork_base {
-                        debug!(
-                            "MakeCanonical: Adding fork validation from base block {}",
-                            fork_base
-                        );
-                        actions.push(Box::new(ValidateFork::new(fork_base)));
-                        // clear the fork base since we're now canonical
-                        env.active_node_state_mut()?.current_fork_base = None;
-                    }
+                if let Ok(active_state) = env.active_node_state() &&
+                    let Some(fork_base) = active_state.current_fork_base
+                {
+                    debug!("MakeCanonical: Adding fork validation from base block {}", fork_base);
+                    actions.push(Box::new(ValidateFork::new(fork_base)));
+                    // clear the fork base since we're now canonical
+                    env.active_node_state_mut()?.current_fork_base = None;
                 }
 
                 let mut sequence = Sequence::new(actions);

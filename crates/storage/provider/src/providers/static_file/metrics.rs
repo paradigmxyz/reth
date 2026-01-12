@@ -66,18 +66,15 @@ impl StaticFileProviderMetrics {
         operation: StaticFileProviderOperation,
         duration: Option<Duration>,
     ) {
-        self.segment_operations
+        let segment_operation = self
+            .segment_operations
             .get(&(segment, operation))
-            .expect("segment operation metrics should exist")
-            .calls_total
-            .increment(1);
+            .expect("segment operation metrics should exist");
+
+        segment_operation.calls_total.increment(1);
 
         if let Some(duration) = duration {
-            self.segment_operations
-                .get(&(segment, operation))
-                .expect("segment operation metrics should exist")
-                .write_duration_seconds
-                .record(duration.as_secs_f64());
+            segment_operation.write_duration_seconds.record(duration.as_secs_f64());
         }
     }
 

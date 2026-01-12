@@ -144,7 +144,12 @@ impl<T> ExecutionOutcome<T> {
         bundle: BundleState,
         results: Vec<BlockExecutionResult<T>>,
     ) -> Self {
-        let mut value = Self { bundle, first_block, receipts: Vec::new(), requests: Vec::new() };
+        let mut value = Self {
+            bundle,
+            first_block,
+            receipts: Vec::with_capacity(results.len()),
+            requests: Vec::with_capacity(results.len()),
+        };
         for result in results {
             value.receipts.push(result.receipts);
             value.requests.push(result.requests);
@@ -180,6 +185,11 @@ impl<T> ExecutionOutcome<T> {
     /// Get account if account is known.
     pub fn account(&self, address: &Address) -> Option<Option<Account>> {
         self.bundle.account(address).map(|a| a.info.as_ref().map(Into::into))
+    }
+
+    /// Returns the state [`BundleAccount`] for the given account.
+    pub fn account_state(&self, address: &Address) -> Option<&BundleAccount> {
+        self.bundle.account(address)
     }
 
     /// Get storage if value is known.
@@ -332,7 +342,7 @@ impl<T> ExecutionOutcome<T> {
     /// Prepends present the state with the given `BundleState`.
     /// It adds changes from the given state but does not override any existing changes.
     ///
-    /// Reverts  and receipts are not updated.
+    /// Reverts and receipts are not updated.
     pub fn prepend_state(&mut self, mut other: BundleState) {
         let other_len = other.reverts.len();
         // take this bundle
@@ -386,7 +396,7 @@ impl ExecutionOutcome {
     /// Returns the ethereum receipt root for all recorded receipts.
     ///
     /// Note: this function calculated Bloom filters for every receipt and created merkle trees
-    /// of receipt. This is a expensive operation.
+    /// of receipt. This is an expensive operation.
     pub fn ethereum_receipts_root(&self, block_number: BlockNumber) -> Option<B256> {
         self.generic_receipts_root_slow(
             block_number,

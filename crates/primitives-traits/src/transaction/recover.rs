@@ -15,11 +15,11 @@ mod rayon {
 
     /// Recovers a list of signers from a transaction list iterator.
     ///
-    /// Returns `None`, if some transaction's signature is invalid
+    /// Returns `Err(RecoveryError)`, if some transaction's signature is invalid
     pub fn recover_signers<'a, I, T>(txes: I) -> Result<Vec<Address>, RecoveryError>
     where
         T: SignedTransaction,
-        I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
+        I: IntoParallelIterator<Item = &'a T>,
     {
         txes.into_par_iter().map(|tx| tx.recover_signer()).collect()
     }
@@ -27,11 +27,11 @@ mod rayon {
     /// Recovers a list of signers from a transaction list iterator _without ensuring that the
     /// signature has a low `s` value_.
     ///
-    /// Returns `None`, if some transaction's signature is invalid.
+    /// Returns `Err(RecoveryError)`, if some transaction's signature is invalid.
     pub fn recover_signers_unchecked<'a, I, T>(txes: I) -> Result<Vec<Address>, RecoveryError>
     where
         T: SignedTransaction,
-        I: IntoParallelIterator<Item = &'a T> + IntoIterator<Item = &'a T> + Send,
+        I: IntoParallelIterator<Item = &'a T>,
     {
         txes.into_par_iter().map(|tx| tx.recover_signer_unchecked()).collect()
     }

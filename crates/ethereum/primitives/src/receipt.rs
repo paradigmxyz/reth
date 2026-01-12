@@ -2,15 +2,12 @@ use core::fmt::Debug;
 
 use alloc::vec::Vec;
 use alloy_consensus::{
-    Eip2718EncodableReceipt, Eip658Value, ReceiptWithBloom, RlpDecodableReceipt,
-    RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
+    Eip2718DecodableReceipt, Eip2718EncodableReceipt, Eip658Value, ReceiptEnvelope,
+    ReceiptWithBloom, RlpDecodableReceipt, RlpEncodableReceipt, TxReceipt, TxType, Typed2718,
 };
-use alloy_eips::{
-    eip2718::{Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718},
-    Decodable2718,
-};
+use alloy_eips::eip2718::{Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718};
 use alloy_primitives::{Bloom, Log, B256};
-use alloy_rlp::{BufMut, Decodable, Encodable, Header};
+use alloy_rlp::{BufMut, Decodable, Encodable, Header, RlpDecodable, RlpEncodable};
 use reth_primitives_traits::{proofs::ordered_trie_root_with_encoder, InMemorySize};
 
 /// Helper trait alias with requirements for transaction type generic to be used within [`Receipt`].
@@ -41,23 +38,48 @@ impl<T> TxTy for T where
 {
 }
 
+/// Raw ethereum receipt.
+pub type Receipt<T = TxType> = EthereumReceipt<T>;
+
+#[cfg(feature = "rpc")]
+/// Receipt representation for RPC.
+pub type RpcReceipt<T = TxType> = EthereumReceipt<T, alloy_rpc_types_eth::Log>;
+
 /// Typed ethereum transaction receipt.
 /// Receipt containing result of transaction execution.
-#[derive(Clone, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Debug, PartialEq, Eq, Default, RlpEncodable, RlpDecodable)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 #[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 #[cfg_attr(feature = "reth-codec", reth_codecs::add_arbitrary_tests(compact, rlp))]
-pub struct Receipt<T = TxType> {
+#[cfg_attr(feature = "serde", serde(rename_all = "camelCase"))]
+pub struct EthereumReceipt<T = TxType, L = Log> {
     /// Receipt type.
+    #[cfg_attr(feature = "serde", serde(rename = "type"))]
     pub tx_type: T,
     /// If transaction is executed successfully.
     ///
     /// This is the `statusCode`
+    #[cfg_attr(feature = "serde", serde(with = "alloy_serde::quantity", rename = "status"))]
     pub success: bool,
     /// Gas used
+    #[cfg_attr(feature = "serde", serde(with = "alloy_serde::quantity"))]
     pub cumulative_gas_used: u64,
     /// Log send from contracts.
-    pub logs: Vec<Log>,
+    pub logs: Vec<L>,
+}
+
+#[cfg(feature = "rpc")]
+impl<T> Receipt<T> {
+    /// Converts the logs of the receipt to RPC logs.
+    pub fn into_rpc(
+        self,
+        next_log_index: usize,
+        meta: alloy_consensus::transaction::TransactionMeta,
+    ) -> RpcReceipt<T> {
+        let Self { tx_type, success, cumulative_gas_used, logs } = self;
+        let logs = alloy_rpc_types_eth::Log::collect_for_receipt(next_log_index, meta, logs);
+        RpcReceipt { tx_type, success, cumulative_gas_used, logs }
+    }
 }
 
 impl<T: TxTy> Receipt<T> {
@@ -116,44 +138,6 @@ impl<T: TxTy> Receipt<T> {
     pub fn calculate_receipt_root_no_memo(receipts: &[Self]) -> B256 {
         ordered_trie_root_with_encoder(receipts, |r, buf| r.with_bloom_ref().encode_2718(buf))
     }
-
-    /// Returns length of RLP-encoded receipt fields without the given [`Bloom`] without an RLP
-    /// header
-    pub fn rlp_encoded_fields_length_without_bloom(&self) -> usize {
-        self.success.length() + self.cumulative_gas_used.length() + self.logs.length()
-    }
-
-    /// RLP-encodes receipt fields without the given [`Bloom`] without an RLP header.
-    pub fn rlp_encode_fields_without_bloom(&self, out: &mut dyn BufMut) {
-        self.success.encode(out);
-        self.cumulative_gas_used.encode(out);
-        self.logs.encode(out);
-    }
-
-    /// Returns RLP header for inner encoding.
-    pub fn rlp_header_inner_without_bloom(&self) -> Header {
-        Header { list: true, payload_length: self.rlp_encoded_fields_length_without_bloom() }
-    }
-
-    /// RLP-decodes the receipt from the provided buffer. This does not expect a type byte or
-    /// network header.
-    pub fn rlp_decode_inner_without_bloom(buf: &mut &[u8], tx_type: T) -> alloy_rlp::Result<Self> {
-        let header = Header::decode(buf)?;
-        if !header.list {
-            return Err(alloy_rlp::Error::UnexpectedString);
-        }
-
-        let remaining = buf.len();
-        let success = Decodable::decode(buf)?;
-        let cumulative_gas_used = Decodable::decode(buf)?;
-        let logs = Decodable::decode(buf)?;
-
-        if buf.len() + header.payload_length != remaining {
-            return Err(alloy_rlp::Error::UnexpectedLength);
-        }
-
-        Ok(Self { tx_type, success, cumulative_gas_used, logs })
-    }
 }
 
 impl<T: TxTy> Eip2718EncodableReceipt for Receipt<T> {
@@ -167,6 +151,16 @@ impl<T: TxTy> Eip2718EncodableReceipt for Receipt<T> {
         }
         self.rlp_header_inner(bloom).encode(out);
         self.rlp_encode_fields(bloom, out);
+    }
+}
+
+impl<T: TxTy> Eip2718DecodableReceipt for Receipt<T> {
+    fn typed_decode_with_bloom(ty: u8, buf: &mut &[u8]) -> Eip2718Result<ReceiptWithBloom<Self>> {
+        Ok(Self::rlp_decode_inner(buf, T::try_from(ty)?)?)
+    }
+
+    fn fallback_decode_with_bloom(buf: &mut &[u8]) -> Eip2718Result<ReceiptWithBloom<Self>> {
+        Ok(Self::rlp_decode_inner(buf, T::try_from(0)?)?)
     }
 }
 
@@ -218,50 +212,12 @@ impl<T: TxTy> RlpDecodableReceipt for Receipt<T> {
     }
 }
 
-impl<T: TxTy> Encodable2718 for Receipt<T> {
-    fn encode_2718_len(&self) -> usize {
-        (!self.tx_type.is_legacy() as usize) +
-            self.rlp_header_inner_without_bloom().length_with_payload()
-    }
-
-    // encode the header
-    fn encode_2718(&self, out: &mut dyn BufMut) {
-        if !self.tx_type.is_legacy() {
-            out.put_u8(self.tx_type.ty());
-        }
-        self.rlp_header_inner_without_bloom().encode(out);
-        self.rlp_encode_fields_without_bloom(out);
-    }
-}
-
-impl<T: TxTy> Decodable2718 for Receipt<T> {
-    fn typed_decode(ty: u8, buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::rlp_decode_inner_without_bloom(buf, T::try_from(ty)?)?)
-    }
-
-    fn fallback_decode(buf: &mut &[u8]) -> Eip2718Result<Self> {
-        Ok(Self::rlp_decode_inner_without_bloom(buf, T::try_from(0)?)?)
-    }
-}
-
-impl<T: TxTy> Encodable for Receipt<T> {
-    fn encode(&self, out: &mut dyn BufMut) {
-        self.network_encode(out);
-    }
-
-    fn length(&self) -> usize {
-        self.network_len()
-    }
-}
-
-impl<T: TxTy> Decodable for Receipt<T> {
-    fn decode(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
-        Ok(Self::network_decode(buf)?)
-    }
-}
-
-impl<T: TxTy> TxReceipt for Receipt<T> {
-    type Log = Log;
+impl<T, L> TxReceipt for EthereumReceipt<T, L>
+where
+    T: TxTy,
+    L: Send + Sync + Clone + Debug + Eq + AsRef<Log>,
+{
+    type Log = L;
 
     fn status_or_post_state(&self) -> Eip658Value {
         self.success.into()
@@ -272,18 +228,18 @@ impl<T: TxTy> TxReceipt for Receipt<T> {
     }
 
     fn bloom(&self) -> Bloom {
-        alloy_primitives::logs_bloom(self.logs())
+        alloy_primitives::logs_bloom(self.logs.iter().map(|l| l.as_ref()))
     }
 
     fn cumulative_gas_used(&self) -> u64 {
         self.cumulative_gas_used
     }
 
-    fn logs(&self) -> &[Log] {
+    fn logs(&self) -> &[L] {
         &self.logs
     }
 
-    fn into_logs(self) -> Vec<Log> {
+    fn into_logs(self) -> Vec<L> {
         self.logs
     }
 }
@@ -302,18 +258,15 @@ impl<T: TxTy> IsTyped2718 for Receipt<T> {
 
 impl<T: TxTy> InMemorySize for Receipt<T> {
     fn size(&self) -> usize {
-        self.tx_type.size() +
-            core::mem::size_of::<bool>() +
-            core::mem::size_of::<u64>() +
-            self.logs.capacity() * core::mem::size_of::<Log>()
+        size_of::<Self>() + self.logs.iter().map(|log| log.size()).sum::<usize>()
     }
 }
 
-impl<T> From<alloy_consensus::ReceiptEnvelope<T>> for Receipt<TxType>
+impl<T> From<ReceiptEnvelope<T>> for Receipt<TxType>
 where
     T: Into<Log>,
 {
-    fn from(value: alloy_consensus::ReceiptEnvelope<T>) -> Self {
+    fn from(value: ReceiptEnvelope<T>) -> Self {
         let value = value.into_primitives_receipt();
         Self {
             tx_type: value.tx_type(),
@@ -324,8 +277,8 @@ where
     }
 }
 
-impl<T> From<Receipt<T>> for alloy_consensus::Receipt<Log> {
-    fn from(value: Receipt<T>) -> Self {
+impl<T, L> From<EthereumReceipt<T, L>> for alloy_consensus::Receipt<L> {
+    fn from(value: EthereumReceipt<T, L>) -> Self {
         Self {
             status: value.success.into(),
             cumulative_gas_used: value.cumulative_gas_used,
@@ -334,8 +287,11 @@ impl<T> From<Receipt<T>> for alloy_consensus::Receipt<Log> {
     }
 }
 
-impl From<Receipt<TxType>> for alloy_consensus::ReceiptEnvelope<Log> {
-    fn from(value: Receipt<TxType>) -> Self {
+impl<L> From<EthereumReceipt<TxType, L>> for ReceiptEnvelope<L>
+where
+    L: Send + Sync + Clone + Debug + Eq + AsRef<Log>,
+{
+    fn from(value: EthereumReceipt<TxType, L>) -> Self {
         let tx_type = value.tx_type;
         let receipt = value.into_with_bloom().map_receipt(Into::into);
         match tx_type {
@@ -624,6 +580,7 @@ mod tests {
     pub(crate) type Block<T = TransactionSigned> = alloy_consensus::Block<T>;
 
     #[test]
+    #[cfg(feature = "reth-codec")]
     fn test_decode_receipt() {
         reth_codecs::test_utils::test_decode::<Receipt<TxType>>(&hex!(
             "c428b52ffd23fc42696156b10200f034792b6a94c3850215c2fef7aea361a0c31b79d9a32652eefc0d4e2e730036061cff7344b6fc6132b50cda0ed810a991ae58ef013150c12b2522533cb3b3a8b19b7786a8b5ff1d3cdc84225e22b02def168c8858df"
@@ -823,5 +780,21 @@ mod tests {
             root,
             b256!("0xfe70ae4a136d98944951b2123859698d59ad251a381abc9960fa81cae3d0d4a0")
         );
+    }
+
+    // Ensures that reth and alloy receipts encode to the same JSON
+    #[test]
+    #[cfg(feature = "rpc")]
+    fn test_receipt_serde() {
+        let input = r#"{"status":"0x1","cumulativeGasUsed":"0x175cc0e","logs":[{"address":"0xa18b9ca2a78660d44ab38ae72e72b18792ffe413","topics":["0x8c5be1e5ebec7d5bd14f71427d1e84f3dd0314c0f7b2291e5b200ac8c7c3b925","0x000000000000000000000000e7e7d8006cbff47bc6ac2dabf592c98e97502708","0x0000000000000000000000007a250d5630b4cf539739df2c5dacb4c659f2488d"],"data":"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff","blockHash":"0xbf9e6a368a399f996a0f0b27cab4191c028c3c99f5f76ea08a5b70b961475fcb","blockNumber":"0x164b59f","blockTimestamp":"0x68c9a713","transactionHash":"0x533aa9e57865675bb94f41aa2895c0ac81eee69686c77af16149c301e19805f1","transactionIndex":"0x14d","logIndex":"0x238","removed":false}],"logsBloom":"0x00000000000000000000000000000000000000000000000000010000000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000000000000000000200000000000000000000000000000000000000000000000000000000400000040000000000000004000000000000000000000000000000000000000000000020000000000000000000000000080000000000000000000000000200000020000000000000000000000000000000000000000000000000000000000000020000010000000000000000000000000000000000000000000000000000000000000","type":"0x2","transactionHash":"0x533aa9e57865675bb94f41aa2895c0ac81eee69686c77af16149c301e19805f1","transactionIndex":"0x14d","blockHash":"0xbf9e6a368a399f996a0f0b27cab4191c028c3c99f5f76ea08a5b70b961475fcb","blockNumber":"0x164b59f","gasUsed":"0xb607","effectiveGasPrice":"0x4a3ee768","from":"0xe7e7d8006cbff47bc6ac2dabf592c98e97502708","to":"0xa18b9ca2a78660d44ab38ae72e72b18792ffe413","contractAddress":null}"#;
+        let receipt: RpcReceipt = serde_json::from_str(input).unwrap();
+        let envelope: ReceiptEnvelope<alloy_rpc_types_eth::Log> =
+            serde_json::from_str(input).unwrap();
+
+        assert_eq!(envelope, receipt.clone().into());
+
+        let json_envelope = serde_json::to_value(&envelope).unwrap();
+        let json_receipt = serde_json::to_value(receipt.into_with_bloom()).unwrap();
+        assert_eq!(json_envelope, json_receipt);
     }
 }

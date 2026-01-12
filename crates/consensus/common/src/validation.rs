@@ -1,14 +1,15 @@
 //! Collection of methods for block validation.
 
-use alloy_consensus::{
-    constants::MAXIMUM_EXTRA_DATA_SIZE, BlockHeader as _, EMPTY_OMMER_ROOT_HASH,
-};
+use alloy_consensus::{BlockHeader as _, Transaction, EMPTY_OMMER_ROOT_HASH};
 use alloy_eips::{eip4844::DATA_GAS_PER_BLOB, eip7840::BlobParams};
 use reth_chainspec::{EthChainSpec, EthereumHardfork, EthereumHardforks};
-use reth_consensus::ConsensusError;
+use reth_consensus::{ConsensusError, TxGasLimitTooHighErr};
 use reth_primitives_traits::{
-    constants::MAXIMUM_GAS_LIMIT_BLOCK, Block, BlockBody, BlockHeader, GotExpected, SealedBlock,
-    SealedHeader,
+    constants::{
+        GAS_LIMIT_BOUND_DIVISOR, MAXIMUM_GAS_LIMIT_BLOCK, MAX_TX_GAS_LIMIT_OSAKA, MINIMUM_GAS_LIMIT,
+    },
+    transaction::TxHashRef,
+    Block, BlockBody, BlockHeader, GotExpected, SealedBlock, SealedHeader,
 };
 
 /// The maximum RLP length of a block, defined in [EIP-7934](https://eips.ethereum.org/EIPS/eip-7934).
@@ -153,6 +154,19 @@ where
     if let Err(error) = block.ensure_transaction_root_valid() {
         return Err(ConsensusError::BodyTransactionRootDiff(error.into()))
     }
+    // EIP-7825 validation
+    if chain_spec.is_osaka_active_at_timestamp(block.timestamp()) {
+        for tx in block.body().transactions() {
+            if tx.gas_limit() > MAX_TX_GAS_LIMIT_OSAKA {
+                return Err(TxGasLimitTooHighErr {
+                    tx_hash: *tx.tx_hash(),
+                    gas_limit: tx.gas_limit(),
+                    max_allowed: MAX_TX_GAS_LIMIT_OSAKA,
+                }
+                .into());
+            }
+        }
+    }
 
     Ok(())
 }
@@ -209,13 +223,9 @@ where
 /// Validates that the EIP-4844 header fields exist and conform to the spec. This ensures that:
 ///
 ///  * `blob_gas_used` exists as a header field
-///  * `excess_blob_gas` exists as a header field
 ///  * `parent_beacon_block_root` exists as a header field
 ///  * `blob_gas_used` is a multiple of `DATA_GAS_PER_BLOB`
-///  * `excess_blob_gas` is a multiple of `DATA_GAS_PER_BLOB`
 ///  * `blob_gas_used` doesn't exceed the max allowed blob gas based on the given params
-///
-/// Note: This does not enforce any restrictions on `blob_gas_used`
 pub fn validate_4844_header_standalone<H: BlockHeader>(
     header: &H,
     blob_params: BlobParams,
@@ -248,9 +258,12 @@ pub fn validate_4844_header_standalone<H: BlockHeader>(
 /// From yellow paper: extraData: An arbitrary byte array containing data relevant to this block.
 /// This must be 32 bytes or fewer; formally Hx.
 #[inline]
-pub fn validate_header_extra_data<H: BlockHeader>(header: &H) -> Result<(), ConsensusError> {
+pub fn validate_header_extra_data<H: BlockHeader>(
+    header: &H,
+    max_size: usize,
+) -> Result<(), ConsensusError> {
     let extra_data_len = header.extra_data().len();
-    if extra_data_len > MAXIMUM_EXTRA_DATA_SIZE {
+    if extra_data_len > max_size {
         Err(ConsensusError::ExtraDataExceedsMax { len: extra_data_len })
     } else {
         Ok(())
@@ -266,18 +279,26 @@ pub fn validate_against_parent_hash_number<H: BlockHeader>(
     header: &H,
     parent: &SealedHeader<H>,
 ) -> Result<(), ConsensusError> {
-    // Parent number is consistent.
-    if parent.number() + 1 != header.number() {
-        return Err(ConsensusError::ParentBlockNumberMismatch {
-            parent_block_number: parent.number(),
-            block_number: header.number(),
-        })
-    }
-
     if parent.hash() != header.parent_hash() {
         return Err(ConsensusError::ParentHashMismatch(
             GotExpected { got: header.parent_hash(), expected: parent.hash() }.into(),
         ))
+    }
+
+    let Some(parent_number) = parent.number().checked_add(1) else {
+        // parent block already reached the maximum
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number(),
+            block_number: u64::MAX,
+        })
+    };
+
+    // Parent number is consistent.
+    if parent_number != header.number() {
+        return Err(ConsensusError::ParentBlockNumberMismatch {
+            parent_block_number: parent.number(),
+            block_number: header.number(),
+        })
     }
 
     Ok(())
@@ -314,7 +335,7 @@ pub fn validate_against_parent_eip1559_base_fee<ChainSpec: EthChainSpec + Ethere
     Ok(())
 }
 
-/// Validates the timestamp against the parent to make sure it is in the past.
+/// Validates that the block timestamp is greater than the parent block timestamp.
 #[inline]
 pub fn validate_against_parent_timestamp<H: BlockHeader>(
     header: &H,
@@ -326,6 +347,54 @@ pub fn validate_against_parent_timestamp<H: BlockHeader>(
             timestamp: header.timestamp(),
         })
     }
+    Ok(())
+}
+
+/// Validates gas limit against parent gas limit.
+///
+/// The maximum allowable difference between self and parent gas limits is determined by the
+/// parent's gas limit divided by the [`GAS_LIMIT_BOUND_DIVISOR`].
+#[inline]
+pub fn validate_against_parent_gas_limit<
+    H: BlockHeader,
+    ChainSpec: EthChainSpec + EthereumHardforks,
+>(
+    header: &SealedHeader<H>,
+    parent: &SealedHeader<H>,
+    chain_spec: &ChainSpec,
+) -> Result<(), ConsensusError> {
+    // Determine the parent gas limit, considering elasticity multiplier on the London fork.
+    let parent_gas_limit = if !chain_spec.is_london_active_at_block(parent.number()) &&
+        chain_spec.is_london_active_at_block(header.number())
+    {
+        parent.gas_limit() *
+            chain_spec.base_fee_params_at_timestamp(header.timestamp()).elasticity_multiplier
+                as u64
+    } else {
+        parent.gas_limit()
+    };
+
+    // Check for an increase in gas limit beyond the allowed threshold.
+    if header.gas_limit() > parent_gas_limit {
+        if header.gas_limit() - parent_gas_limit >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
+            return Err(ConsensusError::GasLimitInvalidIncrease {
+                parent_gas_limit,
+                child_gas_limit: header.gas_limit(),
+            })
+        }
+    }
+    // Check for a decrease in gas limit beyond the allowed threshold.
+    else if parent_gas_limit - header.gas_limit() >= parent_gas_limit / GAS_LIMIT_BOUND_DIVISOR {
+        return Err(ConsensusError::GasLimitInvalidDecrease {
+            parent_gas_limit,
+            child_gas_limit: header.gas_limit(),
+        })
+    }
+    // Check if the self gas limit is below the minimum required limit.
+    else if header.gas_limit() < MINIMUM_GAS_LIMIT {
+        return Err(ConsensusError::GasLimitInvalidMinimum { child_gas_limit: header.gas_limit() })
+    }
+
     Ok(())
 }
 
@@ -431,12 +500,27 @@ mod tests {
         let expected_blob_gas_used = 10 * DATA_GAS_PER_BLOB;
 
         // validate blob, it should fail blob gas used validation
-        assert_eq!(
-            validate_block_pre_execution(&block, &chain_spec),
-            Err(ConsensusError::BlobGasUsedDiff(GotExpected {
-                got: 1,
-                expected: expected_blob_gas_used
-            }))
-        );
+        assert!(matches!(
+            validate_block_pre_execution(&block, &chain_spec).unwrap_err(),
+            ConsensusError::BlobGasUsedDiff(diff)
+                if diff.got == 1 && diff.expected == expected_blob_gas_used
+        ));
+    }
+
+    #[test]
+    fn validate_header_extra_data_with_custom_limit() {
+        // Test with default 32 bytes - should pass
+        let header_32 = Header { extra_data: Bytes::from(vec![0; 32]), ..Default::default() };
+        assert!(validate_header_extra_data(&header_32, 32).is_ok());
+
+        // Test exceeding default - should fail
+        let header_33 = Header { extra_data: Bytes::from(vec![0; 33]), ..Default::default() };
+        assert!(matches!(
+            validate_header_extra_data(&header_33, 32).unwrap_err(),
+            ConsensusError::ExtraDataExceedsMax { len } if len == 33
+        ));
+
+        // Test with custom larger limit - should pass
+        assert!(validate_header_extra_data(&header_33, 64).is_ok());
     }
 }

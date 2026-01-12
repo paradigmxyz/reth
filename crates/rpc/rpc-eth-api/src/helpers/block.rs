@@ -5,19 +5,17 @@ use crate::{
     node::RpcNodeCoreExt, EthApiTypes, FromEthApiError, FullEthApiTypes, RpcBlock, RpcNodeCore,
     RpcReceipt,
 };
-use alloy_consensus::TxReceipt;
+use alloy_consensus::{transaction::TxHashRef, TxReceipt};
 use alloy_eips::BlockId;
 use alloy_rlp::Encodable;
 use alloy_rpc_types_eth::{Block, BlockTransactions, Index};
 use futures::Future;
 use reth_node_api::BlockBody;
-use reth_primitives_traits::{
-    AlloyBlockHeader, RecoveredBlock, SealedHeader, SignedTransaction, TransactionMeta,
-};
+use reth_primitives_traits::{AlloyBlockHeader, RecoveredBlock, SealedHeader, TransactionMeta};
 use reth_rpc_convert::{transaction::ConvertReceiptInput, RpcConvert, RpcHeader};
 use reth_storage_api::{BlockIdReader, BlockReader, ProviderHeader, ProviderReceipt, ProviderTx};
 use reth_transaction_pool::{PoolTransaction, TransactionPool};
-use std::{borrow::Cow, sync::Arc};
+use std::sync::Arc;
 
 /// Result type of the fetched block receipts.
 pub type BlockReceiptsResult<N, E> = Result<Option<Vec<RpcReceipt<N>>>, E>;
@@ -32,9 +30,7 @@ pub type BlockAndReceiptsResult<Eth> = Result<
 
 /// Block related functions for the [`EthApiServer`](crate::EthApiServer) trait in the
 /// `eth_` namespace.
-pub trait EthBlocks:
-    LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primitives, Error = Self::Error>>
-{
+pub trait EthBlocks: LoadBlock<RpcConvert: RpcConvert<Primitives = Self::Primitives>> {
     /// Returns the block header for the given block id.
     fn rpc_block_header(
         &self,
@@ -63,8 +59,8 @@ pub trait EthBlocks:
 
             let block = block.clone_into_rpc_block(
                 full.into(),
-                |tx, tx_info| self.tx_resp_builder().fill(tx, tx_info),
-                |header, size| self.tx_resp_builder().convert_header(header, size),
+                |tx, tx_info| self.converter().fill(tx, tx_info),
+                |header, size| self.converter().convert_header(header, size),
             )?;
             Ok(Some(block))
         }
@@ -78,7 +74,11 @@ pub trait EthBlocks:
         block_id: BlockId,
     ) -> impl Future<Output = Result<Option<usize>, Self::Error>> + Send {
         async move {
+            // If no pending block from provider, build the pending block locally.
             if block_id.is_pending() {
+                if let Some(pending) = self.local_pending_block().await? {
+                    return Ok(Some(pending.block.body().transaction_count()));
+                }
                 // Pending block can be fetched directly without need for caching
                 return Ok(self
                     .provider()
@@ -127,7 +127,7 @@ pub trait EthBlocks:
 
                 let inputs = block
                     .transactions_recovered()
-                    .zip(receipts.iter())
+                    .zip(Arc::unwrap_or_clone(receipts))
                     .enumerate()
                     .map(|(idx, (tx, receipt))| {
                         let meta = TransactionMeta {
@@ -140,22 +140,28 @@ pub trait EthBlocks:
                             timestamp,
                         };
 
+                        let cumulative_gas_used = receipt.cumulative_gas_used();
+                        let logs_len = receipt.logs().len();
+
                         let input = ConvertReceiptInput {
-                            receipt: Cow::Borrowed(receipt),
                             tx,
-                            gas_used: receipt.cumulative_gas_used() - gas_used,
+                            gas_used: cumulative_gas_used - gas_used,
                             next_log_index,
                             meta,
+                            receipt,
                         };
 
-                        gas_used = receipt.cumulative_gas_used();
-                        next_log_index += receipt.logs().len();
+                        gas_used = cumulative_gas_used;
+                        next_log_index += logs_len;
 
                         input
                     })
                     .collect::<Vec<_>>();
 
-                return self.tx_resp_builder().convert_receipts(inputs).map(Some)
+                return Ok(self
+                    .converter()
+                    .convert_receipts_with_block(inputs, block.sealed_block())
+                    .map(Some)?)
             }
 
             Ok(None)
@@ -185,22 +191,20 @@ pub trait EthBlocks:
                 }
 
                 // If no pending block from provider, build the pending block locally.
-                if let Some((block, receipts)) = self.local_pending_block().await? {
-                    return Ok(Some((block, receipts)));
+                if let Some(pending) = self.local_pending_block().await? {
+                    return Ok(Some((pending.block, pending.receipts)));
                 }
             }
 
             if let Some(block_hash) =
-                self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)?
-            {
-                if let Some((block, receipts)) = self
+                self.provider().block_hash_for_id(block_id).map_err(Self::Error::from_eth_err)? &&
+                let Some((block, receipts)) = self
                     .cache()
                     .get_block_and_receipts(block_hash)
                     .await
                     .map_err(Self::Error::from_eth_err)?
-                {
-                    return Ok(Some((block, receipts)));
-                }
+            {
+                return Ok(Some((block, receipts)));
             }
 
             Ok(None)
@@ -256,7 +260,7 @@ pub trait EthBlocks:
                         alloy_consensus::Block::<alloy_consensus::TxEnvelope, _>::uncle(header);
                     let size = block.length();
                     let header = self
-                        .tx_resp_builder()
+                        .converter()
                         .convert_header(SealedHeader::new_unhashed(block.header), size)?;
                     Ok(Block {
                         uncles: vec![],
@@ -296,7 +300,7 @@ pub trait LoadBlock: LoadPendingBlock + SpawnBlocking + RpcNodeCoreExt {
 
                 // If no pending block from provider, try to get local pending block
                 return match self.local_pending_block().await? {
-                    Some((block, _)) => Ok(Some(block)),
+                    Some(pending) => Ok(Some(pending.block)),
                     None => Ok(None),
                 };
             }

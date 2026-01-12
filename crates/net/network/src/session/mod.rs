@@ -539,9 +539,12 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                 let version = conn.version();
 
                 // Configure the interval at which the range information is updated, starting with
-                // ETH69
+                // ETH69. We use interval_at to delay the first tick, avoiding sending
+                // BlockRangeUpdate immediately after connection (which can cause issues with
+                // peers that don't properly handle the message).
                 let range_update_interval = (conn.version() >= EthVersion::Eth69).then(|| {
-                    let mut interval = tokio::time::interval(RANGE_UPDATE_INTERVAL);
+                    let start = tokio::time::Instant::now() + RANGE_UPDATE_INTERVAL;
+                    let mut interval = tokio::time::interval_at(start, RANGE_UPDATE_INTERVAL);
                     interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
                     interval
                 });
@@ -571,6 +574,7 @@ impl<N: NetworkPrimitives> SessionManager<N> {
                     range_info: None,
                     local_range_info: self.local_range_info.clone(),
                     range_update_interval,
+                    last_sent_latest_block: None,
                 };
 
                 self.spawn(session);
@@ -904,7 +908,7 @@ pub(crate) async fn start_pending_incoming_session<N: NetworkPrimitives>(
 }
 
 /// Starts the authentication process for a connection initiated by a remote peer.
-#[instrument(skip_all, fields(%remote_addr, peer_id), target = "net")]
+#[instrument(level = "trace", target = "net::network", skip_all, fields(%remote_addr, peer_id))]
 #[expect(clippy::too_many_arguments)]
 async fn start_pending_outbound_session<N: NetworkPrimitives>(
     handshake: Arc<dyn EthRlpxHandshake>,
@@ -1150,18 +1154,20 @@ async fn authenticate_stream<N: NetworkPrimitives>(
                 .ok();
         }
 
-        let (multiplex_stream, their_status) =
-            match multiplex_stream.into_eth_satellite_stream(status, fork_filter).await {
-                Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
-                Err(err) => {
-                    return PendingSessionEvent::Disconnected {
-                        remote_addr,
-                        session_id,
-                        direction,
-                        error: Some(PendingSessionHandshakeError::Eth(err)),
-                    }
+        let (multiplex_stream, their_status) = match multiplex_stream
+            .into_eth_satellite_stream(status, fork_filter, handshake)
+            .await
+        {
+            Ok((multiplex_stream, their_status)) => (multiplex_stream, their_status),
+            Err(err) => {
+                return PendingSessionEvent::Disconnected {
+                    remote_addr,
+                    session_id,
+                    direction,
+                    error: Some(PendingSessionHandshakeError::Eth(err)),
                 }
-            };
+            }
+        };
 
         (multiplex_stream.into(), their_status)
     };

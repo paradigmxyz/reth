@@ -37,17 +37,19 @@ where
     // operation as hashing that is required for state root got calculated in every
     // transaction This was replaced with is_success flag.
     // See more about EIP here: https://eips.ethereum.org/EIPS/eip-658
-    if chain_spec.is_byzantium_active_at_block(block.header().number()) {
-        if let Err(error) =
-            verify_receipts(block.header().receipts_root(), block.header().logs_bloom(), receipts)
-        {
-            let receipts = receipts
-                .iter()
-                .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
-                .collect::<Vec<_>>();
-            tracing::debug!(%error, ?receipts, "receipts verification failed");
-            return Err(error)
-        }
+    if chain_spec.is_byzantium_active_at_block(block.header().number()) &&
+        let Err(error) = verify_receipts(
+            block.header().receipts_root(),
+            block.header().logs_bloom(),
+            receipts,
+        )
+    {
+        let receipts = receipts
+            .iter()
+            .map(|r| Bytes::from(r.with_bloom_ref().encoded_2718()))
+            .collect::<Vec<_>>();
+        tracing::debug!(%error, ?receipts, "receipts verification failed");
+        return Err(error)
     }
 
     // Validate that the header requests hash matches the calculated requests hash
@@ -85,9 +87,7 @@ fn verify_receipts<R: Receipt>(
         logs_bloom,
         expected_receipts_root,
         expected_logs_bloom,
-    )?;
-
-    Ok(())
+    )
 }
 
 /// Compare the calculated receipts root with the expected receipts root, also compare
@@ -170,18 +170,16 @@ mod tests {
         let expected_receipts_root = B256::random();
         let expected_logs_bloom = calculated_logs_bloom;
 
-        assert_eq!(
+        assert!(matches!(
             compare_receipts_root_and_logs_bloom(
                 calculated_receipts_root,
                 calculated_logs_bloom,
                 expected_receipts_root,
                 expected_logs_bloom
-            ),
-            Err(ConsensusError::BodyReceiptRootDiff(
-                GotExpected { got: calculated_receipts_root, expected: expected_receipts_root }
-                    .into()
-            ))
-        );
+            ).unwrap_err(),
+            ConsensusError::BodyReceiptRootDiff(diff)
+                if diff.got == calculated_receipts_root && diff.expected == expected_receipts_root
+        ));
     }
 
     #[test]
@@ -192,16 +190,15 @@ mod tests {
         let expected_receipts_root = calculated_receipts_root;
         let expected_logs_bloom = Bloom::random();
 
-        assert_eq!(
+        assert!(matches!(
             compare_receipts_root_and_logs_bloom(
                 calculated_receipts_root,
                 calculated_logs_bloom,
                 expected_receipts_root,
                 expected_logs_bloom
-            ),
-            Err(ConsensusError::BodyBloomLogDiff(
-                GotExpected { got: calculated_logs_bloom, expected: expected_logs_bloom }.into()
-            ))
-        );
+            ).unwrap_err(),
+            ConsensusError::BodyBloomLogDiff(diff)
+                if diff.got == calculated_logs_bloom && diff.expected == expected_logs_bloom
+        ));
     }
 }

@@ -18,7 +18,7 @@ use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
-use tracing::{debug, trace, trace_span};
+use tracing::{debug, instrument, trace};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
 /// finishing the computation.
@@ -601,7 +601,7 @@ where
     pub fn root(self) -> Result<B256, StorageRootError> {
         match self.calculate(false)? {
             StorageRootProgress::Complete(root, _, _) => Ok(root),
-            StorageRootProgress::Progress(..) => unreachable!(), // update retenion is disabled
+            StorageRootProgress::Progress(..) => unreachable!(), // update retention is disabled
         }
     }
 
@@ -611,10 +611,8 @@ where
     ///
     /// The storage root, number of walked entries and trie updates
     /// for a given address if requested.
+    #[instrument(skip_all, target = "trie::storage_root", name = "Storage trie", fields(hashed_address = ?self.hashed_address))]
     pub fn calculate(self, retain_updates: bool) -> Result<StorageRootProgress, StorageRootError> {
-        let span = trace_span!(target: "trie::storage_root", "Storage trie", hashed_address = ?self.hashed_address);
-        let _enter = span.enter();
-
         trace!(target: "trie::storage_root", "calculating storage root");
 
         let mut hashed_storage_cursor =
@@ -728,6 +726,8 @@ pub enum TrieType {
     State,
     /// Storage trie type.
     Storage,
+    /// Custom trie type. Can be used in ExEx.
+    Custom(&'static str),
 }
 
 impl TrieType {
@@ -736,6 +736,7 @@ impl TrieType {
         match self {
             Self::State => "state",
             Self::Storage => "storage",
+            Self::Custom(s) => s,
         }
     }
 }

@@ -1,188 +1,262 @@
-use crate::{ExecutionPayloadBaseV1, FlashBlock};
-use alloy_eips::{eip2718::WithEncoded, BlockNumberOrTag, Decodable2718};
-use eyre::OptionExt;
-use futures_util::{Stream, StreamExt};
-use reth_chain_state::ExecutedBlock;
-use reth_errors::RethError;
-use reth_evm::{
-    execute::{BlockBuilder, BlockBuilderOutcome},
-    ConfigureEvm,
+use crate::{
+    cache::SequenceManager, worker::FlashBlockBuilder, FlashBlock, FlashBlockCompleteSequence,
+    FlashBlockCompleteSequenceRx, InProgressFlashBlockRx, PendingFlashBlock,
 };
-use reth_execution_types::ExecutionOutcome;
-use reth_primitives_traits::{
-    AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy, SignedTransaction,
-};
-use reth_revm::{database::StateProviderDatabase, db::State};
-use reth_rpc_eth_types::{EthApiError, PendingBlock};
+use alloy_primitives::B256;
+use futures_util::{FutureExt, Stream, StreamExt};
+use metrics::{Gauge, Histogram};
+use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
+use reth_evm::ConfigureEvm;
+use reth_metrics::Metrics;
+use reth_primitives_traits::{AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy};
+use reth_revm::cached::CachedReads;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
-use std::{
-    pin::Pin,
-    sync::Arc,
-    task::{Context, Poll},
-    time::{Duration, Instant},
-};
-use tracing::{debug, error, info};
+use reth_tasks::TaskExecutor;
+use std::{sync::Arc, time::Instant};
+use tokio::sync::{oneshot, watch};
+use tracing::*;
 
-/// The `FlashBlockService` maintains an in-memory [`PendingBlock`] built out of a sequence of
+/// The `FlashBlockService` maintains an in-memory [`PendingFlashBlock`] built out of a sequence of
 /// [`FlashBlock`]s.
 #[derive(Debug)]
 pub struct FlashBlockService<
     N: NodePrimitives,
     S,
-    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: Unpin>,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>,
     Provider,
 > {
-    rx: S,
-    current: Option<PendingBlock<N>>,
-    blocks: Vec<FlashBlock>,
-    evm_config: EvmConfig,
-    provider: Provider,
+    /// Incoming flashblock stream.
+    incoming_flashblock_rx: S,
+    /// Signals when a block build is in progress.
+    in_progress_tx: watch::Sender<Option<FlashBlockBuildInfo>>,
+    /// Broadcast channel to forward received flashblocks from the subscription.
+    received_flashblocks_tx: tokio::sync::broadcast::Sender<Arc<FlashBlock>>,
+
+    /// Executes flashblock sequences to build pending blocks.
+    builder: FlashBlockBuilder<EvmConfig, Provider>,
+    /// Task executor for spawning block build jobs.
+    spawner: TaskExecutor,
+    /// Currently running block build job with start time and result receiver.
+    job: Option<BuildJob<N>>,
+    /// Manages flashblock sequences with caching and intelligent build selection.
+    sequences: SequenceManager<N::SignedTx>,
+
+    /// `FlashBlock` service's metrics
+    metrics: FlashBlockServiceMetrics,
 }
 
-impl<
-        N: NodePrimitives,
-        S,
-        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>,
-        Provider: StateProviderFactory
-            + BlockReaderIdExt<
-                Header = HeaderTy<N>,
-                Block = BlockTy<N>,
-                Transaction = N::SignedTx,
-                Receipt = ReceiptTy<N>,
-            >,
-    > FlashBlockService<N, S, EvmConfig, Provider>
+impl<N, S, EvmConfig, Provider> FlashBlockService<N, S, EvmConfig, Provider>
+where
+    N: NodePrimitives,
+    S: Stream<Item = eyre::Result<FlashBlock>> + Unpin + 'static,
+    EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<OpFlashblockPayloadBase> + Unpin>
+        + Clone
+        + 'static,
+    Provider: StateProviderFactory
+        + BlockReaderIdExt<
+            Header = HeaderTy<N>,
+            Block = BlockTy<N>,
+            Transaction = N::SignedTx,
+            Receipt = ReceiptTy<N>,
+        > + Unpin
+        + Clone
+        + 'static,
 {
     /// Constructs a new `FlashBlockService` that receives [`FlashBlock`]s from `rx` stream.
-    pub const fn new(rx: S, evm_config: EvmConfig, provider: Provider) -> Self {
-        Self { rx, current: None, blocks: Vec::new(), evm_config, provider }
+    pub fn new(
+        incoming_flashblock_rx: S,
+        evm_config: EvmConfig,
+        provider: Provider,
+        spawner: TaskExecutor,
+        compute_state_root: bool,
+    ) -> Self {
+        let (in_progress_tx, _) = watch::channel(None);
+        let (received_flashblocks_tx, _) = tokio::sync::broadcast::channel(128);
+        Self {
+            incoming_flashblock_rx,
+            in_progress_tx,
+            received_flashblocks_tx,
+            builder: FlashBlockBuilder::new(evm_config, provider),
+            spawner,
+            job: None,
+            sequences: SequenceManager::new(compute_state_root),
+            metrics: FlashBlockServiceMetrics::default(),
+        }
     }
 
-    /// Adds the `block` into the collection.
-    ///
-    /// Depending on its index and associated block number, it may:
-    /// * Be added to all the flashblocks received prior using this function.
-    /// * Cause a reset of the flashblocks and become the sole member of the collection.
-    /// * Be ignored.
-    pub fn add_flash_block(&mut self, flashblock: FlashBlock) {
-        // Flash block at index zero resets the whole state
-        if flashblock.index == 0 {
-            self.blocks = vec![flashblock];
-            self.current.take();
-        }
-        // Flash block at the following index adds to the collection and invalidates built block
-        else if flashblock.index == self.blocks.last().map(|last| last.index + 1).unwrap_or(0) {
-            self.blocks.push(flashblock);
-            self.current.take();
-        }
-        // Flash block at a different index is ignored
-        else if let Some(pending_block) = self.current.as_ref() {
-            // Delete built block if it corresponds to a different height
-            if pending_block.block().header().number() == flashblock.metadata.block_number {
-                info!(
-                    message = "None sequential Flashblocks, keeping cache",
-                    curr_block = %pending_block.block().header().number(),
-                    new_block = %flashblock.metadata.block_number,
-                );
-            } else {
-                error!(
-                    message = "Received Flashblock for new block, zeroing Flashblocks until we receive a base Flashblock",
-                    curr_block = %pending_block.block().header().number(),
-                    new_block = %flashblock.metadata.block_number,
-                );
+    /// Returns the sender half for the received flashblocks broadcast channel.
+    pub const fn flashblocks_broadcaster(
+        &self,
+    ) -> &tokio::sync::broadcast::Sender<Arc<FlashBlock>> {
+        &self.received_flashblocks_tx
+    }
 
-                self.blocks.clear();
-                self.current.take();
+    /// Returns the sender half for the flashblock sequence broadcast channel.
+    pub const fn block_sequence_broadcaster(
+        &self,
+    ) -> &tokio::sync::broadcast::Sender<FlashBlockCompleteSequence> {
+        self.sequences.block_sequence_broadcaster()
+    }
+
+    /// Returns a subscriber to the flashblock sequence.
+    pub fn subscribe_block_sequence(&self) -> FlashBlockCompleteSequenceRx {
+        self.sequences.subscribe_block_sequence()
+    }
+
+    /// Returns a receiver that signals when a flashblock is being built.
+    pub fn subscribe_in_progress(&self) -> InProgressFlashBlockRx {
+        self.in_progress_tx.subscribe()
+    }
+
+    /// Drives the service and sends new blocks to the receiver.
+    ///
+    /// This loop:
+    /// 1. Checks if any build job has completed and processes results
+    /// 2. Receives and batches all immediately available flashblocks
+    /// 3. Attempts to build a block from the complete sequence
+    ///
+    /// Note: this should be spawned
+    pub async fn run(mut self, tx: watch::Sender<Option<PendingFlashBlock<N>>>) {
+        loop {
+            tokio::select! {
+                // Event 1: job exists, listen to job results
+                Some(result) = async {
+                    match self.job.as_mut() {
+                        Some((_, rx)) => rx.await.ok(),
+                        None => std::future::pending().await,
+                    }
+                } => {
+                    let (start_time, _) = self.job.take().unwrap();
+                    let _ = self.in_progress_tx.send(None);
+
+                    match result {
+                        Ok(Some((pending, cached_reads))) => {
+                            let parent_hash = pending.parent_hash();
+                            self.sequences
+                                .on_build_complete(parent_hash, Some((pending.clone(), cached_reads)));
+
+                            let elapsed = start_time.elapsed();
+                            self.metrics.execution_duration.record(elapsed.as_secs_f64());
+
+                            let _ = tx.send(Some(pending));
+                        }
+                        Ok(None) => {
+                            trace!(target: "flashblocks", "Build job returned None");
+                        }
+                        Err(err) => {
+                            warn!(target: "flashblocks", %err, "Build job failed");
+                        }
+                    }
+                }
+
+                // Event 2: New flashblock arrives (batch process all ready flashblocks)
+                result = self.incoming_flashblock_rx.next() => {
+                    match result {
+                        Some(Ok(flashblock)) => {
+                            // Process first flashblock
+                            self.process_flashblock(flashblock);
+
+                            // Batch process all other immediately available flashblocks
+                            while let Some(result) = self.incoming_flashblock_rx.next().now_or_never().flatten() {
+                                match result {
+                                    Ok(fb) => self.process_flashblock(fb),
+                                    Err(err) => warn!(target: "flashblocks", %err, "Error receiving flashblock"),
+                                }
+                            }
+
+                            self.try_start_build_job();
+                        }
+                        Some(Err(err)) => {
+                            warn!(target: "flashblocks", %err, "Error receiving flashblock");
+                        }
+                        None => {
+                            warn!(target: "flashblocks", "Flashblock stream ended");
+                            break;
+                        }
+                    }
+                }
             }
-        } else {
-            debug!("ignoring {flashblock:?}");
         }
     }
 
-    /// Returns the [`ExecutedBlock`] made purely out of [`FlashBlock`]s that were received using
-    /// [`Self::add_flash_block`].
-    /// Builds a pending block using the configured provider and pool.
-    ///
-    /// If the origin is the actual pending block, the block is built with withdrawals.
-    ///
-    /// After Cancun, if the origin is the actual pending block, the block includes the EIP-4788 pre
-    /// block contract call using the parent beacon block root received from the CL.
-    pub fn execute(&mut self) -> eyre::Result<PendingBlock<N>> {
-        let latest = self
-            .provider
-            .latest_header()?
-            .ok_or(EthApiError::HeaderNotFound(BlockNumberOrTag::Latest.into()))?;
+    /// Processes a single flashblock: notifies subscribers, records metrics, and inserts into
+    /// sequence.
+    fn process_flashblock(&mut self, flashblock: FlashBlock) {
+        self.notify_received_flashblock(&flashblock);
 
-        let attrs = self
-            .blocks
-            .iter()
-            .find_map(|v| v.base.clone())
-            .ok_or_eyre("Missing base flashblock")?;
-
-        let state_provider = self.provider.history_by_block_hash(latest.hash())?;
-        let state = StateProviderDatabase::new(&state_provider);
-        let mut db = State::builder().with_database(state).with_bundle_update().build();
-
-        let mut builder = self
-            .evm_config
-            .builder_for_next_block(&mut db, &latest, attrs.into())
-            .map_err(RethError::other)?;
-
-        builder.apply_pre_execution_changes()?;
-
-        let transactions = self.blocks.iter().flat_map(|v| v.diff.transactions.clone());
-
-        for encoded in transactions {
-            let tx = N::SignedTx::decode_2718_exact(encoded.as_ref())?;
-            let signer = tx.try_recover()?;
-            let tx = WithEncoded::new(encoded, tx.with_signer(signer));
-            let _gas_used = builder.execute_transaction(tx)?;
+        if flashblock.index == 0 {
+            self.metrics.last_flashblock_length.record(self.sequences.pending().count() as f64);
         }
 
-        let BlockBuilderOutcome { execution_result, block, hashed_state, .. } =
-            builder.finish(&state_provider)?;
+        if let Err(err) = self.sequences.insert_flashblock(flashblock) {
+            trace!(target: "flashblocks", %err, "Failed to insert flashblock");
+        }
+    }
 
-        let execution_outcome = ExecutionOutcome::new(
-            db.take_bundle(),
-            vec![execution_result.receipts],
-            block.number(),
-            vec![execution_result.requests],
-        );
+    /// Notifies all subscribers about the received flashblock.
+    fn notify_received_flashblock(&self, flashblock: &FlashBlock) {
+        if self.received_flashblocks_tx.receiver_count() > 0 {
+            let _ = self.received_flashblocks_tx.send(Arc::new(flashblock.clone()));
+        }
+    }
 
-        Ok(PendingBlock::with_executed_block(
-            Instant::now() + Duration::from_secs(1),
-            ExecutedBlock {
-                recovered_block: block.into(),
-                execution_output: Arc::new(execution_outcome),
-                hashed_state: Arc::new(hashed_state),
-            },
-        ))
+    /// Attempts to build a block if no job is currently running and a buildable sequence exists.
+    fn try_start_build_job(&mut self) {
+        if self.job.is_some() {
+            return; // Already building
+        }
+
+        let Some(latest) = self.builder.provider().latest_header().ok().flatten() else {
+            return;
+        };
+
+        let Some(args) = self.sequences.next_buildable_args(latest.hash(), latest.timestamp())
+        else {
+            return; // Nothing buildable
+        };
+
+        // Spawn build job
+        let fb_info = FlashBlockBuildInfo {
+            parent_hash: args.base.parent_hash,
+            index: args.last_flashblock_index,
+            block_number: args.base.block_number,
+        };
+        self.metrics.current_block_height.set(fb_info.block_number as f64);
+        self.metrics.current_index.set(fb_info.index as f64);
+        let _ = self.in_progress_tx.send(Some(fb_info));
+
+        let (tx, rx) = oneshot::channel();
+        let builder = self.builder.clone();
+        self.spawner.spawn_blocking(Box::pin(async move {
+            let _ = tx.send(builder.execute(args));
+        }));
+        self.job = Some((Instant::now(), rx));
     }
 }
 
-impl<
-        N: NodePrimitives,
-        S: Stream<Item = eyre::Result<FlashBlock>> + Unpin,
-        EvmConfig: ConfigureEvm<Primitives = N, NextBlockEnvCtx: From<ExecutionPayloadBaseV1> + Unpin>,
-        Provider: StateProviderFactory
-            + BlockReaderIdExt<
-                Header = HeaderTy<N>,
-                Block = BlockTy<N>,
-                Transaction = N::SignedTx,
-                Receipt = ReceiptTy<N>,
-            > + Unpin,
-    > Stream for FlashBlockService<N, S, EvmConfig, Provider>
-{
-    type Item = eyre::Result<PendingBlock<N>>;
+/// Information for a flashblock currently built
+#[derive(Debug, Clone, Copy)]
+pub struct FlashBlockBuildInfo {
+    /// Parent block hash
+    pub parent_hash: B256,
+    /// Flashblock index within the current block's sequence
+    pub index: u64,
+    /// Block number of the flashblock being built.
+    pub block_number: u64,
+}
 
-    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        let this = self.get_mut();
-        loop {
-            match this.rx.poll_next_unpin(cx) {
-                Poll::Ready(Some(Ok(flashblock))) => this.add_flash_block(flashblock),
-                Poll::Ready(Some(Err(err))) => return Poll::Ready(Some(Err(err))),
-                Poll::Ready(None) => return Poll::Ready(None),
-                Poll::Pending => return Poll::Ready(Some(this.execute())),
-            }
-        }
-    }
+type BuildJob<N> =
+    (Instant, oneshot::Receiver<eyre::Result<Option<(PendingFlashBlock<N>, CachedReads)>>>);
+
+#[derive(Metrics)]
+#[metrics(scope = "flashblock_service")]
+struct FlashBlockServiceMetrics {
+    /// The last complete length of flashblocks per block.
+    last_flashblock_length: Histogram,
+    /// The duration applying flashblock state changes in seconds.
+    execution_duration: Histogram,
+    /// Current block height.
+    current_block_height: Gauge,
+    /// Current flashblock index.
+    current_index: Gauge,
 }

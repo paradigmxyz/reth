@@ -24,7 +24,7 @@ use reth_trie_sparse::{
     provider::{RevealedNode, TrieNodeProvider, TrieNodeProviderFactory},
     SerialSparseTrie, SparseStateTrie,
 };
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
 /// State transition witness for the trie.
 #[derive(Debug)]
@@ -84,7 +84,7 @@ impl<T, H> TrieWitness<T, H> {
         self
     }
 
-    /// Set `always_include_root_node` to true. Root node will be included even on empty state.
+    /// Set `always_include_root_node` to true. Root node will be included even in empty state.
     /// This setting is useful if the caller wants to verify the witness against the
     /// parent state root.
     pub const fn always_include_root_node(mut self) -> Self {
@@ -95,8 +95,8 @@ impl<T, H> TrieWitness<T, H> {
 
 impl<T, H> TrieWitness<T, H>
 where
-    T: TrieCursorFactory + Clone + Send + Sync,
-    H: HashedCursorFactory + Clone + Send + Sync,
+    T: TrieCursorFactory + Clone,
+    H: HashedCursorFactory + Clone,
 {
     /// Compute the state transition witness for the trie. Gather all required nodes
     /// to apply `state` on top of the current trie state.
@@ -147,11 +147,7 @@ where
 
         let (tx, rx) = mpsc::channel();
         let blinded_provider_factory = WitnessTrieNodeProviderFactory::new(
-            ProofTrieNodeProviderFactory::new(
-                self.trie_cursor_factory,
-                self.hashed_cursor_factory,
-                Arc::new(self.prefix_sets),
-            ),
+            ProofTrieNodeProviderFactory::new(self.trie_cursor_factory, self.hashed_cursor_factory),
             tx,
         );
         let mut sparse_trie = SparseStateTrie::<SerialSparseTrie>::new();
@@ -196,7 +192,11 @@ where
                 .get(&hashed_address)
                 .ok_or(TrieWitnessError::MissingAccount(hashed_address))?
                 .unwrap_or_default();
-            sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)?;
+
+            if !sparse_trie.update_account(hashed_address, account, &blinded_provider_factory)? {
+                let nibbles = Nibbles::unpack(hashed_address);
+                sparse_trie.remove_account_leaf(&nibbles, &blinded_provider_factory)?;
+            }
 
             while let Ok(node) = rx.try_recv() {
                 self.witness.insert(keccak256(&node), node);

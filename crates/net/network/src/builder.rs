@@ -1,11 +1,11 @@
 //! Builder support for configuring the entire setup.
 
-use std::fmt::Debug;
-
 use crate::{
     eth_requests::EthRequestHandler,
     transactions::{
-        config::{StrictEthAnnouncementFilter, TransactionPropagationKind},
+        config::{
+            AnnouncementFilteringPolicy, StrictEthAnnouncementFilter, TransactionPropagationKind,
+        },
         policy::NetworkPolicies,
         TransactionPropagationPolicy, TransactionsManager, TransactionsManagerConfig,
     },
@@ -77,15 +77,7 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
         self,
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
-    ) -> NetworkBuilder<
-        TransactionsManager<
-            Pool,
-            N,
-            NetworkPolicies<TransactionPropagationKind, StrictEthAnnouncementFilter>,
-        >,
-        Eth,
-        N,
-    > {
+    ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
         self.transactions_with_policy(
             pool,
             transactions_manager_config,
@@ -94,24 +86,41 @@ impl<Tx, Eth, N: NetworkPrimitives> NetworkBuilder<Tx, Eth, N> {
     }
 
     /// Creates a new [`TransactionsManager`] and wires it to the network.
-    pub fn transactions_with_policy<
+    ///
+    /// Uses the default [`StrictEthAnnouncementFilter`] for announcement filtering.
+    pub fn transactions_with_policy<Pool: TransactionPool, P: TransactionPropagationPolicy<N>>(
+        self,
+        pool: Pool,
+        transactions_manager_config: TransactionsManagerConfig,
+        propagation_policy: P,
+    ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
+        self.transactions_with_policies(
+            pool,
+            transactions_manager_config,
+            propagation_policy,
+            StrictEthAnnouncementFilter::default(),
+        )
+    }
+
+    /// Creates a new [`TransactionsManager`] with custom propagation and announcement policies.
+    ///
+    /// This allows chains with custom transaction types (like CATX) to configure
+    /// the announcement filter to accept their transaction types.
+    pub fn transactions_with_policies<
         Pool: TransactionPool,
-        P: TransactionPropagationPolicy + Debug,
+        P: TransactionPropagationPolicy<N>,
+        A: AnnouncementFilteringPolicy<N>,
     >(
         self,
         pool: Pool,
         transactions_manager_config: TransactionsManagerConfig,
         propagation_policy: P,
-    ) -> NetworkBuilder<
-        TransactionsManager<Pool, N, NetworkPolicies<P, StrictEthAnnouncementFilter>>,
-        Eth,
-        N,
-    > {
+        announcement_policy: A,
+    ) -> NetworkBuilder<TransactionsManager<Pool, N>, Eth, N> {
         let Self { mut network, request_handler, .. } = self;
         let (tx, rx) = mpsc::unbounded_channel();
         network.set_transactions(tx);
         let handle = network.handle().clone();
-        let announcement_policy = StrictEthAnnouncementFilter::default();
         let policies = NetworkPolicies::new(propagation_policy, announcement_policy);
 
         let transactions = TransactionsManager::with_policy(

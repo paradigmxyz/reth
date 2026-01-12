@@ -17,7 +17,7 @@ pub mod unwind;
 #[derive(Debug, Parser)]
 pub struct Command<C: ChainSpecParser> {
     #[command(subcommand)]
-    command: Subcommands<C>,
+    pub command: Subcommands<C>,
 }
 
 /// `reth stage` subcommands

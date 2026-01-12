@@ -4,12 +4,12 @@
 use crate::transaction::OpTransaction;
 use alloc::vec::Vec;
 use alloy_consensus::{
-    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable},
+    transaction::{RlpEcdsaDecodableTx, RlpEcdsaEncodableTx, SignerRecoverable, TxHashRef},
     Sealed, SignableTransaction, Signed, Transaction, TxEip1559, TxEip2930, TxEip7702, TxLegacy,
     Typed2718,
 };
 use alloy_eips::{
-    eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718},
+    eip2718::{Decodable2718, Eip2718Error, Eip2718Result, Encodable2718, IsTyped2718},
     eip2930::AccessList,
     eip7702::SignedAuthorization,
 };
@@ -142,11 +142,19 @@ impl SignerRecoverable for OpTransactionSigned {
     }
 }
 
-impl SignedTransaction for OpTransactionSigned {
+impl TxHashRef for OpTransactionSigned {
     fn tx_hash(&self) -> &TxHash {
         self.hash.get_or_init(|| self.recalculate_hash())
     }
+}
 
+impl IsTyped2718 for OpTransactionSigned {
+    fn is_type(type_id: u8) -> bool {
+        <op_alloy_consensus::OpTxEnvelope as IsTyped2718>::is_type(type_id)
+    }
+}
+
+impl SignedTransaction for OpTransactionSigned {
     fn recalculate_hash(&self) -> B256 {
         keccak256(self.encoded_2718())
     }

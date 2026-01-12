@@ -1,4 +1,4 @@
-//! Example illustrating how to run the ETH JSON RPC API as standalone over a DB file.
+//! Example illustrating how to run the ETH JSON RPC API as a standalone over a DB file.
 //!
 //! Run with
 //!
@@ -24,7 +24,7 @@ use reth_ethereum::{
     pool::noop::NoopTransactionPool,
     provider::{
         db::{mdbx::DatabaseArguments, open_db_read_only, ClientVersion, DatabaseEnv},
-        providers::{BlockchainProvider, StaticFileProvider},
+        providers::{BlockchainProvider, RocksDBProvider, StaticFileProvider},
         ProviderFactory,
     },
     rpc::{
@@ -41,7 +41,7 @@ pub mod myrpc_ext;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    // 1. Setup the DB
+    // 1. Set up the DB
     let db_path = std::env::var("RETH_DB_PATH")?;
     let db_path = Path::new(&db_path);
     let db = Arc::new(open_db_read_only(
@@ -53,9 +53,10 @@ async fn main() -> eyre::Result<()> {
         db.clone(),
         spec.clone(),
         StaticFileProvider::read_only(db_path.join("static_files"), true)?,
-    );
+        RocksDBProvider::builder(db_path.join("rocksdb")).build().unwrap(),
+    )?;
 
-    // 2. Setup the blockchain provider using only the database provider and a noop for the tree to
+    // 2. Set up the blockchain provider using only the database provider and a noop for the tree to
     //    satisfy trait bounds. Tree is not used in this example since we are only operating on the
     //    disk and don't handle new blocks/live sync etc, which is done by the blockchain tree.
     let provider = BlockchainProvider::new(factory)?;
@@ -80,7 +81,7 @@ async fn main() -> eyre::Result<()> {
     // Pick which namespaces to expose.
     let config = TransportRpcModuleConfig::default().with_http([RethRpcModule::Eth]);
 
-    let mut server = rpc_builder.build(config, eth_api);
+    let mut server = rpc_builder.build(config, eth_api, Default::default());
 
     // Add a custom rpc namespace
     let custom_rpc = MyRpcExt { provider };

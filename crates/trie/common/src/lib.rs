@@ -6,7 +6,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 #![cfg_attr(not(feature = "std"), no_std)]
 
 extern crate alloc;
@@ -17,7 +17,7 @@ pub use hashed_state::*;
 
 /// Input for trie computation.
 mod input;
-pub use input::TrieInput;
+pub use input::{TrieInput, TrieInputSorted};
 
 /// The implementation of hash builder.
 pub mod hash_builder;
@@ -36,10 +36,13 @@ mod nibbles;
 pub use nibbles::{Nibbles, StoredNibbles, StoredNibblesSubKey};
 
 mod storage;
-pub use storage::StorageTrieEntry;
+pub use storage::{StorageTrieEntry, TrieChangeSetsEntry};
 
 mod subnode;
 pub use subnode::StoredSubNode;
+
+mod trie;
+pub use trie::{BranchNodeMasks, BranchNodeMasksMap, ProofTrieNode};
 
 /// The implementation of a container for storing intermediate changes to a trie.
 /// The container indicates when the trie has been modified.
@@ -57,6 +60,9 @@ pub mod updates;
 
 pub mod added_removed_keys;
 
+/// Utilities used by other modules in this crate.
+mod utils;
+
 /// Bincode-compatible serde implementations for trie types.
 ///
 /// `bincode` crate allows for more efficient serialization of trie types, because it allows
@@ -65,7 +71,10 @@ pub mod added_removed_keys;
 /// Read more: <https://github.com/paradigmxyz/reth/issues/11370>
 #[cfg(all(feature = "serde", feature = "serde-bincode-compat"))]
 pub mod serde_bincode_compat {
-    pub use super::updates::serde_bincode_compat as updates;
+    pub use super::{
+        hashed_state::serde_bincode_compat as hashed_state,
+        updates::serde_bincode_compat as updates,
+    };
 }
 
 /// Re-export

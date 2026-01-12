@@ -32,6 +32,7 @@ alloy-consensus.workspace = true
 alloy-rpc-types-engine.workspace = true
 
 auto_impl.workspace = true
+serde_json = { workspace = true, optional = true }
 
 [features]
 default = ["std"]
@@ -50,10 +51,12 @@ std = [
     "reth-storage-errors/std",
     "reth-db-models/std",
     "reth-trie-common/std",
+    "serde_json?/std",
 ]
 
 db-api = [
     "dep:reth-db-api",
+    "dep:serde_json",
 ]
 
 serde = [
@@ -65,7 +68,6 @@ serde = [
     "reth-stages-types/serde",
     "reth-trie-common/serde",
     "revm-database/serde",
-    "reth-ethereum-primitives/serde",
     "alloy-eips/serde",
     "alloy-primitives/serde",
     "alloy-consensus/serde",
@@ -73,7 +75,6 @@ serde = [
 ]
 
 serde-bincode-compat = [
-    "reth-ethereum-primitives/serde-bincode-compat",
     "reth-execution-types/serde-bincode-compat",
     "reth-primitives-traits/serde-bincode-compat",
     "reth-trie-common/serde-bincode-compat",

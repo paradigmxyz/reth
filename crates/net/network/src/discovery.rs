@@ -25,7 +25,7 @@ use std::{
 };
 use tokio::{sync::mpsc, task::JoinHandle};
 use tokio_stream::{wrappers::ReceiverStream, Stream};
-use tracing::trace;
+use tracing::{debug, trace};
 
 /// Default max capacity for cache of discovered peers.
 ///
@@ -95,12 +95,15 @@ impl Discovery {
             // spawn the service
             let discv4_service = discv4_service.spawn();
 
+            debug!(target:"net", ?discovery_v4_addr, "started discovery v4");
+
             Ok((Some(discv4), Some(discv4_updates), Some(discv4_service)))
         };
 
         let discv5_future = async {
             let Some(config) = discv5_config else { return Ok::<_, NetworkError>((None, None)) };
-            let (discv5, discv5_updates, _local_enr_discv5) = Discv5::start(&sk, config).await?;
+            let (discv5, discv5_updates) = Discv5::start(&sk, config).await?;
+            debug!(target:"net", discovery_v5_enr=? discv5.local_enr(), "started discovery v5");
             Ok((Some(discv5), Some(discv5_updates.into())))
         };
 
@@ -148,13 +151,16 @@ impl Discovery {
         self.discovery_listeners.retain_mut(|listener| listener.send(event.clone()).is_ok());
     }
 
-    /// Updates the `eth:ForkId` field in discv4.
+    /// Updates the `eth:ForkId` field in discv4/discv5.
     pub(crate) fn update_fork_id(&self, fork_id: ForkId) {
         if let Some(discv4) = &self.discv4 {
             // use forward-compatible forkid entry
             discv4.set_eip868_rlp(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
         }
-        // todo: update discv5 enr
+        if let Some(discv5) = &self.discv5 {
+            discv5
+                .encode_and_set_eip868_in_local_enr(b"eth".to_vec(), EnrForkIdEntry::from(fork_id))
+        }
     }
 
     /// Bans the [`IpAddr`] in the discovery service.
@@ -200,7 +206,6 @@ impl Discovery {
     }
 
     /// Add a node to the discv4 table.
-    #[expect(clippy::result_large_err)]
     pub(crate) fn add_discv5_node(&self, enr: Enr<SecretKey>) -> Result<(), NetworkError> {
         if let Some(discv5) = &self.discv5 {
             discv5.add_node(enr).map_err(NetworkError::Discv5Error)?;
@@ -267,12 +272,11 @@ impl Discovery {
             while let Some(Poll::Ready(Some(update))) =
                 self.discv5_updates.as_mut().map(|updates| updates.poll_next_unpin(cx))
             {
-                if let Some(discv5) = self.discv5.as_mut() {
-                    if let Some(DiscoveredPeer { node_record, fork_id }) =
+                if let Some(discv5) = self.discv5.as_mut() &&
+                    let Some(DiscoveredPeer { node_record, fork_id }) =
                         discv5.on_discv5_update(update)
-                    {
-                        self.on_node_record_update(node_record, fork_id);
-                    }
+                {
+                    self.on_node_record_update(node_record, fork_id);
                 }
             }
 

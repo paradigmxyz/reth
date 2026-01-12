@@ -1,6 +1,6 @@
 //! A Protocol defines a P2P subprotocol in an `RLPx` connection
 
-use crate::{Capability, EthVersion};
+use crate::{Capability, EthMessageID, EthVersion};
 
 /// Type that represents a [Capability] and the number of messages it uses.
 ///
@@ -26,7 +26,7 @@ impl Protocol {
     /// Returns the corresponding eth capability for the given version.
     pub const fn eth(version: EthVersion) -> Self {
         let cap = Capability::eth(version);
-        let messages = version.total_messages();
+        let messages = EthMessageID::message_count(version);
         Self::new(cap, messages)
     }
 
@@ -70,4 +70,19 @@ pub(crate) struct ProtoVersion {
     pub(crate) messages: u8,
     /// Version of the protocol
     pub(crate) version: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_protocol_eth_message_count() {
+        // Test that Protocol::eth() returns correct message counts for each version
+        // This ensures that EthMessageID::message_count() produces the expected results
+        assert_eq!(Protocol::eth(EthVersion::Eth66).messages(), 17);
+        assert_eq!(Protocol::eth(EthVersion::Eth67).messages(), 17);
+        assert_eq!(Protocol::eth(EthVersion::Eth68).messages(), 17);
+        assert_eq!(Protocol::eth(EthVersion::Eth69).messages(), 18);
+    }
 }

@@ -21,7 +21,7 @@ pub trait DatabaseTrieWitness<'a, TX> {
 }
 
 impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
-    for TrieWitness<DatabaseTrieCursorFactory<'a, TX>, DatabaseHashedCursorFactory<'a, TX>>
+    for TrieWitness<DatabaseTrieCursorFactory<&'a TX>, DatabaseHashedCursorFactory<&'a TX>>
 {
     fn from_tx(tx: &'a TX) -> Self {
         Self::new(DatabaseTrieCursorFactory::new(tx), DatabaseHashedCursorFactory::new(tx))
@@ -34,16 +34,12 @@ impl<'a, TX: DbTx> DatabaseTrieWitness<'a, TX>
     ) -> Result<B256Map<Bytes>, TrieWitnessError> {
         let nodes_sorted = input.nodes.into_sorted();
         let state_sorted = input.state.into_sorted();
-        Self::from_tx(tx)
-            .with_trie_cursor_factory(InMemoryTrieCursorFactory::new(
-                DatabaseTrieCursorFactory::new(tx),
-                &nodes_sorted,
-            ))
-            .with_hashed_cursor_factory(HashedPostStateCursorFactory::new(
-                DatabaseHashedCursorFactory::new(tx),
-                &state_sorted,
-            ))
-            .with_prefix_sets_mut(input.prefix_sets)
-            .compute(target)
+        TrieWitness::new(
+            InMemoryTrieCursorFactory::new(DatabaseTrieCursorFactory::new(tx), &nodes_sorted),
+            HashedPostStateCursorFactory::new(DatabaseHashedCursorFactory::new(tx), &state_sorted),
+        )
+        .with_prefix_sets_mut(input.prefix_sets)
+        .always_include_root_node()
+        .compute(target)
     }
 }

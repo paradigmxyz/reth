@@ -69,9 +69,7 @@ pub async fn import_blocks_from_file<N>(
     provider_factory: ProviderFactory<N>,
     config: &Config,
     executor: impl ConfigureEvm<Primitives = N::Primitives> + 'static,
-    consensus: Arc<
-        impl FullConsensus<N::Primitives, Error = reth_consensus::ConsensusError> + 'static,
-    >,
+    consensus: Arc<impl FullConsensus<N::Primitives> + 'static>,
 ) -> eyre::Result<ImportResult>
 where
     N: ProviderNodeTypes,
@@ -90,12 +88,20 @@ where
     // open file
     let mut reader = ChunkedFileReader::new(path, import_config.chunk_len).await?;
 
+    let provider = provider_factory.provider()?;
+    let init_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
+    let init_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+    drop(provider);
+
     let mut total_decoded_blocks = 0;
     let mut total_decoded_txns = 0;
 
     let mut sealed_header = provider_factory
         .sealed_header(provider_factory.last_block_number()?)?
         .expect("should have genesis");
+
+    let static_file_producer =
+        StaticFileProducer::new(provider_factory.clone(), PruneModes::default());
 
     while let Some(file_client) =
         reader.next_chunk::<BlockTy<N>>(consensus.clone(), Some(sealed_header)).await?
@@ -116,7 +122,7 @@ where
             provider_factory.clone(),
             &consensus,
             Arc::new(file_client),
-            StaticFileProducer::new(provider_factory.clone(), PruneModes::default()),
+            static_file_producer.clone(),
             import_config.no_state,
             executor.clone(),
         )?;
@@ -125,10 +131,8 @@ where
         pipeline.set_tip(tip);
         debug!(target: "reth::import", ?tip, "Tip manually set");
 
-        let provider = provider_factory.provider()?;
-
         let latest_block_number =
-            provider.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
+            provider_factory.get_stage_checkpoint(StageId::Finish)?.map(|ch| ch.block_number);
         tokio::spawn(reth_node_events::node::handle_events(None, latest_block_number, events));
 
         // Run pipeline
@@ -147,9 +151,9 @@ where
     }
 
     let provider = provider_factory.provider()?;
-
-    let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()?;
-    let total_imported_txns = provider.tx_ref().entries::<tables::TransactionHashNumbers>()?;
+    let total_imported_blocks = provider.tx_ref().entries::<tables::HeaderNumbers>()? - init_blocks;
+    let total_imported_txns =
+        provider.tx_ref().entries::<tables::TransactionHashNumbers>()? - init_txns;
 
     let result = ImportResult {
         total_decoded_blocks,
@@ -170,7 +174,7 @@ where
         info!(target: "reth::import",
             total_imported_blocks,
             total_imported_txns,
-            "Chain file imported"
+            "Chain was fully imported"
         );
     }
 
@@ -189,10 +193,10 @@ pub fn build_import_pipeline_impl<N, C, E>(
     static_file_producer: StaticFileProducer<ProviderFactory<N>>,
     disable_exec: bool,
     evm_config: E,
-) -> eyre::Result<(Pipeline<N>, impl futures::Stream<Item = NodeEvent<N::Primitives>>)>
+) -> eyre::Result<(Pipeline<N>, impl futures::Stream<Item = NodeEvent<N::Primitives>> + use<N, C, E>)>
 where
     N: ProviderNodeTypes,
-    C: FullConsensus<N::Primitives, Error = reth_consensus::ConsensusError> + 'static,
+    C: FullConsensus<N::Primitives> + 'static,
     E: ConfigureEvm<Primitives = N::Primitives> + 'static,
 {
     if !file_client.has_canonical_blocks() {

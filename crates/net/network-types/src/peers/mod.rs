@@ -8,7 +8,7 @@ pub use config::{ConnectionsConfig, PeersConfig};
 pub use reputation::{Reputation, ReputationChange, ReputationChangeKind, ReputationChangeWeights};
 
 use alloy_eip2124::ForkId;
-use tracing::debug;
+use tracing::trace;
 
 use crate::{
     is_banned_reputation, PeerAddr, PeerConnectionState, PeerKind, ReputationChangeOutcome,
@@ -25,7 +25,7 @@ pub struct Peer {
     /// The state of the connection, if any.
     pub state: PeerConnectionState,
     /// The [`ForkId`] that the peer announced via discovery.
-    pub fork_id: Option<ForkId>,
+    pub fork_id: Option<Box<ForkId>>,
     /// Whether the entry should be removed after an existing session was terminated.
     pub remove_after_disconnect: bool,
     /// The kind of peer
@@ -92,7 +92,7 @@ impl Peer {
         // we add reputation since negative reputation change decrease total reputation
         self.reputation = previous.saturating_add(reputation);
 
-        debug!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), ?kind, "applied reputation change");
+        trace!(target: "net::peers", reputation=%self.reputation, banned=%self.is_banned(), ?kind, "applied reputation change");
 
         if self.state.is_connected() && self.is_banned() {
             self.state.disconnect();

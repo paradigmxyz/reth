@@ -9,22 +9,7 @@ license.workspace = true
 # reth
 reth-db = { workspace = true, features = ["op", "test-utils"] }
 reth-node-builder.workspace = true
-reth-optimism-consensus.workspace = true
-reth-tasks.workspace = true
-reth-node-api.workspace = true
-reth-rpc-api.workspace = true
-reth-tracing.workspace = true
-reth-provider.workspace = true
 reth-optimism-node.workspace = true
 reth-optimism-chainspec.workspace = true
 
-# alloy
-alloy-rpc-types-engine.workspace = true
-
-async-trait.workspace = true
-clap = { workspace = true, features = ["derive"] }
-eyre.workspace = true
-jsonrpsee.workspace = true
-futures.workspace = true
-serde_json.workspace = true
 tokio = { workspace = true, features = ["sync"] }

@@ -2,7 +2,7 @@ use crate::metrics::{BodyDownloaderMetrics, ResponseMetrics};
 use alloy_consensus::BlockHeader;
 use alloy_primitives::B256;
 use futures::{Future, FutureExt};
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::Consensus;
 use reth_network_p2p::{
     bodies::{client::BodiesClient, response::BlockResponse},
     error::{DownloadError, DownloadResult},
@@ -12,7 +12,6 @@ use reth_network_peers::{PeerId, WithPeerId};
 use reth_primitives_traits::{Block, GotExpected, InMemorySize, SealedBlock, SealedHeader};
 use std::{
     collections::VecDeque,
-    mem,
     pin::Pin,
     sync::Arc,
     task::{ready, Context, Poll},
@@ -39,7 +38,7 @@ use std::{
 /// and eventually disconnected.
 pub(crate) struct BodiesRequestFuture<B: Block, C: BodiesClient<Body = B::Body>> {
     client: Arc<C>,
-    consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+    consensus: Arc<dyn Consensus<B>>,
     metrics: BodyDownloaderMetrics,
     /// Metrics for individual responses. This can be used to observe how the size (in bytes) of
     /// responses change while bodies are being downloaded.
@@ -61,7 +60,7 @@ where
     /// Returns an empty future. Use [`BodiesRequestFuture::with_headers`] to set the request.
     pub(crate) fn new(
         client: Arc<C>,
-        consensus: Arc<dyn Consensus<B, Error = ConsensusError>>,
+        consensus: Arc<dyn Consensus<B>>,
         metrics: BodyDownloaderMetrics,
     ) -> Self {
         Self {
@@ -166,11 +165,10 @@ where
     where
         C::Body: InMemorySize,
     {
-        let bodies_capacity = bodies.capacity();
         let bodies_len = bodies.len();
         let mut bodies = bodies.into_iter().peekable();
 
-        let mut total_size = bodies_capacity * mem::size_of::<C::Body>();
+        let mut total_size = 0;
         while bodies.peek().is_some() {
             let next_header = match self.pending_headers.pop_front() {
                 Some(header) => header,
@@ -178,8 +176,6 @@ where
             };
 
             if next_header.is_empty() {
-                // increment empty block body metric
-                total_size += mem::size_of::<C::Body>();
                 self.buffer.push(BlockResponse::Empty(next_header));
             } else {
                 let next_body = bodies.next().unwrap();

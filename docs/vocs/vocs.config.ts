@@ -10,6 +10,9 @@ export default defineConfig({
   ogImageUrl: '/reth-prod.png',
   sidebar,
   basePath,
+  search: {
+    fuzzy: true
+  },
   topNav: [
     { text: 'Run', link: '/run/ethereum' },
     { text: 'SDK', link: '/sdk' },
@@ -18,7 +21,7 @@ export default defineConfig({
     },
     { text: 'GitHub', link: 'https://github.com/paradigmxyz/reth' },
     {
-      text: 'v1.6.0',
+      text: 'v1.9.3',
       items: [
         {
           text: 'Releases',
@@ -69,5 +72,35 @@ export default defineConfig({
   },
   editLink: {
     pattern: "https://github.com/paradigmxyz/reth/edit/main/docs/vocs/docs/pages/:path",
+  },
+  vite: {
+    plugins: [
+      {
+        name: 'transform-summary-links',
+        apply: 'serve', // only during dev for faster feedback
+        enforce: 'pre',
+        async load(id) {
+          if (id.endsWith('pages/cli/SUMMARY.mdx') || id.endsWith('pages/cli/summary.mdx')) {
+            const { readFileSync } = await import('node:fs')
+            let code = readFileSync(id, 'utf-8')
+            code = code.replace(/\]\(\.\/([^)]+)\.mdx\)/g, '](/cli/\$1)')
+            return code
+          }
+        }
+      },
+      {
+        name: 'transform-summary-links-build',
+        apply: 'build', // only apply during build
+        enforce: 'pre',
+        async load(id) {
+          if (id.endsWith('pages/cli/SUMMARY.mdx') || id.endsWith('pages/cli/summary.mdx')) {
+            const { readFileSync } = await import('node:fs')
+            let code = readFileSync(id, 'utf-8')
+            code = code.replace(/\]\(\.\/([^)]+)\.mdx\)/g, '](/cli/\$1)')
+            return code
+          }
+        }
+      }
+    ]
   }
 })

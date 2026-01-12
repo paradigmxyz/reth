@@ -7,6 +7,6 @@
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![allow(non_upper_case_globals, non_camel_case_types, non_snake_case, clippy::all)]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));

@@ -1,4 +1,4 @@
-use std::cmp::max;
+use std::{cmp::max, time::Duration};
 
 /// The default port for the http server
 pub const DEFAULT_HTTP_RPC_PORT: u16 = 8545;
@@ -17,6 +17,20 @@ pub const DEFAULT_MAX_LOGS_PER_RESPONSE: usize = 20_000;
 
 /// The default maximum number of blocks for `trace_filter` requests.
 pub const DEFAULT_MAX_TRACE_FILTER_BLOCKS: u64 = 100;
+
+/// Setting for how many concurrent (heavier) _blocking_ IO requests are allowed.
+///
+/// What is considered a blocking IO request can depend on the RPC method. In general anything that
+/// requires IO is considered blocking and should be spawned as blocking. This setting is however,
+/// primarily intended for heavier blocking requests that require evm execution for example,
+/// `eth_call` and alike. This is intended to be used with a semaphore that must be acquired before
+/// a new task is spawned to avoid unnecessary pooling if the number of inflight requests exceeds
+/// the available threads in the pool.
+///
+/// tokio's blocking pool, has a default of 512 and could grow unbounded, since requests like
+/// `eth_call` also require a lot of cpu which will occupy the thread, we can set this to a lower
+/// value.
+pub const DEFAULT_MAX_BLOCKING_IO_REQUEST: usize = 256;
 
 /// The default maximum number tracing requests we're allowing concurrently.
 /// Tracing is mostly CPU bound so we're limiting the number of concurrent requests to something
@@ -60,6 +74,9 @@ pub const DEFAULT_TX_FEE_CAP_WEI: u128 = 1_000_000_000_000_000_000u128;
 /// Maximum eth historical proof window. Equivalent to roughly 6 months of data on a 12
 /// second block time, and a month on a 2 second block time.
 pub const MAX_ETH_PROOF_WINDOW: u64 = 28 * 24 * 60 * 60 / 2;
+
+/// Default timeout for send raw transaction sync in seconds.
+pub const RPC_DEFAULT_SEND_RAW_TX_SYNC_TIMEOUT_SECS: Duration = Duration::from_secs(30);
 
 /// GPO specific constants
 pub mod gas_oracle {

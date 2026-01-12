@@ -87,7 +87,7 @@ pub trait DbDupCursorRO<T: DupSort> {
     /// | `key`  | `subkey` | **Equivalent starting position**        |
     /// |--------|----------|-----------------------------------------|
     /// | `None` | `None`   | [`DbCursorRO::first()`]                 |
-    /// | `Some` | `None`   | [`DbCursorRO::seek()`]               |
+    /// | `Some` | `None`   | [`DbCursorRO::seek_exact()`]            |
     /// | `None` | `Some`   | [`DbDupCursorRO::seek_by_key_subkey()`] |
     /// | `Some` | `Some`   | [`DbDupCursorRO::seek_by_key_subkey()`] |
     fn walk_dup(
@@ -119,7 +119,7 @@ pub trait DbCursorRW<T: Table> {
     fn delete_current(&mut self) -> Result<(), DatabaseError>;
 }
 
-/// Read Write Cursor over `DupSorted` table.
+/// Read Write Cursor over `DupSort` table.
 pub trait DbDupCursorRW<T: DupSort> {
     /// Delete all duplicate entries for current key.
     fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError>;
@@ -315,6 +315,14 @@ impl<T: Table, CURSOR: DbCursorRW<T> + DbCursorRO<T>> RangeWalker<'_, T, CURSOR>
     pub fn delete_current(&mut self) -> Result<(), DatabaseError> {
         self.start.take();
         self.cursor.delete_current()
+    }
+}
+
+impl<T: DupSort, CURSOR: DbDupCursorRW<T> + DbCursorRO<T>> RangeWalker<'_, T, CURSOR> {
+    /// Delete all duplicate entries for current key that walker points to.
+    pub fn delete_current_duplicates(&mut self) -> Result<(), DatabaseError> {
+        self.start.take();
+        self.cursor.delete_current_duplicates()
     }
 }
 

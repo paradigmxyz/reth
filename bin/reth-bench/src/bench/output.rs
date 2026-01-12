@@ -1,6 +1,7 @@
 //! Contains various benchmark output formats, either for logging or for
 //! serialization to / from files.
 
+use eyre::OptionExt;
 use reth_primitives_traits::constants::GIGAGAS;
 use serde::{ser::SerializeStruct, Serialize};
 use std::time::Duration;
@@ -52,7 +53,7 @@ impl Serialize for NewPayloadResult {
     {
         // convert the time to microseconds
         let time = self.latency.as_micros();
-        let mut state = serializer.serialize_struct("NewPayloadResult", 3)?;
+        let mut state = serializer.serialize_struct("NewPayloadResult", 2)?;
         state.serialize_field("gas_used", &self.gas_used)?;
         state.serialize_field("latency", &time)?;
         state.end()
@@ -66,6 +67,8 @@ impl Serialize for NewPayloadResult {
 pub(crate) struct CombinedResult {
     /// The block number of the block being processed.
     pub(crate) block_number: u64,
+    /// The number of transactions in the block.
+    pub(crate) transaction_count: u64,
     /// The `newPayload` result.
     pub(crate) new_payload_result: NewPayloadResult,
     /// The latency of the `forkchoiceUpdated` call.
@@ -107,10 +110,11 @@ impl Serialize for CombinedResult {
         let fcu_latency = self.fcu_latency.as_micros();
         let new_payload_latency = self.new_payload_result.latency.as_micros();
         let total_latency = self.total_latency.as_micros();
-        let mut state = serializer.serialize_struct("CombinedResult", 5)?;
+        let mut state = serializer.serialize_struct("CombinedResult", 6)?;
 
         // flatten the new payload result because this is meant for CSV writing
         state.serialize_field("block_number", &self.block_number)?;
+        state.serialize_field("transaction_count", &self.transaction_count)?;
         state.serialize_field("gas_used", &self.new_payload_result.gas_used)?;
         state.serialize_field("new_payload_latency", &new_payload_latency)?;
         state.serialize_field("fcu_latency", &fcu_latency)?;
@@ -124,6 +128,8 @@ impl Serialize for CombinedResult {
 pub(crate) struct TotalGasRow {
     /// The block number of the block being processed.
     pub(crate) block_number: u64,
+    /// The number of transactions in the block.
+    pub(crate) transaction_count: u64,
     /// The total gas used in the block.
     pub(crate) gas_used: u64,
     /// Time since the start of the benchmark.
@@ -145,15 +151,14 @@ pub(crate) struct TotalGasOutput {
 
 impl TotalGasOutput {
     /// Create a new [`TotalGasOutput`] from a list of [`TotalGasRow`].
-    pub(crate) fn new(rows: Vec<TotalGasRow>) -> Self {
+    pub(crate) fn new(rows: Vec<TotalGasRow>) -> eyre::Result<Self> {
         // the duration is obtained from the last row
-        let total_duration =
-            rows.last().map(|row| row.time).expect("the row has at least one element");
+        let total_duration = rows.last().map(|row| row.time).ok_or_eyre("empty results")?;
         let blocks_processed = rows.len() as u64;
         let total_gas_used: u64 = rows.into_iter().map(|row| row.gas_used).sum();
         let total_gas_per_second = total_gas_used as f64 / total_duration.as_secs_f64();
 
-        Self { total_gas_used, total_duration, total_gas_per_second, blocks_processed }
+        Ok(Self { total_gas_used, total_duration, total_gas_per_second, blocks_processed })
     }
 
     /// Return the total gigagas per second.
@@ -172,8 +177,9 @@ impl Serialize for TotalGasRow {
     {
         // convert the time to microseconds
         let time = self.time.as_micros();
-        let mut state = serializer.serialize_struct("TotalGasRow", 3)?;
+        let mut state = serializer.serialize_struct("TotalGasRow", 4)?;
         state.serialize_field("block_number", &self.block_number)?;
+        state.serialize_field("transaction_count", &self.transaction_count)?;
         state.serialize_field("gas_used", &self.gas_used)?;
         state.serialize_field("time", &time)?;
         state.end()
@@ -188,7 +194,12 @@ mod tests {
 
     #[test]
     fn test_write_total_gas_row_csv() {
-        let row = TotalGasRow { block_number: 1, gas_used: 1_000, time: Duration::from_secs(1) };
+        let row = TotalGasRow {
+            block_number: 1,
+            transaction_count: 10,
+            gas_used: 1_000,
+            time: Duration::from_secs(1),
+        };
 
         let mut writer = Writer::from_writer(vec![]);
         writer.serialize(row).unwrap();
@@ -198,11 +209,11 @@ mod tests {
         let mut result = result.as_slice().lines();
 
         // assert header
-        let expected_first_line = "block_number,gas_used,time";
+        let expected_first_line = "block_number,transaction_count,gas_used,time";
         let first_line = result.next().unwrap().unwrap();
         assert_eq!(first_line, expected_first_line);
 
-        let expected_second_line = "1,1000,1000000";
+        let expected_second_line = "1,10,1000,1000000";
         let second_line = result.next().unwrap().unwrap();
         assert_eq!(second_line, expected_second_line);
     }

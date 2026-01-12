@@ -15,11 +15,10 @@ workspace = true
 ## reth
 reth-chain-state.workspace = true
 reth-chainspec.workspace = true
-reth-cli-util.workspace = true
 reth-config.workspace = true
 reth-consensus-debug-client.workspace = true
 reth-consensus.workspace = true
-reth-db = { workspace = true, features = ["mdbx"], optional = true }
+reth-db = { workspace = true, features = ["mdbx"] }
 reth-db-api.workspace = true
 reth-db-common.workspace = true
 reth-downloaders.workspace = true
@@ -77,6 +76,7 @@ secp256k1 = { workspace = true, features = ["global-context", "std", "recovery"]
 ## misc
 aquamarine.workspace = true
 eyre.workspace = true
+parking_lot.workspace = true
 jsonrpsee.workspace = true
 fdlimit.workspace = true
 rayon.workspace = true
@@ -95,9 +95,12 @@ reth-evm-ethereum = { workspace = true, features = ["test-utils"] }
 
 [features]
 default = []
-js-tracer = ["reth-rpc/js-tracer"]
+js-tracer = [
+    "reth-rpc/js-tracer",
+    "reth-node-ethereum/js-tracer",
+    "reth-rpc-eth-types/js-tracer",
+]
 test-utils = [
-    "dep:reth-db",
     "reth-db/test-utils",
     "reth-chain-state/test-utils",
     "reth-chainspec/test-utils",
@@ -117,7 +120,7 @@ test-utils = [
     "reth-primitives-traits/test-utils",
 ]
 op = [
-    "reth-db?/op",
+    "reth-db/op",
     "reth-db-api/op",
     "reth-engine-local/op",
     "reth-evm/op",

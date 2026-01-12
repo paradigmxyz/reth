@@ -169,7 +169,7 @@ impl NewPooledTransactionHashes {
                 matches!(version, EthVersion::Eth67 | EthVersion::Eth66)
             }
             Self::Eth68(_) => {
-                matches!(version, EthVersion::Eth68 | EthVersion::Eth69)
+                matches!(version, EthVersion::Eth68 | EthVersion::Eth69 | EthVersion::Eth70)
             }
         }
     }
@@ -407,6 +407,13 @@ impl NewPooledTransactionHashes68 {
         for tx in txs {
             self.push(tx);
         }
+    }
+
+    /// Shrinks the capacity of the message vectors as much as possible.
+    pub fn shrink_to_fit(&mut self) {
+        self.hashes.shrink_to_fit();
+        self.sizes.shrink_to_fit();
+        self.types.shrink_to_fit()
     }
 
     /// Consumes and appends a transaction
@@ -750,12 +757,12 @@ impl RequestTxHashes {
         Self::new(HashSet::with_capacity_and_hasher(capacity, Default::default()))
     }
 
-    /// Returns an new empty instance.
+    /// Returns a new empty instance.
     fn empty() -> Self {
         Self::new(HashSet::default())
     }
 
-    /// Retains the given number of elements, returning and iterator over the rest.
+    /// Retains the given number of elements, returning an iterator over the rest.
     pub fn retain_count(&mut self, count: usize) -> Self {
         let rest_capacity = self.hashes.len().saturating_sub(count);
         if rest_capacity == 0 {
@@ -801,7 +808,7 @@ pub struct BlockRangeUpdate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use alloy_consensus::Typed2718;
+    use alloy_consensus::{transaction::TxHashRef, Typed2718};
     use alloy_eips::eip2718::Encodable2718;
     use alloy_primitives::{b256, hex, Signature, U256};
     use reth_ethereum_primitives::{Transaction, TransactionSigned};

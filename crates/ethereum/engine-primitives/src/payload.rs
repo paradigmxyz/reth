@@ -15,23 +15,25 @@ use alloy_rpc_types_engine::{
     ExecutionPayloadV1, ExecutionPayloadV3, PayloadAttributes, PayloadId,
 };
 use core::convert::Infallible;
-use reth_ethereum_primitives::{Block, EthPrimitives};
+use reth_ethereum_primitives::EthPrimitives;
 use reth_payload_primitives::{BuiltPayload, PayloadBuilderAttributes};
-use reth_primitives_traits::SealedBlock;
+use reth_primitives_traits::{NodePrimitives, SealedBlock};
 
 use crate::BuiltPayloadConversionError;
 
 /// Contains the built payload.
 ///
 /// According to the [engine API specification](https://github.com/ethereum/execution-apis/blob/main/src/engine/README.md) the execution layer should build the initial version of the payload with an empty transaction set and then keep update it in order to maximize the revenue.
-/// Therefore, the empty-block here is always available and full-block will be set/updated
-/// afterward.
+///
+/// This struct represents a single built block at a point in time. The payload building process
+/// creates a sequence of these payloads, starting with an empty block and progressively including
+/// more transactions.
 #[derive(Debug, Clone)]
-pub struct EthBuiltPayload {
+pub struct EthBuiltPayload<N: NodePrimitives = EthPrimitives> {
     /// Identifier of the payload
     pub(crate) id: PayloadId,
     /// The built block
-    pub(crate) block: Arc<SealedBlock<Block>>,
+    pub(crate) block: Arc<SealedBlock<N::Block>>,
     /// The fees of the block
     pub(crate) fees: U256,
     /// The blobs, proofs, and commitments in the block. If the block is pre-cancun, this will be
@@ -43,13 +45,13 @@ pub struct EthBuiltPayload {
 
 // === impl BuiltPayload ===
 
-impl EthBuiltPayload {
+impl<N: NodePrimitives> EthBuiltPayload<N> {
     /// Initializes the payload with the given initial block
     ///
     /// Caution: This does not set any [`BlobSidecars`].
     pub const fn new(
         id: PayloadId,
-        block: Arc<SealedBlock<Block>>,
+        block: Arc<SealedBlock<N::Block>>,
         fees: U256,
         requests: Option<Requests>,
     ) -> Self {
@@ -62,7 +64,7 @@ impl EthBuiltPayload {
     }
 
     /// Returns the built block(sealed)
-    pub fn block(&self) -> &SealedBlock<Block> {
+    pub fn block(&self) -> &SealedBlock<N::Block> {
         &self.block
     }
 
@@ -81,7 +83,9 @@ impl EthBuiltPayload {
         self.sidecars = sidecars.into();
         self
     }
+}
 
+impl EthBuiltPayload {
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV3`].
     ///
     /// Returns an error if the payload contains non EIP-4844 sidecar.
@@ -118,11 +122,11 @@ impl EthBuiltPayload {
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV4`].
     ///
     /// Returns an error if the payload contains non EIP-4844 sidecar.
-    pub fn try_into_v4(self) -> Result<ExecutionPayloadEnvelopeV4, BuiltPayloadConversionError> {
-        Ok(ExecutionPayloadEnvelopeV4 {
-            execution_requests: self.requests.clone().unwrap_or_default(),
-            envelope_inner: self.try_into()?,
-        })
+    pub fn try_into_v4(
+        mut self,
+    ) -> Result<ExecutionPayloadEnvelopeV4, BuiltPayloadConversionError> {
+        let execution_requests = self.requests.take().unwrap_or_default();
+        Ok(ExecutionPayloadEnvelopeV4 { execution_requests, envelope_inner: self.try_into()? })
     }
 
     /// Try converting built payload into [`ExecutionPayloadEnvelopeV5`].
@@ -158,10 +162,10 @@ impl EthBuiltPayload {
     }
 }
 
-impl BuiltPayload for EthBuiltPayload {
-    type Primitives = EthPrimitives;
+impl<N: NodePrimitives> BuiltPayload for EthBuiltPayload<N> {
+    type Primitives = N;
 
-    fn block(&self) -> &SealedBlock<Block> {
+    fn block(&self) -> &SealedBlock<N::Block> {
         &self.block
     }
 
@@ -422,6 +426,8 @@ pub fn payload_id(parent: &B256, attributes: &PayloadAttributes) -> PayloadId {
     }
 
     let out = hasher.finalize();
+
+    #[allow(deprecated)] // generic-array 0.14 deprecated
     PayloadId::new(out.as_slice()[..8].try_into().expect("sufficient length"))
 }
 

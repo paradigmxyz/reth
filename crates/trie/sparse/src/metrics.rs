@@ -16,7 +16,7 @@ pub(crate) struct SparseStateTrieMetrics {
     /// Number of total storage nodes, including those that were skipped.
     pub(crate) multiproof_total_storage_nodes: u64,
     /// The actual metrics we will record into the histogram
-    pub(crate) histograms: SparseStateTrieHistograms,
+    pub(crate) histograms: SparseStateTrieInnerMetrics,
 }
 
 impl SparseStateTrieMetrics {
@@ -61,7 +61,7 @@ impl SparseStateTrieMetrics {
 /// Metrics for the sparse state trie
 #[derive(Metrics)]
 #[metrics(scope = "sparse_state_trie")]
-pub(crate) struct SparseStateTrieHistograms {
+pub(crate) struct SparseStateTrieInnerMetrics {
     /// Histogram of account nodes that were skipped during a multiproof reveal due to being
     /// redundant (i.e. they were already revealed)
     pub(crate) multiproof_skipped_account_nodes: Histogram,

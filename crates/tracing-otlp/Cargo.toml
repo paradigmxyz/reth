@@ -9,13 +9,30 @@ repository.workspace = true
 exclude.workspace = true
 
 [dependencies]
-opentelemetry_sdk = "0.29.0"
-opentelemetry = "0.29.1"
-opentelemetry-otlp = "0.29.0"
-tracing-opentelemetry = "0.30.0"
+# obs
+opentelemetry_sdk = { workspace = true, optional = true }
+opentelemetry = { workspace = true, optional = true }
+opentelemetry-otlp = { workspace = true, optional = true, features = ["grpc-tonic"] }
+opentelemetry-semantic-conventions = { workspace = true, optional = true }
+tracing-opentelemetry = { workspace = true, optional = true }
 tracing-subscriber.workspace = true
 tracing.workspace = true
-opentelemetry-semantic-conventions = "0.29.0"
+
+# misc
+clap = { workspace = true, features = ["derive"] }
+eyre.workspace = true
+url.workspace = true
 
 [lints]
 workspace = true
+
+[features]
+default = ["otlp"]
+
+otlp = [
+    "opentelemetry",
+    "opentelemetry_sdk",
+    "opentelemetry-otlp",
+    "opentelemetry-semantic-conventions",
+    "tracing-opentelemetry",
+]

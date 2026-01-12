@@ -1,4 +1,4 @@
-use crate::{any::AnyError, db::DatabaseError, writer::UnifiedStorageWriterError};
+use crate::{any::AnyError, db::DatabaseError};
 use alloc::{boxed::Box, string::String};
 use alloy_eips::{BlockHashOrNumber, HashOrNumber};
 use alloy_primitives::{Address, BlockHash, BlockNumber, TxNumber, B256};
@@ -58,9 +58,6 @@ pub enum ProviderError {
         /// The account address.
         address: Address,
     },
-    /// The total difficulty for a block is missing.
-    #[error("total difficulty not found for block #{_0}")]
-    TotalDifficultyNotFound(BlockNumber),
     /// When required header related data was not found but was required.
     #[error("no header found for {_0:?}")]
     HeaderNotFound(BlockHashOrNumber),
@@ -106,7 +103,14 @@ pub enum ProviderError {
     /// Static File is not found at specified path.
     #[cfg(feature = "std")]
     #[error("not able to find {_0} static file at {_1:?}")]
-    MissingStaticFilePath(StaticFileSegment, std::path::PathBuf),
+    MissingStaticFileSegmentPath(StaticFileSegment, std::path::PathBuf),
+    /// Static File is not found at specified path.
+    #[cfg(feature = "std")]
+    #[error("not able to find static file at {_0:?}")]
+    MissingStaticFilePath(std::path::PathBuf),
+    /// Highest block is not found for static file block.
+    #[error("highest block is not found for {_0} static file")]
+    MissingHighestStaticFileBlock(StaticFileSegment),
     /// Static File is not found for requested block.
     #[error("not able to find {_0} static file for block number {_1}")]
     MissingStaticFileBlock(StaticFileSegment, BlockNumber),
@@ -122,21 +126,32 @@ pub enum ProviderError {
     /// Trying to insert data from an unexpected block number.
     #[error("trying to append row to {_0} at index #{_1} but expected index #{_2}")]
     UnexpectedStaticFileTxNumber(StaticFileSegment, TxNumber, TxNumber),
+    /// Changeset static file is corrupted, and does not have offsets for changesets in each block
+    #[error("changeset static file is corrupted, missing offsets for changesets in each block")]
+    CorruptedChangeSetStaticFile,
+    /// Error when constructing hashed post state reverts
+    #[error("Unbounded start is unsupported in from_reverts")]
+    UnboundedStartUnsupported,
     /// Static File Provider was initialized as read-only.
     #[error("cannot get a writer on a read-only environment.")]
     ReadOnlyStaticFileAccess,
     /// Consistent view error.
     #[error("failed to initialize consistent view: {_0}")]
     ConsistentView(Box<ConsistentViewError>),
-    /// Storage writer error.
-    #[error(transparent)]
-    UnifiedStorageWriterError(#[from] UnifiedStorageWriterError),
     /// Received invalid output from configured storage implementation.
     #[error("received invalid output from storage")]
     InvalidStorageOutput,
     /// Missing trie updates.
     #[error("missing trie updates for block {0}")]
     MissingTrieUpdates(B256),
+    /// Insufficient changesets to revert to the requested block.
+    #[error("insufficient changesets to revert to block #{requested}. Available changeset range: {available:?}")]
+    InsufficientChangesets {
+        /// The block number requested for reversion
+        requested: BlockNumber,
+        /// The available range of blocks with changesets
+        available: core::ops::RangeInclusive<BlockNumber>,
+    },
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),
@@ -168,7 +183,7 @@ impl ProviderError {
         other.downcast_ref()
     }
 
-    /// Returns true if the this type is a [`ProviderError::Other`] of that error
+    /// Returns true if this type is a [`ProviderError::Other`] of that error
     /// type. Returns false otherwise.
     pub fn is_other<T: core::error::Error + 'static>(&self) -> bool {
         self.as_other().map(|err| err.is::<T>()).unwrap_or(false)

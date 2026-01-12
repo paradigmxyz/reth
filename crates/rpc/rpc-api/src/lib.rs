@@ -12,7 +12,7 @@
     issue_tracker_base_url = "https://github.com/paradigmxyz/reth/issues/"
 )]
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
-#![cfg_attr(docsrs, feature(doc_cfg, doc_auto_cfg))]
+#![cfg_attr(docsrs, feature(doc_cfg))]
 
 mod admin;
 mod anvil;
@@ -25,10 +25,13 @@ mod net;
 mod otterscan;
 mod reth;
 mod rpc;
+mod testing;
 mod trace;
 mod txpool;
 mod validation;
 mod web3;
+
+pub use testing::{TestingBuildBlockRequestV1, TESTING_BUILD_BLOCK_V1};
 
 /// re-export of all server traits
 pub use servers::*;
@@ -45,6 +48,7 @@ pub mod servers {
         otterscan::OtterscanServer,
         reth::RethApiServer,
         rpc::RpcApiServer,
+        testing::TestingApiServer,
         trace::TraceApiServer,
         txpool::TxPoolApiServer,
         validation::BlockSubmissionValidationApiServer,
@@ -75,6 +79,7 @@ pub mod clients {
         otterscan::OtterscanClient,
         reth::RethApiClient,
         rpc::RpcApiServer,
+        testing::TestingApiClient,
         trace::TraceApiClient,
         txpool::TxPoolApiClient,
         validation::BlockSubmissionValidationApiClient,

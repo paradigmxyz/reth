@@ -124,7 +124,7 @@ async fn handshake_eth(
 }
 
 // Snoop by greedily capturing all broadcasts that the peer emits
-// note: this node cannot handle request so will be disconnected by peer when challenged
+// note: this node cannot handle request so it will be disconnected by peer when challenged
 async fn snoop(peer: NodeRecord, mut eth_stream: AuthedEthStream) {
     while let Some(Ok(update)) = eth_stream.next().await {
         match update {
