@@ -39,7 +39,11 @@ pub enum StageId {
 static ENCODED_STAGE_IDS: OnceLock<HashMap<StageId, Vec<u8>>> = OnceLock::new();
 
 impl StageId {
-    /// All supported Stages
+    /// All supported stages in the default pipeline execution order.
+    ///
+    /// NOTE: This is used in various places to iterate stage checkpoints/metrics. Keeping this in
+    /// sync with the default stage set (see `crates/stages/stages/src/sets.rs`) avoids confusing
+    /// ordering mismatches in output/metrics and reduces documentation drift.
     pub const ALL: [Self; 16] = [
         Self::Era,
         Self::Headers,
@@ -51,10 +55,10 @@ impl StageId {
         Self::AccountHashing,
         Self::StorageHashing,
         Self::MerkleExecute,
+        Self::MerkleChangeSets,
         Self::TransactionLookup,
         Self::IndexStorageHistory,
         Self::IndexAccountHistory,
-        Self::MerkleChangeSets,
         Self::Prune,
         Self::Finish,
     ];
@@ -141,6 +145,29 @@ impl core::fmt::Display for StageId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn pos(id: StageId) -> usize {
+        StageId::ALL
+            .iter()
+            .position(|&x| x == id)
+            .unwrap_or_else(|| panic!("StageId::{id:?} missing from StageId::ALL"))
+    }
+
+    #[test]
+    fn stage_id_all_preserves_expected_relative_order() {
+        // Merkle changesets must be produced right after trie execution and before any history
+        // indexing that relies on finalized trie-related change sets.
+        assert!(pos(StageId::MerkleExecute) < pos(StageId::MerkleChangeSets));
+        assert!(pos(StageId::MerkleChangeSets) < pos(StageId::TransactionLookup));
+
+        // Basic online ordering invariants.
+        assert!(pos(StageId::Headers) < pos(StageId::Bodies));
+        assert!(pos(StageId::Bodies) < pos(StageId::SenderRecovery));
+        assert!(pos(StageId::SenderRecovery) < pos(StageId::Execution));
+
+        // Finish should remain the last stage.
+        assert_eq!(pos(StageId::Finish), StageId::ALL.len() - 1);
+    }
 
     #[test]
     fn stage_id_as_string() {
