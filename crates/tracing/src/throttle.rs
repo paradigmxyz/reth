@@ -53,9 +53,9 @@ macro_rules! throttle {
         static START: ::std::sync::LazyLock<::std::time::Instant> =
             ::std::sync::LazyLock::new(::std::time::Instant::now);
         static LAST: ::core::sync::atomic::AtomicU64 =
-            ::core::sync::atomic::AtomicU64::new($crate::__private::THROTTLE_NOT_YET_RUN);
+            ::core::sync::atomic::AtomicU64::new($crate::__private::NOT_YET_RUN);
 
-        if $crate::__private::should_throttle(&START, &LAST, $duration.as_millis() as u64) {
+        if $crate::__private::should_run(&START, &LAST, $duration.as_millis() as u64) {
             $expr
         }
     }};
