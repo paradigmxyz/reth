@@ -1264,12 +1264,12 @@ pub fn metrics_hooks<N: NodeTypesWithDB>(provider_factory: &ProviderFactory<N>) 
     Hooks::builder()
         .with_hook({
             let db = provider_factory.db_ref().clone();
-            move || throttle!(Duration::from_mins(5), || db.report_metrics())
+            move || throttle!(Duration::from_secs(5 * 60), || db.report_metrics())
         })
         .with_hook({
             let sfp = provider_factory.static_file_provider();
             move || {
-                throttle!(Duration::from_mins(5), || {
+                throttle!(Duration::from_secs(5 * 60), || {
                     if let Err(error) = sfp.report_metrics() {
                         error!(%error, "Failed to report metrics from static file provider");
                     }
