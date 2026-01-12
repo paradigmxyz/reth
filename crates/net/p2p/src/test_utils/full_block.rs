@@ -140,7 +140,7 @@ impl BodiesClient for TestFullBlockClient {
     /// # Arguments
     ///
     /// * `hashes` - A vector of block hashes to retrieve bodies for.
-    /// * `_priority` - Priority level for block body retrieval (unused in this implementation).
+    /// * _priority — Priority level for block body retrieval.
     ///
     /// # Returns
     ///
