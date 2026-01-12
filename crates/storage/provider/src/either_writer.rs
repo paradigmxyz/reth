@@ -274,7 +274,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
     #[cfg(all(unix, feature = "rocksdb"))]
     pub fn into_raw_rocksdb_batch(self) -> Option<rocksdb::WriteBatchWithTransaction<true>> {
         match self {
-            Self::Database(_) | Self::StaticFile(_) => None,
+            Self::Database(_) | Self::StaticFile(..) => None,
             Self::RocksDB(batch) => Some(batch.into_inner()),
         }
     }
@@ -285,7 +285,7 @@ impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
     #[cfg(not(all(unix, feature = "rocksdb")))]
     pub fn into_raw_rocksdb_batch(self) -> Option<RawRocksDBBatch> {
         match self {
-            Self::Database(_) | Self::StaticFile(_) => None,
+            Self::Database(_) | Self::StaticFile(..) => None,
         }
     }
 
@@ -424,7 +424,7 @@ where
                     Ok(cursor.upsert(hash, &tx_num)?)
                 }
             }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::TransactionHashNumbers>(hash, &tx_num),
         }
@@ -439,7 +439,7 @@ where
                 }
                 Ok(())
             }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::TransactionHashNumbers>(hash),
         }
@@ -458,7 +458,7 @@ where
     ) -> ProviderResult<()> {
         match self {
             Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::StoragesHistory>(key, value),
         }
@@ -473,7 +473,7 @@ where
                 }
                 Ok(())
             }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
         }
@@ -492,7 +492,7 @@ where
     ) -> ProviderResult<()> {
         match self {
             Self::Database(cursor) => Ok(cursor.upsert(key, value)?),
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.put::<tables::AccountsHistory>(key, value),
         }
@@ -507,7 +507,7 @@ where
                 }
                 Ok(())
             }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
         }
@@ -546,12 +546,15 @@ where
 }
 
 /// Represents a source for reading data, either from database, static files, or `RocksDB`.
+///
+/// Note: The `StaticFile` variant holds `PhantomData<&'a ()>` to ensure the lifetime `'a`
+/// is used even when the `rocksdb` feature is disabled (where `RocksDB` variant is absent).
 #[derive(Debug, Display)]
 pub enum EitherReader<'a, CURSOR, N> {
     /// Read from database table via cursor
     Database(CURSOR),
     /// Read from static file
-    StaticFile(StaticFileProvider<N>),
+    StaticFile(StaticFileProvider<N>, std::marker::PhantomData<&'a ()>),
     /// Read from `RocksDB` transaction
     #[cfg(all(unix, feature = "rocksdb"))]
     RocksDB(&'a crate::providers::rocksdb::RocksTx<'a>),
@@ -567,7 +570,7 @@ impl<'a> EitherReader<'a, (), ()> {
         P::Tx: DbTx,
     {
         if EitherWriterDestination::senders(provider).is_static_file() {
-            Ok(EitherReader::StaticFile(provider.static_file_provider()))
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), std::marker::PhantomData))
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_read::<tables::TransactionSenders>()?,
@@ -637,7 +640,7 @@ impl<'a> EitherReader<'a, (), ()> {
         P::Tx: DbTx,
     {
         if EitherWriterDestination::account_changesets(provider).is_static_file() {
-            Ok(EitherReader::StaticFile(provider.static_file_provider()))
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), std::marker::PhantomData))
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_dup_read::<tables::AccountChangeSets>()?,
@@ -660,7 +663,7 @@ where
                 .walk_range(range)?
                 .map(|result| result.map_err(ProviderError::from))
                 .collect::<ProviderResult<HashMap<_, _>>>(),
-            Self::StaticFile(provider) => range
+            Self::StaticFile(provider, _) => range
                 .clone()
                 .zip(provider.fetch_range_iter(
                     StaticFileSegment::TransactionSenders,
@@ -689,7 +692,7 @@ where
     ) -> ProviderResult<Option<TxNumber>> {
         match self {
             Self::Database(cursor) => Ok(cursor.seek_exact(hash)?.map(|(_, v)| v)),
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::TransactionHashNumbers>(hash),
         }
@@ -707,7 +710,7 @@ where
     ) -> ProviderResult<Option<BlockNumberList>> {
         match self {
             Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::StoragesHistory>(key),
         }
@@ -772,7 +775,7 @@ where
                     Ok(HistoryInfo::NotYetWritten)
                 }
             }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.storage_history_info(
                 address,
@@ -795,7 +798,7 @@ where
     ) -> ProviderResult<Option<BlockNumberList>> {
         match self {
             Self::Database(cursor) => Ok(cursor.seek_exact(key)?.map(|(_, v)| v)),
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => tx.get::<tables::AccountsHistory>(key),
         }
@@ -855,7 +858,7 @@ where
                     Ok(HistoryInfo::NotYetWritten)
                 }
             }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(tx) => {
                 tx.account_history_info(address, block_number, lowest_available_block_number)
@@ -874,7 +877,7 @@ where
         range: RangeInclusive<BlockNumber>,
     ) -> ProviderResult<BTreeSet<Address>> {
         match self {
-            Self::StaticFile(provider) => {
+            Self::StaticFile(provider, _) => {
                 let highest_static_block =
                     provider.get_highest_static_file_block(StaticFileSegment::AccountChangeSets);
 
@@ -994,7 +997,7 @@ mod tests {
             if transaction_senders_in_static_files {
                 assert!(matches!(reader, EitherReader::StaticFile(_, _)));
             } else {
-                assert!(matches!(reader, EitherReader::Database(_, _)));
+                assert!(matches!(reader, EitherReader::Database(_)));
             }
 
             assert_eq!(
