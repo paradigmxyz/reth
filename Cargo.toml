@@ -734,6 +734,7 @@ tracing-journald = "0.3"
 tracing-logfmt = "0.3.3"
 tracing-samply = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false }
+tracing-tracy = "0.11"
 triehash = "0.8"
 typenum = "1.15.0"
 vergen = "9.0.4"
