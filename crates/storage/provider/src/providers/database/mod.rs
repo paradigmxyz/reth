@@ -89,6 +89,12 @@ impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Database
 
 impl<N: ProviderNodeTypes> ProviderFactory<N> {
     /// Create new database provider factory.
+    ///
+    /// The storage backends used by the produced factory MAY be inconsistent.
+    /// It is recommended to call [`Self::check_consistency`] after
+    /// creation to ensure consistency between the database and static files.
+    /// If the function returns unwind targets, the caller MUST unwind the
+    /// inner database to the minimum of the two targets to ensure consistency.
     pub fn new(
         db: N::DB,
         chain_spec: Arc<N::ChainSpec>,
@@ -123,6 +129,22 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             rocksdb_provider,
             changeset_cache: ChangesetCache::new(),
         })
+    }
+
+    /// Create new database provider factory and perform consistency checks.
+    ///
+    /// This will call [`Self::check_consistency`] internally and return
+    /// [`ProviderError::MustUnwind`] if inconsistencies are found. It may also
+    /// return any [`ProviderError`] that [`Self::new`] may return, or that are
+    /// encountered during consistency checks.
+    pub fn new_checked(
+        db: N::DB,
+        chain_spec: Arc<N::ChainSpec>,
+        static_file_provider: StaticFileProvider<N::Primitives>,
+        rocksdb_provider: RocksDBProvider,
+    ) -> ProviderResult<Self> {
+        Self::new(db, chain_spec, static_file_provider, rocksdb_provider)
+            .and_then(Self::assert_consistent)
     }
 }
 
@@ -283,6 +305,29 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
         let state_provider = provider.try_into_history_at_block(block_number)?;
         trace!(target: "providers::db", ?block_number, %block_hash, "Returning historical state provider for block hash");
         Ok(state_provider)
+    }
+
+    /// Asserts that the static files and database are consistent. If not,
+    /// returns [`ProviderError::MustUnwind`] with the appropriate unwind
+    /// target.
+    pub fn assert_consistent(self) -> ProviderResult<Self> {
+        let (rocksdb_unwind, static_file_unwind) = self.check_consistency()?;
+
+        let source = match (rocksdb_unwind, static_file_unwind) {
+            (None, None) => return Ok(self),
+            (Some(_), Some(_)) => "RocksDB and Static Files",
+            (Some(_), None) => "RocksDB",
+            (None, Some(_)) => "Static Files",
+        };
+
+        Err(ProviderError::MustUnwind {
+            data_source: source,
+            unwind_to: rocksdb_unwind
+                .into_iter()
+                .chain(static_file_unwind)
+                .min()
+                .expect("at least one unwind target must be Some"),
+        })
     }
 
     /// Checks the consistency between the static files and the database. This

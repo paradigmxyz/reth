@@ -177,6 +177,14 @@ pub enum ProviderError {
         /// The available range of blocks with changesets
         available: core::ops::RangeInclusive<BlockNumber>,
     },
+    /// Inconsistency detected during [`ProviderFactory::check_consistency`].
+    #[error("consistency check failed for {data_source}. Db must be unwound to {unwind_to}")]
+    MustUnwind {
+        /// The inconsistent data source(s).
+        data_source: &'static str,
+        /// The block number to which the database must be unwound.
+        unwind_to: BlockNumber,
+    },
     /// Any other error type wrapped into a cloneable [`AnyError`].
     #[error(transparent)]
     Other(#[from] AnyError),
