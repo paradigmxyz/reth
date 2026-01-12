@@ -1,4 +1,4 @@
-use super::{collect_history_indices, load_history_indices};
+use super::{collect_history_indices, load_storages_history_indices};
 use crate::{StageCheckpoint, StageId};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
@@ -7,9 +7,13 @@ use reth_db_api::{
     tables,
     transaction::DbTxMut,
 };
-use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
+use reth_provider::{
+    DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
+    RocksDBProviderFactory, StorageSettingsCache,
+};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_storage_api::NodePrimitivesProvider;
 use std::fmt::Debug;
 use tracing::info;
 
@@ -46,8 +50,13 @@ impl Default for IndexStorageHistoryStage {
 
 impl<Provider> Stage<Provider> for IndexStorageHistoryStage
 where
-    Provider:
-        DBProvider<Tx: DbTxMut> + PruneCheckpointWriter + HistoryWriter + PruneCheckpointReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointWriter
+        + HistoryWriter
+        + PruneCheckpointReader
+        + NodePrimitivesProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -116,7 +125,7 @@ where
             )?;
 
         info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::StoragesHistory, _>(
+        load_storages_history_indices(
             provider,
             collector,
             first_sync,

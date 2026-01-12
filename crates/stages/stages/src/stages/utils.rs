@@ -3,19 +3,24 @@ use alloy_primitives::{Address, BlockNumber, TxNumber};
 use reth_config::config::EtlConfig;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW},
-    models::{sharded_key::NUM_OF_INDICES_IN_SHARD, AccountBeforeTx, ShardedKey},
+    models::{
+        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey,
+        AccountBeforeTx, ShardedKey,
+    },
     table::{Decompress, Table},
+    tables,
     transaction::{DbTx, DbTxMut},
     BlockNumberList, DatabaseError,
 };
 use reth_etl::Collector;
+use reth_node_types::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, to_range, BlockReader, DBProvider, ProviderError,
-    StaticFileProviderFactory,
+    providers::StaticFileProvider, to_range, BlockReader, DBProvider, EitherWriter, ProviderError,
+    RocksDBProviderFactory, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_stages_api::StageError;
 use reth_static_file_types::StaticFileSegment;
-use reth_storage_api::ChangeSetReader;
+use reth_storage_api::{ChangeSetReader, NodePrimitivesProvider};
 use std::{collections::HashMap, hash::Hash, ops::RangeBounds};
 use tracing::info;
 
@@ -319,6 +324,296 @@ impl LoadMode {
     const fn is_flush(&self) -> bool {
         matches!(self, Self::Flush)
     }
+}
+
+/// Loads storage history indices from a collector into the database using EitherWriter.
+///
+/// This is a specialized version of [`load_history_indices`] for [`tables::StoragesHistory`]
+/// that supports writing to either MDBX or RocksDB based on storage settings.
+pub(crate) fn load_storages_history_indices<Provider, P>(
+    provider: &Provider,
+    mut collector: Collector<
+        <tables::StoragesHistory as Table>::Key,
+        <tables::StoragesHistory as Table>::Value,
+    >,
+    append_only: bool,
+    sharded_key_factory: impl Clone + Fn(P, u64) -> StorageShardedKey,
+    decode_key: impl Fn(Vec<u8>) -> Result<StorageShardedKey, DatabaseError>,
+    get_partial: impl Fn(StorageShardedKey) -> P,
+) -> Result<(), StageError>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + NodePrimitivesProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory,
+    P: Copy + Default + Eq,
+{
+    // Create RocksDB batch if feature enabled
+    #[cfg(all(unix, feature = "rocksdb"))]
+    let rocksdb_batch = provider.rocksdb_provider().batch();
+    #[cfg(not(all(unix, feature = "rocksdb")))]
+    let rocksdb_batch = ();
+
+    // Create EitherWriter for storage history
+    let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+
+    // Create read cursor for checking existing shards
+    let mut read_cursor = provider.tx_ref().cursor_read::<tables::StoragesHistory>()?;
+
+    let mut current_partial = P::default();
+    let mut current_list = Vec::<u64>::new();
+
+    // observability
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let sharded_key = decode_key(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing storage history indices");
+        }
+
+        let partial_key = get_partial(sharded_key);
+
+        if current_partial != partial_key {
+            // Flush last shard for previous partial key
+            load_storages_history_shard(
+                &mut writer,
+                current_partial,
+                &mut current_list,
+                &sharded_key_factory,
+                append_only,
+                LoadMode::Flush,
+            )?;
+
+            current_partial = partial_key;
+            current_list.clear();
+
+            // If not first sync, merge with existing shard
+            if !append_only &&
+                let Some((_, last_database_shard)) =
+                    read_cursor.seek_exact(sharded_key_factory(current_partial, u64::MAX))?
+            {
+                current_list.extend(last_database_shard.iter());
+            }
+        }
+
+        current_list.extend(new_list.iter());
+        load_storages_history_shard(
+            &mut writer,
+            current_partial,
+            &mut current_list,
+            &sharded_key_factory,
+            append_only,
+            LoadMode::KeepLast,
+        )?;
+    }
+
+    // Flush remaining shard
+    load_storages_history_shard(
+        &mut writer,
+        current_partial,
+        &mut current_list,
+        &sharded_key_factory,
+        append_only,
+        LoadMode::Flush,
+    )?;
+
+    // Extract and register RocksDB batch for commit
+    #[cfg(all(unix, feature = "rocksdb"))]
+    if let Some(batch) = writer.into_raw_rocksdb_batch() {
+        provider.set_pending_rocksdb_batch(batch);
+    }
+
+    Ok(())
+}
+
+/// Shard and insert storage history indices according to [`LoadMode`] and list length.
+fn load_storages_history_shard<P, CURSOR, N>(
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+    partial_key: P,
+    list: &mut Vec<BlockNumber>,
+    sharded_key_factory: &impl Fn(P, BlockNumber) -> StorageShardedKey,
+    append_only: bool,
+    mode: LoadMode,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
+    P: Copy,
+{
+    if list.len() > NUM_OF_INDICES_IN_SHARD || mode.is_flush() {
+        let chunks =
+            list.chunks(NUM_OF_INDICES_IN_SHARD).map(|chunks| chunks.to_vec()).collect::<Vec<_>>();
+
+        let mut iter = chunks.into_iter().peekable();
+        while let Some(chunk) = iter.next() {
+            let mut highest = *chunk.last().expect("at least one index");
+
+            if !mode.is_flush() && iter.peek().is_none() {
+                *list = chunk;
+            } else {
+                if iter.peek().is_none() {
+                    highest = u64::MAX;
+                }
+                let key = sharded_key_factory(partial_key, highest);
+                let value = BlockNumberList::new_pre_sorted(chunk);
+
+                // Use EitherWriter method (works for both MDBX and RocksDB)
+                writer.put_storage_history(key, &value)?;
+            }
+        }
+    }
+
+    Ok(())
+}
+
+/// Loads account history indices from a collector into the database using EitherWriter.
+///
+/// This is a specialized version of [`load_history_indices`] for [`tables::AccountsHistory`]
+/// that supports writing to either MDBX or RocksDB based on storage settings.
+pub(crate) fn load_accounts_history_indices<Provider, P>(
+    provider: &Provider,
+    mut collector: Collector<
+        <tables::AccountsHistory as Table>::Key,
+        <tables::AccountsHistory as Table>::Value,
+    >,
+    append_only: bool,
+    sharded_key_factory: impl Clone + Fn(P, u64) -> ShardedKey<Address>,
+    decode_key: impl Fn(Vec<u8>) -> Result<ShardedKey<Address>, DatabaseError>,
+    get_partial: impl Fn(ShardedKey<Address>) -> P,
+) -> Result<(), StageError>
+where
+    Provider: DBProvider<Tx: DbTxMut>
+        + NodePrimitivesProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory,
+    P: Copy + Default + Eq,
+{
+    // Create RocksDB batch if feature enabled
+    #[cfg(all(unix, feature = "rocksdb"))]
+    let rocksdb_batch = provider.rocksdb_provider().batch();
+    #[cfg(not(all(unix, feature = "rocksdb")))]
+    let rocksdb_batch = ();
+
+    // Create EitherWriter for account history
+    let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
+
+    // Create read cursor for checking existing shards
+    let mut read_cursor = provider.tx_ref().cursor_read::<tables::AccountsHistory>()?;
+
+    let mut current_partial = P::default();
+    let mut current_list = Vec::<u64>::new();
+
+    // observability
+    let total_entries = collector.len();
+    let interval = (total_entries / 10).max(1);
+
+    for (index, element) in collector.iter()?.enumerate() {
+        let (k, v) = element?;
+        let sharded_key = decode_key(k)?;
+        let new_list = BlockNumberList::decompress_owned(v)?;
+
+        if index > 0 && index.is_multiple_of(interval) && total_entries > 10 {
+            info!(target: "sync::stages::index_history", progress = %format!("{:.2}%", (index as f64 / total_entries as f64) * 100.0), "Writing account history indices");
+        }
+
+        let partial_key = get_partial(sharded_key);
+
+        if current_partial != partial_key {
+            // Flush last shard for previous partial key
+            load_accounts_history_shard(
+                &mut writer,
+                current_partial,
+                &mut current_list,
+                &sharded_key_factory,
+                append_only,
+                LoadMode::Flush,
+            )?;
+
+            current_partial = partial_key;
+            current_list.clear();
+
+            // If not first sync, merge with existing shard
+            if !append_only &&
+                let Some((_, last_database_shard)) =
+                    read_cursor.seek_exact(sharded_key_factory(current_partial, u64::MAX))?
+            {
+                current_list.extend(last_database_shard.iter());
+            }
+        }
+
+        current_list.extend(new_list.iter());
+        load_accounts_history_shard(
+            &mut writer,
+            current_partial,
+            &mut current_list,
+            &sharded_key_factory,
+            append_only,
+            LoadMode::KeepLast,
+        )?;
+    }
+
+    // Flush remaining shard
+    load_accounts_history_shard(
+        &mut writer,
+        current_partial,
+        &mut current_list,
+        &sharded_key_factory,
+        append_only,
+        LoadMode::Flush,
+    )?;
+
+    // Extract and register RocksDB batch for commit
+    #[cfg(all(unix, feature = "rocksdb"))]
+    if let Some(batch) = writer.into_raw_rocksdb_batch() {
+        provider.set_pending_rocksdb_batch(batch);
+    }
+
+    Ok(())
+}
+
+/// Shard and insert account history indices according to [`LoadMode`] and list length.
+fn load_accounts_history_shard<P, CURSOR, N>(
+    writer: &mut EitherWriter<'_, CURSOR, N>,
+    partial_key: P,
+    list: &mut Vec<BlockNumber>,
+    sharded_key_factory: &impl Fn(P, BlockNumber) -> ShardedKey<Address>,
+    append_only: bool,
+    mode: LoadMode,
+) -> Result<(), StageError>
+where
+    N: NodePrimitives,
+    CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
+    P: Copy,
+{
+    if list.len() > NUM_OF_INDICES_IN_SHARD || mode.is_flush() {
+        let chunks =
+            list.chunks(NUM_OF_INDICES_IN_SHARD).map(|chunks| chunks.to_vec()).collect::<Vec<_>>();
+
+        let mut iter = chunks.into_iter().peekable();
+        while let Some(chunk) = iter.next() {
+            let mut highest = *chunk.last().expect("at least one index");
+
+            if !mode.is_flush() && iter.peek().is_none() {
+                *list = chunk;
+            } else {
+                if iter.peek().is_none() {
+                    highest = u64::MAX;
+                }
+                let key = sharded_key_factory(partial_key, highest);
+                let value = BlockNumberList::new_pre_sorted(chunk);
+
+                // Use EitherWriter method (works for both MDBX and RocksDB)
+                writer.put_account_history(key, &value)?;
+            }
+        }
+    }
+
+    Ok(())
 }
 
 /// Called when database is ahead of static files. Attempts to find the first block we are missing

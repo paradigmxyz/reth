@@ -1,16 +1,18 @@
 use crate::stages::utils::collect_history_indices;
 
-use super::{collect_account_history_indices, load_history_indices};
+use super::{collect_account_history_indices, load_accounts_history_indices};
 use alloy_primitives::Address;
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{models::ShardedKey, table::Decode, tables, transaction::DbTxMut};
 use reth_provider::{
-    DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter, StorageSettingsCache,
+    DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
+    RocksDBProviderFactory, StorageSettingsCache,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
     ExecInput, ExecOutput, Stage, StageCheckpoint, StageError, StageId, UnwindInput, UnwindOutput,
 };
+use reth_storage_api::NodePrimitivesProvider;
 use std::fmt::Debug;
 use tracing::info;
 
@@ -53,7 +55,9 @@ where
         + PruneCheckpointWriter
         + reth_storage_api::ChangeSetReader
         + reth_provider::StaticFileProviderFactory
-        + StorageSettingsCache,
+        + StorageSettingsCache
+        + NodePrimitivesProvider
+        + RocksDBProviderFactory,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -125,7 +129,7 @@ where
         };
 
         info!(target: "sync::stages::index_account_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::AccountsHistory, _>(
+        load_accounts_history_indices(
             provider,
             collector,
             first_sync,
