@@ -245,9 +245,6 @@ impl DeferredTrieData {
     ) -> TrieInputSorted {
         let mut overlay = TrieInputSorted::default();
 
-        // Get mutable references once outside the loop.
-        // Since overlay is freshly constructed, the Arcs are unique (strong_count == 1),
-        // so Arc::make_mut is a no-op (no clone needed).
         let state_mut = Arc::make_mut(&mut overlay.state);
         let nodes_mut = Arc::make_mut(&mut overlay.nodes);
 
