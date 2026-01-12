@@ -121,8 +121,9 @@ where
                 ParallelStateRootError::Other(format!("could not calculate state root: {e:?}"))
             })?;
 
-        self.metrics.sparse_trie_final_update_duration_histogram.record(start.elapsed());
-        self.metrics.sparse_trie_total_duration_histogram.record(now.elapsed());
+        let end = Instant::now();
+        self.metrics.sparse_trie_final_update_duration_histogram.record(end.duration_since(start));
+        self.metrics.sparse_trie_total_duration_histogram.record(end.duration_since(now));
 
         Ok(StateRootComputeOutcome { state_root, trie_updates })
     }
