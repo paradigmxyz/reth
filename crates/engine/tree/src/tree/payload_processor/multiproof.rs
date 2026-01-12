@@ -896,7 +896,7 @@ impl MultiProofTask {
                 ctx.merge_state_update(source, update);
 
                 // Batch consecutive state update messages.
-                while self.multiproof_manager.proof_worker_handle.pending_account_tasks() > 0 {
+                while self.multiproof_manager.proof_worker_handle.available_account_workers() == 0 {
                     let (next_source, next_update) = match self.rx.try_recv() {
                         Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
                             (next_source, next_update)
@@ -915,7 +915,7 @@ impl MultiProofTask {
                     unreachable!()
                 };
                 let update_len = update.len();
-                if self.multiproof_manager.proof_worker_handle.available_account_workers() == 0 {
+                if self.multiproof_manager.proof_worker_handle.available_account_workers() > 0 {
                     self.on_state_update(source, update);
                 }
                 trace!(
@@ -1087,7 +1087,7 @@ impl MultiProofTask {
 
                             self.multiproof_manager.on_calculation_complete();
 
-                            if self.multiproof_manager.proof_worker_handle.pending_account_tasks() == 0 && let Some((source, update)) = ctx.pending_state_update.take()  {
+                            if self.multiproof_manager.proof_worker_handle.available_account_workers() > 0 && let Some((source, update)) = ctx.pending_state_update.take()  {
                                 self.on_state_update(source, update);
                             }
 
