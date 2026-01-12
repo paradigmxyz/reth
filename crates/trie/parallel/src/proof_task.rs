@@ -1254,8 +1254,9 @@ where
         let result =
             build_account_multiproof_with_storage_roots(&proof_tx.provider, ctx, &mut tracker);
 
-        let proof_elapsed = proof_start.elapsed();
-        let total_elapsed = start.elapsed();
+        let now = Instant::now();
+        let proof_elapsed = now.duration_since(proof_start);
+        let total_elapsed = now.duration_since(start);
         let proof_cursor_metrics = tracker.cursor_metrics;
         proof_cursor_metrics.record_spans();
 
