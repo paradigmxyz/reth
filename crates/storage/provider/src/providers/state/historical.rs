@@ -130,22 +130,14 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        // Create RocksDB tx only when the feature is enabled
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocks_provider = self.provider.rocksdb_provider();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocks_tx = rocks_provider.tx();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocks_tx_ref = &rocks_tx;
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocks_tx_ref = ();
-
-        let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
-        reader.account_history_info(
-            address,
-            self.block_number,
-            self.lowest_available_blocks.account_history_block_number,
-        )
+        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
+            let mut reader = EitherReader::new_accounts_history(self.provider, rocks_tx_ref)?;
+            reader.account_history_info(
+                address,
+                self.block_number,
+                self.lowest_available_blocks.account_history_block_number,
+            )
+        })
     }
 
     /// Lookup a storage key in the `StoragesHistory` table using `EitherReader`.
@@ -161,23 +153,15 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
             return Err(ProviderError::StateAtBlockPruned(self.block_number))
         }
 
-        // Create RocksDB tx only when the feature is enabled
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocks_provider = self.provider.rocksdb_provider();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocks_tx = rocks_provider.tx();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocks_tx_ref = &rocks_tx;
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocks_tx_ref = ();
-
-        let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
-        reader.storage_history_info(
-            address,
-            storage_key,
-            self.block_number,
-            self.lowest_available_blocks.storage_history_block_number,
-        )
+        self.provider.with_rocksdb_tx(|rocks_tx_ref| {
+            let mut reader = EitherReader::new_storages_history(self.provider, rocks_tx_ref)?;
+            reader.storage_history_info(
+                address,
+                storage_key,
+                self.block_number,
+                self.lowest_available_blocks.storage_history_block_number,
+            )
+        })
     }
 
     /// Checks and returns `true` if distance to historical block exceeds the provided limit.
