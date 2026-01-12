@@ -375,6 +375,8 @@ impl EngineNodeLauncher {
         };
         ctx.task_executor().spawn_critical("consensus engine", Box::pin(consensus_engine));
 
+        let engine_events_for_ethstats = engine_events.new_listener();
+
         let full_node = FullNode {
             evm_config: ctx.components().evm_config().clone(),
             pool: ctx.components().pool().clone(),
@@ -395,7 +397,7 @@ impl EngineNodeLauncher {
         // Notify on node started
         on_node_started.on_event(FullNode::clone(&full_node))?;
 
-        ctx.spawn_ethstats().await?;
+        ctx.spawn_ethstats(engine_events_for_ethstats).await?;
 
         let handle = NodeHandle {
             node_exit_future: NodeExitFuture::new(

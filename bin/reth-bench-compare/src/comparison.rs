@@ -39,7 +39,8 @@ pub(crate) struct BenchmarkResults {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct CombinedLatencyRow {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(default)]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub new_payload_latency: u128,
 }
@@ -48,7 +49,8 @@ pub(crate) struct CombinedLatencyRow {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub(crate) struct TotalGasRow {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(default)]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub time: u128,
 }
@@ -125,7 +127,8 @@ pub(crate) struct ComparisonSummary {
 #[derive(Debug, Serialize)]
 pub(crate) struct BlockComparison {
     pub block_number: u64,
-    pub transaction_count: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub transaction_count: Option<u64>,
     pub gas_used: u64,
     pub baseline_new_payload_latency: u128,
     pub feature_new_payload_latency: u128,

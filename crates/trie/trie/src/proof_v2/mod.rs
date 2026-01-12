@@ -90,7 +90,7 @@ pub struct ProofCalculator<TC, HC, VE: LeafValueEncoder> {
     /// Free-list of re-usable buffers of [`RlpNode`]s, used for encoding branch nodes to RLP.
     ///
     /// We are generally able to re-use these buffers across different branch nodes for the
-    /// duration of a proof calculation, but occasionally we will lose one when when a branch
+    /// duration of a proof calculation, but occasionally we will lose one when a branch
     /// node is returned as a `ProofTrieNode`.
     rlp_nodes_bufs: Vec<Vec<RlpNode>>,
     /// Re-usable byte buffer, used for RLP encoding.
@@ -1648,17 +1648,15 @@ mod tests {
                     // though we never store the root node so the masks for it aren't really valid.
                     let masks = if path.is_empty() {
                         TrieMasks::none()
-                    } else {
+                    } else if let Some(branch_masks) =
+                        proof_legacy_result.branch_node_masks.get(path)
+                    {
                         TrieMasks {
-                            hash_mask: proof_legacy_result
-                                .branch_node_hash_masks
-                                .get(path)
-                                .copied(),
-                            tree_mask: proof_legacy_result
-                                .branch_node_tree_masks
-                                .get(path)
-                                .copied(),
+                            hash_mask: Some(branch_masks.hash_mask),
+                            tree_mask: Some(branch_masks.tree_mask),
                         }
+                    } else {
+                        TrieMasks::none()
                     };
 
                     ProofTrieNode { path: *path, node, masks }

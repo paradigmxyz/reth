@@ -164,11 +164,41 @@ pub(crate) struct Args {
     #[arg(trailing_var_arg = true, allow_hyphen_values = true)]
     pub reth_args: Vec<String>,
 
-    /// Comma-separated list of features to enable during reth compilation
+    /// Comma-separated list of features to enable during reth compilation (applied to both builds)
     ///
     /// Example: `jemalloc,asm-keccak`
     #[arg(long, value_name = "FEATURES", default_value = "jemalloc,asm-keccak")]
     pub features: String,
+
+    /// Comma-separated list of features to enable only for baseline build (overrides --features)
+    ///
+    /// Example: `--baseline-features jemalloc`
+    #[arg(long, value_name = "FEATURES")]
+    pub baseline_features: Option<String>,
+
+    /// Comma-separated list of features to enable only for feature build (overrides --features)
+    ///
+    /// Example: `--feature-features jemalloc,asm-keccak`
+    #[arg(long, value_name = "FEATURES")]
+    pub feature_features: Option<String>,
+
+    /// RUSTFLAGS to use for both baseline and feature builds
+    ///
+    /// Example: `--rustflags "-C target-cpu=native"`
+    #[arg(long, value_name = "FLAGS", default_value = "-C target-cpu=native")]
+    pub rustflags: String,
+
+    /// RUSTFLAGS to use only for baseline build (overrides --rustflags)
+    ///
+    /// Example: `--baseline-rustflags "-C target-cpu=native -C lto"`
+    #[arg(long, value_name = "FLAGS")]
+    pub baseline_rustflags: Option<String>,
+
+    /// RUSTFLAGS to use only for feature build (overrides --rustflags)
+    ///
+    /// Example: `--feature-rustflags "-C target-cpu=native -C lto"`
+    #[arg(long, value_name = "FLAGS")]
+    pub feature_rustflags: Option<String>,
 
     /// Disable automatic --debug.startup-sync-state-idle flag for specific runs.
     /// Can be "baseline", "feature", or "all".
@@ -328,8 +358,6 @@ pub(crate) async fn run_comparison(args: Args, _ctx: CliContext) -> Result<()> {
         git_manager.repo_root().to_string(),
         output_dir.clone(),
         git_manager.clone(),
-        args.features.clone(),
-        args.profile,
     )?;
     // Initialize node manager
     let mut node_manager = NodeManager::new(&args);
@@ -449,6 +477,18 @@ async fn run_compilation_phase(
         let ref_type = ref_types[i];
         let commit = &ref_commits[git_ref];
 
+        // Get per-build features and rustflags
+        let features = match ref_type {
+            "baseline" => args.baseline_features.as_ref().unwrap_or(&args.features),
+            "feature" => args.feature_features.as_ref().unwrap_or(&args.features),
+            _ => &args.features,
+        };
+        let rustflags = match ref_type {
+            "baseline" => args.baseline_rustflags.as_ref().unwrap_or(&args.rustflags),
+            "feature" => args.feature_rustflags.as_ref().unwrap_or(&args.rustflags),
+            _ => &args.rustflags,
+        };
+
         info!(
             "Compiling {} binary for reference: {} (commit: {})",
             ref_type,
@@ -460,7 +500,7 @@ async fn run_compilation_phase(
         git_manager.switch_ref(git_ref)?;
 
         // Compile reth (with caching)
-        compilation_manager.compile_reth(commit, is_optimism)?;
+        compilation_manager.compile_reth(commit, is_optimism, features, rustflags)?;
 
         info!("Completed compilation for {} reference", ref_type);
     }

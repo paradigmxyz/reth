@@ -1,21 +1,23 @@
 //! Merkle trie proofs.
 
-use crate::{Nibbles, TrieAccount};
+use crate::{BranchNodeMasksMap, Nibbles, TrieAccount};
 use alloc::{borrow::Cow, vec::Vec};
 use alloy_consensus::constants::KECCAK_EMPTY;
 use alloy_primitives::{
     keccak256,
-    map::{hash_map, B256Map, B256Set, HashMap},
+    map::{hash_map, B256Map, B256Set},
     Address, Bytes, B256, U256,
 };
 use alloy_rlp::{encode_fixed_size, Decodable, EMPTY_STRING_CODE};
 use alloy_trie::{
     nodes::TrieNode,
     proof::{verify_proof, DecodedProofNodes, ProofNodes, ProofVerificationError},
-    TrieMask, EMPTY_ROOT_HASH,
+    EMPTY_ROOT_HASH,
 };
 use derive_more::{Deref, DerefMut, IntoIterator};
 use itertools::Itertools;
+#[cfg(feature = "rayon")]
+use rayon::iter::{FromParallelIterator, IntoParallelIterator, ParallelIterator};
 use reth_primitives_traits::Account;
 
 /// Proof targets map.
@@ -25,6 +27,16 @@ pub struct MultiProofTargets(B256Map<B256Set>);
 impl FromIterator<(B256, B256Set)> for MultiProofTargets {
     fn from_iter<T: IntoIterator<Item = (B256, B256Set)>>(iter: T) -> Self {
         Self(B256Map::from_iter(iter))
+    }
+}
+
+#[cfg(feature = "rayon")]
+impl FromParallelIterator<(B256, B256Set)> for MultiProofTargets {
+    fn from_par_iter<I>(par_iter: I) -> Self
+    where
+        I: IntoParallelIterator<Item = (B256, B256Set)>,
+    {
+        Self(par_iter.into_par_iter().collect())
     }
 }
 
@@ -93,6 +105,11 @@ impl MultiProofTargets {
     /// Returns the number of items that will be considered during chunking in `[Self::chunks]`.
     pub fn chunking_length(&self) -> usize {
         self.values().map(|slots| 1 + slots.len().saturating_sub(1)).sum::<usize>()
+    }
+
+    /// Returns the total count of storage slot targets across all accounts.
+    pub fn storage_targets_count(&self) -> usize {
+        self.values().map(|slots| slots.len()).sum()
     }
 }
 
@@ -173,10 +190,9 @@ impl Iterator for ChunkedMultiProofTargets {
 pub struct MultiProof {
     /// State trie multiproof for requested accounts.
     pub account_subtree: ProofNodes,
-    /// The hash masks of the branch nodes in the account proof.
-    pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
-    /// The tree masks of the branch nodes in the account proof.
-    pub branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    /// Consolidated branch node masks (`hash_mask`, `tree_mask`) for each path in the account
+    /// proof.
+    pub branch_node_masks: BranchNodeMasksMap,
     /// Storage trie multiproofs.
     pub storages: B256Map<StorageMultiProof>,
 }
@@ -185,8 +201,7 @@ impl MultiProof {
     /// Returns true if the multiproof is empty.
     pub fn is_empty(&self) -> bool {
         self.account_subtree.is_empty() &&
-            self.branch_node_hash_masks.is_empty() &&
-            self.branch_node_tree_masks.is_empty() &&
+            self.branch_node_masks.is_empty() &&
             self.storages.is_empty()
     }
 
@@ -267,9 +282,7 @@ impl MultiProof {
     /// proofs.
     pub fn extend(&mut self, other: Self) {
         self.account_subtree.extend_from(other.account_subtree);
-
-        self.branch_node_hash_masks.extend(other.branch_node_hash_masks);
-        self.branch_node_tree_masks.extend(other.branch_node_tree_masks);
+        self.branch_node_masks.extend(other.branch_node_masks);
 
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
@@ -277,8 +290,7 @@ impl MultiProof {
                     debug_assert_eq!(entry.get().root, storage.root);
                     let entry = entry.get_mut();
                     entry.subtree.extend_from(storage.subtree);
-                    entry.branch_node_hash_masks.extend(storage.branch_node_hash_masks);
-                    entry.branch_node_tree_masks.extend(storage.branch_node_tree_masks);
+                    entry.branch_node_masks.extend(storage.branch_node_masks);
                 }
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(storage);
@@ -302,10 +314,9 @@ impl MultiProof {
 pub struct DecodedMultiProof {
     /// State trie multiproof for requested accounts.
     pub account_subtree: DecodedProofNodes,
-    /// The hash masks of the branch nodes in the account proof.
-    pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
-    /// The tree masks of the branch nodes in the account proof.
-    pub branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    /// Consolidated branch node masks (`hash_mask`, `tree_mask`) for each path in the account
+    /// proof.
+    pub branch_node_masks: BranchNodeMasksMap,
     /// Storage trie multiproofs.
     pub storages: B256Map<DecodedStorageMultiProof>,
 }
@@ -314,8 +325,7 @@ impl DecodedMultiProof {
     /// Returns true if the multiproof is empty.
     pub fn is_empty(&self) -> bool {
         self.account_subtree.is_empty() &&
-            self.branch_node_hash_masks.is_empty() &&
-            self.branch_node_tree_masks.is_empty() &&
+            self.branch_node_masks.is_empty() &&
             self.storages.is_empty()
     }
 
@@ -395,9 +405,7 @@ impl DecodedMultiProof {
     /// proofs.
     pub fn extend(&mut self, other: Self) {
         self.account_subtree.extend_from(other.account_subtree);
-
-        self.branch_node_hash_masks.extend(other.branch_node_hash_masks);
-        self.branch_node_tree_masks.extend(other.branch_node_tree_masks);
+        self.branch_node_masks.extend(other.branch_node_masks);
 
         for (hashed_address, storage) in other.storages {
             match self.storages.entry(hashed_address) {
@@ -405,8 +413,7 @@ impl DecodedMultiProof {
                     debug_assert_eq!(entry.get().root, storage.root);
                     let entry = entry.get_mut();
                     entry.subtree.extend_from(storage.subtree);
-                    entry.branch_node_hash_masks.extend(storage.branch_node_hash_masks);
-                    entry.branch_node_tree_masks.extend(storage.branch_node_tree_masks);
+                    entry.branch_node_masks.extend(storage.branch_node_masks);
                 }
                 hash_map::Entry::Vacant(entry) => {
                     entry.insert(storage);
@@ -437,12 +444,7 @@ impl TryFrom<MultiProof> for DecodedMultiProof {
             .into_iter()
             .map(|(address, storage)| Ok((address, storage.try_into()?)))
             .collect::<Result<B256Map<_>, alloy_rlp::Error>>()?;
-        Ok(Self {
-            account_subtree,
-            branch_node_hash_masks: multi_proof.branch_node_hash_masks,
-            branch_node_tree_masks: multi_proof.branch_node_tree_masks,
-            storages,
-        })
+        Ok(Self { account_subtree, branch_node_masks: multi_proof.branch_node_masks, storages })
     }
 }
 
@@ -453,10 +455,9 @@ pub struct StorageMultiProof {
     pub root: B256,
     /// Storage multiproof for requested slots.
     pub subtree: ProofNodes,
-    /// The hash masks of the branch nodes in the storage proof.
-    pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
-    /// The tree masks of the branch nodes in the storage proof.
-    pub branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    /// Consolidated branch node masks (`hash_mask`, `tree_mask`) for each path in the storage
+    /// proof.
+    pub branch_node_masks: BranchNodeMasksMap,
 }
 
 impl StorageMultiProof {
@@ -468,8 +469,7 @@ impl StorageMultiProof {
                 Nibbles::default(),
                 Bytes::from([EMPTY_STRING_CODE]),
             )]),
-            branch_node_hash_masks: HashMap::default(),
-            branch_node_tree_masks: HashMap::default(),
+            branch_node_masks: BranchNodeMasksMap::default(),
         }
     }
 
@@ -508,10 +508,9 @@ pub struct DecodedStorageMultiProof {
     pub root: B256,
     /// Storage multiproof for requested slots.
     pub subtree: DecodedProofNodes,
-    /// The hash masks of the branch nodes in the storage proof.
-    pub branch_node_hash_masks: HashMap<Nibbles, TrieMask>,
-    /// The tree masks of the branch nodes in the storage proof.
-    pub branch_node_tree_masks: HashMap<Nibbles, TrieMask>,
+    /// Consolidated branch node masks (`hash_mask`, `tree_mask`) for each path in the storage
+    /// proof.
+    pub branch_node_masks: BranchNodeMasksMap,
 }
 
 impl DecodedStorageMultiProof {
@@ -520,8 +519,7 @@ impl DecodedStorageMultiProof {
         Self {
             root: EMPTY_ROOT_HASH,
             subtree: DecodedProofNodes::from_iter([(Nibbles::default(), TrieNode::EmptyRoot)]),
-            branch_node_hash_masks: HashMap::default(),
-            branch_node_tree_masks: HashMap::default(),
+            branch_node_masks: BranchNodeMasksMap::default(),
         }
     }
 
@@ -560,8 +558,7 @@ impl TryFrom<StorageMultiProof> for DecodedStorageMultiProof {
         Ok(Self {
             root: multi_proof.root,
             subtree,
-            branch_node_hash_masks: multi_proof.branch_node_hash_masks,
-            branch_node_tree_masks: multi_proof.branch_node_tree_masks,
+            branch_node_masks: multi_proof.branch_node_masks,
         })
     }
 }
@@ -910,8 +907,7 @@ mod tests {
             StorageMultiProof {
                 root,
                 subtree: subtree1,
-                branch_node_hash_masks: HashMap::default(),
-                branch_node_tree_masks: HashMap::default(),
+                branch_node_masks: BranchNodeMasksMap::default(),
             },
         );
 
@@ -925,8 +921,7 @@ mod tests {
             StorageMultiProof {
                 root,
                 subtree: subtree2,
-                branch_node_hash_masks: HashMap::default(),
-                branch_node_tree_masks: HashMap::default(),
+                branch_node_masks: BranchNodeMasksMap::default(),
             },
         );
 
