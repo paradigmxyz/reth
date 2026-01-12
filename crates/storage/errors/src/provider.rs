@@ -177,7 +177,9 @@ pub enum ProviderError {
         /// The available range of blocks with changesets
         available: core::ops::RangeInclusive<BlockNumber>,
     },
-    /// Inconsistency detected during [`ProviderFactory::check_consistency`].
+    /// Inconsistency detected between static files/rocksdb and the DB during
+    /// `ProviderFactory::check_consistency`. The database must be unwound to
+    /// the specified block number to restore consistency.
     #[error("consistency check failed for {data_source}. Db must be unwound to {unwind_to}")]
     MustUnwind {
         /// The inconsistent data source(s).
