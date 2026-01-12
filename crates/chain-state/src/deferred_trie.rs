@@ -176,7 +176,7 @@ impl DeferredTrieData {
         // We can only reuse the parent's overlay if it was built on top of the same
         // persisted anchor. If the anchor has changed (e.g., due to persistence),
         // the parent's overlay is relative to an old state and cannot be used.
-        let mut overlay = if let Some(parent) = ancestors.last() {
+        let overlay = if let Some(parent) = ancestors.last() {
             let parent_data = parent.wait_cloned();
 
             match &parent_data.anchored_trie_input {
@@ -184,31 +184,34 @@ impl DeferredTrieData {
                 Some(AnchoredTrieInput { anchor_hash: parent_anchor, trie_input })
                     if *parent_anchor == anchor_hash =>
                 {
-                    // O(1): Reuse parent's overlay
-                    TrieInputSorted::new(
+                    // O(1): Reuse parent's overlay, extend with current block's data.
+                    let mut overlay = TrieInputSorted::new(
                         Arc::clone(&trie_input.nodes),
                         Arc::clone(&trie_input.state),
                         Default::default(), // prefix_sets are per-block, not cumulative
-                    )
+                    );
+                    // Only trigger COW clone if there's actually data to add.
+                    if !sorted_hashed_state.is_empty() {
+                        Arc::make_mut(&mut overlay.state).extend_ref(&sorted_hashed_state);
+                    }
+                    if !sorted_trie_updates.is_empty() {
+                        Arc::make_mut(&mut overlay.nodes).extend_ref(&sorted_trie_updates);
+                    }
+                    overlay
                 }
                 // Case 2: Parent exists but anchor mismatch or no cached overlay.
                 // We must rebuild from the ancestors list (which only contains unpersisted blocks).
-                _ => Self::merge_ancestors_into_overlay(ancestors),
+                _ => Self::merge_ancestors_into_overlay(
+                    ancestors,
+                    &sorted_hashed_state,
+                    &sorted_trie_updates,
+                ),
             }
         } else {
             // Case 3: No in-memory ancestors (first block after persisted anchor).
-            // Start with empty overlay.
-            TrieInputSorted::default()
+            // Build overlay with just this block's data.
+            Self::merge_ancestors_into_overlay(&[], &sorted_hashed_state, &sorted_trie_updates)
         };
-
-        // Extend overlay with current block's sorted data.
-        // Only trigger COW clone if there's actually data to add.
-        if !sorted_hashed_state.is_empty() {
-            Arc::make_mut(&mut overlay.state).extend_ref(sorted_hashed_state.as_ref());
-        }
-        if !sorted_trie_updates.is_empty() {
-            Arc::make_mut(&mut overlay.nodes).extend_ref(sorted_trie_updates.as_ref());
-        }
 
         ComputedTrieData::with_trie_input(
             Arc::new(sorted_hashed_state),
@@ -218,15 +221,20 @@ impl DeferredTrieData {
         )
     }
 
-    /// Merge all ancestors into a single overlay.
+    /// Merge all ancestors and current block's data into a single overlay.
     ///
     /// This is a rare fallback path, only used when no ancestor has a cached
     /// `anchored_trie_input` (e.g., blocks created via alternative constructors).
     /// In normal operation, the parent always has a cached overlay and this
     /// function is never called.
     ///
-    /// Iterates ancestors oldest -> newest so later state takes precedence.
-    fn merge_ancestors_into_overlay(ancestors: &[Self]) -> TrieInputSorted {
+    /// Iterates ancestors oldest -> newest, then extends with current block's data,
+    /// so later state takes precedence.
+    fn merge_ancestors_into_overlay(
+        ancestors: &[Self],
+        sorted_hashed_state: &HashedPostStateSorted,
+        sorted_trie_updates: &TrieUpdatesSorted,
+    ) -> TrieInputSorted {
         let mut overlay = TrieInputSorted::default();
 
         // Get mutable references once outside the loop.
@@ -240,6 +248,11 @@ impl DeferredTrieData {
             state_mut.extend_ref(ancestor_data.hashed_state.as_ref());
             nodes_mut.extend_ref(ancestor_data.trie_updates.as_ref());
         }
+
+        // Extend with current block's sorted data last (takes precedence)
+        state_mut.extend_ref(sorted_hashed_state);
+        nodes_mut.extend_ref(sorted_trie_updates);
+
         overlay
     }
 
