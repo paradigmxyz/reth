@@ -1,19 +1,13 @@
 use crate::{
     metrics::ParallelTrieMetrics,
-    proof_task::{
-        AccountMultiproofInput, ProofResult, ProofResultContext, ProofWorkerHandle,
-        StorageProofInput, StorageProofResultMessage,
-    },
+    proof_task::{AccountMultiproofInput, ProofResult, ProofResultContext, ProofWorkerHandle},
     root::ParallelStateRootError,
     StorageRootTargets,
 };
-use alloy_primitives::{map::B256Set, B256};
-use crossbeam_channel::{unbounded as crossbeam_unbounded, Receiver as CrossbeamReceiver};
-use reth_execution_errors::StorageRootError;
-use reth_storage_errors::db::DatabaseError;
+use crossbeam_channel::unbounded as crossbeam_unbounded;
 use reth_trie::{
-    prefix_set::{PrefixSet, PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
-    DecodedMultiProof, DecodedStorageMultiProof, HashedPostState, MultiProofTargets, Nibbles,
+    prefix_set::{PrefixSetMut, TriePrefixSets, TriePrefixSetsMut},
+    DecodedMultiProof, HashedPostState, MultiProofTargets, Nibbles,
 };
 use reth_trie_common::added_removed_keys::MultiAddedRemovedKeys;
 use std::{sync::Arc, time::Instant};
@@ -76,78 +70,6 @@ impl ParallelProof {
     ) -> Self {
         self.multi_added_removed_keys = multi_added_removed_keys;
         self
-    }
-    /// Queues a storage proof task and returns a receiver for the result.
-    fn send_storage_proof(
-        &self,
-        hashed_address: B256,
-        prefix_set: PrefixSet,
-        target_slots: B256Set,
-    ) -> Result<CrossbeamReceiver<StorageProofResultMessage>, ParallelStateRootError> {
-        let (result_tx, result_rx) = crossbeam_channel::unbounded();
-
-        let input = if self.v2_proofs_enabled {
-            StorageProofInput::new(
-                hashed_address,
-                target_slots.into_iter().map(Into::into).collect(),
-            )
-        } else {
-            StorageProofInput::legacy(
-                hashed_address,
-                prefix_set,
-                target_slots,
-                self.collect_branch_node_masks,
-                self.multi_added_removed_keys.clone(),
-            )
-        };
-
-        self.proof_worker_handle
-            .dispatch_storage_proof(input, result_tx)
-            .map_err(|e| ParallelStateRootError::Other(e.to_string()))?;
-
-        Ok(result_rx)
-    }
-
-    /// Generate a storage multiproof according to the specified targets and hashed address.
-    pub fn storage_proof(
-        self,
-        hashed_address: B256,
-        target_slots: B256Set,
-    ) -> Result<DecodedStorageMultiProof, ParallelStateRootError> {
-        let total_targets = target_slots.len();
-        let prefix_set = if self.v2_proofs_enabled {
-            PrefixSet::default()
-        } else {
-            PrefixSetMut::from(target_slots.iter().map(Nibbles::unpack)).freeze()
-        };
-
-        trace!(
-            target: "trie::parallel_proof",
-            total_targets,
-            ?hashed_address,
-            "Starting storage proof generation"
-        );
-
-        let receiver = self.send_storage_proof(hashed_address, prefix_set, target_slots)?;
-        let proof_msg = receiver.recv().map_err(|_| {
-            ParallelStateRootError::StorageRoot(StorageRootError::Database(DatabaseError::Other(
-                format!("channel closed for {hashed_address}"),
-            )))
-        })?;
-
-        // Extract storage proof directly from the result
-        let proof_result = proof_msg.result?;
-        let storage_proof = Into::<Option<DecodedStorageMultiProof>>::into(proof_result)
-            .expect("Partial proofs are not yet supported");
-
-        trace!(
-            target: "trie::parallel_proof",
-            total_targets,
-            ?hashed_address,
-            "Storage proof generation completed"
-        );
-
-        Ok(storage_proof)
     }
 
     /// Extends prefix sets with the given multiproof targets and returns the frozen result.
@@ -249,7 +171,7 @@ mod tests {
     use alloy_primitives::{
         keccak256,
         map::{B256Set, DefaultHashBuilder, HashMap},
-        Address, U256,
+        Address, B256, U256,
     };
     use rand::Rng;
     use reth_primitives_traits::{Account, StorageEntry};
