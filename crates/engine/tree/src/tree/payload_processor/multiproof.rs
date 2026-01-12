@@ -1124,7 +1124,9 @@ impl MultiProofTask {
             .record(batch_metrics.state_update_proofs_requested as f64);
         self.metrics.proofs_processed_histogram.record(batch_metrics.proofs_processed as f64);
         if let Some(first_update_time) = ctx.first_update_time {
-            self.metrics.multiproof_task_total_duration_histogram.record(end.duration_since(first_update_time));
+            self.metrics
+                .multiproof_task_total_duration_histogram
+                .record(end.duration_since(first_update_time));
         }
 
         if let Some(updates_finished_time) = ctx.updates_finished_time {
