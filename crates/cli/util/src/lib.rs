@@ -8,9 +8,6 @@
 #![cfg_attr(not(test), warn(unused_crate_dependencies))]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
-#[cfg(feature = "tracy-allocator")]
-use reth_tracing as _;
-
 pub mod allocator;
 pub mod cancellation;
 
