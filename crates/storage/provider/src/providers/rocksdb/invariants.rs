@@ -164,15 +164,16 @@ impl RocksDBProvider {
                 self.prune_transaction_hash_numbers_in_range(provider, 0..=highest_tx)?;
             }
             (None, None) => {
-                // Both MDBX and static files are empty.
-                // If checkpoint says we should have data, that's an inconsistency.
+                // Both MDBX and static files are empty - this is expected on first run.
+                // Log a warning but don't require unwind to 0, as the pipeline will
+                // naturally populate the data during sync.
                 if checkpoint > 0 {
                     tracing::warn!(
                         target: "reth::providers::rocksdb",
                         checkpoint,
-                        "Checkpoint set but no transaction data exists, unwind needed"
+                        "TransactionHashNumbers: no transaction data exists but checkpoint is set. \
+                         This is expected on first run with RocksDB enabled."
                     );
-                    return Ok(Some(0));
                 }
             }
         }
@@ -263,14 +264,33 @@ impl RocksDBProvider {
                 }
 
                 // Find the max highest_block_number (excluding u64::MAX sentinel) across all
-                // entries
+                // entries. Also track if we found any non-sentinel entries.
                 let mut max_highest_block = 0u64;
+                let mut found_non_sentinel = false;
                 for result in self.iter::<tables::StoragesHistory>()? {
                     let (key, _) = result?;
                     let highest = key.sharded_key.highest_block_number;
-                    if highest != u64::MAX && highest > max_highest_block {
-                        max_highest_block = highest;
+                    if highest != u64::MAX {
+                        found_non_sentinel = true;
+                        if highest > max_highest_block {
+                            max_highest_block = highest;
+                        }
                     }
+                }
+
+                // If all entries are sentinel entries (u64::MAX), treat as first-run scenario.
+                // Sentinel entries represent "open" shards that haven't been completed yet,
+                // so no actual history has been indexed.
+                if !found_non_sentinel {
+                    if checkpoint > 0 {
+                        tracing::warn!(
+                            target: "reth::providers::rocksdb",
+                            checkpoint,
+                            "StoragesHistory has only sentinel entries but checkpoint is set. \
+                             This is expected on first run with RocksDB enabled."
+                        );
+                    }
+                    return Ok(None);
                 }
 
                 // If any entry has highest_block > checkpoint, prune excess
@@ -383,14 +403,33 @@ impl RocksDBProvider {
                 }
 
                 // Find the max highest_block_number (excluding u64::MAX sentinel) across all
-                // entries
+                // entries. Also track if we found any non-sentinel entries.
                 let mut max_highest_block = 0u64;
+                let mut found_non_sentinel = false;
                 for result in self.iter::<tables::AccountsHistory>()? {
                     let (key, _) = result?;
                     let highest = key.highest_block_number;
-                    if highest != u64::MAX && highest > max_highest_block {
-                        max_highest_block = highest;
+                    if highest != u64::MAX {
+                        found_non_sentinel = true;
+                        if highest > max_highest_block {
+                            max_highest_block = highest;
+                        }
                     }
+                }
+
+                // If all entries are sentinel entries (u64::MAX), treat as first-run scenario.
+                // Sentinel entries represent "open" shards that haven't been completed yet,
+                // so no actual history has been indexed.
+                if !found_non_sentinel {
+                    if checkpoint > 0 {
+                        tracing::warn!(
+                            target: "reth::providers::rocksdb",
+                            checkpoint,
+                            "AccountsHistory has only sentinel entries but checkpoint is set. \
+                             This is expected on first run with RocksDB enabled."
+                        );
+                    }
+                    return Ok(None);
                 }
 
                 // If any entry has highest_block > checkpoint, prune excess
@@ -554,7 +593,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_empty_rocksdb_with_checkpoint_needs_unwind() {
+    fn test_check_consistency_empty_rocksdb_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::TransactionHashNumbers>()
@@ -578,10 +617,10 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB is empty but checkpoint says block 100 was processed
-        // This means RocksDB is missing data and we need to unwind to rebuild
+        // RocksDB is empty but checkpoint says block 100 was processed.
+        // This is treated as a first-run/migration scenario - no unwind needed.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, Some(0), "Should require unwind to block 0 to rebuild RocksDB");
+        assert_eq!(result, None, "Empty data with checkpoint is treated as first run");
     }
 
     #[test]
@@ -988,6 +1027,97 @@ mod tests {
         assert!(
             rocksdb.get::<tables::StoragesHistory>(key_block_max).unwrap().is_some(),
             "Entry with highest_block=u64::MAX (sentinel) should remain"
+        );
+    }
+
+    #[test]
+    fn test_check_consistency_storages_history_sentinel_only_with_checkpoint_is_first_run() {
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::StoragesHistory>()
+            .build()
+            .unwrap();
+
+        // Insert ONLY sentinel entries (highest_block_number = u64::MAX)
+        // This simulates a scenario where history tracking started but no shards were completed
+        let key_sentinel_1 = StorageShardedKey::new(Address::ZERO, B256::ZERO, u64::MAX);
+        let key_sentinel_2 = StorageShardedKey::new(Address::random(), B256::random(), u64::MAX);
+        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
+        rocksdb.put::<tables::StoragesHistory>(key_sentinel_1, &block_list).unwrap();
+        rocksdb.put::<tables::StoragesHistory>(key_sentinel_2, &block_list).unwrap();
+
+        // Verify entries exist (not empty table)
+        assert!(rocksdb.first::<tables::StoragesHistory>().unwrap().is_some());
+
+        // Create a test provider factory for MDBX
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        // Set a checkpoint indicating we should have processed up to block 100
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexStorageHistory, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // RocksDB has only sentinel entries (no completed shards) but checkpoint is set.
+        // This is treated as a first-run/migration scenario - no unwind needed.
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(
+            result, None,
+            "Sentinel-only entries with checkpoint should be treated as first run"
+        );
+    }
+
+    #[test]
+    fn test_check_consistency_accounts_history_sentinel_only_with_checkpoint_is_first_run() {
+        use reth_db_api::models::ShardedKey;
+
+        let temp_dir = TempDir::new().unwrap();
+        let rocksdb = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+
+        // Insert ONLY sentinel entries (highest_block_number = u64::MAX)
+        let key_sentinel_1 = ShardedKey::new(Address::ZERO, u64::MAX);
+        let key_sentinel_2 = ShardedKey::new(Address::random(), u64::MAX);
+        let block_list = BlockNumberList::new_pre_sorted([10, 20, 30]);
+        rocksdb.put::<tables::AccountsHistory>(key_sentinel_1, &block_list).unwrap();
+        rocksdb.put::<tables::AccountsHistory>(key_sentinel_2, &block_list).unwrap();
+
+        // Verify entries exist (not empty table)
+        assert!(rocksdb.first::<tables::AccountsHistory>().unwrap().is_some());
+
+        // Create a test provider factory for MDBX
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        // Set a checkpoint indicating we should have processed up to block 100
+        {
+            let provider = factory.database_provider_rw().unwrap();
+            provider
+                .save_stage_checkpoint(StageId::IndexAccountHistory, StageCheckpoint::new(100))
+                .unwrap();
+            provider.commit().unwrap();
+        }
+
+        let provider = factory.database_provider_ro().unwrap();
+
+        // RocksDB has only sentinel entries (no completed shards) but checkpoint is set.
+        // This is treated as a first-run/migration scenario - no unwind needed.
+        let result = rocksdb.check_consistency(&provider).unwrap();
+        assert_eq!(
+            result, None,
+            "Sentinel-only entries with checkpoint should be treated as first run"
         );
     }
 
