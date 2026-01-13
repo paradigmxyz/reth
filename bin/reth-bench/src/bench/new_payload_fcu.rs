@@ -470,7 +470,6 @@ impl PersistenceWaiter {
     }
 
     /// Called once per block. Waits based on the configured mode.
-    #[allow(clippy::manual_is_multiple_of)]
     async fn on_block(&mut self, block_number: u64) -> eyre::Result<()> {
         if let Some(wait_time) = self.wait_time {
             tokio::time::sleep(wait_time).await;
