@@ -6,7 +6,7 @@ use alloy_consensus::BlockHeader;
 use alloy_primitives::{BlockHash, BlockNumber, TxNumber, U256};
 use parking_lot::{lock_api::RwLockWriteGuard, RawRwLock, RwLock};
 use reth_codecs::Compact;
-use reth_db::models::AccountBeforeTx;
+use reth_db::{models::AccountBeforeTx, set_fail_point};
 use reth_db_api::models::CompactU256;
 use reth_nippy_jar::{NippyJar, NippyJarError, NippyJarWriter};
 use reth_node_types::NodePrimitives;
@@ -120,6 +120,7 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
             }
         }
 
+        set_fail_point!("static_file::after_commit");
         debug!(target: "provider::static_file", "Committed all static file segments");
         Ok(())
     }
@@ -352,6 +353,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 "Committed writer to disk"
             );
 
+            set_fail_point!("static_file::segment::after_commit");
             self.update_index()?;
         }
 

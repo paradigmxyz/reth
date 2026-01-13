@@ -154,3 +154,51 @@ Returns the storage at the given block height and transaction index. The result 
 | Client | Method invocation                                                                                 |
 | ------ | ------------------------------------------------------------------------------------------------- |
 | RPC    | `{"method": "debug_storageRangeAt", "params": [block_hash, tx_index, address, key_start, limit]}` |
+
+## `debug_setFailpoint`
+
+Sets a failpoint with the given name and action for runtime fault injection. This method is useful for testing crash recovery and consistency mechanisms.
+
+> **Note**
+>
+> This RPC method is only available when reth is built with the `failpoints` feature enabled.
+
+**Parameters:**
+
+- `name` (string): The name of the failpoint to set (e.g., `"provider::commit::after_rocksdb"`)
+- `actions` (string): The action to perform when the failpoint is triggered. Common actions include:
+  - `"off"`: Disable the failpoint
+  - `"return"`: Return early from the function
+  - `"panic"`: Trigger a panic
+  - `"sleep(ms)"`: Sleep for the specified milliseconds
+  - `"print"`: Print a message
+  - Actions can be prefixed with a probability, e.g., `"50%panic"` for 50% chance to panic
+
+**Available Failpoints:**
+
+| Failpoint Name | Description |
+| -------------- | ----------- |
+| `provider::commit::after_mdbx` | After MDBX transaction commit (normal path) |
+| `provider::commit::after_rocksdb` | After RocksDB batches commit (normal path) |
+| `provider::commit::after_static_files` | After static files commit (normal path) |
+| `provider::commit::after_mdbx_unwind` | After MDBX transaction commit (unwind path) |
+| `provider::commit::after_rocksdb_unwind` | After RocksDB batches commit (unwind path) |
+| `provider::commit::after_static_files_unwind` | After static files commit (unwind path) |
+| `rocksdb::batch::after_commit` | After RocksDB batch commit |
+| `rocksdb::tx::after_commit` | After RocksDB transaction commit |
+| `static_file::after_commit` | After all static file segments commit |
+| `static_file::segment::after_commit` | After a single static file segment commit |
+
+| Client | Method invocation                                                    |
+| ------ | -------------------------------------------------------------------- |
+| RPC    | `{"method": "debug_setFailpoint", "params": ["failpoint_name", "action"]}` |
+
+**Example:**
+
+```bash
+# Enable a failpoint that will panic
+cast rpc debug_setFailpoint "provider::commit::after_rocksdb" "panic"
+
+# Disable a failpoint
+cast rpc debug_setFailpoint "provider::commit::after_rocksdb" "off"
+```

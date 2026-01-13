@@ -39,6 +39,7 @@ derive_more.workspace = true
 rustc-hash = { workspace = true, optional = true, features = ["std"] }
 sysinfo = { workspace = true, features = ["system"] }
 parking_lot = { workspace = true, optional = true }
+fail = { workspace = true, optional = true }
 
 # arbitrary utils
 strum = { workspace = true, features = ["derive"], optional = true }
@@ -96,6 +97,7 @@ op = [
     "reth-db-api/op",
     "reth-primitives-traits/op",
 ]
+failpoints = ["fail/failpoints"]
 disable-lock = []
 
 [[bench]]

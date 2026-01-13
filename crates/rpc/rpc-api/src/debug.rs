@@ -426,6 +426,16 @@ pub trait DebugApi<TxReq: RpcObject> {
     /// Writes a goroutine blocking profile to the given file.
     #[method(name = "writeMutexProfile")]
     async fn debug_write_mutex_profile(&self, file: String) -> RpcResult<()>;
+
+    /// Sets a failpoint with the given name and action.
+    ///
+    /// This method allows runtime fault injection for testing recovery logic.
+    /// Actions: "off", "return", "sleep(ms)", "panic", "print", "pause", "yield"
+    /// Example: "100%return" triggers 100% of the time
+    ///
+    /// Note: Only available when built with the `failpoints` feature.
+    #[method(name = "setFailpoint")]
+    async fn debug_set_failpoint(&self, name: String, actions: String) -> RpcResult<()>;
 }
 
 /// An extension to the `debug_` namespace that provides additional methods for retrieving

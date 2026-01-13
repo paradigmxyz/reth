@@ -176,6 +176,8 @@ min-trace-logs = [
     "reth-node-core/min-trace-logs",
 ]
 
+failpoints = ["reth-node-ethereum/failpoints"]
+
 edge = ["reth-ethereum-cli/edge"]
 
 [[bin]]
