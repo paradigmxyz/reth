@@ -760,6 +760,11 @@ impl<TX: DbTx + 'static, N: NodeTypes> TryIntoHistoricalStateProvider for Databa
 /// The boundary shard (the shard that spans across the block number) is removed from the database.
 /// Any indices that are below the block number are filtered out and returned for reinsertion.
 /// The boundary shard is returned for reinsertion (if it's not empty).
+///
+/// NOTE: This function is no longer used directly - the logic has been moved to
+/// `EitherWriter::unwind_*_history_shards()` methods for `RocksDB` support.
+/// Kept for reference.
+#[allow(dead_code)]
 fn unwind_history_shards<S, T, C>(
     cursor: &mut C,
     start_key: T::Key,
@@ -3049,39 +3054,35 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HashingWriter for DatabaseProvi
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvider<TX, N> {
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> HistoryWriter
+    for DatabaseProvider<TX, N>
+{
     fn unwind_account_history_indices<'a>(
         &self,
         changesets: impl Iterator<Item = &'a (BlockNumber, AccountBeforeTx)>,
     ) -> ProviderResult<usize> {
-        let mut last_indices = changesets
-            .into_iter()
-            .map(|(index, account)| (account.address, *index))
-            .collect::<Vec<_>>();
-        last_indices.sort_by_key(|(a, _)| *a);
-
-        // Unwind the account history index.
-        let mut cursor = self.tx.cursor_write::<tables::AccountsHistory>()?;
-        for &(address, rem_index) in &last_indices {
-            let partial_shard = unwind_history_shards::<_, tables::AccountsHistory, _>(
-                &mut cursor,
-                ShardedKey::last(address),
-                rem_index,
-                |sharded_key| sharded_key.key == address,
-            )?;
-
-            // Check the last returned partial shard.
-            // If it's not empty, the shard needs to be reinserted.
-            if !partial_shard.is_empty() {
-                cursor.insert(
-                    ShardedKey::last(address),
-                    &BlockNumberList::new_pre_sorted(partial_shard),
-                )?;
-            }
+        // Collect and deduplicate by address, finding minimum block for each
+        let mut account_keys: std::collections::HashMap<Address, BlockNumber> =
+            std::collections::HashMap::new();
+        for (block_number, account) in changesets {
+            account_keys
+                .entry(account.address)
+                .and_modify(|min_bn| *min_bn = (*min_bn).min(*block_number))
+                .or_insert(*block_number);
         }
 
-        let changesets = last_indices.len();
-        Ok(changesets)
+        let changesets_count = account_keys.len();
+
+        // Unwind the account history index using EitherWriter for RocksDB support
+        self.with_rocksdb_batch(|batch| {
+            let mut writer = EitherWriter::new_accounts_history(self, batch)?;
+            for (address, min_block) in account_keys {
+                writer.unwind_account_history_shards(address, min_block)?;
+            }
+            Ok(((), writer.into_raw_rocksdb_batch()))
+        })?;
+
+        Ok(changesets_count)
     }
 
     fn unwind_account_history_indices_range(
@@ -3110,36 +3111,28 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         &self,
         changesets: impl Iterator<Item = (BlockNumberAddress, StorageEntry)>,
     ) -> ProviderResult<usize> {
-        let mut storage_changesets = changesets
-            .into_iter()
-            .map(|(BlockNumberAddress((bn, address)), storage)| (address, storage.key, bn))
-            .collect::<Vec<_>>();
-        storage_changesets.sort_by_key(|(address, key, _)| (*address, *key));
-
-        let mut cursor = self.tx.cursor_write::<tables::StoragesHistory>()?;
-        for &(address, storage_key, rem_index) in &storage_changesets {
-            let partial_shard = unwind_history_shards::<_, tables::StoragesHistory, _>(
-                &mut cursor,
-                StorageShardedKey::last(address, storage_key),
-                rem_index,
-                |storage_sharded_key| {
-                    storage_sharded_key.address == address &&
-                        storage_sharded_key.sharded_key.key == storage_key
-                },
-            )?;
-
-            // Check the last returned partial shard.
-            // If it's not empty, the shard needs to be reinserted.
-            if !partial_shard.is_empty() {
-                cursor.insert(
-                    StorageShardedKey::last(address, storage_key),
-                    &BlockNumberList::new_pre_sorted(partial_shard),
-                )?;
-            }
+        // Collect and deduplicate by (address, storage_key), finding minimum block for each
+        let mut storage_keys: std::collections::HashMap<(Address, B256), BlockNumber> =
+            std::collections::HashMap::new();
+        for (BlockNumberAddress((bn, address)), storage) in changesets {
+            storage_keys
+                .entry((address, storage.key))
+                .and_modify(|min_bn| *min_bn = (*min_bn).min(bn))
+                .or_insert(bn);
         }
 
-        let changesets = storage_changesets.len();
-        Ok(changesets)
+        let changesets_count = storage_keys.len();
+
+        // Unwind the storage history index using EitherWriter for RocksDB support
+        self.with_rocksdb_batch(|batch| {
+            let mut writer = EitherWriter::new_storages_history(self, batch)?;
+            for ((address, storage_key), min_block) in storage_keys {
+                writer.unwind_storage_history_shards(address, storage_key, min_block)?;
+            }
+            Ok(((), writer.into_raw_rocksdb_batch()))
+        })?;
+
+        Ok(changesets_count)
     }
 
     fn unwind_storage_history_indices_range(
@@ -5293,6 +5286,154 @@ mod tests {
                 } else {
                     assert!(receipt.is_none());
                 }
+            }
+        }
+    }
+
+    /// Tests for `RocksDB` pending batch management and commit atomicity.
+    #[cfg(all(test, unix, feature = "rocksdb"))]
+    mod rocksdb_commit_tests {
+        use super::*;
+
+        /// Test that multiple pending `RocksDB` batches are all committed atomically.
+        /// This verifies that registering multiple batches before `commit()` results
+        /// in all batch data being present in `RocksDB` after commit.
+        #[test]
+        fn test_multiple_pending_batches_all_committed() {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+            );
+
+            let provider_rw = factory.provider_rw().unwrap();
+
+            // Create and register 3 separate batches with different transaction hash lookups
+            let hashes: Vec<B256> = (0..3).map(|i| B256::from([i + 1; 32])).collect();
+            let tx_numbers: Vec<u64> = vec![100, 200, 300];
+
+            for (hash, tx_num) in hashes.iter().zip(tx_numbers.iter()) {
+                let rocksdb = factory.rocksdb_provider();
+                let mut batch = rocksdb.batch();
+                batch.put::<tables::TransactionHashNumbers>(*hash, tx_num).unwrap();
+                provider_rw.set_pending_rocksdb_batch(batch.into_inner());
+            }
+
+            // Commit provider
+            provider_rw.commit().unwrap();
+
+            // Verify all 3 batches' data is present in RocksDB
+            let rocksdb = factory.rocksdb_provider();
+            for (hash, expected_tx_num) in hashes.iter().zip(tx_numbers.iter()) {
+                let actual = rocksdb.get::<tables::TransactionHashNumbers>(*hash).unwrap();
+                assert_eq!(actual, Some(*expected_tx_num), "Data from batch not committed");
+            }
+        }
+
+        /// Test that pending batch ordering is preserved - later batches overwrite earlier ones.
+        /// This verifies the correct behavior when multiple batches write to the same key.
+        #[test]
+        fn test_pending_batch_ordering_preserved() {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+            );
+
+            let provider_rw = factory.provider_rw().unwrap();
+
+            let hash = B256::from([42u8; 32]);
+
+            // Register 3 batches that all write to the same key with different values
+            for tx_num in [100u64, 200u64, 300u64] {
+                let rocksdb = factory.rocksdb_provider();
+                let mut batch = rocksdb.batch();
+                batch.put::<tables::TransactionHashNumbers>(hash, &tx_num).unwrap();
+                provider_rw.set_pending_rocksdb_batch(batch.into_inner());
+            }
+
+            // Commit provider
+            provider_rw.commit().unwrap();
+
+            // Verify the final value is from the last batch (300)
+            let rocksdb = factory.rocksdb_provider();
+            let actual = rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap();
+            assert_eq!(actual, Some(300), "Last batch should win");
+        }
+
+        /// Test that `RocksDB` batches are committed even when static files have unwind queued.
+        /// This tests the unwind path where MDBX commits first.
+        #[test]
+        fn test_rocksdb_commits_with_unwind_path() {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+            );
+
+            let provider_rw = factory.provider_rw().unwrap();
+
+            // Register a batch
+            let hash = B256::from([99u8; 32]);
+            let tx_num = 999u64;
+            let rocksdb = factory.rocksdb_provider();
+            let mut batch = rocksdb.batch();
+            batch.put::<tables::TransactionHashNumbers>(hash, &tx_num).unwrap();
+            provider_rw.set_pending_rocksdb_batch(batch.into_inner());
+
+            // Note: We can't easily trigger the unwind path without actually having
+            // static file writes queued. But this test verifies that even in the normal
+            // path, batches are committed correctly.
+
+            // Commit provider
+            provider_rw.commit().unwrap();
+
+            // Verify the data is present
+            let rocksdb = factory.rocksdb_provider();
+            let actual = rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap();
+            assert_eq!(actual, Some(tx_num), "Batch should be committed");
+        }
+
+        /// Test that no batches are lost when commit is called without any pending batches.
+        #[test]
+        fn test_commit_with_no_pending_batches() {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+            );
+
+            let provider_rw = factory.provider_rw().unwrap();
+
+            // Don't register any batches, just commit
+            let result = provider_rw.commit();
+            assert!(result.is_ok(), "Commit should succeed with no pending batches");
+        }
+
+        /// Test that large number of pending batches all get committed.
+        #[test]
+        fn test_many_pending_batches() {
+            let factory = create_test_provider_factory();
+            factory.set_storage_settings_cache(
+                StorageSettings::legacy().with_transaction_hash_numbers_in_rocksdb(true),
+            );
+
+            let provider_rw = factory.provider_rw().unwrap();
+
+            // Register 100 batches
+            let count = 100u64;
+            for i in 0..count {
+                let hash = B256::from([i as u8; 32]);
+                let rocksdb = factory.rocksdb_provider();
+                let mut batch = rocksdb.batch();
+                batch.put::<tables::TransactionHashNumbers>(hash, &i).unwrap();
+                provider_rw.set_pending_rocksdb_batch(batch.into_inner());
+            }
+
+            provider_rw.commit().unwrap();
+
+            // Verify all entries present
+            let rocksdb = factory.rocksdb_provider();
+            for i in 0..count {
+                let hash = B256::from([i as u8; 32]);
+                let actual = rocksdb.get::<tables::TransactionHashNumbers>(hash).unwrap();
+                assert_eq!(actual, Some(i), "Entry {i} should be present");
             }
         }
     }

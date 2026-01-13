@@ -425,6 +425,34 @@ impl RocksDBProvider {
         })
     }
 
+    /// Clears all entries from the specified table.
+    ///
+    /// This iterates through all keys and deletes them one by one.
+    /// For large tables, consider using a batch operation instead.
+    pub fn clear<T: Table>(&self) -> ProviderResult<()> {
+        let cf = self.get_cf_handle::<T>()?;
+
+        // Collect all keys first to avoid iterator invalidation during deletion
+        let keys: Vec<_> = self
+            .0
+            .db
+            .iterator_cf(cf, IteratorMode::Start)
+            .filter_map(|result| result.ok().map(|(k, _)| k.to_vec()))
+            .collect();
+
+        // Delete each key
+        for key in keys {
+            self.0.db.delete_cf(cf, &key).map_err(|e| {
+                ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
+        }
+
+        Ok(())
+    }
+
     /// Gets the first (smallest key) entry from the specified table.
     pub fn first<T: Table>(&self) -> ProviderResult<Option<(T::Key, T::Value)>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
@@ -482,6 +510,22 @@ impl RocksDBProvider {
         let cf = self.get_cf_handle::<T>()?;
         let iter = self.0.db.iterator_cf(cf, IteratorMode::Start);
         Ok(RocksDBIter { inner: iter, _marker: std::marker::PhantomData })
+    }
+
+    /// Creates an iterator starting from the given key (inclusive) in reverse order.
+    ///
+    /// Returns decoded `(Key, Value)` pairs in reverse key order, starting from `key`.
+    pub fn iter_from_reverse<T: Table>(
+        &self,
+        key: T::Key,
+    ) -> ProviderResult<RocksDBIterReverse<'_, T>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let encoded_key = key.encode();
+        let iter = self
+            .0
+            .db
+            .iterator_cf(cf, IteratorMode::From(encoded_key.as_ref(), rocksdb::Direction::Reverse));
+        Ok(RocksDBIterReverse { inner: iter, _marker: std::marker::PhantomData })
     }
 
     /// Writes a batch of operations atomically.
@@ -1037,6 +1081,50 @@ impl<T: Table> Iterator for RocksDBIter<'_, T> {
     }
 }
 
+/// Reverse iterator over a `RocksDB` table (non-transactional).
+///
+/// Yields decoded `(Key, Value)` pairs in reverse key order.
+pub struct RocksDBIterReverse<'db, T: Table> {
+    inner: rocksdb::DBIteratorWithThreadMode<'db, OptimisticTransactionDB>,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: Table> fmt::Debug for RocksDBIterReverse<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBIterReverse").field("table", &T::NAME).finish_non_exhaustive()
+    }
+}
+
+impl<T: Table> Iterator for RocksDBIterReverse<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let (key_bytes, value_bytes) = match self.inner.next()? {
+            Ok(kv) => kv,
+            Err(e) => {
+                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))))
+            }
+        };
+
+        // Decode key
+        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
+            Ok(k) => k,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        // Decompress value
+        let value = match T::Value::decompress(&value_bytes) {
+            Ok(v) => v,
+            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+        };
+
+        Some(Ok((key, value)))
+    }
+}
+
 /// Iterator over a `RocksDB` table within a transaction.
 ///
 /// Yields decoded `(Key, Value)` pairs. Sees uncommitted writes.
@@ -1136,6 +1224,16 @@ mod tests {
         const DUPSORT: bool = false;
         type Key = u64;
         type Value = Vec<u8>;
+    }
+
+    #[derive(Debug)]
+    struct TestTable2;
+
+    impl Table for TestTable2 {
+        const NAME: &'static str = "TestTable2";
+        const DUPSORT: bool = false;
+        type Key = u64;
+        type Value = u64;
     }
 
     #[test]
@@ -1573,5 +1671,286 @@ mod tests {
         assert_eq!(result, HistoryInfo::NotYetWritten);
 
         tx.rollback().unwrap();
+    }
+
+    #[test]
+    fn test_clear_empty_table() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Clear an empty table should succeed without error
+        provider.clear::<TestTable>().unwrap();
+
+        // Verify table is still usable after clear
+        provider.put::<TestTable>(1, &b"value".to_vec()).unwrap();
+        assert_eq!(provider.get::<TestTable>(1).unwrap(), Some(b"value".to_vec()));
+    }
+
+    #[test]
+    fn test_clear_single_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Insert a single entry
+        provider.put::<TestTable>(42, &b"test_value".to_vec()).unwrap();
+        assert_eq!(provider.get::<TestTable>(42).unwrap(), Some(b"test_value".to_vec()));
+
+        // Clear the table
+        provider.clear::<TestTable>().unwrap();
+
+        // Verify entry is gone
+        assert_eq!(provider.get::<TestTable>(42).unwrap(), None);
+    }
+
+    #[test]
+    fn test_clear_multiple_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Insert multiple entries
+        for i in 0..100u64 {
+            provider.put::<TestTable>(i, &format!("value_{i}").into_bytes()).unwrap();
+        }
+
+        // Verify entries exist
+        assert_eq!(provider.get::<TestTable>(50).unwrap(), Some(b"value_50".to_vec()));
+
+        // Clear the table
+        provider.clear::<TestTable>().unwrap();
+
+        // Verify all entries are gone
+        for i in 0..100u64 {
+            assert_eq!(provider.get::<TestTable>(i).unwrap(), None);
+        }
+
+        // Verify table is still usable
+        provider.put::<TestTable>(999, &b"new_value".to_vec()).unwrap();
+        assert_eq!(provider.get::<TestTable>(999).unwrap(), Some(b"new_value".to_vec()));
+    }
+
+    #[test]
+    fn test_iter_from_reverse_empty_table() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Reverse iterator on empty table should return no elements
+        let iter = provider.iter_from_reverse::<TestTable>(100).unwrap();
+        let items: Vec<_> = iter.collect();
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_iter_from_reverse_single_entry() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Insert a single entry
+        provider.put::<TestTable>(50, &b"value_50".to_vec()).unwrap();
+
+        // Reverse iterator starting at/above the key should find it
+        let iter = provider.iter_from_reverse::<TestTable>(100).unwrap();
+        let items: Vec<_> = iter.collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(items.len(), 1);
+        assert_eq!(items[0], (50, b"value_50".to_vec()));
+
+        // Reverse iterator starting below the key should not find it
+        let iter = provider.iter_from_reverse::<TestTable>(40).unwrap();
+        let items: Vec<_> = iter.collect::<Result<Vec<_>, _>>().unwrap();
+        assert!(items.is_empty());
+    }
+
+    #[test]
+    fn test_iter_from_reverse_multiple_entries() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Insert entries at keys 10, 20, 30, 40, 50
+        for i in [10u64, 20, 30, 40, 50] {
+            provider.put::<TestTable>(i, &format!("value_{i}").into_bytes()).unwrap();
+        }
+
+        // Reverse iterator starting at 35 should return 30, 20, 10 in that order
+        let iter = provider.iter_from_reverse::<TestTable>(35).unwrap();
+        let items: Vec<_> = iter.collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(items.len(), 3);
+        assert_eq!(items[0].0, 30);
+        assert_eq!(items[1].0, 20);
+        assert_eq!(items[2].0, 10);
+
+        // Reverse iterator starting at 50 should return 50, 40, 30, 20, 10
+        let iter = provider.iter_from_reverse::<TestTable>(50).unwrap();
+        let items: Vec<_> = iter.collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(items.len(), 5);
+        assert_eq!(items[0].0, 50);
+        assert_eq!(items[4].0, 10);
+    }
+
+    #[test]
+    fn test_iter_from_reverse_key_not_found() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // Insert entries at keys 10, 30, 50
+        provider.put::<TestTable>(10, &b"value_10".to_vec()).unwrap();
+        provider.put::<TestTable>(30, &b"value_30".to_vec()).unwrap();
+        provider.put::<TestTable>(50, &b"value_50".to_vec()).unwrap();
+
+        // Starting at key 40 (doesn't exist) should start from 30
+        let iter = provider.iter_from_reverse::<TestTable>(40).unwrap();
+        let items: Vec<_> = iter.collect::<Result<Vec<_>, _>>().unwrap();
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].0, 30);
+        assert_eq!(items[1].0, 10);
+    }
+
+    // ========================
+    // Migration Path Tests
+    // ========================
+
+    /// Test that creating a new `RocksDB` in an existing directory works.
+    /// This simulates the migration path where MDBX-only data exists but
+    /// `RocksDB` is being enabled for the first time.
+    #[test]
+    fn test_create_rocksdb_in_existing_directory() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create some files to simulate existing data directory
+        std::fs::write(temp_dir.path().join("dummy_file.txt"), b"existing data").unwrap();
+
+        // Creating RocksDB should succeed even with existing directory contents
+        let provider =
+            RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+
+        // RocksDB should be empty (no migration of data)
+        let iter = provider.iter::<TestTable>().unwrap();
+        let items: Vec<_> = iter.collect::<Result<Vec<_>, _>>().unwrap();
+        assert!(items.is_empty());
+
+        // Should be fully functional
+        provider.put::<TestTable>(1, &b"new_data".to_vec()).unwrap();
+        assert_eq!(provider.get::<TestTable>(1).unwrap(), Some(b"new_data".to_vec()));
+    }
+
+    /// Test that reopening `RocksDB` with additional column families works.
+    /// This simulates adding support for new tables in a future version.
+    #[test]
+    fn test_open_rocksdb_add_new_column_family() {
+        let temp_dir = TempDir::new().unwrap();
+
+        // Create RocksDB with only TestTable
+        {
+            let provider =
+                RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
+            provider.put::<TestTable>(42, &b"test_value".to_vec()).unwrap();
+        }
+
+        // Reopen with both TestTable and TestTable2
+        // The new column family should be created automatically
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<TestTable>()
+            .with_table::<TestTable2>()
+            .build()
+            .unwrap();
+
+        // Original data should still be present
+        assert_eq!(provider.get::<TestTable>(42).unwrap(), Some(b"test_value".to_vec()));
+
+        // New table should be usable
+        provider.put::<TestTable2>(100, &200u64).unwrap();
+        assert_eq!(provider.get::<TestTable2>(100).unwrap(), Some(200u64));
+    }
+
+    // ========================
+    // Large Data Volume Tests
+    // ========================
+
+    /// Test handling of large history shards with many block numbers.
+    #[test]
+    fn test_large_history_shard_performance() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+
+        // Create a large shard with 10k block numbers
+        let address = Address::from([0x42; 20]);
+        let block_numbers: Vec<u64> = (0..10_000).collect();
+        let shard = BlockNumberList::new_pre_sorted(block_numbers);
+        let key = ShardedKey::new(address, u64::MAX);
+
+        // Write the large shard
+        let start = std::time::Instant::now();
+        provider.put::<tables::AccountsHistory>(key.clone(), &shard).unwrap();
+        let write_duration = start.elapsed();
+
+        // Read the large shard
+        let start = std::time::Instant::now();
+        let result = provider.get::<tables::AccountsHistory>(key).unwrap();
+        let read_duration = start.elapsed();
+
+        assert!(result.is_some());
+        let retrieved_shard = result.unwrap();
+        assert_eq!(retrieved_shard.len(), 10_000);
+
+        // Verify performance is reasonable (under 1 second each)
+        assert!(write_duration.as_secs() < 1, "Write took too long: {:?}", write_duration);
+        assert!(read_duration.as_secs() < 1, "Read took too long: {:?}", read_duration);
+    }
+
+    /// Test iterator performance with many entries across multiple addresses.
+    #[test]
+    fn test_iterator_large_dataset() {
+        let temp_dir = TempDir::new().unwrap();
+        let provider = RocksDBBuilder::new(temp_dir.path())
+            .with_table::<tables::AccountsHistory>()
+            .build()
+            .unwrap();
+
+        // Insert 1000 entries across different addresses
+        let entry_count = 1000u64;
+        for i in 0..entry_count {
+            let address = Address::from_slice(&[
+                (i >> 8) as u8,
+                (i & 0xFF) as u8,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+            ]);
+            let shard = BlockNumberList::new_pre_sorted(vec![i, i + 1000, i + 2000]);
+            let key = ShardedKey::new(address, u64::MAX);
+            provider.put::<tables::AccountsHistory>(key, &shard).unwrap();
+        }
+
+        // Iterate all entries and count
+        let start = std::time::Instant::now();
+        let iter = provider.iter::<tables::AccountsHistory>().unwrap();
+        let items: Vec<_> = iter.collect::<Result<Vec<_>, _>>().unwrap();
+        let iter_duration = start.elapsed();
+
+        assert_eq!(items.len(), entry_count as usize);
+        assert!(iter_duration.as_secs() < 5, "Iterator took too long: {:?}", iter_duration);
     }
 }
