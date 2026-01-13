@@ -474,6 +474,9 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
 
 impl<N: NodePrimitives> StaticFileProvider<N> {
     /// Reports metrics for the static files.
+    ///
+    /// This uses the in-memory index to get file sizes from mmap handles instead of reading
+    /// filesystem metadata.
     pub fn report_metrics(&self) -> ProviderResult<()> {
         let Some(metrics) = &self.metrics else { return Ok(()) };
 
@@ -491,29 +494,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     })?;
 
                 entries += jar_provider.rows();
-
-                let data_path = jar_provider.data_path().to_path_buf();
-                let index_path = jar_provider.index_path();
-                let offsets_path = jar_provider.offsets_path();
-                let config_path = jar_provider.config_path();
-
-                // can release jar early
-                drop(jar_provider);
-
-                let data_size = reth_fs_util::metadata(data_path)
-                    .map(|metadata| metadata.len())
-                    .unwrap_or_default();
-                let index_size = reth_fs_util::metadata(index_path)
-                    .map(|metadata| metadata.len())
-                    .unwrap_or_default();
-                let offsets_size = reth_fs_util::metadata(offsets_path)
-                    .map(|metadata| metadata.len())
-                    .unwrap_or_default();
-                let config_size = reth_fs_util::metadata(config_path)
-                    .map(|metadata| metadata.len())
-                    .unwrap_or_default();
-
-                size += data_size + index_size + offsets_size + config_size;
+                size += jar_provider.size() as u64;
             }
 
             metrics.record_segment(segment, size, headers.len(), entries);
