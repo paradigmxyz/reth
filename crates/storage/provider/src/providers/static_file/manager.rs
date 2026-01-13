@@ -1851,6 +1851,8 @@ pub trait StaticFileWriter {
     fn has_unwind_queued(&self) -> bool;
 
     /// Finalizes all static file writers by committing their configuration to disk.
+    ///
+    /// Returns an error if prune is queued (use [`Self::commit`] instead).
     fn finalize(&self) -> ProviderResult<()>;
 }
 

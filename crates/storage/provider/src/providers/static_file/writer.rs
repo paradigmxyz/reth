@@ -330,9 +330,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns an error if prune is queued (use [`Self::commit`] instead).
     pub fn sync_all(&mut self) -> ProviderResult<()> {
         if self.prune_on_commit.is_some() {
-            return Err(ProviderError::other(StaticFileWriterError::new(
-                "Cannot call sync_all when prune is queued, use commit() instead",
-            )));
+            return Err(StaticFileWriterError::FinalizeWithPruneQueued.into());
         }
         if self.writer.is_dirty() {
             self.writer.sync_all().map_err(ProviderError::other)?;
@@ -347,9 +345,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns an error if prune is queued (use [`Self::commit`] instead).
     pub fn finalize(&mut self) -> ProviderResult<()> {
         if self.prune_on_commit.is_some() {
-            return Err(ProviderError::other(StaticFileWriterError::new(
-                "Cannot call finalize when prune is queued, use commit() instead",
-            )));
+            return Err(StaticFileWriterError::FinalizeWithPruneQueued.into());
         }
         if self.writer.is_dirty() {
             self.writer.finalize().map_err(ProviderError::other)?;
