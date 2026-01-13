@@ -48,7 +48,7 @@ strum = { workspace = true, features = ["derive"], optional = true }
 reth-primitives-traits = { workspace = true, features = ["reth-codec"] }
 reth-prune-types.workspace = true
 
-alloy-primitives = { workspace = true, features = ["getrandom"] }
+alloy-primitives = { workspace = true, features = ["getrandom", "map-indexmap"] }
 alloy-consensus.workspace = true
 
 serde_json.workspace = true

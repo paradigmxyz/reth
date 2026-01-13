@@ -1,6 +1,7 @@
 //! reth's static file database table import and access
 
-use std::{collections::HashMap, path::Path};
+use alloy_primitives::map::IndexMap;
+use std::path::Path;
 
 mod cursor;
 pub use cursor::StaticFileCursor;
@@ -14,7 +15,7 @@ pub use masks::*;
 use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
 
 /// Alias type for a map of [`StaticFileSegment`] and sorted lists of existing static file ranges.
-type SortedStaticFiles = HashMap<StaticFileSegment, Vec<(SegmentRangeInclusive, SegmentHeader)>>;
+type SortedStaticFiles = IndexMap<StaticFileSegment, Vec<(SegmentRangeInclusive, SegmentHeader)>>;
 
 /// Given the `static_files` directory path, it returns a list over the existing `static_files`
 /// organized by [`StaticFileSegment`]. Each segment has a sorted list of block ranges and
@@ -44,8 +45,8 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
         }
     }
 
+    // Sort by block end range.
     for range_list in static_files.values_mut() {
-        // Sort by block end range.
         range_list.sort_by_key(|(block_range, _)| block_range.end());
     }
 
