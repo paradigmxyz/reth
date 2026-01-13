@@ -16,6 +16,7 @@ use std::{
 use tar::Archive;
 use tokio::task;
 use tracing::info;
+use url::Url;
 use zstd::stream::read::Decoder as ZstdDecoder;
 
 const BYTE_UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
@@ -246,12 +247,16 @@ enum CompressionFormat {
 impl CompressionFormat {
     /// Detect compression format from file extension
     fn from_url(url: &str) -> Result<Self> {
-        if url.ends_with(EXTENSION_TAR_LZ4) {
+        let path = Url::parse(url)
+            .map(|u| u.path().to_string())
+            .unwrap_or_else(|_| url.to_string());
+
+        if path.ends_with(EXTENSION_TAR_LZ4) {
             Ok(Self::Lz4)
-        } else if url.ends_with(EXTENSION_TAR_ZSTD) {
+        } else if path.ends_with(EXTENSION_TAR_ZSTD) {
             Ok(Self::Zstd)
         } else {
-            Err(eyre::eyre!("Unsupported file format. Expected .tar.lz4 or .tar.zst, got: {}", url))
+            Err(eyre::eyre!("Unsupported file format. Expected .tar.lz4 or .tar.zst, got: {}", path))
         }
     }
 }
