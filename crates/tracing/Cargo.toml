@@ -22,6 +22,8 @@ tracing-appender.workspace = true
 tracing-journald.workspace = true
 tracing-logfmt.workspace = true
 tracing-samply.workspace = true
+tracing-tracy = { workspace = true, optional = true }
+tracy-client = { workspace = true, optional = true, features = ["demangle"] }
 
 # misc
 clap = { workspace = true, features = ["derive"] }
@@ -31,3 +33,4 @@ rolling-file.workspace = true
 [features]
 default = ["otlp"]
 otlp = ["reth-tracing-otlp"]
+tracy = ["tracing-tracy", "tracy-client"]
