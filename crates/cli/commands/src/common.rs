@@ -27,13 +27,14 @@ use reth_provider::{
         BlockchainProvider, NodeTypesForProvider, RocksDBProvider, StaticFileProvider,
         StaticFileProviderBuilder,
     },
-    ProviderFactory, StaticFileProviderFactory,
+    BlockNumReader, ProviderFactory, PruneCheckpointReader, StageCheckpointReader,
+    StaticFileProviderFactory,
 };
-use reth_stages::{sets::DefaultStages, Pipeline, PipelineTarget};
+use reth_stages::{sets::DefaultStages, Pipeline, StageId};
 use reth_static_file::StaticFileProducer;
 use std::{path::PathBuf, sync::Arc};
 use tokio::sync::watch;
-use tracing::{debug, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Struct to hold config and datadir paths
 #[derive(Debug, Parser)]
@@ -174,11 +175,44 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
             // Highly unlikely to happen, and given its destructive nature, it's better to panic
             // instead.
+            let unwind_block = unwind_target.unwind_target().expect("should exist");
             assert_ne!(
-                unwind_target,
-                PipelineTarget::Unwind(0),
+                unwind_block, 0,
                 "A static file <> database inconsistency was found that would trigger an unwind to block 0"
             );
+
+            // Pre-check: if Execution stage is above the unwind target and history pruning
+            // is enabled, verify we have enough history to unwind. This provides a clearer
+            // error message with recovery suggestions before attempting the unwind.
+            let provider = factory.provider()?;
+            let execution_checkpoint =
+                provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
+
+            if execution_checkpoint > unwind_block {
+                let prune_checkpoints = provider.get_prune_checkpoints()?;
+                if let Err(err) = prune_modes.ensure_unwind_target_unpruned(
+                    provider.last_block_number()?,
+                    unwind_block,
+                    &prune_checkpoints,
+                ) {
+                    error!(
+                        target: "reth::cli",
+                        %err,
+                        execution_checkpoint,
+                        unwind_block,
+                        "Cannot recover from storage inconsistency: required history data has been pruned."
+                    );
+                    error!(
+                        target: "reth::cli",
+                        "Recovery options:\n\
+                         1. Re-sync from scratch by removing the data directory\n\
+                         2. Restore from a backup that has the required history\n\
+                         3. If only static files are corrupted, try deleting the affected static files \
+                            and using `reth stage drop <stage>` to reset the stage checkpoint"
+                    );
+                    return Err(err.into());
+                }
+            }
 
             info!(target: "reth::cli", unwind_target = %unwind_target, "Executing an unwind after a failed storage consistency check.");
 
@@ -201,7 +235,7 @@ impl<C: ChainSpecParser> EnvironmentArgs<C> {
 
             // Move all applicable data from database to static files.
             pipeline.move_to_static_files()?;
-            pipeline.unwind(unwind_target.unwind_target().expect("should exist"), None)?;
+            pipeline.unwind(unwind_block, None)?;
         }
 
         Ok(factory)

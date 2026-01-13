@@ -302,11 +302,19 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         let provider = self.provider_factory.provider()?;
         let latest_block = provider.last_block_number()?;
 
-        // Get the actual pruning configuration
-        let prune_modes = provider.prune_modes_ref();
+        // Get the Execution stage checkpoint to determine if we need history for unwinding.
+        // Only the Execution stage (and dependent stages like AccountHashing/StorageHashing)
+        // actually need account/storage history changesets to unwind. Other stages like
+        // Headers, Bodies, and SenderRecovery can unwind without history data.
+        let execution_checkpoint =
+            provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
 
-        let checkpoints = provider.get_prune_checkpoints()?;
-        prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
+        // Only check history limits if we would actually need to unwind the Execution stage
+        if execution_checkpoint > to {
+            let prune_modes = provider.prune_modes_ref();
+            let checkpoints = provider.get_prune_checkpoints()?;
+            prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
+        }
 
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();

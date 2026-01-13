@@ -148,10 +148,10 @@ impl PruneModes {
         false
     }
 
-    /// Returns an error if we can't unwind to the targeted block because the target block is
-    /// outside the range.
+    /// Returns an error if the unwind target is beyond the pruned history.
     ///
-    /// This is only relevant for certain tables that are required by other stages
+    /// Only relevant for the Execution stage which requires account/storage history to unwind.
+    /// Callers should gate this check on `execution_checkpoint > unwind_target`.
     ///
     /// See also <https://github.com/paradigmxyz/reth/issues/16579>
     pub fn ensure_unwind_target_unpruned(
