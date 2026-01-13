@@ -326,8 +326,7 @@ where
     tmp_path.set_extension("tmp");
 
     // Write to the temporary file
-    let mut file =
-        File::create(&tmp_path).map_err(|err| FsPathError::create_file(err, &tmp_path))?;
+    let mut file = create_file(&tmp_path)?;
 
     // Execute the write function and handle errors properly
     // If write_fn fails, we need to clean up the temporary file before returning
