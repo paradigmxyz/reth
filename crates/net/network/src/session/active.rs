@@ -150,12 +150,6 @@ impl<N: NetworkPrimitives> ActiveSession<N> {
         id
     }
 
-    /// Shrinks the capacity of the internal buffers.
-    pub fn shrink_to_fit(&mut self) {
-        self.received_requests_from_remote.shrink_to_fit();
-        self.queued_outgoing.shrink_to_fit();
-    }
-
     /// Returns how many responses we've currently queued up.
     fn queued_response_count(&self) -> usize {
         self.queued_outgoing.messages.iter().filter(|m| m.is_response()).count()
@@ -888,7 +882,6 @@ fn calculate_new_timeout(current_timeout: Duration, estimated_rtt: Duration) -> 
 
     // this dampens sudden changes by taking a weighted mean of the old and new values
     let smoothened_timeout = current_timeout.mul_f64(1.0 - SAMPLE_IMPACT) + new_timeout;
-
     smoothened_timeout.clamp(MINIMUM_TIMEOUT, MAXIMUM_TIMEOUT)
 }
 
@@ -910,10 +903,6 @@ impl<N: NetworkPrimitives> QueuedOutgoingMessages<N> {
 
     pub(crate) fn pop_front(&mut self) -> Option<OutgoingMessage<N>> {
         self.messages.pop_front().inspect(|_| self.count.decrement(1))
-    }
-
-    pub(crate) fn shrink_to_fit(&mut self) {
-        self.messages.shrink_to_fit();
     }
 }
 
