@@ -1,0 +1,26 @@
+# RocksDB vs MDBX Benchmark Progress
+
+This file tracks progress across Ralph iterations for the performance benchmarking task.
+
+## Key Information
+
+- **Benchmark Plan**: docs/benchmarking/ROCKSDB_BENCHMARK_PLAN.md
+- **Automation Script**: scripts/rocksdb_benchmark.sh (alternative to Ralph)
+- **Results Directory**: ./benchmark-results/
+
+## Environment Setup Notes
+
+Default data directory: `~/.local/share/reth`
+
+## Grafana Access
+- URL: https://reth-g.chiayong.com
+- Dashboard: RocksDB vs MDBX Benchmark
+
+## Metrics to Watch
+- `rocksdb_provider_calls_total{table,operation}` - RocksDB operations
+- `rocksdb_provider_duration_seconds{table,operation}` - RocksDB latency
+- `sync_execution_gas_per_second` - Gas throughput
+- `sync_total_elapsed{stage}` - Stage timing
+
+---
+
