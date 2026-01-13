@@ -158,7 +158,7 @@ where
     /// the DB are currently synced to.
     fn get_db_tip_block_number(&self, provider: &F::Provider) -> ProviderResult<BlockNumber> {
         provider
-            .get_stage_checkpoint(StageId::MerkleChangeSets)?
+            .get_stage_checkpoint(StageId::Finish)?
             .as_ref()
             .map(|chk| chk.block_number)
             .ok_or_else(|| ProviderError::InsufficientChangesets { requested: 0, available: 0..=0 })
@@ -167,7 +167,6 @@ where
     /// Returns whether or not it is required to collect reverts, and validates that there are
     /// sufficient changesets to revert to the requested block number if so.
     ///
-    /// Returns an error if the `MerkleChangeSets` checkpoint doesn't cover the requested block.
     /// Takes into account both the stage checkpoint and the prune checkpoint to determine the
     /// available data range.
     fn reverts_required(
@@ -182,18 +181,10 @@ where
             return Ok(false)
         }
 
-        // Get the MerkleChangeSets prune checkpoints, which will be used to determine the lower
-        // bound.
-        let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::MerkleChangeSets)?;
-
-        // Extract the lower bound from prune checkpoint if available.
-        //
-        // If not available we assume pruning has never ran and so there is no lower bound. This
-        // should not generally happen, since MerkleChangeSets always have pruning enabled, but when
-        // starting a new node from scratch (e.g. in a test case or benchmark) it can surface.
-        //
+        // Check account history prune checkpoint to determine the lower bound of available data.
         // The prune checkpoint's block_number is the highest pruned block, so data is available
-        // starting from the next block
+        // starting from the next block.
+        let prune_checkpoint = provider.get_prune_checkpoint(PruneSegment::AccountHistory)?;
         let lower_bound = prune_checkpoint
             .and_then(|chk| chk.block_number)
             .map(|block_number| block_number + 1)

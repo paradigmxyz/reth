@@ -36,15 +36,6 @@ pub enum HistoryType {
     StorageHistory,
 }
 
-/// Default number of blocks to retain for merkle changesets.
-/// This is used by both the `MerkleChangeSets` stage and the pruner segment.
-pub const MERKLE_CHANGESETS_RETENTION_BLOCKS: u64 = 128;
-
-/// Default pruning mode for merkle changesets
-const fn default_merkle_changesets_mode() -> PruneMode {
-    PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS)
-}
-
 /// Pruning configuration for every segment of the data that can be pruned.
 #[derive(Debug, Clone, Eq, PartialEq)]
 #[cfg_attr(any(test, feature = "serde"), derive(serde::Serialize, serde::Deserialize))]
@@ -93,10 +84,6 @@ pub struct PruneModes {
         )
     )]
     pub bodies_history: Option<PruneMode>,
-    /// Merkle Changesets pruning configuration for `AccountsTrieChangeSets` and
-    /// `StoragesTrieChangeSets`.
-    #[cfg_attr(any(test, feature = "serde"), serde(default = "default_merkle_changesets_mode"))]
-    pub merkle_changesets: PruneMode,
     /// Receipts pruning configuration by retaining only those receipts that contain logs emitted
     /// by the specified addresses, discarding others. This setting is overridden by `receipts`.
     ///
@@ -118,7 +105,6 @@ impl Default for PruneModes {
             account_history: None,
             storage_history: None,
             bodies_history: None,
-            merkle_changesets: default_merkle_changesets_mode(),
             receipts_log_filter: ReceiptsLogPruneConfig::default(),
         }
     }
@@ -134,7 +120,6 @@ impl PruneModes {
             account_history: Some(PruneMode::Full),
             storage_history: Some(PruneMode::Full),
             bodies_history: Some(PruneMode::Full),
-            merkle_changesets: PruneMode::Full,
             receipts_log_filter: Default::default(),
         }
     }
@@ -147,16 +132,7 @@ impl PruneModes {
     /// Migrates deprecated prune mode values to their new defaults.
     ///
     /// Returns `true` if any migration was performed.
-    ///
-    /// Currently migrates:
-    /// - `merkle_changesets`: `Distance(n)` where `n < 128` or `n == 10064` -> `Distance(128)`
     pub const fn migrate(&mut self) -> bool {
-        if let PruneMode::Distance(d) = self.merkle_changesets &&
-            (d < MERKLE_CHANGESETS_RETENTION_BLOCKS || d == MINIMUM_PRUNING_DISTANCE)
-        {
-            self.merkle_changesets = PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS);
-            return true;
-        }
         false
     }
 
