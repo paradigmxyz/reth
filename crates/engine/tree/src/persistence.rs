@@ -6,8 +6,7 @@ use reth_errors::ProviderError;
 use reth_ethereum_primitives::EthPrimitives;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::ProviderNodeTypes, BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter,
-    DBProvider, DatabaseProviderFactory, ProviderFactory,
+    BlockExecutionWriter, BlockHashReader, ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory, SaveBlocksMode, providers::ProviderNodeTypes
 };
 use reth_prune::{PrunerError, PrunerOutput, PrunerWithFactory};
 use reth_stages_api::{MetricEvent, MetricEventsSender};
@@ -151,7 +150,7 @@ where
         if last_block.is_some() {
             let provider_rw = self.provider.database_provider_rw()?;
 
-            provider_rw.save_blocks(blocks)?;
+            provider_rw.save_blocks(blocks, SaveBlocksMode::Full)?;
             provider_rw.commit()?;
         }
 
