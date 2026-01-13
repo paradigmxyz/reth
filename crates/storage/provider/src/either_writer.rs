@@ -1,5 +1,5 @@
 //! Generic reader and writer abstractions for interacting with database tables, static files, or
-//! RocksDB.
+//! `RocksDB`.
 
 use std::{
     collections::BTreeSet,
