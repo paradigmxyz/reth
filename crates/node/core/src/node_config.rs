@@ -3,7 +3,7 @@
 use crate::{
     args::{
         DatabaseArgs, DatadirArgs, DebugArgs, DevArgs, EngineArgs, NetworkArgs, PayloadBuilderArgs,
-        PruningArgs, RocksDBArgs, RpcServerArgs, StaticFilesArgs, TxPoolArgs,
+        PruningArgs, RpcServerArgs, StaticFilesArgs, TxPoolArgs,
     },
     dirs::{ChainPath, DataDirPath},
     utils::get_single_header,
@@ -150,9 +150,6 @@ pub struct NodeConfig<ChainSpec> {
 
     /// All static files related arguments
     pub static_files: StaticFilesArgs,
-
-    /// All `RocksDB` storage related arguments
-    pub rocksdb: RocksDBArgs,
 }
 
 impl NodeConfig<ChainSpec> {
@@ -184,7 +181,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine: EngineArgs::default(),
             era: EraArgs::default(),
             static_files: StaticFilesArgs::default(),
-            rocksdb: RocksDBArgs::default(),
         }
     }
 
@@ -259,7 +255,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine,
             era,
             static_files,
-            rocksdb,
             ..
         } = self;
         NodeConfig {
@@ -279,7 +274,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine,
             era,
             static_files,
-            rocksdb,
         }
     }
 
@@ -348,18 +342,12 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
-    /// Set the `RocksDB` args for the node
-    pub const fn with_rocksdb(mut self, rocksdb: RocksDBArgs) -> Self {
-        self.rocksdb = rocksdb;
-        self
-    }
-
     /// Converts the node configuration to [`StorageSettings`].
     ///
-    /// This combines static file settings and `RocksDB` settings into a single
-    /// [`StorageSettings`] struct for use during node initialization.
+    /// This returns storage settings configured via CLI arguments including
+    /// static file settings and `RocksDB` settings.
     pub const fn to_storage_settings(&self) -> reth_provider::StorageSettings {
-        self.rocksdb.apply_to_settings(self.static_files.to_settings())
+        self.static_files.to_settings()
     }
 
     /// Returns pruning configuration.
@@ -564,7 +552,6 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
             engine: self.engine,
             era: self.era,
             static_files: self.static_files,
-            rocksdb: self.rocksdb,
         }
     }
 
@@ -606,7 +593,6 @@ impl<ChainSpec> Clone for NodeConfig<ChainSpec> {
             engine: self.engine.clone(),
             era: self.era.clone(),
             static_files: self.static_files,
-            rocksdb: self.rocksdb,
         }
     }
 }
