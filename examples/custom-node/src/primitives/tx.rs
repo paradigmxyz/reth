@@ -50,8 +50,6 @@ impl FromTxCompact for CustomTransaction {
     type TxType = TxTypeCustom;
 
     fn from_tx_compact(buf: &[u8], tx_type: Self::TxType, signature: Signature) -> (Self, &[u8])
-    where
-        Self: Sized,
     {
         match tx_type {
             TxTypeCustom::Op(tx_type) => {
