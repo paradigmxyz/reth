@@ -1,11 +1,16 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
 use crate::providers::{needs_prev_shard_check, HistoryInfo};
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_consensus::transaction::TxHashRef;
+use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
+use parking_lot::Mutex;
+use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    models::{storage_sharded_key::StorageShardedKey, ShardedKey, StorageSettings},
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
+use reth_primitives_traits::BlockBody as _;
+use reth_prune_types::PruneMode;
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
@@ -16,11 +21,41 @@ use rocksdb::{
     OptimisticTransactionOptions, Options, Transaction, WriteBatchWithTransaction, WriteOptions,
 };
 use std::{
+    collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
+    thread,
     time::Instant,
 };
+use tracing::instrument;
+
+/// Pending RocksDB batches type alias.
+pub type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+
+/// Context for RocksDB block writes.
+#[derive(Clone)]
+pub struct RocksDBWriteCtx {
+    /// The first block number being written.
+    pub first_block_number: BlockNumber,
+    /// The prune mode for transaction lookup, if any.
+    pub prune_tx_lookup: Option<PruneMode>,
+    /// Storage settings determining what goes to RocksDB.
+    pub storage_settings: StorageSettings,
+    /// Pending batches to push to after writing.
+    pub pending_batches: PendingRocksDBBatches,
+}
+
+impl fmt::Debug for RocksDBWriteCtx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBWriteCtx")
+            .field("first_block_number", &self.first_block_number)
+            .field("prune_tx_lookup", &self.prune_tx_lookup)
+            .field("storage_settings", &self.storage_settings)
+            .field("pending_batches", &"<pending batches>")
+            .finish()
+    }
+}
 
 /// Default cache size for `RocksDB` block cache (128 MB).
 const DEFAULT_CACHE_SIZE: usize = 128 << 20;
@@ -473,6 +508,125 @@ impl RocksDBProvider {
                 code: -1,
             }))
         })
+    }
+
+    /// Writes all RocksDB data for multiple blocks in parallel.
+    ///
+    /// This handles transaction hash numbers, account history, and storage history based on
+    /// the provided storage settings. Each operation runs in parallel with its own batch,
+    /// pushing to `ctx.pending_batches` for later commit.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    pub fn write_blocks_data<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        if !ctx.storage_settings.any_in_rocksdb() {
+            return Ok(());
+        }
+
+        thread::scope(|s| {
+            let handles: Vec<_> = [
+                (ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
+                    ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
+                .then(|| s.spawn(|| self.write_tx_hash_numbers(blocks, tx_nums, &ctx))),
+                ctx.storage_settings
+                    .account_history_in_rocksdb
+                    .then(|| s.spawn(|| self.write_account_history(blocks, &ctx))),
+                ctx.storage_settings
+                    .storages_history_in_rocksdb
+                    .then(|| s.spawn(|| self.write_storage_history(blocks, &ctx))),
+            ]
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, h)| h.map(|h| (i, h)))
+            .collect();
+
+            for (i, handle) in handles {
+                handle.join().map_err(|_| {
+                    ProviderError::Database(DatabaseError::Other(format!(
+                        "rocksdb write thread {i} panicked"
+                    )))
+                })??;
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Writes transaction hash to number mappings for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_tx_hash_numbers<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
+            let body = block.recovered_block().body();
+            let mut tx_num = first_tx_num;
+            for transaction in body.transactions_iter() {
+                batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
+                tx_num += 1;
+            }
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
+
+    /// Writes account history indices for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_account_history<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        for (block_idx, block) in blocks.iter().enumerate() {
+            let block_number = ctx.first_block_number + block_idx as u64;
+            let bundle = &block.execution_outcome().bundle;
+            for (&address, _) in bundle.state() {
+                account_history.entry(address).or_default().push(block_number);
+            }
+        }
+        for (address, blocks) in account_history {
+            let key = ShardedKey::new(address, u64::MAX);
+            let value = BlockNumberList::new_pre_sorted(blocks);
+            batch.put::<tables::AccountsHistory>(key, &value)?;
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
+
+    /// Writes storage history indices for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_storage_history<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        for (block_idx, block) in blocks.iter().enumerate() {
+            let block_number = ctx.first_block_number + block_idx as u64;
+            let bundle = &block.execution_outcome().bundle;
+            for (&address, account) in bundle.state() {
+                for (&slot, _) in &account.storage {
+                    let key = B256::new(slot.to_be_bytes());
+                    storage_history.entry((address, key)).or_default().push(block_number);
+                }
+            }
+        }
+        for ((address, slot), blocks) in storage_history {
+            let key = StorageShardedKey::new(address, slot, u64::MAX);
+            let value = BlockNumberList::new_pre_sorted(blocks);
+            batch.put::<tables::StoragesHistory>(key, &value)?;
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
     }
 }
 

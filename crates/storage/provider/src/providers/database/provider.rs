@@ -4,7 +4,7 @@ use crate::{
     },
     providers::{
         database::{chain::ChainStorage, metrics},
-        rocksdb::RocksDBProvider,
+        rocksdb::{PendingRocksDBBatches, RocksDBProvider, RocksDBWriteCtx},
         static_file::{StaticFileWriteCtx, StaticFileWriter},
         NodeTypesForProvider, StaticFileProvider,
     },
@@ -188,8 +188,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
     /// Pending `RocksDB` batches to be committed at provider commit time.
-    #[cfg(all(unix, feature = "rocksdb"))]
-    pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
+    pending_rocksdb_batches: PendingRocksDBBatches,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
     /// Database provider metrics
@@ -205,10 +204,10 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("prune_modes", &self.prune_modes)
             .field("storage", &self.storage)
             .field("storage_settings", &self.storage_settings)
-            .field("rocksdb_provider", &self.rocksdb_provider);
-        #[cfg(all(unix, feature = "rocksdb"))]
-        s.field("pending_rocksdb_batches", &"<pending batches>");
-        s.field("minimum_pruning_distance", &self.minimum_pruning_distance).finish()
+            .field("rocksdb_provider", &self.rocksdb_provider)
+            .field("pending_rocksdb_batches", &"<pending batches>")
+            .field("minimum_pruning_distance", &self.minimum_pruning_distance)
+            .finish()
     }
 }
 
@@ -336,8 +335,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            #[cfg(all(unix, feature = "rocksdb"))]
-            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
+            pending_rocksdb_batches: Default::default(),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
         }
@@ -403,6 +401,16 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })
     }
 
+    /// Creates the context for RocksDB writes.
+    fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
+        RocksDBWriteCtx {
+            first_block_number: first_block,
+            prune_tx_lookup: self.prune_modes.transaction_lookup,
+            storage_settings: self.cached_storage_settings(),
+            pending_batches: self.pending_rocksdb_batches.clone(),
+        }
+    }
+
     /// Writes executed blocks and state to storage.
     ///
     /// This method parallelizes static file (SF) writes with MDBX writes.
@@ -452,6 +460,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
+        let rocksdb_provider = self.rocksdb_provider.clone();
+        let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
 
         thread::scope(|s| {
             // SF writes
@@ -459,6 +469,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 let start = Instant::now();
                 sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx)?;
                 Ok::<_, ProviderError>(start.elapsed())
+            });
+
+            // RocksDB writes
+            let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
+                s.spawn(|| {
+                    let start = Instant::now();
+                    rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx)?;
+                    Ok::<_, ProviderError>(start.elapsed())
+                })
             });
 
             // MDBX writes
@@ -524,6 +543,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 .join()
                 .map_err(|_| StaticFileWriterError::ThreadPanic("static file"))??;
 
+            // Wait for RocksDB thread
+            #[cfg(all(unix, feature = "rocksdb"))]
+            if let Some(handle) = rocksdb_handle {
+                timings.rocksdb = handle.join().expect("RocksDB thread panicked")?;
+            }
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            let _ = rocksdb_handle;
+
             timings.total = total_start.elapsed();
 
             self.metrics.record_save_blocks(&timings);
@@ -533,7 +560,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })
     }
 
-    /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
+    /// Writes MDBX-only data for a block (eg. indices, lookups, and senders).
     ///
     /// SF data (headers, transactions, senders if SF, receipts if SF) must be written separately.
     #[instrument(level = "debug", target = "providers::db", skip_all)]
@@ -803,8 +830,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
-            #[cfg(all(unix, feature = "rocksdb"))]
-            pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
+            pending_rocksdb_batches: Default::default(),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
             metrics: metrics::DatabaseProviderMetrics::default(),
         }
@@ -3149,14 +3175,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
 
     #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
-        // account history stage
-        {
+        let storage_settings = self.cached_storage_settings();
+        if !storage_settings.account_history_in_rocksdb {
             let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
-        // storage history stage
-        {
+        if !storage_settings.storages_history_in_rocksdb {
             let indices = self.changed_storages_and_blocks_with_range(range)?;
             self.insert_storage_history_index(indices)?;
         }
