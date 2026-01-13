@@ -132,8 +132,8 @@ where
                     let tx_env = eth_api.evm_config().tx_env(tx);
                     let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
 
-                    let (db_ref, inspector_ref, _) = evm.components_mut();
-                    let result = inspector_ref
+                    let (db, inspector, _) = evm.components_mut();
+                    let result = inspector
                         .get_result(
                             Some(TransactionContext {
                                 block_hash: Some(block.hash()),
@@ -143,16 +143,16 @@ where
                             &tx_env,
                             &evm_env.block_env,
                             &res,
-                            db_ref,
+                            db,
                         )
                         .map_err(Eth::Error::from_eth_err)?;
 
                     results.push(TraceResult::Success { result, tx_hash: Some(tx_hash) });
                     if transactions.peek().is_some() {
-                        inspector_ref.fuse().map_err(Eth::Error::from_eth_err)?;
+                        inspector.fuse().map_err(Eth::Error::from_eth_err)?;
                         // need to apply the state changes of this transaction before executing the
                         // next transaction
-                        db_ref.commit(res.state)
+                        db.commit(res.state)
                     }
                 }
 
