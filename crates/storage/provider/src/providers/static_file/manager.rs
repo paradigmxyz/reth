@@ -481,11 +481,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let Some(metrics) = &self.metrics else { return Ok(()) };
 
         let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
-        for (segment, headers) in static_files {
+        for (segment, headers) in static_files.iter() {
             let mut entries = 0;
             let mut size = 0;
 
-            for (block_range, _) in &headers {
+            for (block_range, _) in headers {
                 let fixed_block_range = self.find_fixed_range(segment, block_range.start());
                 let jar_provider = self
                     .get_segment_provider_for_range(segment, || Some(fixed_block_range), None)?
@@ -954,7 +954,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut indexes = self.indexes.write();
         indexes.clear();
 
-        for (segment, headers) in iter_static_files(&self.path).map_err(ProviderError::other)? {
+        for (segment, headers) in
+            iter_static_files(&self.path).map_err(ProviderError::other)?.iter()
+        {
             // Update first and last block for each segment
             //
             // It's safe to call `expect` here, because every segment has at least one header
@@ -965,7 +967,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let mut expected_block_ranges_by_max_block = BTreeMap::default();
             let mut available_block_ranges_by_max_tx = None;
 
-            for (block_range, header) in headers {
+            for (block_range, header) in headers.iter() {
                 // Update max expected block -> expected_block_range index
                 expected_block_ranges_by_max_block
                     .insert(header.expected_block_end(), header.expected_block_range());
@@ -976,7 +978,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
                     available_block_ranges_by_max_tx
                         .get_or_insert_with(BTreeMap::default)
-                        .insert(tx_end, block_range);
+                        .insert(tx_end, *block_range);
                 }
             }
 
@@ -1979,7 +1981,7 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
 
         // iterate through static files and sum changeset metadata via each static file header
         let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
-        if let Some(changeset_segments) = static_files.get(&StaticFileSegment::AccountChangeSets) {
+        if let Some(changeset_segments) = static_files.get(StaticFileSegment::AccountChangeSets) {
             for (_, header) in changeset_segments {
                 if let Some(changeset_offsets) = header.changeset_offsets() {
                     for offset in changeset_offsets {

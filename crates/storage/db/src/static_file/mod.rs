@@ -1,6 +1,7 @@
 //! reth's static file database table import and access
 
-use alloy_primitives::map::HashMap;
+use reth_nippy_jar::{NippyJar, NippyJarError};
+use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
 use std::path::Path;
 
 mod cursor;
@@ -8,14 +9,15 @@ pub use cursor::StaticFileCursor;
 
 mod mask;
 pub use mask::*;
-use reth_nippy_jar::{NippyJar, NippyJarError};
 
 mod masks;
 pub use masks::*;
-use reth_static_file_types::{SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
+
+/// Map of [`StaticFileSegment`] and sorted lists of existing static file ranges.
+pub type StaticFileMap<T> = Box<fixed_map::Map<StaticFileSegment, T>>;
 
 /// Alias type for a map of [`StaticFileSegment`] and sorted lists of existing static file ranges.
-type SortedStaticFiles = HashMap<StaticFileSegment, Vec<(SegmentRangeInclusive, SegmentHeader)>>;
+type SortedStaticFiles = StaticFileMap<Vec<(SegmentRangeInclusive, SegmentHeader)>>;
 
 /// Given the `static_files` directory path, it returns a list over the existing `static_files`
 /// organized by [`StaticFileSegment`]. Each segment has a sorted list of block ranges and
@@ -37,10 +39,13 @@ pub fn iter_static_files(path: &Path) -> Result<SortedStaticFiles, NippyJarError
             let jar = NippyJar::<SegmentHeader>::load(&entry.path())?;
 
             if let Some(block_range) = jar.user_header().block_range() {
-                static_files
-                    .entry(segment)
-                    .and_modify(|headers| headers.push((block_range, jar.user_header().clone())))
-                    .or_insert_with(|| vec![(block_range, jar.user_header().clone())]);
+                match static_files.get_mut(segment) {
+                    Some(headers) => headers.push((block_range, jar.user_header().clone())),
+                    None => {
+                        static_files
+                            .insert(segment, vec![(block_range, jar.user_header().clone())]);
+                    }
+                }
             }
         }
     }
