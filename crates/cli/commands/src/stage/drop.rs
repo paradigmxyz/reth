@@ -14,9 +14,10 @@ use reth_db_common::{
 };
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
+#[cfg(all(unix, feature = "edge"))]
+use reth_provider::RocksDBProviderFactory;
 use reth_provider::{
-    DBProvider, DatabaseProviderFactory, RocksDBProviderFactory, StaticFileProviderFactory,
-    StaticFileWriter, TrieWriter,
+    DBProvider, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter, TrieWriter,
 };
 use reth_prune::PruneSegment;
 use reth_stages::StageId;
