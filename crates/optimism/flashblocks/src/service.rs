@@ -1,5 +1,8 @@
 use crate::{
-    cache::SequenceManager, validation::ReconciliationStrategy, worker::FlashBlockBuilder,
+    cache::SequenceManager,
+    pending_state::PendingStateRegistry,
+    validation::ReconciliationStrategy,
+    worker::{BuildResult, FlashBlockBuilder},
     FlashBlock, FlashBlockCompleteSequence, FlashBlockCompleteSequenceRx, InProgressFlashBlockRx,
     PendingFlashBlock,
 };
@@ -10,7 +13,6 @@ use op_alloy_rpc_types_engine::OpFlashblockPayloadBase;
 use reth_evm::ConfigureEvm;
 use reth_metrics::Metrics;
 use reth_primitives_traits::{AlloyBlockHeader, BlockTy, HeaderTy, NodePrimitives, ReceiptTy};
-use reth_revm::cached::CachedReads;
 use reth_storage_api::{BlockReaderIdExt, StateProviderFactory};
 use reth_tasks::TaskExecutor;
 use std::{sync::Arc, time::Instant};
@@ -55,6 +57,8 @@ pub struct FlashBlockService<
     job: Option<BuildJob<N>>,
     /// Manages flashblock sequences with caching and intelligent build selection.
     sequences: SequenceManager<N::SignedTx>,
+    /// Registry for pending block states to enable speculative building.
+    pending_states: PendingStateRegistry<N>,
 
     /// Maximum depth for pending blocks ahead of canonical before clearing.
     max_depth: u64,
@@ -98,6 +102,7 @@ where
             spawner,
             job: None,
             sequences: SequenceManager::new(compute_state_root),
+            pending_states: PendingStateRegistry::new(),
             max_depth: DEFAULT_MAX_DEPTH,
             metrics: FlashBlockServiceMetrics::default(),
         }
@@ -171,10 +176,14 @@ where
                     let _ = self.in_progress_tx.send(None);
 
                     match result {
-                        Ok(Some((pending, cached_reads))) => {
+                        Ok(Some(build_result)) => {
+                            let pending = build_result.pending_flashblock;
                             let parent_hash = pending.parent_hash();
                             self.sequences
-                                .on_build_complete(parent_hash, Some((pending.clone(), cached_reads)));
+                                .on_build_complete(parent_hash, Some((pending.clone(), build_result.cached_reads)));
+
+                            // Record pending state for speculative building of subsequent blocks
+                            self.pending_states.record_build(build_result.pending_state);
 
                             let elapsed = start_time.elapsed();
                             self.metrics.execution_duration.record(elapsed.as_secs_f64());
@@ -240,14 +249,17 @@ where
             self.max_depth,
         );
 
-        // Record metrics based on strategy
+        // Record metrics and handle state clearing based on strategy
         match strategy {
             ReconciliationStrategy::HandleReorg => {
                 self.metrics.reorg_count.increment(1);
+                // Clear pending states on reorg
+                self.pending_states.clear();
             }
             ReconciliationStrategy::CatchUp | ReconciliationStrategy::DepthLimitExceeded { .. } => {
-                // State was cleared, clear the pending block output
+                // State was cleared, clear the pending block output and pending states
                 // (will be rebuilt on next flashblock)
+                self.pending_states.clear();
             }
             ReconciliationStrategy::Continue | ReconciliationStrategy::NoPendingState => {
                 // No action needed
@@ -286,7 +298,11 @@ where
             return;
         };
 
-        let Some(args) = self.sequences.next_buildable_args(latest.hash(), latest.timestamp())
+        // Get pending parent state for speculative building (if enabled and available)
+        let pending_parent = self.pending_states.current().cloned();
+
+        let Some(args) =
+            self.sequences.next_buildable_args(latest.hash(), latest.timestamp(), pending_parent)
         else {
             return; // Nothing buildable
         };
@@ -321,8 +337,7 @@ pub struct FlashBlockBuildInfo {
     pub block_number: u64,
 }
 
-type BuildJob<N> =
-    (Instant, oneshot::Receiver<eyre::Result<Option<(PendingFlashBlock<N>, CachedReads)>>>);
+type BuildJob<N> = (Instant, oneshot::Receiver<eyre::Result<Option<BuildResult<N>>>>);
 
 #[derive(Metrics)]
 #[metrics(scope = "flashblock_service")]
