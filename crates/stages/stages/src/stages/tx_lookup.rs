@@ -160,7 +160,9 @@ where
                     provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
 
                 // Create writer that routes to either MDBX or RocksDB based on settings
+                #[allow(clippy::let_unit_value)]
                 let rocksdb = make_rocksdb_provider(provider);
+                #[allow(clippy::let_unit_value)]
                 let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
                 let mut writer =
                     EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
@@ -210,7 +212,9 @@ where
         let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.chunk_size);
 
         // Create writer that routes to either MDBX or RocksDB based on settings
+        #[allow(clippy::let_unit_value)]
         let rocksdb = make_rocksdb_provider(provider);
+        #[allow(clippy::let_unit_value)]
         let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
         let mut writer = EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
 
