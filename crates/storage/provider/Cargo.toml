@@ -47,6 +47,7 @@ reth-metrics.workspace = true
 metrics.workspace = true
 
 # misc
+fixed-map.workspace = true
 itertools.workspace = true
 notify = { workspace = true, default-features = false, features = ["macos_fsevent"] }
 parking_lot.workspace = true

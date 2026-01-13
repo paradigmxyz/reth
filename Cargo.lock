@@ -10215,6 +10215,7 @@ dependencies = [
  "assert_matches",
  "dashmap 6.1.0",
  "eyre",
+ "fixed-map",
  "itertools 0.14.0",
  "metrics",
  "notify",

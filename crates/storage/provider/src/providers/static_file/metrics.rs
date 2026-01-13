@@ -1,5 +1,6 @@
 use std::{collections::HashMap, time::Duration};
 
+use fixed_map::Map;
 use itertools::Itertools;
 use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
@@ -9,7 +10,7 @@ use strum::{EnumIter, IntoEnumIterator};
 /// Metrics for the static file provider.
 #[derive(Debug)]
 pub struct StaticFileProviderMetrics {
-    segments: HashMap<StaticFileSegment, StaticFileSegmentMetrics>,
+    segments: Map<StaticFileSegment, StaticFileSegmentMetrics>,
     segment_operations: HashMap<
         (StaticFileSegment, StaticFileProviderOperation),
         StaticFileProviderOperationMetrics,
@@ -18,15 +19,15 @@ pub struct StaticFileProviderMetrics {
 
 impl Default for StaticFileProviderMetrics {
     fn default() -> Self {
+        let mut segments = Map::new();
+        for segment in StaticFileSegment::iter() {
+            segments.insert(
+                segment,
+                StaticFileSegmentMetrics::new_with_labels(&[("segment", segment.as_str())]),
+            );
+        }
         Self {
-            segments: StaticFileSegment::iter()
-                .map(|segment| {
-                    (
-                        segment,
-                        StaticFileSegmentMetrics::new_with_labels(&[("segment", segment.as_str())]),
-                    )
-                })
-                .collect(),
+            segments,
             segment_operations: StaticFileSegment::iter()
                 .cartesian_product(StaticFileProviderOperation::iter())
                 .map(|(segment, operation)| {
@@ -51,10 +52,10 @@ impl StaticFileProviderMetrics {
         files: usize,
         entries: usize,
     ) {
-        self.segments.get(&segment).expect("segment metrics should exist").size.set(size as f64);
-        self.segments.get(&segment).expect("segment metrics should exist").files.set(files as f64);
+        self.segments.get(segment).expect("segment metrics should exist").size.set(size as f64);
+        self.segments.get(segment).expect("segment metrics should exist").files.set(files as f64);
         self.segments
-            .get(&segment)
+            .get(segment)
             .expect("segment metrics should exist")
             .entries
             .set(entries as f64);
