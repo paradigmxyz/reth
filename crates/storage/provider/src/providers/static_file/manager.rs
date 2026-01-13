@@ -35,15 +35,15 @@ use reth_node_types::NodePrimitives;
 use reth_primitives_traits::{RecoveredBlock, SealedHeader, SignedTransaction};
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_static_file_types::{
-    find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
-    DEFAULT_BLOCKS_PER_STATIC_FILE,
+    find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileMap,
+    StaticFileSegment, DEFAULT_BLOCKS_PER_STATIC_FILE,
 };
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StorageSettingsCache,
 };
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::BTreeMap,
     fmt::Debug,
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
@@ -99,7 +99,7 @@ impl<N> Clone for StaticFileProvider<N> {
 pub struct StaticFileProviderBuilder<P> {
     access: StaticFileAccess,
     use_metrics: bool,
-    blocks_per_file: HashMap<StaticFileSegment, u64>,
+    blocks_per_file: StaticFileMap<u64>,
     path: P,
     genesis_block_number: u64,
 }
@@ -138,11 +138,11 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
     /// If it is changed for an existing node, existing static files will not be affected and will
     /// be finished with the old blocks per file setting, but new static files will use the new
     /// setting.
-    pub fn with_blocks_per_file_for_segments(
-        mut self,
-        segments: HashMap<StaticFileSegment, u64>,
-    ) -> Self {
-        self.blocks_per_file.extend(segments);
+    #[allow(clippy::boxed_local)]
+    pub fn with_blocks_per_file_for_segments(mut self, segments: StaticFileMap<u64>) -> Self {
+        for (segment, blocks_per_file) in *segments {
+            self.blocks_per_file.insert(segment, blocks_per_file);
+        }
         self
     }
 
@@ -194,7 +194,9 @@ impl<P: AsRef<Path>> StaticFileProviderBuilder<P> {
             provider.metrics = Some(Arc::new(StaticFileProviderMetrics::default()));
         }
 
-        provider.blocks_per_file.extend(self.blocks_per_file);
+        for (segment, blocks_per_file) in *self.blocks_per_file {
+            provider.blocks_per_file.insert(segment, blocks_per_file);
+        }
         provider.genesis_block_number = self.genesis_block_number;
 
         let provider = StaticFileProvider(Arc::new(provider));
@@ -337,7 +339,7 @@ pub struct StaticFileProviderInner<N> {
     /// segments and ranges.
     map: DashMap<(BlockNumber, StaticFileSegment), LoadedJar>,
     /// Indexes per segment.
-    indexes: RwLock<HashMap<StaticFileSegment, StaticFileSegmentIndex>>,
+    indexes: RwLock<StaticFileMap<StaticFileSegmentIndex>>,
     /// This is an additional index that tracks the expired height, this will track the highest
     /// block number that has been expired (missing). The first, non expired block is
     /// `expired_history_height + 1`.
@@ -358,7 +360,7 @@ pub struct StaticFileProviderInner<N> {
     /// Access rights of the provider.
     access: StaticFileAccess,
     /// Number of blocks per file, per segment.
-    blocks_per_file: HashMap<StaticFileSegment, u64>,
+    blocks_per_file: StaticFileMap<u64>,
     /// Write lock for when access is [`StaticFileAccess::RW`].
     _lock_file: Option<StorageLock>,
     /// Genesis block number, default is 0;
@@ -374,7 +376,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
             None
         };
 
-        let mut blocks_per_file = HashMap::new();
+        let mut blocks_per_file = StaticFileMap::default();
         for segment in StaticFileSegment::iter() {
             blocks_per_file.insert(segment, DEFAULT_BLOCKS_PER_STATIC_FILE);
         }
@@ -414,7 +416,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
         block: BlockNumber,
     ) -> SegmentRangeInclusive {
         let blocks_per_file =
-            self.blocks_per_file.get(&segment).copied().unwrap_or(DEFAULT_BLOCKS_PER_STATIC_FILE);
+            self.blocks_per_file.get(segment).copied().unwrap_or(DEFAULT_BLOCKS_PER_STATIC_FILE);
 
         if let Some(block_index) = block_index {
             // Find first block range that contains the requested block
@@ -458,10 +460,7 @@ impl<N: NodePrimitives> StaticFileProviderInner<N> {
     ) -> SegmentRangeInclusive {
         self.find_fixed_range_with_block_index(
             segment,
-            self.indexes
-                .read()
-                .get(&segment)
-                .map(|index| &index.expected_block_ranges_by_max_block),
+            self.indexes.read().get(segment).map(|index| &index.expected_block_ranges_by_max_block),
             block,
         )
     }
@@ -481,7 +480,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let Some(metrics) = &self.metrics else { return Ok(()) };
 
         let static_files = iter_static_files(&self.path).map_err(ProviderError::other)?;
-        for (segment, headers) in static_files.iter() {
+        for (segment, headers) in &*static_files {
             let mut entries = 0;
             let mut size = 0;
 
@@ -765,7 +764,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         block: u64,
     ) -> Option<SegmentRangeInclusive> {
         let indexes = self.indexes.read();
-        let index = indexes.get(&segment)?;
+        let index = indexes.get(segment)?;
 
         (index.max_block >= block).then(|| {
             self.find_fixed_range_with_block_index(
@@ -784,7 +783,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         tx: u64,
     ) -> Option<SegmentRangeInclusive> {
         let indexes = self.indexes.read();
-        let index = indexes.get(&segment)?;
+        let index = indexes.get(segment)?;
         let available_block_ranges_by_max_tx = index.available_block_ranges_by_max_tx.as_ref()?;
 
         // It's more probable that the request comes from a newer tx height, so we iterate
@@ -831,7 +830,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             Some(segment_max_block) => {
                 let fixed_range = self.find_fixed_range_with_block_index(
                     segment,
-                    indexes.get(&segment).map(|index| &index.expected_block_ranges_by_max_block),
+                    indexes.get(segment).map(|index| &index.expected_block_ranges_by_max_block),
                     segment_max_block,
                 );
 
@@ -941,7 +940,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
             None => {
                 debug!(target: "provider::static_file", ?segment, "Removing segment from index");
-                indexes.remove(&segment);
+                indexes.remove(segment);
             }
         };
 
@@ -954,9 +953,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         let mut indexes = self.indexes.write();
         indexes.clear();
 
-        for (segment, headers) in
-            iter_static_files(&self.path).map_err(ProviderError::other)?.iter()
-        {
+        for (segment, headers) in &*iter_static_files(&self.path).map_err(ProviderError::other)? {
             // Update first and last block for each segment
             //
             // It's safe to call `expect` here, because every segment has at least one header
@@ -967,7 +964,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             let mut expected_block_ranges_by_max_block = BTreeMap::default();
             let mut available_block_ranges_by_max_tx = None;
 
-            for (block_range, header) in headers.iter() {
+            for (block_range, header) in headers {
                 // Update max expected block -> expected_block_range index
                 expected_block_ranges_by_max_block
                     .insert(header.expected_block_end(), header.expected_block_range());
@@ -998,7 +995,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
         // initialize the expired history height to the lowest static file block
         if let Some(lowest_range) =
-            indexes.get(&StaticFileSegment::Transactions).and_then(|index| index.min_block_range)
+            indexes.get(StaticFileSegment::Transactions).and_then(|index| index.min_block_range)
         {
             // the earliest height is the lowest available block number
             self.earliest_history_height
@@ -1479,7 +1476,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_lowest_range(&self, segment: StaticFileSegment) -> Option<SegmentRangeInclusive> {
-        self.indexes.read().get(&segment).and_then(|index| index.min_block_range)
+        self.indexes.read().get(segment).and_then(|index| index.min_block_range)
     }
 
     /// Gets the lowest static file's block range start if it exists for a static file segment.
@@ -1504,7 +1501,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// If there is nothing on disk for the given segment, this will return [`None`].
     pub fn get_highest_static_file_block(&self, segment: StaticFileSegment) -> Option<BlockNumber> {
-        self.indexes.read().get(&segment).map(|index| index.max_block)
+        self.indexes.read().get(segment).map(|index| index.max_block)
     }
 
     /// Gets the highest static file transaction.
@@ -1513,7 +1510,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn get_highest_static_file_tx(&self, segment: StaticFileSegment) -> Option<TxNumber> {
         self.indexes
             .read()
-            .get(&segment)
+            .get(segment)
             .and_then(|index| index.available_block_ranges_by_max_tx.as_ref())
             .and_then(|index| index.last_key_value().map(|(last_tx, _)| *last_tx))
     }
@@ -1533,7 +1530,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         func: impl Fn(StaticFileJarProvider<'_, N>) -> ProviderResult<Option<T>>,
     ) -> ProviderResult<Option<T>> {
         if let Some(ranges) =
-            self.indexes.read().get(&segment).map(|index| &index.expected_block_ranges_by_max_block)
+            self.indexes.read().get(segment).map(|index| &index.expected_block_ranges_by_max_block)
         {
             // Iterate through all ranges in reverse order (highest to lowest)
             for range in ranges.values().rev() {
@@ -1761,7 +1758,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn tx_index(&self, segment: StaticFileSegment) -> Option<SegmentRanges> {
         self.indexes
             .read()
-            .get(&segment)
+            .get(segment)
             .and_then(|index| index.available_block_ranges_by_max_tx.as_ref())
             .cloned()
     }
@@ -1771,7 +1768,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     pub fn expected_block_index(&self, segment: StaticFileSegment) -> Option<SegmentRanges> {
         self.indexes
             .read()
-            .get(&segment)
+            .get(segment)
             .map(|index| &index.expected_block_ranges_by_max_block)
             .cloned()
     }

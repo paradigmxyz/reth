@@ -4098,7 +4098,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "86ed19add84e8cb9e8cc5f7074de0324247149ffef0b851e215fb0edc50c229b"
 dependencies = [
  "fixed-map-derive",
- "hashbrown 0.13.2",
  "serde",
 ]
 
@@ -4555,9 +4554,6 @@ name = "hashbrown"
 version = "0.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "43a3c133739dddd0d2990f9a4bdf8eb4b21ef50e4851ca85ab661199821d510e"
-dependencies = [
- "ahash",
-]
 
 [[package]]
 name = "hashbrown"
@@ -8071,7 +8067,6 @@ dependencies = [
  "codspeed-criterion-compat",
  "derive_more",
  "eyre",
- "fixed-map",
  "metrics",
  "page_size",
  "parking_lot",
@@ -10215,7 +10210,6 @@ dependencies = [
  "assert_matches",
  "dashmap 6.1.0",
  "eyre",
- "fixed-map",
  "itertools 0.14.0",
  "metrics",
  "notify",

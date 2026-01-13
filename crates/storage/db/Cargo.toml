@@ -20,8 +20,6 @@ reth-nippy-jar.workspace = true
 reth-tracing.workspace = true
 reth-static-file-types.workspace = true
 
-fixed-map.workspace = true
-
 # ethereum
 alloy-primitives.workspace = true
 

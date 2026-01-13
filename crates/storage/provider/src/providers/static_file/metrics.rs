@@ -1,16 +1,15 @@
 use std::{collections::HashMap, time::Duration};
 
-use fixed_map::Map;
 use itertools::Itertools;
 use metrics::{Counter, Gauge, Histogram};
 use reth_metrics::Metrics;
-use reth_static_file_types::StaticFileSegment;
+use reth_static_file_types::{StaticFileMap, StaticFileSegment};
 use strum::{EnumIter, IntoEnumIterator};
 
 /// Metrics for the static file provider.
 #[derive(Debug)]
 pub struct StaticFileProviderMetrics {
-    segments: Map<StaticFileSegment, StaticFileSegmentMetrics>,
+    segments: StaticFileMap<StaticFileSegmentMetrics>,
     segment_operations: HashMap<
         (StaticFileSegment, StaticFileProviderOperation),
         StaticFileProviderOperationMetrics,
@@ -19,15 +18,20 @@ pub struct StaticFileProviderMetrics {
 
 impl Default for StaticFileProviderMetrics {
     fn default() -> Self {
-        let mut segments = Map::new();
-        for segment in StaticFileSegment::iter() {
-            segments.insert(
-                segment,
-                StaticFileSegmentMetrics::new_with_labels(&[("segment", segment.as_str())]),
-            );
-        }
         Self {
-            segments,
+            segments: Box::new(
+                StaticFileSegment::iter()
+                    .map(|segment| {
+                        (
+                            segment,
+                            StaticFileSegmentMetrics::new_with_labels(&[(
+                                "segment",
+                                segment.as_str(),
+                            )]),
+                        )
+                    })
+                    .collect(),
+            ),
             segment_operations: StaticFileSegment::iter()
                 .cartesian_product(StaticFileProviderOperation::iter())
                 .map(|(segment, operation)| {
