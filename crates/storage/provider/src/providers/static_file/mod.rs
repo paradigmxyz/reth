@@ -1,6 +1,6 @@
 mod manager;
 pub use manager::{
-    StaticFileAccess, StaticFileProvider, StaticFileProviderBuilder, StaticFileWriteTargets,
+    StaticFileAccess, StaticFileProvider, StaticFileProviderBuilder, StaticFileWriteCtx,
     StaticFileWriter,
 };
 

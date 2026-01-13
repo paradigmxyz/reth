@@ -12,10 +12,10 @@ pub trait StateWriter {
     /// Receipt type included into [`ExecutionOutcome`].
     type Receipt;
 
-    /// Write the state and optionally receipts to the database or static files.
+    /// Write the state and optionally receipts to the database.
     ///
     /// If `write_receipts` is false, receipts are skipped (useful when receipts are written
-    /// separately, e.g., in parallel to static files).
+    /// separately to static files).
     fn write_state(
         &self,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,

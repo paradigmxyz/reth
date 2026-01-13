@@ -325,7 +325,11 @@ fn run_case(
 
         // Commit the post state/state diff to the database
         provider
-            .write_state(&ExecutionOutcome::single(block.number, output), OriginalValuesKnown::Yes)
+            .write_state(
+                &ExecutionOutcome::single(block.number, output),
+                OriginalValuesKnown::Yes,
+                true,
+            )
             .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
         provider

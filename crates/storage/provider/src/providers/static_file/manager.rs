@@ -44,7 +44,7 @@ use reth_static_file_types::{
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StorageSettingsCache,
 };
-use reth_storage_errors::provider::{ProviderError, ProviderResult};
+use reth_storage_errors::provider::{ProviderError, ProviderResult, StaticFileWriterError};
 use std::{
     collections::{BTreeMap, HashMap},
     fmt::Debug,
@@ -81,16 +81,21 @@ impl StaticFileAccess {
     }
 }
 
-/// Specifies which optional segments should be written to static files.
+/// Context for static file block writes.
 ///
-/// Headers and Transactions are always written to static files.
-/// Senders and Receipts depend on storage configuration and prune settings.
+/// Contains target segments and pruning configuration.
 #[derive(Debug, Clone, Copy, Default)]
-pub struct StaticFileWriteTargets {
+pub struct StaticFileWriteCtx {
     /// Whether transaction senders should be written to static files.
-    pub senders: bool,
+    pub write_senders: bool,
     /// Whether receipts should be written to static files.
-    pub receipts: bool,
+    pub write_receipts: bool,
+    /// The current chain tip block number (for pruning).
+    pub tip: BlockNumber,
+    /// The prune mode for receipts, if any.
+    pub receipts_prune_mode: Option<reth_prune_types::PruneMode>,
+    /// Whether receipts are prunable (based on storage settings and prune distance).
+    pub receipts_prunable: bool,
 }
 
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
@@ -548,7 +553,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         &self,
         blocks: &[ExecutedBlock<N>],
         tx_nums: &[TxNumber],
-        targets: StaticFileWriteTargets,
+        ctx: StaticFileWriteCtx,
     ) -> ProviderResult<()> {
         if blocks.is_empty() {
             return Ok(());
@@ -582,7 +587,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 },
             );
 
-            let h_senders = targets.senders.then(|| {
+            let h_senders = ctx.write_senders.then(|| {
                 self.spawn_segment_writer(
                     s,
                     StaticFileSegment::TransactionSenders,
@@ -600,10 +605,20 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 )
             });
 
-            let h_receipts = targets.receipts.then(|| {
+            let h_receipts = ctx.write_receipts.then(|| {
                 self.spawn_segment_writer(s, StaticFileSegment::Receipts, first_block_number, |w| {
                     for (block, &first_tx) in blocks.iter().zip(tx_nums) {
-                        w.increment_block(block.recovered_block().number())?;
+                        let block_number = block.recovered_block().number();
+                        w.increment_block(block_number)?;
+
+                        // skip writing receipts if pruning configuration requires us to.
+                        if ctx.receipts_prunable &&
+                            ctx.receipts_prune_mode
+                                .is_some_and(|mode| mode.should_prune(block_number, ctx.tip))
+                        {
+                            continue
+                        }
+
                         for (i, receipt) in
                             block.execution_outcome().receipts.iter().flatten().enumerate()
                         {
@@ -614,14 +629,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 })
             });
 
-            // Join all threads
-            h_headers.join().expect("headers thread panicked")?;
-            h_txs.join().expect("transactions thread panicked")?;
+            h_headers.join().map_err(|_| StaticFileWriterError::ThreadPanic("headers"))??;
+            h_txs.join().map_err(|_| StaticFileWriterError::ThreadPanic("transactions"))??;
             if let Some(h) = h_senders {
-                h.join().expect("senders thread panicked")?;
+                h.join().map_err(|_| StaticFileWriterError::ThreadPanic("senders"))??;
             }
             if let Some(h) = h_receipts {
-                h.join().expect("receipts thread panicked")?;
+                h.join().map_err(|_| StaticFileWriterError::ThreadPanic("receipts"))??;
             }
             Ok(())
         })
