@@ -63,6 +63,10 @@ pub const MERKLE_STAGE_DEFAULT_INCREMENTAL_THRESHOLD: u64 = 7_000;
 /// stages. The order of these two variants is important. The unwind variant should be added to the
 /// pipeline before the execution variant.
 ///
+/// Note: the unwind variant's `execute` is intentionally a no-op, and the execution variant's
+/// `unwind` is intentionally a no-op. This split is what allows the pipeline to run trie unwinding
+/// as part of the pipeline unwind flow (reverse order), while keeping forward execution separate.
+///
 /// An example pipeline to only hash state would be:
 ///
 /// - [`MerkleStage::Unwind`]
@@ -176,7 +180,10 @@ where
     fn execute(&mut self, provider: &Provider, input: ExecInput) -> Result<ExecOutput, StageError> {
         let (threshold, incremental_threshold) = match self {
             Self::Unwind => {
-                info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
+                debug!(
+                    target: "sync::stages::merkle::unwind",
+                    "Skipping forward execution: trie unwinding happens in `unwind()`"
+                );
                 return Ok(ExecOutput::done(StageCheckpoint::new(input.target())))
             }
             Self::Execution { rebuild_threshold, incremental_threshold } => {
@@ -363,7 +370,10 @@ where
         let tx = provider.tx_ref();
         let range = input.unwind_block_range();
         if matches!(self, Self::Execution { .. }) {
-            info!(target: "sync::stages::merkle::unwind", "Stage is always skipped");
+            debug!(
+                target: "sync::stages::merkle::unwind",
+                "Skipping unwind: trie unwinding is handled by the `MerkleUnwind` stage"
+            );
             return Ok(UnwindOutput { checkpoint: StageCheckpoint::new(input.unwind_to) })
         }
 
