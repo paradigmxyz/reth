@@ -184,9 +184,6 @@ where
                 }
             }
 
-            // Calculate storage root after updates.
-            storage_trie.root();
-
             let account = state
                 .accounts
                 .get(&hashed_address)
