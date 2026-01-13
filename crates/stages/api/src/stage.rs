@@ -347,7 +347,10 @@ mod tests {
                 .with_blocks_per_file(1)
                 .build()
                 .unwrap(),
-            RocksDBProvider::builder(create_test_rocksdb_dir().0.keep()).build().unwrap(),
+            RocksDBProvider::builder(create_test_rocksdb_dir().0.keep())
+                .with_default_tables()
+                .build()
+                .unwrap(),
         )
         .unwrap();
 
