@@ -22,8 +22,8 @@ pub struct PruningArgs {
     /// Run minimal storage mode with maximum pruning and smaller static files.
     ///
     /// This mode configures the node to use minimal disk space by:
-    /// - Fully pruning sender recovery, transaction lookup, receipts, and block bodies
-    /// - Leaving 10,064 blocks for account and storage history
+    /// - Fully pruning sender recovery, transaction lookup, receipts
+    /// - Leaving 10,064 blocks for account, storage history and block bodies
     /// - Using 10,000 blocks per static file segment
     #[arg(long, default_value_t = false, conflicts_with = "full")]
     pub minimal: bool,
@@ -159,7 +159,7 @@ impl PruningArgs {
                     receipts: Some(PruneMode::Full),
                     account_history: Some(PruneMode::Distance(10064)),
                     storage_history: Some(PruneMode::Distance(10064)),
-                    bodies_history: Some(PruneMode::Full),
+                    bodies_history: Some(PruneMode::Distance(10064)),
                     merkle_changesets: PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS),
                     receipts_log_filter: Default::default(),
                 },

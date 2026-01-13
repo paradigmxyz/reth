@@ -7,7 +7,7 @@ use reth_provider::StorageSettings;
 /// Blocks per static file when running in `--minimal` node.
 ///
 /// 10000 blocks per static file allows us to prune all history every 10k blocks.
-const MINIMAL_BLOCKS_PER_FILE: u64 = 10000;
+pub const MINIMAL_BLOCKS_PER_FILE: u64 = 10000;
 
 /// Parameters for static files configuration
 #[derive(Debug, Args, PartialEq, Eq, Default, Clone, Copy)]
