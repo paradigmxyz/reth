@@ -1849,6 +1849,9 @@ pub trait StaticFileWriter {
 
     /// Returns `true` if the static file provider has unwind queued.
     fn has_unwind_queued(&self) -> bool;
+
+    /// Finalizes all static file writers by committing their configuration to disk.
+    fn finalize(&self) -> ProviderResult<()>;
 }
 
 impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
@@ -1886,6 +1889,10 @@ impl<N: NodePrimitives> StaticFileWriter for StaticFileProvider<N> {
 
     fn has_unwind_queued(&self) -> bool {
         self.writers.has_unwind_queued()
+    }
+
+    fn finalize(&self) -> ProviderResult<()> {
+        self.writers.finalize()
     }
 }
 

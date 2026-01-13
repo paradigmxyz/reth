@@ -141,6 +141,30 @@ impl<N: NodePrimitives> StaticFileWriters<N> {
         }
         false
     }
+
+    /// Finalizes all writers by committing their configuration to disk and updating indices.
+    ///
+    /// Must be called after `sync_all` was called on individual writers.
+    /// Returns an error if any writer has prune queued.
+    pub(crate) fn finalize(&self) -> ProviderResult<()> {
+        debug!(target: "provider::static_file", "Finalizing all static file segments into disk");
+
+        for writer_lock in [
+            &self.headers,
+            &self.transactions,
+            &self.receipts,
+            &self.transaction_senders,
+            &self.account_change_sets,
+        ] {
+            let mut writer = writer_lock.write();
+            if let Some(writer) = writer.as_mut() {
+                writer.finalize()?;
+            }
+        }
+
+        debug!(target: "provider::static_file", "Finalized all static file segments into disk");
+        Ok(())
+    }
 }
 
 /// Mutable reference to a [`StaticFileProviderRW`] behind a [`RwLockWriteGuard`].
@@ -296,6 +320,42 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     /// Returns `true` if the writer will prune on commit.
     pub const fn will_prune_on_commit(&self) -> bool {
         self.prune_on_commit.is_some()
+    }
+
+    /// Syncs all data (rows and offsets) to disk.
+    ///
+    /// This does NOT commit the configuration. Call [`Self::finalize`] after to write the
+    /// configuration and mark the writer as clean.
+    ///
+    /// Returns an error if prune is queued (use [`Self::commit`] instead).
+    pub fn sync_all(&mut self) -> ProviderResult<()> {
+        if self.prune_on_commit.is_some() {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "Cannot call sync_all when prune is queued, use commit() instead",
+            )));
+        }
+        if self.writer.is_dirty() {
+            self.writer.sync_all().map_err(ProviderError::other)?;
+        }
+        Ok(())
+    }
+
+    /// Commits configuration to disk and updates the reader index.
+    ///
+    /// Must be called after [`Self::sync_all`] to complete the commit.
+    ///
+    /// Returns an error if prune is queued (use [`Self::commit`] instead).
+    pub fn finalize(&mut self) -> ProviderResult<()> {
+        if self.prune_on_commit.is_some() {
+            return Err(ProviderError::other(StaticFileWriterError::new(
+                "Cannot call finalize when prune is queued, use commit() instead",
+            )));
+        }
+        if self.writer.is_dirty() {
+            self.writer.finalize().map_err(ProviderError::other)?;
+            self.update_index()?;
+        }
+        Ok(())
     }
 
     /// Commits configuration changes to disk and updates the reader index with the new changes.
