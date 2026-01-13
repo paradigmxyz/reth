@@ -296,10 +296,16 @@ impl RocksDBProvider {
                 Ok(None)
             }
             None => {
-                // Empty RocksDB table
+                // Empty RocksDB table - this is expected on first run / migration.
+                // Log a warning but don't require unwind to 0, as the pipeline will
+                // naturally populate the table during sync.
                 if checkpoint > 0 {
-                    // Stage says we should have data but we don't
-                    return Ok(Some(0));
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        checkpoint,
+                        "StoragesHistory is empty but checkpoint is set. \
+                         This is expected on first run with RocksDB enabled."
+                    );
                 }
                 Ok(None)
             }
@@ -413,10 +419,16 @@ impl RocksDBProvider {
                 Ok(None)
             }
             None => {
-                // Empty RocksDB table
+                // Empty RocksDB table - this is expected on first run / migration.
+                // Log a warning but don't require unwind to 0, as the pipeline will
+                // naturally populate the table during sync.
                 if checkpoint > 0 {
-                    // Stage says we should have data but we don't
-                    return Ok(Some(0));
+                    tracing::warn!(
+                        target: "reth::providers::rocksdb",
+                        checkpoint,
+                        "AccountsHistory is empty but checkpoint is set. \
+                         This is expected on first run with RocksDB enabled."
+                    );
                 }
                 Ok(None)
             }
@@ -650,7 +662,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_storages_history_empty_with_checkpoint_needs_unwind() {
+    fn test_check_consistency_storages_history_empty_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::StoragesHistory>()
@@ -674,9 +686,10 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB is empty but checkpoint says block 100 was processed
+        // RocksDB is empty but checkpoint says block 100 was processed.
+        // This is treated as a first-run/migration scenario - no unwind needed.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, Some(0), "Should require unwind to block 0 to rebuild StoragesHistory");
+        assert_eq!(result, None, "Empty RocksDB with checkpoint is treated as first run");
     }
 
     #[test]
@@ -1135,7 +1148,7 @@ mod tests {
     }
 
     #[test]
-    fn test_check_consistency_accounts_history_empty_with_checkpoint_needs_unwind() {
+    fn test_check_consistency_accounts_history_empty_with_checkpoint_is_first_run() {
         let temp_dir = TempDir::new().unwrap();
         let rocksdb = RocksDBBuilder::new(temp_dir.path())
             .with_table::<tables::AccountsHistory>()
@@ -1159,9 +1172,10 @@ mod tests {
 
         let provider = factory.database_provider_ro().unwrap();
 
-        // RocksDB is empty but checkpoint says block 100 was processed
+        // RocksDB is empty but checkpoint says block 100 was processed.
+        // This is treated as a first-run/migration scenario - no unwind needed.
         let result = rocksdb.check_consistency(&provider).unwrap();
-        assert_eq!(result, Some(0), "Should require unwind to block 0 to rebuild AccountsHistory");
+        assert_eq!(result, None, "Empty RocksDB with checkpoint is treated as first run");
     }
 
     #[test]
