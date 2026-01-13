@@ -769,9 +769,6 @@ impl<N: NetworkPrimitives> Future for ActiveSession<N> {
                 this.pending_message_to_session = Some(msg);
             }
         }
-
-        this.shrink_to_fit();
-
         Poll::Pending
     }
 }
