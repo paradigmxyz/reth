@@ -171,12 +171,14 @@ struct DownloadProgress {
     downloaded: u64,
     total_size: u64,
     last_displayed: Instant,
+    started_at: Instant,
 }
 
 impl DownloadProgress {
     /// Creates new progress tracker with given total size
     fn new(total_size: u64) -> Self {
-        Self { downloaded: 0, total_size, last_displayed: Instant::now() }
+        let now = Instant::now();
+        Self { downloaded: 0, total_size, last_displayed: now, started_at: now }
     }
 
     /// Converts bytes to human readable format (B, KB, MB, GB)
@@ -192,6 +194,18 @@ impl DownloadProgress {
         format!("{:.2} {}", size, BYTE_UNITS[unit_index])
     }
 
+    /// Format duration as human readable string
+    fn format_duration(duration: Duration) -> String {
+        let secs = duration.as_secs();
+        if secs < 60 {
+            format!("{secs}s")
+        } else if secs < 3600 {
+            format!("{}m {}s", secs / 60, secs % 60)
+        } else {
+            format!("{}h {}m", secs / 3600, (secs % 3600) / 60)
+        }
+    }
+
     /// Updates progress bar
     fn update(&mut self, chunk_size: u64) -> Result<()> {
         self.downloaded += chunk_size;
@@ -202,8 +216,24 @@ impl DownloadProgress {
             let formatted_total = Self::format_size(self.total_size);
             let progress = (self.downloaded as f64 / self.total_size as f64) * 100.0;
 
+            // Calculate ETA based on current speed
+            let elapsed = self.started_at.elapsed();
+            let eta = if self.downloaded > 0 {
+                let remaining = self.total_size.saturating_sub(self.downloaded);
+                let speed = self.downloaded as f64 / elapsed.as_secs_f64();
+                if speed > 0.0 {
+                    Duration::from_secs_f64(remaining as f64 / speed)
+                } else {
+                    Duration::ZERO
+                }
+            } else {
+                Duration::ZERO
+            };
+            let eta_str = Self::format_duration(eta);
+
+            // Pad with spaces to clear any previous longer line
             print!(
-                "\rDownloading and extracting... {progress:.2}% ({formatted_downloaded} / {formatted_total})",
+                "\rDownloading and extracting... {progress:.2}% ({formatted_downloaded} / {formatted_total}) ETA: {eta_str}     ",
             );
             io::stdout().flush()?;
             self.last_displayed = Instant::now();
@@ -247,16 +277,18 @@ enum CompressionFormat {
 impl CompressionFormat {
     /// Detect compression format from file extension
     fn from_url(url: &str) -> Result<Self> {
-        let path = Url::parse(url)
-            .map(|u| u.path().to_string())
-            .unwrap_or_else(|_| url.to_string());
+        let path =
+            Url::parse(url).map(|u| u.path().to_string()).unwrap_or_else(|_| url.to_string());
 
         if path.ends_with(EXTENSION_TAR_LZ4) {
             Ok(Self::Lz4)
         } else if path.ends_with(EXTENSION_TAR_ZSTD) {
             Ok(Self::Zstd)
         } else {
-            Err(eyre::eyre!("Unsupported file format. Expected .tar.lz4 or .tar.zst, got: {}", path))
+            Err(eyre::eyre!(
+                "Unsupported file format. Expected .tar.lz4 or .tar.zst, got: {}",
+                path
+            ))
         }
     }
 }
