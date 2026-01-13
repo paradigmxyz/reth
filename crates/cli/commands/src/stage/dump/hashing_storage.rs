@@ -29,7 +29,7 @@ pub(crate) async fn dump_hashing_storage_stage<N: ProviderNodeTypes<DB = Arc<Dat
                 Arc::new(output_db),
                 db_tool.chain(),
                 StaticFileProvider::read_write(output_datadir.static_files())?,
-                RocksDBProvider::builder(output_datadir.rocksdb()).build()?,
+                RocksDBProvider::builder(output_datadir.rocksdb()).with_default_tables().build()?,
             )?,
             to,
             from,
