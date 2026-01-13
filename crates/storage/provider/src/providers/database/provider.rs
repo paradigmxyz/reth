@@ -5,7 +5,7 @@ use crate::{
     providers::{
         database::{chain::ChainStorage, metrics},
         rocksdb::RocksDBProvider,
-        static_file::StaticFileWriter,
+        static_file::{StaticFileWriteTargets, StaticFileWriter},
         NodeTypesForProvider, StaticFileProvider,
     },
     to_range,
@@ -378,7 +378,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
     /// Writes executed blocks and state to storage.
     ///
-    /// This method parallelizes static file (SF) writes with MDBX writes using scoped threads.
+    /// This method parallelizes static file (SF) writes with MDBX writes.
     /// The SF thread writes headers, transactions, senders (if SF), and receipts (if SF, Full mode only).
     /// The main thread writes MDBX data (indices, state, trie - Full mode only).
     ///
@@ -388,10 +388,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         &self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
         mode: SaveBlocksMode,
-    ) -> ProviderResult<()>
-    where
-        TX: Sync,
-    {
+    ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to write empty block range");
             return Ok(());
@@ -422,6 +419,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             nums
         };
 
+        // Extract references for SF thread BEFORE scope (avoids capturing &self.tx)
+        let sf_provider = &self.static_file_provider;
+        let sf_targets = StaticFileWriteTargets {
+            senders: EitherWriterDestination::senders(self).is_static_file()
+                && self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()),
+            receipts: mode.is_full() && EitherWriter::receipts_destination(self).is_static_file(),
+        };
+
         // Accumulate durations for each step
         let mut total_insert_block = Duration::ZERO;
         let mut total_write_state = Duration::ZERO;
@@ -429,13 +434,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut total_write_trie_changesets = Duration::ZERO;
         let mut total_write_trie_updates = Duration::ZERO;
 
-        let write_receipts = mode.is_full();
-
+        // Use scoped thread - SF thread only captures sf_provider, blocks, tx_nums (not &self.tx)
         thread::scope(|s| {
-            // SF thread - writes all SF segments in parallel
-            let sf_handle = s.spawn(|| self.write_blocks_sf_data(&blocks, &tx_nums, write_receipts));
+            // Spawn SF thread with references
+            let sf_handle = s.spawn(|| {
+                sf_provider.write_blocks_data(&blocks, &tx_nums, sf_targets)
+            });
 
-            // Main thread: MDBX writes (iterate by reference, SF thread holds &blocks)
+            // Main thread: MDBX writes
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -519,115 +525,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })
     }
 
-    /// Writes all static file data for multiple blocks in parallel per-segment.
-    ///
-    /// This spawns separate threads for each segment type (Headers, Transactions, Senders, Receipts)
-    /// and writes all blocks in parallel. Each thread calls `sync_all()` on its writer when done.
-    ///
-    /// Set `write_receipts` to `false` for `BlocksOnly` mode (receipts come separately).
-    fn write_blocks_sf_data(
-        &self,
-        blocks: &[ExecutedBlock<N::Primitives>],
-        tx_nums: &[TxNumber],
-        write_receipts: bool,
-    ) -> ProviderResult<()>
-    where
-        TX: Sync,
-    {
-        if blocks.is_empty() {
-            return Ok(());
-        }
-
-        let first_block_number = blocks[0].recovered_block().number();
-
-        // Check storage settings
-        let senders_to_sf = EitherWriterDestination::senders(self).is_static_file()
-            && self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full());
-        let receipts_to_sf =
-            write_receipts && EitherWriter::receipts_destination(self).is_static_file();
-
-        thread::scope(|s| {
-            // Headers - always SF
-            let h_headers = s.spawn(|| -> ProviderResult<()> {
-                let mut w = self
-                    .static_file_provider
-                    .get_writer(first_block_number, StaticFileSegment::Headers)?;
-                for block in blocks {
-                    let b = block.recovered_block();
-                    w.append_header(b.header(), &b.hash())?;
-                }
-                w.sync_all()
-            });
-
-            // Transactions - always SF
-            let h_txs = s.spawn(|| -> ProviderResult<()> {
-                let mut w = self
-                    .static_file_provider
-                    .get_writer(first_block_number, StaticFileSegment::Transactions)?;
-                for (block, &first_tx) in blocks.iter().zip(tx_nums) {
-                    let b = block.recovered_block();
-                    w.increment_block(b.number())?;
-                    for (i, tx) in b.body().transactions().iter().enumerate() {
-                        w.append_transaction(first_tx + i as u64, tx)?;
-                    }
-                }
-                w.sync_all()
-            });
-
-            // Senders - if configured for SF
-            let h_senders = senders_to_sf.then(|| {
-                s.spawn(|| -> ProviderResult<()> {
-                    let mut w = self
-                        .static_file_provider
-                        .get_writer(first_block_number, StaticFileSegment::TransactionSenders)?;
-                    for (block, &first_tx) in blocks.iter().zip(tx_nums) {
-                        let b = block.recovered_block();
-                        w.increment_block(b.number())?;
-                        for (i, sender) in b.senders_iter().enumerate() {
-                            w.append_transaction_sender(first_tx + i as u64, sender)?;
-                        }
-                    }
-                    w.sync_all()
-                })
-            });
-
-            // Receipts - if configured for SF and write_receipts is true
-            let h_receipts = receipts_to_sf.then(|| {
-                s.spawn(|| -> ProviderResult<()> {
-                    let mut w = self
-                        .static_file_provider
-                        .get_writer(first_block_number, StaticFileSegment::Receipts)?;
-                    for (block, &first_tx) in blocks.iter().zip(tx_nums) {
-                        w.increment_block(block.recovered_block().number())?;
-                        // receipts is Vec<Vec<T>> (outer: blocks, inner: txs). Each ExecutedBlock
-                        // has one block, so flatten to iterate over all receipts for this block.
-                        for (i, receipt) in
-                            block.execution_outcome().receipts.iter().flatten().enumerate()
-                        {
-                            w.append_receipt(first_tx + i as u64, receipt)?;
-                        }
-                    }
-                    w.sync_all()
-                })
-            });
-
-            // Join all threads
-            h_headers.join().expect("headers thread panicked")?;
-            h_txs.join().expect("transactions thread panicked")?;
-            if let Some(h) = h_senders {
-                h.join().expect("senders thread panicked")?;
-            }
-            if let Some(h) = h_receipts {
-                h.join().expect("receipts thread panicked")?;
-            }
-            Ok(())
-        })
-    }
-
     /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
     ///
     /// SF data (headers, transactions, senders if SF, receipts if SF) must be written separately
-    /// via [`Self::write_blocks_sf_data`].
+    /// via [`write_blocks_sf_data`].
     fn insert_block_mdbx_only(
         &self,
         block: &RecoveredBlock<BlockTy<N>>,
@@ -3358,7 +3259,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     }
 }
 
-impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockExecutionWriter
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
     fn take_block_and_execution_above(
@@ -3401,9 +3302,7 @@ impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockExecutio
     }
 }
 
-impl<TX: DbTxMut + DbTx + Sync + 'static, N: NodeTypesForProvider> BlockWriter
-    for DatabaseProvider<TX, N>
-{
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter for DatabaseProvider<TX, N> {
     type Block = BlockTy<N>;
     type Receipt = ReceiptTy<N>;
 

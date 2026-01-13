@@ -32,7 +32,7 @@ use reth_db_api::{
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
-use reth_primitives_traits::{RecoveredBlock, SealedHeader, SignedTransaction};
+use reth_primitives_traits::{AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader, SignedTransaction};
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
@@ -41,6 +41,7 @@ use reth_static_file_types::{
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StorageSettingsCache,
 };
+use reth_chain_state::ExecutedBlock;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -48,6 +49,7 @@ use std::{
     ops::{Deref, Range, RangeBounds, RangeInclusive},
     path::{Path, PathBuf},
     sync::{atomic::AtomicU64, mpsc, Arc},
+    thread,
 };
 use tracing::{debug, info, trace, warn};
 
@@ -75,6 +77,18 @@ impl StaticFileAccess {
     pub const fn is_read_write(&self) -> bool {
         matches!(self, Self::RW)
     }
+}
+
+/// Specifies which optional segments should be written to static files.
+///
+/// Headers and Transactions are always written to static files.
+/// Senders and Receipts depend on storage configuration and prune settings.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct StaticFileWriteTargets {
+    /// Whether transaction senders should be written to static files.
+    pub senders: bool,
+    /// Whether receipts should be written to static files.
+    pub receipts: bool,
 }
 
 /// [`StaticFileProvider`] manages all existing [`StaticFileJarProvider`].
@@ -501,6 +515,118 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         }
 
         Ok(())
+    }
+
+    /// Spawns a scoped thread that writes to a static file segment using the provided closure.
+    ///
+    /// The closure receives a mutable reference to the segment writer. After the closure completes,
+    /// `sync_all()` is called to flush writes to disk.
+    fn spawn_segment_writer<'scope, 'env, F>(
+        &'env self,
+        scope: &'scope thread::Scope<'scope, 'env>,
+        segment: StaticFileSegment,
+        first_block_number: BlockNumber,
+        f: F,
+    ) -> thread::ScopedJoinHandle<'scope, ProviderResult<()>>
+    where
+        F: FnOnce(&mut StaticFileProviderRWRefMut<'_, N>) -> ProviderResult<()> + Send + 'env,
+    {
+        scope.spawn(move || {
+            let mut w = self.get_writer(first_block_number, segment)?;
+            f(&mut w)?;
+            w.sync_all()
+        })
+    }
+
+    /// Writes all static file data for multiple blocks in parallel per-segment.
+    ///
+    /// This spawns separate threads for each segment type and each thread calls `sync_all()` on its writer when done.
+    pub fn write_blocks_data(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        targets: StaticFileWriteTargets,
+    ) -> ProviderResult<()> {
+        if blocks.is_empty() {
+            return Ok(());
+        }
+
+        let first_block_number = blocks[0].recovered_block().number();
+
+        thread::scope(|s| {
+            let h_headers =
+                self.spawn_segment_writer(s, StaticFileSegment::Headers, first_block_number, |w| {
+                    for block in blocks {
+                        let b = block.recovered_block();
+                        w.append_header(b.header(), &b.hash())?;
+                    }
+                    Ok(())
+                });
+
+            let h_txs = self.spawn_segment_writer(
+                s,
+                StaticFileSegment::Transactions,
+                first_block_number,
+                |w| {
+                    for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+                        let b = block.recovered_block();
+                        w.increment_block(b.number())?;
+                        for (i, tx) in b.body().transactions().iter().enumerate() {
+                            w.append_transaction(first_tx + i as u64, tx)?;
+                        }
+                    }
+                    Ok(())
+                },
+            );
+
+            let h_senders = targets.senders.then(|| {
+                self.spawn_segment_writer(
+                    s,
+                    StaticFileSegment::TransactionSenders,
+                    first_block_number,
+                    |w| {
+                        for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+                            let b = block.recovered_block();
+                            w.increment_block(b.number())?;
+                            for (i, sender) in b.senders_iter().enumerate() {
+                                w.append_transaction_sender(first_tx + i as u64, sender)?;
+                            }
+                        }
+                        Ok(())
+                    },
+                )
+            });
+
+            let h_receipts = targets.receipts.then(|| {
+                self.spawn_segment_writer(
+                    s,
+                    StaticFileSegment::Receipts,
+                    first_block_number,
+                    |w| {
+                        for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+                            w.increment_block(block.recovered_block().number())?;
+                            for (i, receipt) in
+                                block.execution_outcome().receipts.iter().flatten().enumerate()
+                            {
+                                w.append_receipt(first_tx + i as u64, receipt)?;
+                            }
+                        }
+                        Ok(())
+                    },
+                )
+            });
+
+            // Join all threads
+            h_headers.join().expect("headers thread panicked")?;
+            h_txs.join().expect("transactions thread panicked")?;
+            if let Some(h) = h_senders {
+                h.join().expect("senders thread panicked")?;
+            }
+            if let Some(h) = h_receipts {
+                h.join().expect("receipts thread panicked")?;
+            }
+            Ok(())
+        })
     }
 
     /// Gets the [`StaticFileJarProvider`] of the requested segment and start index that can be

@@ -59,7 +59,7 @@ impl AccountHashingStage {
     ///
     /// Proceeds to go to the `BlockTransitionIndex` end, go back `transitions` and change the
     /// account state in the `AccountChangeSets` table.
-    pub fn seed<Tx: DbTx + DbTxMut + Sync + 'static, N: reth_provider::providers::ProviderNodeTypes>(
+    pub fn seed<Tx: DbTx + DbTxMut + 'static, N: reth_provider::providers::ProviderNodeTypes>(
         provider: &reth_provider::DatabaseProvider<Tx, N>,
         opts: SeedOpts,
     ) -> Result<Vec<(alloy_primitives::Address, Account)>, StageError>
