@@ -15,7 +15,8 @@ use reth_db_api::{
 use reth_etl::Collector;
 use reth_primitives_traits::NodePrimitives;
 use reth_provider::{
-    providers::StaticFileProvider, to_range, BlockReader, DBProvider, EitherWriter, ProviderError,
+    make_rocksdb_batch_arg, make_rocksdb_provider, providers::StaticFileProvider,
+    register_rocksdb_batch, to_range, BlockReader, DBProvider, EitherWriter, ProviderError,
     RocksDBProviderFactory, StaticFileProviderFactory, StorageSettingsCache,
 };
 use reth_stages_api::StageError;
@@ -351,15 +352,9 @@ where
         + RocksDBProviderFactory,
     P: Copy + Default + Eq,
 {
-    // Create RocksDB batch if feature enabled
-    #[cfg(all(unix, feature = "rocksdb"))]
-    let rocksdb = provider.rocksdb_provider();
-    #[cfg(all(unix, feature = "rocksdb"))]
-    let rocksdb_batch = rocksdb.batch();
-    #[cfg(not(all(unix, feature = "rocksdb")))]
-    let rocksdb_batch = ();
-
     // Create EitherWriter for storage history
+    let rocksdb = make_rocksdb_provider(provider);
+    let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
     let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
 
     // Create read cursor for checking existing shards
@@ -427,11 +422,8 @@ where
         LoadMode::Flush,
     )?;
 
-    // Extract and register RocksDB batch for commit
-    #[cfg(all(unix, feature = "rocksdb"))]
-    if let Some(batch) = writer.into_raw_rocksdb_batch() {
-        provider.set_pending_rocksdb_batch(batch);
-    }
+    // Register RocksDB batch for commit
+    register_rocksdb_batch(provider, writer);
 
     Ok(())
 }
@@ -498,15 +490,9 @@ where
         + RocksDBProviderFactory,
     P: Copy + Default + Eq,
 {
-    // Create RocksDB batch if feature enabled
-    #[cfg(all(unix, feature = "rocksdb"))]
-    let rocksdb = provider.rocksdb_provider();
-    #[cfg(all(unix, feature = "rocksdb"))]
-    let rocksdb_batch = rocksdb.batch();
-    #[cfg(not(all(unix, feature = "rocksdb")))]
-    let rocksdb_batch = ();
-
     // Create EitherWriter for account history
+    let rocksdb = make_rocksdb_provider(provider);
+    let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
     let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
 
     // Create read cursor for checking existing shards
@@ -574,11 +560,8 @@ where
         LoadMode::Flush,
     )?;
 
-    // Extract and register RocksDB batch for commit
-    #[cfg(all(unix, feature = "rocksdb"))]
-    if let Some(batch) = writer.into_raw_rocksdb_batch() {
-        provider.set_pending_rocksdb_batch(batch);
-    }
+    // Register RocksDB batch for commit
+    register_rocksdb_batch(provider, writer);
 
     Ok(())
 }
