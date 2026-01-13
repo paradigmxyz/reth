@@ -14,6 +14,7 @@ use alloy_primitives::{b256, keccak256, Address, BlockHash, BlockNumber, TxHash,
 use dashmap::DashMap;
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 use parking_lot::RwLock;
+use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec, NamedChain};
 use reth_db::{
     lockfile::StorageLock,
@@ -32,7 +33,9 @@ use reth_db_api::{
 use reth_ethereum_primitives::{Receipt, TransactionSigned};
 use reth_nippy_jar::{NippyJar, NippyJarChecker, CONFIG_FILE_EXTENSION};
 use reth_node_types::NodePrimitives;
-use reth_primitives_traits::{AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader, SignedTransaction};
+use reth_primitives_traits::{
+    AlloyBlockHeader as _, BlockBody as _, RecoveredBlock, SealedHeader, SignedTransaction,
+};
 use reth_stages_types::{PipelineTarget, StageId};
 use reth_static_file_types::{
     find_fixed_range, HighestStaticFiles, SegmentHeader, SegmentRangeInclusive, StaticFileSegment,
@@ -41,7 +44,6 @@ use reth_static_file_types::{
 use reth_storage_api::{
     BlockBodyIndicesProvider, ChangeSetReader, DBProvider, StorageSettingsCache,
 };
-use reth_chain_state::ExecutedBlock;
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use std::{
     collections::{BTreeMap, HashMap},
@@ -540,7 +542,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
 
     /// Writes all static file data for multiple blocks in parallel per-segment.
     ///
-    /// This spawns separate threads for each segment type and each thread calls `sync_all()` on its writer when done.
+    /// This spawns separate threads for each segment type and each thread calls `sync_all()` on its
+    /// writer when done.
     pub fn write_blocks_data(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -598,22 +601,17 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             });
 
             let h_receipts = targets.receipts.then(|| {
-                self.spawn_segment_writer(
-                    s,
-                    StaticFileSegment::Receipts,
-                    first_block_number,
-                    |w| {
-                        for (block, &first_tx) in blocks.iter().zip(tx_nums) {
-                            w.increment_block(block.recovered_block().number())?;
-                            for (i, receipt) in
-                                block.execution_outcome().receipts.iter().flatten().enumerate()
-                            {
-                                w.append_receipt(first_tx + i as u64, receipt)?;
-                            }
+                self.spawn_segment_writer(s, StaticFileSegment::Receipts, first_block_number, |w| {
+                    for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+                        w.increment_block(block.recovered_block().number())?;
+                        for (i, receipt) in
+                            block.execution_outcome().receipts.iter().flatten().enumerate()
+                        {
+                            w.append_receipt(first_tx + i as u64, receipt)?;
                         }
-                        Ok(())
-                    },
-                )
+                    }
+                    Ok(())
+                })
             });
 
             // Join all threads

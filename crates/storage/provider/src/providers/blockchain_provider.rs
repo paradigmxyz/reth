@@ -784,9 +784,12 @@ impl<N: ProviderNodeTypes> TrieReader for BlockchainProvider<N> {
 #[cfg(test)]
 mod tests {
     use crate::{
-        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode, providers::BlockchainProvider, test_utils::{
-            MockNodeTypesWithDB, create_test_provider_factory, create_test_provider_factory_with_chain_spec
-        }
+        providers::BlockchainProvider,
+        test_utils::{
+            create_test_provider_factory, create_test_provider_factory_with_chain_spec,
+            MockNodeTypesWithDB,
+        },
+        BlockWriter, CanonChainTracker, ProviderFactory, SaveBlocksMode,
     };
     use alloy_eips::{BlockHashOrNumber, BlockNumHash, BlockNumberOrTag};
     use alloy_primitives::{BlockNumber, TxNumber, B256};
@@ -904,6 +907,7 @@ mod tests {
                     ..Default::default()
                 },
                 OriginalValuesKnown::No,
+                true,
             )?;
         }
 
