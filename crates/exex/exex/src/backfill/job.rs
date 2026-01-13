@@ -89,7 +89,10 @@ where
 
         let mut blocks = Vec::new();
         let mut results = Vec::new();
-        for block_number in self.range.clone() {
+        let range_start = *self.range.start();
+        let range_end = *self.range.end();
+        let mut block_number = range_start;
+        while block_number <= range_end {
             // Fetch the block
             let fetch_block_start = Instant::now();
 
@@ -121,15 +124,18 @@ where
 
             // Seal the block back and save it
             blocks.push(block);
+
             // Check if we should commit now
             if self.thresholds.is_end_of_batch(
-                block_number - *self.range.start() + 1,
+                block_number - range_start + 1,
                 executor.size_hint() as u64,
                 cumulative_gas,
                 batch_start.elapsed(),
             ) {
                 break
             }
+
+            block_number += 1;
         }
 
         let first_block_number = blocks.first().expect("blocks should not be empty").number();
@@ -142,7 +148,7 @@ where
             throughput = format_gas_throughput(cumulative_gas, execution_duration),
             "Finished executing block range"
         );
-        self.range = last_block_number + 1..=*self.range.end();
+        self.range = last_block_number + 1..=range_end;
 
         let outcome = ExecutionOutcome::from_blocks(
             first_block_number,
