@@ -121,7 +121,6 @@ where
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
                 let inspector = DebugInspector::new(opts).map_err(Eth::Error::from_eth_err)?;
 
-                // Create EVM once and reuse it for all transactions in the block
                 let mut evm = eth_api.evm_config().evm_with_env_and_inspector(
                     &mut db,
                     evm_env.clone(),
@@ -133,7 +132,6 @@ where
                     let tx_env = eth_api.evm_config().tx_env(tx);
                     let res = evm.transact(tx_env.clone()).map_err(Eth::Error::from_evm_err)?;
 
-                    // Access inspector and db through EVM components
                     let (db_ref, inspector_ref, _) = evm.components_mut();
                     let result = inspector_ref
                         .get_result(
