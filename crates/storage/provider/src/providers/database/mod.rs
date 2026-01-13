@@ -709,7 +709,7 @@ mod tests {
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
-            RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
+            RocksDBProvider::builder(&rocksdb_path).with_default_tables().build().unwrap(),
         )
         .unwrap();
         let provider = factory.provider().unwrap();
