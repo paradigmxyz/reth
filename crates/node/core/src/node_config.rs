@@ -342,7 +342,7 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
-    /// Converts the node configuration to [`StorageSettings`].
+    /// Converts the node configuration to [`reth_provider::StorageSettings`].
     ///
     /// This returns storage settings configured via CLI arguments including
     /// static file settings and `RocksDB` settings.
