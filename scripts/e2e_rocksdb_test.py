@@ -98,9 +98,7 @@ def start_node(extra_args: list[str] = None) -> int:
     cmd = [
         RETH_BINARY, "node",
         "--chain", CHAIN,
-        "--rocksdb.tx-hash-numbers",
-        "--rocksdb.storages-history",
-        "--rocksdb.account-history",
+        "--storage.rocksdb",
         "-vvvv",  # Debug verbosity
     ]
     if extra_args:
@@ -240,9 +238,7 @@ def run_drop_stage(stage: str) -> bool:
     cmd = [
         RETH_BINARY, "stage", "drop",
         "--chain", CHAIN,
-        "--rocksdb.tx-hash-numbers",
-        "--rocksdb.storages-history",
-        "--rocksdb.account-history",
+        "--storage.rocksdb",
         stage,
     ]
 
@@ -267,9 +263,7 @@ def check_consistency_on_startup(timeout: int = CONSISTENCY_CHECK_TIMEOUT) -> tu
     cmd = [
         RETH_BINARY, "node",
         "--chain", CHAIN,
-        "--rocksdb.tx-hash-numbers",
-        "--rocksdb.storages-history",
-        "--rocksdb.account-history",
+        "--storage.rocksdb",
         "-vvvv",
     ]
 
