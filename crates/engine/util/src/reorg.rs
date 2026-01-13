@@ -194,7 +194,7 @@ where
                         BeaconEngineMessage::NewPayload { payload, tx },
                         // Reorg payload
                         BeaconEngineMessage::NewPayload {
-                            payload: T::block_to_payload(reorg_block),
+                            payload: T::block_to_payload(&reorg_block),
                             tx: reorg_payload_tx,
                         },
                         // Reorg forkchoice state

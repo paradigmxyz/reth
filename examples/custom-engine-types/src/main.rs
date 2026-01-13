@@ -153,12 +153,12 @@ impl PayloadTypes for CustomEngineTypes {
     type PayloadBuilderAttributes = CustomPayloadBuilderAttributes;
 
     fn block_to_payload(
-        block: SealedBlock<
+        block: &SealedBlock<
                 <<Self::BuiltPayload as reth_ethereum::node::api::BuiltPayload>::Primitives as reth_ethereum::node::api::NodePrimitives>::Block,
             >,
     ) -> ExecutionData {
         let (payload, sidecar) =
-            ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
+            ExecutionPayload::from_block_unchecked(block.hash(), &block.clone_block());
         ExecutionData { payload, sidecar }
     }
 }

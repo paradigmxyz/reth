@@ -44,13 +44,13 @@ where
     type PayloadBuilderAttributes = OpPayloadBuilderAttributes<N::SignedTx>;
 
     fn block_to_payload(
-        block: SealedBlock<
+        block: &SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
     ) -> Self::ExecutionData {
         OpExecutionData::from_block_unchecked(
             block.hash(),
-            &block.into_block().into_ethereum_block(),
+            &block.clone_block().into_ethereum_block(),
         )
     }
 }

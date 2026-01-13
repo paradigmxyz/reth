@@ -94,7 +94,7 @@ where
         };
 
         while let Some(block) = block_stream.recv().await {
-            let payload = T::block_to_payload(SealedBlock::new_unhashed(block));
+            let payload = T::block_to_payload(&SealedBlock::new_unhashed(block));
 
             let block_hash = payload.block_hash();
             let block_number = payload.block_number();
