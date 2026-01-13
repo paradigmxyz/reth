@@ -482,7 +482,8 @@ mod tests {
         let local_tip_hash = B256::random();
         let local_tip_timestamp = 1000;
 
-        let args = manager.next_buildable_args::<OpPrimitives>(local_tip_hash, local_tip_timestamp, None);
+        let args =
+            manager.next_buildable_args::<OpPrimitives>(local_tip_hash, local_tip_timestamp, None);
         assert!(args.is_none());
     }
 
@@ -577,7 +578,11 @@ mod tests {
         }
 
         // Request with proper timing - should compute state root for index 9
-        let args = manager.next_buildable_args::<OpPrimitives>(parent_hash, base_timestamp - block_time, None);
+        let args = manager.next_buildable_args::<OpPrimitives>(
+            parent_hash,
+            base_timestamp - block_time,
+            None,
+        );
         assert!(args.is_some());
         assert!(args.unwrap().compute_state_root);
     }
@@ -594,7 +599,11 @@ mod tests {
         let base_timestamp = fb0.base.as_ref().unwrap().timestamp;
         manager.insert_flashblock(fb0).unwrap();
 
-        let args = manager.next_buildable_args::<OpPrimitives>(parent_hash, base_timestamp - block_time, None);
+        let args = manager.next_buildable_args::<OpPrimitives>(
+            parent_hash,
+            base_timestamp - block_time,
+            None,
+        );
         assert!(args.is_some());
         assert!(!args.unwrap().compute_state_root);
     }
@@ -618,7 +627,11 @@ mod tests {
         }
 
         // Request with proper timing - should compute state root for index 9
-        let args = manager.next_buildable_args::<OpPrimitives>(parent_hash, base_timestamp - block_time, None);
+        let args = manager.next_buildable_args::<OpPrimitives>(
+            parent_hash,
+            base_timestamp - block_time,
+            None,
+        );
         assert!(args.is_some());
         assert!(!args.unwrap().compute_state_root);
     }
@@ -789,7 +802,8 @@ mod tests {
         };
 
         // With pending parent state, should return args for speculative building
-        let args = manager.next_buildable_args(local_tip_hash, 1000000, Some(pending_state.clone()));
+        let args =
+            manager.next_buildable_args(local_tip_hash, 1000000, Some(pending_state.clone()));
         assert!(args.is_some());
         let build_args = args.unwrap();
         assert!(build_args.pending_parent.is_some());
