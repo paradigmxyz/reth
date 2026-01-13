@@ -591,13 +591,21 @@ impl AccountProof {
         self,
         slots: Vec<alloy_serde::JsonStorageKey>,
     ) -> alloy_rpc_types_eth::EIP1186AccountProofResponse {
+        let is_non_existent = self.info.is_none();
         let info = self.info.unwrap_or_default();
+
+        let (code_hash, storage_hash) = if is_non_existent {
+            (B256::ZERO, B256::ZERO)
+        } else {
+            (info.get_bytecode_hash(), self.storage_root)
+        };
+
         alloy_rpc_types_eth::EIP1186AccountProofResponse {
             address: self.address,
             balance: info.balance,
-            code_hash: info.get_bytecode_hash(),
+            code_hash,
             nonce: info.nonce,
-            storage_hash: self.storage_root,
+            storage_hash,
             account_proof: self.proof,
             storage_proof: self
                 .storage_proofs
@@ -631,7 +639,7 @@ impl AccountProof {
         let (storage_root, info) = if nonce == 0 &&
             balance.is_zero() &&
             storage_hash.is_zero() &&
-            code_hash == KECCAK_EMPTY
+            (code_hash == KECCAK_EMPTY || code_hash.is_zero())
         {
             // Account does not exist in state. Return `None` here to prevent proof
             // verification.

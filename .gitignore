@@ -72,3 +72,6 @@ __pycache__/
 # direnv
 .envrc
 .direnv/
+
+# LLVM profile files
+**/*.profraw

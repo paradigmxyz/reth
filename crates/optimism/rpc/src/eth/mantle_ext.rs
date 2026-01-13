@@ -75,7 +75,7 @@ where
     /// # Deprecation
     ///
     /// This method is deprecated and will be removed in the next network upgrade.
-    #[method(name = "getBlockRange")]
+    // #[deprecated(note = "This method will be removed in the next network upgrade.")]
     async fn get_block_range(
         &self,
         start_number: BlockNumberOrTag,
