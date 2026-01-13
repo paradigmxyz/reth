@@ -4,12 +4,34 @@
 //! available (either on non-Unix platforms or when the `rocksdb` feature is not enabled).
 //! Operations will produce errors if actually attempted.
 
-use reth_db_api::table::{Encode, Table};
+use alloy_primitives::BlockNumber;
+use parking_lot::Mutex;
+use reth_db_api::{
+    models::StorageSettings,
+    table::{Encode, Table},
+};
+use reth_prune_types::PruneMode;
 use reth_storage_errors::{
     db::LogLevel,
     provider::{ProviderError::UnsupportedProvider, ProviderResult},
 };
-use std::path::Path;
+use std::{path::Path, sync::Arc};
+
+/// Pending RocksDB batches type alias (stub - uses unit type).
+pub type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
+
+/// Context for RocksDB block writes (stub).
+#[derive(Debug, Clone)]
+pub struct RocksDBWriteCtx {
+    /// The first block number being written.
+    pub first_block_number: BlockNumber,
+    /// The prune mode for transaction lookup, if any.
+    pub prune_tx_lookup: Option<PruneMode>,
+    /// Storage settings determining what goes to RocksDB.
+    pub storage_settings: StorageSettings,
+    /// Pending batches (stub - unused).
+    pub pending_batches: PendingRocksDBBatches,
+}
 
 /// A stub `RocksDB` provider.
 ///
@@ -109,6 +131,21 @@ impl RocksDBProvider {
         _provider: &Provider,
     ) -> ProviderResult<Option<alloy_primitives::BlockNumber>> {
         Ok(None)
+    }
+
+    /// Writes all RocksDB data for multiple blocks (stub implementation).
+    ///
+    /// No-op since RocksDB is not available on this platform.
+    pub fn write_blocks_data<N>(
+        &self,
+        _blocks: &[reth_chain_state::ExecutedBlock<N>],
+        _tx_nums: &[alloy_primitives::TxNumber],
+        _ctx: RocksDBWriteCtx,
+    ) -> ProviderResult<()>
+    where
+        N: reth_node_types::NodePrimitives,
+    {
+        Ok(())
     }
 }
 
