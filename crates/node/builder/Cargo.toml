@@ -126,3 +126,8 @@ op = [
     "reth-evm/op",
     "reth-primitives-traits/op",
 ]
+
+failpoints = [
+    "reth-rpc/failpoints",
+    "reth-provider/failpoints",
+]

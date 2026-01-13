@@ -37,6 +37,7 @@ use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
 use reth_chain_state::ExecutedBlock;
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
+use reth_db::set_fail_point;
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
     database::Database,
@@ -401,11 +402,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Must be written after blocks because of the receipt lookup.
             let start = Instant::now();
             self.write_state(&execution_output, OriginalValuesKnown::No)?;
+            set_fail_point!("persistence::after_write_state");
             total_write_state += start.elapsed();
 
             // insert hashes and intermediate merkle nodes
             let start = Instant::now();
             self.write_hashed_state(&trie_data.hashed_state)?;
+            set_fail_point!("persistence::after_hashed_state");
             total_write_hashed_state += start.elapsed();
 
             let start = Instant::now();
@@ -414,12 +417,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             let start = Instant::now();
             self.write_trie_updates_sorted(&trie_data.trie_updates)?;
+            set_fail_point!("persistence::after_trie_update");
             total_write_trie_updates += start.elapsed();
         }
 
         // update history indices
         let start = Instant::now();
         self.update_history_indices(first_number..=last_block_number)?;
+        set_fail_point!("persistence::after_history_indices");
         let duration_update_history_indices = start.elapsed();
 
         // Update pipeline progress
@@ -3429,6 +3434,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         // checkpoints on the next start-up.
         if self.static_file_provider.has_unwind_queued() {
             self.tx.commit()?;
+            set_fail_point!("provider::commit::after_mdbx_unwind");
 
             #[cfg(all(unix, feature = "rocksdb"))]
             {
@@ -3436,11 +3442,14 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
                 for batch in batches {
                     self.rocksdb_provider.commit_batch(batch)?;
                 }
+                set_fail_point!("provider::commit::after_rocksdb_unwind");
             }
 
             self.static_file_provider.commit()?;
+            set_fail_point!("provider::commit::after_static_files_unwind");
         } else {
             self.static_file_provider.commit()?;
+            set_fail_point!("provider::commit::after_static_files");
 
             #[cfg(all(unix, feature = "rocksdb"))]
             {
@@ -3448,9 +3457,11 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
                 for batch in batches {
                     self.rocksdb_provider.commit_batch(batch)?;
                 }
+                set_fail_point!("provider::commit::after_rocksdb");
             }
 
             self.tx.commit()?;
+            set_fail_point!("provider::commit::after_mdbx");
         }
 
         Ok(true)

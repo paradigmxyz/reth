@@ -1,6 +1,7 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
 use crate::providers::{needs_prev_shard_check, HistoryInfo};
 use alloy_primitives::{Address, BlockNumber, B256};
+use reth_db::set_fail_point;
 use reth_db_api::{
     models::{storage_sharded_key::StorageShardedKey, ShardedKey},
     table::{Compress, Decode, Decompress, Encode, Table},
@@ -536,7 +537,9 @@ impl<'a> RocksDBBatch<'a> {
                 message: e.to_string().into(),
                 code: -1,
             }))
-        })
+        })?;
+        set_fail_point!("rocksdb::batch::after_commit");
+        Ok(())
     }
 
     /// Returns the number of write operations (puts + deletes) queued in this batch.
@@ -668,7 +671,9 @@ impl<'db> RocksTx<'db> {
                 message: e.to_string().into(),
                 code: -1,
             }))
-        })
+        })?;
+        set_fail_point!("rocksdb::tx::after_commit");
+        Ok(())
     }
 
     /// Rolls back the transaction, discarding all changes.

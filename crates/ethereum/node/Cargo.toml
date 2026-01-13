@@ -113,3 +113,5 @@ test-utils = [
     "reth-evm-ethereum/test-utils",
     "reth-stages-types/test-utils",
 ]
+
+failpoints = ["reth-node-builder/failpoints"]

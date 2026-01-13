@@ -96,6 +96,7 @@ sha2.workspace = true
 thiserror.workspace = true
 derive_more.workspace = true
 itertools.workspace = true
+fail = { workspace = true, optional = true }
 
 [dev-dependencies]
 reth-ethereum-primitives.workspace = true
@@ -114,3 +115,4 @@ js-tracer = [
     "reth-rpc-eth-types/js-tracer",
     "reth-rpc-eth-api/js-tracer",
 ]
+failpoints = ["fail/failpoints"]

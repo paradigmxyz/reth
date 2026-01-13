@@ -37,6 +37,38 @@ pub use mdbx::{create_db, init_db, open_db, open_db_read_only, DatabaseEnv, Data
 pub use models::ClientVersion;
 pub use reth_db_api::*;
 
+// Re-export fail crate when failpoints feature is enabled
+#[cfg(feature = "failpoints")]
+#[doc(hidden)]
+pub use fail;
+
+/// Generic failpoint injection macro that panics when triggered.
+/// When `failpoints` feature is enabled, this triggers the failpoint and panics if activated.
+/// When disabled, this is a no-op (compiles to nothing).
+///
+/// # Example
+/// ```ignore
+/// set_fail_point!("my::failpoint::name");
+/// ```
+///
+/// To trigger via RPC: `debug_setFailpoint("my::failpoint::name", "panic")`
+#[cfg(feature = "failpoints")]
+#[macro_export]
+macro_rules! set_fail_point {
+    ($name:expr) => {
+        $crate::fail::fail_point!($name, |_| {
+            panic!("failpoint triggered: {}", $name);
+        });
+    };
+}
+
+/// No-op version when failpoints feature is disabled.
+#[cfg(not(feature = "failpoints"))]
+#[macro_export]
+macro_rules! set_fail_point {
+    ($name:expr) => {};
+}
+
 /// Collection of database test utilities
 #[cfg(any(test, feature = "test-utils"))]
 pub mod test_utils {

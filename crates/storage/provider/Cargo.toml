@@ -104,3 +104,4 @@ test-utils = [
     "revm-state",
     "tokio",
 ]
+failpoints = ["reth-db/failpoints"]

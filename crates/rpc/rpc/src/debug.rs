@@ -1092,6 +1092,23 @@ where
     async fn debug_write_mutex_profile(&self, _file: String) -> RpcResult<()> {
         Ok(())
     }
+
+    /// Handler for `debug_setFailpoint`
+    ///
+    /// Sets a failpoint with the given name and action for runtime fault injection.
+    async fn debug_set_failpoint(&self, name: String, actions: String) -> RpcResult<()> {
+        #[cfg(feature = "failpoints")]
+        {
+            fail::cfg(name, &actions).map_err(internal_rpc_err)
+        }
+        #[cfg(not(feature = "failpoints"))]
+        {
+            let _ = (name, actions);
+            Err(internal_rpc_err(
+                "Failpoints feature is not enabled. Rebuild with --features failpoints",
+            ))
+        }
+    }
 }
 
 impl<Eth: RpcNodeCore> std::fmt::Debug for DebugApi<Eth> {

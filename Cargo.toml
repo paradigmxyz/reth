@@ -554,6 +554,7 @@ derive_more = { version = "2", default-features = false, features = ["full"] }
 dirs-next = "2.0.0"
 dyn-clone = "1.0.17"
 eyre = "0.6"
+fail = "0.5"
 fdlimit = "0.3.0"
 humantime = "2.1"
 humantime-serde = "1.1"
