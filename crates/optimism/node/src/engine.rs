@@ -393,8 +393,10 @@ mod test {
 
     #[test]
     fn test_well_formed_attributes_holocene_eip1559_params_zero_elasticity() {
-        let validator =
-            OpEngineValidator::new::<KeccakKeyHasher>(BASE_SEPOLIA.clone(), NoopProvider::default());
+        let validator = OpEngineValidator::new::<KeccakKeyHasher>(
+            BASE_SEPOLIA.clone(),
+            NoopProvider::default(),
+        );
         let attributes = get_attributes(Some(b64!("0000000800000000")), None, 1732633200);
 
         let result = <engine::OpEngineValidator<_, _, _> as EngineApiValidator<
