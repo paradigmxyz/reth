@@ -269,26 +269,23 @@ where
 
         if let Some(saved_cache) = saved_cache {
             debug!(target: "engine::caching", parent_hash=?hash, "Updating execution cache");
-            // Perform all cache operations atomically under the lock
+
+            // Create the new cache entry OUTSIDE the lock to minimize lock contention.
+            // This allows the expensive state insertion to happen without blocking other tasks.
+            let (caches, cache_metrics) = saved_cache.split();
+            let new_cache = SavedCache::new(hash, caches, cache_metrics);
+
+            // Insert state into cache OUTSIDE the lock (this is the expensive operation)
+            if new_cache.cache().insert_state(execution_outcome.state()).is_err() {
+                debug!(target: "engine::caching", "cleared execution cache on update error");
+                execution_cache.clear();
+                return;
+            }
+
+            new_cache.update_metrics();
+
+            // Only acquire the lock for the atomic swap (fast operation)
             execution_cache.update_with_guard(|cached| {
-                // consumes the `SavedCache` held by the prewarming task, which releases its usage
-                // guard
-                let (caches, cache_metrics) = saved_cache.split();
-                let new_cache = SavedCache::new(hash, caches, cache_metrics);
-
-                // Insert state into cache while holding the lock
-                // Access the BundleState through the shared ExecutionOutcome
-                if new_cache.cache().insert_state(execution_outcome.state()).is_err() {
-                    // Clear the cache on error to prevent having a polluted cache
-                    *cached = None;
-                    debug!(target: "engine::caching", "cleared execution cache on update error");
-                    return;
-                }
-
-                new_cache.update_metrics();
-
-                // Replace the shared cache with the new one; the previous cache (if any) is
-                // dropped.
                 *cached = Some(new_cache);
             });
 

@@ -556,40 +556,54 @@ where
         block_with_parent: BlockWithParent,
         bundle_state: &BundleState,
     ) {
-        self.execution_cache.update_with_guard(|cached| {
+        // First, acquire the lock briefly to check parent hash and extract existing cache.
+        // This minimizes lock contention by doing the expensive insert_state outside the lock.
+        let cache_data = self.execution_cache.update_with_guard_return(|cached| {
             if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent) {
                 debug!(
                     target: "engine::caching",
                     parent_hash = %block_with_parent.parent,
                     "Cannot find cache for parent hash, skip updating cache with new state for inserted executed block",
                 );
-                return;
+                None
+            } else {
+                // Take existing cache (if any) or create fresh caches
+                let (caches, cache_metrics) = match cached.take() {
+                    Some(existing) => existing.split(),
+                    None => (
+                        ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size),
+                        CachedStateMetrics::zeroed(),
+                    ),
+                };
+                Some((caches, cache_metrics))
             }
-
-            // Take existing cache (if any) or create fresh caches
-            let (caches, cache_metrics) = match cached.take() {
-                Some(existing) => {
-                    existing.split()
-                }
-                None => (
-                    ExecutionCacheBuilder::default().build_caches(self.cross_block_cache_size),
-                    CachedStateMetrics::zeroed(),
-                ),
-            };
-
-            // Insert the block's bundle state into cache
-            let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics);
-            if new_cache.cache().insert_state(bundle_state).is_err() {
-                *cached = None;
-                debug!(target: "engine::caching", "cleared execution cache on update error");
-                return;
-            }
-            new_cache.update_metrics();
-
-            // Replace with the updated cache
-            *cached = Some(new_cache);
-            debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
         });
+
+        // If we couldn't get cache data, parent hash didn't match
+        let Some((caches, cache_metrics)) = cache_data else {
+            return;
+        };
+
+        // Insert the block's bundle state into cache OUTSIDE the lock (expensive operation)
+        let new_cache = SavedCache::new(block_with_parent.block.hash, caches, cache_metrics);
+        if new_cache.cache().insert_state(bundle_state).is_err() {
+            self.execution_cache.clear();
+            debug!(target: "engine::caching", "cleared execution cache on update error");
+            return;
+        }
+        new_cache.update_metrics();
+
+        // Only acquire the lock for the atomic swap (fast operation).
+        // Check that no other writer has installed a cache for a different block in the meantime.
+        self.execution_cache.update_with_guard(|cached| {
+            if cached.as_ref().is_some_and(|c| c.executed_block_hash() != block_with_parent.parent)
+            {
+                // Some other writer installed a cache for a different block; don't clobber it.
+                return;
+            }
+            *cached = Some(new_cache);
+        });
+        debug!(target: "engine::caching", ?block_with_parent, "Updated execution cache for inserted block");
     }
 }
 
@@ -784,7 +798,6 @@ impl ExecutionCache {
     }
 
     /// Clears the tracked cache
-    #[expect(unused)]
     pub(crate) fn clear(&self) {
         self.inner.write().take();
     }
@@ -808,6 +821,17 @@ impl ExecutionCache {
     {
         let mut guard = self.inner.write();
         update_fn(&mut guard);
+    }
+
+    /// Updates the cache with a closure and returns a value.
+    /// Similar to [`update_with_guard`](Self::update_with_guard), but allows returning a value
+    /// from the closure to minimize time spent holding the lock.
+    pub(crate) fn update_with_guard_return<F, R>(&self, update_fn: F) -> R
+    where
+        F: FnOnce(&mut Option<SavedCache>) -> R,
+    {
+        let mut guard = self.inner.write();
+        update_fn(&mut guard)
     }
 }
 
