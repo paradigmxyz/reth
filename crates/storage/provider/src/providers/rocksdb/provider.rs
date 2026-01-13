@@ -1,11 +1,19 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
 use crate::providers::{needs_prev_shard_check, HistoryInfo};
-use alloy_primitives::{Address, BlockNumber, B256};
+use alloy_consensus::transaction::TxHashRef;
+use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
+use itertools::Itertools;
+use reth_chain_state::ExecutedBlock;
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    models::{
+        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
+        StorageSettings,
+    },
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
+use reth_primitives_traits::BlockBody as _;
+use reth_prune_types::PruneMode;
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
@@ -16,11 +24,23 @@ use rocksdb::{
     OptimisticTransactionOptions, Options, Transaction, WriteBatchWithTransaction, WriteOptions,
 };
 use std::{
+    collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
     time::Instant,
 };
+
+/// Context for RocksDB block writes.
+#[derive(Debug, Clone, Copy)]
+pub struct RocksDBWriteCtx {
+    /// The first block number being written.
+    pub first_block_number: BlockNumber,
+    /// The prune mode for transaction lookup, if any.
+    pub prune_tx_lookup: Option<PruneMode>,
+    /// Storage settings determining what goes to RocksDB.
+    pub storage_settings: StorageSettings,
+}
 
 /// Default cache size for `RocksDB` block cache (128 MB).
 const DEFAULT_CACHE_SIZE: usize = 128 << 20;
@@ -517,6 +537,81 @@ impl RocksDBProvider {
                 code: -1,
             }))
         })
+    }
+
+    /// Writes all RocksDB data for multiple blocks in a single batch.
+    ///
+    /// This handles transaction hash numbers, account history, and storage history based on
+    /// the provided storage settings. Returns the raw batch to be committed later, or `None` if no
+    /// RocksDB writes are needed.
+    pub fn write_blocks_data<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: RocksDBWriteCtx,
+    ) -> ProviderResult<Option<WriteBatchWithTransaction<true>>> {
+        if !ctx.storage_settings.any_in_rocksdb() {
+            return Ok(None);
+        }
+
+        let mut batch = self.batch();
+
+        // Write transaction hash numbers
+        if ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
+            ctx.prune_tx_lookup.is_none_or(|m| !m.is_full())
+        {
+            for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
+                let body = block.recovered_block().body();
+                let mut tx_num = first_tx_num;
+                for transaction in body.transactions_iter() {
+                    batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
+                    tx_num += 1;
+                }
+            }
+        }
+
+        // Collect and write account history TODO: wrong
+        if ctx.storage_settings.account_history_in_rocksdb {
+            let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+            for (block_idx, block) in blocks.iter().enumerate() {
+                let block_number = ctx.first_block_number + block_idx as u64;
+                let bundle = &block.execution_outcome().bundle;
+                for (&address, _) in bundle.state() {
+                    account_history.entry(address).or_default().push(block_number);
+                }
+            }
+
+            // Write account history using sharded keys
+            for (address, blocks) in account_history {
+                let key = ShardedKey::new(address, u64::MAX);
+                let value = BlockNumberList::new_pre_sorted(blocks);
+                batch.put::<tables::AccountsHistory>(key, &value)?;
+            }
+        }
+
+        // Collect and write storage history TODO: wrong
+        if ctx.storage_settings.storages_history_in_rocksdb {
+            let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+            for (block_idx, block) in blocks.iter().enumerate() {
+                let block_number = ctx.first_block_number + block_idx as u64;
+                let bundle = &block.execution_outcome().bundle;
+                for (&address, account) in bundle.state() {
+                    for (&slot, _) in &account.storage {
+                        let key = B256::new(slot.to_be_bytes());
+                        storage_history.entry((address, key)).or_default().push(block_number);
+                    }
+                }
+            }
+
+            // Write storage history using sharded keys
+            for ((address, slot), blocks) in storage_history {
+                let key = StorageShardedKey::new(address, slot, u64::MAX);
+                let value = BlockNumberList::new_pre_sorted(blocks);
+                batch.put::<tables::StoragesHistory>(key, &value)?;
+            }
+        }
+
+        Ok(Some(batch.into_inner()))
     }
 }
 

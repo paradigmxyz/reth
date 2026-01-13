@@ -4,7 +4,7 @@ use crate::{
     },
     providers::{
         database::{chain::ChainStorage, metrics},
-        rocksdb::RocksDBProvider,
+        rocksdb::{RocksDBProvider, RocksDBWriteCtx},
         static_file::{StaticFileWriteCtx, StaticFileWriter},
         NodeTypesForProvider, StaticFileProvider,
     },
@@ -403,6 +403,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })
     }
 
+    /// Creates the context for RocksDB writes.
+    fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
+        RocksDBWriteCtx {
+            first_block_number: first_block,
+            prune_tx_lookup: self.prune_modes.transaction_lookup,
+            storage_settings: self.cached_storage_settings(),
+        }
+    }
+
     /// Writes executed blocks and state to storage.
     ///
     /// This method parallelizes static file (SF) writes with MDBX writes.
@@ -456,10 +465,17 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
+        let rocksdb_provider = self.rocksdb_provider.clone();
+        let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
 
         thread::scope(|s| {
             // SF writes
             let sf_handle = s.spawn(|| sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx));
+
+            // RocksDB writes
+            let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
+                s.spawn(|| rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx))
+            });
 
             // MDBX writes
             for (i, block) in blocks.iter().enumerate() {
@@ -546,13 +562,23 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Wait for SF thread
             sf_handle.join().map_err(|_| StaticFileWriterError::ThreadPanic("static file"))??;
 
+            // Wait for RocksDB thread and push batch to pending
+            #[cfg(all(unix, feature = "rocksdb"))]
+            if let Some(handle) = rocksdb_handle {
+                if let Some(batch) = handle.join().expect("RocksDB thread panicked")? {
+                    self.set_pending_rocksdb_batch(batch);
+                }
+            }
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            let _ = rocksdb_handle;
+
             debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
 
             Ok(())
         })
     }
 
-    /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
+    /// Writes MDBX-only data for a block (eg. indices, lookups, and senders).
     ///
     /// SF data (headers, transactions, senders if SF, receipts if SF) must be written separately.
     fn insert_block_mdbx_only(
@@ -3111,14 +3137,13 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> HistoryWriter
     }
 
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
-        // account history stage
-        {
+        let storage_settings = self.cached_storage_settings();
+        if !storage_settings.account_history_in_rocksdb {
             let indices = self.changed_accounts_and_blocks_with_range(range.clone())?;
             self.insert_account_history_index(indices)?;
         }
 
-        // storage history stage
-        {
+        if !storage_settings.storages_history_in_rocksdb {
             let indices = self.changed_storages_and_blocks_with_range(range)?;
             self.insert_storage_history_index(indices)?;
         }
