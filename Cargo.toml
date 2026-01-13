@@ -596,9 +596,9 @@ chrono = "0.4.41"
 # metrics
 metrics = "0.24.0"
 metrics-derive = "0.1"
-metrics-exporter-prometheus = { version = "0.16.0", default-features = false }
+metrics-exporter-prometheus = { version = "0.18.0", default-features = false }
 metrics-process = "2.1.0"
-metrics-util = { default-features = false, version = "0.19.0" }
+metrics-util = { default-features = false, version = "0.20.0" }
 
 # proc-macros
 proc-macro2 = "1.0"
@@ -734,6 +734,7 @@ tracing-journald = "0.3"
 tracing-logfmt = "0.3.3"
 tracing-samply = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false }
+tracing-tracy = "0.11"
 triehash = "0.8"
 typenum = "1.15.0"
 vergen = "9.0.4"

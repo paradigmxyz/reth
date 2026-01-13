@@ -605,7 +605,7 @@ pub struct RpcServerArgs {
     pub rpc_eth_proof_window: u64,
 
     /// Maximum number of concurrent getproof requests.
-    #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = constants::DEFAULT_PROOF_PERMITS)]
+    #[arg(long = "rpc.proof-permits", alias = "rpc-proof-permits", value_name = "COUNT", default_value_t = DefaultRpcServerArgs::get_global().rpc_proof_permits)]
     pub rpc_proof_permits: usize,
 
     /// Configures the pending block behavior for RPC responses.

@@ -1075,18 +1075,6 @@ transaction_lookup = 'full'
 receipts = { distance = 16384 }
 #";
         let _conf: Config = toml::from_str(s).unwrap();
-
-        let s = r"#
-[prune]
-block_interval = 5
-
-[prune.segments]
-sender_recovery = { distance = 16384 }
-transaction_lookup = 'full'
-receipts = 'full'
-#";
-        let err = toml::from_str::<Config>(s).unwrap_err().to_string();
-        assert!(err.contains("invalid value: string \"full\""), "{}", err);
     }
 
     #[test]

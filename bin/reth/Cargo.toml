@@ -131,6 +131,11 @@ jemalloc-unprefixed = [
 tracy-allocator = [
     "reth-cli-util/tracy-allocator",
     "reth-ethereum-cli/tracy-allocator",
+    "tracy",
+]
+tracy = [
+    "reth-ethereum-cli/tracy",
+    "reth-node-core/tracy",
 ]
 
 # Because jemalloc is default and preferred over snmalloc when both features are
