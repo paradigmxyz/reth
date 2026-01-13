@@ -353,7 +353,9 @@ where
     P: Copy + Default + Eq,
 {
     // Create EitherWriter for storage history
+    #[allow(clippy::let_unit_value)]
     let rocksdb = make_rocksdb_provider(provider);
+    #[allow(clippy::let_unit_value)]
     let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
     let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
 
@@ -491,7 +493,9 @@ where
     P: Copy + Default + Eq,
 {
     // Create EitherWriter for account history
+    #[allow(clippy::let_unit_value)]
     let rocksdb = make_rocksdb_provider(provider);
+    #[allow(clippy::let_unit_value)]
     let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
     let mut writer = EitherWriter::new_accounts_history(provider, rocksdb_batch)?;
 

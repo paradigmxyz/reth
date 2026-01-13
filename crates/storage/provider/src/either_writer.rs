@@ -37,11 +37,11 @@ use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, Stor
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
 
-/// Collects shards to unwind from a RocksDB reverse iterator.
+/// Collects shards to unwind from a `RocksDB` reverse iterator.
 ///
-/// This is a generic helper for the RocksDB unwind logic used by both account and storage history.
-/// It iterates through shards from highest to lowest block number, collecting shards to delete
-/// and identifying any partial shard that needs to be preserved.
+/// This is a generic helper for the `RocksDB` unwind logic used by both account and storage
+/// history. It iterates through shards from highest to lowest block number, collecting shards to
+/// delete and identifying any partial shard that needs to be preserved.
 ///
 /// # Arguments
 /// * `iter` - An iterator yielding `(K, BlockNumberList)` pairs in reverse order
@@ -352,9 +352,7 @@ pub fn make_rocksdb_batch_arg(
 /// On `RocksDB`-enabled builds, this creates a real batch from the given `RocksDB` provider.
 /// On other builds, this returns `()` to allow the same API without feature gates.
 #[cfg(not(all(unix, feature = "rocksdb")))]
-pub fn make_rocksdb_batch_arg<T>(_rocksdb: &T) -> RocksBatchArg<'static> {
-    ()
-}
+pub const fn make_rocksdb_batch_arg<T>(_rocksdb: &T) -> RocksBatchArg<'static> {}
 
 /// Gets the `RocksDB` provider from a provider that implements [`RocksDBProviderFactory`].
 ///
@@ -375,7 +373,7 @@ where
 ///
 /// On non-`RocksDB` builds, returns `()`.
 #[cfg(not(all(unix, feature = "rocksdb")))]
-pub fn make_rocksdb_provider<P>(_provider: &P) {}
+pub const fn make_rocksdb_provider<P>(_provider: &P) {}
 
 /// Registers a `RocksDB` batch extracted from an [`EitherWriter`] with the provider.
 ///
