@@ -283,11 +283,11 @@ docker-build-push-nightly-edge-profiling: ## Build and push cross-arch Docker im
 
 # Create a cross-arch Docker image with the given tags and push it
 define docker_build_push
-	$(MAKE) FEATURES="$(FEATURES)" build-x86_64-unknown-linux-gnu
+	$(MAKE) FEATURES="$(FEATURES)" PROFILE="$(PROFILE)" CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)" build-x86_64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/amd64
 	cp $(CARGO_TARGET_DIR)/x86_64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/amd64/reth
 
-	$(MAKE) FEATURES="$(FEATURES)" build-aarch64-unknown-linux-gnu
+	$(MAKE) FEATURES="$(FEATURES)" PROFILE="$(PROFILE)" CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)" build-aarch64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/arm64
 	cp $(CARGO_TARGET_DIR)/aarch64-unknown-linux-gnu/$(PROFILE)/reth $(BIN_DIR)/arm64/reth
 
@@ -357,11 +357,11 @@ op-docker-build-push-nightly-profiling: ## Build and push cross-arch Docker imag
 
 # Create a cross-arch Docker image with the given tags and push it
 define op_docker_build_push
-	$(MAKE) FEATURES="$(FEATURES)" op-build-x86_64-unknown-linux-gnu
+	$(MAKE) FEATURES="$(FEATURES)" PROFILE="$(PROFILE)" CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)" op-build-x86_64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/amd64
 	cp $(CARGO_TARGET_DIR)/x86_64-unknown-linux-gnu/$(PROFILE)/op-reth $(BIN_DIR)/amd64/op-reth
 
-	$(MAKE) FEATURES="$(FEATURES)" op-build-aarch64-unknown-linux-gnu
+	$(MAKE) FEATURES="$(FEATURES)" PROFILE="$(PROFILE)" CARGO_TARGET_DIR="$(CARGO_TARGET_DIR)" op-build-aarch64-unknown-linux-gnu
 	mkdir -p $(BIN_DIR)/arm64
 	cp $(CARGO_TARGET_DIR)/aarch64-unknown-linux-gnu/$(PROFILE)/op-reth $(BIN_DIR)/arm64/op-reth
 
