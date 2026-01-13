@@ -336,11 +336,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             // Commits offsets and new user_header to disk
             self.writer.commit().map_err(ProviderError::other)?;
 
+            let end = Instant::now();
+            let duration = end.duration_since(start);
+
             if let Some(metrics) = &self.metrics {
                 metrics.record_segment_operation(
                     self.writer.user_header().segment(),
                     StaticFileProviderOperation::CommitWriter,
-                    Some(start.elapsed()),
+                    Some(duration),
                 );
             }
 
@@ -348,7 +351,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
                 target: "provider::static_file",
                 segment = ?self.writer.user_header().segment(),
                 path = ?self.data_path,
-                duration = ?start.elapsed(),
+                ?duration,
                 "Committed writer to disk"
             );
 
@@ -374,11 +377,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         // Commits offsets and new user_header to disk
         self.writer.commit_without_sync_all().map_err(ProviderError::other)?;
 
+        let end = Instant::now();
+        let duration = end.duration_since(start);
+
         if let Some(metrics) = &self.metrics {
             metrics.record_segment_operation(
                 self.writer.user_header().segment(),
                 StaticFileProviderOperation::CommitWriter,
-                Some(start.elapsed()),
+                Some(duration),
             );
         }
 
@@ -386,7 +392,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             target: "provider::static_file",
             segment = ?self.writer.user_header().segment(),
             path = ?self.data_path,
-            duration = ?start.elapsed(),
+            ?duration,
             "Committed writer to disk (without sync)"
         );
 
