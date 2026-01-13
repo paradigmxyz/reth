@@ -27,7 +27,7 @@ impl<C: Send + Sync, N: NodePrimitives> StaticFileProviderFactory for NoopProvid
 
 impl<C: Send + Sync, N: NodePrimitives> RocksDBProviderFactory for NoopProvider<C, N> {
     fn rocksdb_provider(&self) -> RocksDBProvider {
-        RocksDBProvider::builder(PathBuf::default()).build().unwrap()
+        RocksDBProvider::builder(PathBuf::default()).with_default_tables().build().unwrap()
     }
 
     #[cfg(all(unix, feature = "rocksdb"))]
