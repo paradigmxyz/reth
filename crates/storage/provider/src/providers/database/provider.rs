@@ -469,8 +469,13 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
 
         thread::scope(|s| {
-            // SF writes
-            let sf_handle = s.spawn(|| sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx));
+            // SF writes - capture duration inside thread
+            let sf_handle = s.spawn(|| {
+                let sf_start = Instant::now();
+                let result = sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx);
+                let sf_elapsed = sf_start.elapsed();
+                result.map(|_| sf_elapsed)
+            });
 
             // RocksDB writes
             let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
@@ -478,6 +483,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             });
 
             // MDBX writes
+            let mdbx_start = Instant::now();
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -559,8 +565,27 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 duration_update_pipeline_stages,
             );
 
+            let mdbx_elapsed = mdbx_start.elapsed();
+
             // Wait for SF thread
-            sf_handle.join().map_err(|_| StaticFileWriterError::ThreadPanic("static file"))??;
+            let join_start = Instant::now();
+            let sf_elapsed = sf_handle.join().map_err(|_| StaticFileWriterError::ThreadPanic("static file"))??;
+            let join_elapsed = join_start.elapsed();
+
+            debug!(
+                target: "providers::db",
+                block_count = %blocks.len(),
+                ?mdbx_elapsed,
+                ?sf_elapsed,
+                ?join_elapsed,
+                ?total_insert_block,
+                ?total_write_state,
+                ?total_write_hashed_state,
+                ?total_write_trie_changesets,
+                ?total_write_trie_updates,
+                ?duration_update_history_indices,
+                "save_blocks breakdown"
+            );
 
             // Wait for RocksDB thread and push batch to pending
             #[cfg(all(unix, feature = "rocksdb"))]
@@ -3544,30 +3569,58 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
         // truncate the static files according to the
         // checkpoints on the next start-up.
         if self.static_file_provider.has_unwind_queued() {
+            let start = Instant::now();
             self.tx.commit()?;
+            let mdbx_elapsed = start.elapsed();
 
             #[cfg(all(unix, feature = "rocksdb"))]
             {
+                let start = Instant::now();
                 let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
                 for batch in batches {
                     self.rocksdb_provider.commit_batch(batch)?;
                 }
+                let rocksdb_elapsed = start.elapsed();
+                debug!(target: "providers::db", ?rocksdb_elapsed, "commit rocksdb (unwind path)");
             }
 
+            let start = Instant::now();
             self.static_file_provider.commit()?;
+            let sf_elapsed = start.elapsed();
+
+            debug!(
+                target: "providers::db",
+                ?mdbx_elapsed,
+                ?sf_elapsed,
+                "commit breakdown (unwind path)"
+            );
         } else {
             // Normal path: finalize() will call sync_all() if not already synced
+            let start = Instant::now();
             self.static_file_provider.finalize()?;
+            let sf_elapsed = start.elapsed();
 
             #[cfg(all(unix, feature = "rocksdb"))]
             {
+                let start = Instant::now();
                 let batches = std::mem::take(&mut *self.pending_rocksdb_batches.lock());
                 for batch in batches {
                     self.rocksdb_provider.commit_batch(batch)?;
                 }
+                let rocksdb_elapsed = start.elapsed();
+                debug!(target: "providers::db", ?rocksdb_elapsed, "commit rocksdb (normal path)");
             }
 
+            let start = Instant::now();
             self.tx.commit()?;
+            let mdbx_elapsed = start.elapsed();
+
+            debug!(
+                target: "providers::db",
+                ?sf_elapsed,
+                ?mdbx_elapsed,
+                "commit breakdown (normal path)"
+            );
         }
 
         Ok(true)
