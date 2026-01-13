@@ -65,17 +65,24 @@ cargo nextest run --workspace -E 'binary(e2e_testsuite) and test(test_name)'
 Tests use the framework components from this directory:
 
 ```rust
-use reth_e2e_test_utils::{setup_import, Environment, TestBuilder};
+use reth_e2e_test_utils::testsuite::{
+    actions::ProduceBlocks,
+    setup::{NetworkSetup, Setup},
+    TestBuilder,
+};
+use reth_node_ethereum::EthereumNode;
 
 #[tokio::test]
 async fn test_example() -> eyre::Result<()> {
-    // Create test environment
-    let (mut env, mut handle) = TestBuilder::new()
-        .build()
-        .await?;
+    let setup = Setup::default()
+        .with_chain_spec(chain_spec)
+        .with_network(NetworkSetup::single_node());
 
-    // Perform test actions...
-    
+    let test = TestBuilder::new()
+        .with_setup(setup)
+        .with_action(ProduceBlocks::new(5));
+
+    test.run::<EthereumNode>().await?;
     Ok(())
 }
 ```
