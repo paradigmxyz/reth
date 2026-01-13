@@ -136,6 +136,18 @@ export const opRethCliSidebar: SidebarItem = {
                                 {
                                     text: "op-reth db settings set account_changesets",
                                     link: "/cli/op-reth/db/settings/set/account_changesets"
+                                },
+                                {
+                                    text: "op-reth db settings set storages_history_rocksdb",
+                                    link: "/cli/op-reth/db/settings/set/storages_history_rocksdb"
+                                },
+                                {
+                                    text: "op-reth db settings set transaction_hash_numbers_rocksdb",
+                                    link: "/cli/op-reth/db/settings/set/transaction_hash_numbers_rocksdb"
+                                },
+                                {
+                                    text: "op-reth db settings set account_history_rocksdb",
+                                    link: "/cli/op-reth/db/settings/set/account_history_rocksdb"
                                 }
                             ]
                         }

@@ -1,21 +1,16 @@
-# op-reth db settings set
+# op-reth db settings set storages_history_rocksdb
 
-Set storage settings in database
+Store storages history in RocksDB instead of the database
 
 ```bash
-$ op-reth db settings set --help
+$ op-reth db settings set storages_history_rocksdb --help
 ```
 ```txt
-Usage: op-reth db settings set [OPTIONS] <COMMAND>
+Usage: op-reth db settings set storages_history_rocksdb [OPTIONS] <VALUE>
 
-Commands:
-  receipts                          Store receipts in static files instead of the database
-  transaction_senders               Store transaction senders in static files instead of the database
-  account_changesets                Store account changesets in static files instead of the database
-  storages_history_rocksdb          Store storages history in RocksDB instead of the database
-  transaction_hash_numbers_rocksdb  Store transaction hash numbers in RocksDB instead of the database
-  account_history_rocksdb           Store account history in RocksDB instead of the database
-  help                              Print this message or the help of the given subcommand(s)
+Arguments:
+  <VALUE>
+          [possible values: true, false]
 
 Options:
   -h, --help
