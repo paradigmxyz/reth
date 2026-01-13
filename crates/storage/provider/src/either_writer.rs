@@ -15,6 +15,7 @@ use crate::{
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
 
 use crate::providers::{needs_prev_shard_check, HistoryInfo};
+use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -25,7 +26,7 @@ use reth_db::{
 };
 use reth_db_api::{
     cursor::DbCursorRW,
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    models::{sharded_key, storage_sharded_key::StorageShardedKey, ShardedKey},
     tables,
     tables::BlockNumberList,
 };
@@ -719,6 +720,92 @@ where
             }
         }
     }
+
+    /// Appends indices to a storage history shard.
+    ///
+    /// Loads the existing shard (if any) for the given key, appends the new indices,
+    /// and rechunks into multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    pub fn append_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let last_key = StorageShardedKey::last(address, storage_key);
+
+        match self {
+            Self::Database(cursor) => {
+                let mut last_shard = cursor
+                    .seek_exact(last_key.clone())?
+                    .map(|(_, list)| list)
+                    .unwrap_or_else(BlockNumberList::empty);
+
+                last_shard.append(indices).map_err(ProviderError::other)?;
+
+                // Fast path: all indices fit in one shard
+                if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
+                    cursor.upsert(last_key, &last_shard)?;
+                    return Ok(());
+                }
+
+                // Slow path: rechunk into multiple shards
+                let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
+                let mut chunks_peekable = chunks.into_iter().peekable();
+
+                while let Some(chunk) = chunks_peekable.next() {
+                    let shard = BlockNumberList::new_pre_sorted(chunk);
+                    let highest_block_number = if chunks_peekable.peek().is_some() {
+                        shard.iter().next_back().expect("`chunks` does not return empty list")
+                    } else {
+                        // Insert last list with `u64::MAX`.
+                        u64::MAX
+                    };
+
+                    cursor.upsert(
+                        StorageShardedKey::new(address, storage_key, highest_block_number),
+                        &shard,
+                    )?;
+                }
+
+                Ok(())
+            }
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => {
+                let provider = batch.provider();
+                let last_shard_opt = provider.get::<tables::StoragesHistory>(last_key.clone())?;
+                let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+                last_shard.append(indices).map_err(ProviderError::other)?;
+
+                // Fast path: all indices fit in one shard
+                if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
+                    batch.put::<tables::StoragesHistory>(last_key, &last_shard)?;
+                    return Ok(());
+                }
+
+                // Slow path: rechunk into multiple shards
+                let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
+                let mut chunks_peekable = chunks.into_iter().peekable();
+
+                while let Some(chunk) = chunks_peekable.next() {
+                    let shard = BlockNumberList::new_pre_sorted(chunk);
+                    let highest_block_number = if chunks_peekable.peek().is_some() {
+                        shard.iter().next_back().expect("`chunks` does not return empty list")
+                    } else {
+                        u64::MAX
+                    };
+
+                    batch.put::<tables::StoragesHistory>(
+                        StorageShardedKey::new(address, storage_key, highest_block_number),
+                        &shard,
+                    )?;
+                }
+
+                Ok(())
+            }
+        }
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
@@ -835,6 +922,88 @@ where
                     batch.put::<tables::AccountsHistory>(
                         start_key,
                         &BlockNumberList::new_pre_sorted(indices),
+                    )?;
+                }
+
+                Ok(())
+            }
+        }
+    }
+
+    /// Appends indices to an account history shard.
+    ///
+    /// Loads the existing shard (if any) for the given address, appends the new indices,
+    /// and rechunks into multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    pub fn append_account_history_shard(
+        &mut self,
+        address: Address,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let last_key = ShardedKey::last(address);
+
+        match self {
+            Self::Database(cursor) => {
+                let mut last_shard = cursor
+                    .seek_exact(last_key.clone())?
+                    .map(|(_, list)| list)
+                    .unwrap_or_else(BlockNumberList::empty);
+
+                last_shard.append(indices).map_err(ProviderError::other)?;
+
+                // Fast path: all indices fit in one shard
+                if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
+                    cursor.upsert(last_key, &last_shard)?;
+                    return Ok(());
+                }
+
+                // Slow path: rechunk into multiple shards
+                let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
+                let mut chunks_peekable = chunks.into_iter().peekable();
+
+                while let Some(chunk) = chunks_peekable.next() {
+                    let shard = BlockNumberList::new_pre_sorted(chunk);
+                    let highest_block_number = if chunks_peekable.peek().is_some() {
+                        shard.iter().next_back().expect("`chunks` does not return empty list")
+                    } else {
+                        // Insert last list with `u64::MAX`.
+                        u64::MAX
+                    };
+
+                    cursor.upsert(ShardedKey::new(address, highest_block_number), &shard)?;
+                }
+
+                Ok(())
+            }
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => {
+                let provider = batch.provider();
+                let last_shard_opt = provider.get::<tables::AccountsHistory>(last_key.clone())?;
+                let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+                last_shard.append(indices).map_err(ProviderError::other)?;
+
+                // Fast path: all indices fit in one shard
+                if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
+                    batch.put::<tables::AccountsHistory>(last_key, &last_shard)?;
+                    return Ok(());
+                }
+
+                // Slow path: rechunk into multiple shards
+                let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
+                let mut chunks_peekable = chunks.into_iter().peekable();
+
+                while let Some(chunk) = chunks_peekable.next() {
+                    let shard = BlockNumberList::new_pre_sorted(chunk);
+                    let highest_block_number = if chunks_peekable.peek().is_some() {
+                        shard.iter().next_back().expect("`chunks` does not return empty list")
+                    } else {
+                        u64::MAX
+                    };
+
+                    batch.put::<tables::AccountsHistory>(
+                        ShardedKey::new(address, highest_block_number),
+                        &shard,
                     )?;
                 }
 
