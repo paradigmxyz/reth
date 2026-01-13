@@ -14,22 +14,24 @@ pub trait StateWriter {
 
     /// Write the state and optionally receipts to the database.
     ///
-    /// If `write_receipts` is false, receipts are skipped (useful when receipts are written
-    /// separately to static files).
+    /// Use `config` to skip writing certain data types when they are written elsewhere.
     fn write_state(
         &self,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         is_value_known: OriginalValuesKnown,
-        write_receipts: bool,
+        config: StateWriteConfig,
     ) -> ProviderResult<()>;
 
     /// Write state reverts to the database.
     ///
     /// NOTE: Reverts will delete all wiped storage from plain state.
+    ///
+    /// Use `config` to skip writing certain data types when they are written elsewhere.
     fn write_state_reverts(
         &self,
         reverts: PlainStateReverts,
         first_block: BlockNumber,
+        config: StateWriteConfig,
     ) -> ProviderResult<()>;
 
     /// Write state changes to the database.
@@ -48,4 +50,21 @@ pub trait StateWriter {
         &self,
         block: BlockNumber,
     ) -> ProviderResult<ExecutionOutcome<Self::Receipt>>;
+}
+
+/// Configuration for what to write when calling [`StateWriter::write_state`].
+///
+/// Used to skip writing certain data types, when they are being written separately.
+#[derive(Debug, Clone, Copy)]
+pub struct StateWriteConfig {
+    /// Whether to write receipts.
+    pub write_receipts: bool,
+    /// Whether to write account changesets.
+    pub write_account_changesets: bool,
+}
+
+impl Default for StateWriteConfig {
+    fn default() -> Self {
+        Self { write_receipts: true, write_account_changesets: true }
+    }
 }

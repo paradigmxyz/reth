@@ -25,7 +25,7 @@ use reth_db::{
 };
 use reth_db_api::{
     cursor::DbCursorRO,
-    models::StoredBlockBodyIndices,
+    models::{AccountBeforeTx, StoredBlockBodyIndices},
     table::{Decompress, Table, Value},
     tables,
     transaction::DbTx,
@@ -90,6 +90,8 @@ pub struct StaticFileWriteCtx {
     pub write_senders: bool,
     /// Whether receipts should be written to static files.
     pub write_receipts: bool,
+    /// Whether account changesets should be written to static files.
+    pub write_account_changesets: bool,
     /// The current chain tip block number (for pruning).
     pub tip: BlockNumber,
     /// The prune mode for receipts, if any.
@@ -629,6 +631,33 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 })
             });
 
+            let h_account_changesets = ctx.write_account_changesets.then(|| {
+                self.spawn_segment_writer(
+                    s,
+                    StaticFileSegment::AccountChangeSets,
+                    first_block_number,
+                    |w| {
+                        for block in blocks {
+                            let block_number = block.recovered_block().number();
+                            let reverts =
+                                block.execution_outcome().bundle.reverts.to_plain_state_reverts();
+
+                            for account_block_reverts in reverts.accounts {
+                                let changeset = account_block_reverts
+                                    .into_iter()
+                                    .map(|(address, info)| AccountBeforeTx {
+                                        address,
+                                        info: info.map(Into::into),
+                                    })
+                                    .collect::<Vec<_>>();
+                                w.append_account_changeset(changeset, block_number)?;
+                            }
+                        }
+                        Ok(())
+                    },
+                )
+            });
+
             h_headers.join().map_err(|_| StaticFileWriterError::ThreadPanic("headers"))??;
             h_txs.join().map_err(|_| StaticFileWriterError::ThreadPanic("transactions"))??;
             if let Some(h) = h_senders {
@@ -636,6 +665,10 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
             }
             if let Some(h) = h_receipts {
                 h.join().map_err(|_| StaticFileWriterError::ThreadPanic("receipts"))??;
+            }
+            if let Some(h) = h_account_changesets {
+                h.join()
+                    .map_err(|_| StaticFileWriterError::ThreadPanic("account_changesets"))??;
             }
             Ok(())
         })

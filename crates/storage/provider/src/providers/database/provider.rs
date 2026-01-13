@@ -61,8 +61,8 @@ use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{
     BlockBodyIndicesProvider, BlockBodyReader, MetadataProvider, MetadataWriter,
-    NodePrimitivesProvider, StateProvider, StorageChangeSetReader, StorageSettingsCache,
-    TryIntoHistoricalStateProvider,
+    NodePrimitivesProvider, StateProvider, StateWriteConfig, StorageChangeSetReader,
+    StorageSettingsCache, TryIntoHistoricalStateProvider,
 };
 use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
@@ -389,6 +389,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()),
             write_receipts: save_mode.with_state() &&
                 EitherWriter::receipts_destination(self).is_static_file(),
+            write_account_changesets: save_mode.with_state() &&
+                EitherWriterDestination::account_changesets(self).is_static_file(),
             tip,
             receipts_prune_mode: self.prune_modes.receipts,
             // Receipts are prunable if no receipts exist in SF yet and within pruning distance
@@ -473,11 +475,15 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
                     // Write state and changesets to the database.
                     // Must be written after blocks because of the receipt lookup.
+                    // Skip receipts/account changesets if they're being written to static files.
                     let start = Instant::now();
                     self.write_state(
                         execution_output,
                         OriginalValuesKnown::No,
-                        !sf_ctx.write_receipts,
+                        StateWriteConfig {
+                            write_receipts: !sf_ctx.write_receipts,
+                            write_account_changesets: !sf_ctx.write_account_changesets,
+                        },
                     )?;
                     total_write_state += start.elapsed();
 
@@ -1994,17 +2000,17 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         &self,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         is_value_known: OriginalValuesKnown,
-        write_receipts: bool,
+        config: StateWriteConfig,
     ) -> ProviderResult<()> {
         let first_block = execution_outcome.first_block();
 
         let (plain_state, reverts) =
             execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
 
-        self.write_state_reverts(reverts, first_block)?;
+        self.write_state_reverts(reverts, first_block, config)?;
         self.write_state_changes(plain_state)?;
 
-        if !write_receipts {
+        if !config.write_receipts {
             return Ok(());
         }
 
@@ -2097,6 +2103,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         &self,
         reverts: PlainStateReverts,
         first_block: BlockNumber,
+        config: StateWriteConfig,
     ) -> ProviderResult<()> {
         // Write storage changes
         tracing::trace!("Writing storage changes");
@@ -2144,7 +2151,11 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
             }
         }
 
-        // Write account changes to static files
+        if !config.write_account_changesets {
+            return Ok(());
+        }
+
+        // Write account changes
         tracing::debug!(target: "sync::stages::merkle_changesets", ?first_block, "Writing account changes");
         for (block_index, account_block_reverts) in reverts.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
@@ -3428,7 +3439,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 
-        self.write_state(execution_outcome, OriginalValuesKnown::No, true)?;
+        self.write_state(execution_outcome, OriginalValuesKnown::No, StateWriteConfig::default())?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
@@ -3654,11 +3665,17 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
-                true,
+                StateWriteConfig::default(),
             )
             .unwrap();
         provider_rw.insert_block(&data.blocks[0].0).unwrap();
-        provider_rw.write_state(&data.blocks[0].1, crate::OriginalValuesKnown::No, true).unwrap();
+        provider_rw
+            .write_state(
+                &data.blocks[0].1,
+                crate::OriginalValuesKnown::No,
+                StateWriteConfig::default(),
+            )
+            .unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -3681,13 +3698,17 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
-                true,
+                StateWriteConfig::default(),
             )
             .unwrap();
         for i in 0..3 {
             provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw
-                .write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No, true)
+                .write_state(
+                    &data.blocks[i].1,
+                    crate::OriginalValuesKnown::No,
+                    StateWriteConfig::default(),
+                )
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3714,7 +3735,7 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
-                true,
+                StateWriteConfig::default(),
             )
             .unwrap();
 
@@ -3722,7 +3743,11 @@ mod tests {
         for i in 0..3 {
             provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw
-                .write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No, true)
+                .write_state(
+                    &data.blocks[i].1,
+                    crate::OriginalValuesKnown::No,
+                    StateWriteConfig::default(),
+                )
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3748,13 +3773,17 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
-                true,
+                StateWriteConfig::default(),
             )
             .unwrap();
         for i in 0..3 {
             provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw
-                .write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No, true)
+                .write_state(
+                    &data.blocks[i].1,
+                    crate::OriginalValuesKnown::No,
+                    StateWriteConfig::default(),
+                )
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -3814,13 +3843,17 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
-                true,
+                StateWriteConfig::default(),
             )
             .unwrap();
         for i in 0..3 {
             provider_rw.insert_block(&data.blocks[i].0).unwrap();
             provider_rw
-                .write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No, true)
+                .write_state(
+                    &data.blocks[i].1,
+                    crate::OriginalValuesKnown::No,
+                    StateWriteConfig::default(),
+                )
                 .unwrap();
         }
         provider_rw.commit().unwrap();
@@ -5135,7 +5168,9 @@ mod tests {
                 }]],
                 ..Default::default()
             };
-            provider_rw.write_state(&outcome, crate::OriginalValuesKnown::No, true).unwrap();
+            provider_rw
+                .write_state(&outcome, crate::OriginalValuesKnown::No, StateWriteConfig::default())
+                .unwrap();
             provider_rw.commit().unwrap();
         };
 

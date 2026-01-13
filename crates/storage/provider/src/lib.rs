@@ -45,8 +45,8 @@ pub use revm_database::states::OriginalValuesKnown;
 // reexport traits to avoid breaking changes
 pub use reth_static_file_types as static_file;
 pub use reth_storage_api::{
-    HistoryWriter, MetadataProvider, MetadataWriter, StatsReader, StorageSettings,
-    StorageSettingsCache,
+    HistoryWriter, MetadataProvider, MetadataWriter, StateWriteConfig, StatsReader,
+    StorageSettings, StorageSettingsCache,
 };
 /// Re-export provider error.
 pub use reth_storage_errors::provider::{ProviderError, ProviderResult};

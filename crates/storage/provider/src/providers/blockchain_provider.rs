@@ -808,8 +808,8 @@ mod tests {
     use reth_storage_api::{
         BlockBodyIndicesProvider, BlockHashReader, BlockIdReader, BlockNumReader, BlockReader,
         BlockReaderIdExt, BlockSource, ChangeSetReader, DBProvider, DatabaseProviderFactory,
-        HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory, StateWriter,
-        TransactionVariant, TransactionsProvider,
+        HeaderProvider, ReceiptProvider, ReceiptProviderIdExt, StateProviderFactory,
+        StateWriteConfig, StateWriter, TransactionVariant, TransactionsProvider,
     };
     use reth_testing_utils::generators::{
         self, random_block, random_block_range, random_changeset_range, random_eoa_accounts,
@@ -907,7 +907,7 @@ mod tests {
                     ..Default::default()
                 },
                 OriginalValuesKnown::No,
-                true,
+                StateWriteConfig::default(),
             )?;
         }
 
