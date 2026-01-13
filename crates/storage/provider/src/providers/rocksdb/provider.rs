@@ -790,7 +790,7 @@ impl<'a> RocksDBBatch<'a> {
 /// - Iteration over uncommitted data
 ///
 /// Note: `Transaction` is `Send` but NOT `Sync`. This wrapper does not implement
-/// `DbTx`/`DbTxMut` traits directly; use RocksDB-specific methods instead.
+/// `DbTx`/`DbTxMut` traits directly; use `RocksDB`-specific methods instead.
 pub struct RocksTx<'db> {
     inner: Transaction<'db, OptimisticTransactionDB>,
     provider: &'db RocksDBProvider,
