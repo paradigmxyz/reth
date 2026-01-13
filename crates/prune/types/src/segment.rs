@@ -61,15 +61,12 @@ impl PruneSegment {
     }
 
     /// Returns minimum number of blocks to keep in the database for this segment.
-    pub const fn min_blocks(&self, purpose: PrunePurpose) -> u64 {
+    pub const fn min_blocks(&self) -> u64 {
         match self {
-            Self::SenderRecovery | Self::TransactionLookup => 0,
-            Self::Receipts if purpose.is_static_file() => 0,
-            Self::ContractLogs |
-            Self::AccountHistory |
-            Self::StorageHistory |
-            Self::Bodies |
-            Self::Receipts => MINIMUM_PRUNING_DISTANCE,
+            Self::SenderRecovery | Self::TransactionLookup | Self::Receipts | Self::Bodies => 0,
+            Self::ContractLogs | Self::AccountHistory | Self::StorageHistory => {
+                MINIMUM_PRUNING_DISTANCE
+            }
             Self::MerkleChangeSets => MERKLE_CHANGESETS_RETENTION_BLOCKS,
             #[expect(deprecated)]
             #[expect(clippy::match_same_arms)]
