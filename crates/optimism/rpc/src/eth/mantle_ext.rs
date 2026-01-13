@@ -70,6 +70,12 @@ where
         + Sync
         + 'static,
 {
+    /// Returns a range of blocks.
+    ///
+    /// # Deprecation
+    ///
+    /// This method is deprecated and will be removed in the next network upgrade.
+    #[method(name = "getBlockRange")]
     async fn get_block_range(
         &self,
         start_number: BlockNumberOrTag,

@@ -3,6 +3,7 @@
 use crate::{eth::RpcNodeCore, OpEthApi, OpEthApiError};
 use alloy_consensus::{BlockHeader, Receipt, TxReceipt};
 use alloy_eips::eip2718::Encodable2718;
+use alloy_primitives::{b256, U256};
 use alloy_rpc_types_eth::{Log, TransactionReceipt};
 use op_alloy_consensus::{OpReceiptEnvelope, OpTransaction};
 use op_alloy_rpc_types::{L1BlockInfo, OpTransactionReceipt, OpTransactionReceiptFields};
@@ -22,6 +23,10 @@ use reth_rpc_eth_api::{
 use reth_rpc_eth_types::{receipt::build_receipt, EthApiError};
 use reth_storage_api::{BlockReader, StateProviderFactory};
 use std::fmt::Debug;
+
+const TOKEN_RATIO_UPDATED_TOPIC: U256 = U256::from_be_bytes(
+    b256!("5d6ae9db2d6725497bed0302a8212c0db5fdb3bd7d14f188a83b5589089caafd").0,
+);
 
 impl<N, Rpc> LoadReceipt for OpEthApi<N, Rpc>
 where
@@ -88,24 +93,50 @@ where
             }
         };
 
-        // [TODO] It's a temporary solution to get token ratio from state, we should modify the
-        // receipt
-        let state = self.provider.state_by_block_hash(block.hash()).unwrap();
-        let token_ratio = state.storage(GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT.into()).unwrap();
-        l1_block_info.token_ratio = token_ratio.unwrap_or_default();
+        // Get token ratio from parent block state (start of current block)
+        // If we can't get parent state (unlikely for non-genesis), fallback to current block state
+        let state = self
+            .provider
+            .state_by_block_hash(block.parent_hash())
+            .or_else(|_| self.provider.state_by_block_hash(block.hash()))
+            .unwrap();
+        let mut token_ratio = state
+            .storage(GAS_ORACLE_CONTRACT, TOKEN_RATIO_SLOT.into())
+            .unwrap()
+            .unwrap_or_default();
 
         let mut receipts = Vec::with_capacity(inputs.len());
 
         for input in inputs {
+            // Update the token ratio for the current transaction
+            l1_block_info.token_ratio = token_ratio;
+
             // We must clear this cache as different L2 transactions can have different
             // L1 costs. A potential improvement here is to only clear the cache if the
             // new transaction input has changed, since otherwise the L1 cost wouldn't.
             l1_block_info.clear_tx_l1_cost();
 
-            receipts.push(
+            let receipt =
                 OpReceiptBuilder::new(&self.provider.chain_spec(), input, &mut l1_block_info)?
-                    .build(),
-            );
+                    .build();
+
+            // Check for TokenRatioUpdated event
+            // event TokenRatioUpdated(uint256 indexed previousTokenRatio, uint256 indexed newTokenRatio)
+            // Topic 0: 0x5d6ae9db2d6725497bed0302a8212c0db5fdb3bd7d14f188a83b5589089caafd
+            for log in receipt.inner.logs() {
+                if log.address() == GAS_ORACLE_CONTRACT
+                    && log
+                        .topics()
+                        .first()
+                        .map_or(false, |t| U256::from_be_bytes(t.0) == TOKEN_RATIO_UPDATED_TOPIC)
+                {
+                    if let Some(new_ratio) = log.topics().get(2) {
+                        token_ratio = U256::from_be_bytes(new_ratio.0);
+                    }
+                }
+            }
+
+            receipts.push(receipt);
         }
 
         Ok(receipts)

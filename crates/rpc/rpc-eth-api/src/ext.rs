@@ -81,7 +81,11 @@ pub struct PreconfLog {
 #[cfg_attr(feature = "client", rpc(server, client, namespace = "eth"))]
 pub trait MantleEthApiExt<B: RpcObject> {
     /// Returns a list of blocks in the specified range.
-    /// 
+    ///
+    /// # Deprecation
+    ///
+    /// This method is deprecated and will be removed in the next network upgrade.
+    ///
     /// # Parameters
     /// - `start_number`: The block number to start from (inclusive).
     /// - `end_number`: The block number to end at (inclusive).
@@ -95,6 +99,7 @@ pub trait MantleEthApiExt<B: RpcObject> {
     /// - Start block number is greater than end block number.
     /// - The requested range exceeds 1000 blocks.
     /// - The end block doesn't exist.
+    #[deprecated(note = "This method will be removed in the next network upgrade.")]
     #[method(name = "getBlockRange")]
     async fn get_block_range(
         &self,
