@@ -156,7 +156,6 @@ impl PruningArgs {
                     account_history: Some(PruneMode::Distance(10064)),
                     storage_history: Some(PruneMode::Distance(10064)),
                     bodies_history: Some(PruneMode::Distance(10064)),
-                    merkle_changesets: PruneMode::Distance(MERKLE_CHANGESETS_RETENTION_BLOCKS),
                     receipts_log_filter: Default::default(),
                 },
             }
