@@ -375,7 +375,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut total_insert_block = Duration::ZERO;
         let mut total_write_state = Duration::ZERO;
         let mut total_write_hashed_state = Duration::ZERO;
-        let mut total_write_trie_changesets = Duration::ZERO;
         let mut total_write_trie_updates = Duration::ZERO;
 
         // TODO: Do performant / batched writes for each type of object
@@ -408,10 +407,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             total_write_hashed_state += start.elapsed();
 
             let start = Instant::now();
-            self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
-            total_write_trie_changesets += start.elapsed();
-
-            let start = Instant::now();
             self.write_trie_updates_sorted(&trie_data.trie_updates)?;
             total_write_trie_updates += start.elapsed();
         }
@@ -431,10 +426,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.metrics.record_duration(metrics::Action::SaveBlocksWriteState, total_write_state);
         self.metrics
             .record_duration(metrics::Action::SaveBlocksWriteHashedState, total_write_hashed_state);
-        self.metrics.record_duration(
-            metrics::Action::SaveBlocksWriteTrieChangesets,
-            total_write_trie_changesets,
-        );
         self.metrics
             .record_duration(metrics::Action::SaveBlocksWriteTrieUpdates, total_write_trie_updates);
         self.metrics.record_duration(
