@@ -142,6 +142,15 @@ impl Layers {
         Ok(())
     }
 
+    #[cfg(feature = "tracy")]
+    pub(crate) fn tracy(&mut self, config: LayerInfo) -> eyre::Result<()> {
+        self.add_layer(tracing_tracy::TracyLayer::default().with_filter(build_env_filter(
+            Some(config.default_directive.parse()?),
+            &config.filters,
+        )?));
+        Ok(())
+    }
+
     /// Add OTLP spans layer to the layer collection
     #[cfg(feature = "otlp")]
     pub fn with_span_layer(
