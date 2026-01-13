@@ -67,8 +67,8 @@ use reth_node_metrics::{
 use reth_provider::{
     providers::{NodeTypesForProvider, ProviderNodeTypes, RocksDBProvider, StaticFileProvider},
     BlockHashReader, BlockNumReader, DatabaseProviderFactory, ProviderError, ProviderFactory,
-    ProviderResult, RocksDBProviderFactory, StageCheckpointReader, StaticFileProviderBuilder,
-    StaticFileProviderFactory,
+    ProviderResult, PruneCheckpointReader, RocksDBProviderFactory, StageCheckpointReader,
+    StaticFileProviderBuilder, StaticFileProviderFactory,
 };
 use reth_prune::{PruneModes, PrunerBuilder};
 use reth_rpc_builder::config::RethRpcServerConfig;
@@ -546,6 +546,42 @@ where
                 "A {} inconsistency was found that would trigger an unwind to block 0",
                 inconsistency_source
             );
+
+            // Pre-check: if Execution stage is above the unwind target and history pruning
+            // is enabled, verify we have enough history to unwind. This provides a clearer
+            // error message with recovery suggestions before attempting the unwind.
+            let execution_checkpoint = provider_ro
+                .get_stage_checkpoint(StageId::Execution)?
+                .unwrap_or_default()
+                .block_number;
+
+            if execution_checkpoint > unwind_block {
+                let prune_modes = self.prune_modes();
+                let prune_checkpoints = provider_ro.get_prune_checkpoints()?;
+                if let Err(err) = prune_modes.ensure_unwind_target_unpruned(
+                    provider_ro.last_block_number()?,
+                    unwind_block,
+                    &prune_checkpoints,
+                ) {
+                    error!(
+                        target: "reth::cli",
+                        %err,
+                        execution_checkpoint,
+                        unwind_block,
+                        %inconsistency_source,
+                        "Cannot recover from storage inconsistency: required history data has been pruned."
+                    );
+                    error!(
+                        target: "reth::cli",
+                        "Recovery options:\n\
+                         1. Re-sync from scratch by removing the data directory\n\
+                         2. Restore from a backup that has the required history\n\
+                         3. If only static files are corrupted, try deleting the affected static files \
+                            and using `reth stage drop <stage>` to reset the stage checkpoint"
+                    );
+                    return Err(eyre::Report::msg(err.to_string()));
+                }
+            }
 
             let unwind_target = PipelineTarget::Unwind(unwind_block);
 
