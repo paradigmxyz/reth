@@ -53,10 +53,7 @@ async fn main() -> eyre::Result<()> {
         db.clone(),
         spec.clone(),
         StaticFileProvider::read_only(db_path.join("static_files"), true)?,
-        RocksDBProvider::builder(db_path.join("rocksdb"))
-            .with_default_tables()
-            .build()
-            .unwrap(),
+        RocksDBProvider::builder(db_path.join("rocksdb")).with_default_tables().build().unwrap(),
     )?;
 
     // 2. Set up the blockchain provider using only the database provider and a noop for the tree to
