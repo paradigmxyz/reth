@@ -7,6 +7,7 @@ use reth_db_api::{
 };
 use reth_primitives_traits::Account;
 use reth_trie::hashed_cursor::{HashedCursor, HashedCursorFactory, HashedStorageCursor};
+use tracing::trace;
 
 /// A struct wrapping database transaction that implements [`HashedCursorFactory`].
 #[derive(Debug, Clone)]
@@ -122,5 +123,260 @@ where
 
     fn set_hashed_address(&mut self, hashed_address: B256) {
         self.hashed_address = hashed_address;
+    }
+}
+
+/// A hashed storage cursor that caches all storage entries in memory for faster access.
+///
+/// This cursor can optionally preload all storage entries for an account using a single
+/// sequential scan (`walk_dup`), which is more efficient than individual seeks when
+/// multiple storage slots need to be accessed. After preloading:
+/// - `seek()` uses binary search (O(log n) in-memory) instead of database seek
+/// - `next()` uses array indexing (O(1)) instead of database cursor advancement
+///
+/// This optimization is beneficial when:
+/// - An account has many storage slots that will be iterated
+/// - The cost of loading all slots upfront is less than the cost of individual seeks
+///
+/// Use `preload()` to load all entries, or `preload_limited()` to load up to a maximum
+/// number of entries (falling back to database access if the limit is exceeded).
+#[derive(Debug)]
+pub struct CachedHashedStorageCursor<C> {
+    /// The underlying database cursor.
+    cursor: C,
+    /// Target hashed address of the account.
+    hashed_address: B256,
+    /// Cached storage entries (sorted by key). `None` if not cached.
+    cache: Option<Vec<(B256, U256)>>,
+    /// Current position in cache for `next()` calls.
+    cache_pos: usize,
+}
+
+impl<C> CachedHashedStorageCursor<C> {
+    /// Create a new cursor without caching (lazy mode).
+    ///
+    /// The cursor will operate in pass-through mode, delegating all operations
+    /// to the underlying database cursor until `preload()` is called.
+    pub const fn new(cursor: C, hashed_address: B256) -> Self {
+        Self { cursor, hashed_address, cache: None, cache_pos: 0 }
+    }
+
+    /// Returns `true` if the cache is populated.
+    pub const fn is_cached(&self) -> bool {
+        self.cache.is_some()
+    }
+
+    /// Returns the number of cached entries, or `None` if not cached.
+    pub fn cached_len(&self) -> Option<usize> {
+        self.cache.as_ref().map(|c| c.len())
+    }
+}
+
+impl<C> CachedHashedStorageCursor<C>
+where
+    C: DbCursorRO<tables::HashedStorages> + DbDupCursorRO<tables::HashedStorages>,
+{
+    /// Preload all storage entries for the current address into memory.
+    ///
+    /// This uses `walk_dup` for efficient sequential loading:
+    /// - 1 initial seek operation
+    /// - N-1 sequential `NEXT_DUP` operations (much faster than seeks)
+    ///
+    /// After calling this method, `seek()` and `next()` will operate on the
+    /// in-memory cache instead of the database.
+    pub fn preload(&mut self) -> Result<(), DatabaseError> {
+        let mut entries = Vec::new();
+
+        for result in self.cursor.walk_dup(Some(self.hashed_address), None)? {
+            let (_, entry) = result?;
+            entries.push((entry.key, entry.value));
+        }
+
+        self.cache = Some(entries);
+        self.cache_pos = 0;
+        Ok(())
+    }
+
+    /// Preload storage entries up to a maximum limit.
+    ///
+    /// If the account has more than `max_entries` storage slots, the cache
+    /// is not populated and the cursor continues to operate in pass-through mode.
+    ///
+    /// Returns `true` if caching was successful, `false` if the limit was exceeded.
+    pub fn preload_limited(&mut self, max_entries: usize) -> Result<bool, DatabaseError> {
+        let mut entries = Vec::new();
+
+        for result in self.cursor.walk_dup(Some(self.hashed_address), None)? {
+            let (_, entry) = result?;
+            entries.push((entry.key, entry.value));
+
+            if entries.len() > max_entries {
+                // Too many entries, don't cache
+                trace!(
+                    target: "trie::cache",
+                    address = %self.hashed_address,
+                    limit = max_entries,
+                    "Storage cache limit exceeded, falling back to database"
+                );
+                return Ok(false);
+            }
+        }
+
+        let len = entries.len();
+        self.cache = Some(entries);
+        self.cache_pos = 0;
+
+        trace!(
+            target: "trie::cache",
+            address = %self.hashed_address,
+            entries = len,
+            "Preloaded storage entries into cache"
+        );
+
+        Ok(true)
+    }
+
+    /// Create a new cursor with preloaded cache.
+    ///
+    /// This is a convenience method that creates a cursor and immediately
+    /// preloads all storage entries.
+    pub fn preloaded(cursor: C, hashed_address: B256) -> Result<Self, DatabaseError> {
+        let mut this = Self::new(cursor, hashed_address);
+        this.preload()?;
+        Ok(this)
+    }
+}
+
+impl<C> HashedCursor for CachedHashedStorageCursor<C>
+where
+    C: DbCursorRO<tables::HashedStorages> + DbDupCursorRO<tables::HashedStorages>,
+{
+    type Value = U256;
+
+    fn seek(&mut self, subkey: B256) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        if let Some(ref cache) = self.cache {
+            // Binary search in cached entries - O(log n) in-memory
+            match cache.binary_search_by_key(&subkey, |(k, _)| *k) {
+                Ok(idx) => {
+                    // Exact match found
+                    self.cache_pos = idx + 1;
+                    Ok(Some(cache[idx]))
+                }
+                Err(idx) => {
+                    // No exact match, idx is insertion point (first element >= subkey)
+                    self.cache_pos = idx + 1;
+                    Ok(cache.get(idx).copied())
+                }
+            }
+        } else {
+            // Fall back to database seek
+            Ok(self
+                .cursor
+                .seek_by_key_subkey(self.hashed_address, subkey)?
+                .map(|e| (e.key, e.value)))
+        }
+    }
+
+    fn next(&mut self) -> Result<Option<(B256, Self::Value)>, DatabaseError> {
+        if let Some(ref cache) = self.cache {
+            // O(1) array access
+            let entry = cache.get(self.cache_pos).copied();
+            if entry.is_some() {
+                self.cache_pos += 1;
+            }
+            Ok(entry)
+        } else {
+            // Fall back to database next
+            Ok(self.cursor.next_dup_val()?.map(|e| (e.key, e.value)))
+        }
+    }
+
+    fn reset(&mut self) {
+        self.cache_pos = 0;
+    }
+}
+
+impl<C> HashedStorageCursor for CachedHashedStorageCursor<C>
+where
+    C: DbCursorRO<tables::HashedStorages> + DbDupCursorRO<tables::HashedStorages>,
+{
+    fn is_storage_empty(&mut self) -> Result<bool, DatabaseError> {
+        if let Some(ref cache) = self.cache {
+            Ok(cache.is_empty())
+        } else {
+            Ok(self.cursor.seek_exact(self.hashed_address)?.is_none())
+        }
+    }
+
+    fn set_hashed_address(&mut self, hashed_address: B256) {
+        self.hashed_address = hashed_address;
+        // Invalidate cache when address changes
+        self.cache = None;
+        self.cache_pos = 0;
+    }
+}
+
+/// A [`HashedCursorFactory`] that returns cached storage cursors.
+///
+/// This factory wraps a database transaction and creates [`CachedHashedStorageCursor`]
+/// instances that preload all storage entries for efficient batch access.
+///
+/// Use this when you expect to access many storage slots for an account,
+/// as it reduces expensive database seeks by loading all entries upfront.
+#[derive(Debug, Clone)]
+pub struct CachedHashedCursorFactory<T> {
+    tx: T,
+    /// Maximum number of storage entries to cache per account.
+    /// If an account has more entries, caching is skipped.
+    max_cache_size: usize,
+}
+
+impl<T> CachedHashedCursorFactory<T> {
+    /// Create a new cached hashed cursor factory.
+    ///
+    /// # Arguments
+    /// * `tx` - The database transaction
+    /// * `max_cache_size` - Maximum entries to cache per account (0 = unlimited)
+    pub const fn new(tx: T, max_cache_size: usize) -> Self {
+        Self { tx, max_cache_size }
+    }
+
+    /// Create a factory with unlimited cache size (always preloads).
+    pub const fn unlimited(tx: T) -> Self {
+        Self::new(tx, 0)
+    }
+}
+
+impl<TX: DbTx> HashedCursorFactory for CachedHashedCursorFactory<&TX> {
+    type AccountCursor<'a>
+        = DatabaseHashedAccountCursor<<TX as DbTx>::Cursor<tables::HashedAccounts>>
+    where
+        Self: 'a;
+    type StorageCursor<'a>
+        = CachedHashedStorageCursor<<TX as DbTx>::DupCursor<tables::HashedStorages>>
+    where
+        Self: 'a;
+
+    fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
+        Ok(DatabaseHashedAccountCursor(self.tx.cursor_read::<tables::HashedAccounts>()?))
+    }
+
+    fn hashed_storage_cursor(
+        &self,
+        hashed_address: B256,
+    ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
+        let cursor = self.tx.cursor_dup_read::<tables::HashedStorages>()?;
+        let mut cached = CachedHashedStorageCursor::new(cursor, hashed_address);
+
+        // Preload storage entries
+        if self.max_cache_size == 0 {
+            // Unlimited - always preload
+            cached.preload()?;
+        } else {
+            // Limited - only preload if within size limit
+            cached.preload_limited(self.max_cache_size)?;
+        }
+
+        Ok(cached)
     }
 }

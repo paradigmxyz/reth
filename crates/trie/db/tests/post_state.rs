@@ -594,3 +594,237 @@ fn all_storage_slots_deleted_not_wiped_exact_keys() {
     let result = cursor.next().unwrap();
     assert_eq!(result, None, "Expected None from next() but got {:?}", result);
 }
+
+#[test]
+fn cached_cursor_preload_and_seek() {
+    use reth_db_api::transaction::DbTx;
+    use reth_trie_db::CachedHashedStorageCursor;
+
+    let address = B256::random();
+    let storage: BTreeMap<B256, U256> = (1u8..=10)
+        .map(|key| (B256::with_last_byte(key), U256::from(u64::from(key) * 100)))
+        .collect();
+
+    let db = create_test_rw_db();
+    db.update(|tx| {
+        for (slot, value) in &storage {
+            tx.put::<tables::HashedStorages>(address, StorageEntry { key: *slot, value: *value })
+                .unwrap();
+        }
+    })
+    .unwrap();
+
+    let tx = db.tx().unwrap();
+    let cursor = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+    let mut cached = CachedHashedStorageCursor::new(cursor, address);
+
+    // Before preload, cache should be empty
+    assert!(!cached.is_cached());
+
+    // Preload the storage
+    cached.preload().unwrap();
+    assert!(cached.is_cached());
+    assert_eq!(cached.cached_len(), Some(10));
+
+    // Test seek to exact key
+    let result = cached.seek(B256::with_last_byte(5)).unwrap();
+    assert_eq!(result, Some((B256::with_last_byte(5), U256::from(500))));
+
+    // Test seek to non-existent key (should return next greater)
+    let result = cached.seek(B256::with_last_byte(0)).unwrap();
+    assert_eq!(result, Some((B256::with_last_byte(1), U256::from(100))));
+
+    // Test seek past all keys
+    let result = cached.seek(B256::with_last_byte(255)).unwrap();
+    assert_eq!(result, None);
+}
+
+#[test]
+fn cached_cursor_next_iteration() {
+    use reth_db_api::transaction::DbTx;
+    use reth_trie_db::CachedHashedStorageCursor;
+
+    let address = B256::random();
+    let storage: Vec<(B256, U256)> =
+        (1..=5).map(|key| (B256::with_last_byte(key), U256::from(key * 10))).collect();
+
+    let db = create_test_rw_db();
+    db.update(|tx| {
+        for (slot, value) in &storage {
+            tx.put::<tables::HashedStorages>(address, StorageEntry { key: *slot, value: *value })
+                .unwrap();
+        }
+    })
+    .unwrap();
+
+    let tx = db.tx().unwrap();
+    let cursor = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+    let mut cached = CachedHashedStorageCursor::new(cursor, address);
+    cached.preload().unwrap();
+
+    // Seek to start
+    let first = cached.seek(B256::ZERO).unwrap();
+    assert_eq!(first, Some((B256::with_last_byte(1), U256::from(10))));
+
+    // Iterate through remaining entries
+    for key in 2..=5 {
+        let next = cached.next().unwrap();
+        assert_eq!(next, Some((B256::with_last_byte(key), U256::from(key as u64 * 10))));
+    }
+
+    // After last entry, next should return None
+    assert_eq!(cached.next().unwrap(), None);
+}
+
+#[test]
+fn cached_cursor_is_storage_empty() {
+    use reth_db_api::transaction::DbTx;
+    use reth_trie_db::CachedHashedStorageCursor;
+
+    let address = B256::random();
+    let db = create_test_rw_db();
+
+    // Empty storage
+    {
+        let tx = db.tx().unwrap();
+        let cursor = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let mut cached = CachedHashedStorageCursor::new(cursor, address);
+        cached.preload().unwrap();
+        assert!(cached.is_storage_empty().unwrap());
+    }
+
+    // Non-empty storage
+    db.update(|tx| {
+        tx.put::<tables::HashedStorages>(
+            address,
+            StorageEntry { key: B256::with_last_byte(1), value: U256::from(100) },
+        )
+        .unwrap();
+    })
+    .unwrap();
+
+    {
+        let tx = db.tx().unwrap();
+        let cursor = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let mut cached = CachedHashedStorageCursor::new(cursor, address);
+        cached.preload().unwrap();
+        assert!(!cached.is_storage_empty().unwrap());
+    }
+}
+
+#[test]
+fn cached_cursor_preload_limited() {
+    use reth_db_api::transaction::DbTx;
+    use reth_trie_db::CachedHashedStorageCursor;
+
+    let address = B256::random();
+    let storage: Vec<(B256, U256)> =
+        (1..=100).map(|key| (B256::with_last_byte(key), U256::from(key))).collect();
+
+    let db = create_test_rw_db();
+    db.update(|tx| {
+        for (slot, value) in &storage {
+            tx.put::<tables::HashedStorages>(address, StorageEntry { key: *slot, value: *value })
+                .unwrap();
+        }
+    })
+    .unwrap();
+
+    // Limit too low - should not cache
+    {
+        let tx = db.tx().unwrap();
+        let cursor = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let mut cached = CachedHashedStorageCursor::new(cursor, address);
+        let cached_result = cached.preload_limited(50).unwrap();
+        assert!(!cached_result);
+        assert!(!cached.is_cached());
+    }
+
+    // Limit high enough - should cache
+    {
+        let tx = db.tx().unwrap();
+        let cursor = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+        let mut cached = CachedHashedStorageCursor::new(cursor, address);
+        let cached_result = cached.preload_limited(200).unwrap();
+        assert!(cached_result);
+        assert!(cached.is_cached());
+        assert_eq!(cached.cached_len(), Some(100));
+    }
+}
+
+#[test]
+fn cached_cursor_reset() {
+    use reth_db_api::transaction::DbTx;
+    use reth_trie_db::CachedHashedStorageCursor;
+
+    let address = B256::random();
+    let storage: Vec<(B256, U256)> =
+        (1..=3).map(|key| (B256::with_last_byte(key), U256::from(key))).collect();
+
+    let db = create_test_rw_db();
+    db.update(|tx| {
+        for (slot, value) in &storage {
+            tx.put::<tables::HashedStorages>(address, StorageEntry { key: *slot, value: *value })
+                .unwrap();
+        }
+    })
+    .unwrap();
+
+    let tx = db.tx().unwrap();
+    let cursor = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+    let mut cached = CachedHashedStorageCursor::new(cursor, address);
+    cached.preload().unwrap();
+
+    // Seek and iterate
+    cached.seek(B256::ZERO).unwrap();
+    cached.next().unwrap();
+    cached.next().unwrap();
+
+    // Reset and verify we can iterate again from start
+    cached.reset();
+    let first = cached.seek(B256::ZERO).unwrap();
+    assert_eq!(first, Some((B256::with_last_byte(1), U256::from(1))));
+}
+
+#[test]
+fn cached_cursor_set_hashed_address_invalidates_cache() {
+    use reth_db_api::transaction::DbTx;
+    use reth_trie_db::CachedHashedStorageCursor;
+
+    let address1 = B256::with_last_byte(1);
+    let address2 = B256::with_last_byte(2);
+
+    let db = create_test_rw_db();
+    db.update(|tx| {
+        tx.put::<tables::HashedStorages>(
+            address1,
+            StorageEntry { key: B256::with_last_byte(10), value: U256::from(100) },
+        )
+        .unwrap();
+        tx.put::<tables::HashedStorages>(
+            address2,
+            StorageEntry { key: B256::with_last_byte(20), value: U256::from(200) },
+        )
+        .unwrap();
+    })
+    .unwrap();
+
+    let tx = db.tx().unwrap();
+    let cursor = tx.cursor_dup_read::<tables::HashedStorages>().unwrap();
+    let mut cached = CachedHashedStorageCursor::new(cursor, address1);
+
+    // Preload address1's storage
+    cached.preload().unwrap();
+    assert!(cached.is_cached());
+    assert_eq!(cached.cached_len(), Some(1));
+
+    // Change address - should invalidate cache
+    cached.set_hashed_address(address2);
+    assert!(!cached.is_cached());
+
+    // Preload address2's storage
+    cached.preload().unwrap();
+    assert!(cached.is_cached());
+    let result = cached.seek(B256::ZERO).unwrap();
+    assert_eq!(result, Some((B256::with_last_byte(20), U256::from(200))));
+}

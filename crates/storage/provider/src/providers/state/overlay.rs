@@ -16,9 +16,7 @@ use reth_trie::{
     updates::TrieUpdatesSorted,
     HashedPostStateSorted, KeccakKeyHasher,
 };
-use reth_trie_db::{
-    DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
-};
+use reth_trie_db::{CachedHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory};
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::Arc,
@@ -463,7 +461,7 @@ where
 {
     type AccountCursor<'a>
         = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'a Provider::Tx>,
+        CachedHashedCursorFactory<&'a Provider::Tx>,
         &'a Arc<HashedPostStateSorted>,
     > as HashedCursorFactory>::AccountCursor<'a>
     where
@@ -471,14 +469,18 @@ where
 
     type StorageCursor<'a>
         = <HashedPostStateCursorFactory<
-        DatabaseHashedCursorFactory<&'a Provider::Tx>,
+        CachedHashedCursorFactory<&'a Provider::Tx>,
         &'a Arc<HashedPostStateSorted>,
     > as HashedCursorFactory>::StorageCursor<'a>
     where
         Self: 'a;
 
     fn hashed_account_cursor(&self) -> Result<Self::AccountCursor<'_>, DatabaseError> {
-        let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
+        // Use CachedHashedCursorFactory to preload storage entries for efficient batch access.
+        // Limit to 10k entries (~640KB) per account to avoid memory issues with large contracts.
+        // Contracts exceeding this fall back to direct database seeks.
+        let db_hashed_cursor_factory =
+            CachedHashedCursorFactory::new(self.provider.tx_ref(), 10_000);
         let hashed_cursor_factory =
             HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
         hashed_cursor_factory.hashed_account_cursor()
@@ -488,7 +490,11 @@ where
         &self,
         hashed_address: B256,
     ) -> Result<Self::StorageCursor<'_>, DatabaseError> {
-        let db_hashed_cursor_factory = DatabaseHashedCursorFactory::new(self.provider.tx_ref());
+        // Use CachedHashedCursorFactory to preload storage entries for efficient batch access.
+        // Limit to 10k entries (~640KB) per account to avoid memory issues with large contracts.
+        // Contracts exceeding this fall back to direct database seeks.
+        let db_hashed_cursor_factory =
+            CachedHashedCursorFactory::new(self.provider.tx_ref(), 10_000);
         let hashed_cursor_factory =
             HashedPostStateCursorFactory::new(db_hashed_cursor_factory, &self.hashed_post_state);
         hashed_cursor_factory.hashed_storage_cursor(hashed_address)
