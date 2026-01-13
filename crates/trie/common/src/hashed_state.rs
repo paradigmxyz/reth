@@ -673,9 +673,9 @@ impl HashedStorageSorted {
         self.storage_slots.len()
     }
 
-    /// Returns `true` if there are no storage slot updates.
+    /// Returns `true` if there are no storage slot updates and storage was not wiped.
     pub const fn is_empty(&self) -> bool {
-        self.storage_slots.is_empty()
+        !self.wiped && self.storage_slots.is_empty()
     }
 
     /// Extends the storage slots updates with another set of sorted updates.

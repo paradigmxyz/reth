@@ -681,9 +681,9 @@ impl StorageTrieUpdatesSorted {
         self.storage_nodes.len()
     }
 
-    /// Returns `true` if there are no storage node updates.
+    /// Returns `true` if there are no storage node updates and trie was not deleted.
     pub const fn is_empty(&self) -> bool {
-        self.storage_nodes.is_empty()
+        !self.is_deleted && self.storage_nodes.is_empty()
     }
 
     /// Extends the storage trie updates with another set of sorted updates.
