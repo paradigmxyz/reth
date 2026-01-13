@@ -10,9 +10,10 @@ use reth_db_api::{
 use reth_etl::Collector;
 use reth_primitives_traits::{NodePrimitives, SignedTransaction};
 use reth_provider::{
-    BlockReader, DBProvider, EitherWriter, PruneCheckpointReader, PruneCheckpointWriter,
-    RocksDBProviderFactory, StaticFileProviderFactory, StatsReader, StorageSettingsCache,
-    TransactionsProvider, TransactionsProviderExt,
+    make_rocksdb_batch_arg, make_rocksdb_provider, register_rocksdb_batch, BlockReader, DBProvider,
+    EitherWriter, PruneCheckpointReader, PruneCheckpointWriter, RocksDBProviderFactory,
+    StaticFileProviderFactory, StatsReader, StorageSettingsCache, TransactionsProvider,
+    TransactionsProviderExt,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{
@@ -158,15 +159,9 @@ where
                 let append_only =
                     provider.count_entries::<tables::TransactionHashNumbers>()?.is_zero();
 
-                // Create RocksDB batch if feature is enabled
-                #[cfg(all(unix, feature = "rocksdb"))]
-                let rocksdb = provider.rocksdb_provider();
-                #[cfg(all(unix, feature = "rocksdb"))]
-                let rocksdb_batch = rocksdb.batch();
-                #[cfg(not(all(unix, feature = "rocksdb")))]
-                let rocksdb_batch = ();
-
                 // Create writer that routes to either MDBX or RocksDB based on settings
+                let rocksdb = make_rocksdb_provider(provider);
+                let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
                 let mut writer =
                     EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
 
@@ -187,11 +182,8 @@ where
                     writer.put_transaction_hash_number(hash, tx_num, append_only)?;
                 }
 
-                // Extract and register RocksDB batch for commit at provider level
-                #[cfg(all(unix, feature = "rocksdb"))]
-                if let Some(batch) = writer.into_raw_rocksdb_batch() {
-                    provider.set_pending_rocksdb_batch(batch);
-                }
+                // Register RocksDB batch for commit at provider level
+                register_rocksdb_batch(provider, writer);
 
                 trace!(target: "sync::stages::transaction_lookup",
                     total_hashes,
@@ -217,15 +209,9 @@ where
     ) -> Result<UnwindOutput, StageError> {
         let (range, unwind_to, _) = input.unwind_block_range_with_threshold(self.chunk_size);
 
-        // Create RocksDB batch if feature is enabled
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb = provider.rocksdb_provider();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_batch = rocksdb.batch();
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocksdb_batch = ();
-
         // Create writer that routes to either MDBX or RocksDB based on settings
+        let rocksdb = make_rocksdb_provider(provider);
+        let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
         let mut writer = EitherWriter::new_transaction_hash_numbers(provider, rocksdb_batch)?;
 
         let static_file_provider = provider.static_file_provider();
@@ -248,11 +234,8 @@ where
             }
         }
 
-        // Extract and register RocksDB batch for commit at provider level
-        #[cfg(all(unix, feature = "rocksdb"))]
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
-            provider.set_pending_rocksdb_batch(batch);
-        }
+        // Register RocksDB batch for commit at provider level
+        register_rocksdb_batch(provider, writer);
 
         Ok(UnwindOutput {
             checkpoint: StageCheckpoint::new(unwind_to)

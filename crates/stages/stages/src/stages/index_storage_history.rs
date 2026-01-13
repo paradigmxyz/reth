@@ -10,7 +10,8 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_provider::{
-    DBProvider, EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
+    make_rocksdb_batch_arg, make_rocksdb_provider, register_rocksdb_batch, DBProvider,
+    EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
     RocksDBProviderFactory, StorageSettingsCache,
 };
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
@@ -150,15 +151,9 @@ where
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        // Create RocksDB batch if feature enabled
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb = provider.rocksdb_provider();
-        #[cfg(all(unix, feature = "rocksdb"))]
-        let rocksdb_batch = rocksdb.batch();
-        #[cfg(not(all(unix, feature = "rocksdb")))]
-        let rocksdb_batch = ();
-
         // Create EitherWriter for storage history
+        let rocksdb = make_rocksdb_provider(provider);
+        let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
         let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
 
         // Read changesets to identify what to unwind
@@ -190,11 +185,8 @@ where
             )?;
         }
 
-        // Extract and register RocksDB batch for commit
-        #[cfg(all(unix, feature = "rocksdb"))]
-        if let Some(batch) = writer.into_raw_rocksdb_batch() {
-            provider.set_pending_rocksdb_batch(batch);
-        }
+        // Register RocksDB batch for commit
+        register_rocksdb_batch(provider, writer);
 
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
     }
