@@ -20,7 +20,7 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
 };
-use revm_primitives::map::B256Map;
+use revm_primitives::map::{hash_map, B256Map};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
@@ -726,12 +726,16 @@ impl MultiProofTask {
                 for account in not_fetched_state_update
                     .storages
                     .keys()
-                    .chain(self.multi_added_removed_keys.storages.keys())
+                    .chain(not_fetched_state_update.accounts.keys())
                 {
-                    if !storages.contains_key(account) &&
-                        let Some(storage) = self.multi_added_removed_keys.storages.get(account)
-                    {
-                        storages.insert(*account, storage.clone());
+                    if let hash_map::Entry::Vacant(entry) = storages.entry(*account) {
+                        entry.insert(
+                            self.multi_added_removed_keys
+                                .storages
+                                .get(account)
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
                     }
                 }
 
