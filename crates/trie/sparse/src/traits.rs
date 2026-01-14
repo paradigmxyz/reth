@@ -2,7 +2,7 @@
 
 use core::fmt::Debug;
 
-use alloc::{borrow::Cow, vec, vec::Vec};
+use alloc::{borrow::Cow, sync::Arc, vec, vec::Vec};
 use alloy_primitives::{
     map::{HashMap, HashSet},
     B256,
@@ -269,7 +269,7 @@ impl TrieMasks {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct SparseTrieUpdates {
     /// Collection of updated intermediate nodes indexed by full path.
-    pub updated_nodes: HashMap<Nibbles, BranchNodeCompact>,
+    pub updated_nodes: HashMap<Nibbles, Arc<BranchNodeCompact>>,
     /// Collection of removed intermediate nodes indexed by full path.
     pub removed_nodes: HashSet<Nibbles>,
     /// Flag indicating whether the trie was wiped.

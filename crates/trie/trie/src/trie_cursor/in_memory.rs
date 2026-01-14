@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use super::{TrieCursor, TrieCursorFactory};
 use crate::{forward_cursor::ForwardInMemoryCursor, updates::TrieUpdatesSorted};
 use alloy_primitives::B256;
@@ -45,7 +46,7 @@ where
         hashed_address: B256,
     ) -> Result<Self::StorageTrieCursor<'_>, DatabaseError> {
         // if the storage trie has no updates then we use this as the in-memory overlay.
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+        static EMPTY_UPDATES: Vec<(Nibbles, Option<Arc<BranchNodeCompact>>)> = Vec::new();
 
         let storage_trie_updates =
             self.trie_updates.as_ref().storage_tries_ref().get(&hashed_address);
@@ -72,7 +73,7 @@ pub struct InMemoryTrieCursor<'a, C> {
     /// Entry that `cursor` is currently pointing to.
     cursor_entry: Option<(Nibbles, BranchNodeCompact)>,
     /// Forward-only in-memory cursor over storage trie nodes.
-    in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, Option<BranchNodeCompact>>,
+    in_memory_cursor: ForwardInMemoryCursor<'a, Nibbles, Option<std::sync::Arc<BranchNodeCompact>>>,
     /// The key most recently returned from the Cursor.
     last_key: Option<Nibbles>,
     #[cfg(debug_assertions)]
@@ -85,7 +86,7 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
     /// in-memory trie nodes.
     pub fn new(
         cursor: Option<C>,
-        trie_updates: &'a [(Nibbles, Option<BranchNodeCompact>)],
+        trie_updates: &'a [(Nibbles, Option<std::sync::Arc<BranchNodeCompact>>)],
     ) -> Self {
         let in_memory_cursor = ForwardInMemoryCursor::new(trie_updates);
         Self {
@@ -168,8 +169,8 @@ impl<'a, C: TrieCursor> InMemoryTrieCursor<'a, C> {
                     if self.cursor_entry.as_ref().is_none_or(|(db_key, _)| &mem_key <= db_key) =>
                 {
                     // If overlay returns a node prior to the DB's node, or the DB is exhausted,
-                    // then we return the overlay's node.
-                    return Ok(Some((mem_key, node)))
+                    // then we return the overlay's node. Clone the Arc to get the actual node.
+                    return Ok(Some((mem_key, node.as_ref().clone())))
                 }
                 // All other cases:
                 // - mem_key > db_key
@@ -196,7 +197,7 @@ impl<C: TrieCursor> TrieCursor for InMemoryTrieCursor<'_, C> {
 
         let entry = match (mem_entry, &self.cursor_entry) {
             (Some((mem_key, entry_inner)), _) if mem_key == key => {
-                entry_inner.map(|node| (key, node))
+                entry_inner.as_ref().map(|node| (key, node.as_ref().clone()))
             }
             (_, Some((db_key, node))) if db_key == &key => Some((key, node.clone())),
             _ => None,
@@ -271,7 +272,7 @@ mod tests {
     #[derive(Debug)]
     struct InMemoryTrieCursorTestCase {
         db_nodes: Vec<(Nibbles, BranchNodeCompact)>,
-        in_memory_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
+        in_memory_nodes: Vec<(Nibbles, Option<Arc<BranchNodeCompact>>)>,
         expected_results: Vec<(Nibbles, BranchNodeCompact)>,
     }
 
@@ -336,21 +337,21 @@ mod tests {
         let in_memory_nodes = vec![
             (
                 Nibbles::from_nibbles([0x1]),
-                Some(BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b0011, 0b0001, 0, vec![], None))),
             ),
             (
                 Nibbles::from_nibbles([0x2]),
-                Some(BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b0011, 0b0010, 0, vec![], None))),
             ),
             (
                 Nibbles::from_nibbles([0x3]),
-                Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None))),
             ),
         ];
 
         let expected_results: Vec<(Nibbles, BranchNodeCompact)> = in_memory_nodes
             .iter()
-            .filter_map(|(k, v)| v.as_ref().map(|node| (*k, node.clone())))
+            .filter_map(|(k, v)| v.as_ref().map(|node| (*k, Arc::unwrap_or_clone(Arc::clone(node)))))
             .collect();
 
         let test_case =
@@ -368,11 +369,11 @@ mod tests {
         let in_memory_nodes = vec![
             (
                 Nibbles::from_nibbles([0x1]),
-                Some(BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b1111, 0b1111, 0, vec![], None))),
             ),
             (
                 Nibbles::from_nibbles([0x3]),
-                Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None))),
             ),
         ];
 
@@ -417,21 +418,21 @@ mod tests {
         let in_memory_nodes = vec![
             (
                 Nibbles::from_nibbles([0x2]),
-                Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None))),
             ),
             (Nibbles::from_nibbles([0x3]), None),
             (
                 Nibbles::from_nibbles([0x4]),
-                Some(BranchNodeCompact::new(0b0100, 0b0100, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b0100, 0b0100, 0, vec![], None))),
             ),
             (
                 Nibbles::from_nibbles([0x6]),
-                Some(BranchNodeCompact::new(0b0110, 0b0110, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b0110, 0b0110, 0, vec![], None))),
             ),
             (Nibbles::from_nibbles([0x7]), None),
             (
                 Nibbles::from_nibbles([0x8]),
-                Some(BranchNodeCompact::new(0b1000, 0b1000, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b1000, 0b1000, 0, vec![], None))),
             ),
         ];
 
@@ -457,7 +458,7 @@ mod tests {
 
         let in_memory_nodes = vec![(
             Nibbles::from_nibbles([0x2]),
-            Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+            Some(Arc::new(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None))),
         )];
 
         let db_nodes_map: BTreeMap<Nibbles, BranchNodeCompact> = db_nodes.into_iter().collect();
@@ -526,7 +527,7 @@ mod tests {
             (Nibbles::from_nibbles([0x1]), None),
             (
                 Nibbles::from_nibbles([0x2]),
-                Some(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b0010, 0b0010, 0, vec![], None))),
             ),
             (Nibbles::from_nibbles([0x3]), None),
         ];
@@ -551,11 +552,11 @@ mod tests {
         let in_memory_nodes = vec![
             (
                 Nibbles::from_nibbles([0x1]),
-                Some(BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b0001, 0b0001, 0, vec![], None))),
             ),
             (
                 Nibbles::from_nibbles([0x3]),
-                Some(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None)),
+                Some(Arc::new(BranchNodeCompact::new(0b0011, 0b0011, 0, vec![], None))),
             ),
         ];
 
@@ -587,7 +588,7 @@ mod tests {
         /// This properly handles deletions (None values in `in_memory_nodes`).
         fn merge_with_overlay(
             db_nodes: Vec<(Nibbles, BranchNodeCompact)>,
-            in_memory_nodes: Vec<(Nibbles, Option<BranchNodeCompact>)>,
+            in_memory_nodes: Vec<(Nibbles, Option<Arc<BranchNodeCompact>>)>,
         ) -> Vec<(Nibbles, BranchNodeCompact)> {
             db_nodes
                 .into_iter()
@@ -597,11 +598,11 @@ mod tests {
                     itertools::EitherOrBoth::Left((key, node)) => Some((key, node)),
                     // Only in memory: keep if not a deletion
                     itertools::EitherOrBoth::Right((key, node_opt)) => {
-                        node_opt.map(|node| (key, node))
+                        node_opt.map(|node| (key, Arc::unwrap_or_clone(node)))
                     }
                     // In both: memory takes precedence (keep if not a deletion)
                     itertools::EitherOrBoth::Both(_, (key, node_opt)) => {
-                        node_opt.map(|node| (key, node))
+                        node_opt.map(|node| (key, Arc::unwrap_or_clone(node)))
                     }
                 })
                 .collect()
@@ -643,9 +644,9 @@ mod tests {
             })
         }
 
-        /// Generate a sorted vector of (Nibbles, Option<BranchNodeCompact>) entries
+        /// Generate a sorted vector of (Nibbles, Option<Arc<BranchNodeCompact>>) entries
         fn sorted_in_memory_nodes_strategy(
-        ) -> impl Strategy<Value = Vec<(Nibbles, Option<BranchNodeCompact>)>> {
+        ) -> impl Strategy<Value = Vec<(Nibbles, Option<Arc<BranchNodeCompact>>)>> {
             prop::collection::vec(
                 (
                     prop::collection::vec(any::<u8>(), 0..3),
@@ -655,9 +656,9 @@ mod tests {
             )
             .prop_map(|entries| {
                 // Convert Vec<u8> to Nibbles and sort
-                let mut result: Vec<(Nibbles, Option<BranchNodeCompact>)> = entries
+                let mut result: Vec<(Nibbles, Option<Arc<BranchNodeCompact>>)> = entries
                     .into_iter()
-                    .map(|(bytes, node)| (Nibbles::from_nibbles_unchecked(bytes), node))
+                    .map(|(bytes, node)| (Nibbles::from_nibbles_unchecked(bytes), node.map(Arc::new)))
                     .collect();
                 result.sort_by(|a, b| a.0.cmp(&b.0));
                 result.dedup_by(|a, b| a.0 == b.0);

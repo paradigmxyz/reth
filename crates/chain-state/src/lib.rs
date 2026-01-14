@@ -26,6 +26,11 @@ pub use notifications::{
 mod memory_overlay;
 pub use memory_overlay::{MemoryOverlayStateProvider, MemoryOverlayStateProviderRef};
 
+mod trie_profiler;
+pub use trie_profiler::{
+    AggregatedTrieStats, BlockTrieStats, TrieProfiler, TrieProfilerMetrics,
+};
+
 #[cfg(any(test, feature = "test-utils"))]
 /// Common test helpers
 pub mod test_utils;

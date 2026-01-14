@@ -20,7 +20,7 @@ use revm_database::{
     AccountStatus, RevertToSlot,
 };
 use serde::Serialize;
-use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf};
+use std::{collections::BTreeMap, fmt::Debug, fs::File, io::Write, path::PathBuf, sync::Arc};
 
 type CollectionResult =
     (BTreeMap<B256, Bytes>, BTreeMap<B256, Bytes>, reth_trie::HashedPostState, BundleState);
@@ -769,7 +769,7 @@ mod tests {
             vec![B256::from([1u8; 32])], // hashes
             None,                        // root_hash
         );
-        account_nodes.insert(nibbles, branch_node);
+        account_nodes.insert(nibbles, Arc::new(branch_node));
 
         let mut removed_nodes = HashSet::default();
         removed_nodes.insert(Nibbles::from_nibbles_unchecked([0x4, 0x5, 0x6]));

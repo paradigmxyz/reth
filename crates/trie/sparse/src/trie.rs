@@ -8,6 +8,7 @@ use alloc::{
     boxed::Box,
     fmt,
     string::{String, ToString},
+    sync::Arc,
     vec,
     vec::Vec,
 };
@@ -1729,7 +1730,7 @@ impl SerialSparseTrie {
                                 hashes,
                                 hash.filter(|_| path.is_empty()),
                             );
-                            updates.updated_nodes.insert(path, branch_node);
+                            updates.updated_nodes.insert(path, Arc::new(branch_node));
                         } else if self
                             .branch_node_tree_masks
                             .get(&path)

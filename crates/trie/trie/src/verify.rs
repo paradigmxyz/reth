@@ -119,7 +119,7 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
 
             // collect account updates and sort them in descending order, so that when we pop them
             // off the Vec they are popped in ascending order.
-            self.account_nodes.extend(updates.account_nodes);
+            self.account_nodes.extend(updates.account_nodes.into_iter().map(|(k, v)| (k, (*v).clone())));
             Self::sort_updates(&mut self.account_nodes);
 
             self.storage_tries = updates
@@ -127,7 +127,7 @@ impl<H: HashedCursorFactory + Clone> Iterator for StateRootBranchNodesIter<H> {
                 .into_iter()
                 .filter_map(|(account, t)| {
                     (!t.storage_nodes.is_empty()).then(|| {
-                        let mut storage_nodes = t.storage_nodes.into_iter().collect::<Vec<_>>();
+                        let mut storage_nodes = t.storage_nodes.into_iter().map(|(k, v)| (k, (*v).clone())).collect::<Vec<_>>();
                         Self::sort_updates(&mut storage_nodes);
                         (account, storage_nodes)
                     })

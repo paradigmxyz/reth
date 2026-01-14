@@ -633,7 +633,7 @@ fn account_trie_around_extension_node_with_dbtrie() {
         .into_iter()
         .map(|item| {
             let (key, node) = item.unwrap();
-            (key.0, node)
+            (key.0, Arc::new(node))
         })
         .collect();
     assert_trie_updates(&account_updates);
@@ -745,12 +745,12 @@ fn extension_node_trie<N: ProviderNodeTypes>(
     hb.root()
 }
 
-fn assert_trie_updates(account_updates: &HashMap<Nibbles, BranchNodeCompact>) {
+fn assert_trie_updates(account_updates: &HashMap<Nibbles, Arc<BranchNodeCompact>>) {
     assert_eq!(account_updates.len(), 2);
 
     let node = account_updates.get(&Nibbles::from_nibbles_unchecked([0x3])).unwrap();
     let expected = BranchNodeCompact::new(0b0011, 0b0001, 0b0000, vec![], None);
-    assert_eq!(node, &expected);
+    assert_eq!(node.as_ref(), &expected);
 
     let node = account_updates.get(&Nibbles::from_nibbles_unchecked([0x3, 0x0, 0xA, 0xF])).unwrap();
     assert_eq!(node.state_mask, TrieMask::new(0b101100000));

@@ -18,6 +18,7 @@ use alloy_rlp::{BufMut, Encodable};
 use alloy_trie::proof::AddedRemovedKeys;
 use reth_execution_errors::{StateRootError, StorageRootError};
 use reth_primitives_traits::Account;
+use std::sync::Arc;
 use tracing::{debug, instrument, trace};
 
 /// The default updates after which root algorithms should return intermediate progress rather than
@@ -371,7 +372,7 @@ impl StateRootContext {
         let (walker_stack, walker_deleted_keys) = account_node_iter.walker.split();
         self.trie_updates.removed_nodes.extend(walker_deleted_keys);
         let (hash_builder, hash_builder_updates) = hash_builder.split();
-        self.trie_updates.account_nodes.extend(hash_builder_updates);
+        self.trie_updates.account_nodes.extend(hash_builder_updates.into_iter().map(|(k, v)| (k, Arc::new(v))));
 
         let account_state = IntermediateRootState { hash_builder, walker_stack, last_hashed_key };
 
@@ -676,7 +677,7 @@ where
                         let (walker_stack, walker_deleted_keys) = storage_node_iter.walker.split();
                         trie_updates.removed_nodes.extend(walker_deleted_keys);
                         let (hash_builder, hash_builder_updates) = hash_builder.split();
-                        trie_updates.storage_nodes.extend(hash_builder_updates);
+                        trie_updates.storage_nodes.extend(hash_builder_updates.into_iter().map(|(k, v)| (k, Arc::new(v))));
 
                         let state = IntermediateRootState {
                             hash_builder,

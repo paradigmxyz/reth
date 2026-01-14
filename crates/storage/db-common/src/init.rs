@@ -716,10 +716,15 @@ mod tests {
         transaction::DbTx,
         Database,
     };
+
     use reth_provider::{
-        test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
+        test_utils::{self, create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
         ProviderFactory,
     };
+
+    use reth_provider::providers::triedb::TriedbProvider;
+    use reth_db::test_utils::create_test_triedb_dir;
+
     use std::{collections::BTreeMap, sync::Arc};
 
     fn collect_table_entries<DB, T>(
@@ -766,10 +771,12 @@ mod tests {
         init_genesis(&factory).unwrap();
 
         // Try to init db with a different genesis block
+        let (triedb_dir, _guard) = create_test_triedb_dir();
         let genesis_hash = init_genesis(&ProviderFactory::<MockNodeTypesWithDB>::new(
             factory.into_db(),
             MAINNET.clone(),
             static_file_provider,
+            Arc::new(TriedbProvider::new(triedb_dir)),
         ));
 
         assert!(matches!(

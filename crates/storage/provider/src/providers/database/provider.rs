@@ -1,3 +1,4 @@
+use tokio::time::Instant;
 use crate::{
     changesets_utils::{
         storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
@@ -2146,7 +2147,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
         let mut db_account_cursor = DatabaseAccountTrieCursor::new(curr_values_cursor);
 
         // Static empty array for when updates_overlay is None
-        static EMPTY_ACCOUNT_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+        static EMPTY_ACCOUNT_UPDATES: Vec<(Nibbles, Option<Arc<BranchNodeCompact>>)> = Vec::new();
 
         // Get the overlay updates for account trie, or use an empty array
         let account_overlay_updates = updates_overlay
@@ -2225,7 +2226,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
             let (_, TrieChangeSetsEntry { nibbles, node }) = entry?;
             // Only keep the first (oldest) version of each node
             if seen_account_keys.insert(nibbles.0) {
-                account_nodes.push((nibbles.0, node));
+                account_nodes.push((nibbles.0, node.map(Arc::new)));
             }
         }
 
@@ -2258,7 +2259,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
             .into_iter()
             .map(|(address, mut nodes)| {
                 nodes.sort_by_key(|(path, _)| *path);
-                (address, StorageTrieUpdatesSorted { storage_nodes: nodes, is_deleted: false })
+                (address, StorageTrieUpdatesSorted { storage_nodes: nodes.into_iter().map(|(p, n)| (p, n.map(Arc::new))).collect(), is_deleted: false })
             })
             .collect();
 
@@ -2289,7 +2290,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
         for entry in accounts_trie_cursor.walk_dup(Some(block_number), None)? {
             let (_, TrieChangeSetsEntry { nibbles, .. }) = entry?;
             // Look up the current value of this trie node using the overlay cursor
-            let node_value = account_cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
+            let node_value = account_cursor.seek_exact(nibbles.0)?.map(|(_, node)| Arc::new(node));
             account_nodes.push((nibbles.0, node_value));
         }
 
@@ -2317,7 +2318,7 @@ impl<TX: DbTx + 'static, N: NodeTypes> TrieReader for DatabaseProvider<TX, N> {
             // Look up the current value of this storage trie node
             let cursor =
                 storage_cursor.as_mut().expect("storage_cursor was just initialized above");
-            let node_value = cursor.seek_exact(nibbles.0)?.map(|(_, node)| node);
+            let node_value = cursor.seek_exact(nibbles.0)?.map(|(_, node)| Arc::new(node));
             storage_tries
                 .entry(hashed_address)
                 .or_insert_with(|| StorageTrieUpdatesSorted {
@@ -2394,7 +2395,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         );
 
         // Static empty array for when updates_overlay is None
-        static EMPTY_UPDATES: Vec<(Nibbles, Option<BranchNodeCompact>)> = Vec::new();
+        static EMPTY_ACCOUNT_UPDATES: Vec<(Nibbles, Option<Arc<BranchNodeCompact>>)> = Vec::new();
 
         for (hashed_address, storage_trie_updates) in storage_tries {
             let changeset_key = BlockNumberHashedAddress((block_number, *hashed_address));
@@ -3401,7 +3402,7 @@ mod tests {
 
         // Create account trie updates: one Some (update) and one None (removal)
         let account_nodes = vec![
-            (account_nibbles1, Some(node1.clone())), // This will update existing node
+            (account_nibbles1, Some(&node1)), // This will update existing node
             (account_nibbles2, None),                // This will be a removal (no existing node)
         ];
 
@@ -3472,21 +3473,20 @@ mod tests {
         let storage_trie1 = StorageTrieUpdatesSorted {
             is_deleted: false,
             storage_nodes: vec![
-                (storage_nibbles1, Some(storage_node1.clone())), // This will update existing node
+                (storage_nibbles1, Some(Arc::new(storage_node1.clone()))), // This will update existing node
                 (storage_nibbles2, None),                        // This is a new node
             ],
         };
 
         // Wiped storage trie
         let storage_trie2 = StorageTrieUpdatesSorted {
-            is_deleted: true,
-            storage_nodes: vec![
-                (storage_nibbles1, Some(storage_node1.clone())), // Updated node already in db
-                (storage_nibbles2, Some(storage_node2.clone())), /* Updated node not in db
-                                                                  * storage_nibbles3 is in db
-                                                                  * but not updated */
-            ],
-        };
+        is_deleted: true,
+        storage_nodes: vec![
+            (storage_nibbles1, Some(Arc::new(storage_node1.clone()))), // Updated node already in db
+            (storage_nibbles2, Some(Arc::new(storage_node2.clone()))), /* Updated node not in db
+                                                                        * storage_nibbles3 is in db
+                                                                        * but not updated */
+        ],
 
         let mut storage_tries = B256Map::default();
         storage_tries.insert(storage_address1, storage_trie1);
@@ -3642,12 +3642,12 @@ mod tests {
 
         // Create overlay account nodes
         let overlay_account_nodes = vec![
-            (account_nibbles1, Some(node1_old.clone())), // This simulates existing node in overlay
+            (account_nibbles1, Some(Arc::new(node1_old.clone()))), // This simulates existing node in overlay
         ];
 
         // Create account trie updates: one Some (update) and one None (removal)
         let account_nodes = vec![
-            (account_nibbles1, Some(node1)), // This will update overlay node
+            (account_nibbles1, Some(Arc::new(node1))), // This will update overlay node
             (account_nibbles2, None),        // This will be a removal (no existing node)
         ];
 
@@ -3691,17 +3691,16 @@ mod tests {
         let overlay_storage_trie1 = StorageTrieUpdatesSorted {
             is_deleted: false,
             storage_nodes: vec![
-                (storage_nibbles1, Some(storage_node1_old.clone())), /* Simulates existing in
+                (storage_nibbles1, Some(Arc::new(storage_node1_old.clone()))), /* Simulates existing in
                                                                       * overlay */
             ],
         };
 
-        // Overlay for wiped storage (storage_address2)
         let overlay_storage_trie2 = StorageTrieUpdatesSorted {
             is_deleted: false,
             storage_nodes: vec![
-                (storage_nibbles1, Some(storage_node1.clone())), // Existing in overlay
-                (storage_nibbles3, Some(storage_node2.clone())), // Also existing in overlay
+                (storage_nibbles1, Some(Arc::new(storage_node1.clone()))), // Existing in overlay
+                (storage_nibbles3, Some(Arc::new(storage_node2.clone()))), // Also existing in overlay
             ],
         };
 
@@ -3710,11 +3709,14 @@ mod tests {
 
         let overlay = TrieUpdatesSorted::new(overlay_account_nodes, overlay_storage_tries);
 
+        let storage_node_1 = Arc::new(storage_node1.clone());
+        let storage_node_2 = Arc::new(storage_node2.clone());
+
         // Normal storage trie: one Some (update) and one None (new)
-        let storage_trie1 = StorageTrieUpdatesSorted {
+=        let storage_trie1 = StorageTrieUpdatesSorted {
             is_deleted: false,
             storage_nodes: vec![
-                (storage_nibbles1, Some(storage_node1.clone())), // This will update overlay node
+                (storage_nibbles1, Some(Arc::new(storage_node1))), // This will update overlay node
                 (storage_nibbles2, None),                        // This is a new node
             ],
         };
@@ -3723,8 +3725,8 @@ mod tests {
         let storage_trie2 = StorageTrieUpdatesSorted {
             is_deleted: true,
             storage_nodes: vec![
-                (storage_nibbles1, Some(storage_node1.clone())), // Updated node from overlay
-                (storage_nibbles2, Some(storage_node2.clone())), /* Updated node not in overlay
+                (storage_nibbles1, Some(Arc::new(storage_node1))), // Updated node from overlay
+                (storage_nibbles2, Some(Arc::new(storage_node2))), /* Updated node not in overlay
                                                                   * storage_nibbles3 is in
                                                                   * overlay
                                                                   * but not updated */
@@ -4253,24 +4255,24 @@ mod tests {
         let account_nodes = vec![
             (
                 Nibbles::from_nibbles([0x1, 0x2]),
-                Some(BranchNodeCompact::new(
+                Some(Arc::new(BranchNodeCompact::new(
                     0b1111_1111_1111_1111, // state_mask (updated)
                     0b0000_0000_0000_0000, // tree_mask
                     0b0000_0000_0000_0000, // hash_mask (no hashes)
                     vec![],
                     None,
-                )),
+                ))),
             ),
             (Nibbles::from_nibbles([0x3, 0x4]), None), // Deletion
             (
                 Nibbles::from_nibbles([0x5, 0x6]),
-                Some(BranchNodeCompact::new(
+                Some(Arc::new(BranchNodeCompact::new(
                     0b1111_1111_1111_1111, // state_mask
                     0b0000_0000_0000_0000, // tree_mask
                     0b0000_0000_0000_0000, // hash_mask (no hashes)
                     vec![],
                     None,
-                )),
+                ))),
             ),
         ];
 
@@ -4280,13 +4282,13 @@ mod tests {
             storage_nodes: vec![
                 (
                     Nibbles::from_nibbles([0x1, 0x0]),
-                    Some(BranchNodeCompact::new(
+                    Some(Arc::new(BranchNodeCompact::new(
                         0b1111_0000_0000_0000, // state_mask
                         0b0000_0000_0000_0000, // tree_mask
                         0b0000_0000_0000_0000, // hash_mask (no hashes)
                         vec![],
                         None,
-                    )),
+                    ))),
                 ),
                 (Nibbles::from_nibbles([0x2, 0x0]), None), // Deletion of existing node
             ],

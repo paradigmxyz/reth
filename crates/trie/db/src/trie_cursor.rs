@@ -145,7 +145,7 @@ where
             if let Some(node) = maybe_updated {
                 self.cursor.upsert(
                     self.hashed_address,
-                    &StorageTrieEntry { nibbles, node: node.clone() },
+                    &StorageTrieEntry { nibbles, node: node.as_ref().clone() },
                 )?;
             }
         }

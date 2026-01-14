@@ -871,7 +871,7 @@ mod tests {
     use reth_ethereum_primitives::{EthPrimitives, Receipt};
     use reth_primitives_traits::{Account, Bytecode};
     use reth_storage_api::{
-        AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider,
+        AccountReader, BlockHashReader, BytecodeReader, HashedPostStateProvider, PlainPostState,
         StateProofProvider, StateProvider, StateRootProvider, StorageRootProvider,
     };
     use reth_trie::{
@@ -967,6 +967,13 @@ mod tests {
         fn state_root_from_nodes_with_updates(
             &self,
             _input: TrieInput,
+        ) -> ProviderResult<(B256, TrieUpdates)> {
+            Ok((B256::random(), TrieUpdates::default()))
+        }
+
+        fn state_root_with_updates_triedb(
+            &self,
+            _plain_state: PlainPostState,
         ) -> ProviderResult<(B256, TrieUpdates)> {
             Ok((B256::random(), TrieUpdates::default()))
         }

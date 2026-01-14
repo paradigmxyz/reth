@@ -20,7 +20,7 @@ use futures_util::FutureExt;
 use reth_chainspec::{ChainSpec, MAINNET};
 use reth_consensus::test_utils::TestConsensus;
 use reth_db::{
-    test_utils::{create_test_rw_db, create_test_static_files_dir, TempDatabase},
+    test_utils::{create_test_rw_db, create_test_static_files_dir, create_test_triedb_dir, TempDatabase},
     DatabaseEnv,
 };
 use reth_db_common::init::init_genesis;
@@ -50,7 +50,7 @@ use reth_node_ethereum::{
 use reth_payload_builder::noop::NoopPayloadBuilderService;
 use reth_primitives_traits::{Block as _, RecoveredBlock};
 use reth_provider::{
-    providers::{BlockchainProvider, StaticFileProvider},
+    providers::{BlockchainProvider, StaticFileProvider, triedb::TriedbProvider},
     BlockReader, EthStorage, ProviderFactory,
 };
 use reth_tasks::TaskManager;
@@ -239,11 +239,13 @@ pub async fn test_exex_context_with_chain_spec(
     let consensus = Arc::new(TestConsensus::default());
 
     let (static_dir, _) = create_test_static_files_dir();
+    let (triedb_dir, _) = create_test_triedb_dir();
     let db = create_test_rw_db();
     let provider_factory = ProviderFactory::<NodeTypesWithDBAdapter<TestNode, _>>::new(
         db,
         chain_spec.clone(),
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
+        Arc::new(TriedbProvider::new(triedb_dir)),
     );
 
     let genesis_hash = init_genesis(&provider_factory)?;

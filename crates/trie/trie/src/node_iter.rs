@@ -330,7 +330,7 @@ mod tests {
         prefix_set::PrefixSetMut, updates::TrieUpdates, BranchNode, HashedPostState, LeafNode,
         RlpNode,
     };
-    use std::collections::BTreeMap;
+    use std::{collections::BTreeMap, sync::Arc};
 
     use super::{TrieElement, TrieNodeIter};
 
@@ -377,7 +377,7 @@ mod tests {
         let mut trie_updates = TrieUpdates::default();
         trie_updates.finalize(hash_builder, Default::default(), Default::default());
 
-        trie_updates.account_nodes
+        trie_updates.account_nodes.into_iter().map(|(k, v)| (k, Arc::unwrap_or_clone(v))).collect()
     }
 
     #[test]

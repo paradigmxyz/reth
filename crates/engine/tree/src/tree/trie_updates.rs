@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+use std::sync::Arc;
 use alloy_primitives::{map::HashMap, B256};
 use reth_db::DatabaseError;
 use reth_trie::{
@@ -17,7 +19,7 @@ struct EntryDiff<T> {
 
 #[derive(Debug, Default)]
 struct TrieUpdatesDiff {
-    account_nodes: HashMap<Nibbles, EntryDiff<Option<BranchNodeCompact>>>,
+    account_nodes: HashMap<Nibbles, EntryDiff<Option<Arc<BranchNodeCompact>>>>,
     removed_nodes: HashMap<Nibbles, EntryDiff<bool>>,
     storage_tries: HashMap<B256, StorageTrieUpdatesDiff>,
 }
@@ -57,7 +59,7 @@ impl TrieUpdatesDiff {
 #[derive(Debug, Default)]
 struct StorageTrieUpdatesDiff {
     is_deleted: Option<EntryDiff<bool>>,
-    storage_nodes: HashMap<Nibbles, EntryDiff<Option<BranchNodeCompact>>>,
+    storage_nodes: HashMap<Nibbles, EntryDiff<Option<std::sync::Arc<BranchNodeCompact>>>>,
     removed_nodes: HashMap<Nibbles, EntryDiff<bool>>,
 }
 
@@ -120,8 +122,12 @@ pub(super) fn compare_trie_updates(
         let (task, regular) = (task.account_nodes.remove(&key), regular.account_nodes.remove(&key));
         let database = account_trie_cursor.seek_exact(key)?.map(|x| x.1);
 
-        if !branch_nodes_equal(task.as_ref(), regular.as_ref(), database.as_ref())? {
-            diff.account_nodes.insert(key, EntryDiff { task, regular, database });
+        if !branch_nodes_equal(task.as_ref().map(|n: &std::sync::Arc<BranchNodeCompact>| n.as_ref()), regular.as_ref().map(|n| n.as_ref()), database.as_ref())? {
+            diff.account_nodes.insert(key, EntryDiff { 
+                task, 
+                regular, 
+                database: database.map(std::sync::Arc::new) 
+            });
         }
     }
 
@@ -211,8 +217,12 @@ fn compare_storage_trie_updates<C: TrieCursor>(
     {
         let (task, regular) = (task.storage_nodes.remove(&key), regular.storage_nodes.remove(&key));
         let database = storage_trie_cursor.seek_exact(key)?.map(|x| x.1);
-        if !branch_nodes_equal(task.as_ref(), regular.as_ref(), database.as_ref())? {
-            diff.storage_nodes.insert(key, EntryDiff { task, regular, database });
+        if !branch_nodes_equal(task.as_ref().map(|n| &**n), regular.as_ref().map(|n| &**n), database.as_ref())? {
+            diff.storage_nodes.insert(key, EntryDiff { 
+                task, 
+                regular, 
+                database: database.map(std::sync::Arc::new) 
+            });
         }
     }
 

@@ -1,5 +1,5 @@
 use crate::LowerSparseSubtrie;
-use alloc::borrow::Cow;
+use alloc::{borrow::Cow, sync::Arc};
 use alloy_primitives::{
     map::{Entry, HashMap},
     B256,
@@ -1347,7 +1347,7 @@ impl ParallelSparseTrie {
                         updates.updated_nodes.remove(&path);
                     }
                     SparseTrieUpdatesAction::InsertUpdated(path, branch_node) => {
-                        updates.updated_nodes.insert(path, branch_node);
+                        updates.updated_nodes.insert(path, Arc::new(branch_node));
                     }
                 }
             }
@@ -2697,7 +2697,7 @@ mod tests {
         LeafLookup, LeafLookupError, RevealedSparseNode, SerialSparseTrie, SparseNode,
         SparseTrieInterface, SparseTrieUpdates, TrieMasks,
     };
-    use std::collections::{BTreeMap, BTreeSet};
+    use std::{collections::{BTreeMap, BTreeSet}, sync::Arc};
 
     /// Pad nibbles to the length of a B256 hash with zeros on the right.
     fn pad_nibbles_right(mut nibbles: Nibbles) -> Nibbles {
@@ -3765,7 +3765,7 @@ mod tests {
         if let Some(updates) = trie.updates.as_mut() {
             updates
                 .updated_nodes
-                .insert(Nibbles::default(), BranchNodeCompact::new(0b11, 0, 0, vec![], None));
+                .insert(Nibbles::default(), Arc::new(BranchNodeCompact::new(0b11, 0, 0, vec![], None)));
         }
 
         let provider = MockTrieNodeProvider::new();
