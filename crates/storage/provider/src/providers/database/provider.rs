@@ -582,7 +582,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                     let mut result = blocks_iter.next().expect("non-empty").trie_updates();
 
                     for block in blocks_iter {
-                        Arc::make_mut(&mut result).extend_ref(block.trie_updates().as_ref());
+                        Arc::make_mut(&mut result)
+                            .extend_ref_and_sort(block.trie_updates().as_ref());
                     }
 
                     match Arc::try_unwrap(result) {
