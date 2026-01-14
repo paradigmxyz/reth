@@ -2,9 +2,9 @@ use super::metrics::{RocksDBMetrics, RocksDBOperation};
 use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
+use itertools::Itertools;
 use parking_lot::Mutex;
 use reth_chain_state::ExecutedBlock;
-use itertools::Itertools;
 use reth_db_api::{
     models::{
         sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
