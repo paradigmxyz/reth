@@ -257,7 +257,8 @@ where
 
     // Fetch reorg target block depending on its depth and its parent.
     let mut previous_hash = next_block.parent_hash();
-    let mut candidate_transactions = next_block.into_body().transactions().to_vec();
+    let mut candidate_transactions =
+        if depth == 0 { next_block.into_body().transactions().to_vec() } else { Vec::new() };
     let reorg_target = 'target: {
         loop {
             let reorg_target = provider
