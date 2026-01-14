@@ -16,8 +16,8 @@ pub use static_file::{
 mod state;
 pub use state::{
     historical::{
-        needs_prev_shard_check, HistoricalStateProvider, HistoricalStateProviderRef, HistoryInfo,
-        LowestAvailableBlocks,
+        compute_history_rank, needs_prev_shard_check, HistoricalStateProvider,
+        HistoricalStateProviderRef, HistoryInfo, LowestAvailableBlocks,
     },
     latest::{LatestStateProvider, LatestStateProviderRef},
     overlay::{OverlayStateProvider, OverlayStateProviderFactory},

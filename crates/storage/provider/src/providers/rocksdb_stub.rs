@@ -17,17 +17,17 @@ use reth_storage_errors::{
 };
 use std::{path::Path, sync::Arc};
 
-/// Pending RocksDB batches type alias (stub - uses unit type).
-pub type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
+/// Pending `RocksDB` batches type alias (stub - uses unit type).
+pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
 
-/// Context for RocksDB block writes (stub).
+/// Context for `RocksDB` block writes (stub).
 #[derive(Debug, Clone)]
 pub struct RocksDBWriteCtx {
     /// The first block number being written.
     pub first_block_number: BlockNumber,
     /// The prune mode for transaction lookup, if any.
     pub prune_tx_lookup: Option<PruneMode>,
-    /// Storage settings determining what goes to RocksDB.
+    /// Storage settings determining what goes to `RocksDB`.
     pub storage_settings: StorageSettings,
     /// Pending batches (stub - unused).
     pub pending_batches: PendingRocksDBBatches,
@@ -133,9 +133,9 @@ impl RocksDBProvider {
         Ok(None)
     }
 
-    /// Writes all RocksDB data for multiple blocks (stub implementation).
+    /// Writes all `RocksDB` data for multiple blocks (stub implementation).
     ///
-    /// No-op since RocksDB is not available on this platform.
+    /// No-op since `RocksDB` is not available on this platform.
     pub fn write_blocks_data<N>(
         &self,
         _blocks: &[reth_chain_state::ExecutedBlock<N>],

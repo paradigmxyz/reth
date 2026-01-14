@@ -522,6 +522,29 @@ impl LowestAvailableBlocks {
     }
 }
 
+/// Computes the rank and selected block from a history shard chunk.
+///
+/// Given a `BlockNumberList` (history shard) and a target block number, this function:
+/// 1. Finds the rank of the first entry at or before `block_number`
+/// 2. Adjusts the rank if the found entry equals `block_number` (so we get strictly before)
+/// 3. Returns `(rank, found_block)` for use with [`needs_prev_shard_check`] and
+///    [`HistoryInfo::from_lookup`]
+///
+/// This logic is shared between MDBX cursor-based lookups and `RocksDB` iterator lookups.
+#[inline]
+pub fn compute_history_rank(
+    chunk: &reth_db_api::BlockNumberList,
+    block_number: BlockNumber,
+) -> (u64, Option<u64>) {
+    let mut rank = chunk.rank(block_number);
+    // Adjust the rank, so that we have the rank of the first entry strictly before
+    // our block (not equal to it).
+    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+        rank -= 1;
+    }
+    (rank, chunk.select(rank))
+}
+
 /// Checks if a previous shard lookup is needed to determine if we're before the first write.
 ///
 /// Returns `true` when `rank == 0` (first entry in shard) and the found block doesn't match

@@ -1,5 +1,5 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
-use crate::providers::{needs_prev_shard_check, HistoryInfo};
+use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
 use parking_lot::Mutex;
@@ -29,33 +29,6 @@ use std::{
     time::Instant,
 };
 use tracing::instrument;
-
-/// Pending RocksDB batches type alias.
-pub type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
-
-/// Context for RocksDB block writes.
-#[derive(Clone)]
-pub struct RocksDBWriteCtx {
-    /// The first block number being written.
-    pub first_block_number: BlockNumber,
-    /// The prune mode for transaction lookup, if any.
-    pub prune_tx_lookup: Option<PruneMode>,
-    /// Storage settings determining what goes to RocksDB.
-    pub storage_settings: StorageSettings,
-    /// Pending batches to push to after writing.
-    pub pending_batches: PendingRocksDBBatches,
-}
-
-impl fmt::Debug for RocksDBWriteCtx {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.debug_struct("RocksDBWriteCtx")
-            .field("first_block_number", &self.first_block_number)
-            .field("prune_tx_lookup", &self.prune_tx_lookup)
-            .field("storage_settings", &self.storage_settings)
-            .field("pending_batches", &"<pending batches>")
-            .finish()
-    }
-}
 
 /// Pending `RocksDB` batches type alias.
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
@@ -981,21 +954,9 @@ impl<'db> RocksTx<'db> {
             };
         };
         let chunk = BlockNumberList::decompress(value_bytes)?;
+        let (rank, found_block) = compute_history_rank(&chunk, block_number);
 
-        // Get the rank of the first entry before or equal to our block.
-        let mut rank = chunk.rank(block_number);
-
-        // Adjust the rank, so that we have the rank of the first entry strictly before our
-        // block (not equal to it).
-        if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
-            rank -= 1;
-        }
-
-        let found_block = chunk.select(rank);
-
-        // Lazy check for previous shard - only called when needed.
-        // If we can step to a previous shard for this same key, history already exists,
-        // so the target block is not before the first write.
+        // Check if this is before the first write by looking at the previous shard.
         let is_before_first_write = if needs_prev_shard_check(rank, found_block, block_number) {
             iter.prev();
             Self::raw_iter_status_ok(&iter)?;

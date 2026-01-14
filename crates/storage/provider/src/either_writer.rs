@@ -3,6 +3,7 @@
 
 use std::{
     collections::BTreeSet,
+    marker::PhantomData,
     ops::{Range, RangeInclusive},
 };
 
@@ -14,7 +15,7 @@ use crate::{
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
 
-use crate::providers::{needs_prev_shard_check, HistoryInfo};
+use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -554,7 +555,7 @@ pub enum EitherReader<'a, CURSOR, N> {
     /// Read from database table via cursor
     Database(CURSOR),
     /// Read from static file
-    StaticFile(StaticFileProvider<N>, std::marker::PhantomData<&'a ()>),
+    StaticFile(StaticFileProvider<N>, PhantomData<&'a ()>),
     /// Read from `RocksDB` transaction
     #[cfg(all(unix, feature = "rocksdb"))]
     RocksDB(&'a crate::providers::rocksdb::RocksTx<'a>),
@@ -570,7 +571,7 @@ impl<'a> EitherReader<'a, (), ()> {
         P::Tx: DbTx,
     {
         if EitherWriterDestination::senders(provider).is_static_file() {
-            Ok(EitherReader::StaticFile(provider.static_file_provider(), std::marker::PhantomData))
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_read::<tables::TransactionSenders>()?,
@@ -640,7 +641,7 @@ impl<'a> EitherReader<'a, (), ()> {
         P::Tx: DbTx,
     {
         if EitherWriterDestination::account_changesets(provider).is_static_file() {
-            Ok(EitherReader::StaticFile(provider.static_file_provider(), std::marker::PhantomData))
+            Ok(EitherReader::StaticFile(provider.static_file_provider(), PhantomData))
         } else {
             Ok(EitherReader::Database(
                 provider.tx_ref().cursor_dup_read::<tables::AccountChangeSets>()?,
@@ -738,23 +739,9 @@ where
                     .filter(|(k, _)| k.address == address && k.sharded_key.key == storage_key)
                     .map(|x| x.1)
                 {
-                    // Get the rank of the first entry before or equal to our block.
-                    let mut rank = chunk.rank(block_number);
+                    let (rank, found_block) = compute_history_rank(&chunk, block_number);
 
-                    // Adjust the rank, so that we have the rank of the first entry strictly before
-                    // our block (not equal to it).
-                    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
-                        rank -= 1;
-                    }
-
-                    let found_block = chunk.select(rank);
-
-                    // If our block is before the first entry in the index chunk and this first
-                    // entry doesn't equal to our block, it might be before the first write ever.
-                    // To check, we look at the previous entry and check if the key is the same.
-                    // This check is worth it, the `cursor.prev()` check is rarely triggered (the
-                    // if will short-circuit) and when it passes we save a full seek into the
-                    // changeset/plain state table.
+                    // Check if this is before the first write by looking at the previous shard.
                     let is_before_first_write =
                         needs_prev_shard_check(rank, found_block, block_number) &&
                             cursor.prev()?.is_none_or(|(k, _)| {
@@ -823,23 +810,9 @@ where
                 if let Some(chunk) =
                     cursor.seek(key)?.filter(|(k, _)| k.key == address).map(|x| x.1)
                 {
-                    // Get the rank of the first entry before or equal to our block.
-                    let mut rank = chunk.rank(block_number);
+                    let (rank, found_block) = compute_history_rank(&chunk, block_number);
 
-                    // Adjust the rank, so that we have the rank of the first entry strictly before
-                    // our block (not equal to it).
-                    if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
-                        rank -= 1;
-                    }
-
-                    let found_block = chunk.select(rank);
-
-                    // If our block is before the first entry in the index chunk and this first
-                    // entry doesn't equal to our block, it might be before the first write ever.
-                    // To check, we look at the previous entry and check if the key is the same.
-                    // This check is worth it, the `cursor.prev()` check is rarely triggered (the
-                    // if will short-circuit) and when it passes we save a full seek into the
-                    // changeset/plain state table.
+                    // Check if this is before the first write by looking at the previous shard.
                     let is_before_first_write =
                         needs_prev_shard_check(rank, found_block, block_number) &&
                             cursor.prev()?.is_none_or(|(k, _)| k.key != address);
