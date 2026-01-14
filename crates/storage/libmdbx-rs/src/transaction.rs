@@ -208,11 +208,11 @@ where
     }
 
     /// Gets the option flags for the given database in the transaction.
-    pub fn db_flags(&self, db: &Database) -> Result<DatabaseFlags> {
+    pub fn db_flags(&self, dbi: ffi::MDBX_dbi) -> Result<DatabaseFlags> {
         let mut flags: c_uint = 0;
         unsafe {
             self.txn_execute(|txn| {
-                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, db.dbi(), &mut flags, ptr::null_mut()))
+                mdbx_result(ffi::mdbx_dbi_flags_ex(txn, dbi, &mut flags, ptr::null_mut()))
             })??;
         }
 
@@ -222,8 +222,8 @@ where
     }
 
     /// Retrieves database statistics.
-    pub fn db_stat(&self, db: &Database) -> Result<Stat> {
-        self.db_stat_with_dbi(db.dbi())
+    pub fn db_stat(&self, dbi: ffi::MDBX_dbi) -> Result<Stat> {
+        self.db_stat_with_dbi(dbi)
     }
 
     /// Retrieves database statistics by the given dbi.
@@ -238,8 +238,8 @@ where
     }
 
     /// Open a new cursor on the given database.
-    pub fn cursor(&self, db: &Database) -> Result<Cursor<K>> {
-        Cursor::new(self.clone(), db.dbi())
+    pub fn cursor(&self, dbi: ffi::MDBX_dbi) -> Result<Cursor<K>> {
+        Cursor::new(self.clone(), dbi)
     }
 
     /// Open a new cursor on the given dbi.
@@ -400,7 +400,7 @@ impl Transaction<RW> {
     #[allow(clippy::mut_from_ref)]
     pub fn reserve(
         &self,
-        db: &Database,
+        dbi: ffi::MDBX_dbi,
         key: impl AsRef<[u8]>,
         len: usize,
         flags: WriteFlags,
@@ -412,13 +412,7 @@ impl Transaction<RW> {
             ffi::MDBX_val { iov_len: len, iov_base: ptr::null_mut::<c_void>() };
         unsafe {
             mdbx_result(self.txn_execute(|txn| {
-                ffi::mdbx_put(
-                    txn,
-                    db.dbi(),
-                    &key_val,
-                    &mut data_val,
-                    flags.bits() | ffi::MDBX_RESERVE,
-                )
+                ffi::mdbx_put(txn, dbi, &key_val, &mut data_val, flags.bits() | ffi::MDBX_RESERVE)
             })?)?;
             Ok(slice::from_raw_parts_mut(data_val.iov_base as *mut u8, data_val.iov_len))
         }
@@ -473,10 +467,10 @@ impl Transaction<RW> {
     /// Drops the database from the environment.
     ///
     /// # Safety
-    /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
-    /// BEFORE calling this function.
-    pub unsafe fn drop_db(&self, db: Database) -> Result<()> {
-        mdbx_result(self.txn_execute(|txn| unsafe { ffi::mdbx_drop(txn, db.dbi(), true) })?)?;
+    /// Caller must close ALL other [Database] and [Cursor] instances pointing
+    /// to the same dbi BEFORE calling this function.
+    pub unsafe fn drop_db(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
+        mdbx_result(self.txn_execute(|txn| unsafe { ffi::mdbx_drop(txn, dbi, true) })?)?;
 
         Ok(())
     }
@@ -488,8 +482,8 @@ impl Transaction<RO> {
     /// # Safety
     /// Caller must close ALL other [Database] and [Cursor] instances pointing to the same dbi
     /// BEFORE calling this function.
-    pub unsafe fn close_db(&self, db: Database) -> Result<()> {
-        mdbx_result(unsafe { ffi::mdbx_dbi_close(self.env().env_ptr(), db.dbi()) })?;
+    pub unsafe fn close_db(&self, dbi: ffi::MDBX_dbi) -> Result<()> {
+        mdbx_result(unsafe { ffi::mdbx_dbi_close(self.env().env_ptr(), dbi) })?;
 
         Ok(())
     }
