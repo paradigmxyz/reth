@@ -67,16 +67,23 @@ impl<K: TransactionKind> Tx<K> {
         self.metrics_handler.as_ref().map_or_else(|| self.inner.id(), |handler| Ok(handler.txn_id))
     }
 
-    /// Gets a table database handle if it exists, otherwise creates it.
-    pub fn get_dbi<T: Table>(&self) -> Result<MDBX_dbi, DatabaseError> {
-        if let Some(dbi) = self.dbis.get(T::NAME) {
+    /// Gets a table database handle by name if it exists, otherwise, check the
+    /// database, opening the DB if it exists.
+    pub fn get_dbi_raw(&self, name: &str) -> Result<MDBX_dbi, DatabaseError> {
+        if let Some(dbi) = self.dbis.get(name) {
             Ok(*dbi)
         } else {
             self.inner
-                .open_db(Some(T::NAME))
+                .open_db(Some(name))
                 .map(|db| db.dbi())
                 .map_err(|e| DatabaseError::Open(e.into()))
         }
+    }
+
+    /// Gets a table database handle by name if it exists, otherwise, check the
+    /// database, opening the DB if it exists.
+    pub fn get_dbi<T: Table>(&self) -> Result<MDBX_dbi, DatabaseError> {
+        self.get_dbi_raw(T::NAME)
     }
 
     /// Create db Cursor
