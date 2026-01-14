@@ -3,9 +3,141 @@ use crate::{
     transaction::{DbTx, DbTxMut},
     DatabaseError,
 };
-
+use bytes::BufMut;
 use serde::{Deserialize, Serialize};
 use std::fmt::Debug;
+
+/// A [`BufMut`] that only counts bytes written without allocating.
+///
+/// Used to compute the size of a value before serializing it.
+#[derive(Debug, Default, Clone, Copy)]
+pub struct CountingBuf {
+    len: usize,
+}
+
+impl CountingBuf {
+    /// Creates a new `CountingBuf`.
+    #[inline]
+    pub const fn new() -> Self {
+        Self { len: 0 }
+    }
+
+    /// Returns the number of bytes written.
+    #[inline]
+    pub const fn len(&self) -> usize {
+        self.len
+    }
+
+    /// Returns true if no bytes have been written.
+    #[inline]
+    pub const fn is_empty(&self) -> bool {
+        self.len == 0
+    }
+}
+
+unsafe impl BufMut for CountingBuf {
+    #[inline]
+    fn remaining_mut(&self) -> usize {
+        usize::MAX - self.len
+    }
+
+    #[inline]
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        self.len += cnt;
+    }
+
+    #[inline]
+    fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
+        // Return a dummy slice that will never be used.
+        // The caller must use put_slice which we override below.
+        unsafe {
+            bytes::buf::UninitSlice::from_raw_parts_mut(core::ptr::NonNull::dangling().as_ptr(), 0)
+        }
+    }
+
+    #[inline]
+    fn put_slice(&mut self, src: &[u8]) {
+        self.len += src.len();
+    }
+
+    #[inline]
+    fn put_u8(&mut self, _val: u8) {
+        self.len += 1;
+    }
+
+    #[inline]
+    fn put_bytes(&mut self, _val: u8, cnt: usize) {
+        self.len += cnt;
+    }
+}
+
+impl AsMut<[u8]> for CountingBuf {
+    #[inline]
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut []
+    }
+}
+
+/// A [`BufMut`] that writes directly into a caller-provided `&mut [u8]`.
+///
+/// Used to serialize values directly into MDBX-managed memory.
+#[derive(Debug)]
+pub struct SliceBuf<'a> {
+    buf: &'a mut [u8],
+    pos: usize,
+}
+
+impl<'a> SliceBuf<'a> {
+    /// Creates a new `SliceBuf` wrapping the given slice.
+    #[inline]
+    pub const fn new(buf: &'a mut [u8]) -> Self {
+        Self { buf, pos: 0 }
+    }
+
+    /// Returns the number of bytes written.
+    #[inline]
+    pub const fn written(&self) -> usize {
+        self.pos
+    }
+}
+
+unsafe impl BufMut for SliceBuf<'_> {
+    #[inline]
+    fn remaining_mut(&self) -> usize {
+        self.buf.len() - self.pos
+    }
+
+    #[inline]
+    unsafe fn advance_mut(&mut self, cnt: usize) {
+        debug_assert!(self.pos + cnt <= self.buf.len(), "SliceBuf overflow");
+        self.pos += cnt;
+    }
+
+    #[inline]
+    fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
+        // SAFETY: The slice is valid and we track the position.
+        unsafe {
+            bytes::buf::UninitSlice::from_raw_parts_mut(
+                self.buf.as_mut_ptr().add(self.pos),
+                self.buf.len() - self.pos,
+            )
+        }
+    }
+
+    #[inline]
+    fn put_slice(&mut self, src: &[u8]) {
+        debug_assert!(self.pos + src.len() <= self.buf.len(), "SliceBuf overflow");
+        self.buf[self.pos..self.pos + src.len()].copy_from_slice(src);
+        self.pos += src.len();
+    }
+}
+
+impl AsMut<[u8]> for SliceBuf<'_> {
+    #[inline]
+    fn as_mut(&mut self) -> &mut [u8] {
+        &mut self.buf[..self.pos]
+    }
+}
 
 /// Trait that will transform the data to be saved in the DB in a (ideally) compressed format
 pub trait Compress: Send + Sync + Sized + Debug {
@@ -22,6 +154,24 @@ pub trait Compress: Send + Sync + Sized + Debug {
     /// If the type cannot be compressed, return its inner reference as `Some(self.as_ref())`
     fn uncompressable_ref(&self) -> Option<&[u8]> {
         None
+    }
+
+    /// Returns the exact number of bytes that [`Compress::compress_to_buf`] will write.
+    ///
+    /// This is used by [`mdbx::reserve`] to allocate the exact buffer size needed.
+    /// The default implementation uses a [`CountingBuf`] to compute the size without allocating.
+    ///
+    /// # Important
+    ///
+    /// This **must** return the exact same size that `compress_to_buf` will write.
+    /// A mismatch will cause database corruption or panics.
+    fn compressed_size(&self) -> usize {
+        if let Some(uncompressable) = self.uncompressable_ref() {
+            return uncompressable.len();
+        }
+        let mut buf = CountingBuf::new();
+        self.compress_to_buf(&mut buf);
+        buf.len()
     }
 
     /// Compresses data going into the database.
@@ -179,5 +329,67 @@ pub trait TableImporter: DbTxMut {
         }
 
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counting_buf_tracks_bytes() {
+        let mut buf = CountingBuf::new();
+        assert_eq!(buf.len(), 0);
+        assert!(buf.is_empty());
+
+        buf.put_slice(&[1, 2, 3, 4, 5]);
+        assert_eq!(buf.len(), 5);
+
+        buf.put_u8(0xff);
+        assert_eq!(buf.len(), 6);
+
+        buf.put_bytes(0x00, 10);
+        assert_eq!(buf.len(), 16);
+        assert!(!buf.is_empty());
+    }
+
+    #[test]
+    fn slice_buf_writes_correctly() {
+        let mut backing = [0u8; 16];
+        let mut buf = SliceBuf::new(&mut backing);
+
+        assert_eq!(buf.written(), 0);
+        assert_eq!(buf.remaining_mut(), 16);
+
+        buf.put_slice(&[0x11, 0x22, 0x33]);
+        assert_eq!(buf.written(), 3);
+        assert_eq!(buf.remaining_mut(), 13);
+
+        buf.put_u8(0x44);
+        assert_eq!(buf.written(), 4);
+
+        assert_eq!(&backing[..4], &[0x11, 0x22, 0x33, 0x44]);
+    }
+
+    #[test]
+    fn compressed_size_matches_compress() {
+        use alloy_primitives::{Address, B256};
+
+        let addr = Address::repeat_byte(0x42);
+        let addr_compressed: Vec<u8> = addr.compress().into();
+        assert_eq!(addr.compressed_size(), addr_compressed.len());
+
+        let hash = B256::repeat_byte(0xab);
+        let hash_compressed: Vec<u8> = hash.compress().into();
+        assert_eq!(hash.compressed_size(), hash_compressed.len());
+    }
+
+    #[test]
+    fn uncompressable_types_fast_path() {
+        use alloy_primitives::B256;
+
+        let hash = B256::repeat_byte(0xcd);
+        assert!(hash.uncompressable_ref().is_some());
+        assert_eq!(hash.uncompressable_ref().unwrap().len(), 32);
     }
 }
