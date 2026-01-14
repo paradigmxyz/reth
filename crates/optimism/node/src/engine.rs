@@ -19,7 +19,7 @@ use reth_optimism_consensus::isthmus;
 use reth_optimism_forks::OpHardforks;
 use reth_optimism_payload_builder::{OpExecutionPayloadValidator, OpPayloadTypes};
 use reth_optimism_primitives::{OpBlock, L2_TO_L1_MESSAGE_PASSER_ADDRESS};
-use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SignedTransaction};
+use reth_primitives_traits::{Block, RecoveredBlock, SealedBlock, SealedHeader, SignedTransaction};
 use reth_provider::StateProviderFactory;
 use reth_trie_common::{HashedPostState, KeyHasher};
 use std::{marker::PhantomData, sync::Arc};
@@ -41,11 +41,18 @@ impl<T: PayloadTypes<ExecutionData = OpExecutionData>> PayloadTypes for OpEngine
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> <T as PayloadTypes>::ExecutionData {
-        OpExecutionData::from_block_unchecked(
+    ) -> (
+        <T as PayloadTypes>::ExecutionData,
+        SealedHeader<
+            <<<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block as Block>::Header,
+        >,
+    ){
+        let header = block.sealed_header().clone();
+        let execution_data = OpExecutionData::from_block_unchecked(
             block.hash(),
             &block.into_block().into_ethereum_block(),
-        )
+        );
+        (execution_data, header)
     }
 }
 

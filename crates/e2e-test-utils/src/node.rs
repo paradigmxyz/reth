@@ -283,7 +283,7 @@ where
         self.inner
             .add_ons_handle
             .beacon_engine_handle
-            .new_payload(Payload::block_to_payload(payload.block().clone()))
+            .new_payload(Payload::block_to_payload(payload.block().clone()).0)
             .await?;
 
         Ok(block_hash)

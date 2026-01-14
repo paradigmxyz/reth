@@ -15,7 +15,7 @@ extern crate alloc;
 
 use alloy_primitives::Bytes;
 use reth_chainspec::EthereumHardforks;
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
 mod error;
 pub use error::{
@@ -58,11 +58,19 @@ pub trait PayloadTypes: Send + Sync + Unpin + core::fmt::Debug + Clone + 'static
         + Unpin;
 
     /// Converts a sealed block into the execution payload format.
+    ///
+    /// Returns both the execution data and the sealed header to avoid redundant header clones.
+    #[allow(clippy::type_complexity)]
     fn block_to_payload(
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> Self::ExecutionData;
+    ) -> (
+        Self::ExecutionData,
+        SealedHeader<
+            <<<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block as reth_primitives_traits::Block>::Header,
+        >,
+    );
 }
 
 /// Validates the timestamp depending on the version called:

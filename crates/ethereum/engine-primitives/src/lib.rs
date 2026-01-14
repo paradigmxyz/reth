@@ -24,7 +24,7 @@ pub use alloy_rpc_types_engine::{
 };
 use reth_engine_primitives::EngineTypes;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives_traits::{NodePrimitives, SealedBlock};
+use reth_primitives_traits::{NodePrimitives, SealedBlock, SealedHeader};
 
 /// The types used in the default mainnet ethereum beacon consensus engine.
 #[derive(Debug, Default, Clone, serde::Deserialize, serde::Serialize)]
@@ -51,10 +51,16 @@ impl<
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> Self::ExecutionData {
+    ) -> (
+        Self::ExecutionData,
+        SealedHeader<
+            <<<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block as reth_primitives_traits::Block>::Header,
+        >,
+    ){
+        let header = block.sealed_header().clone();
         let (payload, sidecar) =
             ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
-        ExecutionData { payload, sidecar }
+        (ExecutionData { payload, sidecar }, header)
     }
 }
 
@@ -90,9 +96,15 @@ impl PayloadTypes for EthPayloadTypes {
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> Self::ExecutionData {
+    ) -> (
+        Self::ExecutionData,
+        SealedHeader<
+            <<<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block as reth_primitives_traits::Block>::Header,
+        >,
+    ){
+        let header = block.sealed_header().clone();
         let (payload, sidecar) =
             ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
-        ExecutionData { payload, sidecar }
+        (ExecutionData { payload, sidecar }, header)
     }
 }

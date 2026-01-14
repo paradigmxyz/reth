@@ -22,7 +22,7 @@ pub use payload::{
 mod traits;
 use reth_optimism_primitives::OpPrimitives;
 use reth_payload_primitives::{BuiltPayload, PayloadTypes};
-use reth_primitives_traits::{Block, NodePrimitives, SealedBlock};
+use reth_primitives_traits::{Block, NodePrimitives, SealedBlock, SealedHeader};
 pub use traits::*;
 pub mod validator;
 pub use validator::OpExecutionPayloadValidator;
@@ -47,10 +47,17 @@ where
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> Self::ExecutionData {
-        OpExecutionData::from_block_unchecked(
+    ) -> (
+        Self::ExecutionData,
+        SealedHeader<
+            <<<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block as Block>::Header,
+        >,
+    ){
+        let header = block.sealed_header().clone();
+        let execution_data = OpExecutionData::from_block_unchecked(
             block.hash(),
             &block.into_block().into_ethereum_block(),
-        )
+        );
+        (execution_data, header)
     }
 }

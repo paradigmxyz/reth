@@ -24,6 +24,7 @@ use reth_op::node::{
     engine::OpEngineValidator, payload::OpAttributes, OpBuiltPayload, OpEngineTypes,
     OpPayloadAttributes, OpPayloadBuilderAttributes,
 };
+use reth_primitives_traits::SealedHeader;
 use revm_primitives::U256;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -213,12 +214,18 @@ impl PayloadTypes for CustomPayloadTypes {
         block: SealedBlock<
             <<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block,
         >,
-    ) -> Self::ExecutionData {
+    ) -> (
+        Self::ExecutionData,
+        SealedHeader<
+            <<<Self::BuiltPayload as BuiltPayload>::Primitives as NodePrimitives>::Block as reth_primitives_traits::Block>::Header,
+        >,
+    ){
+        let header = block.sealed_header().clone();
         let extension = block.header().extension;
         let block_hash = block.hash();
         let block = block.into_block().map_header(|header| header.inner);
         let (payload, sidecar) = OpExecutionPayload::from_block_unchecked(block_hash, &block);
-        CustomExecutionData { inner: OpExecutionData { payload, sidecar }, extension }
+        (CustomExecutionData { inner: OpExecutionData { payload, sidecar }, extension }, header)
     }
 }
 

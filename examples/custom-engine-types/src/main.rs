@@ -59,6 +59,7 @@ use reth_ethereum::{
 };
 use reth_ethereum_payload_builder::{EthereumBuilderConfig, EthereumExecutionPayloadValidator};
 use reth_payload_builder::{EthBuiltPayload, EthPayloadBuilderAttributes, PayloadBuilderError};
+use reth_primitives_traits::SealedHeader;
 use reth_tracing::{RethTracer, Tracer};
 use serde::{Deserialize, Serialize};
 use std::{convert::Infallible, sync::Arc};
@@ -156,10 +157,16 @@ impl PayloadTypes for CustomEngineTypes {
         block: SealedBlock<
                 <<Self::BuiltPayload as reth_ethereum::node::api::BuiltPayload>::Primitives as reth_ethereum::node::api::NodePrimitives>::Block,
             >,
-    ) -> ExecutionData {
+    ) -> (
+        ExecutionData,
+        SealedHeader<
+            <<<Self::BuiltPayload as reth_ethereum::node::api::BuiltPayload>::Primitives as reth_ethereum::node::api::NodePrimitives>::Block as reth_primitives_traits::Block>::Header,
+        >,
+    ){
+        let header = block.sealed_header().clone();
         let (payload, sidecar) =
             ExecutionPayload::from_block_unchecked(block.hash(), &block.into_block());
-        ExecutionData { payload, sidecar }
+        (ExecutionData { payload, sidecar }, header)
     }
 }
 

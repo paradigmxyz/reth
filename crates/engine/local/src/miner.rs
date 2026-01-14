@@ -217,9 +217,8 @@ where
             eyre::bail!("No payload")
         };
 
-        let header = payload.block().sealed_header().clone();
-        let payload = T::block_to_payload(payload.block().clone());
-        let res = self.to_engine.new_payload(payload).await?;
+        let (payload_data, header) = T::block_to_payload(payload.block().clone());
+        let res = self.to_engine.new_payload(payload_data).await?;
 
         if !res.is_valid() {
             eyre::bail!("Invalid payload")
