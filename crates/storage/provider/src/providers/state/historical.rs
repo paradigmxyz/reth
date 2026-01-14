@@ -109,7 +109,9 @@ pub struct HistoricalStateProviderRef<'b, Provider> {
     lowest_available_blocks: LowestAvailableBlocks,
 }
 
-impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, Provider> {
+impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
+    HistoricalStateProviderRef<'b, Provider>
+{
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: &'b Provider, block_number: BlockNumber) -> Self {
         Self { provider, block_number, lowest_available_blocks: Default::default() }
@@ -182,8 +184,7 @@ impl<'b, Provider: DBProvider + BlockNumReader> HistoricalStateProviderRef<'b, P
             );
         }
 
-        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(self.tx(), self.block_number..)
-            .map_err(ProviderError::from)
+        HashedPostStateSorted::from_reverts::<KeccakKeyHasher>(self.provider, self.block_number..)
     }
 
     /// Retrieve revert hashed storage for this history provider and target address.
@@ -320,21 +321,19 @@ impl<Provider: DBProvider + BlockNumReader + BlockHashReader> BlockHashReader
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> StateRootProvider
+impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StateRootProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     fn state_root(&self, hashed_state: HashedPostState) -> ProviderResult<B256> {
         let mut revert_state = self.revert_state()?;
         let hashed_state_sorted = hashed_state.into_sorted();
         revert_state.extend_ref(&hashed_state_sorted);
-        StateRoot::overlay_root(self.tx(), &revert_state)
-            .map_err(|err| ProviderError::Database(err.into()))
+        Ok(StateRoot::overlay_root(self.tx(), &revert_state)?)
     }
 
     fn state_root_from_nodes(&self, mut input: TrieInput) -> ProviderResult<B256> {
         input.prepend(self.revert_state()?.into());
-        StateRoot::overlay_root_from_nodes(self.tx(), TrieInputSorted::from_unsorted(input))
-            .map_err(|err| ProviderError::Database(err.into()))
+        Ok(StateRoot::overlay_root_from_nodes(self.tx(), TrieInputSorted::from_unsorted(input))?)
     }
 
     fn state_root_with_updates(
@@ -344,8 +343,7 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
         let mut revert_state = self.revert_state()?;
         let hashed_state_sorted = hashed_state.into_sorted();
         revert_state.extend_ref(&hashed_state_sorted);
-        StateRoot::overlay_root_with_updates(self.tx(), &revert_state)
-            .map_err(|err| ProviderError::Database(err.into()))
+        Ok(StateRoot::overlay_root_with_updates(self.tx(), &revert_state)?)
     }
 
     fn state_root_from_nodes_with_updates(
@@ -353,15 +351,14 @@ impl<Provider: DBProvider + BlockNumReader> StateRootProvider
         mut input: TrieInput,
     ) -> ProviderResult<(B256, TrieUpdates)> {
         input.prepend(self.revert_state()?.into());
-        StateRoot::overlay_root_from_nodes_with_updates(
+        Ok(StateRoot::overlay_root_from_nodes_with_updates(
             self.tx(),
             TrieInputSorted::from_unsorted(input),
-        )
-        .map_err(|err| ProviderError::Database(err.into()))
+        )?)
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
+impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StorageRootProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     fn storage_root(
@@ -400,7 +397,7 @@ impl<Provider: DBProvider + BlockNumReader> StorageRootProvider
     }
 }
 
-impl<Provider: DBProvider + BlockNumReader> StateProofProvider
+impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> StateProofProvider
     for HistoricalStateProviderRef<'_, Provider>
 {
     /// Get account and storage proofs.
@@ -494,7 +491,7 @@ pub struct HistoricalStateProvider<Provider> {
     lowest_available_blocks: LowestAvailableBlocks,
 }
 
-impl<Provider: DBProvider + BlockNumReader> HistoricalStateProvider<Provider> {
+impl<Provider: DBProvider + ChangeSetReader + BlockNumReader> HistoricalStateProvider<Provider> {
     /// Create new `StateProvider` for historical block number
     pub fn new(provider: Provider, block_number: BlockNumber) -> Self {
         Self { provider, block_number, lowest_available_blocks: Default::default() }
@@ -564,7 +561,12 @@ impl LowestAvailableBlocks {
 ///
 /// Returns `true` when `rank == 0` (first entry in shard) and the found block doesn't match
 /// the target block number. In this case, we need to check if there's a previous shard.
-fn needs_prev_shard_check(rank: u64, found_block: Option<u64>, block_number: BlockNumber) -> bool {
+#[inline]
+pub fn needs_prev_shard_check(
+    rank: u64,
+    found_block: Option<u64>,
+    block_number: BlockNumber,
+) -> bool {
     rank == 0 && found_block != Some(block_number)
 }
 

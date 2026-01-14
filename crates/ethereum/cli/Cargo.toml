@@ -58,7 +58,8 @@ jemalloc-symbols = [
     "jemalloc-prof",
     "reth-node-metrics/jemalloc-symbols",
 ]
-tracy-allocator = []
+tracy-allocator = ["tracy"]
+tracy = ["reth-tracing/tracy", "reth-node-core/tracy"]
 
 # Because jemalloc is default and preferred over snmalloc when both features are
 # enabled, `--no-default-features` should be used when enabling snmalloc or
@@ -86,3 +87,5 @@ min-trace-logs = [
     "tracing/release_max_level_trace",
     "reth-node-core/min-trace-logs",
 ]
+
+edge = ["reth-cli-commands/edge"]

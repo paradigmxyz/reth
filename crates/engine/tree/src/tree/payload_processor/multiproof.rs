@@ -5,7 +5,6 @@ use alloy_eip7928::BlockAccessList;
 use alloy_evm::block::StateChangeSource;
 use alloy_primitives::{keccak256, map::HashSet, B256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
-use dashmap::DashMap;
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
 use reth_metrics::Metrics;
@@ -21,7 +20,7 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
 };
-use std::{collections::BTreeMap, mem, ops::DerefMut, sync::Arc, time::Instant};
+use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -56,14 +55,6 @@ const PREFETCH_MAX_BATCH_TARGETS: usize = 512;
 /// Maximum number of prefetch messages to batch together.
 /// Prevents excessive batching even with small messages.
 const PREFETCH_MAX_BATCH_MESSAGES: usize = 16;
-
-/// Maximum number of targets to batch together for state updates.
-/// Lower than prefetch because state updates require additional processing (hashing, state
-/// partitioning) before dispatch.
-const STATE_UPDATE_MAX_BATCH_TARGETS: usize = 64;
-
-/// Preallocation hint for state update batching to avoid repeated reallocations on small bursts.
-const STATE_UPDATE_BATCH_PREALLOC: usize = 16;
 
 /// The default max targets, for limiting the number of account and storage proof targets to be
 /// fetched by a single worker. If exceeded, chunking is forced regardless of worker availability.
@@ -151,11 +142,6 @@ impl ProofSequencer {
     fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
         if sequence >= self.next_to_deliver {
             self.pending_proofs.insert(sequence, update);
-        }
-
-        // return early if we don't have the next expected proof
-        if !self.pending_proofs.contains_key(&self.next_to_deliver) {
-            return Vec::new()
         }
 
         let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
@@ -266,23 +252,13 @@ impl MultiproofInput {
 pub struct MultiproofManager {
     /// Handle to the proof worker pools (storage and account).
     proof_worker_handle: ProofWorkerHandle,
-    /// Cached storage proof roots for missed leaves; this maps
-    /// hashed (missed) addresses to their storage proof roots.
-    ///
-    /// It is important to cache these. Otherwise, a common account
-    /// (popular ERC-20, etc.) having missed leaves in its path would
-    /// repeatedly calculate these proofs per interacting transaction
-    /// (same account different slots).
-    ///
-    /// This also works well with chunking multiproofs, which may break
-    /// a big account change into different chunks, which may repeatedly
-    /// revisit missed leaves.
-    missed_leaves_storage_roots: Arc<DashMap<B256, B256>>,
     /// Channel sender cloned into each dispatched job so workers can send back the
     /// `ProofResultMessage`.
     proof_result_tx: CrossbeamSender<ProofResultMessage>,
     /// Metrics
     metrics: MultiProofTaskMetrics,
+    /// Whether to use V2 storage proofs
+    v2_proofs_enabled: bool,
 }
 
 impl MultiproofManager {
@@ -296,12 +272,9 @@ impl MultiproofManager {
         metrics.max_storage_workers.set(proof_worker_handle.total_storage_workers() as f64);
         metrics.max_account_workers.set(proof_worker_handle.total_account_workers() as f64);
 
-        Self {
-            metrics,
-            proof_worker_handle,
-            missed_leaves_storage_roots: Default::default(),
-            proof_result_tx,
-        }
+        let v2_proofs_enabled = proof_worker_handle.v2_proofs_enabled();
+
+        Self { metrics, proof_worker_handle, proof_result_tx, v2_proofs_enabled }
     }
 
     /// Dispatches a new multiproof calculation to worker pools.
@@ -346,7 +319,6 @@ impl MultiproofManager {
             multi_added_removed_keys,
         } = multiproof_input;
 
-        let missed_leaves_storage_roots = self.missed_leaves_storage_roots.clone();
         let account_targets = proof_targets.len();
         let storage_targets = proof_targets.values().map(|slots| slots.len()).sum::<usize>();
 
@@ -372,7 +344,6 @@ impl MultiproofManager {
             prefix_sets: frozen_prefix_sets,
             collect_branch_node_masks: true,
             multi_added_removed_keys,
-            missed_leaves_storage_roots,
             // Workers will send ProofResultMessage directly to proof_result_rx
             proof_result_sender: ProofResultContext::new(
                 self.proof_result_tx.clone(),
@@ -380,6 +351,7 @@ impl MultiproofManager {
                 hashed_state_update,
                 start,
             ),
+            v2_proofs_enabled: self.v2_proofs_enabled,
         };
 
         if let Err(e) = self.proof_worker_handle.dispatch_account_multiproof(input) {
@@ -434,8 +406,6 @@ pub(crate) struct MultiProofTaskMetrics {
 
     /// Histogram of prefetch proof batch sizes (number of messages merged).
     pub prefetch_batch_size_histogram: Histogram,
-    /// Histogram of state update batch sizes (number of messages merged).
-    pub state_update_batch_size_histogram: Histogram,
 
     /// Histogram of proof calculation durations.
     pub proof_calculation_duration_histogram: Histogram,
@@ -619,11 +589,6 @@ impl MultiProofTask {
         }
     }
 
-    /// Returns a sender that can be used to send arbitrary [`MultiProofMessage`]s to this task.
-    pub(super) fn state_root_message_sender(&self) -> CrossbeamSender<MultiProofMessage> {
-        self.tx.clone()
-    }
-
     /// Handles request for proof prefetch.
     ///
     /// Returns how many multiproof tasks were dispatched for the prefetch request.
@@ -633,30 +598,31 @@ impl MultiProofTask {
         skip_all,
         fields(accounts = targets.len(), chunks = 0)
     )]
-    fn on_prefetch_proof(&mut self, targets: MultiProofTargets) -> u64 {
-        let proof_targets = self.get_prefetch_proof_targets(targets);
-        self.fetched_proof_targets.extend_ref(&proof_targets);
+    fn on_prefetch_proof(&mut self, mut targets: MultiProofTargets) -> u64 {
+        // Remove already fetched proof targets to avoid redundant work.
+        targets.retain_difference(&self.fetched_proof_targets);
+        self.fetched_proof_targets.extend_ref(&targets);
 
         // Make sure all target accounts have an `AddedRemovedKeySet` in the
         // [`MultiAddedRemovedKeys`]. Even if there are not any known removed keys for the account,
         // we still want to optimistically fetch extension children for the leaf addition case.
-        self.multi_added_removed_keys.touch_accounts(proof_targets.keys().copied());
+        self.multi_added_removed_keys.touch_accounts(targets.keys().copied());
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
         let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
 
-        self.metrics.prefetch_proof_targets_accounts_histogram.record(proof_targets.len() as f64);
+        self.metrics.prefetch_proof_targets_accounts_histogram.record(targets.len() as f64);
         self.metrics
             .prefetch_proof_targets_storages_histogram
-            .record(proof_targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
+            .record(targets.values().map(|slots| slots.len()).sum::<usize>() as f64);
 
-        let chunking_len = proof_targets.chunking_length();
+        let chunking_len = targets.chunking_length();
         let available_account_workers =
             self.multiproof_manager.proof_worker_handle.available_account_workers();
         let available_storage_workers =
             self.multiproof_manager.proof_worker_handle.available_storage_workers();
         let num_chunks = dispatch_with_chunking(
-            proof_targets,
+            targets,
             chunking_len,
             self.chunk_size,
             self.max_targets_for_chunking,
@@ -679,77 +645,21 @@ impl MultiProofTask {
         num_chunks as u64
     }
 
-    // Returns true if all state updates finished and all proofs processed.
-    fn is_done(
-        &self,
-        proofs_processed: u64,
-        state_update_proofs_requested: u64,
-        prefetch_proofs_requested: u64,
-        updates_finished: bool,
-    ) -> bool {
-        let all_proofs_processed =
-            proofs_processed >= state_update_proofs_requested + prefetch_proofs_requested;
+    /// Returns true if all state updates finished and all pending proofs processed.
+    fn is_done(&self, metrics: &MultiproofBatchMetrics, ctx: &MultiproofBatchCtx) -> bool {
+        let all_proofs_processed = metrics.all_proofs_processed();
         let no_pending = !self.proof_sequencer.has_pending();
+        let updates_finished = ctx.updates_finished();
         trace!(
             target: "engine::tree::payload_processor::multiproof",
-            proofs_processed,
-            state_update_proofs_requested,
-            prefetch_proofs_requested,
+            proofs_processed = metrics.proofs_processed,
+            state_update_proofs_requested = metrics.state_update_proofs_requested,
+            prefetch_proofs_requested = metrics.prefetch_proofs_requested,
             no_pending,
             updates_finished,
             "Checking end condition"
         );
         all_proofs_processed && no_pending && updates_finished
-    }
-
-    /// Calls `get_proof_targets` with existing proof targets for prefetching.
-    fn get_prefetch_proof_targets(&self, mut targets: MultiProofTargets) -> MultiProofTargets {
-        // Here we want to filter out any targets that are already fetched
-        //
-        // This means we need to remove any storage slots that have already been fetched
-        let mut duplicates = 0;
-
-        // First remove all storage targets that are subsets of already fetched storage slots
-        targets.retain(|hashed_address, target_storage| {
-            let keep = self
-                .fetched_proof_targets
-                .get(hashed_address)
-                // do NOT remove if None, because that means the account has not been fetched yet
-                .is_none_or(|fetched_storage| {
-                    // remove if a subset
-                    !target_storage.is_subset(fetched_storage)
-                });
-
-            if !keep {
-                duplicates += target_storage.len();
-            }
-
-            keep
-        });
-
-        // For all non-subset remaining targets, we have to calculate the difference
-        for (hashed_address, target_storage) in targets.deref_mut() {
-            let Some(fetched_storage) = self.fetched_proof_targets.get(hashed_address) else {
-                // this means the account has not been fetched yet, so we must fetch everything
-                // associated with this account
-                continue;
-            };
-
-            let prev_target_storage_len = target_storage.len();
-
-            // keep only the storage slots that have not been fetched yet
-            //
-            // we already removed subsets, so this should only remove duplicates
-            target_storage.retain(|slot| !fetched_storage.contains(slot));
-
-            duplicates += prev_target_storage_len - target_storage.len();
-        }
-
-        if duplicates > 0 {
-            trace!(target: "engine::tree::payload_processor::multiproof", duplicates, "Removed duplicate prefetch proof targets");
-        }
-
-        targets
     }
 
     /// Handles state updates.
@@ -861,11 +771,11 @@ impl MultiProofTask {
             .filter(|proof| !proof.is_empty())
     }
 
-    /// Processes a multiproof message, batching consecutive same-type messages.
+    /// Processes a multiproof message, batching consecutive prefetch messages.
     ///
-    /// Drains queued messages of the same type and merges them into one batch before processing,
-    /// storing one pending message (different type or over-cap) to handle on the next iteration.
-    /// This preserves ordering without requeuing onto the channel.
+    /// For prefetch messages, drains queued prefetch messages and merges them into one batch before
+    /// processing, storing one pending message (different type or over-cap) to handle on the next
+    /// iteration. State updates are processed directly without batching.
     ///
     /// Returns `true` if done, `false` to continue.
     fn process_multiproof_message<P>(
@@ -896,6 +806,8 @@ impl MultiProofTask {
                 ctx.accumulated_prefetch_targets.push(targets);
 
                 // Batch consecutive prefetch messages up to limits.
+                // EmptyProof messages are handled inline since they're very fast (~100ns)
+                // and shouldn't interrupt batching.
                 while accumulated_count < PREFETCH_MAX_BATCH_TARGETS &&
                     ctx.accumulated_prefetch_targets.len() < PREFETCH_MAX_BATCH_MESSAGES
                 {
@@ -909,6 +821,16 @@ impl MultiProofTask {
                             }
                             accumulated_count += next_count;
                             ctx.accumulated_prefetch_targets.push(next_targets);
+                        }
+                        Ok(MultiProofMessage::EmptyProof { sequence_number, state }) => {
+                            // Handle inline - very fast, don't break batching
+                            batch_metrics.proofs_processed += 1;
+                            if let Some(combined_update) = self.on_proof(
+                                sequence_number,
+                                SparseTrieUpdate { state, multiproof: Default::default() },
+                            ) {
+                                let _ = self.to_sparse_trie.send(combined_update);
+                            }
                         }
                         Ok(other_msg) => {
                             ctx.pending_msg = Some(other_msg);
@@ -946,7 +868,6 @@ impl MultiProofTask {
 
                 false
             }
-            // State update: batch consecutive updates from the same source
             MultiProofMessage::StateUpdate(source, update) => {
                 trace!(target: "engine::tree::payload_processor::multiproof", "processing MultiProofMessage::StateUpdate");
 
@@ -958,80 +879,14 @@ impl MultiProofTask {
                     debug!(target: "engine::tree::payload_processor::multiproof", "Started state root calculation");
                 }
 
-                // Accumulate messages including the first one; reuse buffer to avoid allocations.
-                let mut accumulated_targets = estimate_evm_state_targets(&update);
-                ctx.accumulated_state_updates.clear();
-                ctx.accumulated_state_updates.push((source, update));
-
-                // Batch consecutive state update messages up to target limit.
-                while accumulated_targets < STATE_UPDATE_MAX_BATCH_TARGETS {
-                    match self.rx.try_recv() {
-                        Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                            let (batch_source, batch_update) = &ctx.accumulated_state_updates[0];
-                            if !can_batch_state_update(
-                                *batch_source,
-                                batch_update,
-                                next_source,
-                                &next_update,
-                            ) {
-                                ctx.pending_msg =
-                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                                break;
-                            }
-
-                            let next_estimate = estimate_evm_state_targets(&next_update);
-                            // Would exceed batch cap; leave pending to dispatch on next iteration.
-                            if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS
-                            {
-                                ctx.pending_msg =
-                                    Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                                break;
-                            }
-                            accumulated_targets += next_estimate;
-                            ctx.accumulated_state_updates.push((next_source, next_update));
-                        }
-                        Ok(other_msg) => {
-                            ctx.pending_msg = Some(other_msg);
-                            break;
-                        }
-                        Err(_) => break,
-                    }
-                }
-
-                // Process all accumulated messages in a single batch
-                let num_batched = ctx.accumulated_state_updates.len();
-                self.metrics.state_update_batch_size_histogram.record(num_batched as f64);
-
-                #[cfg(debug_assertions)]
-                {
-                    let batch_source = ctx.accumulated_state_updates[0].0;
-                    let batch_update = &ctx.accumulated_state_updates[0].1;
-                    debug_assert!(ctx.accumulated_state_updates.iter().all(|(source, update)| {
-                        can_batch_state_update(batch_source, batch_update, *source, update)
-                    }));
-                }
-
-                // Merge all accumulated updates into a single EvmState payload.
-                // Use drain to preserve the buffer allocation.
-                let mut accumulated_iter = ctx.accumulated_state_updates.drain(..);
-                let (mut batch_source, mut merged_update) = accumulated_iter
-                    .next()
-                    .expect("state update batch always has at least one entry");
-                for (next_source, next_update) in accumulated_iter {
-                    batch_source = next_source;
-                    merged_update.extend(next_update);
-                }
-
-                let batch_len = merged_update.len();
-                batch_metrics.state_update_proofs_requested +=
-                    self.on_state_update(batch_source, merged_update);
+                let update_len = update.len();
+                batch_metrics.state_update_proofs_requested += self.on_state_update(source, update);
                 trace!(
                     target: "engine::tree::payload_processor::multiproof",
-                    ?batch_source,
-                    len = batch_len,
+                    ?source,
+                    len = update_len,
                     state_update_proofs_requested = ?batch_metrics.state_update_proofs_requested,
-                    num_batched,
-                    "Dispatched state update batch"
+                    "Dispatched state update"
                 );
 
                 false
@@ -1072,12 +927,7 @@ impl MultiProofTask {
                 ctx.updates_finished_time = Some(Instant::now());
 
                 // Check if we're done (might need to wait for proofs to complete)
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "BAL processed and all proofs complete, ending calculation"
@@ -1092,12 +942,7 @@ impl MultiProofTask {
 
                 ctx.updates_finished_time = Some(Instant::now());
 
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "State updates finished and all proofs processed, ending calculation"
@@ -1119,12 +964,7 @@ impl MultiProofTask {
                     let _ = self.to_sparse_trie.send(combined_update);
                 }
 
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "State updates finished and all proofs processed, ending calculation"
@@ -1167,10 +1007,9 @@ impl MultiProofTask {
     ///    * Once this message is received, on every [`MultiProofMessage::EmptyProof`] and
     ///      [`ProofResultMessage`], we check if all proofs have been processed and if there are any
     ///      pending proofs in the proof sequencer left to be revealed.
-    /// 6. While running, consecutive [`MultiProofMessage::PrefetchProofs`] and
-    ///    [`MultiProofMessage::StateUpdate`] messages are batched to reduce redundant work; if a
-    ///    different message type arrives mid-batch or a batch cap is reached, it is held as
-    ///    `pending_msg` and processed on the next loop to preserve ordering.
+    /// 6. While running, consecutive [`MultiProofMessage::PrefetchProofs`] messages are batched to
+    ///    reduce redundant work; if a different message type arrives mid-batch or a batch cap is
+    ///    reached, it is held as `pending_msg` and processed on the next loop to preserve ordering.
     /// 7. This task exits after all pending proofs are processed.
     #[instrument(
         level = "debug",
@@ -1223,7 +1062,7 @@ impl MultiProofTask {
 
                                     let update = SparseTrieUpdate {
                                         state: proof_result.state,
-                                        multiproof: proof_result_data.into_multiproof(),
+                                        multiproof: proof_result_data.proof,
                                     };
 
                                     if let Some(combined_update) =
@@ -1238,12 +1077,7 @@ impl MultiProofTask {
                                 }
                             }
 
-                            if self.is_done(
-                                batch_metrics.proofs_processed,
-                                batch_metrics.state_update_proofs_requested,
-                                batch_metrics.prefetch_proofs_requested,
-                                ctx.updates_finished(),
-                            ) {
+                            if self.is_done(&batch_metrics, &ctx) {
                                 debug!(
                                     target: "engine::tree::payload_processor::multiproof",
                                     "State updates finished and all proofs processed, ending calculation"
@@ -1303,7 +1137,7 @@ impl MultiProofTask {
 ///
 /// Contains processing state that persists across loop iterations.
 ///
-/// Used by `process_multiproof_message` to batch consecutive same-type messages received via
+/// Used by `process_multiproof_message` to batch consecutive prefetch messages received via
 /// `try_recv` for efficient processing.
 struct MultiproofBatchCtx {
     /// Buffers a non-matching message type encountered during batching.
@@ -1319,8 +1153,6 @@ struct MultiproofBatchCtx {
     updates_finished_time: Option<Instant>,
     /// Reusable buffer for accumulating prefetch targets during batching.
     accumulated_prefetch_targets: Vec<MultiProofTargets>,
-    /// Reusable buffer for accumulating state updates during batching.
-    accumulated_state_updates: Vec<(Source, EvmState)>,
 }
 
 impl MultiproofBatchCtx {
@@ -1332,7 +1164,6 @@ impl MultiproofBatchCtx {
             start,
             updates_finished_time: None,
             accumulated_prefetch_targets: Vec::with_capacity(PREFETCH_MAX_BATCH_MESSAGES),
-            accumulated_state_updates: Vec::with_capacity(STATE_UPDATE_BATCH_PREALLOC),
         }
     }
 
@@ -1353,6 +1184,13 @@ struct MultiproofBatchMetrics {
     prefetch_proofs_requested: u64,
 }
 
+impl MultiproofBatchMetrics {
+    /// Returns `true` if all requested proofs have been processed.
+    const fn all_proofs_processed(&self) -> bool {
+        self.proofs_processed >= self.state_update_proofs_requested + self.prefetch_proofs_requested
+    }
+}
+
 /// Returns accounts only with those storages that were not already fetched, and
 /// if there are no such storages and the account itself was already fetched, the
 /// account shouldn't be included.
@@ -1364,9 +1202,9 @@ fn get_proof_targets(
     let mut targets = MultiProofTargets::default();
 
     // first collect all new accounts (not previously fetched)
-    for &hashed_address in state_update.accounts.keys() {
-        if !fetched_proof_targets.contains_key(&hashed_address) {
-            targets.insert(hashed_address, HashSet::default());
+    for hashed_address in state_update.accounts.keys() {
+        if !fetched_proof_targets.contains_key(hashed_address) {
+            targets.insert(*hashed_address, HashSet::default());
         }
     }
 
@@ -1432,76 +1270,16 @@ where
     1
 }
 
-/// Checks whether two state updates can be merged in a batch.
-///
-/// Transaction updates with the same transaction ID (`StateChangeSource::Transaction(id)`)
-/// are safe to merge because they originate from the same logical execution and can be
-/// coalesced to amortize proof work.
-fn can_batch_state_update(
-    batch_source: Source,
-    batch_update: &EvmState,
-    next_source: Source,
-    next_update: &EvmState,
-) -> bool {
-    if !same_source(batch_source, next_source) {
-        return false;
-    }
-
-    match (batch_source, next_source) {
-        (
-            Source::Evm(StateChangeSource::PreBlock(_)),
-            Source::Evm(StateChangeSource::PreBlock(_)),
-        ) |
-        (
-            Source::Evm(StateChangeSource::PostBlock(_)),
-            Source::Evm(StateChangeSource::PostBlock(_)),
-        ) => batch_update == next_update,
-        _ => true,
-    }
-}
-
-/// Checks whether two sources refer to the same origin.
-fn same_source(lhs: Source, rhs: Source) -> bool {
-    match (lhs, rhs) {
-        (
-            Source::Evm(StateChangeSource::Transaction(a)),
-            Source::Evm(StateChangeSource::Transaction(b)),
-        ) => a == b,
-        (
-            Source::Evm(StateChangeSource::PreBlock(a)),
-            Source::Evm(StateChangeSource::PreBlock(b)),
-        ) => mem::discriminant(&a) == mem::discriminant(&b),
-        (
-            Source::Evm(StateChangeSource::PostBlock(a)),
-            Source::Evm(StateChangeSource::PostBlock(b)),
-        ) => mem::discriminant(&a) == mem::discriminant(&b),
-        (Source::BlockAccessList, Source::BlockAccessList) => true,
-        _ => false,
-    }
-}
-
-/// Estimates target count from `EvmState` for batching decisions.
-fn estimate_evm_state_targets(state: &EvmState) -> usize {
-    state
-        .values()
-        .filter(|account| account.is_touched())
-        .map(|account| {
-            let changed_slots = account.storage.iter().filter(|(_, v)| v.is_changed()).count();
-            1 + changed_slots
-        })
-        .sum()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::tree::cached_state::{CachedStateProvider, ExecutionCacheBuilder};
     use alloy_eip7928::{AccountChanges, BalanceChange};
-    use alloy_primitives::{map::B256Set, Address};
+    use alloy_primitives::Address;
     use reth_provider::{
         providers::OverlayStateProviderFactory, test_utils::create_test_provider_factory,
-        BlockReader, DatabaseProviderFactory, LatestStateProvider, PruneCheckpointReader,
-        StageCheckpointReader, StateProviderBox, TrieReader,
+        BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, LatestStateProvider,
+        PruneCheckpointReader, StageCheckpointReader, StateProviderBox, TrieReader,
     };
     use reth_trie::MultiProof;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
@@ -1523,7 +1301,12 @@ mod tests {
     fn create_test_state_root_task<F>(factory: F) -> MultiProofTask
     where
         F: DatabaseProviderFactory<
-                Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+                Provider: BlockReader
+                              + TrieReader
+                              + StageCheckpointReader
+                              + PruneCheckpointReader
+                              + ChangeSetReader
+                              + BlockNumReader,
             > + Clone
             + Send
             + 'static,
@@ -1531,7 +1314,7 @@ mod tests {
         let rt_handle = get_test_runtime_handle();
         let overlay_factory = OverlayStateProviderFactory::new(factory);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
-        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1);
+        let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);
         let (to_sparse_trie, _receiver) = std::sync::mpsc::channel();
         let (tx, rx) = crossbeam_channel::unbounded();
 
@@ -1798,87 +1581,6 @@ mod tests {
     }
 
     #[test]
-    fn test_get_prefetch_proof_targets_no_duplicates() {
-        let test_provider_factory = create_test_provider_factory();
-        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
-
-        // populate some targets
-        let mut targets = MultiProofTargets::default();
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-        targets.insert(addr1, std::iter::once(slot1).collect());
-        targets.insert(addr2, std::iter::once(slot2).collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets are the same because there are no fetched proof
-        // targets yet
-        assert_eq!(prefetch_proof_targets, targets);
-
-        // add a different addr and slot to fetched proof targets
-        let addr3 = B256::random();
-        let slot3 = B256::random();
-        test_state_root_task.fetched_proof_targets.insert(addr3, std::iter::once(slot3).collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets are the same because the fetched proof targets
-        // don't overlap with the prefetch targets
-        assert_eq!(prefetch_proof_targets, targets);
-    }
-
-    #[test]
-    fn test_get_prefetch_proof_targets_remove_subset() {
-        let test_provider_factory = create_test_provider_factory();
-        let mut test_state_root_task = create_test_state_root_task(test_provider_factory);
-
-        // populate some targe
-        let mut targets = MultiProofTargets::default();
-        let addr1 = B256::random();
-        let addr2 = B256::random();
-        let slot1 = B256::random();
-        let slot2 = B256::random();
-        targets.insert(addr1, std::iter::once(slot1).collect());
-        targets.insert(addr2, std::iter::once(slot2).collect());
-
-        // add a subset of the first target to fetched proof targets
-        test_state_root_task.fetched_proof_targets.insert(addr1, std::iter::once(slot1).collect());
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets do not include the subset
-        assert_eq!(prefetch_proof_targets.len(), 1);
-        assert!(!prefetch_proof_targets.contains_key(&addr1));
-        assert!(prefetch_proof_targets.contains_key(&addr2));
-
-        // now add one more slot to the prefetch targets
-        let slot3 = B256::random();
-        targets.get_mut(&addr1).unwrap().insert(slot3);
-
-        let prefetch_proof_targets =
-            test_state_root_task.get_prefetch_proof_targets(targets.clone());
-
-        // check that the prefetch proof targets do not include the subset
-        // but include the new slot
-        assert_eq!(prefetch_proof_targets.len(), 2);
-        assert!(prefetch_proof_targets.contains_key(&addr1));
-        assert_eq!(
-            *prefetch_proof_targets.get(&addr1).unwrap(),
-            std::iter::once(slot3).collect::<B256Set>()
-        );
-        assert!(prefetch_proof_targets.contains_key(&addr2));
-        assert_eq!(
-            *prefetch_proof_targets.get(&addr2).unwrap(),
-            std::iter::once(slot2).collect::<B256Set>()
-        );
-    }
-
-    #[test]
     fn test_get_proof_targets_with_removed_storage_keys() {
         let mut state = HashedPostState::default();
         let mut fetched = MultiProofTargets::default();
@@ -2005,7 +1707,7 @@ mod tests {
         let mut targets3 = MultiProofTargets::default();
         targets3.insert(addr3, HashSet::default());
 
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(targets1)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(targets2)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(targets3)).unwrap();
@@ -2032,320 +1734,6 @@ mod tests {
             };
 
         assert_eq!(proofs_requested, 1);
-    }
-
-    /// Verifies that consecutive state update messages from the same source are batched together.
-    #[test]
-    fn test_state_update_batching() {
-        use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
-
-        let test_provider_factory = create_test_provider_factory();
-        let mut task = create_test_state_root_task(test_provider_factory);
-
-        // create multiple state updates
-        let addr1 = alloy_primitives::Address::random();
-        let addr2 = alloy_primitives::Address::random();
-
-        let mut update1 = EvmState::default();
-        update1.insert(
-            addr1,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(100),
-                    nonce: 1,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
-
-        let mut update2 = EvmState::default();
-        update2.insert(
-            addr2,
-            Account {
-                info: revm_state::AccountInfo {
-                    balance: U256::from(200),
-                    nonce: 2,
-                    code_hash: Default::default(),
-                    code: Default::default(),
-                },
-                transaction_id: Default::default(),
-                storage: Default::default(),
-                status: revm_state::AccountStatus::Touched,
-            },
-        );
-
-        let source = StateChangeSource::Transaction(0);
-
-        let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), update1.clone())).unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), update2.clone())).unwrap();
-
-        let proofs_requested =
-            if let Ok(MultiProofMessage::StateUpdate(_src, update)) = task.rx.recv() {
-                let mut merged_update = update;
-                let mut num_batched = 1;
-
-                while let Ok(MultiProofMessage::StateUpdate(_next_source, next_update)) =
-                    task.rx.try_recv()
-                {
-                    merged_update.extend(next_update);
-                    num_batched += 1;
-                }
-
-                assert_eq!(num_batched, 2);
-                assert_eq!(merged_update.len(), 2);
-                assert!(merged_update.contains_key(&addr1));
-                assert!(merged_update.contains_key(&addr2));
-
-                task.on_state_update(source.into(), merged_update)
-            } else {
-                panic!("Expected StateUpdate message");
-            };
-        assert_eq!(proofs_requested, 1);
-    }
-
-    /// Verifies that state updates from different sources are not batched together.
-    #[test]
-    fn test_state_update_batching_separates_sources() {
-        use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
-
-        let test_provider_factory = create_test_provider_factory();
-        let task = create_test_state_root_task(test_provider_factory);
-
-        let addr_a1 = alloy_primitives::Address::random();
-        let addr_b1 = alloy_primitives::Address::random();
-        let addr_a2 = alloy_primitives::Address::random();
-
-        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
-            let mut state = EvmState::default();
-            state.insert(
-                addr,
-                Account {
-                    info: revm_state::AccountInfo {
-                        balance: U256::from(balance),
-                        nonce: 1,
-                        code_hash: Default::default(),
-                        code: Default::default(),
-                    },
-                    transaction_id: Default::default(),
-                    storage: Default::default(),
-                    status: revm_state::AccountStatus::Touched,
-                },
-            );
-            state
-        };
-
-        let source_a = StateChangeSource::Transaction(1);
-        let source_b = StateChangeSource::Transaction(2);
-
-        // Queue: A1 (immediate dispatch), B1 (batched), A2 (should become pending)
-        let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(source_a.into(), create_state_update(addr_a1, 100)))
-            .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source_b.into(), create_state_update(addr_b1, 200)))
-            .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source_a.into(), create_state_update(addr_a2, 300)))
-            .unwrap();
-
-        let mut pending_msg: Option<MultiProofMessage> = None;
-
-        if let Ok(MultiProofMessage::StateUpdate(first_source, _)) = task.rx.recv() {
-            assert!(same_source(first_source, source_a.into()));
-
-            // Simulate batching loop for remaining messages
-            let mut accumulated_updates: Vec<(Source, EvmState)> = Vec::new();
-            let mut accumulated_targets = 0usize;
-
-            loop {
-                if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
-                    break;
-                }
-                match task.rx.try_recv() {
-                    Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                            !can_batch_state_update(
-                                *batch_source,
-                                batch_update,
-                                next_source,
-                                &next_update,
-                            )
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-
-                        let next_estimate = estimate_evm_state_targets(&next_update);
-                        if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                            !accumulated_updates.is_empty()
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        accumulated_targets += next_estimate;
-                        accumulated_updates.push((next_source, next_update));
-                    }
-                    Ok(other_msg) => {
-                        pending_msg = Some(other_msg);
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-
-            assert_eq!(accumulated_updates.len(), 1, "Should only batch matching sources");
-            let batch_source = accumulated_updates[0].0;
-            assert!(same_source(batch_source, source_b.into()));
-
-            let batch_source = accumulated_updates[0].0;
-            let mut merged_update = accumulated_updates.remove(0).1;
-            for (_, next_update) in accumulated_updates {
-                merged_update.extend(next_update);
-            }
-
-            assert!(same_source(batch_source, source_b.into()), "Batch should use matching source");
-            assert!(merged_update.contains_key(&addr_b1));
-            assert!(!merged_update.contains_key(&addr_a1));
-            assert!(!merged_update.contains_key(&addr_a2));
-        } else {
-            panic!("Expected first StateUpdate");
-        }
-
-        match pending_msg {
-            Some(MultiProofMessage::StateUpdate(pending_source, pending_update)) => {
-                assert!(same_source(pending_source, source_a.into()));
-                assert!(pending_update.contains_key(&addr_a2));
-            }
-            other => panic!("Expected pending StateUpdate with source_a, got {:?}", other),
-        }
-    }
-
-    /// Verifies that pre-block updates only batch when their payloads are identical.
-    #[test]
-    fn test_pre_block_updates_require_payload_match_to_batch() {
-        use alloy_evm::block::{StateChangePreBlockSource, StateChangeSource};
-        use revm_state::Account;
-
-        let test_provider_factory = create_test_provider_factory();
-        let task = create_test_state_root_task(test_provider_factory);
-
-        let addr1 = alloy_primitives::Address::random();
-        let addr2 = alloy_primitives::Address::random();
-        let addr3 = alloy_primitives::Address::random();
-
-        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
-            let mut state = EvmState::default();
-            state.insert(
-                addr,
-                Account {
-                    info: revm_state::AccountInfo {
-                        balance: U256::from(balance),
-                        nonce: 1,
-                        code_hash: Default::default(),
-                        code: Default::default(),
-                    },
-                    transaction_id: Default::default(),
-                    storage: Default::default(),
-                    status: revm_state::AccountStatus::Touched,
-                },
-            );
-            state
-        };
-
-        let source = StateChangeSource::PreBlock(StateChangePreBlockSource::BeaconRootContract);
-
-        // Queue: first update dispatched immediately, next two should not merge
-        let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr1, 100)))
-            .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr2, 200)))
-            .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(source.into(), create_state_update(addr3, 300)))
-            .unwrap();
-
-        let mut pending_msg: Option<MultiProofMessage> = None;
-
-        if let Ok(MultiProofMessage::StateUpdate(first_source, first_update)) = task.rx.recv() {
-            assert!(same_source(first_source, source.into()));
-            assert!(first_update.contains_key(&addr1));
-
-            let mut accumulated_updates: Vec<(Source, EvmState)> = Vec::new();
-            let mut accumulated_targets = 0usize;
-
-            loop {
-                if accumulated_targets >= STATE_UPDATE_MAX_BATCH_TARGETS {
-                    break;
-                }
-                match task.rx.try_recv() {
-                    Ok(MultiProofMessage::StateUpdate(next_source, next_update)) => {
-                        if let Some((batch_source, batch_update)) = accumulated_updates.first() &&
-                            !can_batch_state_update(
-                                *batch_source,
-                                batch_update,
-                                next_source,
-                                &next_update,
-                            )
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-
-                        let next_estimate = estimate_evm_state_targets(&next_update);
-                        if next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        if accumulated_targets + next_estimate > STATE_UPDATE_MAX_BATCH_TARGETS &&
-                            !accumulated_updates.is_empty()
-                        {
-                            pending_msg =
-                                Some(MultiProofMessage::StateUpdate(next_source, next_update));
-                            break;
-                        }
-                        accumulated_targets += next_estimate;
-                        accumulated_updates.push((next_source, next_update));
-                    }
-                    Ok(other_msg) => {
-                        pending_msg = Some(other_msg);
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-
-            assert_eq!(
-                accumulated_updates.len(),
-                1,
-                "Second pre-block update should not merge with a different payload"
-            );
-            let (batched_source, batched_update) = accumulated_updates.remove(0);
-            assert!(same_source(batched_source, source.into()));
-            assert!(batched_update.contains_key(&addr2));
-            assert!(!batched_update.contains_key(&addr3));
-
-            match pending_msg {
-                Some(MultiProofMessage::StateUpdate(_, pending_update)) => {
-                    assert!(pending_update.contains_key(&addr3));
-                }
-                other => panic!("Expected pending third pre-block update, got {:?}", other),
-            }
-        } else {
-            panic!("Expected first StateUpdate");
-        }
     }
 
     /// Verifies that different message types arriving mid-batch are not lost and preserve order.
@@ -2410,7 +1798,7 @@ mod tests {
         let source = StateChangeSource::Transaction(42);
 
         // Queue: [PrefetchProofs1, PrefetchProofs2, StateUpdate1, StateUpdate2, PrefetchProofs3]
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(targets1)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(targets2)).unwrap();
         tx.send(MultiProofMessage::StateUpdate(source.into(), state_update1)).unwrap();
@@ -2511,7 +1899,7 @@ mod tests {
 
         let source = StateChangeSource::Transaction(99);
 
-        let tx = task.state_root_message_sender();
+        let tx = task.tx.clone();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch1)).unwrap();
         tx.send(MultiProofMessage::StateUpdate(source.into(), state_update)).unwrap();
         tx.send(MultiProofMessage::PrefetchProofs(prefetch2.clone())).unwrap();
@@ -2532,6 +1920,7 @@ mod tests {
         assert!(matches!(pending, MultiProofMessage::StateUpdate(_, _)));
 
         // Pending message should be handled before the next select loop.
+        // StateUpdate is processed directly without batching.
         assert!(!task.process_multiproof_message(
             pending,
             &mut ctx,
@@ -2539,161 +1928,16 @@ mod tests {
             &test_provider
         ));
 
-        // Prefetch2 should now be in pending_msg (captured by StateUpdate's batching loop).
-        match ctx.pending_msg.take() {
-            Some(MultiProofMessage::PrefetchProofs(targets)) => {
+        // Since StateUpdate doesn't batch, Prefetch2 remains in the channel (not in pending_msg).
+        assert!(ctx.pending_msg.is_none());
+
+        // Prefetch2 should still be in the channel.
+        match task.rx.try_recv() {
+            Ok(MultiProofMessage::PrefetchProofs(targets)) => {
                 assert_eq!(targets.len(), 1);
                 assert!(targets.contains_key(&prefetch_addr2));
             }
-            other => panic!("Expected remaining PrefetchProofs2 in pending_msg, got {:?}", other),
-        }
-    }
-
-    /// Verifies that pending messages from a previous batch drain get full batching treatment.
-    #[test]
-    fn test_pending_messages_get_full_batching_treatment() {
-        // Queue: [Prefetch1, State1, State2, State3, Prefetch2]
-        //
-        // Expected behavior:
-        // 1. recv() → Prefetch1
-        // 2. try_recv() → State1 is different type → pending = State1, break
-        // 3. Process Prefetch1
-        // 4. Next iteration: pending = State1 → process with batching
-        // 5. try_recv() → State2 same type → merge
-        // 6. try_recv() → State3 same type → merge
-        // 7. try_recv() → Prefetch2 different type → pending = Prefetch2, break
-        // 8. Process merged State (1+2+3)
-        //
-        // Without the state-machine fix, State1 would be processed alone (no batching).
-        use alloy_evm::block::StateChangeSource;
-        use revm_state::Account;
-
-        let test_provider_factory = create_test_provider_factory();
-        let task = create_test_state_root_task(test_provider_factory);
-
-        let prefetch_addr1 = B256::random();
-        let prefetch_addr2 = B256::random();
-        let state_addr1 = alloy_primitives::Address::random();
-        let state_addr2 = alloy_primitives::Address::random();
-        let state_addr3 = alloy_primitives::Address::random();
-
-        // Create Prefetch targets
-        let mut prefetch1 = MultiProofTargets::default();
-        prefetch1.insert(prefetch_addr1, HashSet::default());
-
-        let mut prefetch2 = MultiProofTargets::default();
-        prefetch2.insert(prefetch_addr2, HashSet::default());
-
-        // Create StateUpdates
-        let create_state_update = |addr: alloy_primitives::Address, balance: u64| {
-            let mut state = EvmState::default();
-            state.insert(
-                addr,
-                Account {
-                    info: revm_state::AccountInfo {
-                        balance: U256::from(balance),
-                        nonce: 1,
-                        code_hash: Default::default(),
-                        code: Default::default(),
-                    },
-                    transaction_id: Default::default(),
-                    storage: Default::default(),
-                    status: revm_state::AccountStatus::Touched,
-                },
-            );
-            state
-        };
-
-        let source = StateChangeSource::Transaction(42);
-
-        // Queue: [Prefetch1, State1, State2, State3, Prefetch2]
-        let tx = task.state_root_message_sender();
-        tx.send(MultiProofMessage::PrefetchProofs(prefetch1.clone())).unwrap();
-        tx.send(MultiProofMessage::StateUpdate(
-            source.into(),
-            create_state_update(state_addr1, 100),
-        ))
-        .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(
-            source.into(),
-            create_state_update(state_addr2, 200),
-        ))
-        .unwrap();
-        tx.send(MultiProofMessage::StateUpdate(
-            source.into(),
-            create_state_update(state_addr3, 300),
-        ))
-        .unwrap();
-        tx.send(MultiProofMessage::PrefetchProofs(prefetch2.clone())).unwrap();
-
-        // Simulate the state-machine loop behavior
-        let mut pending_msg: Option<MultiProofMessage> = None;
-
-        // First iteration: recv() gets Prefetch1, drains until State1
-        if let Ok(MultiProofMessage::PrefetchProofs(targets)) = task.rx.recv() {
-            let mut merged_targets = targets;
-            loop {
-                match task.rx.try_recv() {
-                    Ok(MultiProofMessage::PrefetchProofs(next_targets)) => {
-                        merged_targets.extend(next_targets);
-                    }
-                    Ok(other_msg) => {
-                        pending_msg = Some(other_msg);
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-            // Should have only Prefetch1 (State1 is different type)
-            assert_eq!(merged_targets.len(), 1);
-            assert!(merged_targets.contains_key(&prefetch_addr1));
-        } else {
-            panic!("Expected PrefetchProofs");
-        }
-
-        // Pending should be State1
-        assert!(matches!(pending_msg, Some(MultiProofMessage::StateUpdate(_, _))));
-
-        // Second iteration: process pending State1 WITH BATCHING
-        // This is the key test - the pending message should drain State2 and State3
-        if let Some(MultiProofMessage::StateUpdate(_src, first_update)) = pending_msg.take() {
-            let mut merged_update = first_update;
-            let mut num_batched = 1;
-
-            loop {
-                match task.rx.try_recv() {
-                    Ok(MultiProofMessage::StateUpdate(_src, next_update)) => {
-                        merged_update.extend(next_update);
-                        num_batched += 1;
-                    }
-                    Ok(other_msg) => {
-                        pending_msg = Some(other_msg);
-                        break;
-                    }
-                    Err(_) => break,
-                }
-            }
-
-            // THE KEY ASSERTION: pending State1 should have batched with State2 and State3
-            assert_eq!(
-                num_batched, 3,
-                "Pending message should get full batching treatment and merge all 3 StateUpdates"
-            );
-            assert_eq!(merged_update.len(), 3, "Should have all 3 addresses in merged update");
-            assert!(merged_update.contains_key(&state_addr1));
-            assert!(merged_update.contains_key(&state_addr2));
-            assert!(merged_update.contains_key(&state_addr3));
-        } else {
-            panic!("Expected pending StateUpdate");
-        }
-
-        // Pending should now be Prefetch2
-        match pending_msg {
-            Some(MultiProofMessage::PrefetchProofs(targets)) => {
-                assert_eq!(targets.len(), 1);
-                assert!(targets.contains_key(&prefetch_addr2));
-            }
-            _ => panic!("Prefetch2 was lost!"),
+            other => panic!("Expected PrefetchProofs2 in channel, got {:?}", other),
         }
     }
 

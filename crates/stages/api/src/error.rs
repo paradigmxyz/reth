@@ -112,7 +112,7 @@ pub enum StageError {
     /// Database is ahead of static file data.
     #[error("missing static file data for block number: {number}", number = block.block.number)]
     MissingStaticFileData {
-        /// Starting block with  missing data.
+        /// Starting block with missing data.
         block: Box<BlockWithParent>,
         /// Static File segment
         segment: StaticFileSegment,
