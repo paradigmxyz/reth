@@ -485,9 +485,13 @@ where
 /// Conversion into transaction RPC response failed.
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionConversionError {
-    /// Required fields are missing from the transaction request.
-    #[error("Failed to convert transaction into RPC response: {0}")]
-    FromTxReq(String),
+    /// Transaction request validation error.
+    /// 
+    /// Contains the complete error information including which fields are missing or invalid.
+    /// The error message preserves the full Debug representation of the underlying ValueError,
+    /// which includes the transaction request and detailed error context.
+    #[error("Failed to convert transaction request: {0}")]
+    ValueError(String),
 
     /// Other conversion errors.
     #[error("{0}")]
@@ -831,7 +835,7 @@ where
         Ok(self
             .sim_tx_converter
             .convert_sim_tx(request)
-            .map_err(|e| TransactionConversionError::FromTxReq(e.to_string()))?)
+            .map_err(|e| TransactionConversionError::ValueError(format!("{e:?}")))?)
     }
 
     fn tx_env(
@@ -983,6 +987,26 @@ mod transaction_response_tests {
     use alloy_network::Ethereum;
     use alloy_primitives::{Address, Signature, B256, U256};
     use alloy_rpc_types_eth::Transaction;
+
+    #[test]
+    fn test_transaction_conversion_error_variants() {
+        // Test ValueError variant - preserves complete Debug representation
+        let error = TransactionConversionError::ValueError(
+            "ValueError { request: TransactionRequest { from: None, to: None, ... }, message: \"missing required field 'to'\" }".to_string()
+        );
+        assert!(error.to_string().contains("Failed to convert transaction request"));
+        assert!(error.to_string().contains("missing required field"));
+
+        // Test Other variant
+        let error = TransactionConversionError::Other("Unknown error".to_string());
+        assert!(error.to_string().contains("Unknown error"));
+        
+        // The ValueError variant now uses Debug format which includes full context
+        let debug_info = "ValueError { request: TransactionRequest { gas: Some(21000), ... }, message: \"invalid gas price\" }";
+        let error = TransactionConversionError::ValueError(debug_info.to_string());
+        assert!(error.to_string().contains("ValueError"));
+        assert!(error.to_string().contains("TransactionRequest"));
+    }
 
     #[test]
     fn test_ethereum_transaction_conversion() {
