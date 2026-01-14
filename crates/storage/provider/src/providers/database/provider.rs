@@ -379,6 +379,12 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut total_write_trie_changesets = Duration::ZERO;
         let mut total_write_trie_updates = Duration::ZERO;
 
+        // Extract account and storage transitions from the bundle reverts BEFORE writing state.
+        // This avoids a subsequent DB scan in update_history_indices, which is expensive.
+        // The pattern mirrors append_blocks_with_state.
+        let mut account_transitions: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        let mut storage_transitions: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+
         // TODO: Do performant / batched writes for each type of object
         // instead of a loop over all blocks,
         // meaning:
@@ -392,6 +398,22 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let trie_data = block.trie_data();
             let ExecutedBlock { recovered_block, execution_output, .. } = block;
             let block_number = recovered_block.number();
+
+            // Accumulate history transitions from in-memory reverts
+            let exec_first_block = execution_output.first_block();
+            for (block_idx, block_reverts) in execution_output.bundle.reverts.iter().enumerate() {
+                let revert_block_number = exec_first_block + block_idx as u64;
+                for (address, account_revert) in block_reverts {
+                    account_transitions.entry(*address).or_default().push(revert_block_number);
+                    for storage_key in account_revert.storage.keys() {
+                        let key = B256::new(storage_key.to_be_bytes());
+                        storage_transitions
+                            .entry((*address, key))
+                            .or_default()
+                            .push(revert_block_number);
+                    }
+                }
+            }
 
             let start = Instant::now();
             self.insert_block(&recovered_block)?;
@@ -417,9 +439,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             total_write_trie_updates += start.elapsed();
         }
 
-        // update history indices
+        // Use pre-computed transitions for history indices instead of scanning changeset tables.
         let start = Instant::now();
-        self.update_history_indices(first_number..=last_block_number)?;
+        self.insert_account_history_index(account_transitions)?;
+        self.insert_storage_history_index(storage_transitions)?;
         let duration_update_history_indices = start.elapsed();
 
         // Update pipeline progress
