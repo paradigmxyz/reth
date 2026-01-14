@@ -4,8 +4,12 @@ use alloy_consensus::transaction::TxHashRef;
 use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
 use parking_lot::Mutex;
 use reth_chain_state::ExecutedBlock;
+use itertools::Itertools;
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey, StorageSettings},
+    models::{
+        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
+        StorageSettings,
+    },
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
@@ -592,10 +596,10 @@ impl RocksDBProvider {
                 account_history.entry(address).or_default().push(block_number);
             }
         }
-        for (address, blocks) in account_history {
-            let key = ShardedKey::new(address, u64::MAX);
-            let value = BlockNumberList::new_pre_sorted(blocks);
-            batch.put::<tables::AccountsHistory>(key, &value)?;
+
+        // Write account history using proper shard append logic
+        for (address, indices) in account_history {
+            batch.append_account_history_shard(address, indices)?;
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
@@ -620,10 +624,10 @@ impl RocksDBProvider {
                 }
             }
         }
-        for ((address, slot), blocks) in storage_history {
-            let key = StorageShardedKey::new(address, slot, u64::MAX);
-            let value = BlockNumberList::new_pre_sorted(blocks);
-            batch.put::<tables::StoragesHistory>(key, &value)?;
+
+        // Write storage history using proper shard append logic
+        for ((address, slot), indices) in storage_history {
+            batch.append_storage_history_shard(address, slot, indices)?;
         }
         ctx.pending_batches.lock().push(batch.into_inner());
         Ok(())
@@ -713,6 +717,91 @@ impl<'a> RocksDBBatch<'a> {
     /// This is used to defer commits to the provider level.
     pub fn into_inner(self) -> WriteBatchWithTransaction<true> {
         self.inner
+    }
+
+    /// Appends indices to an account history shard with proper shard management.
+    ///
+    /// Loads the existing shard (if any), appends new indices, and rechunks into
+    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    pub fn append_account_history_shard(
+        &mut self,
+        address: Address,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let last_key = ShardedKey::new(address, u64::MAX);
+        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
+        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        // Fast path: all indices fit in one shard
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.put::<tables::AccountsHistory>(last_key, &last_shard)?;
+            return Ok(());
+        }
+
+        // Slow path: rechunk into multiple shards
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            self.put::<tables::AccountsHistory>(
+                ShardedKey::new(address, highest_block_number),
+                &shard,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Appends indices to a storage history shard with proper shard management.
+    ///
+    /// Loads the existing shard (if any), appends new indices, and rechunks into
+    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    pub fn append_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let last_key = StorageShardedKey::last(address, storage_key);
+        let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
+        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        // Fast path: all indices fit in one shard
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.put::<tables::StoragesHistory>(last_key, &last_shard)?;
+            return Ok(());
+        }
+
+        // Slow path: rechunk into multiple shards
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            self.put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, highest_block_number),
+                &shard,
+            )?;
+        }
+
+        Ok(())
     }
 }
 
