@@ -334,7 +334,7 @@ where
         Vec::new(),
     );
 
-    provider.write_state(&execution_outcome, OriginalValuesKnown::Yes)?;
+    provider.write_state(&execution_outcome, OriginalValuesKnown::Yes, true)?;
 
     trace!(target: "reth::cli", "Inserted state");
 

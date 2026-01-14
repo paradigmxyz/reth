@@ -463,7 +463,7 @@ where
         }
 
         // write output
-        provider.write_state(&state, OriginalValuesKnown::Yes)?;
+        provider.write_state(&state, OriginalValuesKnown::Yes, true)?;
 
         let db_write_duration = time.elapsed();
         debug!(

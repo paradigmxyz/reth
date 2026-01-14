@@ -5,7 +5,7 @@ use crate::{
     providers::{
         database::{chain::ChainStorage, metrics},
         rocksdb::RocksDBProvider,
-        static_file::StaticFileWriter,
+        static_file::{StaticFileWriteCtx, StaticFileWriter},
         NodeTypesForProvider, StaticFileProvider,
     },
     to_range,
@@ -35,7 +35,7 @@ use alloy_primitives::{
 use itertools::Itertools;
 use parking_lot::RwLock;
 use rayon::slice::ParallelSliceMut;
-use reth_chain_state::ExecutedBlock;
+use reth_chain_state::{ComputedTrieData, ExecutedBlock};
 use reth_chainspec::{ChainInfo, ChainSpecProvider, EthChainSpec};
 use reth_db_api::{
     cursor::{DbCursorRO, DbCursorRW, DbDupCursorRO, DbDupCursorRW},
@@ -64,7 +64,7 @@ use reth_storage_api::{
     NodePrimitivesProvider, StateProvider, StorageChangeSetReader, StorageSettingsCache,
     TryIntoHistoricalStateProvider,
 };
-use reth_storage_errors::provider::ProviderResult;
+use reth_storage_errors::provider::{ProviderResult, StaticFileWriterError};
 use reth_trie::{
     trie_cursor::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
@@ -85,6 +85,7 @@ use std::{
     fmt::Debug,
     ops::{Deref, DerefMut, Range, RangeBounds, RangeFrom, RangeInclusive},
     sync::Arc,
+    thread,
     time::{Duration, Instant},
 };
 use tracing::{debug, trace};
@@ -147,6 +148,25 @@ impl<DB: Database, N: NodeTypes> From<DatabaseProviderRW<DB, N>>
 {
     fn from(provider: DatabaseProviderRW<DB, N>) -> Self {
         provider.0
+    }
+}
+
+/// Mode for [`DatabaseProvider::save_blocks`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SaveBlocksMode {
+    /// Full mode: write block structure + receipts + state + trie.
+    /// Used by engine/production code.
+    Full,
+    /// Blocks only: write block structure (headers, txs, senders, indices).
+    /// Receipts/state/trie are skipped - they may come later via separate calls.
+    /// Used by `insert_block`.
+    BlocksOnly,
+}
+
+impl SaveBlocksMode {
+    /// Returns `true` if this is [`SaveBlocksMode::Full`].
+    pub const fn with_state(self) -> bool {
+        matches!(self, Self::Full)
     }
 }
 
@@ -356,21 +376,73 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         Ok(result)
     }
 
+    /// Creates the context for static file writes.
+    fn static_file_write_ctx(
+        &self,
+        save_mode: SaveBlocksMode,
+        first_block: BlockNumber,
+        last_block: BlockNumber,
+    ) -> ProviderResult<StaticFileWriteCtx> {
+        let tip = self.last_block_number()?.max(last_block);
+        Ok(StaticFileWriteCtx {
+            write_senders: EitherWriterDestination::senders(self).is_static_file() &&
+                self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()),
+            write_receipts: save_mode.with_state() &&
+                EitherWriter::receipts_destination(self).is_static_file(),
+            tip,
+            receipts_prune_mode: self.prune_modes.receipts,
+            // Receipts are prunable if no receipts exist in SF yet and within pruning distance
+            receipts_prunable: self
+                .static_file_provider
+                .get_highest_static_file_tx(StaticFileSegment::Receipts)
+                .is_none() &&
+                PruneMode::Distance(self.minimum_pruning_distance)
+                    .should_prune(first_block, tip),
+        })
+    }
+
     /// Writes executed blocks and state to storage.
-    pub fn save_blocks(&self, blocks: Vec<ExecutedBlock<N::Primitives>>) -> ProviderResult<()> {
+    ///
+    /// This method parallelizes static file (SF) writes with MDBX writes.
+    /// The SF thread writes headers, transactions, senders (if SF), and receipts (if SF, Full mode
+    /// only). The main thread writes MDBX data (indices, state, trie - Full mode only).
+    ///
+    /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
+    /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
+    pub fn save_blocks(
+        &self,
+        blocks: Vec<ExecutedBlock<N::Primitives>>,
+        save_mode: SaveBlocksMode,
+    ) -> ProviderResult<()> {
         if blocks.is_empty() {
             debug!(target: "providers::db", "Attempted to write empty block range");
             return Ok(())
         }
 
-        // NOTE: checked non-empty above
-        let first_block = blocks.first().unwrap().recovered_block();
-
-        let last_block = blocks.last().unwrap().recovered_block();
-        let first_number = first_block.number();
-        let last_block_number = last_block.number();
+        let first_number = blocks.first().unwrap().recovered_block().number();
+        let last_block_number = blocks.last().unwrap().recovered_block().number();
 
         debug!(target: "providers::db", block_count = %blocks.len(), "Writing blocks and execution data to storage");
+
+        // Compute tx_nums upfront (both threads need these)
+        let start = Instant::now();
+        let first_tx_num = self
+            .tx
+            .cursor_read::<tables::TransactionBlocks>()?
+            .last()?
+            .map(|(n, _)| n + 1)
+            .unwrap_or_default();
+        self.metrics.record_duration(metrics::Action::GetNextTxNum, start.elapsed());
+
+        let tx_nums: Vec<TxNumber> = {
+            let mut nums = Vec::with_capacity(blocks.len());
+            let mut current = first_tx_num;
+            for block in &blocks {
+                nums.push(current);
+                current += block.recovered_block().body().transaction_count() as u64;
+            }
+            nums
+        };
 
         // Accumulate durations for each step
         let mut total_insert_block = Duration::ZERO;
@@ -379,75 +451,176 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut total_write_trie_changesets = Duration::ZERO;
         let mut total_write_trie_updates = Duration::ZERO;
 
-        // TODO: Do performant / batched writes for each type of object
-        // instead of a loop over all blocks,
-        // meaning:
-        //  * blocks
-        //  * state
-        //  * hashed state
-        //  * trie updates (cannot naively extend, need helper)
-        //  * indices (already done basically)
-        // Insert the blocks
-        for block in blocks {
-            let trie_data = block.trie_data();
-            let ExecutedBlock { recovered_block, execution_output, .. } = block;
-            let block_number = recovered_block.number();
+        // avoid capturing &self.tx in scope below.
+        let sf_provider = &self.static_file_provider;
+        let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
 
-            let start = Instant::now();
-            self.insert_block(&recovered_block)?;
-            total_insert_block += start.elapsed();
+        thread::scope(|s| {
+            // SF writes
+            let sf_handle = s.spawn(|| sf_provider.write_blocks_data(&blocks, &tx_nums, sf_ctx));
 
-            // Write state and changesets to the database.
-            // Must be written after blocks because of the receipt lookup.
-            let start = Instant::now();
-            self.write_state(&execution_output, OriginalValuesKnown::No)?;
-            total_write_state += start.elapsed();
+            // MDBX writes
+            for (i, block) in blocks.iter().enumerate() {
+                let recovered_block = block.recovered_block();
 
-            // insert hashes and intermediate merkle nodes
-            let start = Instant::now();
-            self.write_hashed_state(&trie_data.hashed_state)?;
-            total_write_hashed_state += start.elapsed();
+                let start = Instant::now();
+                self.insert_block_mdbx_only(recovered_block, tx_nums[i])?;
+                total_insert_block += start.elapsed();
 
-            let start = Instant::now();
-            self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
-            total_write_trie_changesets += start.elapsed();
+                if save_mode.with_state() {
+                    let execution_output = block.execution_outcome();
+                    let block_number = recovered_block.number();
 
+                    // Write state and changesets to the database.
+                    // Must be written after blocks because of the receipt lookup.
+                    let start = Instant::now();
+                    self.write_state(
+                        execution_output,
+                        OriginalValuesKnown::No,
+                        !sf_ctx.write_receipts,
+                    )?;
+                    total_write_state += start.elapsed();
+
+                    let trie_data = block.trie_data();
+
+                    // insert hashes and intermediate merkle nodes
+                    let start = Instant::now();
+                    self.write_hashed_state(&trie_data.hashed_state)?;
+                    total_write_hashed_state += start.elapsed();
+
+                    let start = Instant::now();
+                    self.write_trie_changesets(block_number, &trie_data.trie_updates, None)?;
+                    total_write_trie_changesets += start.elapsed();
+
+                    let start = Instant::now();
+                    self.write_trie_updates_sorted(&trie_data.trie_updates)?;
+                    total_write_trie_updates += start.elapsed();
+                }
+            }
+
+            // Full mode: update history indices
+            let duration_update_history_indices = if save_mode.with_state() {
+                let start = Instant::now();
+                self.update_history_indices(first_number..=last_block_number)?;
+                start.elapsed()
+            } else {
+                Duration::ZERO
+            };
+
+            // Update pipeline progress
             let start = Instant::now();
-            self.write_trie_updates_sorted(&trie_data.trie_updates)?;
-            total_write_trie_updates += start.elapsed();
+            self.update_pipeline_stages(last_block_number, false)?;
+            let duration_update_pipeline_stages = start.elapsed();
+
+            // Record all metrics
+            self.metrics
+                .record_duration(metrics::Action::SaveBlocksInsertBlock, total_insert_block);
+            self.metrics.record_duration(metrics::Action::SaveBlocksWriteState, total_write_state);
+            self.metrics.record_duration(
+                metrics::Action::SaveBlocksWriteHashedState,
+                total_write_hashed_state,
+            );
+            self.metrics.record_duration(
+                metrics::Action::SaveBlocksWriteTrieChangesets,
+                total_write_trie_changesets,
+            );
+            self.metrics.record_duration(
+                metrics::Action::SaveBlocksWriteTrieUpdates,
+                total_write_trie_updates,
+            );
+            self.metrics.record_duration(
+                metrics::Action::SaveBlocksUpdateHistoryIndices,
+                duration_update_history_indices,
+            );
+            self.metrics.record_duration(
+                metrics::Action::SaveBlocksUpdatePipelineStages,
+                duration_update_pipeline_stages,
+            );
+
+            // Wait for SF thread
+            sf_handle.join().map_err(|_| StaticFileWriterError::ThreadPanic("static file"))??;
+
+            debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+
+            Ok(())
+        })
+    }
+
+    /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
+    ///
+    /// SF data (headers, transactions, senders if SF, receipts if SF) must be written separately.
+    fn insert_block_mdbx_only(
+        &self,
+        block: &RecoveredBlock<BlockTy<N>>,
+        first_tx_num: TxNumber,
+    ) -> ProviderResult<StoredBlockBodyIndices> {
+        if self.prune_modes.sender_recovery.is_none_or(|m| !m.is_full()) &&
+            EitherWriterDestination::senders(self).is_database()
+        {
+            let start = Instant::now();
+            let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
+            let mut cursor = self.tx.cursor_write::<tables::TransactionSenders>()?;
+            for (tx_num, sender) in tx_nums_iter.zip(block.senders_iter().copied()) {
+                cursor.append(tx_num, &sender)?;
+            }
+            self.metrics
+                .record_duration(metrics::Action::InsertTransactionSenders, start.elapsed());
         }
 
-        // update history indices
+        let block_number = block.number();
+        let tx_count = block.body().transaction_count() as u64;
+
         let start = Instant::now();
-        self.update_history_indices(first_number..=last_block_number)?;
-        let duration_update_history_indices = start.elapsed();
+        self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
+        self.metrics.record_duration(metrics::Action::InsertHeaderNumbers, start.elapsed());
 
-        // Update pipeline progress
+        // Write tx hash numbers to MDBX if not handled by RocksDB and not fully pruned
+        if !self.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
+            self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
+        {
+            let start = Instant::now();
+            let mut cursor = self.tx.cursor_write::<tables::TransactionHashNumbers>()?;
+            let mut tx_num = first_tx_num;
+            for transaction in block.body().transactions_iter() {
+                cursor.upsert(*transaction.tx_hash(), &tx_num)?;
+                tx_num += 1;
+            }
+            self.metrics
+                .record_duration(metrics::Action::InsertTransactionHashNumbers, start.elapsed());
+        }
+
+        self.write_block_body_indices(block_number, block.body(), first_tx_num, tx_count)?;
+
+        Ok(StoredBlockBodyIndices { first_tx_num, tx_count })
+    }
+
+    /// Writes MDBX block body indices (`BlockBodyIndices`, `TransactionBlocks`,
+    /// `Ommers`/`Withdrawals`).
+    fn write_block_body_indices(
+        &self,
+        block_number: BlockNumber,
+        body: &BodyTy<N>,
+        first_tx_num: TxNumber,
+        tx_count: u64,
+    ) -> ProviderResult<()> {
+        // MDBX: BlockBodyIndices
         let start = Instant::now();
-        self.update_pipeline_stages(last_block_number, false)?;
-        let duration_update_pipeline_stages = start.elapsed();
+        self.tx
+            .cursor_write::<tables::BlockBodyIndices>()?
+            .append(block_number, &StoredBlockBodyIndices { first_tx_num, tx_count })?;
+        self.metrics.record_duration(metrics::Action::InsertBlockBodyIndices, start.elapsed());
 
-        // Record all metrics at the end
-        self.metrics.record_duration(metrics::Action::SaveBlocksInsertBlock, total_insert_block);
-        self.metrics.record_duration(metrics::Action::SaveBlocksWriteState, total_write_state);
-        self.metrics
-            .record_duration(metrics::Action::SaveBlocksWriteHashedState, total_write_hashed_state);
-        self.metrics.record_duration(
-            metrics::Action::SaveBlocksWriteTrieChangesets,
-            total_write_trie_changesets,
-        );
-        self.metrics
-            .record_duration(metrics::Action::SaveBlocksWriteTrieUpdates, total_write_trie_updates);
-        self.metrics.record_duration(
-            metrics::Action::SaveBlocksUpdateHistoryIndices,
-            duration_update_history_indices,
-        );
-        self.metrics.record_duration(
-            metrics::Action::SaveBlocksUpdatePipelineStages,
-            duration_update_pipeline_stages,
-        );
+        // MDBX: TransactionBlocks (last tx -> block mapping)
+        if tx_count > 0 {
+            let start = Instant::now();
+            self.tx
+                .cursor_write::<tables::TransactionBlocks>()?
+                .append(first_tx_num + tx_count - 1, &block_number)?;
+            self.metrics.record_duration(metrics::Action::InsertTransactionBlocks, start.elapsed());
+        }
 
-        debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
+        // MDBX: Ommers/Withdrawals
+        self.storage.writer().write_block_bodies(self, vec![(block_number, Some(body))])?;
 
         Ok(())
     }
@@ -1821,19 +1994,25 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         &self,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
         is_value_known: OriginalValuesKnown,
+        write_receipts: bool,
     ) -> ProviderResult<()> {
         let first_block = execution_outcome.first_block();
-        let block_count = execution_outcome.len() as u64;
-        let last_block = execution_outcome.last_block();
-        let block_range = first_block..=last_block;
-
-        let tip = self.last_block_number()?.max(last_block);
 
         let (plain_state, reverts) =
             execution_outcome.bundle.to_plain_state_and_reverts(is_value_known);
 
         self.write_state_reverts(reverts, first_block)?;
         self.write_state_changes(plain_state)?;
+
+        if !write_receipts {
+            return Ok(());
+        }
+
+        let block_count = execution_outcome.len() as u64;
+        let last_block = execution_outcome.last_block();
+        let block_range = first_block..=last_block;
+
+        let tip = self.last_block_number()?.max(last_block);
 
         // Fetch the first transaction number for each block in the range
         let block_indices: Vec<_> = self
@@ -2987,7 +3166,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecutionWriter
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
     fn take_block_and_execution_above(
@@ -3030,89 +3209,40 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWriter
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> BlockWriter
     for DatabaseProvider<TX, N>
 {
     type Block = BlockTy<N>;
     type Receipt = ReceiptTy<N>;
 
-    /// Inserts the block into the database, always modifying the following static file segments and
-    /// tables:
-    /// * [`StaticFileSegment::Headers`]
-    /// * [`tables::HeaderNumbers`]
-    /// * [`tables::BlockBodyIndices`]
+    /// Inserts the block into the database, writing to both static files and MDBX.
     ///
-    /// If there are transactions in the block, the following static file segments and tables will
-    /// be modified:
-    /// * [`StaticFileSegment::Transactions`]
-    /// * [`tables::TransactionBlocks`]
-    ///
-    /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
-    /// If withdrawals are not empty, this will modify
-    /// [`BlockWithdrawals`](tables::BlockWithdrawals).
-    ///
-    /// If the provider has __not__ configured full sender pruning, this will modify either:
-    /// * [`StaticFileSegment::TransactionSenders`] if senders are written to static files
-    /// * [`tables::TransactionSenders`] if senders are written to the database
-    ///
-    /// If the provider has __not__ configured full transaction lookup pruning, this will modify
-    /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
+    /// This is a convenience method primarily used in tests. For production use,
+    /// prefer [`Self::save_blocks`] which handles execution output and trie data.
     fn insert_block(
         &self,
         block: &RecoveredBlock<Self::Block>,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number();
-        let tx_count = block.body().transaction_count() as u64;
 
-        let mut durations_recorder = metrics::DurationsRecorder::new(&self.metrics);
-
-        self.static_file_provider
-            .get_writer(block_number, StaticFileSegment::Headers)?
-            .append_header(block.header(), &block.hash())?;
-
-        self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
-        durations_recorder.record_relative(metrics::Action::InsertHeaderNumbers);
-
-        let first_tx_num = self
-            .tx
-            .cursor_read::<tables::TransactionBlocks>()?
-            .last()?
-            .map(|(n, _)| n + 1)
-            .unwrap_or_default();
-        durations_recorder.record_relative(metrics::Action::GetNextTxNum);
-
-        let tx_nums_iter = std::iter::successors(Some(first_tx_num), |n| Some(n + 1));
-
-        if self.prune_modes.sender_recovery.as_ref().is_none_or(|m| !m.is_full()) {
-            let mut senders_writer = EitherWriter::new_senders(self, block.number())?;
-            senders_writer.increment_block(block.number())?;
-            senders_writer
-                .append_senders(tx_nums_iter.clone().zip(block.senders_iter().copied()))?;
-            durations_recorder.record_relative(metrics::Action::InsertTransactionSenders);
-        }
-
-        if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
-            self.with_rocksdb_batch(|batch| {
-                let mut writer = EitherWriter::new_transaction_hash_numbers(self, batch)?;
-                for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
-                    let hash = transaction.tx_hash();
-                    writer.put_transaction_hash_number(*hash, tx_num, false)?;
-                }
-                Ok(((), writer.into_raw_rocksdb_batch()))
-            })?;
-            durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
-        }
-
-        self.append_block_bodies(vec![(block_number, Some(block.body()))])?;
-
-        debug!(
-            target: "providers::db",
-            ?block_number,
-            actions = ?durations_recorder.actions,
-            "Inserted block"
+        // Wrap block in ExecutedBlock with empty execution output (no receipts/state/trie)
+        let executed_block = ExecutedBlock::new(
+            Arc::new(block.clone()),
+            Arc::new(ExecutionOutcome::new(
+                Default::default(),
+                Vec::<Vec<ReceiptTy<N>>>::new(),
+                block_number,
+                vec![],
+            )),
+            ComputedTrieData::default(),
         );
 
-        Ok(StoredBlockBodyIndices { first_tx_num, tx_count })
+        // Delegate to save_blocks with BlocksOnly mode (skips receipts/state/trie)
+        self.save_blocks(vec![executed_block], SaveBlocksMode::BlocksOnly)?;
+
+        // Return the body indices
+        self.block_body_indices(block_number)?
+            .ok_or(ProviderError::BlockBodyIndicesNotFound(block_number))
     }
 
     fn append_block_bodies(
@@ -3298,7 +3428,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             durations_recorder.record_relative(metrics::Action::InsertBlock);
         }
 
-        self.write_state(execution_outcome, OriginalValuesKnown::No)?;
+        self.write_state(execution_outcome, OriginalValuesKnown::No, true)?;
         durations_recorder.record_relative(metrics::Action::InsertState);
 
         // insert hashes and intermediate merkle nodes
@@ -3440,7 +3570,8 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
 
             self.static_file_provider.commit()?;
         } else {
-            self.static_file_provider.commit()?;
+            // Normal path: finalize() will call sync_all() if not already synced
+            self.static_file_provider.finalize()?;
 
             #[cfg(all(unix, feature = "rocksdb"))]
             {
@@ -3523,10 +3654,11 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
+                true,
             )
             .unwrap();
         provider_rw.insert_block(&data.blocks[0].0).unwrap();
-        provider_rw.write_state(&data.blocks[0].1, crate::OriginalValuesKnown::No).unwrap();
+        provider_rw.write_state(&data.blocks[0].1, crate::OriginalValuesKnown::No, true).unwrap();
         provider_rw.commit().unwrap();
 
         let provider = factory.provider().unwrap();
@@ -3549,11 +3681,14 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
+                true,
             )
             .unwrap();
         for i in 0..3 {
             provider_rw.insert_block(&data.blocks[i].0).unwrap();
-            provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
+            provider_rw
+                .write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No, true)
+                .unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -3579,13 +3714,16 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
+                true,
             )
             .unwrap();
 
         // insert blocks 1-3 with receipts
         for i in 0..3 {
             provider_rw.insert_block(&data.blocks[i].0).unwrap();
-            provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
+            provider_rw
+                .write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No, true)
+                .unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -3610,11 +3748,14 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
+                true,
             )
             .unwrap();
         for i in 0..3 {
             provider_rw.insert_block(&data.blocks[i].0).unwrap();
-            provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
+            provider_rw
+                .write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No, true)
+                .unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -3673,11 +3814,14 @@ mod tests {
             .write_state(
                 &ExecutionOutcome { first_block: 0, receipts: vec![vec![]], ..Default::default() },
                 crate::OriginalValuesKnown::No,
+                true,
             )
             .unwrap();
         for i in 0..3 {
             provider_rw.insert_block(&data.blocks[i].0).unwrap();
-            provider_rw.write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No).unwrap();
+            provider_rw
+                .write_state(&data.blocks[i].1, crate::OriginalValuesKnown::No, true)
+                .unwrap();
         }
         provider_rw.commit().unwrap();
 
@@ -4991,7 +5135,7 @@ mod tests {
                 }]],
                 ..Default::default()
             };
-            provider_rw.write_state(&outcome, crate::OriginalValuesKnown::No).unwrap();
+            provider_rw.write_state(&outcome, crate::OriginalValuesKnown::No, true).unwrap();
             provider_rw.commit().unwrap();
         };
 

@@ -28,6 +28,7 @@ bytes = { workspace = true, optional = true }
 derive_more.workspace = true
 itertools = { workspace = true, features = ["use_alloc"] }
 nybbles = { workspace = true, features = ["rlp"] }
+dashmap.workspace = true
 
 # reth
 revm-database.workspace = true
