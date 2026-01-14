@@ -59,7 +59,6 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
             f(self)
         }
     }
-
 }
 
 /// Decodes a `(key, value)` pair from the database.
@@ -122,9 +121,8 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
 
     fn next(&mut self) -> PairResult<T> {
         if let Some(metrics) = self.metrics.clone() {
-            metrics.record_cursor_read(T::NAME, ReadOperation::Next, || {
-                decode::<T>(self.inner.next())
-            })
+            metrics
+                .record_cursor_read(T::NAME, ReadOperation::Next, || decode::<T>(self.inner.next()))
         } else {
             decode::<T>(self.inner.next())
         }
@@ -132,9 +130,8 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
 
     fn prev(&mut self) -> PairResult<T> {
         if let Some(metrics) = self.metrics.clone() {
-            metrics.record_cursor_read(T::NAME, ReadOperation::Prev, || {
-                decode::<T>(self.inner.prev())
-            })
+            metrics
+                .record_cursor_read(T::NAME, ReadOperation::Prev, || decode::<T>(self.inner.prev()))
         } else {
             decode::<T>(self.inner.prev())
         }
@@ -142,9 +139,8 @@ impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
 
     fn last(&mut self) -> PairResult<T> {
         if let Some(metrics) = self.metrics.clone() {
-            metrics.record_cursor_read(T::NAME, ReadOperation::Last, || {
-                decode::<T>(self.inner.last())
-            })
+            metrics
+                .record_cursor_read(T::NAME, ReadOperation::Last, || decode::<T>(self.inner.last()))
         } else {
             decode::<T>(self.inner.last())
         }

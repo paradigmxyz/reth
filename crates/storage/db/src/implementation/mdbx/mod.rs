@@ -336,10 +336,8 @@ impl DatabaseMetrics for DatabaseEnv {
             vec![],
         ));
 
-        if let Ok(info) = self
-            .inner
-            .info()
-            .map_err(|error| error!(%error, "Failed to read db.info for page_ops"))
+        if let Ok(info) =
+            self.inner.info().map_err(|error| error!(%error, "Failed to read db.info for page_ops"))
         {
             let page_ops = info.page_ops();
             metrics.push(("db.page_ops.newly", page_ops.newly as f64, vec![]));

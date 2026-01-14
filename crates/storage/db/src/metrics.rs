@@ -42,10 +42,7 @@ impl ReadOperation {
 
     /// Returns `true` if this is a seek-like operation that should record duration.
     pub(crate) const fn should_record_duration(&self) -> bool {
-        matches!(
-            self,
-            Self::Seek | Self::SeekExact | Self::First | Self::Last | Self::SeekBySubkey
-        )
+        matches!(self, Self::Seek | Self::SeekExact | Self::First | Self::Last | Self::SeekBySubkey)
     }
 }
 
@@ -104,8 +101,8 @@ impl DatabaseEnvMetrics {
 
     /// Generate a map of all possible cursor read operation handles for each table and read
     /// operation tuple. Used for tracking cursor read metrics.
-    fn generate_cursor_read_handles(
-    ) -> FxHashMap<(&'static str, ReadOperation), CursorReadMetrics> {
+    fn generate_cursor_read_handles() -> FxHashMap<(&'static str, ReadOperation), CursorReadMetrics>
+    {
         let mut cursor_reads = FxHashMap::with_capacity_and_hasher(
             Tables::COUNT * ReadOperation::COUNT,
             Default::default(),
