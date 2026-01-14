@@ -84,7 +84,12 @@ where
         .into_inner();
         let tx_range = start..=
             Some(end)
-                .min(input.limiter.deleted_entries_limit_left().map(|left| start + left as u64 - 1))
+                .min(
+                    input
+                        .limiter
+                        .deleted_entries_limit_left()
+                        .map(|left| start.saturating_add(left as u64).saturating_sub(1)),
+                )
                 .unwrap();
         let tx_range_end = *tx_range.end();
 
