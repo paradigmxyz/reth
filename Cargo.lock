@@ -7920,6 +7920,7 @@ dependencies = [
  "tokio-stream",
  "toml",
  "tracing",
+ "url",
  "zstd",
 ]
 
