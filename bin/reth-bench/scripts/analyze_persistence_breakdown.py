@@ -86,8 +86,9 @@ def parse_log(log_file: str) -> list:
 
             # Look for the significant commit that follows (> 10ms mdbx time)
             # There are many small commits from other operations, we want the big one
+            # Search up to 1000 lines to handle verbose debug logs between operations
             commit_data = None
-            for j in range(i + 1, min(i + 200, len(lines))):
+            for j in range(i + 1, min(i + 1000, len(lines))):
                 if 'commit breakdown' in lines[j]:
                     mdbx_elapsed = parse_duration(lines[j], 'mdbx_elapsed')
                     # Look for significant commit (> 10ms) - the actual save_blocks commit
