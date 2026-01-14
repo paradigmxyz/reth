@@ -467,6 +467,8 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
         let rocksdb_provider = self.rocksdb_provider.clone();
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
+        #[cfg(all(unix, feature = "rocksdb"))]
+        let pending_rocksdb_batches = &self.pending_rocksdb_batches;
 
         thread::scope(|s| {
             // SF writes - capture duration inside thread
@@ -477,9 +479,25 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 result.map(|_| sf_elapsed)
             });
 
-            // RocksDB writes
+            // RocksDB writes - capture duration inside thread, push batch immediately
             let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
-                s.spawn(|| rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx))
+                s.spawn(|| {
+                    let rocksdb_start = Instant::now();
+                    let result = rocksdb_provider.write_blocks_data(&blocks, &tx_nums, rocksdb_ctx);
+                    let rocksdb_elapsed = rocksdb_start.elapsed();
+
+                    // Push batch to pending immediately after write completes
+                    match result {
+                        Ok(_batch_opt) => {
+                            #[cfg(all(unix, feature = "rocksdb"))]
+                            if let Some(batch) = _batch_opt {
+                                pending_rocksdb_batches.lock().push(batch);
+                            }
+                            Ok(rocksdb_elapsed)
+                        }
+                        Err(e) => Err(e),
+                    }
+                })
             });
 
             // MDBX writes
@@ -570,14 +588,32 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             // Wait for SF thread
             let join_start = Instant::now();
             let sf_elapsed = sf_handle.join().map_err(|_| StaticFileWriterError::ThreadPanic("static file"))??;
-            let join_elapsed = join_start.elapsed();
+            let sf_join_elapsed = join_start.elapsed();
+
+            // Wait for RocksDB thread (batch already pushed to pending inside thread)
+            #[cfg(all(unix, feature = "rocksdb"))]
+            let rocksdb_elapsed = if let Some(handle) = rocksdb_handle {
+                let join_start = Instant::now();
+                let rocksdb_elapsed = handle.join().expect("RocksDB thread panicked")?;
+                let rocksdb_join_elapsed = join_start.elapsed();
+                Some((rocksdb_elapsed, rocksdb_join_elapsed))
+            } else {
+                None
+            };
+            #[cfg(not(all(unix, feature = "rocksdb")))]
+            let rocksdb_elapsed: Option<(Duration, Duration)> = {
+                let _ = rocksdb_handle;
+                None
+            };
 
             debug!(
                 target: "providers::db",
                 block_count = %blocks.len(),
                 ?mdbx_elapsed,
                 ?sf_elapsed,
-                ?join_elapsed,
+                sf_join_elapsed = ?sf_join_elapsed,
+                rocksdb_elapsed = ?rocksdb_elapsed.map(|(e, _)| e),
+                rocksdb_join_elapsed = ?rocksdb_elapsed.map(|(_, j)| j),
                 ?total_insert_block,
                 ?total_write_state,
                 ?total_write_hashed_state,
@@ -586,16 +622,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 ?duration_update_history_indices,
                 "save_blocks breakdown"
             );
-
-            // Wait for RocksDB thread and push batch to pending
-            #[cfg(all(unix, feature = "rocksdb"))]
-            if let Some(handle) = rocksdb_handle &&
-                let Some(batch) = handle.join().expect("RocksDB thread panicked")?
-            {
-                self.set_pending_rocksdb_batch(batch);
-            }
-            #[cfg(not(all(unix, feature = "rocksdb")))]
-            let _ = rocksdb_handle;
 
             debug!(target: "providers::db", range = ?first_number..=last_block_number, "Appended block data");
 

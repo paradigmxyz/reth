@@ -47,21 +47,22 @@ def grep_lines(log_file: str, pattern: str) -> list[str]:
 
 
 def parse_duration(text: str, field: str) -> float | None:
-    """Extract duration in ms from field like 'field=123.456ms'."""
+    """Extract duration in ms from field like 'field=123.456ms' or 'field=Some(123.456ms)'."""
+    # Handle both direct values and Some(...) wrapped values
     # Milliseconds
-    match = re.search(rf'{field}=(\d+\.?\d*)ms', text)
+    match = re.search(rf'{field}=(?:Some\()?(\d+\.?\d*)ms\)?', text)
     if match:
         return float(match.group(1))
     # Seconds
-    match = re.search(rf'{field}=(\d+\.?\d*)s(?![\w])', text)
+    match = re.search(rf'{field}=(?:Some\()?(\d+\.?\d*)s(?![\w])\)?', text)
     if match:
         return float(match.group(1)) * 1000
     # Microseconds
-    match = re.search(rf'{field}=(\d+\.?\d*)[µu]s', text)
+    match = re.search(rf'{field}=(?:Some\()?(\d+\.?\d*)[µu]s\)?', text)
     if match:
         return float(match.group(1)) / 1000
     # Nanoseconds
-    match = re.search(rf'{field}=(\d+\.?\d*)ns', text)
+    match = re.search(rf'{field}=(?:Some\()?(\d+\.?\d*)ns\)?', text)
     if match:
         return float(match.group(1)) / 1_000_000
     return None
@@ -85,7 +86,9 @@ def parse_save_blocks_entries(log_file: str) -> pd.DataFrame:
             "block_count": parse_int(line, "block_count"),
             "mdbx_ms": parse_duration(line, "mdbx_elapsed"),
             "sf_ms": parse_duration(line, "sf_elapsed"),
-            "join_ms": parse_duration(line, "join_elapsed"),
+            "sf_join_ms": parse_duration(line, "sf_join_elapsed"),
+            "rocksdb_ms": parse_duration(line, "rocksdb_elapsed"),
+            "rocksdb_join_ms": parse_duration(line, "rocksdb_join_elapsed"),
             "insert_block_ms": parse_duration(line, "total_insert_block"),
             "write_state_ms": parse_duration(line, "total_write_state"),
             "write_hashed_state_ms": parse_duration(line, "total_write_hashed_state"),
@@ -405,18 +408,28 @@ def main():
         # Normalize to per-block
         df_save['mdbx_per_block'] = df_save['mdbx_ms'] / df_save['block_count']
         df_save['sf_per_block'] = df_save['sf_ms'] / df_save['block_count']
-        df_save['join_per_block'] = df_save['join_ms'] / df_save['block_count']
+        df_save['sf_join_per_block'] = df_save['sf_join_ms'] / df_save['block_count']
+        if 'rocksdb_ms' in df_save and df_save['rocksdb_ms'].notna().any():
+            df_save['rocksdb_per_block'] = df_save['rocksdb_ms'] / df_save['block_count']
+            df_save['rocksdb_join_per_block'] = df_save['rocksdb_join_ms'] / df_save['block_count']
+            has_rocksdb = True
+        else:
+            has_rocksdb = False
 
         # Overall stats
         print_subsection("Overall Timing (per save_blocks call)")
         print_stats_row("MDBX total", calc_percentiles(df_save['mdbx_ms']))
         print_stats_row("SF total", calc_percentiles(df_save['sf_ms']))
-        print_stats_row("Join wait", calc_percentiles(df_save['join_ms']))
+        print_stats_row("SF join wait", calc_percentiles(df_save['sf_join_ms']))
+        if has_rocksdb:
+            print_stats_row("RocksDB total", calc_percentiles(df_save['rocksdb_ms']))
+            print_stats_row("RocksDB join wait", calc_percentiles(df_save['rocksdb_join_ms']))
 
         print_subsection("Per-Block Timing")
         print_stats_row("MDBX per block", calc_percentiles(df_save['mdbx_per_block']))
         print_stats_row("SF per block", calc_percentiles(df_save['sf_per_block']))
-        print_stats_row("Join per block", calc_percentiles(df_save['join_per_block']))
+        if has_rocksdb:
+            print_stats_row("RocksDB per block", calc_percentiles(df_save['rocksdb_per_block']))
 
         # Bottleneck analysis
         print_subsection("Bottleneck Analysis")
@@ -490,22 +503,37 @@ def main():
     if not df_save.empty:
         total_mdbx = df_save['mdbx_ms'].sum()
         total_sf = df_save['sf_ms'].sum()
-        total_join = df_save['join_ms'].sum()
+        total_sf_join = df_save['sf_join_ms'].sum()
         total_blocks = df_save['block_count'].sum()
 
-        # Wall clock estimate (max of parallel work + join wait)
-        wall_time = df_save[['mdbx_ms', 'sf_ms']].max(axis=1).sum()
+        # Check for rocksdb data
+        has_rocksdb = 'rocksdb_ms' in df_save and df_save['rocksdb_ms'].notna().any()
+        if has_rocksdb:
+            total_rocksdb = df_save['rocksdb_ms'].sum()
+            total_rocksdb_join = df_save['rocksdb_join_ms'].sum()
+
+        # Wall clock estimate (max of parallel work)
+        parallel_cols = ['mdbx_ms', 'sf_ms']
+        if has_rocksdb:
+            parallel_cols.append('rocksdb_ms')
+        wall_time = df_save[parallel_cols].max(axis=1).sum()
 
         print(f"  Total blocks processed:  {total_blocks:.0f}")
         print(f"  Total save_blocks calls: {len(df_save)}")
         print(f"")
         print(f"  Aggregate MDBX time:     {total_mdbx:,.1f}ms ({total_mdbx/1000:.1f}s)")
         print(f"  Aggregate SF time:       {total_sf:,.1f}ms ({total_sf/1000:.1f}s)")
-        print(f"  Aggregate join wait:     {total_join:,.1f}ms ({total_join/1000:.1f}s)")
+        if has_rocksdb:
+            print(f"  Aggregate RocksDB time:  {total_rocksdb:,.1f}ms ({total_rocksdb/1000:.1f}s)")
+        print(f"  Aggregate SF join wait:  {total_sf_join:,.1f}ms ({total_sf_join/1000:.1f}s)")
+        if has_rocksdb:
+            print(f"  Aggregate RocksDB join:  {total_rocksdb_join:,.1f}ms ({total_rocksdb_join/1000:.1f}s)")
         print(f"  Est. wall clock time:    {wall_time:,.1f}ms ({wall_time/1000:.1f}s)")
         print(f"")
         print(f"  Avg per block (MDBX):    {total_mdbx/total_blocks:.3f}ms")
         print(f"  Avg per block (SF):      {total_sf/total_blocks:.3f}ms")
+        if has_rocksdb:
+            print(f"  Avg per block (RocksDB): {total_rocksdb/total_blocks:.3f}ms")
 
     if not df_commit.empty:
         normal = df_commit[~df_commit['is_unwind']]

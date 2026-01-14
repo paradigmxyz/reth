@@ -60,24 +60,31 @@ def parse_block_count(text: str) -> int | None:
 
 
 def parse_duration_field(text: str, field: str) -> float | None:
-    """Extract duration in ms from field like 'mdbx_elapsed=123.456ms' or 'mdbx_elapsed=1.23s'."""
-    # Try milliseconds first: field=123.456ms
-    pattern = rf'{field}=(\d+\.?\d*)ms'
+    """Extract duration in ms from field like 'field=123.456ms' or 'field=Some(123.456ms)'."""
+    # Handle both direct values and Some(...) wrapped values
+    # Try milliseconds first: field=123.456ms or field=Some(123.456ms)
+    pattern = rf'{field}=(?:Some\()?(\d+\.?\d*)ms\)?'
     match = re.search(pattern, text)
     if match:
         return float(match.group(1))
 
-    # Try seconds: field=1.23s
-    pattern = rf'{field}=(\d+\.?\d*)s'
+    # Try seconds: field=1.23s or field=Some(1.23s)
+    pattern = rf'{field}=(?:Some\()?(\d+\.?\d*)s(?![\w])\)?'
     match = re.search(pattern, text)
     if match:
         return float(match.group(1)) * 1000
 
-    # Try microseconds: field=123.456µs or field=123.456us
-    pattern = rf'{field}=(\d+\.?\d*)[µu]s'
+    # Try microseconds: field=123.456µs or field=Some(123.456µs)
+    pattern = rf'{field}=(?:Some\()?(\d+\.?\d*)[µu]s\)?'
     match = re.search(pattern, text)
     if match:
         return float(match.group(1)) / 1000
+
+    # Try nanoseconds: field=123ns or field=Some(123ns)
+    pattern = rf'{field}=(?:Some\()?(\d+\.?\d*)ns\)?'
+    match = re.search(pattern, text)
+    if match:
+        return float(match.group(1)) / 1_000_000
 
     return None
 
@@ -228,7 +235,9 @@ def analyze_breakdown(log_file: str) -> dict:
                 "block_count": block_count,
                 "mdbx_ms": parse_duration_field(line, "mdbx_elapsed"),
                 "sf_ms": parse_duration_field(line, "sf_elapsed"),
-                "join_ms": parse_duration_field(line, "join_elapsed"),
+                "sf_join_ms": parse_duration_field(line, "sf_join_elapsed"),
+                "rocksdb_ms": parse_duration_field(line, "rocksdb_elapsed"),
+                "rocksdb_join_ms": parse_duration_field(line, "rocksdb_join_elapsed"),
                 "insert_block_ms": parse_duration_field(line, "total_insert_block"),
                 "write_state_ms": parse_duration_field(line, "total_write_state"),
                 "write_hashed_state_ms": parse_duration_field(line, "total_write_hashed_state"),
@@ -263,7 +272,9 @@ def analyze_breakdown(log_file: str) -> dict:
     # Per-block normalization
     mdbx_per_block = [e["mdbx_ms"] / e["block_count"] for e in entries if e["mdbx_ms"]]
     sf_per_block = [e["sf_ms"] / e["block_count"] for e in entries if e["sf_ms"]]
-    join_per_block = [e["join_ms"] / e["block_count"] for e in entries if e["join_ms"]]
+    sf_join_per_block = [e["sf_join_ms"] / e["block_count"] for e in entries if e["sf_join_ms"]]
+    rocksdb_per_block = [e["rocksdb_ms"] / e["block_count"] for e in entries if e["rocksdb_ms"]]
+    rocksdb_join_per_block = [e["rocksdb_join_ms"] / e["block_count"] for e in entries if e["rocksdb_join_ms"]]
 
     # Count how often SF vs MDBX was the bottleneck
     sf_slower = sum(1 for e in entries if e["sf_ms"] and e["mdbx_ms"] and e["sf_ms"] > e["mdbx_ms"])
@@ -275,7 +286,9 @@ def analyze_breakdown(log_file: str) -> dict:
         "total_blocks": sum(e["block_count"] for e in entries),
         "mdbx_per_block": calc_stats(mdbx_per_block),
         "sf_per_block": calc_stats(sf_per_block),
-        "join_per_block": calc_stats(join_per_block),
+        "sf_join_per_block": calc_stats(sf_join_per_block),
+        "rocksdb_per_block": calc_stats(rocksdb_per_block),
+        "rocksdb_join_per_block": calc_stats(rocksdb_join_per_block),
         "sf_slower_count": sf_slower,
         "mdbx_slower_count": mdbx_slower,
         # Raw totals for MDBX breakdown
@@ -340,9 +353,15 @@ def print_breakdown_stats(label: str, stats: dict):
     if stats['sf_per_block']:
         s = stats['sf_per_block']
         print(f"  SF per block:          avg={s['avg']:.3f}ms  p50={s['p50']:.3f}ms  p90={s['p90']:.3f}ms  max={s['max']:.3f}ms")
-    if stats['join_per_block']:
-        s = stats['join_per_block']
-        print(f"  Join wait per block:   avg={s['avg']:.3f}ms  p50={s['p50']:.3f}ms  p90={s['p90']:.3f}ms  max={s['max']:.3f}ms")
+    if stats.get('sf_join_per_block'):
+        s = stats['sf_join_per_block']
+        print(f"  SF join per block:     avg={s['avg']:.3f}ms  p50={s['p50']:.3f}ms  p90={s['p90']:.3f}ms  max={s['max']:.3f}ms")
+    if stats.get('rocksdb_per_block'):
+        s = stats['rocksdb_per_block']
+        print(f"  RocksDB per block:     avg={s['avg']:.3f}ms  p50={s['p50']:.3f}ms  p90={s['p90']:.3f}ms  max={s['max']:.3f}ms")
+    if stats.get('rocksdb_join_per_block'):
+        s = stats['rocksdb_join_per_block']
+        print(f"  RocksDB join/block:    avg={s['avg']:.3f}ms  p50={s['p50']:.3f}ms  p90={s['p90']:.3f}ms  max={s['max']:.3f}ms")
 
     # MDBX breakdown
     print()
