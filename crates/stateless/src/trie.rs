@@ -268,7 +268,7 @@ fn calculate_state_root(
         }
 
         // Finalise the storage‑trie root before pushing the result
-        storage_trie.root();
+
         storage_results.push((address, storage_trie));
     }
 
