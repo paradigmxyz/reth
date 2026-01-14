@@ -486,7 +486,7 @@ where
 #[derive(Debug, thiserror::Error)]
 pub enum TransactionConversionError {
     /// Transaction request validation error.
-    /// 
+    ///
     /// Contains the complete error information including which fields are missing or invalid.
     /// The error message preserves the full Debug representation of the underlying ValueError,
     /// which includes the transaction request and detailed error context.
@@ -1000,7 +1000,7 @@ mod transaction_response_tests {
         // Test Other variant
         let error = TransactionConversionError::Other("Unknown error".to_string());
         assert!(error.to_string().contains("Unknown error"));
-        
+
         // The ValueError variant now uses Debug format which includes full context
         let debug_info = "ValueError { request: TransactionRequest { gas: Some(21000), ... }, message: \"invalid gas price\" }";
         let error = TransactionConversionError::ValueError(debug_info.to_string());
