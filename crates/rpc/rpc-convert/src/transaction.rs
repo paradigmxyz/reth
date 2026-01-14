@@ -488,7 +488,7 @@ pub enum TransactionConversionError {
     /// Transaction request validation error.
     ///
     /// Contains the complete error information including which fields are missing or invalid.
-    /// The error message preserves the full Debug representation of the underlying ValueError,
+    /// The error message preserves the full Debug representation of the underlying `ValueError`,
     /// which includes the transaction request and detailed error context.
     #[error("Failed to convert transaction request: {0}")]
     ValueError(String),
