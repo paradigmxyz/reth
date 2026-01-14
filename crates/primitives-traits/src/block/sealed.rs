@@ -282,6 +282,13 @@ where
     }
 }
 
+impl<B: Block> From<Sealed<B>> for SealedBlock<B> {
+    fn from(sealed: Sealed<B>) -> Self {
+        let (block, hash) = sealed.into_parts();
+        Self::new_unchecked(block, hash)
+    }
+}
+
 impl<B> Default for SealedBlock<B>
 where
     B: Block + Default,
