@@ -641,7 +641,7 @@ async fn run_benchmark_workflow(
     let (mut node_process, _) = node_manager
         .start_node(&binary_path, &args.baseline_ref, "baseline", &additional_args)
         .await?;
-    let starting_tip = if args.skip_wait_syncing {
+    let starting_tip = if true {
         node_manager.wait_for_rpc_and_get_tip(&mut node_process).await?
     } else {
         node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?
