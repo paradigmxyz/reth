@@ -33,3 +33,12 @@ pub use revm::{self, database::State, *};
 /// Helper types for execution witness generation.
 #[cfg(feature = "witness")]
 pub mod witness;
+
+/// Basic block gas batching optimization - reduces gas checks from per-instruction to per-block.
+/// Expected gain: 4-6%.
+#[cfg(feature = "std")]
+pub mod basic_block_gas;
+
+/// Batched interpreter using basic block gas optimization.
+#[cfg(feature = "std")]
+pub mod batched_interpreter;
