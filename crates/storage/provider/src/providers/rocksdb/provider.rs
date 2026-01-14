@@ -514,6 +514,22 @@ impl RocksDBProvider {
         })
     }
 
+    /// Creates a reverse iterator over a table starting from the given key.
+    ///
+    /// Iterates from the key towards the beginning of the table.
+    pub fn iter_from_reverse<T: Table>(
+        &self,
+        key: T::Key,
+    ) -> ProviderResult<RocksDBIterReverse<'_, T>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let encoded_key = key.encode();
+        let iter = self
+            .0
+            .db
+            .iterator_cf(cf, IteratorMode::From(encoded_key.as_ref(), rocksdb::Direction::Reverse));
+        Ok(RocksDBIterReverse { inner: iter, _marker: std::marker::PhantomData })
+    }
+
     /// Writes all `RocksDB` data for multiple blocks in parallel.
     ///
     /// This handles transaction hash numbers, account history, and storage history based on
@@ -1116,6 +1132,60 @@ impl<T: Table> Iterator for RocksDBIter<'_, T> {
         };
 
         Some(Ok((key, value)))
+    }
+}
+
+/// Result type for raw iterator items.
+type RocksDBRawIterResult = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
+
+/// Decodes an iterator result from `RocksDB` into a table key-value pair.
+fn decode_iter_result<T: Table>(
+    result: RocksDBRawIterResult,
+) -> Option<ProviderResult<(T::Key, T::Value)>> {
+    let (key_bytes, value_bytes) = match result {
+        Ok(kv) => kv,
+        Err(e) => {
+            return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))))
+        }
+    };
+
+    // Decode key
+    let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
+        Ok(k) => k,
+        Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+    };
+
+    // Decompress value
+    let value = match T::Value::decompress(&value_bytes) {
+        Ok(v) => v,
+        Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+    };
+
+    Some(Ok((key, value)))
+}
+
+/// Reverse iterator over a `RocksDB` table (non-transactional).
+///
+/// Yields decoded `(Key, Value)` pairs in reverse key order.
+pub struct RocksDBIterReverse<'db, T: Table> {
+    inner: rocksdb::DBIteratorWithThreadMode<'db, OptimisticTransactionDB>,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: Table> fmt::Debug for RocksDBIterReverse<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBIterReverse").field("table", &T::NAME).finish_non_exhaustive()
+    }
+}
+
+impl<T: Table> Iterator for RocksDBIterReverse<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        decode_iter_result::<T>(self.inner.next()?)
     }
 }
 
