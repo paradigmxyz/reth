@@ -128,7 +128,7 @@ impl EngineNodeLauncher {
         let node_config = ctx.node_config();
 
         // We always assume that node is syncing after a restart
-        network_handle.update_sync_state(SyncState::Syncing);
+        network_handle.update_sync_state(SyncState::Idle);
 
         let max_block = ctx.max_block(network_client.clone()).await?;
 
