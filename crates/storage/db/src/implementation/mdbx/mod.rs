@@ -336,24 +336,6 @@ impl DatabaseMetrics for DatabaseEnv {
             vec![],
         ));
 
-        if let Ok(info) =
-            self.inner.info().map_err(|error| error!(%error, "Failed to read db.info for page_ops"))
-        {
-            let page_ops = info.page_ops();
-            metrics.push(("db.page_ops.newly", page_ops.newly as f64, vec![]));
-            metrics.push(("db.page_ops.cow", page_ops.cow as f64, vec![]));
-            metrics.push(("db.page_ops.clone", page_ops.clone as f64, vec![]));
-            metrics.push(("db.page_ops.split", page_ops.split as f64, vec![]));
-            metrics.push(("db.page_ops.merge", page_ops.merge as f64, vec![]));
-            metrics.push(("db.page_ops.spill", page_ops.spill as f64, vec![]));
-            metrics.push(("db.page_ops.unspill", page_ops.unspill as f64, vec![]));
-            metrics.push(("db.page_ops.wops", page_ops.wops as f64, vec![]));
-            metrics.push(("db.page_ops.prefault", page_ops.prefault as f64, vec![]));
-            metrics.push(("db.page_ops.mincore", page_ops.mincore as f64, vec![]));
-            metrics.push(("db.page_ops.msync", page_ops.msync as f64, vec![]));
-            metrics.push(("db.page_ops.fsync", page_ops.fsync as f64, vec![]));
-        }
-
         metrics
     }
 }

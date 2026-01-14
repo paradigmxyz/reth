@@ -363,32 +363,3 @@ impl OperationMetrics {
         }
     }
 }
-
-#[derive(Metrics, Clone)]
-#[metrics(scope = "database.cursor_read")]
-pub(crate) struct CursorReadMetrics {
-    /// Total number of cursor read operations made.
-    calls_total: Counter,
-    /// Duration of cursor read operations (only recorded for seek-like operations).
-    duration_seconds: Histogram,
-}
-
-impl CursorReadMetrics {
-    /// Record cursor read metric.
-    ///
-    /// Duration is only recorded for seek-like operations (`seek`, `seek_exact`, `first`, `last`,
-    /// `seek_by_subkey`) to avoid the performance overhead of clock syscalls on frequent
-    /// `next`/`prev` operations.
-    pub(crate) fn record<R>(&self, read_op: ReadOperation, f: impl FnOnce() -> R) -> R {
-        self.calls_total.increment(1);
-
-        if read_op.should_record_duration() {
-            let start = Instant::now();
-            let result = f();
-            self.duration_seconds.record(start.elapsed());
-            result
-        } else {
-            f()
-        }
-    }
-}
