@@ -1,15 +1,22 @@
-use super::{collect_history_indices, load_history_indices};
+use super::{collect_history_indices, load_storages_history_indices};
 use crate::{StageCheckpoint, StageId};
+use alloy_primitives::{Address, BlockNumber, B256};
 use reth_config::config::{EtlConfig, IndexHistoryConfig};
 use reth_db_api::{
+    cursor::DbCursorRO,
     models::{storage_sharded_key::StorageShardedKey, AddressStorageKey, BlockNumberAddress},
     table::Decode,
     tables,
-    transaction::DbTxMut,
+    transaction::{DbTx, DbTxMut},
 };
-use reth_provider::{DBProvider, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter};
+use reth_provider::{
+    make_rocksdb_batch_arg, make_rocksdb_provider, register_rocksdb_batch, DBProvider,
+    EitherWriter, HistoryWriter, PruneCheckpointReader, PruneCheckpointWriter,
+    RocksDBProviderFactory, StorageSettingsCache,
+};
 use reth_prune_types::{PruneCheckpoint, PruneMode, PrunePurpose, PruneSegment};
 use reth_stages_api::{ExecInput, ExecOutput, Stage, StageError, UnwindInput, UnwindOutput};
+use reth_storage_api::NodePrimitivesProvider;
 use std::fmt::Debug;
 use tracing::info;
 
@@ -46,8 +53,13 @@ impl Default for IndexStorageHistoryStage {
 
 impl<Provider> Stage<Provider> for IndexStorageHistoryStage
 where
-    Provider:
-        DBProvider<Tx: DbTxMut> + PruneCheckpointWriter + HistoryWriter + PruneCheckpointReader,
+    Provider: DBProvider<Tx: DbTxMut>
+        + PruneCheckpointWriter
+        + HistoryWriter
+        + PruneCheckpointReader
+        + NodePrimitivesProvider
+        + StorageSettingsCache
+        + RocksDBProviderFactory,
 {
     /// Return the id of the stage
     fn id(&self) -> StageId {
@@ -116,7 +128,7 @@ where
             )?;
 
         info!(target: "sync::stages::index_storage_history::exec", "Loading indices into database");
-        load_history_indices::<_, tables::StoragesHistory, _>(
+        load_storages_history_indices(
             provider,
             collector,
             first_sync,
@@ -139,7 +151,44 @@ where
         let (range, unwind_progress, _) =
             input.unwind_block_range_with_threshold(self.commit_threshold);
 
-        provider.unwind_storage_history_indices_range(BlockNumberAddress::range(range))?;
+        // Create EitherWriter for storage history
+        #[allow(clippy::let_unit_value)]
+        let rocksdb = make_rocksdb_provider(provider);
+        #[allow(clippy::let_unit_value)]
+        let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
+        let mut writer = EitherWriter::new_storages_history(provider, rocksdb_batch)?;
+
+        // Read changesets to identify what to unwind
+        let changesets = provider
+            .tx_ref()
+            .cursor_read::<tables::StorageChangeSets>()?
+            .walk_range(BlockNumberAddress::range(range))?
+            .collect::<Result<Vec<_>, _>>()?;
+
+        // Group by (address, storage_key) and find minimum block for each
+        // We only need to unwind once per (address, key) using the LOWEST block number
+        // since unwind removes all indices >= that block
+        let mut storage_keys: std::collections::HashMap<(Address, B256), BlockNumber> =
+            std::collections::HashMap::new();
+        for (BlockNumberAddress((bn, address)), storage) in changesets {
+            storage_keys
+                .entry((address, storage.key))
+                .and_modify(|min_bn| *min_bn = (*min_bn).min(bn))
+                .or_insert(bn);
+        }
+
+        // Unwind each storage slot's history shards (once per unique key)
+        for ((address, storage_key), min_block) in storage_keys {
+            super::utils::unwind_storages_history_shards(
+                &mut writer,
+                address,
+                storage_key,
+                min_block,
+            )?;
+        }
+
+        // Register RocksDB batch for commit
+        register_rocksdb_batch(provider, writer);
 
         Ok(UnwindOutput { checkpoint: StageCheckpoint::new(unwind_progress) })
     }
@@ -662,5 +711,119 @@ mod tests {
             assert!(table.is_empty());
             Ok(())
         }
+    }
+}
+
+#[cfg(all(test, unix, feature = "rocksdb"))]
+mod rocksdb_stage_tests {
+    use super::*;
+    use crate::test_utils::TestStageDB;
+    use alloy_primitives::{address, b256, U256};
+    use reth_db_api::{models::StoredBlockBodyIndices, tables};
+    use reth_primitives_traits::StorageEntry;
+    use reth_provider::{DatabaseProviderFactory, RocksDBProviderFactory};
+    use reth_storage_api::StorageSettings;
+
+    const ADDRESS: Address = address!("0x0000000000000000000000000000000000000001");
+    const STORAGE_KEY: alloy_primitives::B256 =
+        b256!("0x0000000000000000000000000000000000000000000000000000000000000001");
+
+    /// Test that `IndexStorageHistoryStage` writes to `RocksDB` when enabled.
+    #[test]
+    fn test_index_storage_history_writes_to_rocksdb() {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        // Setup storage changesets (blocks 1-10, skip 0 to avoid genesis edge case)
+        db.commit(|tx| {
+            for block in 1..=10u64 {
+                tx.put::<tables::BlockBodyIndices>(
+                    block,
+                    StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                )?;
+                tx.put::<tables::StorageChangeSets>(
+                    BlockNumberAddress((block, ADDRESS)),
+                    StorageEntry { key: STORAGE_KEY, value: U256::ZERO },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        // Execute stage from checkpoint 0 (will process blocks 1-10)
+        let input = ExecInput { target: Some(10), checkpoint: Some(StageCheckpoint::new(0)) };
+        let mut stage = IndexStorageHistoryStage::default();
+        let provider = db.factory.database_provider_rw().unwrap();
+        let out = stage.execute(&provider, input).unwrap();
+        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+        provider.commit().unwrap();
+
+        // Verify data is in RocksDB
+        let rocksdb = db.factory.rocksdb_provider();
+        let count =
+            rocksdb.iter::<tables::StoragesHistory>().unwrap().filter_map(|r| r.ok()).count();
+        assert!(count > 0, "Expected data in RocksDB, found {count} entries");
+
+        // Verify MDBX StoragesHistory is empty (data went to RocksDB)
+        let mdbx_table = db.table::<tables::StoragesHistory>().unwrap();
+        assert!(mdbx_table.is_empty(), "MDBX should be empty when RocksDB is enabled");
+    }
+
+    /// Test that `IndexStorageHistoryStage` unwind clears `RocksDB` data.
+    #[test]
+    fn test_index_storage_history_unwind_clears_rocksdb() {
+        let db = TestStageDB::default();
+        db.factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        // Setup storage changesets (blocks 1-10, skip 0 to avoid genesis edge case)
+        db.commit(|tx| {
+            for block in 1..=10u64 {
+                tx.put::<tables::BlockBodyIndices>(
+                    block,
+                    StoredBlockBodyIndices { tx_count: 3, ..Default::default() },
+                )?;
+                tx.put::<tables::StorageChangeSets>(
+                    BlockNumberAddress((block, ADDRESS)),
+                    StorageEntry { key: STORAGE_KEY, value: U256::ZERO },
+                )?;
+            }
+            Ok(())
+        })
+        .unwrap();
+
+        // Execute stage from checkpoint 0 (will process blocks 1-10)
+        let input = ExecInput { target: Some(10), checkpoint: Some(StageCheckpoint::new(0)) };
+        let mut stage = IndexStorageHistoryStage::default();
+        let provider = db.factory.database_provider_rw().unwrap();
+        let out = stage.execute(&provider, input).unwrap();
+        assert_eq!(out, ExecOutput { checkpoint: StageCheckpoint::new(10), done: true });
+        provider.commit().unwrap();
+
+        // Verify data exists in RocksDB
+        let rocksdb = db.factory.rocksdb_provider();
+        let before_count =
+            rocksdb.iter::<tables::StoragesHistory>().unwrap().filter_map(|r| r.ok()).count();
+        assert!(before_count > 0, "Expected data in RocksDB before unwind");
+
+        // Unwind to block 0 (removes blocks 1-10, leaving nothing)
+        let unwind_input = UnwindInput {
+            checkpoint: StageCheckpoint::new(10),
+            unwind_to: 0,
+            ..Default::default()
+        };
+        let provider = db.factory.database_provider_rw().unwrap();
+        let out = stage.unwind(&provider, unwind_input).unwrap();
+        assert_eq!(out, UnwindOutput { checkpoint: StageCheckpoint::new(0) });
+        provider.commit().unwrap();
+
+        // Verify RocksDB is cleared (no block 0 data exists)
+        let rocksdb = db.factory.rocksdb_provider();
+        let after_count =
+            rocksdb.iter::<tables::StoragesHistory>().unwrap().filter_map(|r| r.ok()).count();
+        assert_eq!(after_count, 0, "RocksDB should be empty after unwind to 0");
     }
 }
