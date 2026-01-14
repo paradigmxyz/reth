@@ -83,59 +83,57 @@ impl AsMut<[u8]> for CountingBuf {
 /// Used to serialize values directly into MDBX-managed memory.
 #[derive(Debug)]
 pub struct SliceBuf<'a> {
+    /// The remaining unwritten portion of the buffer.
     buf: &'a mut [u8],
-    pos: usize,
+    /// The initial length of the buffer (used to compute bytes written).
+    initial_len: usize,
 }
 
 impl<'a> SliceBuf<'a> {
     /// Creates a new `SliceBuf` wrapping the given slice.
     #[inline]
-    pub const fn new(buf: &'a mut [u8]) -> Self {
-        Self { buf, pos: 0 }
+    pub fn new(buf: &'a mut [u8]) -> Self {
+        let initial_len = buf.len();
+        Self { buf, initial_len }
     }
 
     /// Returns the number of bytes written.
     #[inline]
-    pub const fn written(&self) -> usize {
-        self.pos
+    pub fn written(&self) -> usize {
+        self.initial_len - self.buf.len()
     }
 }
 
 unsafe impl BufMut for SliceBuf<'_> {
     #[inline]
     fn remaining_mut(&self) -> usize {
-        self.buf.len() - self.pos
+        self.buf.len()
     }
 
     #[inline]
     unsafe fn advance_mut(&mut self, cnt: usize) {
-        debug_assert!(self.pos + cnt <= self.buf.len(), "SliceBuf overflow");
-        self.pos += cnt;
+        debug_assert!(cnt <= self.buf.len(), "SliceBuf overflow");
+        let buf = core::mem::take(&mut self.buf);
+        self.buf = &mut buf[cnt..];
     }
 
     #[inline]
     fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
-        // SAFETY: The slice is valid and we track the position.
-        unsafe {
-            bytes::buf::UninitSlice::from_raw_parts_mut(
-                self.buf.as_mut_ptr().add(self.pos),
-                self.buf.len() - self.pos,
-            )
-        }
+        bytes::buf::UninitSlice::new(self.buf)
     }
 
     #[inline]
     fn put_slice(&mut self, src: &[u8]) {
-        debug_assert!(self.pos + src.len() <= self.buf.len(), "SliceBuf overflow");
-        self.buf[self.pos..self.pos + src.len()].copy_from_slice(src);
-        self.pos += src.len();
+        self.buf[..src.len()].copy_from_slice(src);
+        let buf = core::mem::take(&mut self.buf);
+        self.buf = &mut buf[src.len()..];
     }
 }
 
 impl AsMut<[u8]> for SliceBuf<'_> {
     #[inline]
     fn as_mut(&mut self) -> &mut [u8] {
-        &mut self.buf[..self.pos]
+        self.buf
     }
 }
 
