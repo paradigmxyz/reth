@@ -89,7 +89,7 @@ async fn testing_rpc_build_block_works() -> eyre::Result<()> {
     Ok(())
 }
 
-/// Helper to test testing_buildBlockV1 error scenarios with a custom request builder
+/// Helper to test `testing_buildBlockV1` error scenarios with a custom request builder
 async fn test_build_block_error<F>(build_request: F) -> eyre::Result<()>
 where
     F: FnOnce(Arc<reth_chainspec::ChainSpec>) -> TestingBuildBlockRequestV1 + Send + 'static,
@@ -119,7 +119,7 @@ where
         .on_rpc_started(move |ctx, handles| {
             let Some(client) = handles.rpc.http_client() else { return Ok(()) };
             let chain = ctx.config().chain.clone();
-            
+
             tokio::spawn(async move {
                 let request = build_request(chain);
                 let res: eyre::Result<ExecutionPayloadEnvelopeV4> =
@@ -143,7 +143,7 @@ where
 fn create_tx(chain_id: u64, gas: u64, nonce: u64) -> Bytes {
     let wallet = Wallet::default().inner;
     let signer = EthereumWallet::from(wallet);
-    
+
     let tx_request = TransactionRequest {
         nonce: Some(nonce),
         value: Some(U256::from(100)),
@@ -161,7 +161,7 @@ fn create_tx(chain_id: u64, gas: u64, nonce: u64) -> Bytes {
             .await
             .unwrap()
     });
-    
+
     Bytes::from(signed_tx.encoded_2718())
 }
 
