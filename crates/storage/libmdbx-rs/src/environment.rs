@@ -211,7 +211,7 @@ impl Environment {
         let mut freelist: usize = 0;
         let txn = self.begin_ro_txn()?;
         let db = Database::freelist_db();
-        let cursor = txn.cursor(&db)?;
+        let cursor = txn.cursor(db.dbi())?;
 
         for result in cursor.iter_slices() {
             let (_key, value) = result?;
