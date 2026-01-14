@@ -22,6 +22,7 @@ use strum::{EnumIs, EnumString};
     EnumIs,
     Serialize,
     Deserialize,
+    fixed_map::Key,
 )]
 #[strum(serialize_all = "kebab-case")]
 #[cfg_attr(feature = "clap", derive(clap::ValueEnum))]
