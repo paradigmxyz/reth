@@ -147,6 +147,11 @@ pub(crate) struct Args {
     #[arg(long)]
     pub no_clear_cache: bool,
 
+    /// Skip waiting for the node to sync before starting benchmarks.
+    /// When enabled, assumes the node is already synced and skips the initial tip check.
+    #[arg(long)]
+    pub skip_wait_syncing: bool,
+
     #[command(flatten)]
     pub logs: LogArgs,
 
@@ -578,7 +583,11 @@ async fn run_warmup_phase(
         node_manager.start_node(&binary_path, warmup_ref, "warmup", &additional_args).await?;
 
     // Wait for node to be ready and get its current tip
-    let current_tip = node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?;
+    let current_tip = if args.skip_wait_syncing {
+        node_manager.wait_for_rpc_and_get_tip(&mut node_process).await?
+    } else {
+        node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?
+    };
     info!("Warmup node is ready at tip: {}", current_tip);
 
     // Clear filesystem caches before warmup run only (unless disabled)
@@ -632,7 +641,11 @@ async fn run_benchmark_workflow(
     let (mut node_process, _) = node_manager
         .start_node(&binary_path, &args.baseline_ref, "baseline", &additional_args)
         .await?;
-    let starting_tip = node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?;
+    let starting_tip = if args.skip_wait_syncing {
+        node_manager.wait_for_rpc_and_get_tip(&mut node_process).await?
+    } else {
+        node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?
+    };
     info!("Node starting tip: {}", starting_tip);
     node_manager.stop_node(&mut node_process).await?;
 
@@ -699,7 +712,11 @@ async fn run_benchmark_workflow(
             node_manager.start_node(&binary_path, git_ref, ref_type, &additional_args).await?;
 
         // Wait for node to be ready and get its current tip (wherever it is)
-        let current_tip = node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?;
+        let current_tip = if args.skip_wait_syncing {
+            node_manager.wait_for_rpc_and_get_tip(&mut node_process).await?
+        } else {
+            node_manager.wait_for_node_ready_and_get_tip(&mut node_process).await?
+        };
         info!("Node is ready at tip: {}", current_tip);
 
         // Calculate benchmark range
