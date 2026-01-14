@@ -20,6 +20,7 @@ reth-trie.workspace = true
 reth-trie-common.workspace = true
 reth-storage-api = { workspace = true, features = ["db-api"] }
 reth-storage-errors.workspace = true
+reth-stages-types.workspace = true
 reth-metrics = { workspace = true, optional = true }
 
 # alloy

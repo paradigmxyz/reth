@@ -8398,6 +8398,7 @@ dependencies = [
 name = "reth-engine-service"
 version = "1.9.3"
 dependencies = [
+ "alloy-eips",
  "futures",
  "pin-project",
  "reth-chainspec",
@@ -8419,6 +8420,7 @@ dependencies = [
  "reth-prune",
  "reth-stages-api",
  "reth-tasks",
+ "reth-trie-db",
  "tokio",
  "tokio-stream",
 ]
@@ -11191,6 +11193,7 @@ dependencies = [
  "reth-metrics",
  "reth-primitives-traits",
  "reth-provider",
+ "reth-stages-types",
  "reth-storage-api",
  "reth-storage-errors",
  "reth-trie",

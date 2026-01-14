@@ -236,30 +236,11 @@ where
 
                 let start = Instant::now();
 
-                // Use changeset cache to retrieve and accumulate reverts block by block.
-                // Iterate in reverse order (newest to oldest) so that older changesets
-                // take precedence when there are conflicting updates.
-                let mut accumulated_reverts = TrieUpdatesSorted::default();
-
-                for block_number in ((from_block + 1)..=db_tip_block).rev() {
-                    // Get the block hash for this block number
-                    let block_hash = provider.block_hash(block_number)?.ok_or_else(|| {
-                        ProviderError::other(std::io::Error::new(
-                            std::io::ErrorKind::NotFound,
-                            format!("block hash not found for block number {}", block_number),
-                        ))
-                    })?;
-
-                    // Get changesets from cache (or compute on-the-fly)
-                    let changesets =
-                        self.changeset_cache.get_or_compute(block_hash, block_number, provider)?;
-
-                    // Overlay this block's changesets on top of accumulated reverts.
-                    // Since we iterate newest to oldest, older values are added last
-                    // and overwrite any conflicting newer values (oldest changeset values to take
-                    // precedence).
-                    accumulated_reverts.extend_ref(&changesets);
-                }
+                // Use changeset cache to retrieve and accumulate reverts to restore state after
+                // from_block
+                let accumulated_reverts = self
+                    .changeset_cache
+                    .get_or_compute_range(provider, (from_block + 1)..=db_tip_block)?;
 
                 retrieve_trie_reverts_duration = start.elapsed();
                 accumulated_reverts

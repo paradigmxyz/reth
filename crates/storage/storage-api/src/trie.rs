@@ -94,9 +94,11 @@ pub trait StateProofProvider {
 pub trait TrieReader: Send {
     /// Returns the [`TrieUpdatesSorted`] for reverting the trie database to its state prior to the
     /// given block and onwards having been processed.
+    #[deprecated]
     fn trie_reverts(&self, from: BlockNumber) -> ProviderResult<TrieUpdatesSorted>;
 
     /// Returns the trie updates that were applied by the specified block.
+    #[deprecated]
     fn get_block_trie_updates(
         &self,
         block_number: BlockNumber,

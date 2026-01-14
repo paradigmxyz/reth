@@ -886,6 +886,7 @@ mod tests {
     use reth_revm::db::BundleState;
     use reth_testing_utils::generators;
     use reth_trie::{test_utils::state_root, HashedPostState};
+    use reth_trie_db::changesets::ChangesetCacheHandle;
     use revm_primitives::{Address, HashMap, B256, KECCAK_EMPTY, U256};
     use revm_state::{AccountInfo, AccountStatus, EvmState, EvmStorageSlot};
     use std::sync::Arc;
@@ -1141,7 +1142,7 @@ mod tests {
                 std::convert::identity,
             ),
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-            OverlayStateProviderFactory::new(provider_factory),
+            OverlayStateProviderFactory::new(provider_factory, ChangesetCacheHandle::new(64)),
             &TreeConfig::default(),
             None, // No BAL for test
         );

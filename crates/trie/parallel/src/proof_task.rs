@@ -1726,8 +1726,11 @@ mod tests {
         runtime.block_on(async {
             let handle = tokio::runtime::Handle::current();
             let provider_factory = create_test_provider_factory();
-            let factory =
-                reth_provider::providers::OverlayStateProviderFactory::new(provider_factory);
+            let changeset_cache = reth_trie_db::changesets::ChangesetCacheHandle::new(64);
+            let factory = reth_provider::providers::OverlayStateProviderFactory::new(
+                provider_factory,
+                changeset_cache,
+            );
             let ctx = test_ctx(factory);
 
             let proof_handle = ProofWorkerHandle::new(handle.clone(), ctx, 5, 3, false);

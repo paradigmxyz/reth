@@ -8,16 +8,18 @@
 //! - **Memory efficiency**: Automatic eviction ensures bounded memory usage
 
 use crate::{DatabaseHashedPostState, DatabaseStateRoot, DatabaseTrieCursorFactory};
-use alloy_primitives::{BlockNumber, B256};
+use alloy_primitives::{map::B256Map, BlockNumber, B256};
 use reth_storage_api::{BlockNumReader, ChangeSetReader, DBProvider, StageCheckpointReader};
 use reth_storage_errors::provider::{ProviderError, ProviderResult};
 use reth_trie::{
-    changesets::compute_trie_changesets, trie_cursor::InMemoryTrieCursorFactory,
+    changesets::compute_trie_changesets,
+    trie_cursor::{InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory},
     HashedPostStateSorted, KeccakKeyHasher, StateRoot, TrieInputSorted,
 };
-use reth_trie_common::updates::TrieUpdatesSorted;
+use reth_trie_common::updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted};
 use std::{
     collections::{BTreeMap, HashMap},
+    ops::RangeInclusive,
     sync::{Arc, RwLock},
     time::Instant,
 };
@@ -123,6 +125,109 @@ where
     Ok(changesets)
 }
 
+/// Computes block trie updates using the changeset cache.
+///
+/// # Algorithm
+///
+/// For block N:
+/// 1. Get cumulative trie reverts from block N+1 to db tip using the cache
+/// 2. Create an overlay cursor factory with these reverts (representing trie state after block N)
+/// 3. Walk through account trie changesets for block N
+/// 4. For each changed path, look up the current value using the overlay cursor
+/// 5. Walk through storage trie changesets for block N
+/// 6. For each changed path, look up the current value using the overlay cursor
+/// 7. Return the collected trie updates
+///
+/// # Arguments
+///
+/// * `cache` - Handle to the changeset cache for retrieving trie reverts
+/// * `provider` - Database provider for accessing changesets and block data
+/// * `block_number` - Block number to compute trie updates for
+///
+/// # Returns
+///
+/// Trie updates representing the state of trie nodes after the block was processed
+///
+/// # Errors
+///
+/// Returns error if:
+/// - Block number exceeds database tip
+/// - Database access fails
+/// - Cache retrieval fails
+pub fn compute_block_trie_updates<Provider>(
+    cache: &ChangesetCacheHandle,
+    provider: &Provider,
+    block_number: BlockNumber,
+) -> ProviderResult<TrieUpdatesSorted>
+where
+    Provider: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+{
+    let tx = provider.tx_ref();
+
+    // Get the database tip block number
+    let db_tip_block = provider
+        .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
+        .as_ref()
+        .map(|chk| chk.block_number)
+        .ok_or_else(|| ProviderError::InsufficientChangesets {
+            requested: block_number,
+            available: 0..=0,
+        })?;
+
+    // Step 1: Get the block hash for the target block
+    let block_hash = provider.block_hash(block_number)?.ok_or_else(|| {
+        ProviderError::other(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            format!("block hash not found for block number {}", block_number),
+        ))
+    })?;
+
+    // Step 2: Get the trie changesets for the target block from cache
+    let changesets = cache.get_or_compute(block_hash, block_number, provider)?;
+
+    // Step 3: Get the trie reverts for the state after the target block using the cache
+    let reverts = cache.get_or_compute_range(provider, (block_number + 1)..=db_tip_block)?;
+
+    // Step 4: Create an InMemoryTrieCursorFactory with the reverts
+    // This gives us the trie state as it was after the target block was processed
+    let db_cursor_factory = DatabaseTrieCursorFactory::new(tx);
+    let cursor_factory = InMemoryTrieCursorFactory::new(db_cursor_factory, &reverts);
+
+    // Step 5: Collect all account trie nodes that changed in the target block
+    let mut account_nodes = Vec::new();
+    let mut account_cursor = cursor_factory.account_trie_cursor()?;
+
+    // Iterate over the account nodes from the changesets
+    for (nibbles, _old_node) in changesets.account_nodes_ref() {
+        // Look up the current value of this trie node using the overlay cursor
+        let node_value = account_cursor.seek_exact(nibbles.clone())?.map(|(_, node)| node);
+        account_nodes.push((nibbles.clone(), node_value));
+    }
+
+    // Step 6: Collect all storage trie nodes that changed in the target block
+    let mut storage_tries = B256Map::default();
+
+    // Iterate over the storage tries from the changesets
+    for (hashed_address, storage_changeset) in changesets.storage_tries_ref() {
+        let mut storage_cursor = cursor_factory.storage_trie_cursor(*hashed_address)?;
+        let mut storage_nodes = Vec::new();
+
+        // Iterate over the storage nodes for this account
+        for (nibbles, _old_node) in storage_changeset.storage_nodes_ref() {
+            // Look up the current value of this storage trie node
+            let node_value = storage_cursor.seek_exact(nibbles.clone())?.map(|(_, node)| node);
+            storage_nodes.push((nibbles.clone(), node_value));
+        }
+
+        storage_tries.insert(
+            *hashed_address,
+            StorageTrieUpdatesSorted { storage_nodes, is_deleted: storage_changeset.is_deleted },
+        );
+    }
+
+    Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
+}
+
 /// Thread-safe handle to the changeset cache.
 ///
 /// This type wraps a shared, mutable reference to the changeset cache.
@@ -226,6 +331,97 @@ impl ChangesetCacheHandle {
         }
 
         Ok(changesets)
+    }
+
+    /// Gets or computes accumulated trie reverts for a range of blocks.
+    ///
+    /// This method retrieves and accumulates all trie changesets (reverts) for the specified
+    /// block range (inclusive). The changesets are accumulated in reverse order (newest to oldest)
+    /// so that older values take precedence when there are conflicts.
+    ///
+    /// # Arguments
+    ///
+    /// * `provider` - Database provider for DB access and block lookups
+    /// * `range` - Block range to accumulate reverts for (inclusive)
+    ///
+    /// # Returns
+    ///
+    /// Accumulated trie reverts for all blocks in the specified range
+    ///
+    /// # Errors
+    ///
+    /// Returns error if:
+    /// - Any block in the range is beyond the database tip
+    /// - Database access fails
+    /// - Block hash lookup fails
+    /// - Changeset computation fails
+    pub fn get_or_compute_range<P>(
+        &self,
+        provider: &P,
+        range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<TrieUpdatesSorted>
+    where
+        P: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
+    {
+        // Get the database tip block number
+        let db_tip_block = provider
+            .get_stage_checkpoint(reth_stages_types::StageId::Finish)?
+            .as_ref()
+            .map(|chk| chk.block_number)
+            .ok_or_else(|| ProviderError::InsufficientChangesets {
+                requested: *range.start(),
+                available: 0..=0,
+            })?;
+
+        let start_block = *range.start();
+        let end_block = *range.end();
+
+        // If range end is beyond the tip, return an error
+        if end_block > db_tip_block {
+            return Err(ProviderError::InsufficientChangesets {
+                requested: end_block,
+                available: 0..=db_tip_block,
+            });
+        }
+
+        let timer = Instant::now();
+
+        // Use changeset cache to retrieve and accumulate reverts block by block.
+        // Iterate in reverse order (newest to oldest) so that older changesets
+        // take precedence when there are conflicting updates.
+        let mut accumulated_reverts = TrieUpdatesSorted::default();
+
+        for block_number in range.rev() {
+            // Get the block hash for this block number
+            let block_hash = provider.block_hash(block_number)?.ok_or_else(|| {
+                ProviderError::other(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    format!("block hash not found for block number {}", block_number),
+                ))
+            })?;
+
+            // Get changesets from cache (or compute on-the-fly)
+            let changesets = self.get_or_compute(block_hash, block_number, provider)?;
+
+            // Overlay this block's changesets on top of accumulated reverts.
+            // Since we iterate newest to oldest, older values are added last
+            // and overwrite any conflicting newer values (oldest changeset values take
+            // precedence).
+            accumulated_reverts.extend_ref(&changesets);
+        }
+
+        let elapsed = timer.elapsed();
+
+        debug!(
+            target: "trie::changeset_cache",
+            ?elapsed,
+            start_block,
+            end_block,
+            num_blocks = end_block.saturating_sub(start_block).saturating_add(1),
+            "Accumulated trie reverts for block range"
+        );
+
+        Ok(accumulated_reverts)
     }
 }
 

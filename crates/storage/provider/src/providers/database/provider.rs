@@ -1956,7 +1956,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         // Write account changes to static files
-        tracing::debug!(target: "sync::stages::merkle_changesets", ?first_block, "Writing account changes");
+        tracing::trace!(?first_block, "Writing account changes");
         for (block_index, account_block_reverts) in reverts.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
             let changeset = account_block_reverts

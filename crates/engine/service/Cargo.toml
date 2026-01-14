@@ -40,6 +40,8 @@ reth-evm-ethereum.workspace = true
 reth-exex-types.workspace = true
 reth-primitives-traits.workspace = true
 reth-node-ethereum.workspace = true
+reth-trie-db.workspace = true
 
+alloy-eips.workspace = true
 tokio = { workspace = true, features = ["sync"] }
 tokio-stream.workspace = true

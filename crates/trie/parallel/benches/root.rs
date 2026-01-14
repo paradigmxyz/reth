@@ -38,7 +38,8 @@ pub fn calculate_state_root(c: &mut Criterion) {
             provider_rw.commit().unwrap();
         }
 
-        let factory = OverlayStateProviderFactory::new(provider_factory.clone());
+        let changeset_cache = reth_trie_db::changesets::ChangesetCacheHandle::new(64);
+        let factory = OverlayStateProviderFactory::new(provider_factory.clone(), changeset_cache);
 
         // state root
         group.bench_function(BenchmarkId::new("sync root", size), |b| {

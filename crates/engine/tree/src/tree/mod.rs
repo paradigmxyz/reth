@@ -30,8 +30,9 @@ use reth_payload_primitives::{
 };
 use reth_primitives_traits::{NodePrimitives, RecoveredBlock, SealedBlock, SealedHeader};
 use reth_provider::{
-    BlockReader, DatabaseProviderFactory, HashedPostStateProvider, ProviderError, StateProviderBox,
-    StateProviderFactory, StateReader, TransactionVariant, TrieReader,
+    BlockNumReader, BlockReader, ChangeSetReader, DatabaseProviderFactory, HashedPostStateProvider,
+    ProviderError, StageCheckpointReader, StateProviderBox, StateProviderFactory, StateReader,
+    TransactionVariant, TrieReader,
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
@@ -314,8 +315,10 @@ where
         + TrieReader
         + Clone
         + 'static,
-    <P as DatabaseProviderFactory>::Provider:
-        BlockReader<Block = N::Block, Header = N::BlockHeader>,
+    <P as DatabaseProviderFactory>::Provider: BlockReader<Block = N::Block, Header = N::BlockHeader>
+        + StageCheckpointReader
+        + ChangeSetReader
+        + BlockNumReader,
     C: ConfigureEvm<Primitives = N> + 'static,
     T: PayloadTypes<BuiltPayload: BuiltPayload<Primitives = N>>,
     V: EngineValidator<T>,
@@ -1824,6 +1827,7 @@ where
     /// or the database. If the required historical data (such as trie change sets) has been
     /// pruned for a given block, this operation will return an error. On archive nodes, it
     /// can retrieve any block.
+    #[instrument(level = "debug", target = "engine::tree", skip(self))]
     fn canonical_block_by_hash(&self, hash: B256) -> ProviderResult<Option<ExecutedBlock<N>>> {
         trace!(target: "engine::tree", ?hash, "Fetching executed block by hash");
         // check memory first
@@ -1841,7 +1845,18 @@ where
             .get_state(block.header().number())?
             .ok_or_else(|| ProviderError::StateForNumberNotFound(block.header().number()))?;
         let hashed_state = self.provider.hashed_post_state(execution_output.state());
-        let trie_updates = self.provider.get_block_trie_updates(block.number())?;
+
+        debug!(
+            target: "engine::tree",
+            number = ?block.number(),
+            "computing block trie updates",
+        );
+        let db_provider = self.provider.database_provider_ro()?;
+        let trie_updates = reth_trie_db::changesets::compute_block_trie_updates(
+            &self.changeset_cache,
+            &db_provider,
+            block.number(),
+        )?;
 
         let sorted_hashed_state = Arc::new(hashed_state.into_sorted());
         let sorted_trie_updates = Arc::new(trie_updates);
