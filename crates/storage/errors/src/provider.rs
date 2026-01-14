@@ -20,6 +20,9 @@ pub enum ProviderError {
     /// Pruning error.
     #[error(transparent)]
     Pruning(#[from] PruneSegmentError),
+    /// Static file writer error.
+    #[error(transparent)]
+    StaticFileWriter(#[from] StaticFileWriterError),
     /// RLP error.
     #[error("{_0}")]
     Rlp(alloy_rlp::Error),
@@ -216,18 +219,21 @@ pub struct RootMismatch {
     pub block_hash: BlockHash,
 }
 
-/// A Static File Write Error.
-#[derive(Debug, thiserror::Error)]
-#[error("{message}")]
-pub struct StaticFileWriterError {
-    /// The error message.
-    pub message: String,
+/// A Static File Writer Error.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub enum StaticFileWriterError {
+    /// Cannot call `sync_all` or `finalize` when prune is queued.
+    #[error("cannot call sync_all or finalize when prune is queued, use commit() instead")]
+    FinalizeWithPruneQueued,
+    /// Other error with message.
+    #[error("{0}")]
+    Other(String),
 }
 
 impl StaticFileWriterError {
-    /// Creates a new [`StaticFileWriterError`] with the given message.
+    /// Creates a new [`StaticFileWriterError::Other`] with the given message.
     pub fn new(message: impl Into<String>) -> Self {
-        Self { message: message.into() }
+        Self::Other(message.into())
     }
 }
 /// Consistent database view error.

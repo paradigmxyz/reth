@@ -30,7 +30,7 @@ pub struct ParallelProof {
     /// Flag indicating whether to include branch node masks in the proof.
     collect_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
-    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    multi_added_removed_keys: Option<MultiAddedRemovedKeys>,
     /// Handle to the proof worker pools.
     proof_worker_handle: ProofWorkerHandle,
     /// Whether to use V2 storage proofs.
@@ -72,7 +72,7 @@ impl ParallelProof {
     /// extra proofs needed to add and remove leaf nodes from the tries.
     pub fn with_multi_added_removed_keys(
         mut self,
-        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+        multi_added_removed_keys: Option<MultiAddedRemovedKeys>,
     ) -> Self {
         self.multi_added_removed_keys = multi_added_removed_keys;
         self
