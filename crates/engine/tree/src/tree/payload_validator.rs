@@ -1,5 +1,11 @@
 //! Types and traits for validating blocks and payloads.
 
+/// Threshold for switching from extend_ref loop to merge_batch in [`merge_overlay_trie_input`].
+///
+/// Benchmarked crossover: extend_ref wins up to ~64 blocks, merge_batch wins beyond.
+/// Using 64 as threshold since they're roughly equal there.
+const MERGE_BATCH_THRESHOLD: usize = 64;
+
 use crate::tree::{
     cached_state::CachedStateProvider,
     error::{InsertBlockError, InsertBlockErrorKind, InsertPayloadError},
@@ -40,7 +46,10 @@ use reth_provider::{
     StateProvider, StateProviderFactory, StateReader, TrieReader,
 };
 use reth_revm::db::State;
-use reth_trie::{updates::TrieUpdates, HashedPostState, StateRoot, TrieInputSorted};
+use reth_trie::{
+    updates::{TrieUpdates, TrieUpdatesSorted},
+    HashedPostState, HashedPostStateSorted, StateRoot, TrieInputSorted,
+};
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
 use std::{
@@ -1012,34 +1021,58 @@ where
         Ok((input, block_hash))
     }
 
-    /// Aggregates multiple in-memory blocks into a single [`TrieInputSorted`] by combining their
+    /// Aggregates in-memory blocks into a single [`TrieInputSorted`] by combining their
     /// state changes.
     ///
     /// The input `blocks` vector is ordered newest -> oldest (see `TreeState::blocks_by_hash`).
-    /// We iterate it in reverse so we start with the oldest block's trie data and extend forward
-    /// toward the newest, ensuring newer state takes precedence.
+    ///
+    /// Uses extend_ref loop for small k, k-way merge_batch for large k.
+    /// See [`MERGE_BATCH_THRESHOLD`] for crossover point.
     fn merge_overlay_trie_input(blocks: &[ExecutedBlock<N>]) -> TrieInputSorted {
-        let mut input = TrieInputSorted::default();
-        let mut blocks_iter = blocks.iter().rev().peekable();
 
-        if let Some(first) = blocks_iter.next() {
-            let data = first.trie_data();
-            input.state = data.hashed_state;
-            input.nodes = data.trie_updates;
-
-            // Only clone and mutate if there are more in-memory blocks.
-            if blocks_iter.peek().is_some() {
-                let state_mut = Arc::make_mut(&mut input.state);
-                let nodes_mut = Arc::make_mut(&mut input.nodes);
-                for block in blocks_iter {
-                    let data = block.trie_data();
-                    state_mut.extend_ref(data.hashed_state.as_ref());
-                    nodes_mut.extend_ref(data.trie_updates.as_ref());
-                }
-            }
+        if blocks.is_empty() {
+            return TrieInputSorted::default();
         }
 
-        input
+        if blocks.len() < MERGE_BATCH_THRESHOLD {
+            // Small k: extend_ref loop is faster
+            // Iterate oldest->newest so newer values override older ones
+            let mut blocks_iter = blocks.iter().rev();
+            let first = blocks_iter.next().expect("blocks is non-empty");
+            let data = first.trie_data();
+
+            // Clone data directly - avoid Arc::clone + Arc::make_mut (which clones anyway)
+            let mut state = data.hashed_state.as_ref().clone();
+            let mut nodes = data.trie_updates.as_ref().clone();
+
+            for block in blocks_iter {
+                let data = block.trie_data();
+                state.extend_ref(data.hashed_state.as_ref());
+                nodes.extend_ref(data.trie_updates.as_ref());
+            }
+
+            TrieInputSorted {
+                state: Arc::new(state),
+                nodes: Arc::new(nodes),
+                prefix_sets: Default::default(),
+            }
+        } else {
+            // Large k: merge_batch is faster (O(n log k) via k-way merge)
+            let trie_data: Vec<_> = blocks.iter().map(|b| b.trie_data()).collect();
+
+            let merged_state = HashedPostStateSorted::merge_batch(
+                trie_data.iter().map(|d| d.hashed_state.as_ref()),
+            );
+            let merged_nodes = TrieUpdatesSorted::merge_batch(
+                trie_data.iter().map(|d| d.trie_updates.as_ref()),
+            );
+
+            TrieInputSorted {
+                state: Arc::new(merged_state),
+                nodes: Arc::new(merged_nodes),
+                prefix_sets: Default::default(),
+            }
+        }
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.

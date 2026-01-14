@@ -1,7 +1,31 @@
 use alloc::vec::Vec;
 use core::cmp::Ordering;
+use itertools::Itertools;
 
-/// Helper function to extend a sorted vector with another sorted vector.
+/// Merge sorted slices into sorted iterator. First occurrence wins for duplicate keys.
+///
+/// Callers pass slices in priority order (index 0 = highest priority), so the first
+/// slice's value for a key takes precedence over later slices.
+pub(crate) fn kway_merge_sorted<'a, K, V>(
+    slices: impl IntoIterator<Item = &'a [(K, V)]>,
+) -> impl Iterator<Item = (K, V)>
+where
+    K: Ord + Clone + 'a,
+    V: Clone + 'a,
+{
+    slices
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .enumerate()
+        .map(|(i, s)| s.iter().cloned().map(move |item| (i, item)))
+        .kmerge_by(|(i1, a), (i2, b)| (&a.0, *i1) < (&b.0, *i2))
+        .coalesce(|(i1, a), (i2, b)| if a.0 == b.0 { Ok((i1, a)) } else { Err(((i1, a), (i2, b))) })
+        .map(|(_, item)| item)
+        .collect::<Vec<_>>()
+        .into_iter()
+}
+
+/// Extend a sorted vector with another sorted vector.
 /// Values from `other` take precedence for duplicate keys.
 ///
 /// This function efficiently merges two sorted vectors by:
@@ -62,5 +86,53 @@ mod tests {
         let other = vec![(2, "b"), (3, "c_new")];
         extend_sorted_vec(&mut target, &other);
         assert_eq!(target, vec![(1, "a"), (2, "b"), (3, "c_new")]);
+    }
+
+    #[test]
+    fn test_kway_merge_sorted_basic() {
+        let slice1 = vec![(1, "a1"), (3, "c1")];
+        let slice2 = vec![(2, "b2"), (3, "c2")];
+        let slice3 = vec![(1, "a3"), (4, "d3")];
+
+        let result: Vec<_> =
+            kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()]).collect();
+        // First occurrence wins: key 1 -> a1 (slice1), key 3 -> c1 (slice1)
+        assert_eq!(result, vec![(1, "a1"), (2, "b2"), (3, "c1"), (4, "d3")]);
+    }
+
+    #[test]
+    fn test_kway_merge_sorted_empty_slices() {
+        let slice1: Vec<(i32, &str)> = vec![];
+        let slice2 = vec![(1, "a")];
+        let slice3: Vec<(i32, &str)> = vec![];
+
+        let result: Vec<_> =
+            kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()]).collect();
+        assert_eq!(result, vec![(1, "a")]);
+    }
+
+    #[test]
+    fn test_kway_merge_sorted_all_same_key() {
+        let slice1 = vec![(5, "first")];
+        let slice2 = vec![(5, "middle")];
+        let slice3 = vec![(5, "last")];
+
+        let result: Vec<_> =
+            kway_merge_sorted([slice1.as_slice(), slice2.as_slice(), slice3.as_slice()]).collect();
+        // First occurrence wins (slice1 has highest priority)
+        assert_eq!(result, vec![(5, "first")]);
+    }
+
+    #[test]
+    fn test_kway_merge_sorted_single_slice() {
+        let slice = vec![(1, "a"), (2, "b"), (3, "c")];
+        let result: Vec<_> = kway_merge_sorted([slice.as_slice()]).collect();
+        assert_eq!(result, vec![(1, "a"), (2, "b"), (3, "c")]);
+    }
+
+    #[test]
+    fn test_kway_merge_sorted_no_slices() {
+        let result: Vec<(i32, &str)> = kway_merge_sorted(Vec::<&[(i32, &str)]>::new()).collect();
+        assert!(result.is_empty());
     }
 }

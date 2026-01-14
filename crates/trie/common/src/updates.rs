@@ -1,4 +1,7 @@
-use crate::{utils::extend_sorted_vec, BranchNodeCompact, HashBuilder, Nibbles};
+use crate::{
+    utils::{extend_sorted_vec, kway_merge_sorted},
+    BranchNodeCompact, HashBuilder, Nibbles,
+};
 use alloc::{
     collections::{btree_map::BTreeMap, btree_set::BTreeSet},
     vec::Vec,
@@ -620,6 +623,67 @@ impl TrieUpdatesSorted {
         self.account_nodes.clear();
         self.storage_tries.clear();
     }
+
+    /// Batch-merge sorted trie updates. Iterator yields **newest to oldest**.
+    ///
+    /// This is more efficient than repeated `extend_ref` calls for large batches,
+    /// using k-way merge for O(n log k) complexity instead of O(n * k).
+    pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
+        let updates: Vec<_> = updates.into_iter().collect();
+        if updates.is_empty() {
+            return Self::default();
+        }
+
+        // Merge account nodes using k-way merge. Newest (index 0) takes precedence.
+        let account_nodes: Vec<_> =
+            kway_merge_sorted(updates.iter().map(|u| u.account_nodes.as_slice())).collect();
+
+        // Accumulator for collecting storage trie slices per address.
+        // We process updates newest-to-oldest and stop collecting for an address
+        // once we hit a "deleted" storage (sealed=true), since older data is irrelevant.
+        struct StorageAcc<'a> {
+            is_deleted: bool,
+            sealed: bool,
+            slices: Vec<&'a [(Nibbles, Option<BranchNodeCompact>)]>,
+        }
+
+        let mut acc: B256Map<StorageAcc<'_>> = B256Map::default();
+
+        // Collect storage slices per address, respecting deletion boundaries
+        for update in &updates {
+            for (addr, storage) in &update.storage_tries {
+                let entry = acc.entry(*addr).or_insert_with(|| StorageAcc {
+                    is_deleted: false,
+                    sealed: false,
+                    slices: Vec::new(),
+                });
+
+                // Skip if we already hit a deletion for this address (older data is irrelevant)
+                if entry.sealed {
+                    continue;
+                }
+
+                entry.slices.push(storage.storage_nodes.as_slice());
+
+                // If this storage was deleted, mark as deleted and seal to ignore older updates
+                if storage.is_deleted {
+                    entry.is_deleted = true;
+                    entry.sealed = true;
+                }
+            }
+        }
+
+        // Merge each address's storage slices using k-way merge
+        let storage_tries = acc
+            .into_iter()
+            .map(|(addr, entry)| {
+                let storage_nodes: Vec<_> = kway_merge_sorted(entry.slices).collect();
+                (addr, StorageTrieUpdatesSorted { is_deleted: entry.is_deleted, storage_nodes })
+            })
+            .collect();
+
+        Self { account_nodes, storage_tries }
+    }
 }
 
 impl AsRef<Self> for TrieUpdatesSorted {
@@ -710,6 +774,22 @@ impl StorageTrieUpdatesSorted {
         // Extend storage nodes
         extend_sorted_vec(&mut self.storage_nodes, &other.storage_nodes);
         self.is_deleted = self.is_deleted || other.is_deleted;
+    }
+
+    /// Batch-merge sorted storage trie updates. Iterator yields **newest to oldest**.
+    /// If any update is deleted, older data is discarded.
+    pub fn merge_batch<'a>(updates: impl IntoIterator<Item = &'a Self>) -> Self {
+        let updates: Vec<_> = updates.into_iter().collect();
+        if updates.is_empty() {
+            return Self::default();
+        }
+
+        let del_idx = updates.iter().position(|u| u.is_deleted);
+        let relevant = del_idx.map_or(&updates[..], |idx| &updates[..=idx]);
+        let storage_nodes =
+            kway_merge_sorted(relevant.iter().map(|u| u.storage_nodes.as_slice())).collect();
+
+        Self { is_deleted: del_idx.is_some(), storage_nodes }
     }
 }
 
