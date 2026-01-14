@@ -448,7 +448,8 @@ where
         // Get or create added/removed keys context
         let multi_added_removed_keys =
             multi_added_removed_keys.unwrap_or_else(MultiAddedRemovedKeys::new);
-        let added_removed_keys = multi_added_removed_keys.get_storage(&hashed_address);
+        let added_removed_keys =
+            multi_added_removed_keys.get_storage(&hashed_address).map(|k| k.as_ref().clone());
 
         let span = debug_span!(
             target: "trie::proof_task",
@@ -466,7 +467,7 @@ where
             StorageProof::new_hashed(&self.provider, &self.provider, hashed_address)
                 .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().copied()))
                 .with_branch_node_masks(with_branch_node_masks)
-                .with_added_removed_keys(added_removed_keys.as_ref().map(|k| k.as_ref()))
+                .with_added_removed_keys(added_removed_keys)
                 .with_trie_cursor_metrics(trie_cursor_metrics)
                 .with_hashed_cursor_metrics(hashed_cursor_metrics)
                 .storage_multiproof(target_slots)
