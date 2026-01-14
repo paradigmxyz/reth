@@ -24,6 +24,7 @@ reth-trie.workspace = true
 alloy-rlp.workspace = true
 alloy-primitives.workspace = true
 
+parking_lot.workspace = true
 # tracing
 tracing.workspace = true
 

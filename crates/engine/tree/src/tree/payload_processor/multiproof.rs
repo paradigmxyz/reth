@@ -7,6 +7,7 @@ use alloy_primitives::{keccak256, map::HashSet, B256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
+use parking_lot::RwLock;
 use reth_metrics::Metrics;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
@@ -225,7 +226,7 @@ struct MultiproofInput {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: CrossbeamSender<MultiProofMessage>,
-    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    multi_added_removed_keys: Option<Arc<RwLock<MultiAddedRemovedKeys>>>,
 }
 
 impl MultiproofInput {
@@ -544,7 +545,7 @@ pub(super) struct MultiProofTask {
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
     /// Tracks keys which have been added and removed throughout the entire block.
-    multi_added_removed_keys: MultiAddedRemovedKeys,
+    multi_added_removed_keys: Arc<RwLock<MultiAddedRemovedKeys>>,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
@@ -577,7 +578,7 @@ impl MultiProofTask {
             proof_result_rx,
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
-            multi_added_removed_keys: MultiAddedRemovedKeys::new(),
+            multi_added_removed_keys: Arc::new(RwLock::new(MultiAddedRemovedKeys::new())),
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
                 metrics.clone(),
@@ -606,10 +607,7 @@ impl MultiProofTask {
         // Make sure all target accounts have an `AddedRemovedKeySet` in the
         // [`MultiAddedRemovedKeys`]. Even if there are not any known removed keys for the account,
         // we still want to optimistically fetch extension children for the leaf addition case.
-        self.multi_added_removed_keys.touch_accounts(targets.keys().copied());
-
-        // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        self.multi_added_removed_keys.write().touch_accounts(targets.keys().copied());
 
         self.metrics.prefetch_proof_targets_accounts_histogram.record(targets.len() as f64);
         self.metrics
@@ -636,7 +634,7 @@ impl MultiProofTask {
                     proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
-                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                    multi_added_removed_keys: Some(self.multi_added_removed_keys.clone()),
                 });
             },
         );
@@ -686,12 +684,15 @@ impl MultiProofTask {
         hashed_state_update: HashedPostState,
     ) -> u64 {
         // Update removed keys based on the state update.
-        self.multi_added_removed_keys.update_with_state(&hashed_state_update);
+        self.multi_added_removed_keys.write().update_with_state(&hashed_state_update);
 
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
         let (fetched_state_update, not_fetched_state_update) = hashed_state_update
-            .partition_by_targets(&self.fetched_proof_targets, &self.multi_added_removed_keys);
+            .partition_by_targets(
+                &self.fetched_proof_targets,
+                &self.multi_added_removed_keys.read(),
+            );
 
         let mut state_updates = 0;
         // If there are any accounts or storage slots that we already fetched the proofs for,
@@ -703,9 +704,6 @@ impl MultiProofTask {
             });
             state_updates += 1;
         }
-
-        // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
 
         let chunking_len = not_fetched_state_update.chunking_length();
         let mut spawned_proof_targets = MultiProofTargets::default();
@@ -725,7 +723,7 @@ impl MultiProofTask {
                 let proof_targets = get_proof_targets(
                     &hashed_state_update,
                     &self.fetched_proof_targets,
-                    &multi_added_removed_keys,
+                    &self.multi_added_removed_keys.read(),
                 );
                 spawned_proof_targets.extend_ref(&proof_targets);
 
@@ -735,7 +733,7 @@ impl MultiProofTask {
                     proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
-                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                    multi_added_removed_keys: Some(self.multi_added_removed_keys.clone()),
                 });
             },
         );
