@@ -1,12 +1,12 @@
 //! Sealed block types
 
 use crate::{
-    block::{error::BlockRecoveryError, RecoveredBlock},
-    transaction::signed::RecoveryError,
+    block::{error::BlockRecoveryError, header::BlockHeader, RecoveredBlock},
+    transaction::signed::{RecoveryError, SignedTransaction},
     Block, BlockBody, GotExpected, InMemorySize, SealedHeader,
 };
 use alloc::vec::Vec;
-use alloy_consensus::BlockHeader;
+use alloy_consensus::BlockHeader as _;
 use alloy_eips::{eip1898::BlockWithParent, BlockNumHash};
 use alloy_primitives::{Address, BlockHash, Sealable, Sealed, B256};
 use alloy_rlp::{Decodable, Encodable};
@@ -282,13 +282,6 @@ where
     }
 }
 
-impl<B: Block> From<Sealed<B>> for SealedBlock<B> {
-    fn from(sealed: Sealed<B>) -> Self {
-        let (block, hash) = sealed.into_parts();
-        Self::new_unchecked(block, hash)
-    }
-}
-
 impl<B> Default for SealedBlock<B>
 where
     B: Block + Default,
@@ -331,6 +324,31 @@ impl<B: Block> From<SealedBlock<B>> for Sealed<B> {
     fn from(value: SealedBlock<B>) -> Self {
         let (block, hash) = value.split();
         Self::new_unchecked(block, hash)
+    }
+}
+
+impl<B: Block> From<Sealed<B>> for SealedBlock<B> {
+    fn from(value: Sealed<B>) -> Self {
+        let (block, hash) = value.into_parts();
+        Self::new_unchecked(block, hash)
+    }
+}
+
+impl<T, H> SealedBlock<alloy_consensus::Block<T, H>>
+where
+    T: Decodable + SignedTransaction,
+    H: BlockHeader,
+{
+    /// Decodes the block from RLP, computing the header hash directly from the RLP bytes.
+    ///
+    /// This is more efficient than decoding and then sealing, as the header hash is computed
+    /// from the raw RLP bytes without re-encoding.
+    ///
+    /// This leverages [`alloy_consensus::Block::decode_sealed`].
+    pub fn decode_sealed(buf: &mut &[u8]) -> alloy_rlp::Result<Self> {
+        let sealed = alloy_consensus::Block::<T, H>::decode_sealed(buf)?;
+        let (block, hash) = sealed.into_parts();
+        Ok(Self::new_unchecked(block, hash))
     }
 }
 
@@ -561,5 +579,97 @@ mod tests {
         assert_eq!(sealed_block.header().number, decoded.header().number);
         assert_eq!(sealed_block.header().state_root, decoded.header().state_root);
         assert_eq!(sealed_block.body().transactions.len(), decoded.body().transactions.len());
+    }
+
+    #[test]
+    fn test_decode_sealed_produces_correct_hash() {
+        // Create a sample block using alloy_consensus::Block
+        let header = alloy_consensus::Header {
+            parent_hash: B256::ZERO,
+            ommers_hash: B256::ZERO,
+            beneficiary: Address::ZERO,
+            state_root: B256::ZERO,
+            transactions_root: B256::ZERO,
+            receipts_root: B256::ZERO,
+            logs_bloom: Default::default(),
+            difficulty: Default::default(),
+            number: 42,
+            gas_limit: 30_000_000,
+            gas_used: 21_000,
+            timestamp: 1_000_000,
+            extra_data: Default::default(),
+            mix_hash: B256::ZERO,
+            nonce: Default::default(),
+            base_fee_per_gas: Some(1_000_000_000),
+            withdrawals_root: None,
+            blob_gas_used: None,
+            excess_blob_gas: None,
+            parent_beacon_block_root: None,
+            requests_hash: None,
+        };
+
+        // Create a simple transaction
+        let tx = alloy_consensus::TxLegacy {
+            chain_id: Some(1),
+            nonce: 0,
+            gas_price: 21_000_000_000,
+            gas_limit: 21_000,
+            to: alloy_primitives::TxKind::Call(Address::ZERO),
+            value: alloy_primitives::U256::from(100),
+            input: alloy_primitives::Bytes::default(),
+        };
+
+        let tx_signed =
+            alloy_consensus::TxEnvelope::Legacy(alloy_consensus::Signed::new_unchecked(
+                tx,
+                alloy_primitives::Signature::test_signature(),
+                B256::ZERO,
+            ));
+
+        // Create block body with the transaction
+        let body = alloy_consensus::BlockBody {
+            transactions: vec![tx_signed],
+            ommers: vec![],
+            withdrawals: Some(Default::default()),
+        };
+
+        // Create the block
+        let block = alloy_consensus::Block::new(header, body);
+        let expected_hash = block.header.hash_slow();
+
+        // Encode the block
+        let mut encoded = Vec::new();
+        block.encode(&mut encoded);
+
+        // Decode using decode_sealed - this should compute hash from raw RLP
+        let decoded =
+            SealedBlock::<alloy_consensus::Block<alloy_consensus::TxEnvelope>>::decode_sealed(
+                &mut encoded.as_slice(),
+            )
+            .expect("Failed to decode sealed block");
+
+        // Verify the hash matches
+        assert_eq!(decoded.hash(), expected_hash);
+        assert_eq!(decoded.header().number, 42);
+        assert_eq!(decoded.body().transactions.len(), 1);
+    }
+
+    #[test]
+    fn test_sealed_block_from_sealed() {
+        let header = alloy_consensus::Header::default();
+        let body = alloy_consensus::BlockBody::<alloy_consensus::TxEnvelope>::default();
+        let block = alloy_consensus::Block::new(header, body);
+        let hash = block.header.hash_slow();
+
+        // Create Sealed<Block>
+        let sealed: Sealed<alloy_consensus::Block<alloy_consensus::TxEnvelope>> =
+            Sealed::new_unchecked(block.clone(), hash);
+
+        // Convert to SealedBlock
+        let sealed_block: SealedBlock<alloy_consensus::Block<alloy_consensus::TxEnvelope>> =
+            SealedBlock::from(sealed);
+
+        assert_eq!(sealed_block.hash(), hash);
+        assert_eq!(sealed_block.header().number, block.header.number);
     }
 }
