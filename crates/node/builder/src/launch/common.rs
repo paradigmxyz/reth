@@ -482,7 +482,7 @@ where
         let static_file_provider =
             StaticFileProviderBuilder::read_write(self.data_dir().static_files())
                 .with_metrics()
-                .with_blocks_per_file_for_segments(static_files_config.as_blocks_per_file_map())
+                .with_blocks_per_file_for_segments(&static_files_config.as_blocks_per_file_map())
                 .with_genesis_block_number(self.chain_spec().genesis().number.unwrap_or_default())
                 .build()?;
 
@@ -935,9 +935,9 @@ where
     /// This checks for OP-Mainnet and ensures we have all the necessary data to progress (past
     /// bedrock height)
     fn ensure_chain_specific_db_checks(&self) -> ProviderResult<()> {
-        if self.chain_spec().is_optimism() &&
-            !self.is_dev() &&
-            self.chain_id() == Chain::optimism_mainnet()
+        if self.chain_spec().is_optimism()
+            && !self.is_dev()
+            && self.chain_id() == Chain::optimism_mainnet()
         {
             let latest = self.blockchain_db().last_block_number()?;
             // bedrock height
@@ -945,7 +945,7 @@ where
                 error!(
                     "Op-mainnet has been launched without importing the pre-Bedrock state. The chain can't progress without this. See also https://reth.rs/run/sync-op-mainnet.html?minimal-bootstrap-recommended"
                 );
-                return Err(ProviderError::BestBlockNotFound)
+                return Err(ProviderError::BestBlockNotFound);
             }
         }
 
@@ -1130,8 +1130,8 @@ where
             while let Some(event) = engine_events.next().await {
                 use reth_engine_primitives::ConsensusEngineEvent;
                 match event {
-                    ConsensusEngineEvent::ForkBlockAdded(executed, duration) |
-                    ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {
+                    ConsensusEngineEvent::ForkBlockAdded(executed, duration)
+                    | ConsensusEngineEvent::CanonicalBlockAdded(executed, duration) => {
                         let block_hash = executed.recovered_block.num_hash().hash;
                         let block_number = executed.recovered_block.num_hash().number;
                         if let Err(e) = ethstats_for_events
