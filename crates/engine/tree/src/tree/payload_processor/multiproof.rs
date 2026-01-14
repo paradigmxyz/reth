@@ -22,6 +22,7 @@ use reth_trie_parallel::{
     },
     targets_v2::{ChunkedMultiProofTargetsV2, MultiProofTargetsV2},
 };
+use revm_primitives::map::{hash_map, B256Map};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
@@ -870,7 +871,33 @@ impl MultiProofTask {
         }
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
+            account: self.multi_added_removed_keys.account.clone(),
+            storages: {
+                let mut storages = B256Map::with_capacity_and_hasher(
+                    not_fetched_state_update.storages.len(),
+                    Default::default(),
+                );
+
+                for account in not_fetched_state_update
+                    .storages
+                    .keys()
+                    .chain(not_fetched_state_update.accounts.keys())
+                {
+                    if let hash_map::Entry::Vacant(entry) = storages.entry(*account) {
+                        entry.insert(
+                            self.multi_added_removed_keys
+                                .storages
+                                .get(account)
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                    }
+                }
+
+                storages
+            },
+        });
 
         let chunking_len = not_fetched_state_update.chunking_length();
         let mut spawned_proof_targets = MultiProofTargets::default();
