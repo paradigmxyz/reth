@@ -457,6 +457,20 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
     pub fn increment_block(&mut self, expected_block_number: BlockNumber) -> ProviderResult<()> {
         let segment = self.writer.user_header().segment();
 
+        // If the static file is empty and the expected block is beyond expected_block_start,
+        // we need to advance to that block first. This can happen when enabling static files
+        // on an existing node where the first block to write is not at the segment boundary.
+        if self.writer.user_header().block_end().is_none() {
+            let start_block = self.writer.user_header().expected_block_start();
+            if expected_block_number > start_block {
+                // Initialize the block range and advance to expected_block_number - 1
+                self.writer.user_header_mut().increment_block();
+                for block in start_block + 1..expected_block_number {
+                    self.writer.user_header_mut().increment_block();
+                }
+            }
+        }
+
         self.check_next_block_number(expected_block_number)?;
 
         let start = Instant::now();
