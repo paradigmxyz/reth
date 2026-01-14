@@ -447,7 +447,7 @@ where
 
         // Get or create added/removed keys context
         let multi_added_removed_keys =
-            multi_added_removed_keys.unwrap_or_else(|| Arc::new(MultiAddedRemovedKeys::new()));
+            multi_added_removed_keys.unwrap_or_else(MultiAddedRemovedKeys::new);
         let added_removed_keys = multi_added_removed_keys.get_storage(&hashed_address);
 
         let span = debug_span!(
@@ -466,7 +466,7 @@ where
             StorageProof::new_hashed(&self.provider, &self.provider, hashed_address)
                 .with_prefix_set_mut(PrefixSetMut::from(prefix_set.iter().copied()))
                 .with_branch_node_masks(with_branch_node_masks)
-                .with_added_removed_keys(added_removed_keys)
+                .with_added_removed_keys(added_removed_keys.as_ref().map(|k| k.as_ref()))
                 .with_trie_cursor_metrics(trie_cursor_metrics)
                 .with_hashed_cursor_metrics(hashed_cursor_metrics)
                 .storage_multiproof(target_slots)
@@ -1556,7 +1556,7 @@ fn dispatch_storage_proofs(
     targets: &MultiProofTargets,
     storage_prefix_sets: &mut B256Map<PrefixSet>,
     with_branch_node_masks: bool,
-    multi_added_removed_keys: Option<&Arc<MultiAddedRemovedKeys>>,
+    multi_added_removed_keys: Option<&MultiAddedRemovedKeys>,
     use_v2_proofs: bool,
 ) -> Result<B256Map<CrossbeamReceiver<StorageProofResultMessage>>, ParallelStateRootError> {
     let mut storage_proof_receivers =
@@ -1613,7 +1613,7 @@ pub enum StorageProofInput {
         /// Whether or not to collect branch node masks
         with_branch_node_masks: bool,
         /// Provided by the user to give the necessary context to retain extra proofs.
-        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+        multi_added_removed_keys: Option<MultiAddedRemovedKeys>,
     },
     /// V2 storage proof variant
     V2 {
@@ -1632,7 +1632,7 @@ impl StorageProofInput {
         prefix_set: PrefixSet,
         target_slots: B256Set,
         with_branch_node_masks: bool,
-        multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+        multi_added_removed_keys: Option<MultiAddedRemovedKeys>,
     ) -> Self {
         Self::Legacy {
             hashed_address,
@@ -1668,7 +1668,7 @@ pub struct AccountMultiproofInput {
     /// Whether or not to collect branch node masks.
     pub collect_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
-    pub multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    pub multi_added_removed_keys: Option<MultiAddedRemovedKeys>,
     /// Context for sending the proof result.
     pub proof_result_sender: ProofResultContext,
     /// Whether to use V2 storage proofs.
@@ -1684,7 +1684,7 @@ struct AccountMultiproofParams<'a> {
     /// Whether or not to collect branch node masks.
     collect_branch_node_masks: bool,
     /// Provided by the user to give the necessary context to retain extra proofs.
-    multi_added_removed_keys: Option<&'a Arc<MultiAddedRemovedKeys>>,
+    multi_added_removed_keys: Option<&'a MultiAddedRemovedKeys>,
     /// Receivers for storage proofs being computed in parallel.
     storage_proof_receivers: B256Map<CrossbeamReceiver<StorageProofResultMessage>>,
     /// Cached storage roots. This will be used to read storage roots for missed leaves, as well as
