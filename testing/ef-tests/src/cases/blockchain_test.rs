@@ -17,7 +17,7 @@ use reth_primitives_traits::{Block as BlockTrait, RecoveredBlock, SealedBlock};
 use reth_provider::{
     test_utils::create_test_provider_factory_with_chain_spec, BlockWriter, DatabaseProviderFactory,
     ExecutionOutcome, HeaderProvider, HistoryWriter, OriginalValuesKnown, StateProofProvider,
-    StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
+    StateWriteConfig, StateWriter, StaticFileProviderFactory, StaticFileSegment, StaticFileWriter,
 };
 use reth_revm::{database::StateProviderDatabase, witness::ExecutionWitnessRecord, State};
 use reth_stateless::{
@@ -328,7 +328,7 @@ fn run_case(
             .write_state(
                 &ExecutionOutcome::single(block.number, output),
                 OriginalValuesKnown::Yes,
-                true,
+                StateWriteConfig::default(),
             )
             .map_err(|err| Error::block_failed(block_number, program_inputs.clone(), err))?;
 
