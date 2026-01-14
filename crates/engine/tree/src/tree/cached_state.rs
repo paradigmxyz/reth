@@ -507,11 +507,8 @@ impl ExecutionCache {
     pub(crate) const fn bytes_to_entries(size_bytes: usize, entry_size: usize) -> usize {
         let entries = size_bytes / entry_size;
         // Round down to nearest power of two
-        let rounded = if entries == 0 {
-            1
-        } else {
-            1 << (usize::BITS - 1 - entries.leading_zeros())
-        };
+        let rounded =
+            if entries == 0 { 1 } else { 1 << (usize::BITS - 1 - entries.leading_zeros()) };
         // Ensure minimum size for epoch tracking
         if rounded < Self::MIN_CACHE_SIZE_WITH_EPOCHS {
             Self::MIN_CACHE_SIZE_WITH_EPOCHS
