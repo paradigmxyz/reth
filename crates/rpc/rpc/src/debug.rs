@@ -116,6 +116,7 @@ where
             .spawn_with_state_at_block(block.parent_hash(), move |eth_api, mut db| {
                 let mut results = Vec::with_capacity(block.body().transactions().len());
 
+                let block_env = evm_env.block_env.clone();
                 eth_api.apply_pre_execution_changes(&block, &mut db, &evm_env)?;
 
                 let mut transactions = block.transactions_recovered().enumerate().peekable();
@@ -123,7 +124,7 @@ where
 
                 let mut evm = eth_api.evm_config().evm_with_env_and_inspector(
                     &mut db,
-                    evm_env.clone(),
+                    evm_env,
                     inspector,
                 );
 
@@ -141,7 +142,7 @@ where
                                 tx_index: Some(index),
                             }),
                             &tx_env,
-                            &evm_env.block_env,
+                            &block_env,
                             &res,
                             db,
                         )
