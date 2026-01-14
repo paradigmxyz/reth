@@ -86,6 +86,9 @@ impl DownloadDefaults {
             "\nIf no URL is provided, the latest mainnet archive snapshot\nwill be proposed for download from ",
         );
         help.push_str(self.default_base_url.as_ref());
+        help.push_str(
+            ".\n\nLocal file:// URLs are also supported for extracting snapshots from disk.",
+        );
         help
     }
 
@@ -293,19 +296,14 @@ impl CompressionFormat {
     }
 }
 
-/// Downloads and extracts a snapshot, blocking until finished.
-fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
-    let client = reqwest::blocking::Client::builder().build()?;
-    let response = client.get(url).send()?.error_for_status()?;
-
-    let total_size = response.content_length().ok_or_else(|| {
-        eyre::eyre!(
-            "Server did not provide Content-Length header. This is required for snapshot downloads"
-        )
-    })?;
-
-    let progress_reader = ProgressReader::new(response, total_size);
-    let format = CompressionFormat::from_url(url)?;
+/// Extracts a compressed tar archive to the target directory with progress tracking.
+fn extract_archive<R: Read>(
+    reader: R,
+    total_size: u64,
+    format: CompressionFormat,
+    target_dir: &Path,
+) -> Result<()> {
+    let progress_reader = ProgressReader::new(reader, total_size);
 
     match format {
         CompressionFormat::Lz4 => {
@@ -320,6 +318,45 @@ fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
 
     info!(target: "reth::cli", "Extraction complete.");
     Ok(())
+}
+
+/// Extracts a snapshot from a local file.
+fn extract_from_file(path: &Path, format: CompressionFormat, target_dir: &Path) -> Result<()> {
+    let file = std::fs::File::open(path)?;
+    let total_size = file.metadata()?.len();
+    extract_archive(file, total_size, format, target_dir)
+}
+
+/// Fetches the snapshot from a remote URL, uncompressing it in a streaming fashion.
+fn download_and_extract(url: &str, format: CompressionFormat, target_dir: &Path) -> Result<()> {
+    let client = reqwest::blocking::Client::builder().build()?;
+    let response = client.get(url).send()?.error_for_status()?;
+
+    let total_size = response.content_length().ok_or_else(|| {
+        eyre::eyre!(
+            "Server did not provide Content-Length header. This is required for snapshot downloads"
+        )
+    })?;
+
+    extract_archive(response, total_size, format, target_dir)
+}
+
+/// Downloads and extracts a snapshot, blocking until finished.
+///
+/// Supports both `file://` URLs for local files and HTTP(S) URLs for remote downloads.
+fn blocking_download_and_extract(url: &str, target_dir: &Path) -> Result<()> {
+    let format = CompressionFormat::from_url(url)?;
+
+    if let Ok(parsed_url) = Url::parse(url) &&
+        parsed_url.scheme() == "file"
+    {
+        let file_path = parsed_url
+            .to_file_path()
+            .map_err(|_| eyre::eyre!("Invalid file:// URL path: {}", url))?;
+        extract_from_file(&file_path, format, target_dir)
+    } else {
+        download_and_extract(url, format, target_dir)
+    }
 }
 
 async fn stream_and_extract(url: &str, target_dir: &Path) -> Result<()> {
@@ -380,6 +417,7 @@ mod tests {
         assert!(help.contains("Available snapshot sources:"));
         assert!(help.contains("merkle.io"));
         assert!(help.contains("publicnode.com"));
+        assert!(help.contains("file://"));
     }
 
     #[test]
@@ -403,5 +441,26 @@ mod tests {
         assert_eq!(defaults.default_base_url, "https://custom.example.com");
         assert_eq!(defaults.available_snapshots.len(), 4); // 2 defaults + 2 added
         assert_eq!(defaults.long_help, Some("Custom help for snapshots".to_string()));
+    }
+
+    #[test]
+    fn test_compression_format_detection() {
+        assert!(matches!(
+            CompressionFormat::from_url("https://example.com/snapshot.tar.lz4"),
+            Ok(CompressionFormat::Lz4)
+        ));
+        assert!(matches!(
+            CompressionFormat::from_url("https://example.com/snapshot.tar.zst"),
+            Ok(CompressionFormat::Zstd)
+        ));
+        assert!(matches!(
+            CompressionFormat::from_url("file:///path/to/snapshot.tar.lz4"),
+            Ok(CompressionFormat::Lz4)
+        ));
+        assert!(matches!(
+            CompressionFormat::from_url("file:///path/to/snapshot.tar.zst"),
+            Ok(CompressionFormat::Zstd)
+        ));
+        assert!(CompressionFormat::from_url("https://example.com/snapshot.tar.gz").is_err());
     }
 }
