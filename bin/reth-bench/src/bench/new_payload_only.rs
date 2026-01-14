@@ -49,6 +49,7 @@ impl Command {
             auth_provider,
             mut next_block,
             is_optimism,
+            ..
         } = BenchContext::new(&self.benchmark, self.rpc_url).await?;
 
         let buffer_size = self.rpc_block_buffer_size;
@@ -96,11 +97,7 @@ impl Command {
             let transaction_count = block.transactions.len() as u64;
             let gas_used = block.header.gas_used;
 
-            debug!(
-                target: "reth-bench",
-                number=?block.header.number,
-                "Sending payload to engine",
-            );
+            debug!(number=?block.header.number, "Sending payload to engine");
 
             let (version, params) = block_to_new_payload(block, is_optimism)?;
 
