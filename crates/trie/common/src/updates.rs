@@ -23,6 +23,15 @@ pub struct TrieUpdates {
 }
 
 impl TrieUpdates {
+    /// Creates a new `TrieUpdates` with pre-allocated capacity.
+    pub fn with_capacity(account_nodes: usize, storage_tries: usize) -> Self {
+        Self {
+            account_nodes: HashMap::with_capacity_and_hasher(account_nodes, Default::default()),
+            removed_nodes: HashSet::with_capacity_and_hasher(account_nodes / 4, Default::default()),
+            storage_tries: B256Map::with_capacity_and_hasher(storage_tries, Default::default()),
+        }
+    }
+
     /// Returns `true` if the updates are empty.
     pub fn is_empty(&self) -> bool {
         self.account_nodes.is_empty() &&

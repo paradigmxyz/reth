@@ -1018,28 +1018,44 @@ where
     /// The input `blocks` vector is ordered newest -> oldest (see `TreeState::blocks_by_hash`).
     /// We iterate it in reverse so we start with the oldest block's trie data and extend forward
     /// toward the newest, ensuring newer state takes precedence.
+    ///
+    /// This uses unsorted HashMap-based structures for O(1) insertion during merging,
+    /// then sorts once at the end. This is more efficient than merging sorted structures
+    /// incrementally (which would require O(N) merge per block).
     fn merge_overlay_trie_input(blocks: &[ExecutedBlock<N>]) -> TrieInputSorted {
-        let mut input = TrieInputSorted::default();
-        let mut blocks_iter = blocks.iter().rev().peekable();
-
-        if let Some(first) = blocks_iter.next() {
-            let data = first.trie_data();
-            input.state = data.hashed_state;
-            input.nodes = data.trie_updates;
-
-            // Only clone and mutate if there are more in-memory blocks.
-            if blocks_iter.peek().is_some() {
-                let state_mut = Arc::make_mut(&mut input.state);
-                let nodes_mut = Arc::make_mut(&mut input.nodes);
-                for block in blocks_iter {
-                    let data = block.trie_data();
-                    state_mut.extend_ref(data.hashed_state.as_ref());
-                    nodes_mut.extend_ref(data.trie_updates.as_ref());
-                }
-            }
+        // Single block: return its sorted data directly (no merge needed)
+        if blocks.len() == 1 {
+            let data = blocks[0].trie_data();
+            return TrieInputSorted::new(data.trie_updates, data.hashed_state, Default::default());
         }
 
-        input
+        // Collect all trie data upfront to avoid repeated wait_cloned() calls
+        // and to calculate total capacity for pre-allocation.
+        let trie_data: Vec<_> = blocks.iter().rev().map(|b| b.trie_data()).collect();
+
+        // Pre-allocate capacity to avoid HashMap rehashing during merges
+        let total_accounts: usize = trie_data.iter().map(|d| d.hashed_state.accounts.len()).sum();
+        let total_storages: usize = trie_data.iter().map(|d| d.hashed_state.storages.len()).sum();
+        let total_account_nodes: usize =
+            trie_data.iter().map(|d| d.trie_updates.account_nodes_ref().len()).sum();
+        let total_storage_tries: usize =
+            trie_data.iter().map(|d| d.trie_updates.storage_tries_ref().len()).sum();
+
+        let mut state = HashedPostState::with_capacity(total_accounts.max(total_storages));
+        let mut nodes = TrieUpdates::with_capacity(total_account_nodes, total_storage_tries);
+
+        // Merge all blocks (already ordered oldest -> newest)
+        for data in &trie_data {
+            state.extend_from_sorted(data.hashed_state.as_ref());
+            nodes.extend_from_sorted(data.trie_updates.as_ref());
+        }
+
+        // Sort once at the end
+        TrieInputSorted::new(
+            Arc::new(nodes.into_sorted()),
+            Arc::new(state.into_sorted()),
+            Default::default(),
+        )
     }
 
     /// Spawns a background task to compute and sort trie data for the executed block.
