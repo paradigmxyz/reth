@@ -1,14 +1,17 @@
 //! Tracking of keys having been added and removed from the tries.
 
+use std::sync::Arc;
+
 use crate::HashedPostState;
-use alloy_primitives::{map::B256Map, B256};
+use alloy_primitives::B256;
 use alloy_trie::proof::AddedRemovedKeys;
+use dashmap::{mapref::one::Ref, DashMap};
 
 /// Tracks added and removed keys across account and storage tries.
 #[derive(Debug, Clone)]
 pub struct MultiAddedRemovedKeys {
     account: AddedRemovedKeys,
-    storages: B256Map<AddedRemovedKeys>,
+    storages: Arc<DashMap<B256, AddedRemovedKeys, alloy_primitives::map::DefaultHashBuilder>>,
 }
 
 /// Returns [`AddedRemovedKeys`] with default parameters. This is necessary while we are not yet
@@ -50,7 +53,7 @@ impl MultiAddedRemovedKeys {
                 continue
             }
 
-            let storage_removed_keys =
+            let mut storage_removed_keys =
                 self.storages.entry(*hashed_address).or_insert_with(default_added_removed_keys);
 
             for (key, val) in &storage.storage {
@@ -68,7 +71,7 @@ impl MultiAddedRemovedKeys {
     }
 
     /// Returns a [`AddedRemovedKeys`] for the storage trie of a particular account, if any.
-    pub fn get_storage(&self, hashed_address: &B256) -> Option<&AddedRemovedKeys> {
+    pub fn get_storage(&self, hashed_address: &B256) -> Option<Ref<'_, B256, AddedRemovedKeys>> {
         self.storages.get(hashed_address)
     }
 

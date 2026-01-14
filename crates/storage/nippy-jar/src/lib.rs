@@ -17,7 +17,7 @@ use serde::{Deserialize, Serialize};
 use std::{
     error::Error as StdError,
     fs::File,
-    io::{Read, Write},
+    io::{self, Read, Write},
     ops::Range,
     path::{Path, PathBuf},
 };
@@ -201,11 +201,11 @@ impl<H: NippyJarHeader> NippyJar<H> {
         let config_path = path.with_extension(CONFIG_FILE_EXTENSION);
         let config_file = File::open(&config_path)
             .inspect_err(|e| {
-                warn!( ?path, %e, "Failed to load static file jar");
+                warn!(?path, %e, "Failed to load static file jar");
             })
             .map_err(|err| reth_fs_util::FsPathError::open(err, config_path))?;
 
-        let mut obj = Self::load_from_reader(config_file)?;
+        let mut obj = Self::load_from_reader(io::BufReader::new(config_file))?;
         obj.path = path.to_path_buf();
         Ok(obj)
     }
@@ -418,9 +418,14 @@ impl DataReader {
         &self.data_mmap[range]
     }
 
-    /// Returns total size of data
+    /// Returns total size of data file.
     pub fn size(&self) -> usize {
         self.data_mmap.len()
+    }
+
+    /// Returns total size of offsets file.
+    pub fn offsets_size(&self) -> usize {
+        self.offset_mmap.len()
     }
 }
 

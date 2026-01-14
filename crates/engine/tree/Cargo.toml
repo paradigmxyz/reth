@@ -44,6 +44,8 @@ alloy-primitives.workspace = true
 alloy-rlp.workspace = true
 alloy-rpc-types-engine.workspace = true
 
+parking_lot.workspace = true
+
 revm.workspace = true
 revm-primitives.workspace = true
 
@@ -65,7 +67,6 @@ schnellru.workspace = true
 rayon.workspace = true
 tracing.workspace = true
 derive_more.workspace = true
-parking_lot.workspace = true
 crossbeam-channel.workspace = true
 
 # optional deps for test-utils
