@@ -1361,6 +1361,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Provider: DBProvider + BlockReader + StageCheckpointReader,
     {
         debug!(target: "reth::providers::static_file", ?segment, ?highest_static_file_entry, ?highest_static_file_block, "Ensuring invariants");
+
+        // If the static file is truly empty (never had data), this is a valid scenario when
+        // enabling static files for the first time on an existing node. No invariants to check.
+        if highest_static_file_entry.is_none() && highest_static_file_block.is_none() {
+            debug!(target: "reth::providers::static_file", ?segment, "Static file is empty, allowing fresh start");
+            return Ok(None);
+        }
+
         let mut db_cursor = provider.tx_ref().cursor_read::<T>()?;
 
         if let Some((db_last_entry, _)) = db_cursor.last()? &&
