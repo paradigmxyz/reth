@@ -20,6 +20,7 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
 };
+use revm_primitives::map::B256Map;
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
@@ -611,12 +612,15 @@ impl MultiProofTask {
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
         let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
             account: self.multi_added_removed_keys.account.clone(),
-            storages: self
-                .multi_added_removed_keys
-                .storages
-                .iter()
-                .filter(|(k, _)| targets.contains_key(*k))
-                .map(|(k, v)| (*k, v.clone()))
+            storages: targets
+                .keys()
+                .filter_map(|account| {
+                    self.multi_added_removed_keys
+                        .storages
+                        .get(account)
+                        .cloned()
+                        .map(|keys| (*account, keys))
+                })
                 .collect(),
         });
 
@@ -716,20 +720,23 @@ impl MultiProofTask {
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
         let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
             account: self.multi_added_removed_keys.account.clone(),
-            storages: not_fetched_state_update
-                .accounts
-                .keys()
-                .chain(not_fetched_state_update.storages.keys())
-                .collect::<HashSet<_>>()
-                .into_iter()
-                .filter_map(|account| {
-                    self.multi_added_removed_keys
-                        .storages
-                        .get(account)
-                        .cloned()
-                        .map(|keys| (*account, keys))
-                })
-                .collect(),
+            storages: {
+                let mut storages = B256Map::default();
+
+                for account in not_fetched_state_update
+                    .storages
+                    .keys()
+                    .chain(self.multi_added_removed_keys.storages.keys())
+                {
+                    if !storages.contains_key(account) &&
+                        let Some(storage) = self.multi_added_removed_keys.storages.get(account)
+                    {
+                        storages.insert(*account, storage.clone());
+                    }
+                }
+
+                storages
+            },
         });
 
         let chunking_len = not_fetched_state_update.chunking_length();
