@@ -33,3 +33,7 @@ pub use revm::{self, database::State, *};
 /// Helper types for execution witness generation.
 #[cfg(feature = "witness")]
 pub mod witness;
+
+/// Tail-call dispatch optimization - reduces interpreter loop overhead.
+/// Expected gain: 3-5%.
+pub mod tail_call;
