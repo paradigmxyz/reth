@@ -15,6 +15,7 @@ workspace = true
 alloy-primitives.workspace = true
 
 clap = { workspace = true, features = ["derive"], optional = true }
+fixed-map.workspace = true
 derive_more.workspace = true
 serde = { workspace = true, features = ["alloc", "derive"] }
 strum = { workspace = true, features = ["derive"] }
@@ -32,5 +33,6 @@ std = [
     "serde/std",
     "strum/std",
     "serde_json/std",
+    "fixed-map/std",
 ]
 clap = ["dep:clap"]
