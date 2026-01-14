@@ -389,7 +389,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         for block in blocks {
             let trie_data = block.trie_data();
             let ExecutedBlock { recovered_block, execution_output, .. } = block;
-            let block_number = recovered_block.number();
 
             let start = Instant::now();
             self.insert_block(&recovered_block)?;

@@ -37,6 +37,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
+use reth_trie_db::changesets::ChangesetCacheHandle;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -201,10 +202,13 @@ impl EngineNodeLauncher {
         };
         let validator_builder = add_ons.engine_validator_builder();
 
+        // Create changeset cache that will be shared between validator and engine tree
+        let changeset_cache = ChangesetCacheHandle::new();
+
         // Build the engine validator with all required components
         let engine_validator = validator_builder
             .clone()
-            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone())
+            .build_tree_validator(&add_ons_ctx, engine_tree_config.clone(), changeset_cache.clone())
             .await?;
 
         // Create the consensus engine stream with optional reorg
@@ -214,7 +218,13 @@ impl EngineNodeLauncher {
             .maybe_reorg(
                 ctx.blockchain_db().clone(),
                 ctx.components().evm_config().clone(),
-                || validator_builder.build_tree_validator(&add_ons_ctx, engine_tree_config.clone()),
+                || async {
+                    // Create a separate cache for reorg validator (not shared with main engine)
+                    let reorg_cache = ChangesetCacheHandle::new();
+                    validator_builder
+                        .build_tree_validator(&add_ons_ctx, engine_tree_config.clone(), reorg_cache)
+                        .await
+                },
                 node_config.debug.reorg_frequency,
                 node_config.debug.reorg_depth,
             )
@@ -239,6 +249,7 @@ impl EngineNodeLauncher {
             engine_tree_config,
             ctx.sync_metrics_tx(),
             ctx.components().evm_config().clone(),
+            changeset_cache,
         );
 
         info!(target: "reth::cli", "Consensus engine initialized");

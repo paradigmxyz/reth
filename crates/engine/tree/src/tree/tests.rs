@@ -193,7 +193,7 @@ impl TestHarness {
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
-        let changeset_cache = ChangesetCacheHandle::new(EPOCH_SLOTS * 2);
+        let changeset_cache = ChangesetCacheHandle::new();
         let engine_validator = BasicEngineValidator::new(
             provider.clone(),
             consensus.clone(),
@@ -201,7 +201,7 @@ impl TestHarness {
             payload_validator,
             TreeConfig::default(),
             Box::new(NoopInvalidBlockHook::default()),
-            changeset_cache,
+            changeset_cache.clone(),
         );
 
         let tree = EngineApiTreeHandler::new(
@@ -218,6 +218,7 @@ impl TestHarness {
             TreeConfig::default().with_legacy_state_root(false).with_has_enough_parallelism(true),
             EngineApiKind::Ethereum,
             evm_config,
+            changeset_cache,
         );
 
         let block_builder = TestBlockBuilder::default().with_chain_spec((*chain_spec).clone());
@@ -391,7 +392,7 @@ impl ValidatorTestHarness {
         let provider = harness.provider.clone();
         let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
-        let changeset_cache = ChangesetCacheHandle::new(EPOCH_SLOTS * 2);
+        let changeset_cache = ChangesetCacheHandle::new();
 
         let validator = BasicEngineValidator::new(
             provider,

@@ -241,7 +241,7 @@ fn bench_state_root(c: &mut Criterion) {
                                 StateProviderBuilder::new(provider.clone(), genesis_hash, None),
                                 OverlayStateProviderFactory::new(
                                     provider,
-                                    reth_trie_db::changesets::ChangesetCacheHandle::new(64),
+                                    reth_trie_db::changesets::ChangesetCacheHandle::new(),
                                 ),
                                 &TreeConfig::default(),
                                 None,

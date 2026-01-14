@@ -1313,7 +1313,7 @@ mod tests {
             + 'static,
     {
         let rt_handle = get_test_runtime_handle();
-        let changeset_cache = ChangesetCacheHandle::new(64);
+        let changeset_cache = ChangesetCacheHandle::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);

@@ -1290,6 +1290,7 @@ pub trait EngineValidatorBuilder<Node: FullNodeComponents>: Send + Sync + Clone 
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
+        changeset_cache: ChangesetCacheHandle,
     ) -> impl Future<Output = eyre::Result<Self::EngineValidator>> + Send;
 }
 
@@ -1337,13 +1338,11 @@ where
         self,
         ctx: &AddOnsContext<'_, Node>,
         tree_config: TreeConfig,
+        changeset_cache: ChangesetCacheHandle,
     ) -> eyre::Result<Self::EngineValidator> {
         let validator = self.payload_validator_builder.build(ctx).await?;
         let data_dir = ctx.config.datadir.clone().resolve_datadir(ctx.config.chain.chain());
         let invalid_block_hook = ctx.create_invalid_block_hook(&data_dir).await?;
-
-        // Cache size is 2 epochs (64 blocks) to cover the finalization window
-        let changeset_cache = ChangesetCacheHandle::new(EPOCH_SLOTS * 2);
 
         Ok(BasicEngineValidator::new(
             ctx.node.provider().clone(),

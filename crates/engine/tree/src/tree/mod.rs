@@ -338,6 +338,7 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
+        changeset_cache: ChangesetCacheHandle,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -358,8 +359,7 @@ where
             incoming_tx,
             engine_kind,
             evm_config,
-            // Cache size is 2 epochs (64 blocks) to cover the finalization window
-            changeset_cache: ChangesetCacheHandle::new(EPOCH_SLOTS * 2),
+            changeset_cache,
         }
     }
 
@@ -379,6 +379,7 @@ where
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
+        changeset_cache: ChangesetCacheHandle,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -410,6 +411,7 @@ where
             config,
             kind,
             evm_config,
+            changeset_cache,
         );
         let incoming = task.incoming_tx.clone();
         std::thread::Builder::new().name("Engine Task".to_string()).spawn(|| task.run()).unwrap();
@@ -1374,6 +1376,20 @@ where
 
         debug!(target: "engine::tree", ?last_persisted_block_hash, ?last_persisted_block_number, elapsed=?start_time.elapsed(), "Finished persisting, calling finish");
         self.persistence_state.finish(last_persisted_block_hash, last_persisted_block_number);
+
+        // Evict changesets for blocks below the persistence watermark
+        // Keep a 64-block retention window for reorg support
+        let eviction_threshold = last_persisted_block_number.saturating_sub(64);
+
+        debug!(
+            target: "engine::tree",
+            last_persisted = last_persisted_block_number,
+            eviction_threshold,
+            "Evicting changesets below threshold"
+        );
+
+        self.changeset_cache.evict(eviction_threshold);
+
         self.on_new_persisted_block()?;
         Ok(())
     }

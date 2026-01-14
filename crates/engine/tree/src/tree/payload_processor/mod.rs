@@ -1142,7 +1142,7 @@ mod tests {
                 std::convert::identity,
             ),
             StateProviderBuilder::new(provider_factory.clone(), genesis_hash, None),
-            OverlayStateProviderFactory::new(provider_factory, ChangesetCacheHandle::new(64)),
+            OverlayStateProviderFactory::new(provider_factory, ChangesetCacheHandle::new()),
             &TreeConfig::default(),
             None, // No BAL for test
         );

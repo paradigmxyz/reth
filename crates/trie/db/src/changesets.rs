@@ -66,6 +66,12 @@ pub fn compute_block_trie_changesets<Provider>(
 where
     Provider: DBProvider + StageCheckpointReader + ChangeSetReader + BlockNumReader,
 {
+    debug!(
+        target: "trie::changeset_cache",
+        block_number,
+        "Computing block trie changesets from database state"
+    );
+
     // Step 1: Collect/calculate state reverts
 
     // This is just the changes from this specific block
@@ -121,6 +127,14 @@ where
 
     let changesets =
         compute_trie_changesets(&overlay_factory, &trie_updates).map_err(ProviderError::other)?;
+
+    debug!(
+        target: "trie::changeset_cache",
+        block_number,
+        num_account_nodes = changesets.account_nodes_ref().len(),
+        num_storage_tries = changesets.storage_tries_ref().len(),
+        "Computed block trie changesets successfully"
+    );
 
     Ok(changesets)
 }
@@ -238,9 +252,12 @@ pub struct ChangesetCacheHandle {
 }
 
 impl ChangesetCacheHandle {
-    /// Creates a new cache handle with the specified capacity.
-    pub fn new(capacity: u64) -> Self {
-        Self { inner: Arc::new(RwLock::new(ChangesetCache::new(capacity))) }
+    /// Creates a new cache handle.
+    ///
+    /// The cache has no capacity limit and relies on explicit eviction
+    /// via the `evict()` method to manage memory usage.
+    pub fn new() -> Self {
+        Self { inner: Arc::new(RwLock::new(ChangesetCache::new())) }
     }
 
     /// Retrieves changesets for a block by hash.
@@ -251,22 +268,31 @@ impl ChangesetCacheHandle {
         self.inner.read().unwrap().get(block_hash)
     }
 
-    /// Inserts changesets for a block, triggering eviction if needed.
+    /// Inserts changesets for a block into the cache.
     ///
-    /// # Eviction Policy
-    ///
-    /// Keeps blocks in range `[max_block_number - capacity, max_block_number]`.
-    /// When a new block with number N is inserted:
-    /// - Update `max_block_number` if N > current max
-    /// - Remove all blocks with number < (`max_block_number` - capacity)
+    /// This method does not perform any eviction. Eviction must be explicitly
+    /// triggered by calling `evict()`.
     ///
     /// # Arguments
     ///
     /// * `block_hash` - Hash of the block
-    /// * `block_number` - Block number for eviction tracking
+    /// * `block_number` - Block number for tracking and eviction
     /// * `changesets` - Trie changesets to cache
     pub fn insert(&self, block_hash: B256, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
         self.inner.write().unwrap().insert(block_hash, block_number, changesets)
+    }
+
+    /// Evicts changesets for blocks below the given block number.
+    ///
+    /// This should be called after blocks are persisted to the database to free
+    /// memory for changesets that are no longer needed in the cache.
+    ///
+    /// # Arguments
+    ///
+    /// * `up_to_block` - Evict blocks with number < this value. Blocks with number >= this value
+    ///   are retained.
+    pub fn evict(&self, up_to_block: BlockNumber) {
+        self.inner.write().unwrap().evict(up_to_block)
     }
 
     /// Gets changesets from cache, or computes them on-the-fly if missing.
@@ -296,6 +322,12 @@ impl ChangesetCacheHandle {
         {
             let cache = self.inner.read().unwrap();
             if let Some(changesets) = cache.get(&block_hash) {
+                debug!(
+                    target: "trie::changeset_cache",
+                    ?block_hash,
+                    block_number,
+                    "Changeset cache HIT"
+                );
                 return Ok(changesets);
             }
         }
@@ -305,7 +337,7 @@ impl ChangesetCacheHandle {
             target: "trie::changeset_cache",
             ?block_hash,
             block_number,
-            "Changeset cache miss, computing from database"
+            "Changeset cache MISS, computing from database"
         );
 
         let start = Instant::now();
@@ -321,7 +353,8 @@ impl ChangesetCacheHandle {
             target: "trie::changeset_cache",
             ?elapsed,
             block_number,
-            "Changeset computed from database"
+            ?block_hash,
+            "Changeset computed from database and inserting into cache"
         );
 
         // Store in cache (with write lock)
@@ -329,6 +362,13 @@ impl ChangesetCacheHandle {
             let mut cache = self.inner.write().unwrap();
             cache.insert(block_hash, block_number, Arc::clone(&changesets));
         }
+
+        debug!(
+            target: "trie::changeset_cache",
+            ?block_hash,
+            block_number,
+            "Changeset successfully cached"
+        );
 
         Ok(changesets)
     }
@@ -386,6 +426,14 @@ impl ChangesetCacheHandle {
 
         let timer = Instant::now();
 
+        debug!(
+            target: "trie::changeset_cache",
+            start_block,
+            end_block,
+            db_tip_block,
+            "Starting get_or_compute_range"
+        );
+
         // Use changeset cache to retrieve and accumulate reverts block by block.
         // Iterate in reverse order (newest to oldest) so that older changesets
         // take precedence when there are conflicting updates.
@@ -400,6 +448,13 @@ impl ChangesetCacheHandle {
                 ))
             })?;
 
+            debug!(
+                target: "trie::changeset_cache",
+                block_number,
+                ?block_hash,
+                "Looked up block hash for block number in range"
+            );
+
             // Get changesets from cache (or compute on-the-fly)
             let changesets = self.get_or_compute(block_hash, block_number, provider)?;
 
@@ -412,34 +467,36 @@ impl ChangesetCacheHandle {
 
         let elapsed = timer.elapsed();
 
+        let num_account_nodes = accumulated_reverts.account_nodes_ref().len();
+        let num_storage_tries = accumulated_reverts.storage_tries_ref().len();
+
         debug!(
             target: "trie::changeset_cache",
             ?elapsed,
             start_block,
             end_block,
             num_blocks = end_block.saturating_sub(start_block).saturating_add(1),
-            "Accumulated trie reverts for block range"
+            num_account_nodes,
+            num_storage_tries,
+            "Finished accumulating trie reverts for block range"
         );
 
         Ok(accumulated_reverts)
     }
 }
 
-/// In-memory cache for trie changesets with strict eviction policy.
+/// In-memory cache for trie changesets with explicit eviction policy.
 ///
-/// Holds changesets for up to a configured number of blocks (typically 64),
-/// evicting older blocks when the window moves forward. Keyed by block hash
-/// for fast lookup during reorgs.
+/// Holds changesets for blocks that have been validated but not yet persisted.
+/// Keyed by block hash for fast lookup during reorgs. Eviction is controlled
+/// explicitly by the engine API tree handler when persistence completes.
 ///
-/// ## Capacity and Eviction
+/// ## Eviction Policy
 ///
-/// The cache maintains a sliding window of blocks. When `insert()` is called
-/// with a block number higher than the current maximum, blocks outside the
-/// retention window are automatically evicted.
-///
-/// For a cache with capacity 64:
-/// - Block 100 is inserted → cache contains blocks 36-100 (if they exist)
-/// - Block 101 is inserted → blocks 0-36 are evicted, cache contains 37-101
+/// Unlike traditional caches with automatic eviction, this cache requires explicit
+/// eviction calls. The engine API tree handler calls `evict(block_number)` after
+/// blocks are persisted to the database, ensuring changesets remain available
+/// until their corresponding blocks are safely on disk.
 ///
 /// ## Metrics
 ///
@@ -455,19 +512,6 @@ pub struct ChangesetCache {
 
     /// Block number to hashes mapping for eviction
     block_numbers: BTreeMap<u64, Vec<B256>>,
-
-    /// Maximum number of blocks to cache
-    ///
-    /// This defines the size of the sliding window. Typically set to 64
-    /// blocks, which covers about 2 epochs and handles most reorg scenarios.
-    capacity: u64,
-
-    /// Highest block number seen
-    ///
-    /// Used to determine the eviction window. When a new block with a higher
-    /// number is inserted, this value is updated and blocks outside the
-    /// retention window are evicted.
-    max_block_number: Option<u64>,
 
     /// Metrics for monitoring cache behavior
     #[cfg(feature = "metrics")]
@@ -496,13 +540,14 @@ struct ChangesetCacheMetrics {
 }
 
 impl ChangesetCache {
-    /// Creates a new cache with the specified capacity.
-    pub fn new(capacity: u64) -> Self {
+    /// Creates a new empty changeset cache.
+    ///
+    /// The cache has no capacity limit and relies on explicit eviction
+    /// via the `evict()` method to manage memory usage.
+    pub fn new() -> Self {
         Self {
-            entries: HashMap::with_capacity(capacity as usize),
+            entries: HashMap::new(),
             block_numbers: BTreeMap::new(),
-            capacity,
-            max_block_number: None,
             #[cfg(feature = "metrics")]
             metrics: Default::default(),
         }
@@ -527,19 +572,15 @@ impl ChangesetCache {
         }
     }
 
-    /// Inserts changesets for a block, triggering eviction if needed.
+    /// Inserts changesets for a block into the cache.
     ///
-    /// # Eviction Policy
-    ///
-    /// Keeps blocks in range `[max_block_number - capacity, max_block_number]`.
-    /// When a new block with number N is inserted:
-    /// - Update `max_block_number` if N > current max
-    /// - Remove all blocks with number < (`max_block_number` - capacity)
+    /// This method does not perform any eviction. Eviction must be explicitly
+    /// triggered by calling `evict()`.
     ///
     /// # Arguments
     ///
     /// * `block_hash` - Hash of the block
-    /// * `block_number` - Block number for eviction tracking
+    /// * `block_number` - Block number for tracking and eviction
     /// * `changesets` - Trie changesets to cache
     pub fn insert(
         &mut self,
@@ -547,27 +588,13 @@ impl ChangesetCache {
         block_number: u64,
         changesets: Arc<TrieUpdatesSorted>,
     ) {
-        // Check if this block is already outside the retention window
-        if let Some(current_max) = self.max_block_number {
-            let eviction_threshold = current_max.saturating_sub(self.capacity);
-            if block_number < eviction_threshold {
-                // Don't insert blocks that are already outside the window
-                return;
-            }
-        }
-
-        // Update max_block_number if this is a newer block
-        let needs_eviction = if let Some(current_max) = self.max_block_number {
-            if block_number > current_max {
-                self.max_block_number = Some(block_number);
-                true
-            } else {
-                false
-            }
-        } else {
-            self.max_block_number = Some(block_number);
-            false
-        };
+        debug!(
+            target: "trie::changeset_cache",
+            ?block_hash,
+            block_number,
+            cache_size_before = self.entries.len(),
+            "Inserting changeset into cache"
+        );
 
         // Insert the entry
         self.entries.insert(block_hash, (block_number, changesets));
@@ -575,63 +602,84 @@ impl ChangesetCache {
         // Add block hash to block_numbers mapping
         self.block_numbers.entry(block_number).or_default().push(block_hash);
 
-        // Trigger eviction if we have a new max block number
-        if needs_eviction {
-            self.evict();
-        }
-
         // Update size metric
         #[cfg(feature = "metrics")]
         self.metrics.size.set(self.entries.len() as f64);
+
+        debug!(
+            target: "trie::changeset_cache",
+            ?block_hash,
+            block_number,
+            cache_size_after = self.entries.len(),
+            "Changeset inserted into cache"
+        );
     }
 
-    /// Evicts blocks outside the retention window.
+    /// Evicts blocks with numbers strictly less than the given threshold.
     ///
-    /// This internal method is called by `insert()` when a new maximum block
-    /// number is encountered. It removes all blocks with numbers less than
-    /// `max_block_number - capacity`.
+    /// This method removes all cache entries for blocks with numbers below
+    /// `up_to_block`. It should be called after blocks are persisted to the
+    /// database to free memory for changesets that are no longer needed.
     ///
     /// # Implementation Details
     ///
     /// Uses the `block_numbers` `BTreeMap` to efficiently find and remove
     /// blocks by range. For each evicted block number:
-    /// 1. Get all hashes at that block number
+    /// 1. Get all hashes at that block number (handles side chains)
     /// 2. Remove entries from `entries` `HashMap`
     /// 3. Remove the block number from `block_numbers`
-    fn evict(&mut self) {
-        let Some(max_block) = self.max_block_number else {
-            return;
-        };
+    ///
+    /// # Arguments
+    ///
+    /// * `up_to_block` - Evict blocks with number < this value. Blocks with number >= this value
+    ///   are retained.
+    pub fn evict(&mut self, up_to_block: BlockNumber) {
+        debug!(
+            target: "trie::changeset_cache",
+            up_to_block,
+            cache_size_before = self.entries.len(),
+            "Starting cache eviction"
+        );
 
-        // Calculate the eviction threshold
-        // We keep blocks in range [max_block - capacity, max_block]
-        let eviction_threshold = max_block.saturating_sub(self.capacity);
-
-        // Find all block numbers that should be evicted
+        // Find all block numbers that should be evicted (< up_to_block)
         let blocks_to_evict: Vec<u64> =
-            self.block_numbers.range(..eviction_threshold).map(|(num, _)| *num).collect();
+            self.block_numbers.range(..up_to_block).map(|(num, _)| *num).collect();
 
         // Remove entries for each block number below threshold
         #[cfg(feature = "metrics")]
         let mut evicted_count = 0;
+        #[cfg(not(feature = "metrics"))]
+        let mut evicted_count = 0;
 
-        for block_number in blocks_to_evict {
-            if let Some(hashes) = self.block_numbers.remove(&block_number) {
+        for block_number in &blocks_to_evict {
+            if let Some(hashes) = self.block_numbers.remove(block_number) {
+                debug!(
+                    target: "trie::changeset_cache",
+                    block_number,
+                    num_hashes = hashes.len(),
+                    "Evicting block from cache"
+                );
                 for hash in hashes {
                     if self.entries.remove(&hash).is_some() {
-                        #[cfg(feature = "metrics")]
-                        {
-                            evicted_count += 1;
-                        }
+                        evicted_count += 1;
                     }
                 }
             }
         }
 
+        debug!(
+            target: "trie::changeset_cache",
+            up_to_block,
+            evicted_count,
+            cache_size_after = self.entries.len(),
+            "Finished cache eviction"
+        );
+
         // Update metrics if we evicted anything
         #[cfg(feature = "metrics")]
         if evicted_count > 0 {
             self.metrics.evictions.increment(evicted_count as u64);
+            self.metrics.size.set(self.entries.len() as f64);
         }
     }
 }
@@ -648,7 +696,7 @@ mod tests {
 
     #[test]
     fn test_insert_and_retrieve_single_entry() {
-        let mut cache = ChangesetCache::new(64);
+        let mut cache = ChangesetCache::new();
         let hash = B256::random();
         let changesets = create_test_changesets();
 
@@ -658,12 +706,11 @@ mod tests {
         let retrieved = cache.get(&hash);
         assert!(retrieved.is_some());
         assert_eq!(cache.entries.len(), 1);
-        assert_eq!(cache.max_block_number, Some(100));
     }
 
     #[test]
     fn test_insert_multiple_entries() {
-        let mut cache = ChangesetCache::new(64);
+        let mut cache = ChangesetCache::new();
 
         // Insert 10 blocks
         let mut hashes = Vec::new();
@@ -678,12 +725,11 @@ mod tests {
         for hash in &hashes {
             assert!(cache.get(hash).is_some());
         }
-        assert_eq!(cache.max_block_number, Some(109));
     }
 
     #[test]
-    fn test_eviction_when_capacity_exceeded() {
-        let mut cache = ChangesetCache::new(10);
+    fn test_eviction_when_explicitly_called() {
+        let mut cache = ChangesetCache::new();
 
         // Insert 15 blocks (0-14)
         let mut hashes = Vec::new();
@@ -693,9 +739,13 @@ mod tests {
             hashes.push((i, hash));
         }
 
-        // Cache should have evicted blocks 0-4 (14 - 10 + 1 = 5)
-        // Retention window: [14 - 10, 14] = [4, 14]
-        // So blocks 0, 1, 2, 3 should be evicted
+        // All blocks should be present (no automatic eviction)
+        assert_eq!(cache.entries.len(), 15);
+
+        // Explicitly evict blocks < 4
+        cache.evict(4);
+
+        // Blocks 0-3 should be evicted
         assert_eq!(cache.entries.len(), 11); // blocks 4-14 = 11 blocks
 
         // Verify blocks 0-3 are evicted
@@ -710,36 +760,40 @@ mod tests {
     }
 
     #[test]
-    fn test_eviction_window_logic() {
-        let mut cache = ChangesetCache::new(64);
+    fn test_eviction_with_persistence_watermark() {
+        let mut cache = ChangesetCache::new();
 
-        // Insert block 100
-        let hash_100 = B256::random();
-        cache.insert(hash_100, 100, create_test_changesets());
-        assert!(cache.get(&hash_100).is_some());
-
-        // Insert block 165 - should evict blocks < (165 - 64) = 101
-        let hash_165 = B256::random();
-        cache.insert(hash_165, 165, create_test_changesets());
-
-        // Block 100 should be evicted
-        assert!(cache.get(&hash_100).is_none());
-        // Block 165 should be present
-        assert!(cache.get(&hash_165).is_some());
-
-        // Insert blocks 101-164
-        for i in 101..165 {
+        // Insert blocks 100-165
+        let mut hashes = std::collections::HashMap::new();
+        for i in 100..=165 {
             let hash = B256::random();
             cache.insert(hash, i, create_test_changesets());
+            hashes.insert(i, hash);
         }
 
-        // All blocks 101-165 should be present (65 blocks total)
+        // All blocks should be present (no automatic eviction)
+        assert_eq!(cache.entries.len(), 66);
+
+        // Simulate persistence up to block 164, with 64-block retention window
+        // Eviction threshold = 164 - 64 = 100
+        cache.evict(100);
+
+        // Blocks 100-165 should remain (66 blocks)
+        assert_eq!(cache.entries.len(), 66);
+
+        // Simulate persistence up to block 165
+        // Eviction threshold = 165 - 64 = 101
+        cache.evict(101);
+
+        // Blocks 101-165 should remain (65 blocks)
         assert_eq!(cache.entries.len(), 65);
+        assert!(cache.get(&hashes[&100]).is_none());
+        assert!(cache.get(&hashes[&101]).is_some());
     }
 
     #[test]
-    fn test_out_of_order_inserts() {
-        let mut cache = ChangesetCache::new(10);
+    fn test_out_of_order_inserts_with_explicit_eviction() {
+        let mut cache = ChangesetCache::new();
 
         // Insert blocks in random order
         let hash_10 = B256::random();
@@ -754,8 +808,12 @@ mod tests {
         let hash_3 = B256::random();
         cache.insert(hash_3, 3, create_test_changesets());
 
-        // After inserting block 15, eviction threshold is 15 - 10 = 5
-        // Blocks < 5 should be evicted
+        // All blocks should be present (no automatic eviction)
+        assert_eq!(cache.entries.len(), 4);
+
+        // Explicitly evict blocks < 5
+        cache.evict(5);
+
         assert!(cache.get(&hash_3).is_none(), "Block 3 should be evicted");
         assert!(cache.get(&hash_5).is_some(), "Block 5 should be present");
         assert!(cache.get(&hash_10).is_some(), "Block 10 should be present");
@@ -764,7 +822,7 @@ mod tests {
 
     #[test]
     fn test_multiple_blocks_same_number() {
-        let mut cache = ChangesetCache::new(64);
+        let mut cache = ChangesetCache::new();
 
         // Insert multiple blocks with same number (side chains)
         let hash_1a = B256::random();
@@ -779,22 +837,29 @@ mod tests {
     }
 
     #[test]
-    fn test_eviction_with_side_chains() {
-        let mut cache = ChangesetCache::new(5);
+    fn test_eviction_removes_all_side_chains() {
+        let mut cache = ChangesetCache::new();
 
-        // Insert blocks at same height (simulating side chains)
-        let hash_1a = B256::random();
-        let hash_1b = B256::random();
-        cache.insert(hash_1a, 1, create_test_changesets());
-        cache.insert(hash_1b, 1, create_test_changesets());
+        // Insert multiple blocks at same height (side chains)
+        let hash_10a = B256::random();
+        let hash_10b = B256::random();
+        let hash_10c = B256::random();
+        cache.insert(hash_10a, 10, create_test_changesets());
+        cache.insert(hash_10b, 10, create_test_changesets());
+        cache.insert(hash_10c, 10, create_test_changesets());
 
-        // Insert block 7 - should evict blocks < (7 - 5) = 2
-        let hash_7 = B256::random();
-        cache.insert(hash_7, 7, create_test_changesets());
+        let hash_20 = B256::random();
+        cache.insert(hash_20, 20, create_test_changesets());
 
-        // Both blocks at height 1 should be evicted
-        assert!(cache.get(&hash_1a).is_none());
-        assert!(cache.get(&hash_1b).is_none());
-        assert!(cache.get(&hash_7).is_some());
+        assert_eq!(cache.entries.len(), 4);
+
+        // Evict blocks < 15 - should remove all three side chains at height 10
+        cache.evict(15);
+
+        assert_eq!(cache.entries.len(), 1);
+        assert!(cache.get(&hash_10a).is_none());
+        assert!(cache.get(&hash_10b).is_none());
+        assert!(cache.get(&hash_10c).is_none());
+        assert!(cache.get(&hash_20).is_some());
     }
 }

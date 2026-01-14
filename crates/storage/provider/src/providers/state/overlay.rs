@@ -7,7 +7,7 @@ use reth_metrics::Metrics;
 use reth_prune_types::PruneSegment;
 use reth_stages_types::StageId;
 use reth_storage_api::{
-    BlockHashReader, BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
+    BlockNumReader, ChangeSetReader, DBProvider, DatabaseProviderFactory,
     DatabaseProviderROFactory, PruneCheckpointReader, StageCheckpointReader, TrieReader,
 };
 use reth_trie::{
@@ -228,6 +228,16 @@ where
             self.get_requested_block_number(provider)? &&
             self.reverts_required(provider, db_tip_block, from_block)?
         {
+            debug!(
+                target: "providers::state::overlay",
+                block_hash = ?self.block_hash,
+                from_block,
+                db_tip_block,
+                range_start = from_block + 1,
+                range_end = db_tip_block,
+                "Collecting trie reverts for overlay state provider"
+            );
+
             // Collect trie reverts using changeset cache
             let mut trie_reverts = {
                 let _guard =
