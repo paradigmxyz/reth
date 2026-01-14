@@ -7,45 +7,6 @@ use strum::{EnumCount, EnumIter, IntoEnumIterator};
 
 const LARGE_VALUE_THRESHOLD_BYTES: usize = 4096;
 
-/// Read operation types for cursor read metrics.
-#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, EnumCount, EnumIter)]
-pub(crate) enum ReadOperation {
-    /// Cursor seek operation (`set_range`).
-    Seek,
-    /// Cursor seek exact operation (`set_key`).
-    SeekExact,
-    /// Cursor first operation.
-    First,
-    /// Cursor last operation.
-    Last,
-    /// Cursor next operation.
-    Next,
-    /// Cursor prev operation.
-    Prev,
-    /// Cursor seek by key subkey operation (`get_both_range`).
-    SeekBySubkey,
-}
-
-impl ReadOperation {
-    /// Returns the read operation as a string.
-    pub(crate) const fn as_str(&self) -> &'static str {
-        match self {
-            Self::Seek => "seek",
-            Self::SeekExact => "seek-exact",
-            Self::First => "first",
-            Self::Last => "last",
-            Self::Next => "next",
-            Self::Prev => "prev",
-            Self::SeekBySubkey => "seek-by-subkey",
-        }
-    }
-
-    /// Returns `true` if this is a seek-like operation that should record duration.
-    pub(crate) const fn should_record_duration(&self) -> bool {
-        matches!(self, Self::Seek | Self::SeekExact | Self::First | Self::Last | Self::SeekBySubkey)
-    }
-}
-
 /// Caches metric handles for database environment to make sure handles are not re-created
 /// on every operation.
 ///
@@ -55,8 +16,6 @@ impl ReadOperation {
 pub(crate) struct DatabaseEnvMetrics {
     /// Caches `OperationMetrics` handles for each table and operation tuple.
     operations: FxHashMap<(&'static str, Operation), OperationMetrics>,
-    /// Caches `CursorReadMetrics` handles for each table and read operation tuple.
-    cursor_reads: FxHashMap<(&'static str, ReadOperation), CursorReadMetrics>,
     /// Caches `TransactionMetrics` handles for counters grouped by only transaction mode.
     /// Updated both at tx open and close.
     transactions: FxHashMap<TransactionMode, TransactionMetrics>,
@@ -72,7 +31,6 @@ impl DatabaseEnvMetrics {
         // to avoid runtime locks on the map when recording metrics.
         Self {
             operations: Self::generate_operation_handles(),
-            cursor_reads: Self::generate_cursor_read_handles(),
             transactions: Self::generate_transaction_handles(),
             transaction_outcomes: Self::generate_transaction_outcome_handles(),
         }
@@ -97,28 +55,6 @@ impl DatabaseEnvMetrics {
             }
         }
         operations
-    }
-
-    /// Generate a map of all possible cursor read operation handles for each table and read
-    /// operation tuple. Used for tracking cursor read metrics.
-    fn generate_cursor_read_handles() -> FxHashMap<(&'static str, ReadOperation), CursorReadMetrics>
-    {
-        let mut cursor_reads = FxHashMap::with_capacity_and_hasher(
-            Tables::COUNT * ReadOperation::COUNT,
-            Default::default(),
-        );
-        for table in Tables::ALL {
-            for read_op in ReadOperation::iter() {
-                cursor_reads.insert(
-                    (table.name(), read_op),
-                    CursorReadMetrics::new_with_labels(&[
-                        (Labels::Table.as_str(), table.name()),
-                        (Labels::Operation.as_str(), read_op.as_str()),
-                    ]),
-                );
-            }
-        }
-        cursor_reads
     }
 
     /// Generate a map of all possible transaction modes to metric handles.
@@ -170,20 +106,6 @@ impl DatabaseEnvMetrics {
     ) -> R {
         if let Some(metrics) = self.operations.get(&(table, operation)) {
             metrics.record(value_size, f)
-        } else {
-            f()
-        }
-    }
-
-    /// Record a metric for cursor read operation executed in `f`.
-    pub(crate) fn record_cursor_read<R>(
-        &self,
-        table: &'static str,
-        read_op: ReadOperation,
-        f: impl FnOnce() -> R,
-    ) -> R {
-        if let Some(metrics) = self.cursor_reads.get(&(table, read_op)) {
-            metrics.record(read_op, f)
         } else {
             f()
         }
