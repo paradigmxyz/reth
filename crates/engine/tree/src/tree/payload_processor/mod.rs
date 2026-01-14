@@ -61,6 +61,7 @@ mod configured_sparse_trie;
 pub mod executor;
 pub mod multiproof;
 pub mod prewarm;
+pub mod shared_state;
 pub mod sparse_trie;
 
 use configured_sparse_trie::ConfiguredSparseTrie;

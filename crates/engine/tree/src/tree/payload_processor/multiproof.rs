@@ -7,6 +7,7 @@ use alloy_primitives::{keccak256, map::HashSet, B256};
 use crossbeam_channel::{unbounded, Receiver as CrossbeamReceiver, Sender as CrossbeamSender};
 use derive_more::derive::Deref;
 use metrics::{Gauge, Histogram};
+use parking_lot::RwLock;
 use reth_metrics::Metrics;
 use reth_provider::AccountReader;
 use reth_revm::state::EvmState;
@@ -225,7 +226,9 @@ struct MultiproofInput {
     proof_targets: MultiProofTargets,
     proof_sequence_number: u64,
     state_root_message_sender: CrossbeamSender<MultiProofMessage>,
-    multi_added_removed_keys: Option<Arc<MultiAddedRemovedKeys>>,
+    /// Shared reference to added/removed keys tracking. Will be snapshotted when
+    /// dispatching to workers.
+    multi_added_removed_keys: Option<Arc<RwLock<MultiAddedRemovedKeys>>>,
 }
 
 impl MultiproofInput {
@@ -338,12 +341,17 @@ impl MultiproofManager {
         let frozen_prefix_sets =
             ParallelProof::extend_prefix_sets_with_targets(&Default::default(), &proof_targets);
 
+        // Snapshot the added/removed keys for workers. This is the only place we clone
+        // the data, avoiding repeated clones on every prefetch/state update.
+        let multi_added_removed_keys_snapshot =
+            multi_added_removed_keys.map(|ark| Arc::new(ark.read().clone()));
+
         // Dispatch account multiproof to worker pool with result sender
         let input = AccountMultiproofInput {
             targets: proof_targets,
             prefix_sets: frozen_prefix_sets,
             collect_branch_node_masks: true,
-            multi_added_removed_keys,
+            multi_added_removed_keys: multi_added_removed_keys_snapshot,
             // Workers will send ProofResultMessage directly to proof_result_rx
             proof_result_sender: ProofResultContext::new(
                 self.proof_result_tx.clone(),
@@ -544,7 +552,9 @@ pub(super) struct MultiProofTask {
     /// Proof targets that have been already fetched.
     fetched_proof_targets: MultiProofTargets,
     /// Tracks keys which have been added and removed throughout the entire block.
-    multi_added_removed_keys: MultiAddedRemovedKeys,
+    /// Uses Arc<RwLock> to avoid expensive cloning on every dispatch - workers can
+    /// read from this shared state while MultiProofTask updates it.
+    multi_added_removed_keys: Arc<RwLock<MultiAddedRemovedKeys>>,
     /// Proof sequencing handler.
     proof_sequencer: ProofSequencer,
     /// Manages calculation of multiproofs.
@@ -577,7 +587,7 @@ impl MultiProofTask {
             proof_result_rx,
             to_sparse_trie,
             fetched_proof_targets: Default::default(),
-            multi_added_removed_keys: MultiAddedRemovedKeys::new(),
+            multi_added_removed_keys: Arc::new(RwLock::new(MultiAddedRemovedKeys::new())),
             proof_sequencer: ProofSequencer::default(),
             multiproof_manager: MultiproofManager::new(
                 metrics.clone(),
@@ -606,10 +616,10 @@ impl MultiProofTask {
         // Make sure all target accounts have an `AddedRemovedKeySet` in the
         // [`MultiAddedRemovedKeys`]. Even if there are not any known removed keys for the account,
         // we still want to optimistically fetch extension children for the leaf addition case.
-        self.multi_added_removed_keys.touch_accounts(targets.keys().copied());
+        self.multi_added_removed_keys.write().touch_accounts(targets.keys().copied());
 
-        // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        // Share the Arc - workers will read from this shared state (no cloning!)
+        let multi_added_removed_keys = Arc::clone(&self.multi_added_removed_keys);
 
         self.metrics.prefetch_proof_targets_accounts_histogram.record(targets.len() as f64);
         self.metrics
@@ -686,12 +696,12 @@ impl MultiProofTask {
         hashed_state_update: HashedPostState,
     ) -> u64 {
         // Update removed keys based on the state update.
-        self.multi_added_removed_keys.update_with_state(&hashed_state_update);
+        self.multi_added_removed_keys.write().update_with_state(&hashed_state_update);
 
         // Split the state update into already fetched and not fetched according to the proof
         // targets.
         let (fetched_state_update, not_fetched_state_update) = hashed_state_update
-            .partition_by_targets(&self.fetched_proof_targets, &self.multi_added_removed_keys);
+            .partition_by_targets(&self.fetched_proof_targets, &self.multi_added_removed_keys.read());
 
         let mut state_updates = 0;
         // If there are any accounts or storage slots that we already fetched the proofs for,
@@ -704,8 +714,8 @@ impl MultiProofTask {
             state_updates += 1;
         }
 
-        // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        // Share the Arc - workers will read from this shared state (no cloning!)
+        let multi_added_removed_keys = Arc::clone(&self.multi_added_removed_keys);
 
         let chunking_len = not_fetched_state_update.chunking_length();
         let mut spawned_proof_targets = MultiProofTargets::default();
@@ -725,7 +735,7 @@ impl MultiProofTask {
                 let proof_targets = get_proof_targets(
                     &hashed_state_update,
                     &self.fetched_proof_targets,
-                    &multi_added_removed_keys,
+                    &multi_added_removed_keys.read(),
                 );
                 spawned_proof_targets.extend_ref(&proof_targets);
 
@@ -735,7 +745,7 @@ impl MultiProofTask {
                     proof_targets,
                     proof_sequence_number: self.proof_sequencer.next_sequence(),
                     state_root_message_sender: self.tx.clone(),
-                    multi_added_removed_keys: Some(multi_added_removed_keys.clone()),
+                    multi_added_removed_keys: Some(Arc::clone(&multi_added_removed_keys)),
                 });
             },
         );

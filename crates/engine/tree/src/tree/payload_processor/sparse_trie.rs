@@ -3,7 +3,7 @@
 use crate::tree::payload_processor::multiproof::{MultiProofTaskMetrics, SparseTrieUpdate};
 use alloy_primitives::B256;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use reth_trie::{updates::TrieUpdates, Nibbles};
+use reth_trie::{updates::TrieUpdates, DecodedMultiProof, Nibbles};
 use reth_trie_parallel::root::ParallelStateRootError;
 use reth_trie_sparse::{
     errors::{SparseStateTrieResult, SparseTrieErrorKind},
@@ -16,6 +16,14 @@ use std::{
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument, trace};
+
+/// Message for direct multiproof reveals from workers.
+/// These don't need sequencing - we're just populating trie nodes.
+#[derive(Debug)]
+pub struct DirectMultiproofReveal {
+    /// The multiproof to reveal (trie structure).
+    pub multiproof: DecodedMultiProof,
+}
 
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
