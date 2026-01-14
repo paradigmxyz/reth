@@ -10,7 +10,7 @@ use reth_db_api::{
     transaction::{DbTx, DbTxMut},
 };
 use reth_libmdbx::{ffi::MDBX_dbi, CommitLatency, Transaction, TransactionKind, WriteFlags, RW};
-use reth_storage_errors::db::{DatabaseWriteError, DatabaseWriteOperation};
+use reth_storage_errors::db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation};
 use reth_tracing::tracing::{debug, trace, warn};
 use std::{
     backtrace::Backtrace,
@@ -295,10 +295,19 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         })
     }
 
-    fn commit(self) -> Result<bool, DatabaseError> {
+    fn commit(self) -> Result<(), DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
-                Ok((v, latency)) => (Ok(v), Some(latency)),
+                Ok((true, _)) => (
+                    Err(DatabaseError::Commit(DatabaseErrorInfo {
+                        message:
+                            "transaction was aborted due to a previous error (MDBX_RESULT_TRUE)"
+                                .into(),
+                        code: reth_libmdbx::ffi::MDBX_RESULT_TRUE,
+                    })),
+                    None,
+                ),
+                Ok((false, latency)) => (Ok(()), Some(latency)),
                 Err(e) => (Err(e), None),
             }
         })
