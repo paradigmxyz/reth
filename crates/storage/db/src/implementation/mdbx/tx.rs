@@ -295,10 +295,18 @@ impl<K: TransactionKind> DbTx for Tx<K> {
         })
     }
 
-    fn commit(self) -> Result<bool, DatabaseError> {
+    fn commit(self) -> Result<(), DatabaseError> {
         self.execute_with_close_transaction_metric(TransactionOutcome::Commit, |this| {
             match this.inner.commit().map_err(|e| DatabaseError::Commit(e.into())) {
-                Ok((v, latency)) => (Ok(v), Some(latency)),
+                Ok((true, _)) => (
+                    Err(DatabaseError::Commit(
+                        "transaction was aborted due to a previous error (MDBX_RESULT_TRUE)"
+                            .to_string()
+                            .into(),
+                    )),
+                    None,
+                ),
+                Ok((false, latency)) => (Ok(()), Some(latency)),
                 Err(e) => (Err(e), None),
             }
         })
