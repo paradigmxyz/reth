@@ -401,7 +401,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })
     }
 
-    /// Creates the context for RocksDB writes.
+    /// Creates the context for `RocksDB` writes.
     fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
         RocksDBWriteCtx {
             first_block_number: first_block,
