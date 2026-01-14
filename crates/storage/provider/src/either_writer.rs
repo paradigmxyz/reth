@@ -764,39 +764,7 @@ where
             }
             Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => {
-                let provider = batch.provider();
-                let last_shard_opt = provider.get::<tables::StoragesHistory>(last_key.clone())?;
-                let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
-
-                last_shard.append(indices).map_err(ProviderError::other)?;
-
-                // Fast path: all indices fit in one shard
-                if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
-                    batch.put::<tables::StoragesHistory>(last_key, &last_shard)?;
-                    return Ok(());
-                }
-
-                // Slow path: rechunk into multiple shards
-                let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
-                let mut chunks_peekable = chunks.into_iter().peekable();
-
-                while let Some(chunk) = chunks_peekable.next() {
-                    let shard = BlockNumberList::new_pre_sorted(chunk);
-                    let highest_block_number = if chunks_peekable.peek().is_some() {
-                        shard.iter().next_back().expect("`chunks` does not return empty list")
-                    } else {
-                        u64::MAX
-                    };
-
-                    batch.put::<tables::StoragesHistory>(
-                        StorageShardedKey::new(address, storage_key, highest_block_number),
-                        &shard,
-                    )?;
-                }
-
-                Ok(())
-            }
+            Self::RocksDB(batch) => batch.append_storage_history_shard(address, storage_key, indices),
         }
     }
 }
@@ -969,39 +937,7 @@ where
             }
             Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => {
-                let provider = batch.provider();
-                let last_shard_opt = provider.get::<tables::AccountsHistory>(last_key.clone())?;
-                let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
-
-                last_shard.append(indices).map_err(ProviderError::other)?;
-
-                // Fast path: all indices fit in one shard
-                if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
-                    batch.put::<tables::AccountsHistory>(last_key, &last_shard)?;
-                    return Ok(());
-                }
-
-                // Slow path: rechunk into multiple shards
-                let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
-                let mut chunks_peekable = chunks.into_iter().peekable();
-
-                while let Some(chunk) = chunks_peekable.next() {
-                    let shard = BlockNumberList::new_pre_sorted(chunk);
-                    let highest_block_number = if chunks_peekable.peek().is_some() {
-                        shard.iter().next_back().expect("`chunks` does not return empty list")
-                    } else {
-                        u64::MAX
-                    };
-
-                    batch.put::<tables::AccountsHistory>(
-                        ShardedKey::new(address, highest_block_number),
-                        &shard,
-                    )?;
-                }
-
-                Ok(())
-            }
+            Self::RocksDB(batch) => batch.append_account_history_shard(address, indices),
         }
     }
 }
