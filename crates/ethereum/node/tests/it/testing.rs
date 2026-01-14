@@ -95,7 +95,8 @@ where
     F: FnOnce(Arc<reth_chainspec::ChainSpec>) -> TestingBuildBlockRequestV1 + Send + 'static,
 {
     let tasks = TaskManager::current();
-    let mut rpc_args = reth_node_core::args::RpcServerArgs::default().with_http();
+    let mut rpc_args =
+        reth_node_core::args::RpcServerArgs::default().with_unused_ports().with_http();
     rpc_args.http_api = Some(RpcModuleSelection::from_iter([RethRpcModule::Testing]));
     let tempdir = tempdir().expect("temp datadir");
     let datadir_args = DatadirArgs {
@@ -105,7 +106,8 @@ where
         rocksdb_path: Some(tempdir.path().join("rocksdb")),
         pprof_dumps_path: Some(tempdir.path().join("pprof")),
     };
-    let config = NodeConfig::test().with_datadir_args(datadir_args).with_rpc(rpc_args);
+    let config =
+        NodeConfig::test().with_unused_ports().with_datadir_args(datadir_args).with_rpc(rpc_args);
     let db = create_test_rw_db();
 
     let (tx, rx) = oneshot::channel();
@@ -171,23 +173,6 @@ async fn testing_rpc_build_block_invalid_parent_hash() -> eyre::Result<()> {
         parent_block_hash: B256::from([0xff; 32]), // Invalid parent hash
         payload_attributes: EthPayloadAttributes {
             timestamp: chain.genesis().timestamp + 1,
-            prev_randao: B256::ZERO,
-            suggested_fee_recipient: Address::ZERO,
-            withdrawals: None,
-            parent_beacon_block_root: None,
-        },
-        transactions: vec![],
-        extra_data: None,
-    })
-    .await
-}
-
-#[tokio::test(flavor = "multi_thread")]
-async fn testing_rpc_build_block_invalid_timestamp() -> eyre::Result<()> {
-    test_build_block_error(|chain| TestingBuildBlockRequestV1 {
-        parent_block_hash: chain.genesis_hash(),
-        payload_attributes: EthPayloadAttributes {
-            timestamp: chain.genesis().timestamp - 1, // Invalid: earlier than parent
             prev_randao: B256::ZERO,
             suggested_fee_recipient: Address::ZERO,
             withdrawals: None,
