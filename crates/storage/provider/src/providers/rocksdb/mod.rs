@@ -4,4 +4,5 @@ mod invariants;
 mod metrics;
 mod provider;
 
-pub use provider::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksDBWriteCtx, RocksTx};
+pub(crate) use provider::RocksDBWriteCtx;
+pub use provider::{RocksDBBatch, RocksDBBuilder, RocksDBProvider, RocksTx};

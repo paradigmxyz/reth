@@ -403,7 +403,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })
     }
 
-    /// Creates the context for RocksDB writes.
+    /// Creates the context for `RocksDB` writes.
     fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
         RocksDBWriteCtx {
             first_block_number: first_block,
@@ -564,10 +564,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // Wait for RocksDB thread and push batch to pending
             #[cfg(all(unix, feature = "rocksdb"))]
-            if let Some(handle) = rocksdb_handle {
-                if let Some(batch) = handle.join().expect("RocksDB thread panicked")? {
-                    self.set_pending_rocksdb_batch(batch);
-                }
+            if let Some(handle) = rocksdb_handle &&
+                let Some(batch) = handle.join().expect("RocksDB thread panicked")?
+            {
+                self.set_pending_rocksdb_batch(batch);
             }
             #[cfg(not(all(unix, feature = "rocksdb")))]
             let _ = rocksdb_handle;

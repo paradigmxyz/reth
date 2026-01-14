@@ -31,14 +31,14 @@ use std::{
     time::Instant,
 };
 
-/// Context for RocksDB block writes.
+/// Context for `RocksDB` block writes.
 #[derive(Debug, Clone, Copy)]
 pub struct RocksDBWriteCtx {
     /// The first block number being written.
     pub first_block_number: BlockNumber,
     /// The prune mode for transaction lookup, if any.
     pub prune_tx_lookup: Option<PruneMode>,
-    /// Storage settings determining what goes to RocksDB.
+    /// Storage settings determining what goes to `RocksDB`.
     pub storage_settings: StorageSettings,
 }
 
@@ -539,11 +539,11 @@ impl RocksDBProvider {
         })
     }
 
-    /// Writes all RocksDB data for multiple blocks in a single batch.
+    /// Writes all `RocksDB` data for multiple blocks in a single batch.
     ///
     /// This handles transaction hash numbers, account history, and storage history based on
     /// the provided storage settings. Returns the raw batch to be committed later, or `None` if no
-    /// RocksDB writes are needed.
+    /// `RocksDB` writes are needed.
     pub fn write_blocks_data<N: reth_node_types::NodePrimitives>(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -576,7 +576,7 @@ impl RocksDBProvider {
             for (block_idx, block) in blocks.iter().enumerate() {
                 let block_number = ctx.first_block_number + block_idx as u64;
                 let bundle = &block.execution_outcome().bundle;
-                for (&address, _) in bundle.state() {
+                for &address in bundle.state().keys() {
                     account_history.entry(address).or_default().push(block_number);
                 }
             }
@@ -593,10 +593,10 @@ impl RocksDBProvider {
             for (block_idx, block) in blocks.iter().enumerate() {
                 let block_number = ctx.first_block_number + block_idx as u64;
                 let bundle = &block.execution_outcome().bundle;
-                for (&address, account) in bundle.state() {
-                    for (&slot, _) in &account.storage {
+                for (address, account) in bundle.state() {
+                    for &slot in account.storage.keys() {
                         let key = B256::new(slot.to_be_bytes());
-                        storage_history.entry((address, key)).or_default().push(block_number);
+                        storage_history.entry((*address, key)).or_default().push(block_number);
                     }
                 }
             }

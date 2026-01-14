@@ -5,7 +5,10 @@
 //! Operations will produce errors if actually attempted.
 
 use alloy_primitives::BlockNumber;
-use reth_db_api::{models::StorageSettings, table::{Encode, Table}};
+use reth_db_api::{
+    models::StorageSettings,
+    table::{Encode, Table},
+};
 use reth_prune_types::PruneMode;
 use reth_storage_errors::{
     db::LogLevel,
