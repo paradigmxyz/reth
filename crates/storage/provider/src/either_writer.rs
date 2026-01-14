@@ -15,6 +15,7 @@ use crate::{
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
 
 use crate::providers::{needs_prev_shard_check, HistoryInfo};
+use itertools::Itertools;
 use rayon::slice::ParallelSliceMut;
 use reth_db::{
     cursor::{DbCursorRO, DbDupCursorRW},
@@ -25,7 +26,7 @@ use reth_db::{
 };
 use reth_db_api::{
     cursor::DbCursorRW,
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    models::{sharded_key, storage_sharded_key::StorageShardedKey, ShardedKey},
     tables,
     tables::BlockNumberList,
 };
@@ -36,6 +37,71 @@ use reth_static_file_types::StaticFileSegment;
 use reth_storage_api::{ChangeSetReader, DBProvider, NodePrimitivesProvider, StorageSettingsCache};
 use reth_storage_errors::provider::ProviderResult;
 use strum::{Display, EnumIs};
+
+/// Collects shards to unwind from a `RocksDB` reverse iterator.
+///
+/// This is a generic helper for the `RocksDB` unwind logic used by both account and storage
+/// history. It iterates through shards from highest to lowest block number, collecting shards to
+/// delete and identifying any partial shard that needs to be preserved.
+///
+/// # Arguments
+/// * `iter` - An iterator yielding `(K, BlockNumberList)` pairs in reverse order
+/// * `belongs_to_target` - Predicate that returns `true` if the key belongs to the target being
+///   unwound
+/// * `highest_block_number` - Function to extract the highest block number from the key
+/// * `block_number` - The unwind target block number
+///
+/// # Returns
+/// A tuple of `(shards_to_delete, partial_shard_to_keep)` where:
+/// - `shards_to_delete` contains all keys that should be deleted
+/// - `partial_shard_to_keep` contains block numbers to preserve if a boundary shard was found
+#[cfg(all(unix, feature = "rocksdb"))]
+fn collect_shards_for_unwind<K, I, E>(
+    iter: I,
+    belongs_to_target: impl Fn(&K) -> bool,
+    highest_block_number: impl Fn(&K) -> BlockNumber,
+    block_number: BlockNumber,
+) -> Result<(Vec<K>, Option<Vec<u64>>), E>
+where
+    I: Iterator<Item = Result<(K, BlockNumberList), E>>,
+{
+    let mut shards_to_delete = Vec::new();
+    let mut partial_shard_to_keep: Option<Vec<u64>> = None;
+
+    for result in iter {
+        let (key, list) = result?;
+
+        if !belongs_to_target(&key) {
+            break;
+        }
+
+        shards_to_delete.push(key);
+        let key = shards_to_delete.last().unwrap();
+
+        let first = list.iter().next().expect("List can't be empty");
+
+        // Case 1: Entire shard is at or above the unwinding point - keep it deleted
+        if first >= block_number {
+            continue;
+        }
+
+        // Case 2: Boundary shard - spans across the unwinding point
+        if block_number <= highest_block_number(key) {
+            let indices_to_keep: Vec<_> = list.iter().take_while(|i| *i < block_number).collect();
+            if !indices_to_keep.is_empty() {
+                partial_shard_to_keep = Some(indices_to_keep);
+            }
+            break;
+        }
+
+        // Case 3: Entire shard is below the unwinding point - keep all indices
+        let indices_to_keep: Vec<_> = list.iter().collect();
+        partial_shard_to_keep = Some(indices_to_keep);
+        break;
+    }
+
+    Ok((shards_to_delete, partial_shard_to_keep))
+}
 
 /// Type alias for [`EitherReader`] constructors.
 type EitherReaderTy<'a, P, T> =
@@ -263,6 +329,82 @@ impl<'a> EitherWriter<'a, (), ()> {
     }
 }
 
+/// Creates the appropriate `RocksDB` batch argument for [`EitherWriter`] constructors.
+///
+/// On `RocksDB`-enabled builds, this creates a real batch from the given `RocksDB` provider.
+/// On other builds, this returns `()` to allow the same API without feature gates.
+///
+/// # Example
+///
+/// ```ignore
+/// let rocksdb = make_rocksdb_provider(&provider);
+/// let rocksdb_batch = make_rocksdb_batch_arg(&rocksdb);
+/// let writer = EitherWriter::new_transaction_hash_numbers(&provider, rocksdb_batch)?;
+/// ```
+#[cfg(all(unix, feature = "rocksdb"))]
+pub fn make_rocksdb_batch_arg(
+    rocksdb: &crate::providers::rocksdb::RocksDBProvider,
+) -> RocksBatchArg<'_> {
+    rocksdb.batch()
+}
+
+/// Stub for non-RocksDB builds.
+#[cfg(not(all(unix, feature = "rocksdb")))]
+pub const fn make_rocksdb_batch_arg<T>(_rocksdb: &T) -> RocksBatchArg<'static> {}
+
+/// Gets the `RocksDB` provider from a provider that implements `RocksDBProviderFactory`.
+///
+/// On `RocksDB`-enabled builds, returns the real provider.
+/// On other builds, returns `()` to allow the same API without feature gates.
+///
+/// This should be called first, and the result passed to [`make_rocksdb_batch_arg`].
+/// The returned value must be kept alive for as long as the batch is used.
+#[cfg(all(unix, feature = "rocksdb"))]
+pub fn make_rocksdb_provider<P>(provider: &P) -> crate::providers::rocksdb::RocksDBProvider
+where
+    P: crate::RocksDBProviderFactory,
+{
+    provider.rocksdb_provider()
+}
+
+/// Stub for non-RocksDB builds.
+#[cfg(not(all(unix, feature = "rocksdb")))]
+pub const fn make_rocksdb_provider<P>(_provider: &P) {}
+
+/// Registers a `RocksDB` batch extracted from an [`EitherWriter`] with the provider.
+///
+/// This should be called after operations on an [`EitherWriter`] that may use `RocksDB`,
+/// to ensure the batch is committed when the provider commits.
+///
+/// On non-`RocksDB` builds, this is a no-op.
+///
+/// # Example
+///
+/// ```ignore
+/// let rocksdb_batch = make_rocksdb_batch_arg(&provider);
+/// let mut writer = EitherWriter::new_transaction_hash_numbers(&provider, rocksdb_batch)?;
+/// // ... perform operations ...
+/// register_rocksdb_batch(&provider, writer);
+/// ```
+#[cfg(all(unix, feature = "rocksdb"))]
+pub fn register_rocksdb_batch<P, CURSOR, N>(provider: &P, writer: EitherWriter<'_, CURSOR, N>)
+where
+    P: crate::RocksDBProviderFactory,
+    N: NodePrimitives,
+{
+    if let Some(batch) = writer.into_raw_rocksdb_batch() {
+        provider.set_pending_rocksdb_batch(batch);
+    }
+}
+
+/// Stub for non-RocksDB builds.
+#[cfg(not(all(unix, feature = "rocksdb")))]
+pub fn register_rocksdb_batch<P, CURSOR, N>(_provider: &P, _writer: EitherWriter<'_, CURSOR, N>)
+where
+    N: NodePrimitives,
+{
+}
+
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N> {
     /// Extracts the raw `RocksDB` write batch from this writer, if it contains one.
     ///
@@ -478,6 +620,153 @@ where
             Self::RocksDB(batch) => batch.delete::<tables::StoragesHistory>(key),
         }
     }
+
+    /// Unwinds storage history shards for a given address and storage key.
+    ///
+    /// Walks through all shards for the given key, collecting indices below the unwind point,
+    /// then deletes all shards and reinserts the kept indices as a single sentinel shard.
+    pub fn unwind_storage_history_shards(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        block_number: BlockNumber,
+    ) -> ProviderResult<()> {
+        let start_key = StorageShardedKey::last(address, storage_key);
+
+        match self {
+            Self::Database(cursor) => {
+                // Walk through shards from highest to lowest, following the same algorithm
+                // as unwind_history_shards in provider.rs
+                let mut item = cursor.seek_exact(start_key.clone())?;
+
+                while let Some((sharded_key, list)) = item {
+                    // Check if shard belongs to this (address, storage_key)
+                    if sharded_key.address != address || sharded_key.sharded_key.key != storage_key
+                    {
+                        break;
+                    }
+
+                    // Delete this shard
+                    cursor.delete_current()?;
+
+                    // Get the first (lowest) block number in this shard
+                    let first = list.iter().next().expect("List can't be empty");
+
+                    // Case 1: Entire shard is at or above the unwinding point
+                    // Keep it deleted (already done above) and continue to next shard
+                    if first >= block_number {
+                        item = cursor.prev()?;
+                        continue;
+                    }
+
+                    // Case 2: Boundary shard - spans across the unwinding point
+                    // Reinsert only indices below unwind point, then STOP
+                    if block_number <= sharded_key.sharded_key.highest_block_number {
+                        let indices_to_keep: Vec<_> =
+                            list.iter().take_while(|i| *i < block_number).collect();
+                        if !indices_to_keep.is_empty() {
+                            cursor.insert(
+                                start_key,
+                                &BlockNumberList::new_pre_sorted(indices_to_keep),
+                            )?;
+                        }
+                        return Ok(());
+                    }
+
+                    // Case 3: Entire shard is below the unwinding point
+                    // Reinsert all indices, then STOP (preserves earlier shards)
+                    let indices_to_keep: Vec<_> = list.iter().collect();
+                    cursor.insert(start_key, &BlockNumberList::new_pre_sorted(indices_to_keep))?;
+                    return Ok(());
+                }
+
+                Ok(())
+            }
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => {
+                let provider = batch.provider();
+                let iter =
+                    provider.iter_from_reverse::<tables::StoragesHistory>(start_key.clone())?;
+
+                let (shards_to_delete, partial_shard_to_keep) = collect_shards_for_unwind(
+                    iter,
+                    |k: &StorageShardedKey| {
+                        k.address == address && k.sharded_key.key == storage_key
+                    },
+                    |k| k.sharded_key.highest_block_number,
+                    block_number,
+                )?;
+
+                for key in shards_to_delete {
+                    batch.delete::<tables::StoragesHistory>(key)?;
+                }
+
+                if let Some(indices) = partial_shard_to_keep {
+                    batch.put::<tables::StoragesHistory>(
+                        start_key,
+                        &BlockNumberList::new_pre_sorted(indices),
+                    )?;
+                }
+
+                Ok(())
+            }
+        }
+    }
+
+    /// Appends indices to a storage history shard.
+    ///
+    /// Loads the existing shard (if any) for the given key, appends the new indices,
+    /// and rechunks into multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    pub fn append_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let last_key = StorageShardedKey::last(address, storage_key);
+
+        match self {
+            Self::Database(cursor) => {
+                let mut last_shard = cursor
+                    .seek_exact(last_key.clone())?
+                    .map(|(_, list)| list)
+                    .unwrap_or_else(BlockNumberList::empty);
+
+                last_shard.append(indices).map_err(ProviderError::other)?;
+
+                // Fast path: all indices fit in one shard
+                if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
+                    cursor.upsert(last_key, &last_shard)?;
+                    return Ok(());
+                }
+
+                // Slow path: rechunk into multiple shards
+                let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
+                let mut chunks_peekable = chunks.into_iter().peekable();
+
+                while let Some(chunk) = chunks_peekable.next() {
+                    let shard = BlockNumberList::new_pre_sorted(chunk);
+                    let highest_block_number = if chunks_peekable.peek().is_some() {
+                        shard.iter().next_back().expect("`chunks` does not return empty list")
+                    } else {
+                        // Insert last list with `u64::MAX`.
+                        u64::MAX
+                    };
+
+                    cursor.upsert(
+                        StorageShardedKey::new(address, storage_key, highest_block_number),
+                        &shard,
+                    )?;
+                }
+
+                Ok(())
+            }
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.append_storage_history_shard(address, storage_key, indices),
+        }
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>
@@ -510,6 +799,145 @@ where
             Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
             #[cfg(all(unix, feature = "rocksdb"))]
             Self::RocksDB(batch) => batch.delete::<tables::AccountsHistory>(key),
+        }
+    }
+
+    /// Unwinds account history shards for a given address.
+    ///
+    /// Walks through all shards for the given address, following the same algorithm
+    /// as `unwind_history_shards` in provider.rs: only delete/modify shards at or above
+    /// the unwind point, preserving earlier shards.
+    pub fn unwind_account_history_shards(
+        &mut self,
+        address: Address,
+        block_number: BlockNumber,
+    ) -> ProviderResult<()> {
+        let start_key = ShardedKey::last(address);
+
+        match self {
+            Self::Database(cursor) => {
+                // Walk through shards from highest to lowest
+                let mut item = cursor.seek_exact(start_key.clone())?;
+
+                while let Some((sharded_key, list)) = item {
+                    // Check if shard belongs to this address
+                    if sharded_key.key != address {
+                        break;
+                    }
+
+                    // Delete this shard
+                    cursor.delete_current()?;
+
+                    // Get the first (lowest) block number in this shard
+                    let first = list.iter().next().expect("List can't be empty");
+
+                    // Case 1: Entire shard is at or above the unwinding point
+                    // Keep it deleted (already done above) and continue to next shard
+                    if first >= block_number {
+                        item = cursor.prev()?;
+                        continue;
+                    }
+
+                    // Case 2: Boundary shard - spans across the unwinding point
+                    // Reinsert only indices below unwind point, then STOP
+                    if block_number <= sharded_key.highest_block_number {
+                        let indices_to_keep: Vec<_> =
+                            list.iter().take_while(|i| *i < block_number).collect();
+                        if !indices_to_keep.is_empty() {
+                            cursor.insert(
+                                start_key,
+                                &BlockNumberList::new_pre_sorted(indices_to_keep),
+                            )?;
+                        }
+                        return Ok(());
+                    }
+
+                    // Case 3: Entire shard is below the unwinding point
+                    // Reinsert all indices, then STOP (preserves earlier shards)
+                    let indices_to_keep: Vec<_> = list.iter().collect();
+                    cursor.insert(start_key, &BlockNumberList::new_pre_sorted(indices_to_keep))?;
+                    return Ok(());
+                }
+
+                Ok(())
+            }
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => {
+                let provider = batch.provider();
+                let iter =
+                    provider.iter_from_reverse::<tables::AccountsHistory>(start_key.clone())?;
+
+                let (shards_to_delete, partial_shard_to_keep) = collect_shards_for_unwind(
+                    iter,
+                    |k: &ShardedKey<Address>| k.key == address,
+                    |k| k.highest_block_number,
+                    block_number,
+                )?;
+
+                for key in shards_to_delete {
+                    batch.delete::<tables::AccountsHistory>(key)?;
+                }
+
+                if let Some(indices) = partial_shard_to_keep {
+                    batch.put::<tables::AccountsHistory>(
+                        start_key,
+                        &BlockNumberList::new_pre_sorted(indices),
+                    )?;
+                }
+
+                Ok(())
+            }
+        }
+    }
+
+    /// Appends indices to an account history shard.
+    ///
+    /// Loads the existing shard (if any) for the given address, appends the new indices,
+    /// and rechunks into multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    pub fn append_account_history_shard(
+        &mut self,
+        address: Address,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let last_key = ShardedKey::last(address);
+
+        match self {
+            Self::Database(cursor) => {
+                let mut last_shard = cursor
+                    .seek_exact(last_key.clone())?
+                    .map(|(_, list)| list)
+                    .unwrap_or_else(BlockNumberList::empty);
+
+                last_shard.append(indices).map_err(ProviderError::other)?;
+
+                // Fast path: all indices fit in one shard
+                if last_shard.len() <= sharded_key::NUM_OF_INDICES_IN_SHARD as u64 {
+                    cursor.upsert(last_key, &last_shard)?;
+                    return Ok(());
+                }
+
+                // Slow path: rechunk into multiple shards
+                let chunks = last_shard.iter().chunks(sharded_key::NUM_OF_INDICES_IN_SHARD);
+                let mut chunks_peekable = chunks.into_iter().peekable();
+
+                while let Some(chunk) = chunks_peekable.next() {
+                    let shard = BlockNumberList::new_pre_sorted(chunk);
+                    let highest_block_number = if chunks_peekable.peek().is_some() {
+                        shard.iter().next_back().expect("`chunks` does not return empty list")
+                    } else {
+                        // Insert last list with `u64::MAX`.
+                        u64::MAX
+                    };
+
+                    cursor.upsert(ShardedKey::new(address, highest_block_number), &shard)?;
+                }
+
+                Ok(())
+            }
+            Self::StaticFile(..) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => batch.append_account_history_shard(address, indices),
         }
     }
 }
@@ -592,9 +1020,7 @@ impl<'a> EitherReader<'a, (), ()> {
             return Ok(EitherReader::RocksDB(_rocksdb_tx));
         }
 
-        Ok(EitherReader::Database(
-            provider.tx_ref().cursor_read::<tables::StoragesHistory>()?,
-        ))
+        Ok(EitherReader::Database(provider.tx_ref().cursor_read::<tables::StoragesHistory>()?))
     }
 
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
@@ -630,9 +1056,7 @@ impl<'a> EitherReader<'a, (), ()> {
             return Ok(EitherReader::RocksDB(_rocksdb_tx));
         }
 
-        Ok(EitherReader::Database(
-            provider.tx_ref().cursor_read::<tables::AccountsHistory>()?,
-        ))
+        Ok(EitherReader::Database(provider.tx_ref().cursor_read::<tables::AccountsHistory>()?))
     }
 
     /// Creates a new [`EitherReader`] for account changesets based on storage settings.
@@ -1315,5 +1739,403 @@ mod rocksdb_tests {
             Some(tx_num2),
             "Data should be visible after provider.commit()"
         );
+    }
+
+    // ==================== Storage History Unwind Tests ====================
+
+    /// Test unwinding a single storage history shard.
+    /// Setup: Create single shard with blocks [10, 20, 30, 40, 50]
+    /// Action: Unwind at block 35
+    /// Verify: Shard becomes [10, 20, 30]
+    #[test]
+    fn test_rocksdb_unwind_storage_history_single_shard() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        let address = Address::random();
+        let storage_key = B256::from([1u8; 32]);
+
+        // Insert shard with highest_block=u64::MAX (sentinel shard)
+        let rocksdb = factory.rocksdb_provider();
+        rocksdb
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, u64::MAX),
+                &IntegerList::new([10, 20, 30, 40, 50]).unwrap(),
+            )
+            .unwrap();
+
+        // Unwind at block 35
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_storages_history(&provider, batch).unwrap();
+        writer.unwind_storage_history_shards(address, storage_key, 35).unwrap();
+
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
+
+        // Verify shard is [10, 20, 30]
+        let rocksdb = factory.rocksdb_provider();
+        let result = rocksdb
+            .get::<tables::StoragesHistory>(StorageShardedKey::new(address, storage_key, u64::MAX))
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.iter().collect::<Vec<_>>(), vec![10, 20, 30]);
+    }
+
+    /// Test unwinding multiple storage history shards.
+    /// Setup: 3 shards - blocks [10, 20] in shard 100, [110, 120] in shard 200, [210, 220] in shard
+    /// `u64::MAX` Action: Unwind at block 115
+    /// Verify: Keep shard 100 intact, shard 200 becomes [110], shard `u64::MAX` deleted
+    #[test]
+    fn test_rocksdb_unwind_storage_history_multiple_shards() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        let address = Address::random();
+        let storage_key = B256::from([2u8; 32]);
+
+        // Insert 3 shards
+        let rocksdb = factory.rocksdb_provider();
+        rocksdb
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 100),
+                &IntegerList::new([10, 20]).unwrap(),
+            )
+            .unwrap();
+        rocksdb
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, 200),
+                &IntegerList::new([110, 120]).unwrap(),
+            )
+            .unwrap();
+        rocksdb
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, u64::MAX),
+                &IntegerList::new([210, 220]).unwrap(),
+            )
+            .unwrap();
+
+        // Unwind at block 115 (middle of shard 200)
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_storages_history(&provider, batch).unwrap();
+        writer.unwind_storage_history_shards(address, storage_key, 115).unwrap();
+
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
+
+        // Verify: shard 100 should be unchanged
+        let rocksdb = factory.rocksdb_provider();
+        let shard_100 = rocksdb
+            .get::<tables::StoragesHistory>(StorageShardedKey::new(address, storage_key, 100))
+            .unwrap();
+        assert_eq!(shard_100.unwrap().iter().collect::<Vec<_>>(), vec![10, 20]);
+
+        // Shard 200 and u64::MAX should be deleted, replaced with sentinel containing [110]
+        // Note: The unwind writes to the start_key (u64::MAX) with the remaining indices
+        let sentinel = rocksdb
+            .get::<tables::StoragesHistory>(StorageShardedKey::new(address, storage_key, u64::MAX))
+            .unwrap()
+            .unwrap();
+        assert_eq!(sentinel.iter().collect::<Vec<_>>(), vec![110]);
+
+        // Shard 200 should be deleted
+        let shard_200 = rocksdb
+            .get::<tables::StoragesHistory>(StorageShardedKey::new(address, storage_key, 200))
+            .unwrap();
+        assert!(shard_200.is_none());
+    }
+
+    /// Test unwinding that deletes an entire shard.
+    /// Setup: Shard with blocks [200, 250, 300]
+    /// Action: Unwind at block 150 (before all entries)
+    /// Verify: Shard completely deleted
+    #[test]
+    fn test_rocksdb_unwind_storage_history_delete_entire_shard() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        let address = Address::random();
+        let storage_key = B256::from([3u8; 32]);
+
+        // Insert shard where all entries are above unwind point
+        let rocksdb = factory.rocksdb_provider();
+        rocksdb
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, u64::MAX),
+                &IntegerList::new([200, 250, 300]).unwrap(),
+            )
+            .unwrap();
+
+        // Unwind at block 150 (before all entries)
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_storages_history(&provider, batch).unwrap();
+        writer.unwind_storage_history_shards(address, storage_key, 150).unwrap();
+
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
+
+        // Verify shard is deleted
+        let rocksdb = factory.rocksdb_provider();
+        let result = rocksdb
+            .get::<tables::StoragesHistory>(StorageShardedKey::new(address, storage_key, u64::MAX))
+            .unwrap();
+        assert!(result.is_none());
+    }
+
+    /// Test unwinding for a non-matching address does nothing.
+    /// Setup: Shard for address A
+    /// Action: Unwind for address B
+    /// Verify: No changes, no panic
+    #[test]
+    fn test_rocksdb_unwind_storage_history_no_matching_address() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_storages_history_in_rocksdb(true),
+        );
+
+        let address_a = Address::from([0xAA; 20]);
+        let address_b = Address::from([0xBB; 20]);
+        let storage_key = B256::from([4u8; 32]);
+
+        // Insert shard for address A
+        let rocksdb = factory.rocksdb_provider();
+        rocksdb
+            .put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address_a, storage_key, u64::MAX),
+                &IntegerList::new([10, 20, 30]).unwrap(),
+            )
+            .unwrap();
+
+        // Unwind for address B (should do nothing)
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_storages_history(&provider, batch).unwrap();
+        writer.unwind_storage_history_shards(address_b, storage_key, 15).unwrap();
+
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
+
+        // Verify address A's shard is unchanged
+        let rocksdb = factory.rocksdb_provider();
+        let result = rocksdb
+            .get::<tables::StoragesHistory>(StorageShardedKey::new(
+                address_a,
+                storage_key,
+                u64::MAX,
+            ))
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.iter().collect::<Vec<_>>(), vec![10, 20, 30]);
+    }
+
+    // ==================== Account History Unwind Tests ====================
+
+    /// Test unwinding a single account history shard.
+    /// Setup: Create single shard with blocks [10, 20, 30, 40, 50]
+    /// Action: Unwind at block 35
+    /// Verify: Shard becomes [10, 20, 30]
+    #[test]
+    fn test_rocksdb_unwind_account_history_single_shard() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        let address = Address::random();
+
+        // Insert shard with highest_block=u64::MAX (sentinel shard)
+        let rocksdb = factory.rocksdb_provider();
+        rocksdb
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, u64::MAX),
+                &IntegerList::new([10, 20, 30, 40, 50]).unwrap(),
+            )
+            .unwrap();
+
+        // Unwind at block 35
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_accounts_history(&provider, batch).unwrap();
+        writer.unwind_account_history_shards(address, 35).unwrap();
+
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
+
+        // Verify shard is [10, 20, 30]
+        let rocksdb = factory.rocksdb_provider();
+        let result = rocksdb
+            .get::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX))
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.iter().collect::<Vec<_>>(), vec![10, 20, 30]);
+    }
+
+    /// Test unwinding multiple account history shards.
+    /// Setup: 3 shards - [10, 20] at 100, [110, 120] at 200, [210, 220] at `u64::MAX`
+    /// Action: Unwind at block 115
+    /// Verify: Keep shard 100 intact, shard 200 deleted, sentinel has [110]
+    #[test]
+    fn test_rocksdb_unwind_account_history_multiple_shards() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        let address = Address::random();
+
+        // Insert 3 shards
+        let rocksdb = factory.rocksdb_provider();
+        rocksdb
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, 100),
+                &IntegerList::new([10, 20]).unwrap(),
+            )
+            .unwrap();
+        rocksdb
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, 200),
+                &IntegerList::new([110, 120]).unwrap(),
+            )
+            .unwrap();
+        rocksdb
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, u64::MAX),
+                &IntegerList::new([210, 220]).unwrap(),
+            )
+            .unwrap();
+
+        // Unwind at block 115
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_accounts_history(&provider, batch).unwrap();
+        writer.unwind_account_history_shards(address, 115).unwrap();
+
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
+
+        // Verify: shard 100 should be unchanged
+        let rocksdb = factory.rocksdb_provider();
+        let shard_100 =
+            rocksdb.get::<tables::AccountsHistory>(ShardedKey::new(address, 100)).unwrap();
+        assert_eq!(shard_100.unwrap().iter().collect::<Vec<_>>(), vec![10, 20]);
+
+        // Sentinel should have [110]
+        let sentinel = rocksdb
+            .get::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX))
+            .unwrap()
+            .unwrap();
+        assert_eq!(sentinel.iter().collect::<Vec<_>>(), vec![110]);
+
+        // Shard 200 should be deleted
+        let shard_200 =
+            rocksdb.get::<tables::AccountsHistory>(ShardedKey::new(address, 200)).unwrap();
+        assert!(shard_200.is_none());
+    }
+
+    /// Test unwinding that preserves the `u64::MAX` sentinel correctly.
+    /// Setup: Shard with [5, 10, 15] at `highest_block=u64::MAX`
+    /// Action: Unwind at block 12
+    /// Verify: Shard becomes [5, 10] and sentinel is preserved
+    #[test]
+    fn test_rocksdb_unwind_account_history_boundary_shard() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy().with_account_history_in_rocksdb(true),
+        );
+
+        let address = Address::random();
+
+        // Insert shard at sentinel boundary
+        let rocksdb = factory.rocksdb_provider();
+        rocksdb
+            .put::<tables::AccountsHistory>(
+                ShardedKey::new(address, u64::MAX),
+                &IntegerList::new([5, 10, 15]).unwrap(),
+            )
+            .unwrap();
+
+        // Unwind at block 12
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_accounts_history(&provider, batch).unwrap();
+        writer.unwind_account_history_shards(address, 12).unwrap();
+
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
+
+        // Verify shard is [5, 10] at sentinel
+        let rocksdb = factory.rocksdb_provider();
+        let result = rocksdb
+            .get::<tables::AccountsHistory>(ShardedKey::new(address, u64::MAX))
+            .unwrap()
+            .unwrap();
+        assert_eq!(result.iter().collect::<Vec<_>>(), vec![5, 10]);
+    }
+
+    /// Test unwinding on an empty table does nothing and doesn't panic.
+    #[test]
+    fn test_rocksdb_unwind_empty_table() {
+        let factory = create_test_provider_factory();
+        factory.set_storage_settings_cache(
+            StorageSettings::legacy()
+                .with_storages_history_in_rocksdb(true)
+                .with_account_history_in_rocksdb(true),
+        );
+
+        let address = Address::random();
+        let storage_key = B256::from([5u8; 32]);
+
+        // Unwind on empty storage history - should not panic
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_storages_history(&provider, batch).unwrap();
+        writer.unwind_storage_history_shards(address, storage_key, 100).unwrap();
+
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
+
+        // Unwind on empty account history - should not panic
+        let rocksdb = factory.rocksdb_provider();
+        let batch = rocksdb.batch();
+        let provider = factory.database_provider_rw().unwrap();
+        let mut writer = EitherWriter::new_accounts_history(&provider, batch).unwrap();
+        writer.unwind_account_history_shards(address, 100).unwrap();
+
+        if let Some(batch) = writer.into_raw_rocksdb_batch() {
+            provider.set_pending_rocksdb_batch(batch);
+        }
+        provider.commit().unwrap();
     }
 }
