@@ -38,6 +38,7 @@ tempfile.workspace = true
 default = []
 
 otlp = ["reth-tracing/otlp", "reth-node-core/otlp"]
+otlp-logs = ["reth-tracing/otlp-logs", "reth-node-core/otlp-logs"]
 
 dev = ["reth-cli-commands/arbitrary"]
 
