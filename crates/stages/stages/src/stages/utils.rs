@@ -119,6 +119,40 @@ where
     Ok::<(), StageError>(())
 }
 
+/// Generic shard-and-write helper used by both account and storage history loaders.
+///
+/// Chunks the list into shards, writes each shard via the provided write function,
+/// and handles the last shard according to [`LoadMode`].
+fn shard_and_write<F>(
+    list: &mut Vec<BlockNumber>,
+    mode: LoadMode,
+    mut write_fn: F,
+) -> Result<(), StageError>
+where
+    F: FnMut(Vec<u64>, BlockNumber) -> Result<(), StageError>,
+{
+    if list.len() <= NUM_OF_INDICES_IN_SHARD && !mode.is_flush() {
+        return Ok(());
+    }
+
+    let chunks: Vec<_> = list.chunks(NUM_OF_INDICES_IN_SHARD).map(|c| c.to_vec()).collect();
+    let mut iter = chunks.into_iter().peekable();
+
+    while let Some(chunk) = iter.next() {
+        let highest = *chunk.last().expect("at least one index");
+        let is_last = iter.peek().is_none();
+
+        if !mode.is_flush() && is_last {
+            *list = chunk;
+        } else {
+            let highest = if is_last { u64::MAX } else { highest };
+            write_fn(chunk, highest)?;
+        }
+    }
+
+    Ok(())
+}
+
 /// Collects account history indices using a provider that implements `ChangeSetReader`.
 pub(crate) fn collect_account_history_indices<Provider>(
     provider: &Provider,
@@ -444,30 +478,11 @@ where
     CURSOR: DbCursorRW<tables::StoragesHistory> + DbCursorRO<tables::StoragesHistory>,
     P: Copy,
 {
-    if list.len() > NUM_OF_INDICES_IN_SHARD || mode.is_flush() {
-        let chunks =
-            list.chunks(NUM_OF_INDICES_IN_SHARD).map(|chunks| chunks.to_vec()).collect::<Vec<_>>();
-
-        let mut iter = chunks.into_iter().peekable();
-        while let Some(chunk) = iter.next() {
-            let mut highest = *chunk.last().expect("at least one index");
-
-            if !mode.is_flush() && iter.peek().is_none() {
-                *list = chunk;
-            } else {
-                if iter.peek().is_none() {
-                    highest = u64::MAX;
-                }
-                let key = sharded_key_factory(partial_key, highest);
-                let value = BlockNumberList::new_pre_sorted(chunk);
-
-                // Use EitherWriter method (works for both MDBX and RocksDB)
-                writer.put_storage_history(key, &value)?;
-            }
-        }
-    }
-
-    Ok(())
+    shard_and_write(list, mode, |chunk, highest| {
+        let key = sharded_key_factory(partial_key, highest);
+        let value = BlockNumberList::new_pre_sorted(chunk);
+        Ok(writer.put_storage_history(key, &value)?)
+    })
 }
 
 /// Loads account history indices from a collector into the database using `EitherWriter`.
@@ -584,30 +599,11 @@ where
     CURSOR: DbCursorRW<tables::AccountsHistory> + DbCursorRO<tables::AccountsHistory>,
     P: Copy,
 {
-    if list.len() > NUM_OF_INDICES_IN_SHARD || mode.is_flush() {
-        let chunks =
-            list.chunks(NUM_OF_INDICES_IN_SHARD).map(|chunks| chunks.to_vec()).collect::<Vec<_>>();
-
-        let mut iter = chunks.into_iter().peekable();
-        while let Some(chunk) = iter.next() {
-            let mut highest = *chunk.last().expect("at least one index");
-
-            if !mode.is_flush() && iter.peek().is_none() {
-                *list = chunk;
-            } else {
-                if iter.peek().is_none() {
-                    highest = u64::MAX;
-                }
-                let key = sharded_key_factory(partial_key, highest);
-                let value = BlockNumberList::new_pre_sorted(chunk);
-
-                // Use EitherWriter method (works for both MDBX and RocksDB)
-                writer.put_account_history(key, &value)?;
-            }
-        }
-    }
-
-    Ok(())
+    shard_and_write(list, mode, |chunk, highest| {
+        let key = sharded_key_factory(partial_key, highest);
+        let value = BlockNumberList::new_pre_sorted(chunk);
+        Ok(writer.put_account_history(key, &value)?)
+    })
 }
 
 /// Unwinds storage history shards using `EitherWriter` for `RocksDB` support.

@@ -348,10 +348,7 @@ pub fn make_rocksdb_batch_arg(
     rocksdb.batch()
 }
 
-/// Creates the appropriate `RocksDB` batch argument for [`EitherWriter`] constructors.
-///
-/// On `RocksDB`-enabled builds, this creates a real batch from the given `RocksDB` provider.
-/// On other builds, this returns `()` to allow the same API without feature gates.
+/// Stub for non-RocksDB builds.
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub const fn make_rocksdb_batch_arg<T>(_rocksdb: &T) -> RocksBatchArg<'static> {}
 
@@ -370,9 +367,7 @@ where
     provider.rocksdb_provider()
 }
 
-/// Gets the `RocksDB` provider from a provider that implements `RocksDBProviderFactory`.
-///
-/// On non-`RocksDB` builds, returns `()`.
+/// Stub for non-RocksDB builds.
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub const fn make_rocksdb_provider<P>(_provider: &P) {}
 
@@ -402,9 +397,7 @@ where
     }
 }
 
-/// Registers a `RocksDB` batch extracted from an [`EitherWriter`] with the provider.
-///
-/// On non-`RocksDB` builds, this is a no-op.
+/// Stub for non-RocksDB builds.
 #[cfg(not(all(unix, feature = "rocksdb")))]
 pub fn register_rocksdb_batch<P, CURSOR, N>(_provider: &P, _writer: EitherWriter<'_, CURSOR, N>)
 where

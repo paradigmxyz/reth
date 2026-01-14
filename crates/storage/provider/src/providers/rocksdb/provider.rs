@@ -240,16 +240,18 @@ impl RocksDBBuilder {
 
 /// Some types don't support compression (eg. B256), and we don't want to be copying them to the
 /// allocated buffer when we can just use their reference.
+///
+/// Returns a `&[u8]` directly - either the uncompressable reference or the compressed buffer.
 macro_rules! compress_to_buf_or_ref {
-    ($buf:expr, $value:expr) => {
+    ($buf:expr, $value:expr) => {{
         if let Some(value) = $value.uncompressable_ref() {
-            Some(value)
+            value
         } else {
             $buf.clear();
             $value.compress_to_buf(&mut $buf);
-            None
+            &$buf[..]
         }
-    };
+    }};
 }
 
 /// `RocksDB` provider for auxiliary storage layer beside main database MDBX.
@@ -357,13 +359,11 @@ impl RocksDBProvider {
         key: &<T::Key as Encode>::Encoded,
     ) -> ProviderResult<Option<T::Value>> {
         self.execute_with_operation_metric(RocksDBOperation::Get, T::NAME, |this| {
-            let result =
-                this.0.db.get_cf(this.get_cf_handle::<T>()?, key.as_ref()).map_err(|e| {
-                    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    }))
-                })?;
+            let result = this
+                .0
+                .db
+                .get_cf(this.get_cf_handle::<T>()?, key.as_ref())
+                .map_err(|e| this.read_error(e))?;
 
             Ok(result.and_then(|value| T::Value::decompress(&value).ok()))
         })
@@ -382,11 +382,10 @@ impl RocksDBProvider {
         value: &T::Value,
     ) -> ProviderResult<()> {
         self.execute_with_operation_metric(RocksDBOperation::Put, T::NAME, |this| {
-            // for simplify the code, we need allocate buf here each time because `RocksDBProvider`
-            // is thread safe if user want to avoid allocate buf each time, they can use
-            // write_batch api
+            // For thread-safe operation, we allocate buf here each time.
+            // To avoid per-call allocation, use the write_batch API instead.
             let mut buf = Vec::new();
-            let value_bytes = compress_to_buf_or_ref!(buf, value).unwrap_or(&buf);
+            let value_bytes = compress_to_buf_or_ref!(buf, value);
 
             this.0.db.put_cf(this.get_cf_handle::<T>()?, key, value_bytes).map_err(|e| {
                 ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
@@ -402,12 +401,10 @@ impl RocksDBProvider {
     /// Deletes a value from the specified table.
     pub fn delete<T: Table>(&self, key: T::Key) -> ProviderResult<()> {
         self.execute_with_operation_metric(RocksDBOperation::Delete, T::NAME, |this| {
-            this.0.db.delete_cf(this.get_cf_handle::<T>()?, key.encode().as_ref()).map_err(|e| {
-                ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })
+            this.0
+                .db
+                .delete_cf(this.get_cf_handle::<T>()?, key.encode().as_ref())
+                .map_err(|e| this.delete_error(e))
         })
     }
 
@@ -428,12 +425,7 @@ impl RocksDBProvider {
 
         // Delete each key
         for key in keys {
-            self.0.db.delete_cf(cf, &key).map_err(|e| {
-                ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))
-            })?;
+            self.0.db.delete_cf(cf, &key).map_err(|e| self.delete_error(e))?;
         }
 
         Ok(())
@@ -446,19 +438,8 @@ impl RocksDBProvider {
             let mut iter = this.0.db.iterator_cf(cf, IteratorMode::Start);
 
             match iter.next() {
-                Some(Ok((key_bytes, value_bytes))) => {
-                    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
-                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-                    let value = T::Value::decompress(&value_bytes)
-                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-                    Ok(Some((key, value)))
-                }
-                Some(Err(e)) => {
-                    Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    })))
-                }
+                Some(Ok((key_bytes, value_bytes))) => this.decode_kv::<T>(&key_bytes, &value_bytes),
+                Some(Err(e)) => Err(this.read_error(e)),
                 None => Ok(None),
             }
         })
@@ -471,19 +452,8 @@ impl RocksDBProvider {
             let mut iter = this.0.db.iterator_cf(cf, IteratorMode::End);
 
             match iter.next() {
-                Some(Ok((key_bytes, value_bytes))) => {
-                    let key = <T::Key as reth_db_api::table::Decode>::decode(&key_bytes)
-                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-                    let value = T::Value::decompress(&value_bytes)
-                        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-                    Ok(Some((key, value)))
-                }
-                Some(Err(e)) => {
-                    Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                        message: e.to_string().into(),
-                        code: -1,
-                    })))
-                }
+                Some(Ok((key_bytes, value_bytes))) => this.decode_kv::<T>(&key_bytes, &value_bytes),
+                Some(Err(e)) => Err(this.read_error(e)),
                 None => Ok(None),
             }
         })
@@ -609,6 +579,35 @@ impl RocksDBProvider {
 
         Ok(Some(batch.into_inner()))
     }
+
+    /// Creates a read error from a `RocksDB` error.
+    fn read_error(&self, e: rocksdb::Error) -> ProviderError {
+        ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+            message: e.to_string().into(),
+            code: -1,
+        }))
+    }
+
+    /// Creates a delete error from a `RocksDB` error.
+    fn delete_error(&self, e: rocksdb::Error) -> ProviderError {
+        ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+            message: e.to_string().into(),
+            code: -1,
+        }))
+    }
+
+    /// Decodes a key-value pair from raw bytes.
+    fn decode_kv<T: Table>(
+        &self,
+        key_bytes: &[u8],
+        value_bytes: &[u8],
+    ) -> ProviderResult<Option<(T::Key, T::Value)>> {
+        let key = <T::Key as reth_db_api::table::Decode>::decode(key_bytes)
+            .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+        let value = T::Value::decompress(value_bytes)
+            .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+        Ok(Some((key, value)))
+    }
 }
 
 /// Handle for building a batch of operations atomically.
@@ -651,7 +650,7 @@ impl<'a> RocksDBBatch<'a> {
         key: &<T::Key as Encode>::Encoded,
         value: &T::Value,
     ) -> ProviderResult<()> {
-        let value_bytes = compress_to_buf_or_ref!(self.buf, value).unwrap_or(&self.buf);
+        let value_bytes = compress_to_buf_or_ref!(self.buf, value);
         self.inner.put_cf(self.provider.get_cf_handle::<T>()?, key, value_bytes);
         Ok(())
     }
@@ -696,24 +695,29 @@ impl<'a> RocksDBBatch<'a> {
         self.inner
     }
 
-    /// Appends indices to an account history shard with proper shard management.
+    /// Generic helper for appending indices to a history shard table.
     ///
     /// Loads the existing shard (if any), appends new indices, and rechunks into
     /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
-    pub fn append_account_history_shard(
+    fn append_history_shard<T, F>(
         &mut self,
-        address: Address,
+        last_key: T::Key,
         indices: impl IntoIterator<Item = u64>,
-    ) -> ProviderResult<()> {
-        let last_key = ShardedKey::new(address, u64::MAX);
-        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
+        make_key: F,
+    ) -> ProviderResult<()>
+    where
+        T: Table<Value = BlockNumberList>,
+        T::Key: Clone,
+        F: Fn(u64) -> T::Key,
+    {
+        let last_shard_opt = self.provider.get::<T>(last_key.clone())?;
         let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
 
         last_shard.append(indices).map_err(ProviderError::other)?;
 
         // Fast path: all indices fit in one shard
         if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            self.put::<tables::AccountsHistory>(last_key, &last_shard)?;
+            self.put::<T>(last_key, &last_shard)?;
             return Ok(());
         }
 
@@ -723,62 +727,42 @@ impl<'a> RocksDBBatch<'a> {
 
         while let Some(chunk) = chunks_peekable.next() {
             let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
+            let highest = if chunks_peekable.peek().is_some() {
                 shard.iter().next_back().expect("`chunks` does not return empty list")
             } else {
                 u64::MAX
             };
-
-            self.put::<tables::AccountsHistory>(
-                ShardedKey::new(address, highest_block_number),
-                &shard,
-            )?;
+            self.put::<T>(make_key(highest), &shard)?;
         }
 
         Ok(())
     }
 
+    /// Appends indices to an account history shard with proper shard management.
+    pub fn append_account_history_shard(
+        &mut self,
+        address: Address,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        self.append_history_shard::<tables::AccountsHistory, _>(
+            ShardedKey::new(address, u64::MAX),
+            indices,
+            |highest| ShardedKey::new(address, highest),
+        )
+    }
+
     /// Appends indices to a storage history shard with proper shard management.
-    ///
-    /// Loads the existing shard (if any), appends new indices, and rechunks into
-    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
     pub fn append_storage_history_shard(
         &mut self,
         address: Address,
         storage_key: B256,
         indices: impl IntoIterator<Item = u64>,
     ) -> ProviderResult<()> {
-        let last_key = StorageShardedKey::last(address, storage_key);
-        let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
-        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
-
-        last_shard.append(indices).map_err(ProviderError::other)?;
-
-        // Fast path: all indices fit in one shard
-        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
-            self.put::<tables::StoragesHistory>(last_key, &last_shard)?;
-            return Ok(());
-        }
-
-        // Slow path: rechunk into multiple shards
-        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
-        let mut chunks_peekable = chunks.into_iter().peekable();
-
-        while let Some(chunk) = chunks_peekable.next() {
-            let shard = BlockNumberList::new_pre_sorted(chunk);
-            let highest_block_number = if chunks_peekable.peek().is_some() {
-                shard.iter().next_back().expect("`chunks` does not return empty list")
-            } else {
-                u64::MAX
-            };
-
-            self.put::<tables::StoragesHistory>(
-                StorageShardedKey::new(address, storage_key, highest_block_number),
-                &shard,
-            )?;
-        }
-
-        Ok(())
+        self.append_history_shard::<tables::StoragesHistory, _>(
+            StorageShardedKey::last(address, storage_key),
+            indices,
+            |highest| StorageShardedKey::new(address, storage_key, highest),
+        )
     }
 }
 
@@ -839,7 +823,7 @@ impl<'db> RocksTx<'db> {
     ) -> ProviderResult<()> {
         let cf = self.provider.get_cf_handle::<T>()?;
         let mut buf = Vec::new();
-        let value_bytes = compress_to_buf_or_ref!(buf, value).unwrap_or(&buf);
+        let value_bytes = compress_to_buf_or_ref!(buf, value);
 
         self.inner.put_cf(cf, key.as_ref(), value_bytes).map_err(|e| {
             ProviderError::Database(DatabaseError::Write(Box::new(DatabaseWriteError {
@@ -983,41 +967,20 @@ impl<'db> RocksTx<'db> {
         Self::raw_iter_status_ok(&iter)?;
 
         if !iter.valid() {
-            // No shard found at or after target block.
-            return if lowest_available_block_number.is_some() {
-                // The key may have been written, but due to pruning we may not have changesets
-                // and history, so we need to make a plain state lookup.
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                // The key has not been written to at all.
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return Ok(history_not_found(lowest_available_block_number));
         }
 
         // Check if the found key matches our target entity.
         let Some(key_bytes) = iter.key() else {
-            return if lowest_available_block_number.is_some() {
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return Ok(history_not_found(lowest_available_block_number));
         };
         if !key_matches(key_bytes)? {
-            // The found key is for a different entity.
-            return if lowest_available_block_number.is_some() {
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return Ok(history_not_found(lowest_available_block_number));
         }
 
         // Decompress the block list for this shard.
         let Some(value_bytes) = iter.value() else {
-            return if lowest_available_block_number.is_some() {
-                Ok(HistoryInfo::MaybeInPlainState)
-            } else {
-                Ok(HistoryInfo::NotYetWritten)
-            };
+            return Ok(history_not_found(lowest_available_block_number));
         };
         let chunk = BlockNumberList::decompress(value_bytes)?;
 
@@ -1082,29 +1045,7 @@ impl<T: Table> Iterator for RocksDBIter<'_, T> {
     type Item = ProviderResult<(T::Key, T::Value)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (key_bytes, value_bytes) = match self.inner.next()? {
-            Ok(kv) => kv,
-            Err(e) => {
-                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))))
-            }
-        };
-
-        // Decode key
-        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
-            Ok(k) => k,
-            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-        };
-
-        // Decompress value
-        let value = match T::Value::decompress(&value_bytes) {
-            Ok(v) => v,
-            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-        };
-
-        Some(Ok((key, value)))
+        decode_iter_result::<T>(self.inner.next()?)
     }
 }
 
@@ -1126,29 +1067,7 @@ impl<T: Table> Iterator for RocksDBIterReverse<'_, T> {
     type Item = ProviderResult<(T::Key, T::Value)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (key_bytes, value_bytes) = match self.inner.next()? {
-            Ok(kv) => kv,
-            Err(e) => {
-                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))))
-            }
-        };
-
-        // Decode key
-        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
-            Ok(k) => k,
-            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-        };
-
-        // Decompress value
-        let value = match T::Value::decompress(&value_bytes) {
-            Ok(v) => v,
-            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-        };
-
-        Some(Ok((key, value)))
+        decode_iter_result::<T>(self.inner.next()?)
     }
 }
 
@@ -1170,29 +1089,47 @@ impl<T: Table> Iterator for RocksTxIter<'_, T> {
     type Item = ProviderResult<(T::Key, T::Value)>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let (key_bytes, value_bytes) = match self.inner.next()? {
-            Ok(kv) => kv,
-            Err(e) => {
-                return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                    message: e.to_string().into(),
-                    code: -1,
-                }))))
-            }
-        };
+        decode_iter_result::<T>(self.inner.next()?)
+    }
+}
 
-        // Decode key
-        let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
-            Ok(k) => k,
-            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-        };
+/// Helper function to decode iterator results.
+///
+/// Shared logic for all iterator implementations to avoid code duplication.
+#[allow(clippy::type_complexity)]
+fn decode_iter_result<T: Table>(
+    result: Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>,
+) -> Option<ProviderResult<(T::Key, T::Value)>> {
+    match result {
+        Ok((key_bytes, value_bytes)) => {
+            let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
+                Ok(k) => k,
+                Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+            };
 
-        // Decompress value
-        let value = match T::Value::decompress(&value_bytes) {
-            Ok(v) => v,
-            Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-        };
+            let value = match T::Value::decompress(&value_bytes) {
+                Ok(v) => v,
+                Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+            };
 
-        Some(Ok((key, value)))
+            Some(Ok((key, value)))
+        }
+        Err(e) => Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+            message: e.to_string().into(),
+            code: -1,
+        })))),
+    }
+}
+
+/// Returns the appropriate `HistoryInfo` when no matching history shard is found.
+///
+/// If `lowest_available_block_number` is set (pruning is active), returns `MaybeInPlainState`
+/// since data may have been pruned. Otherwise, returns `NotYetWritten`.
+const fn history_not_found(lowest_available_block_number: Option<BlockNumber>) -> HistoryInfo {
+    if lowest_available_block_number.is_some() {
+        HistoryInfo::MaybeInPlainState
+    } else {
+        HistoryInfo::NotYetWritten
     }
 }
 
