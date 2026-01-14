@@ -22,6 +22,9 @@ use std::{
 };
 use tracing::{debug, instrument};
 
+#[cfg(feature = "std")]
+use rayon::iter::{IntoParallelIterator, ParallelIterator};
+
 /// Extends [`StateRoot`] with operations specific for working with a database transaction.
 pub trait DatabaseStateRoot<'a, TX>: Sized {
     /// Create a new [`StateRoot`] instance.
@@ -297,14 +300,39 @@ impl DatabaseHashedPostState for HashedPostStateSorted {
             }
         }
 
-        // Sort storage slots and convert to HashedStorageSorted
-        let hashed_storages = storages
-            .into_iter()
-            .map(|(address, mut slots)| {
-                slots.sort_unstable_by_key(|(slot, _)| *slot);
-                (address, HashedStorageSorted { storage_slots: slots, wiped: false })
-            })
-            .collect();
+        // Threshold based on benchmark
+        const PARALLEL_THRESHOLD: usize = 10_000;
+
+        #[cfg(feature = "std")]
+        let use_parallel = storages.len() >= PARALLEL_THRESHOLD;
+
+        #[cfg(not(feature = "std"))]
+        let use_parallel = false;
+
+        let hashed_storages = if use_parallel {
+            #[cfg(feature = "std")]
+            {
+                storages
+                    .into_par_iter()
+                    .map(|(address, mut slots)| {
+                        slots.sort_unstable_by_key(|(slot, _)| *slot);
+                        (address, HashedStorageSorted { storage_slots: slots, wiped: false })
+                    })
+                    .collect()
+            }
+            #[cfg(not(feature = "std"))]
+            {
+                unreachable!()
+            }
+        } else {
+            storages
+                .into_iter()
+                .map(|(address, mut slots)| {
+                    slots.sort_unstable_by_key(|(slot, _)| *slot);
+                    (address, HashedStorageSorted { storage_slots: slots, wiped: false })
+                })
+                .collect()
+        };
 
         Ok(Self::new(accounts, hashed_storages))
     }
