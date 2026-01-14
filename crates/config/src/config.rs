@@ -2,9 +2,8 @@
 use reth_network_types::{PeersConfig, SessionsConfig};
 use reth_prune_types::PruneModes;
 use reth_stages_types::ExecutionStageThresholds;
-use reth_static_file_types::StaticFileSegment;
+use reth_static_file_types::{StaticFileMap, StaticFileSegment};
 use std::{
-    collections::HashMap,
     path::{Path, PathBuf},
     time::Duration,
 };
@@ -473,8 +472,8 @@ impl StaticFilesConfig {
         Ok(())
     }
 
-    /// Converts the blocks per file configuration into a [`HashMap`] per segment.
-    pub fn as_blocks_per_file_map(&self) -> HashMap<StaticFileSegment, u64> {
+    /// Converts the blocks per file configuration into a [`StaticFileMap`].
+    pub fn as_blocks_per_file_map(&self) -> StaticFileMap<u64> {
         let BlocksPerFileConfig {
             headers,
             transactions,
@@ -483,7 +482,7 @@ impl StaticFilesConfig {
             account_change_sets,
         } = self.blocks_per_file;
 
-        let mut map = HashMap::new();
+        let mut map = StaticFileMap::default();
         // Iterating over all possible segments allows us to do an exhaustive match here,
         // to not forget to configure new segments in the future.
         for segment in StaticFileSegment::iter() {
@@ -544,7 +543,7 @@ impl PruneConfig {
 
     /// Returns whether there is any kind of receipt pruning configuration.
     pub fn has_receipts_pruning(&self) -> bool {
-        self.segments.receipts.is_some() || !self.segments.receipts_log_filter.is_empty()
+        self.segments.has_receipts_pruning()
     }
 
     /// Merges values from `other` into `self`.
@@ -1079,18 +1078,6 @@ transaction_lookup = 'full'
 receipts = { distance = 16384 }
 #";
         let _conf: Config = toml::from_str(s).unwrap();
-
-        let s = r"#
-[prune]
-block_interval = 5
-
-[prune.segments]
-sender_recovery = { distance = 16384 }
-transaction_lookup = 'full'
-receipts = 'full'
-#";
-        let err = toml::from_str::<Config>(s).unwrap_err().to_string();
-        assert!(err.contains("invalid value: string \"full\""), "{}", err);
     }
 
     #[test]

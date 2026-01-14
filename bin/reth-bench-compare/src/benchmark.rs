@@ -18,6 +18,8 @@ pub(crate) struct BenchmarkRunner {
     rpc_url: String,
     jwt_secret: String,
     wait_time: Option<String>,
+    wait_for_persistence: bool,
+    persistence_threshold: Option<u64>,
     warmup_blocks: u64,
 }
 
@@ -28,6 +30,8 @@ impl BenchmarkRunner {
             rpc_url: args.get_rpc_url(),
             jwt_secret: args.jwt_secret_path().to_string_lossy().to_string(),
             wait_time: args.wait_time.clone(),
+            wait_for_persistence: args.wait_for_persistence,
+            persistence_threshold: args.persistence_threshold,
             warmup_blocks: args.get_warmup_blocks(),
         }
     }
@@ -96,7 +100,7 @@ impl BenchmarkRunner {
             &from_block.to_string(),
             "--to",
             &to_block.to_string(),
-            "--wait-time=0ms", // We just want to warm up caches.
+            "--wait-time=0ms", // Warmup should avoid persistence waits.
         ]);
 
         cmd.env("RUST_LOG_STYLE", "never")
@@ -182,9 +186,16 @@ impl BenchmarkRunner {
             &output_dir.to_string_lossy(),
         ]);
 
-        // Add wait-time argument if provided
+        // Configure wait mode: wait-time takes precedence over persistence-based flow
         if let Some(ref wait_time) = self.wait_time {
             cmd.args(["--wait-time", wait_time]);
+        } else if self.wait_for_persistence {
+            cmd.arg("--wait-for-persistence");
+
+            // Add persistence threshold if specified
+            if let Some(threshold) = self.persistence_threshold {
+                cmd.args(["--persistence-threshold", &threshold.to_string()]);
+            }
         }
 
         cmd.env("RUST_LOG_STYLE", "never")

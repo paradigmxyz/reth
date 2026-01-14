@@ -92,6 +92,14 @@ pub enum EthApiError {
     /// When an invalid block range is provided
     #[error("invalid block range")]
     InvalidBlockRange,
+    /// Requested block number is beyond the head block
+    #[error("request beyond head block: requested {requested}, head {head}")]
+    RequestBeyondHead {
+        /// The requested block number
+        requested: u64,
+        /// The current head block number
+        head: u64,
+    },
     /// Thrown when the target block for proof computation exceeds the maximum configured window.
     #[error("distance to target block exceeds maximum proof window")]
     ExceedsMaxProofWindow,
@@ -268,6 +276,7 @@ impl From<EthApiError> for jsonrpsee_types::error::ErrorObject<'static> {
             EthApiError::InvalidTransactionSignature |
             EthApiError::EmptyRawTransactionData |
             EthApiError::InvalidBlockRange |
+            EthApiError::RequestBeyondHead { .. } |
             EthApiError::ExceedsMaxProofWindow |
             EthApiError::ConflictingFeeFieldsInRequest |
             EthApiError::Signing(_) |

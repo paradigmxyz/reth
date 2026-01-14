@@ -561,7 +561,12 @@ impl LowestAvailableBlocks {
 ///
 /// Returns `true` when `rank == 0` (first entry in shard) and the found block doesn't match
 /// the target block number. In this case, we need to check if there's a previous shard.
-fn needs_prev_shard_check(rank: u64, found_block: Option<u64>, block_number: BlockNumber) -> bool {
+#[inline]
+pub fn needs_prev_shard_check(
+    rank: u64,
+    found_block: Option<u64>,
+    block_number: BlockNumber,
+) -> bool {
     rank == 0 && found_block != Some(block_number)
 }
 
