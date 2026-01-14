@@ -376,7 +376,13 @@ impl Tx<RW> {
 
         // Helper to construct write errors.
         let make_error = |e: reth_libmdbx::Error, key: Vec<u8>| -> DatabaseError {
-            DatabaseWriteError { info: e.into(), operation: write_operation, table_name: T::NAME, key }.into()
+            DatabaseWriteError {
+                info: e.into(),
+                operation: write_operation,
+                table_name: T::NAME,
+                key,
+            }
+            .into()
         };
 
         // Fast path for uncompressable types (e.g., B256, Address).

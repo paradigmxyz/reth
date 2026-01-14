@@ -16,6 +16,9 @@ pub struct CountingBuf {
 }
 
 impl CountingBuf {
+    /// Thread-local scratch buffer for `chunk_mut`. Sized to hold any primitive (u128 = 16 bytes).
+    const SCRATCH_SIZE: usize = 16;
+
     /// Creates a new `CountingBuf`.
     #[inline]
     pub const fn new() -> Self {
@@ -35,6 +38,12 @@ impl CountingBuf {
     }
 }
 
+std::thread_local! {
+    /// Thread-local scratch buffer for [`CountingBuf::chunk_mut`].
+    static SCRATCH: std::cell::UnsafeCell<[u8; CountingBuf::SCRATCH_SIZE]> =
+        const { std::cell::UnsafeCell::new([0u8; CountingBuf::SCRATCH_SIZE]) };
+}
+
 unsafe impl BufMut for CountingBuf {
     #[inline]
     fn remaining_mut(&self) -> usize {
@@ -48,11 +57,11 @@ unsafe impl BufMut for CountingBuf {
 
     #[inline]
     fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
-        // Return a dummy slice that will never be used.
-        // The caller must use put_slice which we override below.
-        unsafe {
-            bytes::buf::UninitSlice::from_raw_parts_mut(core::ptr::NonNull::dangling().as_ptr(), 0)
-        }
+        SCRATCH.with(|scratch| {
+            // SAFETY: We return a mutable reference to the thread-local buffer.
+            // This is safe because CountingBuf is not Sync and chunk_mut takes &mut self.
+            unsafe { bytes::buf::UninitSlice::from_raw_parts_mut((*scratch.get()).as_mut_ptr(), Self::SCRATCH_SIZE) }
+        })
     }
 
     #[inline]
@@ -92,14 +101,14 @@ pub struct SliceBuf<'a> {
 impl<'a> SliceBuf<'a> {
     /// Creates a new `SliceBuf` wrapping the given slice.
     #[inline]
-    pub fn new(buf: &'a mut [u8]) -> Self {
+    pub const fn new(buf: &'a mut [u8]) -> Self {
         let initial_len = buf.len();
         Self { buf, initial_len }
     }
 
     /// Returns the number of bytes written.
     #[inline]
-    pub fn written(&self) -> usize {
+    pub const fn written(&self) -> usize {
         self.initial_len - self.buf.len()
     }
 }
@@ -107,26 +116,23 @@ impl<'a> SliceBuf<'a> {
 unsafe impl BufMut for SliceBuf<'_> {
     #[inline]
     fn remaining_mut(&self) -> usize {
-        self.buf.len()
+        self.buf.remaining_mut()
     }
 
     #[inline]
     unsafe fn advance_mut(&mut self, cnt: usize) {
-        debug_assert!(cnt <= self.buf.len(), "SliceBuf overflow");
-        let buf = core::mem::take(&mut self.buf);
-        self.buf = &mut buf[cnt..];
+        // SAFETY: The caller guarantees that cnt <= remaining_mut().
+        unsafe { self.buf.advance_mut(cnt) };
     }
 
     #[inline]
     fn chunk_mut(&mut self) -> &mut bytes::buf::UninitSlice {
-        bytes::buf::UninitSlice::new(self.buf)
+        self.buf.chunk_mut()
     }
 
     #[inline]
     fn put_slice(&mut self, src: &[u8]) {
-        self.buf[..src.len()].copy_from_slice(src);
-        let buf = core::mem::take(&mut self.buf);
-        self.buf = &mut buf[src.len()..];
+        self.buf.put_slice(src);
     }
 }
 
@@ -374,11 +380,11 @@ mod tests {
         use alloy_primitives::{Address, B256};
 
         let addr = Address::repeat_byte(0x42);
-        let addr_compressed: Vec<u8> = addr.compress().into();
+        let addr_compressed = addr.compress();
         assert_eq!(addr.compressed_size(), addr_compressed.len());
 
         let hash = B256::repeat_byte(0xab);
-        let hash_compressed: Vec<u8> = hash.compress().into();
+        let hash_compressed = hash.compress();
         assert_eq!(hash.compressed_size(), hash_compressed.len());
     }
 
