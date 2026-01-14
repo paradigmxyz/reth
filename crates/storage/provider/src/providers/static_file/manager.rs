@@ -269,9 +269,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                         // We only care about modified data events
                         if !matches!(
                             event.kind,
-                            notify::EventKind::Modify(_)
-                                | notify::EventKind::Create(_)
-                                | notify::EventKind::Remove(_)
+                            notify::EventKind::Modify(_) |
+                                notify::EventKind::Create(_) |
+                                notify::EventKind::Remove(_)
                         ) {
                             continue;
                         }
@@ -536,8 +536,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         match provider {
             Ok(provider) => Ok(Some(provider)),
             Err(
-                ProviderError::MissingStaticFileBlock(_, _)
-                | ProviderError::MissingStaticFileTx(_, _),
+                ProviderError::MissingStaticFileBlock(_, _) |
+                ProviderError::MissingStaticFileTx(_, _),
             ) => Ok(None),
             Err(err) => Err(err),
         }
@@ -1048,8 +1048,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         //
         // If we detect an OVM import was done (block #1 <https://optimistic.etherscan.io/block/1>), skip it.
         // More on [#11099](https://github.com/paradigmxyz/reth/pull/11099).
-        if provider.chain_spec().is_optimism()
-            && reth_chainspec::Chain::optimism_mainnet() == provider.chain_spec().chain_id()
+        if provider.chain_spec().is_optimism() &&
+            reth_chainspec::Chain::optimism_mainnet() == provider.chain_spec().chain_id()
         {
             // check whether we have the first OVM block: <https://optimistic.etherscan.io/block/0xbee7192e575af30420cae0c7776304ac196077ee72b048970549e4f08e875453>
             const OVM_HEADER_1_HASH: B256 =
@@ -1231,8 +1231,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     return false;
                 }
 
-                if NamedChain::Gnosis == provider.chain_spec().chain_id()
-                    || NamedChain::Chiado == provider.chain_spec().chain_id()
+                if NamedChain::Gnosis == provider.chain_spec().chain_id() ||
+                    NamedChain::Chiado == provider.chain_spec().chain_id()
                 {
                     // Gnosis and Chiado's historical import is broken and does not work with
                     // this check. They are importing receipts along
@@ -1366,8 +1366,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 }
             }
 
-            if let Some((db_last_entry, _)) = db_cursor.last()?
-                && highest_static_file_entry
+            if let Some((db_last_entry, _)) = db_cursor.last()? &&
+                highest_static_file_entry
                     .is_none_or(|highest_entry| db_last_entry > highest_entry)
             {
                 debug!(target: "reth::providers::static_file", ?segment, db_last_entry, ?highest_static_file_entry, "Database has entries beyond static files, no unwind needed");
@@ -1425,9 +1425,9 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     // TODO(joshie): is_block_meta
                     writer.prune_headers(prune_count)?;
                 }
-                StaticFileSegment::Transactions
-                | StaticFileSegment::Receipts
-                | StaticFileSegment::TransactionSenders => {
+                StaticFileSegment::Transactions |
+                StaticFileSegment::Receipts |
+                StaticFileSegment::TransactionSenders => {
                     if let Some(block) = provider.block_body_indices(checkpoint_block_number)? {
                         let number = highest_static_file_entry - block.last_tx_num();
                         debug!(target: "reth::providers::static_file", ?segment, prune_count = number, checkpoint_block_number, "Pruning transaction based segment");
@@ -1571,8 +1571,8 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                 match self.get_segment_provider(segment, $number) {
                     Ok(provider) => provider,
                     Err(
-                        ProviderError::MissingStaticFileBlock(_, _)
-                        | ProviderError::MissingStaticFileTx(_, _),
+                        ProviderError::MissingStaticFileBlock(_, _) |
+                        ProviderError::MissingStaticFileTx(_, _),
                     ) => return Ok(result),
                     Err(err) => return Err(err),
                 }
@@ -1957,8 +1957,8 @@ impl<N: NodePrimitives> ChangeSetReader for StaticFileProvider<N> {
             }
         }
 
-        if low < range.end
-            && let Some(change) = cursor
+        if low < range.end &&
+            let Some(change) = cursor
                 .get_one::<reth_db::static_file::AccountChangesetMask>(low.into())?
                 .filter(|change| change.address == address)
         {
@@ -2456,9 +2456,9 @@ impl<N: NodePrimitives> BlockBodyIndicesProvider for StaticFileProvider<N> {
 impl<N: NodePrimitives> StatsReader for StaticFileProvider<N> {
     fn count_entries<T: Table>(&self) -> ProviderResult<usize> {
         match T::NAME {
-            tables::CanonicalHeaders::NAME
-            | tables::Headers::<Header>::NAME
-            | tables::HeaderTerminalDifficulties::NAME => Ok(self
+            tables::CanonicalHeaders::NAME |
+            tables::Headers::<Header>::NAME |
+            tables::HeaderTerminalDifficulties::NAME => Ok(self
                 .get_highest_static_file_block(StaticFileSegment::Headers)
                 .map(|block| block + 1)
                 .unwrap_or_default()
