@@ -9,7 +9,9 @@ use std::{
 #[cfg(all(unix, feature = "rocksdb"))]
 use crate::providers::rocksdb::RocksDBBatch;
 use crate::{
-    providers::{needs_prev_shard_check, HistoryInfo, StaticFileProvider, StaticFileProviderRWRefMut},
+    providers::{
+        needs_prev_shard_check, HistoryInfo, StaticFileProvider, StaticFileProviderRWRefMut,
+    },
     StaticFileProviderFactory,
 };
 use alloy_primitives::{map::HashMap, Address, BlockNumber, TxHash, TxNumber, B256};
@@ -625,9 +627,7 @@ impl<'a> EitherReader<'a, (), ()> {
             return Ok(EitherReader::RocksDB(_rocksdb_tx));
         }
 
-        Ok(EitherReader::Database(
-            provider.tx_ref().cursor_read::<tables::StoragesHistory>()?,
-        ))
+        Ok(EitherReader::Database(provider.tx_ref().cursor_read::<tables::StoragesHistory>()?))
     }
 
     /// Creates a new [`EitherReader`] for transaction hash numbers based on storage settings.
@@ -663,9 +663,7 @@ impl<'a> EitherReader<'a, (), ()> {
             return Ok(EitherReader::RocksDB(_rocksdb_tx));
         }
 
-        Ok(EitherReader::Database(
-            provider.tx_ref().cursor_read::<tables::AccountsHistory>()?,
-        ))
+        Ok(EitherReader::Database(provider.tx_ref().cursor_read::<tables::AccountsHistory>()?))
     }
 
     /// Creates a new [`EitherReader`] for account changesets based on storage settings.
