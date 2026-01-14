@@ -126,6 +126,7 @@ pub static MAINNET: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (mainnet::MAINNET_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (mainnet::MAINNET_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
+        evm_limit_params: EvmLimitParams::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -161,6 +162,7 @@ pub static SEPOLIA: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (sepolia::SEPOLIA_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (sepolia::SEPOLIA_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
+        evm_limit_params: EvmLimitParams::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -191,6 +193,7 @@ pub static HOLESKY: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (holesky::HOLESKY_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (holesky::HOLESKY_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
+        evm_limit_params: EvmLimitParams::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -223,6 +226,7 @@ pub static HOODI: LazyLock<Arc<ChainSpec>> = LazyLock::new(|| {
             (hoodi::HOODI_BPO1_TIMESTAMP, BlobParams::bpo1()),
             (hoodi::HOODI_BPO2_TIMESTAMP, BlobParams::bpo2()),
         ]),
+        evm_limit_params: EvmLimitParams::ethereum(),
     };
     spec.genesis.config.dao_fork_support = true;
     spec.into()
@@ -388,6 +392,40 @@ impl From<ForkBaseFeeParams> for BaseFeeParamsKind {
 #[derive(Clone, Debug, PartialEq, Eq, From)]
 pub struct ForkBaseFeeParams(Vec<(Box<dyn Hardfork>, BaseFeeParams)>);
 
+/// Parameters for EVM execution limits.
+///
+/// These parameters control configurable limits in the EVM that can be
+/// overridden from their spec defaults (EIP-170, EIP-3860, EIP-7825).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EvmLimitParams {
+    /// Maximum bytecode size for deployed contracts.
+    /// EIP-170 default: 24576 bytes (24KB)
+    pub max_code_size: usize,
+    /// Maximum initcode size for CREATE transactions.
+    /// EIP-3860 default: 49152 bytes (48KB, 2x `max_code_size`)
+    pub max_initcode_size: usize,
+    /// Transaction gas limit cap override.
+    /// If `None`, revm defaults to 2^24 post-Osaka (EIP-7825), no limit pre-Osaka.
+    pub tx_gas_limit_cap: Option<u64>,
+}
+
+impl Default for EvmLimitParams {
+    fn default() -> Self {
+        Self::ethereum()
+    }
+}
+
+impl EvmLimitParams {
+    /// Returns the Ethereum default EVM limit params.
+    pub const fn ethereum() -> Self {
+        Self {
+            max_code_size: revm_primitives::eip170::MAX_CODE_SIZE,
+            max_initcode_size: revm_primitives::eip3860::MAX_INITCODE_SIZE,
+            tx_gas_limit_cap: None,
+        }
+    }
+}
+
 impl<H: BlockHeader> core::ops::Deref for ChainSpec<H> {
     type Target = ChainHardforks;
 
@@ -432,6 +470,9 @@ pub struct ChainSpec<H: BlockHeader = Header> {
 
     /// The settings passed for blob configurations for specific hardforks.
     pub blob_params: BlobScheduleBlobParams,
+
+    /// EVM execution limits (max code size, max initcode size, tx gas limit cap).
+    pub evm_limit_params: EvmLimitParams,
 }
 
 impl<H: BlockHeader> Default for ChainSpec<H> {
@@ -446,6 +487,7 @@ impl<H: BlockHeader> Default for ChainSpec<H> {
             base_fee_params: BaseFeeParamsKind::Constant(BaseFeeParams::ethereum()),
             prune_delete_limit: MAINNET_PRUNE_DELETE_LIMIT,
             blob_params: Default::default(),
+            evm_limit_params: EvmLimitParams::ethereum(),
         }
     }
 }
@@ -530,6 +572,13 @@ impl<H: BlockHeader> ChainSpec<H> {
                 bf_params.first().map(|(_, params)| *params).unwrap_or(BaseFeeParams::ethereum())
             }
         }
+    }
+
+    /// Get the [`EvmLimitParams`] for the chain at the given timestamp.
+    ///
+    /// Override this method for hardfork-dependent EVM limits.
+    pub const fn evm_limit_params_at_timestamp(&self, _timestamp: u64) -> EvmLimitParams {
+        self.evm_limit_params
     }
 
     /// Get the hash of the genesis block.
@@ -791,6 +840,7 @@ impl<H: BlockHeader> ChainSpec<H> {
             base_fee_params,
             prune_delete_limit,
             blob_params,
+            evm_limit_params,
         } = self;
         ChainSpec {
             chain,
@@ -802,6 +852,7 @@ impl<H: BlockHeader> ChainSpec<H> {
             base_fee_params,
             prune_delete_limit,
             blob_params,
+            evm_limit_params,
         }
     }
 }

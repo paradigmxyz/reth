@@ -160,7 +160,17 @@ where
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<OpSpecId>, Self::Error> {
-        Ok(EvmEnv::for_op_block(header, self.chain_spec(), self.chain_spec().chain().id()))
+        let mut evm_env =
+            EvmEnv::for_op_block(header, self.chain_spec(), self.chain_spec().chain().id());
+
+        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(header.timestamp());
+        evm_env.cfg_env.limit_contract_code_size = Some(evm_limits.max_code_size);
+        evm_env.cfg_env.limit_contract_initcode_size = Some(evm_limits.max_initcode_size);
+        if let Some(cap) = evm_limits.tx_gas_limit_cap {
+            evm_env.cfg_env.tx_gas_limit_cap = Some(cap);
+        }
+
+        Ok(evm_env)
     }
 
     fn next_evm_env(
@@ -168,7 +178,7 @@ where
         parent: &Header,
         attributes: &Self::NextBlockEnvCtx,
     ) -> Result<EvmEnv<OpSpecId>, Self::Error> {
-        Ok(EvmEnv::for_op_next_block(
+        let mut evm_env = EvmEnv::for_op_next_block(
             parent,
             NextEvmEnvAttributes {
                 timestamp: attributes.timestamp,
@@ -179,7 +189,16 @@ where
             self.chain_spec().next_block_base_fee(parent, attributes.timestamp).unwrap_or_default(),
             self.chain_spec(),
             self.chain_spec().chain().id(),
-        ))
+        );
+
+        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(attributes.timestamp);
+        evm_env.cfg_env.limit_contract_code_size = Some(evm_limits.max_code_size);
+        evm_env.cfg_env.limit_contract_initcode_size = Some(evm_limits.max_initcode_size);
+        if let Some(cap) = evm_limits.tx_gas_limit_cap {
+            evm_env.cfg_env.tx_gas_limit_cap = Some(cap);
+        }
+
+        Ok(evm_env)
     }
 
     fn context_for_block(
@@ -230,7 +249,13 @@ where
 
         let spec = revm_spec_by_timestamp_after_bedrock(self.chain_spec(), timestamp);
 
-        let cfg_env = CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+        let mut cfg_env =
+            CfgEnv::new().with_chain_id(self.chain_spec().chain().id()).with_spec(spec);
+
+        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(timestamp);
+        cfg_env.limit_contract_code_size = Some(evm_limits.max_code_size);
+        cfg_env.limit_contract_initcode_size = Some(evm_limits.max_initcode_size);
+        cfg_env.tx_gas_limit_cap = evm_limits.tx_gas_limit_cap;
 
         let blob_excess_gas_and_price = spec
             .into_eth_spec()

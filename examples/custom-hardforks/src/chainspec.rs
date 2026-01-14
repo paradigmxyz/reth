@@ -8,7 +8,7 @@ use alloy_genesis::Genesis;
 use alloy_primitives::{B256, U256};
 use reth_chainspec::{
     hardfork, BaseFeeParams, Chain, ChainSpec, DepositContract, EthChainSpec, EthereumHardfork,
-    EthereumHardforks, ForkCondition, Hardfork, Hardforks,
+    EthereumHardforks, EvmLimitParams, ForkCondition, Hardfork, Hardforks,
 };
 use reth_network_peers::NodeRecord;
 use serde::{Deserialize, Serialize};
@@ -102,6 +102,10 @@ impl EthChainSpec for CustomChainSpec {
 
     fn base_fee_params_at_timestamp(&self, timestamp: u64) -> BaseFeeParams {
         self.inner.base_fee_params_at_timestamp(timestamp)
+    }
+
+    fn evm_limit_params_at_timestamp(&self, timestamp: u64) -> EvmLimitParams {
+        self.inner.evm_limit_params_at_timestamp(timestamp)
     }
 
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams> {

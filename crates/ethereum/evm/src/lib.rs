@@ -42,7 +42,7 @@ use {
     alloy_rpc_types_engine::ExecutionData,
     reth_chainspec::EthereumHardforks,
     reth_evm::{EvmEnvFor, ExecutionCtxFor},
-    reth_primitives_traits::{constants::MAX_TX_GAS_LIMIT_OSAKA, SignedTransaction, TxTy},
+    reth_primitives_traits::{SignedTransaction, TxTy},
     reth_storage_errors::any::AnyError,
     revm::context::CfgEnv,
     revm::context_interface::block::BlobExcessGasAndPrice,
@@ -155,12 +155,21 @@ where
     }
 
     fn evm_env(&self, header: &Header) -> Result<EvmEnv<SpecId>, Self::Error> {
-        Ok(EvmEnv::for_eth_block(
+        let mut evm_env = EvmEnv::for_eth_block(
             header,
             self.chain_spec(),
             self.chain_spec().chain().id(),
             self.chain_spec().blob_params_at_timestamp(header.timestamp),
-        ))
+        );
+
+        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(header.timestamp);
+        evm_env.cfg_env.limit_contract_code_size = Some(evm_limits.max_code_size);
+        evm_env.cfg_env.limit_contract_initcode_size = Some(evm_limits.max_initcode_size);
+        if let Some(cap) = evm_limits.tx_gas_limit_cap {
+            evm_env.cfg_env.tx_gas_limit_cap = Some(cap);
+        }
+
+        Ok(evm_env)
     }
 
     fn next_evm_env(
@@ -168,7 +177,7 @@ where
         parent: &Header,
         attributes: &NextBlockEnvAttributes,
     ) -> Result<EvmEnv, Self::Error> {
-        Ok(EvmEnv::for_eth_next_block(
+        let mut evm_env = EvmEnv::for_eth_next_block(
             parent,
             NextEvmEnvAttributes {
                 timestamp: attributes.timestamp,
@@ -180,7 +189,16 @@ where
             self.chain_spec(),
             self.chain_spec().chain().id(),
             self.chain_spec().blob_params_at_timestamp(attributes.timestamp),
-        ))
+        );
+
+        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(attributes.timestamp);
+        evm_env.cfg_env.limit_contract_code_size = Some(evm_limits.max_code_size);
+        evm_env.cfg_env.limit_contract_initcode_size = Some(evm_limits.max_initcode_size);
+        if let Some(cap) = evm_limits.tx_gas_limit_cap {
+            evm_env.cfg_env.tx_gas_limit_cap = Some(cap);
+        }
+
+        Ok(evm_env)
     }
 
     fn context_for_block<'a>(
@@ -245,9 +263,10 @@ where
             cfg_env.set_max_blobs_per_tx(blob_params.max_blobs_per_tx);
         }
 
-        if self.chain_spec().is_osaka_active_at_timestamp(timestamp) {
-            cfg_env.tx_gas_limit_cap = Some(MAX_TX_GAS_LIMIT_OSAKA);
-        }
+        let evm_limits = self.chain_spec().evm_limit_params_at_timestamp(timestamp);
+        cfg_env.limit_contract_code_size = Some(evm_limits.max_code_size);
+        cfg_env.limit_contract_initcode_size = Some(evm_limits.max_initcode_size);
+        cfg_env.tx_gas_limit_cap = evm_limits.tx_gas_limit_cap;
 
         // derive the EIP-4844 blob fees from the header's `excess_blob_gas` and the current
         // blobparams
