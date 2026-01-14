@@ -33,3 +33,10 @@ pub use revm::{self, database::State, *};
 /// Helper types for execution witness generation.
 #[cfg(feature = "witness")]
 pub mod witness;
+
+/// Cache-aligned stack with 64-byte alignment and downward growth for better cache locality.
+/// Expected gain: 1-2%.
+#[cfg(feature = "std")]
+pub mod aligned_stack;
+#[cfg(feature = "std")]
+pub use aligned_stack::AlignedStack;
