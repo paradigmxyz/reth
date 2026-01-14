@@ -14,6 +14,8 @@ use reth_db_common::{
 };
 use reth_node_api::{HeaderTy, ReceiptTy, TxTy};
 use reth_node_core::args::StageEnum;
+#[cfg(all(unix, feature = "edge"))]
+use reth_provider::RocksDBProviderFactory;
 use reth_provider::{
     DBProvider, DatabaseProviderFactory, StaticFileProviderFactory, StaticFileWriter, TrieWriter,
 };
@@ -175,6 +177,14 @@ impl<C: ChainSpecParser> Command<C> {
                 tx.clear::<tables::AccountsHistory>()?;
                 tx.clear::<tables::StoragesHistory>()?;
 
+                // Also clear RocksDB tables if they exist
+                #[cfg(all(unix, feature = "edge"))]
+                {
+                    let rocksdb = tool.provider_factory.rocksdb_provider();
+                    rocksdb.clear::<tables::AccountsHistory>()?;
+                    rocksdb.clear::<tables::StoragesHistory>()?;
+                }
+
                 reset_stage_checkpoint(tx, StageId::IndexAccountHistory)?;
                 reset_stage_checkpoint(tx, StageId::IndexStorageHistory)?;
 
@@ -182,6 +192,14 @@ impl<C: ChainSpecParser> Command<C> {
             }
             StageEnum::TxLookup => {
                 tx.clear::<tables::TransactionHashNumbers>()?;
+
+                // Also clear RocksDB table if it exists
+                #[cfg(all(unix, feature = "edge"))]
+                {
+                    let rocksdb = tool.provider_factory.rocksdb_provider();
+                    rocksdb.clear::<tables::TransactionHashNumbers>()?;
+                }
+
                 reset_prune_checkpoint(tx, PruneSegment::TransactionLookup)?;
 
                 reset_stage_checkpoint(tx, StageId::TransactionLookup)?;
