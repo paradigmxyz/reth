@@ -475,8 +475,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 Ok::<_, ProviderError>(start.elapsed())
             });
 
-            // RocksDB writes
-            #[cfg(all(unix, feature = "rocksdb"))]
+            // RocksDB writes (batches are pushed to pending_batches inside write_blocks_data)
             let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
                 s.spawn(|| {
                     let start = Instant::now();
@@ -581,10 +580,11 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 .join()
                 .map_err(|_| StaticFileWriterError::ThreadPanic("static file"))??;
 
-            // Wait for RocksDB thread
+            // Wait for RocksDB thread (batches already pushed to pending_batches)
             #[cfg(all(unix, feature = "rocksdb"))]
             if let Some(handle) = rocksdb_handle {
-                timings.rocksdb = handle.join().expect("RocksDB thread panicked")?;
+                let elapsed = handle.join().expect("RocksDB thread panicked")?;
+                timings.rocksdb = elapsed;
             }
 
             timings.total = total_start.elapsed();
