@@ -363,7 +363,7 @@ impl RocksDBProvider {
                 .0
                 .db
                 .get_cf(this.get_cf_handle::<T>()?, key.as_ref())
-                .map_err(|e| this.read_error(e))?;
+                .map_err(read_error)?;
 
             Ok(result.and_then(|value| T::Value::decompress(&value).ok()))
         })
@@ -404,7 +404,7 @@ impl RocksDBProvider {
             this.0
                 .db
                 .delete_cf(this.get_cf_handle::<T>()?, key.encode().as_ref())
-                .map_err(|e| this.delete_error(e))
+                .map_err(delete_error)
         })
     }
 
@@ -425,7 +425,7 @@ impl RocksDBProvider {
 
         // Delete each key
         for key in keys {
-            self.0.db.delete_cf(cf, &key).map_err(|e| self.delete_error(e))?;
+            self.0.db.delete_cf(cf, &key).map_err(delete_error)?;
         }
 
         Ok(())
@@ -438,8 +438,8 @@ impl RocksDBProvider {
             let mut iter = this.0.db.iterator_cf(cf, IteratorMode::Start);
 
             match iter.next() {
-                Some(Ok((key_bytes, value_bytes))) => this.decode_kv::<T>(&key_bytes, &value_bytes),
-                Some(Err(e)) => Err(this.read_error(e)),
+                Some(Ok((key_bytes, value_bytes))) => decode_kv::<T>(&key_bytes, &value_bytes).map(Some),
+                Some(Err(e)) => Err(read_error(e)),
                 None => Ok(None),
             }
         })
@@ -452,8 +452,8 @@ impl RocksDBProvider {
             let mut iter = this.0.db.iterator_cf(cf, IteratorMode::End);
 
             match iter.next() {
-                Some(Ok((key_bytes, value_bytes))) => this.decode_kv::<T>(&key_bytes, &value_bytes),
-                Some(Err(e)) => Err(this.read_error(e)),
+                Some(Ok((key_bytes, value_bytes))) => decode_kv::<T>(&key_bytes, &value_bytes).map(Some),
+                Some(Err(e)) => Err(read_error(e)),
                 None => Ok(None),
             }
         })
@@ -501,12 +501,7 @@ impl RocksDBProvider {
     /// This is used when the batch was extracted via [`RocksDBBatch::into_inner`]
     /// and needs to be committed at a later point (e.g., at provider commit time).
     pub fn commit_batch(&self, batch: WriteBatchWithTransaction<true>) -> ProviderResult<()> {
-        self.0.db.write_opt(batch, &WriteOptions::default()).map_err(|e| {
-            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })
+        self.0.db.write_opt(batch, &WriteOptions::default()).map_err(commit_error)
     }
 
     /// Writes all `RocksDB` data for multiple blocks in a single batch.
@@ -579,35 +574,6 @@ impl RocksDBProvider {
 
         Ok(Some(batch.into_inner()))
     }
-
-    /// Creates a read error from a `RocksDB` error.
-    fn read_error(&self, e: rocksdb::Error) -> ProviderError {
-        ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-            message: e.to_string().into(),
-            code: -1,
-        }))
-    }
-
-    /// Creates a delete error from a `RocksDB` error.
-    fn delete_error(&self, e: rocksdb::Error) -> ProviderError {
-        ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
-            message: e.to_string().into(),
-            code: -1,
-        }))
-    }
-
-    /// Decodes a key-value pair from raw bytes.
-    fn decode_kv<T: Table>(
-        &self,
-        key_bytes: &[u8],
-        value_bytes: &[u8],
-    ) -> ProviderResult<Option<(T::Key, T::Value)>> {
-        let key = <T::Key as reth_db_api::table::Decode>::decode(key_bytes)
-            .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-        let value = T::Value::decompress(value_bytes)
-            .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
-        Ok(Some((key, value)))
-    }
 }
 
 /// Handle for building a batch of operations atomically.
@@ -665,12 +631,7 @@ impl<'a> RocksDBBatch<'a> {
     ///
     /// This consumes the batch and writes all operations atomically to `RocksDB`.
     pub fn commit(self) -> ProviderResult<()> {
-        self.provider.0.db.write_opt(self.inner, &WriteOptions::default()).map_err(|e| {
-            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })
+        self.provider.0.db.write_opt(self.inner, &WriteOptions::default()).map_err(commit_error)
     }
 
     /// Returns the number of write operations (puts + deletes) queued in this batch.
@@ -799,12 +760,7 @@ impl<'db> RocksTx<'db> {
         key: &<T::Key as Encode>::Encoded,
     ) -> ProviderResult<Option<T::Value>> {
         let cf = self.provider.get_cf_handle::<T>()?;
-        let result = self.inner.get_cf(cf, key.as_ref()).map_err(|e| {
-            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })?;
+        let result = self.inner.get_cf(cf, key.as_ref()).map_err(read_error)?;
 
         Ok(result.and_then(|value| T::Value::decompress(&value).ok()))
     }
@@ -838,12 +794,7 @@ impl<'db> RocksTx<'db> {
     /// Deletes a value from the specified table.
     pub fn delete<T: Table>(&self, key: T::Key) -> ProviderResult<()> {
         let cf = self.provider.get_cf_handle::<T>()?;
-        self.inner.delete_cf(cf, key.encode().as_ref()).map_err(|e| {
-            ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })
+        self.inner.delete_cf(cf, key.encode().as_ref()).map_err(delete_error)
     }
 
     /// Creates an iterator for the specified table. Sees uncommitted writes in this transaction.
@@ -867,12 +818,7 @@ impl<'db> RocksTx<'db> {
 
     /// Commits the transaction, persisting all changes.
     pub fn commit(self) -> ProviderResult<()> {
-        self.inner.commit().map_err(|e| {
-            ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })
+        self.inner.commit().map_err(commit_error)
     }
 
     /// Rolls back the transaction, discarding all changes.
@@ -1018,12 +964,7 @@ impl<'db> RocksTx<'db> {
     fn raw_iter_status_ok(
         iter: &DBRawIteratorWithThreadMode<'_, Transaction<'_, OptimisticTransactionDB>>,
     ) -> ProviderResult<()> {
-        iter.status().map_err(|e| {
-            ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })
+        iter.status().map_err(read_error)
     }
 }
 
@@ -1101,24 +1042,18 @@ fn decode_iter_result<T: Table>(
     result: Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>,
 ) -> Option<ProviderResult<(T::Key, T::Value)>> {
     match result {
-        Ok((key_bytes, value_bytes)) => {
-            let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
-                Ok(k) => k,
-                Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-            };
-
-            let value = match T::Value::decompress(&value_bytes) {
-                Ok(v) => v,
-                Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
-            };
-
-            Some(Ok((key, value)))
-        }
-        Err(e) => Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
-            message: e.to_string().into(),
-            code: -1,
-        })))),
+        Ok((key_bytes, value_bytes)) => Some(decode_kv::<T>(&key_bytes, &value_bytes)),
+        Err(e) => Some(Err(read_error(e))),
     }
+}
+
+/// Decodes a key-value pair from raw bytes.
+fn decode_kv<T: Table>(key_bytes: &[u8], value_bytes: &[u8]) -> ProviderResult<(T::Key, T::Value)> {
+    let key = <T::Key as reth_db_api::table::Decode>::decode(key_bytes)
+        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+    let value = T::Value::decompress(value_bytes)
+        .map_err(|_| ProviderError::Database(DatabaseError::Decode))?;
+    Ok((key, value))
 }
 
 /// Returns the appropriate `HistoryInfo` when no matching history shard is found.
@@ -1131,6 +1066,30 @@ const fn history_not_found(lowest_available_block_number: Option<BlockNumber>) -
     } else {
         HistoryInfo::NotYetWritten
     }
+}
+
+/// Creates a read error from a `RocksDB` error.
+fn read_error(e: rocksdb::Error) -> ProviderError {
+    ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+        message: e.to_string().into(),
+        code: -1,
+    }))
+}
+
+/// Creates a delete error from a `RocksDB` error.
+fn delete_error(e: rocksdb::Error) -> ProviderError {
+    ProviderError::Database(DatabaseError::Delete(DatabaseErrorInfo {
+        message: e.to_string().into(),
+        code: -1,
+    }))
+}
+
+/// Creates a commit error from a `RocksDB` error.
+fn commit_error(e: rocksdb::Error) -> ProviderError {
+    ProviderError::Database(DatabaseError::Commit(DatabaseErrorInfo {
+        message: e.to_string().into(),
+        code: -1,
+    }))
 }
 
 /// Converts Reth's [`LogLevel`] to `RocksDB`'s [`rocksdb::LogLevel`].
