@@ -94,38 +94,94 @@ where
 
         // Pre-calculate storage roots in parallel for accounts which were changed.
         tracker.set_precomputed_storage_roots(storage_root_targets.len() as u64);
-        debug!(target: "trie::parallel_state_root", len = storage_root_targets.len(), "pre-calculating storage roots");
         let mut storage_roots = HashMap::with_capacity(storage_root_targets.len());
 
         // Get runtime handle once outside the loop
         let handle = get_runtime_handle();
 
-        for (hashed_address, prefix_set) in
-            storage_root_targets.into_iter().sorted_unstable_by_key(|(address, _)| *address)
-        {
+        // Collect and sort all targets by address for locality
+        let sorted_targets: Vec<_> = storage_root_targets
+            .into_iter()
+            .sorted_unstable_by_key(|(address, _)| *address)
+            .collect();
+
+        // Determine number of chunks based on available parallelism
+        // Use fewer, larger chunks to maximize locality within each worker
+        let num_chunks = std::thread::available_parallelism()
+            .map(|p| p.get())
+            .unwrap_or(4)
+            .min(sorted_targets.len().max(1));
+        let chunk_size = (sorted_targets.len() + num_chunks - 1) / num_chunks.max(1);
+
+        debug!(
+            target: "trie::parallel_state_root",
+            accounts = sorted_targets.len(),
+            num_chunks,
+            chunk_size,
+            "pre-calculating storage roots with sorted batch processing"
+        );
+
+        // Create channels for all addresses upfront, separating senders and receivers
+        let mut senders: HashMap<B256, mpsc::SyncSender<_>> =
+            HashMap::with_capacity(sorted_targets.len());
+        for (addr, _) in &sorted_targets {
+            let (tx, rx) = mpsc::sync_channel(1);
+            senders.insert(*addr, tx);
+            storage_roots.insert(*addr, rx);
+        }
+
+        // Spawn one task per chunk - each processes a sorted range of addresses
+        // This maintains locality: sequential addresses stay on the same thread
+        for chunk in sorted_targets.chunks(chunk_size.max(1)) {
+            let chunk_data: Vec<_> = chunk
+                .iter()
+                .map(|(addr, prefix_set)| {
+                    let tx = senders.remove(addr);
+                    (*addr, prefix_set.clone(), tx)
+                })
+                .collect();
+
             let factory = self.factory.clone();
             #[cfg(feature = "metrics")]
             let metrics = self.metrics.storage_trie.clone();
 
-            let (tx, rx) = mpsc::sync_channel(1);
-
-            // Spawn a blocking task to calculate account's storage root from database I/O
+            // Spawn a single blocking task for the entire chunk
+            // This ensures all addresses in the chunk are processed sequentially
+            // on the same thread, maximizing MDBX page cache locality
             drop(handle.spawn_blocking(move || {
-                let result = (|| -> Result<_, ParallelStateRootError> {
-                    let provider = factory.database_provider_ro()?;
-                    Ok(StorageRoot::new_hashed(
+                // Create ONE provider for the entire chunk - reuses cursor handles
+                let provider = match factory.database_provider_ro() {
+                    Ok(p) => p,
+                    Err(e) => {
+                        // Send error to all addresses in chunk
+                        for (_, _, tx) in chunk_data {
+                            if let Some(tx) = tx {
+                                let _ = tx.send(Err(e.clone().into()));
+                            }
+                        }
+                        return;
+                    }
+                };
+
+                // Process all addresses in this sorted chunk sequentially
+                // MDBX pages accessed for address N are likely still cached for N+1
+                for (hashed_address, prefix_set, tx) in chunk_data {
+                    let result = StorageRoot::new_hashed(
                         &provider,
                         &provider,
                         hashed_address,
                         prefix_set,
                         #[cfg(feature = "metrics")]
-                        metrics,
+                        metrics.clone(),
                     )
-                    .calculate(retain_updates)?)
-                })();
-                let _ = tx.send(result);
+                    .calculate(retain_updates)
+                    .map_err(ParallelStateRootError::from);
+
+                    if let Some(tx) = tx {
+                        let _ = tx.send(result);
+                    }
+                }
             }));
-            storage_roots.insert(hashed_address, rx);
         }
 
         trace!(target: "trie::parallel_state_root", "calculating state root");
