@@ -383,7 +383,7 @@ where
                 blob_params
                     .as_ref()
                     .map(|params| params.max_blob_gas_per_block())
-                    .unwrap_or(alloy_eips::eip4844::MAX_DATA_GAS_PER_BLOCK_DENCUN),
+                    .unwrap_or(0), // When None, max_blob_gas_per_block = 0 (matches geth's MaxBlobGasPerBlock)
             ),
             rewards: Vec::new(),
             blob_params,

@@ -180,15 +180,20 @@ pub trait EthFees:
                     base_fee_per_gas.push(header.base_fee_per_gas().unwrap_or_default() as u128);
                     gas_used_ratio.push(header.gas_used() as f64 / header.gas_limit() as f64);
 
-                    let blob_params = chain_spec
-                        .blob_params_at_timestamp(header.timestamp())
-                        .unwrap_or_else(BlobParams::cancun);
+                    let blob_params = chain_spec.blob_params_at_timestamp(header.timestamp());
+                    let max_blob_gas_per_block = blob_params
+                        .as_ref()
+                        .map(|params| params.max_blob_gas_per_block())
+                        .unwrap_or(0); // When None, max_blob_gas_per_block = 0 (matches geth's MaxBlobGasPerBlock)
 
-                    base_fee_per_blob_gas.push(header.blob_fee(blob_params).unwrap_or_default());
+                    base_fee_per_blob_gas.push(
+                        header.blob_fee(blob_params.unwrap_or_else(BlobParams::cancun))
+                            .unwrap_or_default()
+                    );
                     blob_gas_used_ratio.push(
                         checked_blob_gas_used_ratio(
                             header.blob_gas_used().unwrap_or_default(),
-                            blob_params.max_blob_gas_per_block(),
+                            max_blob_gas_per_block,
                         )
                     );
 
