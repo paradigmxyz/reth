@@ -7,8 +7,10 @@ use alloy_trie::proof::AddedRemovedKeys;
 /// Tracks added and removed keys across account and storage tries.
 #[derive(Debug, Clone)]
 pub struct MultiAddedRemovedKeys {
-    account: AddedRemovedKeys,
-    storages: B256Map<AddedRemovedKeys>,
+    /// Added and removed accounts.
+    pub account: AddedRemovedKeys,
+    /// Added and removed storage keys for each account.
+    pub storages: B256Map<AddedRemovedKeys>,
 }
 
 /// Returns [`AddedRemovedKeys`] with default parameters. This is necessary while we are not yet

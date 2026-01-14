@@ -609,7 +609,16 @@ impl MultiProofTask {
         self.multi_added_removed_keys.touch_accounts(targets.keys().copied());
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
+            account: self.multi_added_removed_keys.account.clone(),
+            storages: self
+                .multi_added_removed_keys
+                .storages
+                .iter()
+                .filter(|(k, _)| targets.contains_key(*k))
+                .map(|(k, v)| (*k, v.clone()))
+                .collect(),
+        });
 
         self.metrics.prefetch_proof_targets_accounts_histogram.record(targets.len() as f64);
         self.metrics
@@ -705,7 +714,23 @@ impl MultiProofTask {
         }
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
+            account: self.multi_added_removed_keys.account.clone(),
+            storages: not_fetched_state_update
+                .accounts
+                .keys()
+                .chain(not_fetched_state_update.storages.keys())
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .filter_map(|account| {
+                    self.multi_added_removed_keys
+                        .storages
+                        .get(account)
+                        .cloned()
+                        .map(|keys| (*account, keys))
+                })
+                .collect(),
+        });
 
         let chunking_len = not_fetched_state_update.chunking_length();
         let mut spawned_proof_targets = MultiProofTargets::default();
