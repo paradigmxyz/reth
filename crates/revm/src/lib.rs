@@ -33,3 +33,7 @@ pub use revm::{self, database::State, *};
 /// Helper types for execution witness generation.
 #[cfg(feature = "witness")]
 pub mod witness;
+
+/// Opcode fusion optimization - fuses common PUSH+OP patterns into single handlers.
+/// Expected gain: 2-4%.
+pub mod opcode_fusion;
