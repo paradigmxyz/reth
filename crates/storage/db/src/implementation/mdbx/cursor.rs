@@ -2,7 +2,7 @@
 
 use super::utils::*;
 use crate::{
-    metrics::{DatabaseEnvMetrics, Operation},
+    metrics::{DatabaseEnvMetrics, Operation, ReadOperation},
     DatabaseError,
 };
 use reth_db_api::{
@@ -59,6 +59,7 @@ impl<K: TransactionKind, T: Table> Cursor<K, T> {
             f(self)
         }
     }
+
 }
 
 /// Decodes a `(key, value)` pair from the database.
@@ -90,27 +91,63 @@ macro_rules! compress_to_buf_or_ref {
 
 impl<K: TransactionKind, T: Table> DbCursorRO<T> for Cursor<K, T> {
     fn first(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.first())
+        if let Some(metrics) = self.metrics.clone() {
+            metrics.record_cursor_read(T::NAME, ReadOperation::First, || {
+                decode::<T>(self.inner.first())
+            })
+        } else {
+            decode::<T>(self.inner.first())
+        }
     }
 
     fn seek_exact(&mut self, key: <T as Table>::Key) -> PairResult<T> {
-        decode::<T>(self.inner.set_key(key.encode().as_ref()))
+        if let Some(metrics) = self.metrics.clone() {
+            metrics.record_cursor_read(T::NAME, ReadOperation::SeekExact, || {
+                decode::<T>(self.inner.set_key(key.encode().as_ref()))
+            })
+        } else {
+            decode::<T>(self.inner.set_key(key.encode().as_ref()))
+        }
     }
 
     fn seek(&mut self, key: <T as Table>::Key) -> PairResult<T> {
-        decode::<T>(self.inner.set_range(key.encode().as_ref()))
+        if let Some(metrics) = self.metrics.clone() {
+            metrics.record_cursor_read(T::NAME, ReadOperation::Seek, || {
+                decode::<T>(self.inner.set_range(key.encode().as_ref()))
+            })
+        } else {
+            decode::<T>(self.inner.set_range(key.encode().as_ref()))
+        }
     }
 
     fn next(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.next())
+        if let Some(metrics) = self.metrics.clone() {
+            metrics.record_cursor_read(T::NAME, ReadOperation::Next, || {
+                decode::<T>(self.inner.next())
+            })
+        } else {
+            decode::<T>(self.inner.next())
+        }
     }
 
     fn prev(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.prev())
+        if let Some(metrics) = self.metrics.clone() {
+            metrics.record_cursor_read(T::NAME, ReadOperation::Prev, || {
+                decode::<T>(self.inner.prev())
+            })
+        } else {
+            decode::<T>(self.inner.prev())
+        }
     }
 
     fn last(&mut self) -> PairResult<T> {
-        decode::<T>(self.inner.last())
+        if let Some(metrics) = self.metrics.clone() {
+            metrics.record_cursor_read(T::NAME, ReadOperation::Last, || {
+                decode::<T>(self.inner.last())
+            })
+        } else {
+            decode::<T>(self.inner.last())
+        }
     }
 
     fn current(&mut self) -> PairResult<T> {
@@ -182,11 +219,21 @@ impl<K: TransactionKind, T: DupSort> DbDupCursorRO<T> for Cursor<K, T> {
         key: <T as Table>::Key,
         subkey: <T as DupSort>::SubKey,
     ) -> ValueOnlyResult<T> {
-        self.inner
-            .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
-            .map_err(|e| DatabaseError::Read(e.into()))?
-            .map(decode_one::<T>)
-            .transpose()
+        if let Some(metrics) = self.metrics.clone() {
+            metrics.record_cursor_read(T::NAME, ReadOperation::SeekBySubkey, || {
+                self.inner
+                    .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
+                    .map_err(|e| DatabaseError::Read(e.into()))?
+                    .map(decode_one::<T>)
+                    .transpose()
+            })
+        } else {
+            self.inner
+                .get_both_range(key.encode().as_ref(), subkey.encode().as_ref())
+                .map_err(|e| DatabaseError::Read(e.into()))?
+                .map(decode_one::<T>)
+                .transpose()
+        }
     }
 
     /// Depending on its arguments, returns an iterator starting at:
