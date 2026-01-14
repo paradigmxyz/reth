@@ -53,7 +53,7 @@ use std::{
     sync::{atomic::AtomicU64, mpsc, Arc},
     thread,
 };
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, info, instrument, trace, warn};
 
 /// Alias type for a map that can be queried for block or transaction ranges. It uses `u64` to
 /// represent either a block or a transaction number end of a static file range.
@@ -527,6 +527,101 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         Ok(())
     }
 
+    /// Writes headers for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_headers(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+    ) -> ProviderResult<()> {
+        for block in blocks {
+            let b = block.recovered_block();
+            w.append_header(b.header(), &b.hash())?;
+        }
+        Ok(())
+    }
+
+    /// Writes transactions for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_transactions(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+    ) -> ProviderResult<()> {
+        for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+            let b = block.recovered_block();
+            w.increment_block(b.number())?;
+            for (i, tx) in b.body().transactions().iter().enumerate() {
+                w.append_transaction(first_tx + i as u64, tx)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes transaction senders for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_transaction_senders(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+    ) -> ProviderResult<()> {
+        for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+            let b = block.recovered_block();
+            w.increment_block(b.number())?;
+            for (i, sender) in b.senders_iter().enumerate() {
+                w.append_transaction_sender(first_tx + i as u64, sender)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes receipts for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_receipts(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: &StaticFileWriteCtx,
+    ) -> ProviderResult<()> {
+        for (block, &first_tx) in blocks.iter().zip(tx_nums) {
+            let block_number = block.recovered_block().number();
+            w.increment_block(block_number)?;
+
+            // skip writing receipts if pruning configuration requires us to.
+            if ctx.receipts_prunable &&
+                ctx.receipts_prune_mode
+                    .is_some_and(|mode| mode.should_prune(block_number, ctx.tip))
+            {
+                continue
+            }
+
+            for (i, receipt) in block.execution_outcome().receipts.iter().flatten().enumerate() {
+                w.append_receipt(first_tx + i as u64, receipt)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Writes account changesets for all blocks to the static file segment.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_account_changesets(
+        w: &mut StaticFileProviderRWRefMut<'_, N>,
+        blocks: &[ExecutedBlock<N>],
+    ) -> ProviderResult<()> {
+        for block in blocks {
+            let block_number = block.recovered_block().number();
+            let reverts = block.execution_outcome().bundle.reverts.to_plain_state_reverts();
+
+            for account_block_reverts in reverts.accounts {
+                let changeset = account_block_reverts
+                    .into_iter()
+                    .map(|(address, info)| AccountBeforeTx { address, info: info.map(Into::into) })
+                    .collect::<Vec<_>>();
+                w.append_account_changeset(changeset, block_number)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Spawns a scoped thread that writes to a static file segment using the provided closure.
     ///
     /// The closure receives a mutable reference to the segment writer. After the closure completes,
@@ -552,6 +647,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
     ///
     /// This spawns separate threads for each segment type and each thread calls `sync_all()` on its
     /// writer when done.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     pub fn write_blocks_data(
         &self,
         blocks: &[ExecutedBlock<N>],
@@ -567,27 +663,14 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         thread::scope(|s| {
             let h_headers =
                 self.spawn_segment_writer(s, StaticFileSegment::Headers, first_block_number, |w| {
-                    for block in blocks {
-                        let b = block.recovered_block();
-                        w.append_header(b.header(), &b.hash())?;
-                    }
-                    Ok(())
+                    Self::write_headers(w, blocks)
                 });
 
             let h_txs = self.spawn_segment_writer(
                 s,
                 StaticFileSegment::Transactions,
                 first_block_number,
-                |w| {
-                    for (block, &first_tx) in blocks.iter().zip(tx_nums) {
-                        let b = block.recovered_block();
-                        w.increment_block(b.number())?;
-                        for (i, tx) in b.body().transactions().iter().enumerate() {
-                            w.append_transaction(first_tx + i as u64, tx)?;
-                        }
-                    }
-                    Ok(())
-                },
+                |w| Self::write_transactions(w, blocks, tx_nums),
             );
 
             let h_senders = ctx.write_senders.then(|| {
@@ -595,40 +678,13 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     s,
                     StaticFileSegment::TransactionSenders,
                     first_block_number,
-                    |w| {
-                        for (block, &first_tx) in blocks.iter().zip(tx_nums) {
-                            let b = block.recovered_block();
-                            w.increment_block(b.number())?;
-                            for (i, sender) in b.senders_iter().enumerate() {
-                                w.append_transaction_sender(first_tx + i as u64, sender)?;
-                            }
-                        }
-                        Ok(())
-                    },
+                    |w| Self::write_transaction_senders(w, blocks, tx_nums),
                 )
             });
 
             let h_receipts = ctx.write_receipts.then(|| {
                 self.spawn_segment_writer(s, StaticFileSegment::Receipts, first_block_number, |w| {
-                    for (block, &first_tx) in blocks.iter().zip(tx_nums) {
-                        let block_number = block.recovered_block().number();
-                        w.increment_block(block_number)?;
-
-                        // skip writing receipts if pruning configuration requires us to.
-                        if ctx.receipts_prunable &&
-                            ctx.receipts_prune_mode
-                                .is_some_and(|mode| mode.should_prune(block_number, ctx.tip))
-                        {
-                            continue
-                        }
-
-                        for (i, receipt) in
-                            block.execution_outcome().receipts.iter().flatten().enumerate()
-                        {
-                            w.append_receipt(first_tx + i as u64, receipt)?;
-                        }
-                    }
-                    Ok(())
+                    Self::write_receipts(w, blocks, tx_nums, &ctx)
                 })
             });
 
@@ -637,25 +693,7 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
                     s,
                     StaticFileSegment::AccountChangeSets,
                     first_block_number,
-                    |w| {
-                        for block in blocks {
-                            let block_number = block.recovered_block().number();
-                            let reverts =
-                                block.execution_outcome().bundle.reverts.to_plain_state_reverts();
-
-                            for account_block_reverts in reverts.accounts {
-                                let changeset = account_block_reverts
-                                    .into_iter()
-                                    .map(|(address, info)| AccountBeforeTx {
-                                        address,
-                                        info: info.map(Into::into),
-                                    })
-                                    .collect::<Vec<_>>();
-                                w.append_account_changeset(changeset, block_number)?;
-                            }
-                        }
-                        Ok(())
-                    },
+                    |w| Self::write_account_changesets(w, blocks),
                 )
             });
 

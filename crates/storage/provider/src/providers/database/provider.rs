@@ -88,7 +88,7 @@ use std::{
     thread,
     time::Instant,
 };
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
@@ -411,6 +411,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
+    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
@@ -535,6 +536,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
     ///
     /// SF data (headers, transactions, senders if SF, receipts if SF) must be written separately.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn insert_block_mdbx_only(
         &self,
         block: &RecoveredBlock<BlockTy<N>>,
@@ -1886,6 +1888,7 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
         Ok(self.tx.put::<tables::StageCheckpointProgresses>(id.to_string(), checkpoint)?)
     }
 
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_pipeline_stages(
         &self,
         block_number: BlockNumber,
@@ -1976,6 +1979,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 {
     type Receipt = ReceiptTy<N>;
 
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_state(
         &self,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
@@ -2213,6 +2217,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         Ok(())
     }
 
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
@@ -2506,6 +2511,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     /// Writes trie updates to the database with already sorted updates.
     ///
     /// Returns the number of entries modified.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
             return Ok(0)
@@ -2549,6 +2555,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     /// the same `TrieUpdates`.
     ///
     /// Returns the number of keys written.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_trie_changesets(
         &self,
         block_number: BlockNumber,
@@ -3140,6 +3147,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
         )
     }
 
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         // account history stage
         {
