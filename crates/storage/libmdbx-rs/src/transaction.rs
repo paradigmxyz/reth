@@ -170,8 +170,8 @@ where
     /// Commits the transaction.
     ///
     /// Any pending operations will be saved.
-    pub fn commit(self) -> Result<(bool, CommitLatency)> {
-        let result = self.txn_execute(|txn| {
+    pub fn commit(self) -> Result<CommitLatency> {
+        match self.txn_execute(|txn| {
             if K::IS_READ_ONLY {
                 #[cfg(feature = "read-tx-timeouts")]
                 self.env().txn_manager().remove_active_read_transaction(txn);
@@ -186,10 +186,21 @@ where
                     .send_message(TxnManagerMessage::Commit { tx: TxnPtr(txn), sender });
                 rx.recv().unwrap()
             }
-        })?;
-
-        self.inner.set_committed();
-        result
+        })? {
+            //
+            Ok((false, lat)) => {
+                self.inner.set_committed();
+                Ok(lat)
+            }
+            Ok((true, _)) => {
+                // MDBX_RESULT_TRUE means the transaction was aborted due to prior errors.
+                // The transaction is still finished/freed by MDBX, so we must mark it as
+                // committed to prevent the Drop impl from trying to abort it again.
+                self.inner.set_committed();
+                Err(Error::BotchedTransaction)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// Opens a handle to an MDBX database.

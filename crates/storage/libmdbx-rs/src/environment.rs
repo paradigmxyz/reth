@@ -989,7 +989,10 @@ mod tests {
                     result @ Err(_) => result.unwrap(),
                 }
             }
-            tx.commit().unwrap();
+            // The transaction may be in an error state after hitting MapFull,
+            // so commit could fail. We don't care about the result here since
+            // the purpose of this test is to verify the HSR callback was called.
+            let _ = tx.commit();
         }
 
         // Expect the HSR to be called
