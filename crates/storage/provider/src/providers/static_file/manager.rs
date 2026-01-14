@@ -1363,36 +1363,11 @@ impl<N: NodePrimitives> StaticFileProvider<N> {
         debug!(target: "reth::providers::static_file", ?segment, ?highest_static_file_entry, ?highest_static_file_block, "Ensuring invariants");
         let mut db_cursor = provider.tx_ref().cursor_read::<T>()?;
 
-        if let Some((db_first_entry, _)) = db_cursor.first()? {
-            debug!(target: "reth::providers::static_file", ?segment, db_first_entry, "Found first database entry");
-            if let (Some(highest_entry), Some(highest_block)) =
-                (highest_static_file_entry, highest_static_file_block)
-            {
-                // If there is a gap between the entry found in static file and
-                // database, then we have most likely lost static file data and need to unwind so we
-                // can load it again
-                if !(db_first_entry <= highest_entry || highest_entry + 1 == db_first_entry) {
-                    info!(
-                        target: "reth::providers::static_file",
-                        ?db_first_entry,
-                        ?highest_entry,
-                        unwind_target = highest_block,
-                        ?segment,
-                        "Setting unwind target."
-                    );
-                    return Ok(Some(highest_block))
-                }
-            }
-
-            if let Some((db_last_entry, _)) = db_cursor.last()? &&
-                highest_static_file_entry
-                    .is_none_or(|highest_entry| db_last_entry > highest_entry)
-            {
-                debug!(target: "reth::providers::static_file", ?segment, db_last_entry, ?highest_static_file_entry, "Database has entries beyond static files, no unwind needed");
-                return Ok(None)
-            }
-        } else {
-            debug!(target: "reth::providers::static_file", ?segment, "No database entries found");
+        if let Some((db_last_entry, _)) = db_cursor.last()? &&
+            highest_static_file_entry.is_none_or(|highest_entry| db_last_entry > highest_entry)
+        {
+            debug!(target: "reth::providers::static_file", ?segment, db_last_entry, ?highest_static_file_entry, "Database has entries beyond static files, no unwind needed");
+            return Ok(None)
         }
 
         let highest_static_file_entry = highest_static_file_entry.unwrap_or_default();
