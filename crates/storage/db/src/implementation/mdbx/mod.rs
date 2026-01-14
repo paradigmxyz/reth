@@ -27,7 +27,7 @@ use std::{
     ops::{Deref, Range},
     path::Path,
     sync::Arc,
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use tx::Tx;
 
@@ -119,6 +119,24 @@ pub struct DatabaseArguments {
     /// environments). Choose `SafeNoSync` if performance is more important and occasional data
     /// loss is acceptable (e.g., testing or ephemeral data).
     sync_mode: SyncMode,
+    /// The threshold in bytes for flushing data buffers to disk when [`SyncMode::SafeNoSync`] is
+    /// used.
+    ///
+    /// This sets the interprocess/shared threshold to force flush the data buffers to disk.
+    /// When the amount of unsynced data exceeds this threshold, MDBX will automatically
+    /// flush to disk. If [`None`], the MDBX default is used.
+    sync_bytes: Option<usize>,
+    /// The interval for periodic flushing of data buffers to disk when [`SyncMode::SafeNoSync`]
+    /// is used.
+    ///
+    /// This sets the interprocess/shared relative period since the last unsteady commit to force
+    /// flush the data buffers to disk. If [`None`], the MDBX default is used.
+    sync_period: Option<Duration>,
+    /// Interval for a background thread to call `mdbx_env_sync_ex` to flush data buffers to disk.
+    ///
+    /// This is useful when using [`SyncMode::SafeNoSync`] to ensure data is persisted at regular
+    /// intervals. If [`None`], no background sync thread is spawned.
+    periodic_sync_interval: Option<Duration>,
 }
 
 impl Default for DatabaseArguments {
@@ -143,6 +161,9 @@ impl DatabaseArguments {
             exclusive: None,
             max_readers: None,
             sync_mode: SyncMode::Durable,
+            sync_bytes: None,
+            sync_period: None,
+            periodic_sync_interval: None,
         }
     }
 
@@ -212,6 +233,36 @@ impl DatabaseArguments {
     /// Set `max_readers` flag.
     pub const fn with_max_readers(mut self, max_readers: Option<u64>) -> Self {
         self.max_readers = max_readers;
+        self
+    }
+
+    /// Sets the threshold in bytes for flushing data buffers to disk.
+    ///
+    /// This only takes effect when [`SyncMode::SafeNoSync`] is used. When the amount of
+    /// unsynced data exceeds this threshold, MDBX will automatically flush to disk.
+    pub const fn with_sync_bytes(mut self, sync_bytes: Option<usize>) -> Self {
+        self.sync_bytes = sync_bytes;
+        self
+    }
+
+    /// Sets the interval for periodic flushing of data buffers to disk.
+    ///
+    /// This only takes effect when [`SyncMode::SafeNoSync`] is used. Sets the relative
+    /// period since the last unsteady commit to force flush the data buffers to disk.
+    pub const fn with_sync_period(mut self, sync_period: Option<Duration>) -> Self {
+        self.sync_period = sync_period;
+        self
+    }
+
+    /// Sets the interval for a background thread to call `mdbx_env_sync_ex`.
+    ///
+    /// This is useful when using [`SyncMode::SafeNoSync`] to ensure data is persisted at
+    /// regular intervals without waiting for the OS to flush.
+    pub const fn with_periodic_sync_interval(
+        mut self,
+        periodic_sync_interval: Option<Duration>,
+    ) -> Self {
+        self.periodic_sync_interval = periodic_sync_interval;
         self
     }
 
@@ -485,6 +536,18 @@ impl DatabaseEnv {
 
         if let Some(max_read_transaction_duration) = args.max_read_transaction_duration {
             inner_env.set_max_read_transaction_duration(max_read_transaction_duration);
+        }
+
+        if let Some(sync_bytes) = args.sync_bytes {
+            inner_env.set_sync_bytes(sync_bytes);
+        }
+
+        if let Some(sync_period) = args.sync_period {
+            inner_env.set_sync_period(sync_period);
+        }
+
+        if let Some(interval) = args.periodic_sync_interval {
+            inner_env.set_periodic_sync_interval(interval);
         }
 
         let env = Self {

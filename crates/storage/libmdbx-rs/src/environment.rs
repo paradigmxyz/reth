@@ -53,6 +53,7 @@ impl Environment {
             log_level: None,
             kind: Default::default(),
             handle_slow_readers: None,
+            periodic_sync_interval: None,
             #[cfg(feature = "read-tx-timeouts")]
             max_read_transaction_duration: None,
         }
@@ -598,6 +599,9 @@ pub struct EnvironmentBuilder {
     log_level: Option<ffi::MDBX_log_level_t>,
     kind: EnvironmentKind,
     handle_slow_readers: Option<HandleSlowReadersCallback>,
+    /// Interval for periodic sync operations. If set, a background thread will call
+    /// `mdbx_env_sync_ex` at this interval to flush data buffers to disk.
+    periodic_sync_interval: Option<Duration>,
     #[cfg(feature = "read-tx-timeouts")]
     /// The maximum duration of a read transaction. If [None], but the `read-tx-timeout` feature is
     /// enabled, the default value of [`DEFAULT_MAX_READ_TRANSACTION_DURATION`] is used.
@@ -734,7 +738,7 @@ impl EnvironmentBuilder {
         let env_ptr = EnvPtr(env);
 
         #[cfg(not(feature = "read-tx-timeouts"))]
-        let txn_manager = TxnManager::new(env_ptr);
+        let txn_manager = TxnManager::new_with_periodic_sync(env_ptr, self.periodic_sync_interval);
 
         #[cfg(feature = "read-tx-timeouts")]
         let txn_manager = {
@@ -744,9 +748,13 @@ impl EnvironmentBuilder {
                     DEFAULT_MAX_READ_TRANSACTION_DURATION,
                 ))
             {
-                TxnManager::new_with_max_read_transaction_duration(env_ptr, duration)
+                TxnManager::new_with_max_read_transaction_duration(
+                    env_ptr,
+                    duration,
+                    self.periodic_sync_interval,
+                )
             } else {
-                TxnManager::new(env_ptr)
+                TxnManager::new_with_periodic_sync(env_ptr, self.periodic_sync_interval)
             }
         };
 
@@ -871,6 +879,16 @@ impl EnvironmentBuilder {
     /// information.
     pub fn set_handle_slow_readers(&mut self, hsr: HandleSlowReadersCallback) -> &mut Self {
         self.handle_slow_readers = Some(hsr);
+        self
+    }
+
+    /// Sets the interval for periodic sync operations.
+    ///
+    /// If set, a background thread will call `mdbx_env_sync_ex` at this interval to flush
+    /// data buffers to disk. This is useful when using [`SyncMode::SafeNoSync`] to ensure
+    /// data is persisted at regular intervals without waiting for the OS to flush.
+    pub const fn set_periodic_sync_interval(&mut self, interval: Duration) -> &mut Self {
+        self.periodic_sync_interval = Some(interval);
         self
     }
 }

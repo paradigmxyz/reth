@@ -6,6 +6,7 @@ use crate::{
 use std::{
     ptr,
     sync::mpsc::{sync_channel, Receiver, SyncSender},
+    time::Duration,
 };
 
 #[derive(Copy, Clone, Debug)]
@@ -24,6 +25,7 @@ pub(crate) enum TxnManagerMessage {
 ///   corresponding [`TxnManagerMessage`]
 /// - Aborting long-lived read transactions (if the `read-tx-timeouts` feature is enabled and
 ///   `TxnManager::with_max_read_transaction_duration` is called)
+/// - Periodically syncing the environment to disk (if configured with a sync interval)
 #[derive(Debug)]
 pub(crate) struct TxnManager {
     sender: SyncSender<TxnManagerMessage>,
@@ -32,7 +34,12 @@ pub(crate) struct TxnManager {
 }
 
 impl TxnManager {
+    #[allow(dead_code)]
     pub(crate) fn new(env: EnvPtr) -> Self {
+        Self::new_with_periodic_sync(env, None)
+    }
+
+    pub(crate) fn new_with_periodic_sync(env: EnvPtr, sync_interval: Option<Duration>) -> Self {
         let (tx, rx) = sync_channel(0);
         let txn_manager = Self {
             sender: tx,
@@ -42,7 +49,43 @@ impl TxnManager {
 
         txn_manager.start_message_listener(env, rx);
 
+        if let Some(interval) = sync_interval {
+            Self::start_sync_thread(env, interval);
+        }
+
         txn_manager
+    }
+
+    /// Spawns a background thread that periodically calls `mdbx_env_sync_ex` to flush
+    /// data buffers to disk.
+    ///
+    /// This is useful when using [`crate::SyncMode::SafeNoSync`] to ensure data is
+    /// persisted at regular intervals without waiting for the OS to flush.
+    fn start_sync_thread(env: EnvPtr, interval: Duration) {
+        let task = move || {
+            // Capture the EnvPtr (which is Send) into the closure
+            let env = env;
+            loop {
+                std::thread::sleep(interval);
+
+                let _span = tracing::debug_span!(target: "libmdbx::sync", "sync").entered();
+
+                // SAFETY: The env pointer is valid for the lifetime of the Environment,
+                // and this thread will terminate when the process exits.
+                let result = unsafe { ffi::mdbx_env_sync_ex(env.0, false, false) };
+                if result != ffi::MDBX_SUCCESS && result != ffi::MDBX_RESULT_TRUE {
+                    tracing::warn!(
+                        target: "libmdbx::sync",
+                        error_code = result,
+                        "Periodic sync failed"
+                    );
+                }
+            }
+        };
+        std::thread::Builder::new()
+            .name("mdbx-rs-sync".to_string())
+            .spawn(task)
+            .expect("failed to spawn mdbx sync thread");
     }
 
     /// Spawns a new [`std::thread`] that listens to incoming [`TxnManagerMessage`] messages,
@@ -58,6 +101,9 @@ impl TxnManager {
                 match rx.recv() {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
+                            let _span =
+                                tracing::debug_span!(target: "libmdbx::txn", "begin", flags)
+                                    .entered();
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
                             let res = mdbx_result(unsafe {
                                 ffi::mdbx_txn_begin_ex(
@@ -72,9 +118,13 @@ impl TxnManager {
                             sender.send(res).unwrap();
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
+                            let _span =
+                                tracing::debug_span!(target: "libmdbx::txn", "abort").entered();
                             sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
+                            let _span =
+                                tracing::debug_span!(target: "libmdbx::txn", "commit").entered();
                             sender
                                 .send({
                                     let mut latency = CommitLatency::new();
@@ -120,6 +170,7 @@ mod read_transactions {
         pub(crate) fn new_with_max_read_transaction_duration(
             env: EnvPtr,
             duration: Duration,
+            periodic_sync_interval: Option<Duration>,
         ) -> Self {
             let read_transactions = Arc::new(ReadTransactions::new(duration));
             read_transactions.clone().start_monitor();
@@ -129,6 +180,10 @@ mod read_transactions {
             let txn_manager = Self { sender: tx, read_transactions: Some(read_transactions) };
 
             txn_manager.start_message_listener(env, rx);
+
+            if let Some(interval) = periodic_sync_interval {
+                Self::start_sync_thread(env, interval);
+            }
 
             txn_manager
         }

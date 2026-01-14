@@ -88,7 +88,9 @@ impl DatabaseArgs {
             .with_geometry_page_size(self.page_size)
             .with_growth_step(self.growth_step)
             .with_max_readers(self.max_readers)
-            .with_sync_mode(self.sync_mode)
+        // TODO: temporary for testing - remove before merging
+        //.with_sync_mode(Some(SyncMode::SafeNoSync))
+        //.with_periodic_sync_interval(Some(Duration::from_millis(500)))
     }
 }
 
