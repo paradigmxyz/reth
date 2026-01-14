@@ -342,6 +342,14 @@ impl<ChainSpec> NodeConfig<ChainSpec> {
         self
     }
 
+    /// Converts the node configuration to [`StorageSettings`].
+    ///
+    /// This returns storage settings configured via CLI arguments including
+    /// static file settings and `RocksDB` settings.
+    pub const fn to_storage_settings(&self) -> reth_provider::StorageSettings {
+        self.static_files.to_settings()
+    }
+
     /// Returns pruning configuration.
     pub fn prune_config(&self) -> Option<PruneConfig>
     where

@@ -1019,6 +1019,13 @@ Static Files:
 
           Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
 
+      --storage.rocksdb
+          Use RocksDB for history indices instead of MDBX.
+
+          When enabled, AccountsHistory, StoragesHistory, and TransactionHashNumbers tables will be stored in RocksDB for better write performance.
+
+          Note: This setting can only be configured at genesis initialization. Once the node has been initialized, changing this flag requires re-syncing from scratch.
+
 Ress:
       --ress.enable
           Enable support for `ress` subprotocol
