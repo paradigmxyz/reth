@@ -11,7 +11,7 @@ use reth_provider::{
     ChainStateBlockWriter, DBProvider, DatabaseProviderFactory, ProviderFactory,
     PruneCheckpointReader, StageCheckpointReader, StageCheckpointWriter,
 };
-use reth_prune::PrunerBuilder;
+use reth_prune::{PruneModes, PrunerBuilder};
 use reth_static_file::StaticFileProducer;
 use reth_tokio_util::{EventSender, EventStream};
 use std::{
@@ -33,6 +33,37 @@ pub use builder::*;
 use progress::*;
 use reth_errors::RethResult;
 pub use set::*;
+
+/// Checks if we can safely unwind to the target block given current pruning state.
+///
+/// Only the Execution stage (and dependent stages like AccountHashing/StorageHashing)
+/// need account/storage history changesets to unwind. This function checks if Execution
+/// would need to unwind and if so, verifies the required history hasn't been pruned.
+///
+/// Returns `Ok(())` if:
+/// - The Execution stage checkpoint is at or below the unwind target (no Execution unwind needed)
+/// - The required history data is available for the unwind
+///
+/// Returns an error if the Execution stage needs to unwind but required history has been pruned.
+pub fn check_unwind_history_available<P>(
+    provider: &P,
+    prune_modes: &PruneModes,
+    unwind_target: BlockNumber,
+) -> Result<(), PipelineError>
+where
+    P: StageCheckpointReader + PruneCheckpointReader + BlockNumReader,
+{
+    let execution_checkpoint =
+        provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
+
+    // Only Execution (and dependent stages) need history to unwind
+    if execution_checkpoint > unwind_target {
+        let latest_block = provider.last_block_number()?;
+        let checkpoints = provider.get_prune_checkpoints()?;
+        prune_modes.ensure_unwind_target_unpruned(latest_block, unwind_target, &checkpoints)?;
+    }
+    Ok(())
+}
 
 /// A container for a queued stage.
 pub(crate) type BoxedStage<DB> = Box<dyn Stage<DB>>;
@@ -298,23 +329,8 @@ impl<N: ProviderNodeTypes> Pipeline<N> {
         to: BlockNumber,
         bad_block: Option<BlockNumber>,
     ) -> Result<(), PipelineError> {
-        // Add validation before starting unwind
         let provider = self.provider_factory.provider()?;
-        let latest_block = provider.last_block_number()?;
-
-        // Get the Execution stage checkpoint to determine if we need history for unwinding.
-        // Only the Execution stage (and dependent stages like AccountHashing/StorageHashing)
-        // actually need account/storage history changesets to unwind. Other stages like
-        // Headers, Bodies, and SenderRecovery can unwind without history data.
-        let execution_checkpoint =
-            provider.get_stage_checkpoint(StageId::Execution)?.unwrap_or_default().block_number;
-
-        // Only check history limits if we would actually need to unwind the Execution stage
-        if execution_checkpoint > to {
-            let prune_modes = provider.prune_modes_ref();
-            let checkpoints = provider.get_prune_checkpoints()?;
-            prune_modes.ensure_unwind_target_unpruned(latest_block, to, &checkpoints)?;
-        }
+        check_unwind_history_available(&provider, provider.prune_modes_ref(), to)?;
 
         // Unwind stages in reverse order of execution
         let unwind_pipeline = self.stages.iter_mut().rev();
