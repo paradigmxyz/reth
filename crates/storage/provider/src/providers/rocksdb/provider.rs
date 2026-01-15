@@ -12,8 +12,8 @@ use reth_storage_errors::{
 };
 use rocksdb::{
     BlockBasedOptions, Cache, ColumnFamilyDescriptor, CompactionPri, DBCompressionType,
-    DBRawIteratorWithThreadMode, IteratorMode, Options, Transaction, TransactionDB,
-    TransactionDBOptions, TransactionOptions, WriteBatchWithTransaction, WriteOptions,
+    DBRawIteratorWithThreadMode, IteratorMode, OptimisticTransactionDB,
+    OptimisticTransactionOptions, Options, Transaction, WriteBatchWithTransaction, WriteOptions,
 };
 use std::{
     fmt,
@@ -200,20 +200,17 @@ impl RocksDBBuilder {
             })
             .collect();
 
-        // Use TransactionDB for MDBX-like transaction semantics (read-your-writes, rollback)
-        let txn_db_options = TransactionDBOptions::default();
-        let db = TransactionDB::open_cf_descriptors(
-            &options,
-            &txn_db_options,
-            &self.path,
-            cf_descriptors,
-        )
-        .map_err(|e| {
-            ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
-                message: e.to_string().into(),
-                code: -1,
-            }))
-        })?;
+        // Use OptimisticTransactionDB for MDBX-like transaction semantics (read-your-writes,
+        // rollback) OptimisticTransactionDB uses optimistic concurrency control (conflict
+        // detection at commit) and is backed by DBCommon, giving us access to
+        // cancel_all_background_work for clean shutdown.
+        let db = OptimisticTransactionDB::open_cf_descriptors(&options, &self.path, cf_descriptors)
+            .map_err(|e| {
+                ProviderError::Database(DatabaseError::Open(DatabaseErrorInfo {
+                    message: e.to_string().into(),
+                    code: -1,
+                }))
+            })?;
 
         let metrics = self.enable_metrics.then(RocksDBMetrics::default);
 
@@ -241,8 +238,8 @@ pub struct RocksDBProvider(Arc<RocksDBProviderInner>);
 
 /// Inner state for `RocksDB` provider.
 struct RocksDBProviderInner {
-    /// `RocksDB` database instance with transaction support.
-    db: TransactionDB,
+    /// `RocksDB` database instance with optimistic transaction support.
+    db: OptimisticTransactionDB,
     /// Metrics latency & operations.
     metrics: Option<RocksDBMetrics>,
 }
@@ -250,9 +247,17 @@ struct RocksDBProviderInner {
 impl fmt::Debug for RocksDBProviderInner {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("RocksDBProviderInner")
-            .field("db", &"<TransactionDB>")
+            .field("db", &"<OptimisticTransactionDB>")
             .field("metrics", &self.metrics)
             .finish()
+    }
+}
+
+impl Drop for RocksDBProviderInner {
+    fn drop(&mut self) {
+        // Cancel all background work (compaction, flush) before dropping.
+        // This prevents pthread lock errors during shutdown.
+        self.db.cancel_all_background_work(true);
     }
 }
 
@@ -274,9 +279,12 @@ impl RocksDBProvider {
     }
 
     /// Creates a new transaction with MDBX-like semantics (read-your-writes, rollback).
+    ///
+    /// Note: With `OptimisticTransactionDB`, commits may fail if there are conflicts.
+    /// Conflict detection happens at commit time, not at write time.
     pub fn tx(&self) -> RocksTx<'_> {
         let write_options = WriteOptions::default();
-        let txn_options = TransactionOptions::default();
+        let txn_options = OptimisticTransactionOptions::default();
         let inner = self.0.db.transaction_opt(&write_options, &txn_options);
         RocksTx { inner, provider: self }
     }
@@ -564,7 +572,7 @@ impl<'a> RocksDBBatch<'a> {
 /// Note: `Transaction` is `Send` but NOT `Sync`. This wrapper does not implement
 /// `DbTx`/`DbTxMut` traits directly; use RocksDB-specific methods instead.
 pub struct RocksTx<'db> {
-    inner: Transaction<'db, TransactionDB>,
+    inner: Transaction<'db, OptimisticTransactionDB>,
     provider: &'db RocksDBProvider,
 }
 
@@ -747,7 +755,7 @@ impl<'db> RocksTx<'db> {
         })?;
 
         // Create a raw iterator to access key bytes directly.
-        let mut iter: DBRawIteratorWithThreadMode<'_, Transaction<'_, TransactionDB>> =
+        let mut iter: DBRawIteratorWithThreadMode<'_, Transaction<'_, OptimisticTransactionDB>> =
             self.inner.raw_iterator_cf(&cf);
 
         // Seek to the smallest key >= encoded_key.
@@ -825,7 +833,7 @@ impl<'db> RocksTx<'db> {
 
     /// Returns an error if the raw iterator is in an invalid state due to an I/O error.
     fn raw_iter_status_ok(
-        iter: &DBRawIteratorWithThreadMode<'_, Transaction<'_, TransactionDB>>,
+        iter: &DBRawIteratorWithThreadMode<'_, Transaction<'_, OptimisticTransactionDB>>,
     ) -> ProviderResult<()> {
         iter.status().map_err(|e| {
             ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
@@ -840,7 +848,7 @@ impl<'db> RocksTx<'db> {
 ///
 /// Yields decoded `(Key, Value)` pairs in key order.
 pub struct RocksDBIter<'db, T: Table> {
-    inner: rocksdb::DBIteratorWithThreadMode<'db, TransactionDB>,
+    inner: rocksdb::DBIteratorWithThreadMode<'db, OptimisticTransactionDB>,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -884,7 +892,7 @@ impl<T: Table> Iterator for RocksDBIter<'_, T> {
 ///
 /// Yields decoded `(Key, Value)` pairs. Sees uncommitted writes.
 pub struct RocksTxIter<'tx, T: Table> {
-    inner: rocksdb::DBIteratorWithThreadMode<'tx, Transaction<'tx, TransactionDB>>,
+    inner: rocksdb::DBIteratorWithThreadMode<'tx, Transaction<'tx, OptimisticTransactionDB>>,
     _marker: std::marker::PhantomData<T>,
 }
 
@@ -1092,7 +1100,7 @@ mod tests {
             .build()
             .unwrap();
 
-        // Do operations - data should be immediately readable with TransactionDB
+        // Do operations - data should be immediately readable with OptimisticTransactionDB
         for i in 0..10 {
             let value = vec![i as u8];
             provider.put::<TestTable>(i, &value).unwrap();
@@ -1107,7 +1115,7 @@ mod tests {
         let provider =
             RocksDBBuilder::new(temp_dir.path()).with_table::<TestTable>().build().unwrap();
 
-        // Insert data - TransactionDB writes are immediately visible
+        // Insert data - OptimisticTransactionDB writes are immediately visible
         let value = vec![42u8; 1000];
         for i in 0..100 {
             provider.put::<TestTable>(i, &value).unwrap();
@@ -1264,101 +1272,9 @@ mod tests {
         assert_eq!(last, Some((20, b"value_20".to_vec())));
     }
 
-    #[test]
-    fn test_account_history_info_single_shard() {
-        let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
-        let address = Address::from([0x42; 20]);
-
-        // Create a single shard with blocks [100, 200, 300] and highest_block = u64::MAX
-        // This is the "last shard" invariant
-        let chunk = IntegerList::new([100, 200, 300]).unwrap();
-        let shard_key = ShardedKey::new(address, u64::MAX);
-        provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
-
-        let tx = provider.tx();
-
-        // Query for block 150: should find block 200 in changeset
-        let result = tx.account_history_info(address, 150, None).unwrap();
-        assert_eq!(result, HistoryInfo::InChangeset(200));
-
-        // Query for block 50: should return NotYetWritten (before first entry, no prev shard)
-        let result = tx.account_history_info(address, 50, None).unwrap();
-        assert_eq!(result, HistoryInfo::NotYetWritten);
-
-        // Query for block 300: should return InChangeset(300) - exact match means look at
-        // changeset at that block for the previous value
-        let result = tx.account_history_info(address, 300, None).unwrap();
-        assert_eq!(result, HistoryInfo::InChangeset(300));
-
-        // Query for block 500: should return InPlainState (after last entry in last shard)
-        let result = tx.account_history_info(address, 500, None).unwrap();
-        assert_eq!(result, HistoryInfo::InPlainState);
-
-        tx.rollback().unwrap();
-    }
-
-    #[test]
-    fn test_account_history_info_multiple_shards() {
-        let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
-        let address = Address::from([0x42; 20]);
-
-        // Create two shards: first shard ends at block 500, second is the last shard
-        let chunk1 = IntegerList::new([100, 200, 300, 400, 500]).unwrap();
-        let shard_key1 = ShardedKey::new(address, 500);
-        provider.put::<tables::AccountsHistory>(shard_key1, &chunk1).unwrap();
-
-        let chunk2 = IntegerList::new([600, 700, 800]).unwrap();
-        let shard_key2 = ShardedKey::new(address, u64::MAX);
-        provider.put::<tables::AccountsHistory>(shard_key2, &chunk2).unwrap();
-
-        let tx = provider.tx();
-
-        // Query for block 50: should return NotYetWritten (before first shard, no prev)
-        let result = tx.account_history_info(address, 50, None).unwrap();
-        assert_eq!(result, HistoryInfo::NotYetWritten);
-
-        // Query for block 150: should find block 200 in first shard's changeset
-        let result = tx.account_history_info(address, 150, None).unwrap();
-        assert_eq!(result, HistoryInfo::InChangeset(200));
-
-        // Query for block 550: should find block 600 in second shard's changeset
-        // prev() should detect first shard exists
-        let result = tx.account_history_info(address, 550, None).unwrap();
-        assert_eq!(result, HistoryInfo::InChangeset(600));
-
-        // Query for block 900: should return InPlainState (after last entry in last shard)
-        let result = tx.account_history_info(address, 900, None).unwrap();
-        assert_eq!(result, HistoryInfo::InPlainState);
-
-        tx.rollback().unwrap();
-    }
-
-    #[test]
-    fn test_account_history_info_no_history() {
-        let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
-        let address1 = Address::from([0x42; 20]);
-        let address2 = Address::from([0x43; 20]);
-
-        // Only add history for address1
-        let chunk = IntegerList::new([100, 200, 300]).unwrap();
-        let shard_key = ShardedKey::new(address1, u64::MAX);
-        provider.put::<tables::AccountsHistory>(shard_key, &chunk).unwrap();
-
-        let tx = provider.tx();
-
-        // Query for address2 (no history exists): should return NotYetWritten
-        let result = tx.account_history_info(address2, 150, None).unwrap();
-        assert_eq!(result, HistoryInfo::NotYetWritten);
-
-        tx.rollback().unwrap();
-    }
-
+    /// Tests the edge case where block < `lowest_available_block_number`.
+    /// This case cannot be tested via `HistoricalStateProviderRef` (which errors before lookup),
+    /// so we keep this RocksDB-specific test to verify the low-level behavior.
     #[test]
     fn test_account_history_info_pruned_before_first_entry() {
         let temp_dir = TempDir::new().unwrap();
@@ -1379,41 +1295,6 @@ mod tests {
         // check the changeset at the first write block.
         let result = tx.account_history_info(address, 50, Some(100)).unwrap();
         assert_eq!(result, HistoryInfo::InChangeset(100));
-
-        tx.rollback().unwrap();
-    }
-
-    #[test]
-    fn test_storage_history_info() {
-        let temp_dir = TempDir::new().unwrap();
-        let provider = RocksDBBuilder::new(temp_dir.path()).with_default_tables().build().unwrap();
-
-        let address = Address::from([0x42; 20]);
-        let storage_key = B256::from([0x01; 32]);
-
-        // Create a single shard for this storage slot
-        let chunk = IntegerList::new([100, 200, 300]).unwrap();
-        let shard_key = StorageShardedKey::new(address, storage_key, u64::MAX);
-        provider.put::<tables::StoragesHistory>(shard_key, &chunk).unwrap();
-
-        let tx = provider.tx();
-
-        // Query for block 150: should find block 200 in changeset
-        let result = tx.storage_history_info(address, storage_key, 150, None).unwrap();
-        assert_eq!(result, HistoryInfo::InChangeset(200));
-
-        // Query for block 50: should return NotYetWritten
-        let result = tx.storage_history_info(address, storage_key, 50, None).unwrap();
-        assert_eq!(result, HistoryInfo::NotYetWritten);
-
-        // Query for block 500: should return InPlainState
-        let result = tx.storage_history_info(address, storage_key, 500, None).unwrap();
-        assert_eq!(result, HistoryInfo::InPlainState);
-
-        // Query for different storage key (no history): should return NotYetWritten
-        let other_key = B256::from([0x02; 32]);
-        let result = tx.storage_history_info(address, other_key, 150, None).unwrap();
-        assert_eq!(result, HistoryInfo::NotYetWritten);
 
         tx.rollback().unwrap();
     }

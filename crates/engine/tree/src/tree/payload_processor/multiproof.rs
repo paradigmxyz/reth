@@ -20,6 +20,7 @@ use reth_trie_parallel::{
         AccountMultiproofInput, ProofResultContext, ProofResultMessage, ProofWorkerHandle,
     },
 };
+use revm_primitives::map::{hash_map, B256Map};
 use std::{collections::BTreeMap, sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
@@ -609,7 +610,19 @@ impl MultiProofTask {
         self.multi_added_removed_keys.touch_accounts(targets.keys().copied());
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
+            account: self.multi_added_removed_keys.account.clone(),
+            storages: targets
+                .keys()
+                .filter_map(|account| {
+                    self.multi_added_removed_keys
+                        .storages
+                        .get(account)
+                        .cloned()
+                        .map(|keys| (*account, keys))
+                })
+                .collect(),
+        });
 
         self.metrics.prefetch_proof_targets_accounts_histogram.record(targets.len() as f64);
         self.metrics
@@ -645,22 +658,16 @@ impl MultiProofTask {
         num_chunks as u64
     }
 
-    // Returns true if all state updates finished and all proofs processed.
-    fn is_done(
-        &self,
-        proofs_processed: u64,
-        state_update_proofs_requested: u64,
-        prefetch_proofs_requested: u64,
-        updates_finished: bool,
-    ) -> bool {
-        let all_proofs_processed =
-            proofs_processed >= state_update_proofs_requested + prefetch_proofs_requested;
+    /// Returns true if all state updates finished and all pending proofs processed.
+    fn is_done(&self, metrics: &MultiproofBatchMetrics, ctx: &MultiproofBatchCtx) -> bool {
+        let all_proofs_processed = metrics.all_proofs_processed();
         let no_pending = !self.proof_sequencer.has_pending();
+        let updates_finished = ctx.updates_finished();
         trace!(
             target: "engine::tree::payload_processor::multiproof",
-            proofs_processed,
-            state_update_proofs_requested,
-            prefetch_proofs_requested,
+            proofs_processed = metrics.proofs_processed,
+            state_update_proofs_requested = metrics.state_update_proofs_requested,
+            prefetch_proofs_requested = metrics.prefetch_proofs_requested,
             no_pending,
             updates_finished,
             "Checking end condition"
@@ -711,7 +718,33 @@ impl MultiProofTask {
         }
 
         // Clone+Arc MultiAddedRemovedKeys for sharing with the dispatched multiproof tasks
-        let multi_added_removed_keys = Arc::new(self.multi_added_removed_keys.clone());
+        let multi_added_removed_keys = Arc::new(MultiAddedRemovedKeys {
+            account: self.multi_added_removed_keys.account.clone(),
+            storages: {
+                let mut storages = B256Map::with_capacity_and_hasher(
+                    not_fetched_state_update.storages.len(),
+                    Default::default(),
+                );
+
+                for account in not_fetched_state_update
+                    .storages
+                    .keys()
+                    .chain(not_fetched_state_update.accounts.keys())
+                {
+                    if let hash_map::Entry::Vacant(entry) = storages.entry(*account) {
+                        entry.insert(
+                            self.multi_added_removed_keys
+                                .storages
+                                .get(account)
+                                .cloned()
+                                .unwrap_or_default(),
+                        );
+                    }
+                }
+
+                storages
+            },
+        });
 
         let chunking_len = not_fetched_state_update.chunking_length();
         let mut spawned_proof_targets = MultiProofTargets::default();
@@ -933,12 +966,7 @@ impl MultiProofTask {
                 ctx.updates_finished_time = Some(Instant::now());
 
                 // Check if we're done (might need to wait for proofs to complete)
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "BAL processed and all proofs complete, ending calculation"
@@ -953,12 +981,7 @@ impl MultiProofTask {
 
                 ctx.updates_finished_time = Some(Instant::now());
 
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "State updates finished and all proofs processed, ending calculation"
@@ -980,12 +1003,7 @@ impl MultiProofTask {
                     let _ = self.to_sparse_trie.send(combined_update);
                 }
 
-                if self.is_done(
-                    batch_metrics.proofs_processed,
-                    batch_metrics.state_update_proofs_requested,
-                    batch_metrics.prefetch_proofs_requested,
-                    ctx.updates_finished(),
-                ) {
+                if self.is_done(batch_metrics, ctx) {
                     debug!(
                         target: "engine::tree::payload_processor::multiproof",
                         "State updates finished and all proofs processed, ending calculation"
@@ -1098,12 +1116,7 @@ impl MultiProofTask {
                                 }
                             }
 
-                            if self.is_done(
-                                batch_metrics.proofs_processed,
-                                batch_metrics.state_update_proofs_requested,
-                                batch_metrics.prefetch_proofs_requested,
-                                ctx.updates_finished(),
-                            ) {
+                            if self.is_done(&batch_metrics, &ctx) {
                                 debug!(
                                     target: "engine::tree::payload_processor::multiproof",
                                     "State updates finished and all proofs processed, ending calculation"
@@ -1208,6 +1221,13 @@ struct MultiproofBatchMetrics {
     state_update_proofs_requested: u64,
     /// Number of prefetch proofs requested.
     prefetch_proofs_requested: u64,
+}
+
+impl MultiproofBatchMetrics {
+    /// Returns `true` if all requested proofs have been processed.
+    const fn all_proofs_processed(&self) -> bool {
+        self.proofs_processed >= self.state_update_proofs_requested + self.prefetch_proofs_requested
+    }
 }
 
 /// Returns accounts only with those storages that were not already fetched, and
