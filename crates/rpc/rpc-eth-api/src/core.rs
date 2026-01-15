@@ -888,6 +888,6 @@ where
     }
 }
 
-fn pow_rpc_unavailable(_method: &str) -> EthApiError {
+const fn pow_rpc_unavailable(_method: &str) -> EthApiError {
     EthApiError::Unsupported("Proof-of-Work mining RPCs are not supported by this node.")
 }
