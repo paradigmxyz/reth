@@ -26,7 +26,7 @@ where
         .collect()
 }
 
-/// Extend a sorted vector with another sorted vector using O(n+m) merge.
+/// Extend a sorted vector with another sorted vector using 2 pointer merge.
 /// Values from `other` take precedence for duplicate keys.
 pub(crate) fn extend_sorted_vec<K, V>(target: &mut Vec<(K, V)>, other: &[(K, V)])
 where
