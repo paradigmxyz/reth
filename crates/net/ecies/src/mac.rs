@@ -10,11 +10,10 @@
 //! For more information, refer to the [Ethereum MAC specification](https://github.com/ethereum/devp2p/blob/master/rlpx.md#mac).
 
 use aes::Aes256Enc;
-use alloy_primitives::{B128, B256};
+use alloy_primitives::{Keccak256, B128, B256};
 use block_padding::NoPadding;
 use cipher::BlockEncrypt;
 use digest::KeyInit;
-use sha3::{Digest, Keccak256};
 
 /// [`Ethereum MAC`](https://github.com/ethereum/devp2p/blob/master/rlpx.md#mac) state.
 ///
@@ -57,7 +56,7 @@ impl MAC {
         self.hasher.update(data);
         let prev = self.digest();
         let aes = Aes256Enc::new_from_slice(self.secret.as_ref()).unwrap();
-        let mut encrypted = self.digest().0;
+        let mut encrypted = prev.0;
 
         aes.encrypt_padded::<NoPadding>(&mut encrypted, B128::len_bytes()).unwrap();
         for i in 0..16 {

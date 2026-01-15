@@ -267,7 +267,7 @@ impl<T: NodePrimitives, ChainSpec: EthChainSpec + 'static> DBProvider
         self.tx
     }
 
-    fn commit(self) -> ProviderResult<bool> {
+    fn commit(self) -> ProviderResult<()> {
         Ok(self.tx.commit()?)
     }
 
@@ -976,6 +976,17 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
         _address: Address,
     ) -> ProviderResult<Option<AccountBeforeTx>> {
         Ok(None)
+    }
+
+    fn account_changesets_range(
+        &self,
+        _range: impl core::ops::RangeBounds<BlockNumber>,
+    ) -> ProviderResult<Vec<(BlockNumber, AccountBeforeTx)>> {
+        Ok(Vec::default())
+    }
+
+    fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
     }
 }
 

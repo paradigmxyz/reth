@@ -5,7 +5,7 @@ use alloy_consensus::BlockHeader;
 use alloy_eips::BlockHashOrNumber;
 use alloy_rpc_types_engine::{JwtError, JwtSecret};
 use eyre::Result;
-use reth_consensus::{Consensus, ConsensusError};
+use reth_consensus::Consensus;
 use reth_network_p2p::{
     bodies::client::BodiesClient, headers::client::HeadersClient, priority::Priority,
 };
@@ -71,7 +71,7 @@ where
 pub async fn get_single_body<B, Client>(
     client: Client,
     header: SealedHeader<B::Header>,
-    consensus: impl Consensus<B, Error = ConsensusError>,
+    consensus: impl Consensus<B>,
 ) -> Result<SealedBlock<B>>
 where
     B: Block,

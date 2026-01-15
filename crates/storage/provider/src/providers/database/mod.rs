@@ -43,7 +43,7 @@ use std::{
 use tracing::trace;
 
 mod provider;
-pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode};
 
 use super::ProviderNodeTypes;
 use reth_trie::KeccakKeyHasher;
@@ -152,6 +152,11 @@ impl<N: NodeTypesWithDB> StorageSettingsCache for ProviderFactory<N> {
 impl<N: NodeTypesWithDB> RocksDBProviderFactory for ProviderFactory<N> {
     fn rocksdb_provider(&self) -> RocksDBProvider {
         self.rocksdb_provider.clone()
+    }
+
+    #[cfg(all(unix, feature = "rocksdb"))]
+    fn set_pending_rocksdb_batch(&self, _batch: rocksdb::WriteBatchWithTransaction<true>) {
+        unimplemented!("ProviderFactory is a factory, not a provider - use DatabaseProvider::set_pending_rocksdb_batch instead")
     }
 }
 
@@ -721,7 +726,7 @@ mod tests {
         {
             let factory = create_test_provider_factory();
             let provider = factory.provider_rw().unwrap();
-            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
+            assert_matches!(provider.insert_block(&block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(
                 provider.transaction_sender(0), Ok(Some(sender))
                 if sender == block.body().transactions[0].recover_signer().unwrap()
@@ -740,7 +745,7 @@ mod tests {
             };
             let factory = create_test_provider_factory();
             let provider = factory.with_prune_modes(prune_modes).provider_rw().unwrap();
-            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
+            assert_matches!(provider.insert_block(&block.clone().try_recover().unwrap()), Ok(_));
             assert_matches!(provider.transaction_sender(0), Ok(None));
             assert_matches!(
                 provider.transaction_id(*block.body().transactions[0].tx_hash()),
@@ -760,18 +765,18 @@ mod tests {
             let factory = create_test_provider_factory();
             let provider = factory.provider_rw().unwrap();
 
-            assert_matches!(provider.insert_block(block.clone().try_recover().unwrap()), Ok(_));
+            assert_matches!(provider.insert_block(&block.clone().try_recover().unwrap()), Ok(_));
 
-            let senders = provider.take::<tables::TransactionSenders>(range.clone());
+            let senders = provider.take::<tables::TransactionSenders>(range.clone()).unwrap();
             assert_eq!(
                 senders,
-                Ok(range
+                range
                     .clone()
                     .map(|tx_number| (
                         tx_number,
                         block.body().transactions[tx_number as usize].recover_signer().unwrap()
                     ))
-                    .collect())
+                    .collect::<Vec<_>>()
             );
 
             let db_senders = provider.senders_by_tx_range(range);

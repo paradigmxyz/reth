@@ -476,7 +476,7 @@ impl<B: Block + Default> Default for RecoveredBlock<B> {
 impl<B: Block> InMemorySize for RecoveredBlock<B> {
     #[inline]
     fn size(&self) -> usize {
-        self.block.size() + self.senders.len() * core::mem::size_of::<Address>()
+        self.block.size() + self.senders.capacity() * core::mem::size_of::<Address>()
     }
 }
 
@@ -589,6 +589,11 @@ impl<B: crate::test_utils::TestBlock> RecoveredBlock<B> {
     /// Updates the block number.
     pub fn set_block_number(&mut self, number: alloy_primitives::BlockNumber) {
         self.block.set_block_number(number);
+    }
+
+    /// Updates the block timestamp.
+    pub fn set_timestamp(&mut self, timestamp: u64) {
+        self.block.set_timestamp(timestamp);
     }
 
     /// Updates the block state root.

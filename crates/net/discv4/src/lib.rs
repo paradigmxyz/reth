@@ -459,7 +459,7 @@ pub struct Discv4Service {
     ingress: IngressReceiver,
     /// Sender for sending outgoing messages
     ///
-    /// Sends outgoind messages to the UDP task.
+    /// Sends outgoing messages to the UDP task.
     egress: EgressSender,
     /// Buffered pending pings to apply backpressure.
     ///
@@ -479,7 +479,7 @@ pub struct Discv4Service {
     pending_find_nodes: HashMap<PeerId, FindNodeRequest>,
     /// Currently active ENR requests
     pending_enr_requests: HashMap<PeerId, EnrRequestState>,
-    /// Copy of he sender half of the commands channel for [Discv4]
+    /// Copy of the sender half of the commands channel for [Discv4]
     to_service: mpsc::UnboundedSender<Discv4Command>,
     /// Receiver half of the commands channel for [Discv4]
     commands_rx: mpsc::UnboundedReceiver<Discv4Command>,

@@ -253,7 +253,7 @@ impl CompressedBody {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress header: {e}"))
+                E2sError::SnappyCompression(format!("Failed to compress body: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {
@@ -340,7 +340,7 @@ impl CompressedReceipts {
             let mut encoder = FrameEncoder::new(&mut compressed);
 
             Write::write_all(&mut encoder, rlp_data).map_err(|e| {
-                E2sError::SnappyCompression(format!("Failed to compress header: {e}"))
+                E2sError::SnappyCompression(format!("Failed to compress receipts: {e}"))
             })?;
 
             encoder.flush().map_err(|e| {

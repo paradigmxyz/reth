@@ -567,12 +567,10 @@ mod tests {
             gas_used: GAS_USED,
             block_access_list: None,
         };
-        assert_eq!(
-            validate_block_post_execution(&header, &chainspec, &result),
-            Err(ConsensusError::BlobGasUsedDiff(GotExpected {
-                got: BLOB_GAS_USED,
-                expected: BLOB_GAS_USED + 1,
-            }))
-        );
+        assert!(matches!(
+            validate_block_post_execution(&header, &chainspec, &result).unwrap_err(),
+            ConsensusError::BlobGasUsedDiff(diff)
+                if diff.got == BLOB_GAS_USED && diff.expected == BLOB_GAS_USED + 1
+        ));
     }
 }

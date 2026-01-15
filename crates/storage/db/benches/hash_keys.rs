@@ -248,7 +248,7 @@ where
         println!(
             "{:?}\n",
             tx.inner
-                .db_stat(&table_db)
+                .db_stat(table_db.dbi())
                 .map_err(|_| format!("Could not find table: {}", T::NAME))
                 .map(|stats| {
                     let num_pages =

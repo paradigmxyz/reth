@@ -33,7 +33,7 @@ use reth_rpc_eth_types::{
     simulate::{self, EthSimulateError},
     EthApiError, StateCacheDb,
 };
-use reth_storage_api::{BlockIdReader, ProviderTx, StateProvider};
+use reth_storage_api::{BlockIdReader, ProviderTx, StateProviderBox};
 use revm::{
     context::Block,
     context_interface::{result::ResultAndState, Transaction},
@@ -497,11 +497,11 @@ pub trait Call:
     ) -> impl Future<Output = Result<R, Self::Error>> + Send
     where
         R: Send + 'static,
-        F: FnOnce(Self, &dyn StateProvider) -> Result<R, Self::Error> + Send + 'static,
+        F: FnOnce(Self, StateProviderBox) -> Result<R, Self::Error> + Send + 'static,
     {
         self.spawn_blocking_io_fut(move |this| async move {
             let state = this.state_at_block_id(at).await?;
-            f(this, &state)
+            f(this, state)
         })
     }
 
@@ -672,7 +672,7 @@ pub trait Call:
             };
             let (tx, tx_info) = transaction.split();
 
-            let (evm_env, _) = self.evm_env_at(block.hash().into()).await?;
+            let evm_env = self.evm_env_for_header(block.sealed_block().sealed_header())?;
 
             // we need to get the state of the parent block because we're essentially replaying the
             // block the transaction is included in

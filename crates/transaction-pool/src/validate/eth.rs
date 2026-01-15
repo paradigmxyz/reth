@@ -207,7 +207,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        state: &mut Option<Box<dyn AccountInfoReader>>,
+        state: &mut Option<Box<dyn AccountInfoReader + Send>>,
     ) -> TransactionValidationOutcome<Tx> {
         self.validate_one_with_provider(origin, transaction, state)
     }
@@ -219,7 +219,7 @@ where
         &self,
         origin: TransactionOrigin,
         transaction: Tx,
-        maybe_state: &mut Option<Box<dyn AccountInfoReader>>,
+        maybe_state: &mut Option<Box<dyn AccountInfoReader + Send>>,
     ) -> TransactionValidationOutcome<Tx> {
         match self.validate_one_no_state(origin, transaction) {
             Ok(transaction) => {

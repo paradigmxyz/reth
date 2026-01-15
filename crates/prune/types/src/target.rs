@@ -58,13 +58,7 @@ pub struct PruneModes {
     pub transaction_lookup: Option<PruneMode>,
     /// Receipts pruning configuration. This setting overrides `receipts_log_filter`
     /// and offers improved performance.
-    #[cfg_attr(
-        any(test, feature = "serde"),
-        serde(
-            skip_serializing_if = "Option::is_none",
-            deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<MINIMUM_PRUNING_DISTANCE, _>"
-        )
-    )]
+    #[cfg_attr(any(test, feature = "serde"), serde(skip_serializing_if = "Option::is_none",))]
     pub receipts: Option<PruneMode>,
     /// Account History pruning configuration.
     #[cfg_attr(
@@ -85,13 +79,7 @@ pub struct PruneModes {
     )]
     pub storage_history: Option<PruneMode>,
     /// Bodies History pruning configuration.
-    #[cfg_attr(
-        any(test, feature = "serde"),
-        serde(
-            skip_serializing_if = "Option::is_none",
-            deserialize_with = "deserialize_opt_prune_mode_with_min_blocks::<MINIMUM_PRUNING_DISTANCE, _>"
-        )
-    )]
+    #[cfg_attr(any(test, feature = "serde"), serde(skip_serializing_if = "Option::is_none",))]
     pub bodies_history: Option<PruneMode>,
     /// Merkle Changesets pruning configuration for `AccountsTrieChangeSets` and
     /// `StoragesTrieChangeSets`.
@@ -188,7 +176,7 @@ impl PruneModes {
             if let Some(PruneMode::Distance(limit)) = prune_mode {
                 // check if distance exceeds the configured limit
                 if distance > *limit {
-                    // but only if have haven't pruned the target yet, if we dont have a checkpoint
+                    // but only if we haven't pruned the target yet, if we don't have a checkpoint
                     // yet, it's fully unpruned yet
                     let pruned_height = checkpoint
                         .and_then(|checkpoint| checkpoint.1.block_number)

@@ -21,6 +21,9 @@ use core::ops::RangeInclusive;
 pub use event::StaticFileProducerEvent;
 pub use segment::{SegmentConfig, SegmentHeader, SegmentRangeInclusive, StaticFileSegment};
 
+/// Map keyed by [`StaticFileSegment`].
+pub type StaticFileMap<T> = alloc::boxed::Box<fixed_map::Map<StaticFileSegment, T>>;
+
 /// Default static file block count.
 pub const DEFAULT_BLOCKS_PER_STATIC_FILE: u64 = 500_000;
 

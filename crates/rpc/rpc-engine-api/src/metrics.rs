@@ -50,6 +50,8 @@ pub(crate) struct EngineApiLatencyMetrics {
     pub(crate) get_blobs_v1: Histogram,
     /// Latency for `engine_getBlobsV2`
     pub(crate) get_blobs_v2: Histogram,
+    /// Latency for `engine_getBlobsV3`
+    pub(crate) get_blobs_v3: Histogram,
 }
 
 #[derive(Metrics)]

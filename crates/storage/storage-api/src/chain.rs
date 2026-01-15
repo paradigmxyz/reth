@@ -1,5 +1,5 @@
 use crate::DBProvider;
-use alloc::vec::Vec;
+use alloc::{vec, vec::Vec};
 use alloy_consensus::Header;
 use alloy_primitives::BlockNumber;
 use core::marker::PhantomData;
@@ -28,7 +28,7 @@ pub trait BlockBodyWriter<Provider, Body: BlockBody> {
     fn write_block_bodies(
         &self,
         provider: &Provider,
-        bodies: Vec<(BlockNumber, Option<Body>)>,
+        bodies: Vec<(BlockNumber, Option<&Body>)>,
     ) -> ProviderResult<()>;
 
     /// Removes all block bodies above the given block number from the database.
@@ -102,7 +102,7 @@ where
     fn write_block_bodies(
         &self,
         provider: &Provider,
-        bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
+        bodies: Vec<(u64, Option<&alloy_consensus::BlockBody<T, H>>)>,
     ) -> ProviderResult<()> {
         let mut ommers_cursor = provider.tx_ref().cursor_write::<tables::BlockOmmers<H>>()?;
         let mut withdrawals_cursor =
@@ -115,22 +115,25 @@ where
 
             // Write ommers if any
             if !body.ommers.is_empty() {
-                ommers_cursor.append(block_number, &StoredBlockOmmers { ommers: body.ommers })?;
+                ommers_cursor
+                    .append(block_number, &StoredBlockOmmers { ommers: body.ommers.clone() })?;
             }
 
             // Write withdrawals if any
-            if let Some(withdrawals) = body.withdrawals &&
+            if let Some(withdrawals) = body.withdrawals.clone() &&
                 !withdrawals.is_empty()
             {
                 withdrawals_cursor.append(block_number, &StoredBlockWithdrawals { withdrawals })?;
             }
 
-            // Write block access lists  if any
-            if let Some(block_access_list) = body.block_access_list &&
+            // Write block access lists if any
+            if let Some(block_access_list) = &body.block_access_list &&
                 !block_access_list.is_empty()
             {
-                block_access_lists_cursor
-                    .append(block_number, &StoredBlockAccessList { block_access_list })?;
+                block_access_lists_cursor.append(
+                    block_number,
+                    &StoredBlockAccessList { block_access_list: block_access_list.clone() },
+                )?;
             }
         }
 
@@ -243,7 +246,7 @@ where
     fn write_block_bodies(
         &self,
         _provider: &Provider,
-        _bodies: Vec<(u64, Option<alloy_consensus::BlockBody<T, H>>)>,
+        _bodies: Vec<(u64, Option<&alloy_consensus::BlockBody<T, H>>)>,
     ) -> ProviderResult<()> {
         // noop
         Ok(())

@@ -6,7 +6,9 @@ use crate::{
     RocksDBProviderFactory, StageCheckpointReader, StateProviderFactory, StateReader,
     StaticFileProviderFactory, TrieReader,
 };
-use reth_chain_state::{CanonStateSubscriptions, ForkChoiceSubscriptions};
+use reth_chain_state::{
+    CanonStateSubscriptions, ForkChoiceSubscriptions, PersistedBlockSubscriptions,
+};
 use reth_node_types::{BlockTy, HeaderTy, NodeTypesWithDB, ReceiptTy, TxTy};
 use reth_storage_api::NodePrimitivesProvider;
 use std::fmt::Debug;
@@ -15,7 +17,11 @@ use std::fmt::Debug;
 pub trait FullProvider<N: NodeTypesWithDB>:
     DatabaseProviderFactory<
         DB = N::DB,
-        Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+        Provider: BlockReader
+                      + TrieReader
+                      + StageCheckpointReader
+                      + PruneCheckpointReader
+                      + ChangeSetReader,
     > + NodePrimitivesProvider<Primitives = N::Primitives>
     + StaticFileProviderFactory<Primitives = N::Primitives>
     + RocksDBProviderFactory
@@ -32,6 +38,7 @@ pub trait FullProvider<N: NodeTypesWithDB>:
     + ChangeSetReader
     + CanonStateSubscriptions
     + ForkChoiceSubscriptions<Header = HeaderTy<N>>
+    + PersistedBlockSubscriptions
     + StageCheckpointReader
     + Clone
     + Debug
@@ -43,7 +50,11 @@ pub trait FullProvider<N: NodeTypesWithDB>:
 impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
     T: DatabaseProviderFactory<
             DB = N::DB,
-            Provider: BlockReader + TrieReader + StageCheckpointReader + PruneCheckpointReader,
+            Provider: BlockReader
+                          + TrieReader
+                          + StageCheckpointReader
+                          + PruneCheckpointReader
+                          + ChangeSetReader,
         > + NodePrimitivesProvider<Primitives = N::Primitives>
         + StaticFileProviderFactory<Primitives = N::Primitives>
         + RocksDBProviderFactory
@@ -60,6 +71,7 @@ impl<T, N: NodeTypesWithDB> FullProvider<N> for T where
         + ChangeSetReader
         + CanonStateSubscriptions
         + ForkChoiceSubscriptions<Header = HeaderTy<N>>
+        + PersistedBlockSubscriptions
         + StageCheckpointReader
         + Clone
         + Debug

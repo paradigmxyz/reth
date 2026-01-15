@@ -64,6 +64,7 @@ impl EngineApiMetrics {
         &self,
         executor: E,
         mut transactions: impl Iterator<Item = Result<impl ExecutableTx<E>, BlockExecutionError>>,
+        transaction_count: usize,
         state_hook: Box<dyn OnStateHook>,
     ) -> Result<(BlockExecutionOutput<E::Receipt>, Vec<Address>), BlockExecutionError>
     where
@@ -75,7 +76,7 @@ impl EngineApiMetrics {
         // be accessible.
         let wrapper = MeteredStateHook { metrics: self.executor.clone(), inner_hook: state_hook };
 
-        let mut senders = Vec::new();
+        let mut senders = Vec::with_capacity(transaction_count);
         let mut executor = executor.with_state_hook(Some(Box::new(wrapper)));
 
         let f = || {
@@ -320,7 +321,7 @@ impl NewPayloadStatusMetrics {
 }
 
 /// Metrics for non-execution related block validation.
-#[derive(Metrics)]
+#[derive(Metrics, Clone)]
 #[metrics(scope = "sync.block_validation")]
 pub(crate) struct BlockValidationMetrics {
     /// Total number of storage tries updated in the state root calculation
@@ -347,6 +348,14 @@ pub(crate) struct BlockValidationMetrics {
     pub(crate) post_execution_validation_duration: Histogram,
     /// Total duration of the new payload call
     pub(crate) total_duration: Histogram,
+    /// Size of `HashedPostStateSorted` (`total_len`)
+    pub(crate) hashed_post_state_size: Histogram,
+    /// Size of `TrieUpdatesSorted` (`total_len`)
+    pub(crate) trie_updates_sorted_size: Histogram,
+    /// Size of `AnchoredTrieInput` overlay `TrieUpdatesSorted` (`total_len`)
+    pub(crate) anchored_overlay_trie_updates_size: Histogram,
+    /// Size of `AnchoredTrieInput` overlay `HashedPostStateSorted` (`total_len`)
+    pub(crate) anchored_overlay_hashed_state_size: Histogram,
 }
 
 impl BlockValidationMetrics {
@@ -530,6 +539,7 @@ mod tests {
         let _result = metrics.execute_metered::<_, EmptyDB>(
             executor,
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+            input.transaction_count(),
             state_hook,
         );
 
@@ -588,6 +598,7 @@ mod tests {
         let _result = metrics.execute_metered::<_, EmptyDB>(
             executor,
             input.clone_transactions_recovered().map(Ok::<_, BlockExecutionError>),
+            input.transaction_count(),
             state_hook,
         );
 

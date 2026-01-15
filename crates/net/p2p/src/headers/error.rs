@@ -7,7 +7,7 @@ use reth_primitives_traits::SealedHeader;
 pub type HeadersDownloaderResult<T, H> = Result<T, HeadersDownloaderError<H>>;
 
 /// Error variants that can happen when sending requests to a session.
-#[derive(Debug, Clone, Eq, PartialEq, Display, Error)]
+#[derive(Debug, Clone, Display, Error)]
 pub enum HeadersDownloaderError<H: Sealable> {
     /// The downloaded header cannot be attached to the local head,
     /// but is valid otherwise.
