@@ -141,3 +141,7 @@ harness = false
 name = "hashed_state"
 harness = false
 required-features = ["rayon"]
+
+[[bench]]
+name = "kway_merge"
+harness = false
