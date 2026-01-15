@@ -21,7 +21,7 @@ use reth_trie_parallel::{
     },
 };
 use revm_primitives::map::{hash_map, B256Map};
-use std::{collections::BTreeMap, sync::Arc, time::Instant};
+use std::{sync::Arc, time::Instant};
 use tracing::{debug, error, instrument, trace};
 
 /// Source of state changes, either from EVM execution or from a Block Access List.
@@ -119,51 +119,8 @@ pub(super) enum MultiProofMessage {
     FinishedStateUpdates,
 }
 
-/// Handle to track proof calculation ordering.
-#[derive(Debug, Default)]
-struct ProofSequencer {
-    /// The next proof sequence number to be produced.
-    next_sequence: u64,
-    /// The next sequence number expected to be delivered.
-    next_to_deliver: u64,
-    /// Buffer for out-of-order proofs and corresponding state updates
-    pending_proofs: BTreeMap<u64, SparseTrieUpdate>,
-}
-
-impl ProofSequencer {
-    /// Gets the next sequence number and increments the counter
-    const fn next_sequence(&mut self) -> u64 {
-        let seq = self.next_sequence;
-        self.next_sequence += 1;
-        seq
-    }
-
-    /// Adds a proof with the corresponding state update and returns all sequential proofs and state
-    /// updates if we have a continuous sequence
-    fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
-        if sequence >= self.next_to_deliver {
-            self.pending_proofs.insert(sequence, update);
-        }
-
-        let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
-        let mut current_sequence = self.next_to_deliver;
-
-        // keep collecting proofs and state updates as long as we have consecutive sequence numbers
-        while let Some(pending) = self.pending_proofs.remove(&current_sequence) {
-            consecutive_proofs.push(pending);
-            current_sequence += 1;
-        }
-
-        self.next_to_deliver += consecutive_proofs.len() as u64;
-
-        consecutive_proofs
-    }
-
-    /// Returns true if we still have pending proofs
-    pub(crate) fn has_pending(&self) -> bool {
-        !self.pending_proofs.is_empty()
-    }
-}
+// Re-export ProofSequencer from sparse_trie module
+use super::sparse_trie::ProofSequencer;
 
 /// A wrapper for the sender that signals completion when dropped.
 ///
@@ -1379,7 +1336,7 @@ mod tests {
         let mut sequencer = ProofSequencer::default();
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
-        sequencer.next_sequence = 2;
+        sequencer.set_next_sequence(2);
 
         let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
@@ -1396,7 +1353,7 @@ mod tests {
         let proof1 = MultiProof::default();
         let proof2 = MultiProof::default();
         let proof3 = MultiProof::default();
-        sequencer.next_sequence = 3;
+        sequencer.set_next_sequence(3);
 
         let ready = sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proof3).unwrap());
         assert_eq!(ready.len(), 0);
@@ -1416,7 +1373,7 @@ mod tests {
         let mut sequencer = ProofSequencer::default();
         let proof1 = MultiProof::default();
         let proof3 = MultiProof::default();
-        sequencer.next_sequence = 3;
+        sequencer.set_next_sequence(3);
 
         let ready = sequencer.add_proof(0, SparseTrieUpdate::from_multiproof(proof1).unwrap());
         assert_eq!(ready.len(), 1);
@@ -1444,7 +1401,7 @@ mod tests {
     fn test_add_proof_batch_processing() {
         let mut sequencer = ProofSequencer::default();
         let proofs: Vec<_> = (0..5).map(|_| MultiProof::default()).collect();
-        sequencer.next_sequence = 5;
+        sequencer.set_next_sequence(5);
 
         sequencer.add_proof(4, SparseTrieUpdate::from_multiproof(proofs[4].clone()).unwrap());
         sequencer.add_proof(2, SparseTrieUpdate::from_multiproof(proofs[2].clone()).unwrap());

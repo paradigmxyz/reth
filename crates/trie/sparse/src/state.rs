@@ -808,6 +808,141 @@ where
     }
 }
 
+/// Implementation of proof v2 target generation for `SparseStateTrie` using `SerialSparseTrie`.
+///
+/// These methods allow generating partial proof targets based on what's already revealed
+/// in the sparse trie, enabling efficient incremental proof fetching.
+impl SparseStateTrie<SerialSparseTrie, SerialSparseTrie> {
+    /// Generate proof targets for the given account keys.
+    ///
+    /// For each key, walks down the account trie to find the deepest revealed node.
+    /// Returns a vector of `(key, min_len)` pairs where:
+    /// - `key` is the account key that needs a proof
+    /// - `min_len` is the depth of the deepest already-revealed node (in nibbles)
+    ///
+    /// Keys that are already fully revealed (leaf exists) are excluded from the result.
+    ///
+    /// This allows generating partial proofs - we only need to fetch nodes we don't already have.
+    pub fn generate_account_proof_targets(&self, keys: &[B256]) -> Vec<(B256, u8)> {
+        let Some(trie) = self.state.as_revealed_ref() else {
+            // If the trie is blind, we need full proofs for all keys
+            return keys.iter().map(|key| (*key, 0u8)).collect();
+        };
+
+        let nodes = trie.nodes_ref();
+        let mut targets = Vec::with_capacity(keys.len());
+
+        for key in keys {
+            let path = Nibbles::unpack(key);
+
+            // Check if already fully revealed as a leaf
+            if trie.get_leaf_value(&path).is_some() {
+                continue;
+            }
+
+            let min_len = Self::find_deepest_revealed_depth_in_nodes(nodes, &path);
+            targets.push((*key, min_len));
+        }
+
+        targets
+    }
+
+    /// Generate storage proof targets for the given storage keys of an account.
+    ///
+    /// For each storage key, walks down the storage trie to find the deepest revealed node.
+    /// Returns a vector of `(key, min_len)` pairs where:
+    /// - `key` is the storage key that needs a proof
+    /// - `min_len` is the depth of the deepest already-revealed node (in nibbles)
+    ///
+    /// Keys that are already fully revealed (leaf exists) are excluded from the result.
+    pub fn generate_storage_proof_targets(&self, account: B256, storage_keys: &[B256]) -> Vec<(B256, u8)> {
+        let Some(trie) = self.storage.tries.get(&account).and_then(|t| t.as_revealed_ref()) else {
+            // If the storage trie is blind or doesn't exist, we need full proofs for all keys
+            return storage_keys.iter().map(|key| (*key, 0u8)).collect();
+        };
+
+        let nodes = trie.nodes_ref();
+        let mut targets = Vec::with_capacity(storage_keys.len());
+
+        for key in storage_keys {
+            let path = Nibbles::unpack(key);
+
+            // Check if already fully revealed as a leaf
+            if trie.get_leaf_value(&path).is_some() {
+                continue;
+            }
+
+            let min_len = Self::find_deepest_revealed_depth_in_nodes(nodes, &path);
+            targets.push((*key, min_len));
+        }
+
+        targets
+    }
+
+    /// Helper to find the deepest revealed depth for a path in a set of trie nodes.
+    ///
+    /// Walks the trie from root following the path until:
+    /// - We hit a Hash node (blinded) - return the current depth
+    /// - We hit an Empty node or missing node - return the current depth
+    /// - We reach the end of the path - return the full path length
+    fn find_deepest_revealed_depth_in_nodes(
+        nodes: &alloy_primitives::map::HashMap<Nibbles, crate::SparseNode>,
+        full_path: &Nibbles,
+    ) -> u8 {
+        use crate::SparseNode;
+
+        let mut current = Nibbles::default();
+        let mut deepest_revealed = 0u8;
+
+        while current.len() < full_path.len() {
+            match nodes.get(&current) {
+                Some(SparseNode::Empty) | None => {
+                    // No node at this path
+                    break;
+                }
+                Some(SparseNode::Hash(_)) => {
+                    // Hit a blinded node - stop here
+                    break;
+                }
+                Some(SparseNode::Leaf { key, .. }) => {
+                    // Found a leaf - the path is revealed up to current + key
+                    let leaf_path_len = current.len() + key.len();
+                    deepest_revealed = leaf_path_len.min(64) as u8;
+                    break;
+                }
+                Some(SparseNode::Extension { key, .. }) => {
+                    // Extension node - advance by the extension key
+                    deepest_revealed = current.len() as u8;
+                    current.extend(key);
+
+                    // Check if the path diverges
+                    if full_path.len() < current.len() || !full_path.starts_with(&current) {
+                        break;
+                    }
+                }
+                Some(SparseNode::Branch { state_mask, .. }) => {
+                    deepest_revealed = current.len() as u8;
+
+                    // Get the next nibble in the path
+                    let nibble = full_path.get_unchecked(current.len());
+
+                    // Check if branch has a child at this nibble
+                    if !state_mask.is_bit_set(nibble) {
+                        // No child at this nibble - path diverges here
+                        break;
+                    }
+
+                    // Continue down the branch
+                    current.push_unchecked(nibble);
+                    deepest_revealed = current.len() as u8;
+                }
+            }
+        }
+
+        deepest_revealed
+    }
+}
+
 /// The fields of [`SparseStateTrie`] related to storage tries. This is kept separate from the rest
 /// of [`SparseStateTrie`] both to help enforce allocation re-use and to allow us to implement
 /// methods like `get_trie_and_revealed_paths` which return multiple mutable borrows.
@@ -1374,5 +1509,70 @@ mod tests {
                 },
             }
         );
+    }
+
+    #[test]
+    fn generate_account_proof_targets_blind_trie() {
+        let sparse = SparseStateTrie::<SerialSparseTrie>::default();
+
+        let key1 = B256::repeat_byte(0x11);
+        let key2 = B256::repeat_byte(0x22);
+
+        // Blind trie should return all keys with min_len 0
+        let targets = sparse.generate_account_proof_targets(&[key1, key2]);
+        assert_eq!(targets.len(), 2);
+        assert_eq!(targets[0], (key1, 0));
+        assert_eq!(targets[1], (key2, 0));
+    }
+
+    #[test]
+    fn generate_account_proof_targets_revealed_leaf() {
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
+
+        let key1 = B256::repeat_byte(0x00);
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let leaf = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+            Nibbles::unpack(key1),
+            leaf_value,
+        )));
+
+        let multiproof = MultiProof {
+            account_subtree: ProofNodes::from_iter([(Nibbles::default(), leaf.into())]),
+            ..Default::default()
+        };
+
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+
+        // Key1 is fully revealed, so it should not be in the targets
+        let targets = sparse.generate_account_proof_targets(&[key1]);
+        assert!(targets.is_empty());
+    }
+
+    #[test]
+    fn generate_account_proof_targets_partial_reveal() {
+        let mut sparse = SparseStateTrie::<SerialSparseTrie>::default();
+
+        // Create a branch node at root with child at nibble 0
+        let key_revealed = B256::repeat_byte(0x00);
+        let key_unrevealed = B256::repeat_byte(0x10); // Different first nibble
+
+        let leaf_value = alloy_rlp::encode(TrieAccount::default());
+        let leaf = alloy_rlp::encode(TrieNode::Leaf(LeafNode::new(
+            Nibbles::unpack(key_revealed),
+            leaf_value,
+        )));
+
+        // Reveal only the path to key_revealed
+        let multiproof = MultiProof {
+            account_subtree: ProofNodes::from_iter([(Nibbles::default(), leaf.into())]),
+            ..Default::default()
+        };
+
+        sparse.reveal_decoded_multiproof(multiproof.try_into().unwrap()).unwrap();
+
+        // key_unrevealed should need a proof from the root
+        let targets = sparse.generate_account_proof_targets(&[key_unrevealed]);
+        assert_eq!(targets.len(), 1);
+        // min_len will be 0 since we haven't revealed any nodes on the path to key_unrevealed
     }
 }

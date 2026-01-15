@@ -12,10 +12,66 @@ use reth_trie_sparse::{
 };
 use smallvec::SmallVec;
 use std::{
+    collections::BTreeMap,
     sync::mpsc,
     time::{Duration, Instant},
 };
 use tracing::{debug, debug_span, instrument, trace};
+
+/// Handle to track proof calculation ordering.
+///
+/// The `ProofSequencer` ensures that proofs are processed in the correct order,
+/// buffering out-of-order proofs until all preceding proofs have been received.
+#[derive(Debug, Default)]
+pub(super) struct ProofSequencer {
+    /// The next proof sequence number to be produced.
+    next_sequence: u64,
+    /// The next sequence number expected to be delivered.
+    next_to_deliver: u64,
+    /// Buffer for out-of-order proofs and corresponding state updates
+    pending_proofs: BTreeMap<u64, SparseTrieUpdate>,
+}
+
+impl ProofSequencer {
+    /// Gets the next sequence number and increments the counter
+    pub(super) const fn next_sequence(&mut self) -> u64 {
+        let seq = self.next_sequence;
+        self.next_sequence += 1;
+        seq
+    }
+
+    /// Adds a proof with the corresponding state update and returns all sequential proofs and state
+    /// updates if we have a continuous sequence
+    pub(super) fn add_proof(&mut self, sequence: u64, update: SparseTrieUpdate) -> Vec<SparseTrieUpdate> {
+        if sequence >= self.next_to_deliver {
+            self.pending_proofs.insert(sequence, update);
+        }
+
+        let mut consecutive_proofs = Vec::with_capacity(self.pending_proofs.len());
+        let mut current_sequence = self.next_to_deliver;
+
+        // keep collecting proofs and state updates as long as we have consecutive sequence numbers
+        while let Some(pending) = self.pending_proofs.remove(&current_sequence) {
+            consecutive_proofs.push(pending);
+            current_sequence += 1;
+        }
+
+        self.next_to_deliver += consecutive_proofs.len() as u64;
+
+        consecutive_proofs
+    }
+
+    /// Returns true if we still have pending proofs
+    pub(super) fn has_pending(&self) -> bool {
+        !self.pending_proofs.is_empty()
+    }
+
+    /// Sets the next sequence number (for testing purposes).
+    #[cfg(test)]
+    pub(super) fn set_next_sequence(&mut self, seq: u64) {
+        self.next_sequence = seq;
+    }
+}
 
 /// A task responsible for populating the sparse trie.
 pub(super) struct SparseTrieTask<BPF, A = SerialSparseTrie, S = SerialSparseTrie>
