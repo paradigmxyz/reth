@@ -811,6 +811,7 @@ where
 
 impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-only transaction.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
