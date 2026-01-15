@@ -784,6 +784,7 @@ impl StorageTrieUpdatesSorted {
             return Self::default();
         }
 
+        // Discard updates older than the first deletion since the trie was wiped at that point.
         let del_idx = updates.iter().position(|u| u.is_deleted);
         let relevant = del_idx.map_or(&updates[..], |idx| &updates[..=idx]);
         let storage_nodes =
