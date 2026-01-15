@@ -40,6 +40,7 @@ where
     if other.is_empty() {
         return;
     }
+    target.reserve(other.len());
 
     let mut other_iter = other.iter().peekable();
     let initial_len = target.len();
