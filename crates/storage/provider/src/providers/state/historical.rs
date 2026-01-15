@@ -135,7 +135,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
 
         // history key to search IntegerList of block number changesets.
         let history_key = ShardedKey::new(address, self.block_number);
-        self.history_info::<tables::AccountsHistory, _>(
+        self.history_info_lookup::<tables::AccountsHistory, _>(
             history_key,
             |key| key.key == address,
             self.lowest_available_blocks.account_history_block_number,
@@ -154,7 +154,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
 
         // history key to search IntegerList of block number changesets.
         let history_key = StorageShardedKey::new(address, storage_key, self.block_number);
-        self.history_info::<tables::StoragesHistory, _>(
+        self.history_info_lookup::<tables::StoragesHistory, _>(
             history_key,
             |key| key.address == address && key.sharded_key.key == storage_key,
             self.lowest_available_blocks.storage_history_block_number,
@@ -204,7 +204,7 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
         Ok(HashedStorage::from_reverts(self.tx(), address, self.block_number)?)
     }
 
-    fn history_info<T, K>(
+    fn history_info_lookup<T, K>(
         &self,
         key: K,
         key_filter: impl Fn(&K) -> bool,
@@ -214,45 +214,13 @@ impl<'b, Provider: DBProvider + ChangeSetReader + BlockNumReader>
         T: Table<Key = K, Value = BlockNumberList>,
     {
         let mut cursor = self.tx().cursor_read::<T>()?;
-
-        // Lookup the history chunk in the history index. If the key does not appear in the
-        // index, the first chunk for the next key will be returned so we filter out chunks that
-        // have a different key.
-        if let Some(chunk) = cursor.seek(key)?.filter(|(key, _)| key_filter(key)).map(|x| x.1) {
-            // Get the rank of the first entry before or equal to our block.
-            let mut rank = chunk.rank(self.block_number);
-
-            // Adjust the rank, so that we have the rank of the first entry strictly before our
-            // block (not equal to it).
-            if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(self.block_number) {
-                rank -= 1;
-            }
-
-            let found_block = chunk.select(rank);
-
-            // If our block is before the first entry in the index chunk and this first entry
-            // doesn't equal to our block, it might be before the first write ever. To check, we
-            // look at the previous entry and check if the key is the same.
-            // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
-            // short-circuit) and when it passes we save a full seek into the changeset/plain state
-            // table.
-            let is_before_first_write =
-                needs_prev_shard_check(rank, found_block, self.block_number) &&
-                    !cursor.prev()?.is_some_and(|(key, _)| key_filter(&key));
-
-            Ok(HistoryInfo::from_lookup(
-                found_block,
-                is_before_first_write,
-                lowest_available_block_number,
-            ))
-        } else if lowest_available_block_number.is_some() {
-            // The key may have been written, but due to pruning we may not have changesets and
-            // history, so we need to make a plain state lookup.
-            Ok(HistoryInfo::MaybeInPlainState)
-        } else {
-            // The key has not been written to at all.
-            Ok(HistoryInfo::NotYetWritten)
-        }
+        history_info::<T, K, _>(
+            &mut cursor,
+            key,
+            self.block_number,
+            key_filter,
+            lowest_available_block_number,
+        )
     }
 
     /// Set the lowest block number at which the account history is available.
@@ -568,6 +536,60 @@ pub fn needs_prev_shard_check(
     block_number: BlockNumber,
 ) -> bool {
     rank == 0 && found_block != Some(block_number)
+}
+
+/// Generic history lookup for sharded history tables.
+///
+/// Seeks to the shard containing `block_number`, verifies the key via `key_filter`,
+/// and checks previous shard to detect if we're before the first write.
+pub fn history_info<T, K, C>(
+    cursor: &mut C,
+    key: K,
+    block_number: BlockNumber,
+    key_filter: impl Fn(&K) -> bool,
+    lowest_available_block_number: Option<BlockNumber>,
+) -> ProviderResult<HistoryInfo>
+where
+    T: Table<Key = K, Value = BlockNumberList>,
+    C: DbCursorRO<T>,
+{
+    // Lookup the history chunk in the history index. If the key does not appear in the
+    // index, the first chunk for the next key will be returned so we filter out chunks that
+    // have a different key.
+    if let Some(chunk) = cursor.seek(key)?.filter(|(k, _)| key_filter(k)).map(|x| x.1) {
+        // Get the rank of the first entry before or equal to our block.
+        let mut rank = chunk.rank(block_number);
+
+        // Adjust the rank, so that we have the rank of the first entry strictly before our
+        // block (not equal to it).
+        if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+            rank -= 1;
+        }
+
+        let found_block = chunk.select(rank);
+
+        // If our block is before the first entry in the index chunk and this first entry
+        // doesn't equal to our block, it might be before the first write ever. To check, we
+        // look at the previous entry and check if the key is the same.
+        // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
+        // short-circuit) and when it passes we save a full seek into the changeset/plain state
+        // table.
+        let is_before_first_write = needs_prev_shard_check(rank, found_block, block_number) &&
+            !cursor.prev()?.is_some_and(|(k, _)| key_filter(&k));
+
+        Ok(HistoryInfo::from_lookup(
+            found_block,
+            is_before_first_write,
+            lowest_available_block_number,
+        ))
+    } else if lowest_available_block_number.is_some() {
+        // The key may have been written, but due to pruning we may not have changesets and
+        // history, so we need to make a plain state lookup.
+        Ok(HistoryInfo::MaybeInPlainState)
+    } else {
+        // The key has not been written to at all.
+        Ok(HistoryInfo::NotYetWritten)
+    }
 }
 
 #[cfg(test)]
