@@ -322,7 +322,7 @@ mod tests {
         OpExecutionData, OpExecutionPayload, OpExecutionPayloadSidecar,
     };
     use op_revm::OpSpecId;
-    use reth_chainspec::{ChainSpec, EvmLimitParams};
+    use reth_chainspec::{ChainSpec, EvmLimitParams, EvmLimitParamsKind};
     use reth_evm::execute::ProviderError;
     use reth_execution_types::{
         AccountRevertInit, BundleStateInit, Chain, ExecutionOutcome, RevertsInit,
@@ -956,7 +956,7 @@ mod tests {
             .osaka_activated()
             .build();
         let chain_spec = Arc::new(OpChainSpec { inner: inner.clone() });
-        let evm_config = OpEvmConfig::optimism(chain_spec.clone());
+        let evm_config = OpEvmConfig::optimism(chain_spec);
 
         let evm_env = evm_config.evm_env(&header).unwrap();
         let evm_limits = inner.evm_limit_params_at_timestamp(header.timestamp);
@@ -987,11 +987,11 @@ mod tests {
             .genesis(Genesis::default())
             .shanghai_activated()
             .build();
-        inner.evm_limit_params = EvmLimitParams {
+        inner.evm_limit_params = EvmLimitParamsKind::Constant(EvmLimitParams {
             max_code_size: 1234,
             max_initcode_size: 5678,
             tx_gas_limit_cap: Some(999_999),
-        };
+        });
         let evm_config = OpEvmConfig::optimism(Arc::new(OpChainSpec { inner }));
 
         let evm_env = evm_config.evm_env(&Header::default()).unwrap();
@@ -1083,11 +1083,11 @@ mod tests {
             .genesis(Genesis::default())
             .shanghai_activated()
             .build();
-        chain_spec.evm_limit_params = EvmLimitParams {
+        chain_spec.evm_limit_params = EvmLimitParamsKind::Constant(EvmLimitParams {
             max_code_size: 1234,
             max_initcode_size: 5678,
             tx_gas_limit_cap: Some(999_999),
-        };
+        });
         let evm_config = OpEvmConfig::optimism(Arc::new(OpChainSpec { inner: chain_spec }));
         let payload = test_execution_data(1);
 

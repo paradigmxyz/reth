@@ -32,7 +32,8 @@ pub use spec::test_fork_ids;
 pub use spec::{
     blob_params_to_schedule, create_chain_config, mainnet_chain_config, make_genesis_header,
     BaseFeeParams, BaseFeeParamsKind, ChainSpec, ChainSpecBuilder, ChainSpecProvider,
-    DepositContract, EvmLimitParams, ForkBaseFeeParams, DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
+    DepositContract, EvmLimitParams, EvmLimitParamsKind, ForkBaseFeeParams, ForkEvmLimitParams,
+    DEV, HOLESKY, HOODI, MAINNET, SEPOLIA,
 };
 
 use reth_primitives_traits::sync::OnceLock;

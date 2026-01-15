@@ -331,7 +331,7 @@ mod tests {
     use alloy_genesis::Genesis;
     use alloy_primitives::{Address, Bloom, B256};
     use alloy_rpc_types_engine::{ExecutionPayloadSidecar, ExecutionPayloadV1};
-    use reth_chainspec::{Chain, ChainSpec, EvmLimitParams};
+    use reth_chainspec::{Chain, ChainSpec, EvmLimitParams, EvmLimitParamsKind};
     use reth_evm::{execute::ProviderError, EvmEnv, NextBlockEnvAttributes};
     use revm::{
         context::{BlockEnv, CfgEnv},
@@ -577,11 +577,11 @@ mod tests {
             .genesis(Genesis::default())
             .shanghai_activated()
             .build();
-        chain_spec.evm_limit_params = EvmLimitParams {
+        chain_spec.evm_limit_params = EvmLimitParamsKind::Constant(EvmLimitParams {
             max_code_size: 1234,
             max_initcode_size: 5678,
             tx_gas_limit_cap: Some(999_999),
-        };
+        });
         let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
 
         let evm_env = evm_config.evm_env(&Header::default()).unwrap();
@@ -677,11 +677,11 @@ mod tests {
             .genesis(Genesis::default())
             .shanghai_activated()
             .build();
-        chain_spec.evm_limit_params = EvmLimitParams {
+        chain_spec.evm_limit_params = EvmLimitParamsKind::Constant(EvmLimitParams {
             max_code_size: 1234,
             max_initcode_size: 5678,
             tx_gas_limit_cap: Some(999_999),
-        };
+        });
         let evm_config = EthEvmConfig::new(Arc::new(chain_spec));
         let payload = test_execution_data(1);
 
