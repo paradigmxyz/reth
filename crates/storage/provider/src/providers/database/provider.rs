@@ -2,7 +2,6 @@ use crate::{
     changesets_utils::{
         storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
     },
-    either_writer::EitherWriter,
     providers::{
         database::{chain::ChainStorage, metrics},
         rocksdb::RocksDBProvider,
