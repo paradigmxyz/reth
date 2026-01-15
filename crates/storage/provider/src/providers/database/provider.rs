@@ -66,10 +66,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    trie_cursor::{
-        InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
-        TrieCursorIter,
-    },
+    trie_cursor::{InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorIter},
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
 };
@@ -168,6 +165,8 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     storage_settings: Arc<RwLock<StorageSettings>>,
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
+    /// Changeset cache for trie unwinding
+    changeset_cache: ChangesetCacheHandle,
     /// Pending `RocksDB` batches to be committed at provider commit time.
     #[cfg(all(unix, feature = "rocksdb"))]
     pending_rocksdb_batches: parking_lot::Mutex<Vec<rocksdb::WriteBatchWithTransaction<true>>>,
@@ -186,7 +185,8 @@ impl<TX: Debug, N: NodeTypes> Debug for DatabaseProvider<TX, N> {
             .field("prune_modes", &self.prune_modes)
             .field("storage", &self.storage)
             .field("storage_settings", &self.storage_settings)
-            .field("rocksdb_provider", &self.rocksdb_provider);
+            .field("rocksdb_provider", &self.rocksdb_provider)
+            .field("changeset_cache", &self.changeset_cache);
         #[cfg(all(unix, feature = "rocksdb"))]
         s.field("pending_rocksdb_batches", &"<pending batches>");
         s.field("minimum_pruning_distance", &self.minimum_pruning_distance).finish()
@@ -308,6 +308,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        changeset_cache: ChangesetCacheHandle,
     ) -> Self {
         Self {
             tx,
@@ -317,6 +318,7 @@ impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            changeset_cache,
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
@@ -392,7 +394,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         for block in blocks {
             let trie_data = block.trie_data();
             let ExecutedBlock { recovered_block, execution_output, .. } = block;
-            let block_number = recovered_block.number();
+            let _block_number = recovered_block.number();
 
             let start = Instant::now();
             self.insert_block(&recovered_block)?;
@@ -457,11 +459,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// This includes calculating the resulted state root and comparing it with the parent block
     /// state root.
-    pub fn unwind_trie_state_from(
-        &self,
-        changesets_cache: &ChangesetCacheHandle,
-        from: BlockNumber,
-    ) -> ProviderResult<()> {
+    pub fn unwind_trie_state_from(&self, from: BlockNumber) -> ProviderResult<()> {
         let changed_accounts = self
             .tx
             .cursor_read::<tables::AccountChangeSets>()?
@@ -498,7 +496,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
                 available: 0..=0,
             })?;
 
-        let trie_revert = changesets_cache.get_or_compute_range(self, from..=db_tip_block)?;
+        let trie_revert = self.changeset_cache.get_or_compute_range(self, from..=db_tip_block)?;
         self.write_trie_updates_sorted(&trie_revert)?;
 
         // Clear trie changesets which have been unwound.
@@ -648,6 +646,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
         storage: Arc<N::Storage>,
         storage_settings: Arc<RwLock<StorageSettings>>,
         rocksdb_provider: RocksDBProvider,
+        changeset_cache: ChangesetCacheHandle,
     ) -> Self {
         Self {
             tx,
@@ -657,6 +656,7 @@ impl<TX: DbTx + 'static, N: NodeTypesForProvider> DatabaseProvider<TX, N> {
             storage,
             storage_settings,
             rocksdb_provider,
+            changeset_cache,
             #[cfg(all(unix, feature = "rocksdb"))]
             pending_rocksdb_batches: parking_lot::Mutex::new(Vec::new()),
             minimum_pruning_distance: MINIMUM_PRUNING_DISTANCE,
@@ -2936,60 +2936,6 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> HistoryWriter for DatabaseProvi
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> DatabaseProvider<TX, N> {
-    /// Take all of the blocks above the provided number and their execution result, using the
-    /// provided changesets cache for trie unwinding.
-    ///
-    /// The passed block number will stay in the database.
-    pub fn take_block_and_execution_above_with_cache(
-        &self,
-        changesets_cache: &ChangesetCacheHandle,
-        block: BlockNumber,
-    ) -> ProviderResult<Chain<N::Primitives>> {
-        let range = block + 1..=self.last_block_number()?;
-
-        self.unwind_trie_state_from(changesets_cache, block + 1)?;
-
-        // get execution res
-        let execution_state = self.take_state_above(block)?;
-
-        let blocks = self.recovered_block_range(range)?;
-
-        // remove block bodies it is needed for both get block range and get block execution results
-        // that is why it is deleted afterwards.
-        self.remove_blocks_above(block)?;
-
-        // Update pipeline progress
-        self.update_pipeline_stages(block, true)?;
-
-        Ok(Chain::new(blocks, execution_state, BTreeMap::new(), BTreeMap::new()))
-    }
-
-    /// Remove all of the blocks above the provided number and their execution result, using the
-    /// provided changesets cache for trie unwinding.
-    ///
-    /// The passed block number will stay in the database.
-    pub fn remove_block_and_execution_above_with_cache(
-        &self,
-        changesets_cache: &ChangesetCacheHandle,
-        block: BlockNumber,
-    ) -> ProviderResult<()> {
-        self.unwind_trie_state_from(changesets_cache, block + 1)?;
-
-        // remove execution res
-        self.remove_state_above(block)?;
-
-        // remove block bodies it is needed for both get block range and get block execution results
-        // that is why it is deleted afterwards.
-        self.remove_blocks_above(block)?;
-
-        // Update pipeline progress
-        self.update_pipeline_stages(block, true)?;
-
-        Ok(())
-    }
-}
-
 impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecutionWriter
     for DatabaseProvider<TX, N>
 {
@@ -2997,9 +2943,9 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
         &self,
         block: BlockNumber,
     ) -> ProviderResult<Chain<Self::Primitives>> {
-        // Note: This method doesn't unwind trie state - use
-        // take_block_and_execution_above_with_cache if you need trie unwinding
         let range = block + 1..=self.last_block_number()?;
+
+        self.unwind_trie_state_from(block + 1)?;
 
         // get execution res
         let execution_state = self.take_state_above(block)?;
@@ -3017,8 +2963,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
     }
 
     fn remove_block_and_execution_above(&self, block: BlockNumber) -> ProviderResult<()> {
-        // Note: This method doesn't unwind trie state - use
-        // remove_block_and_execution_above_with_cache if you need trie unwinding
+        self.unwind_trie_state_from(block + 1)?;
 
         // remove execution res
         self.remove_state_above(block)?;

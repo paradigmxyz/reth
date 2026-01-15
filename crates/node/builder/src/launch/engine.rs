@@ -88,6 +88,9 @@ impl EngineNodeLauncher {
         } = target;
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
+        // Create changeset cache that will be shared across the engine
+        let changeset_cache = ChangesetCacheHandle::new();
+
         // setup the launch context
         let ctx = ctx
             .with_configured_globals(engine_tree_config.reserved_cpu_cores())
@@ -99,8 +102,8 @@ impl EngineNodeLauncher {
             .attach(database.clone())
             // ensure certain settings take effect
             .with_adjusted_configs()
-            // Create the provider factory
-            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>().await?
+            // Create the provider factory with changeset cache
+            .with_provider_factory::<_, <CB::Components as NodeComponents<T>>::Evm>(changeset_cache.clone()).await?
             .inspect(|ctx| {
                 info!(target: "reth::cli", "Database opened");
                 match ctx.provider_factory().storage_settings() {
@@ -201,9 +204,6 @@ impl EngineNodeLauncher {
             engine_events: event_sender.clone(),
         };
         let validator_builder = add_ons.engine_validator_builder();
-
-        // Create changeset cache that will be shared between validator and engine tree
-        let changeset_cache = ChangesetCacheHandle::new();
 
         // Build the engine validator with all required components
         let engine_validator = validator_builder
