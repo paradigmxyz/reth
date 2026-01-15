@@ -99,7 +99,6 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
     let chain_spec = Arc::new(
         ChainSpecBuilder::default().chain(MAINNET.chain).genesis(genesis).osaka_activated().build(),
     );
-    let genesis_hash = chain_spec.genesis_hash();
     let node_config = NodeConfig::test()
         .with_chain(chain_spec)
         .with_unused_ports()
@@ -110,33 +109,26 @@ async fn can_send_legacy_sidecar_post_activation() -> eyre::Result<()> {
         .launch()
         .await?;
 
-    let mut node = NodeTestContext::new(node, eth_payload_attributes).await?;
+    let node = NodeTestContext::new(node, eth_payload_attributes).await?;
 
     let wallets = Wallet::new(2).wallet_gen();
     let blob_wallet = wallets.first().unwrap();
 
-    // build blob tx
+    // build blob tx with legacy EIP-4844 sidecar
     let blob_tx = TransactionTestContext::tx_with_blobs_bytes(1, blob_wallet.clone()).await?;
 
     let tx = PooledTransactionVariant::decode_2718_exact(&blob_tx).unwrap();
     assert!(tx.as_eip4844().unwrap().tx().sidecar.is_eip4844());
 
-    // inject blob tx to the pool
-    let blob_tx_hash = node.rpc.inject_tx(blob_tx).await?;
-    // fetch it from rpc
-    let envelope = node.rpc.envelope_by_hash(blob_tx_hash).await?;
-    // assert that sidecar was converted to eip7594
-    assert!(envelope.as_eip4844().unwrap().tx().sidecar().unwrap().is_eip7594());
-    // validate sidecar
-    TransactionTestContext::validate_sidecar(envelope);
-
-    // build a payload
-    let blob_payload = node.new_payload().await?;
-
-    // submit the blob payload
-    let blob_block_hash = node.submit_payload(blob_payload).await?;
-
-    node.update_forkchoice(genesis_hash, blob_block_hash).await?;
+    // After Osaka activation, legacy EIP-4844 sidecars should be rejected
+    let result = node.rpc.inject_tx(blob_tx).await;
+    assert!(result.is_err(), "Expected error when injecting legacy sidecar after Osaka activation");
+    let error_msg = result.unwrap_err().to_string();
+    assert!(
+        error_msg.contains("unexpected eip-4844 sidecar after osaka"),
+        "Expected error about unexpected eip-4844 sidecar after osaka, got: {}",
+        error_msg
+    );
 
     Ok(())
 }
