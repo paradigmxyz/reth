@@ -11,10 +11,10 @@ use reth_prune_types::PruneMode;
 use reth_storage_errors::provider::ProviderResult;
 use std::{path::Path, sync::Arc};
 
-/// Pending RocksDB batches type alias (stub - uses unit type).
+/// Pending `RocksDB` batches type alias (stub - uses unit type).
 pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<()>>>;
 
-/// Context for RocksDB block writes (stub).
+/// Context for `RocksDB` block writes (stub).
 #[derive(Debug, Clone)]
 #[allow(dead_code)]
 pub(crate) struct RocksDBWriteCtx {
@@ -22,7 +22,7 @@ pub(crate) struct RocksDBWriteCtx {
     pub first_block_number: BlockNumber,
     /// The prune mode for transaction lookup, if any.
     pub prune_tx_lookup: Option<PruneMode>,
-    /// Storage settings determining what goes to RocksDB.
+    /// Storage settings determining what goes to `RocksDB`.
     pub storage_settings: StorageSettings,
     /// Pending batches (stub - unused).
     pub pending_batches: PendingRocksDBBatches,
