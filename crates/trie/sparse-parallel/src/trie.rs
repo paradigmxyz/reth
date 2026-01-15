@@ -765,9 +765,13 @@ impl SparseTrieInterface for ParallelSparseTrie {
 
     fn wipe(&mut self) {
         self.upper_subtrie.wipe();
-        self.lower_subtries = [const { LowerSparseSubtrie::Blind(None) }; NUM_LOWER_SUBTRIES];
+        // Clear lower subtries instead of replacing with new Blind(None) to preserve allocations
+        for subtrie in &mut self.lower_subtries {
+            subtrie.clear();
+        }
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+        self.branch_node_masks.clear();
     }
 
     fn clear(&mut self) {
@@ -2075,7 +2079,9 @@ impl SparseSubtrie {
     /// Removes all nodes and values from the subtrie, resetting it to a blank state
     /// with only an empty root node. This is used when a storage root is deleted.
     fn wipe(&mut self) {
-        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
+        // Clear existing allocations instead of creating new ones to preserve capacity
+        self.nodes.clear();
+        self.nodes.insert(Nibbles::default(), SparseNode::Empty);
         self.inner.clear();
     }
 

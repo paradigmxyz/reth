@@ -947,10 +947,14 @@ impl SparseTrieInterface for SerialSparseTrie {
     }
 
     fn wipe(&mut self) {
-        self.nodes = HashMap::from_iter([(Nibbles::default(), SparseNode::Empty)]);
-        self.values = HashMap::default();
+        // Clear existing allocations instead of creating new ones to preserve capacity
+        self.nodes.clear();
+        self.nodes.insert(Nibbles::default(), SparseNode::Empty);
+        self.branch_node_masks.clear();
+        self.values.clear();
         self.prefix_set = PrefixSetMut::all();
         self.updates = self.updates.is_some().then(SparseTrieUpdates::wiped);
+        self.rlp_buf.clear();
     }
 
     fn clear(&mut self) {
