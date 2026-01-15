@@ -942,37 +942,35 @@ impl<N: NodePrimitives<SignedTx: SignedTransaction>> NewCanonicalChain<N> {
     pub fn to_chain_notification(&self) -> CanonStateNotification<N> {
         match self {
             Self::Commit { new } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                        exec.trie_updates(),
-                        exec.hashed_state(),
-                    );
-                    chain
-                }));
-                CanonStateNotification::Commit { new }
+                CanonStateNotification::Commit { new: Arc::new(Self::blocks_to_chain(new)) }
             }
-            Self::Reorg { new, old } => {
-                let new = Arc::new(new.iter().fold(Chain::default(), |mut chain, exec| {
+            Self::Reorg { new, old } => CanonStateNotification::Reorg {
+                new: Arc::new(Self::blocks_to_chain(new)),
+                old: Arc::new(Self::blocks_to_chain(old)),
+            },
+        }
+    }
+
+    /// Converts a slice of executed blocks into a [`Chain`].
+    fn blocks_to_chain(blocks: &[ExecutedBlock<N>]) -> Chain<N> {
+        match blocks {
+            [] => Chain::default(),
+            [first, rest @ ..] => {
+                let mut chain = Chain::from_block(
+                    first.recovered_block().clone(),
+                    first.execution_outcome().clone(),
+                    first.trie_updates(),
+                    first.hashed_state(),
+                );
+                for exec in rest {
                     chain.append_block(
                         exec.recovered_block().clone(),
                         exec.execution_outcome().clone(),
                         exec.trie_updates(),
                         exec.hashed_state(),
                     );
-                    chain
-                }));
-                let old = Arc::new(old.iter().fold(Chain::default(), |mut chain, exec| {
-                    chain.append_block(
-                        exec.recovered_block().clone(),
-                        exec.execution_outcome().clone(),
-                        exec.trie_updates(),
-                        exec.hashed_state(),
-                    );
-                    chain
-                }));
-                CanonStateNotification::Reorg { new, old }
+                }
+                chain
             }
         }
     }
@@ -1543,12 +1541,6 @@ mod tests {
         let block2a =
             test_block_builder.get_executed_block_with_number(2, block1.recovered_block.hash());
 
-        let sample_execution_outcome = ExecutionOutcome {
-            receipts: vec![vec![], vec![]],
-            requests: vec![Requests::default(), Requests::default()],
-            ..Default::default()
-        };
-
         // Test commit notification
         let chain_commit = NewCanonicalChain::Commit { new: vec![block0.clone(), block1.clone()] };
 
@@ -1562,12 +1554,20 @@ mod tests {
         expected_hashed_state.insert(0, block0.hashed_state());
         expected_hashed_state.insert(1, block1.hashed_state());
 
+        // Build expected execution outcome (first_block matches first block number)
+        let commit_execution_outcome = ExecutionOutcome {
+            receipts: vec![vec![], vec![]],
+            requests: vec![Requests::default(), Requests::default()],
+            first_block: 0,
+            ..Default::default()
+        };
+
         assert_eq!(
             chain_commit.to_chain_notification(),
             CanonStateNotification::Commit {
                 new: Arc::new(Chain::new(
                     vec![block0.recovered_block().clone(), block1.recovered_block().clone()],
-                    sample_execution_outcome.clone(),
+                    commit_execution_outcome,
                     expected_trie_updates,
                     expected_hashed_state
                 ))
@@ -1600,18 +1600,27 @@ mod tests {
         new_hashed_state.insert(1, block1a.hashed_state());
         new_hashed_state.insert(2, block2a.hashed_state());
 
+        // Build expected execution outcome for reorg chains (first_block matches first block
+        // number)
+        let reorg_execution_outcome = ExecutionOutcome {
+            receipts: vec![vec![], vec![]],
+            requests: vec![Requests::default(), Requests::default()],
+            first_block: 1,
+            ..Default::default()
+        };
+
         assert_eq!(
             chain_reorg.to_chain_notification(),
             CanonStateNotification::Reorg {
                 old: Arc::new(Chain::new(
                     vec![block1.recovered_block().clone(), block2.recovered_block().clone()],
-                    sample_execution_outcome.clone(),
+                    reorg_execution_outcome.clone(),
                     old_trie_updates,
                     old_hashed_state
                 )),
                 new: Arc::new(Chain::new(
                     vec![block1a.recovered_block().clone(), block2a.recovered_block().clone()],
-                    sample_execution_outcome,
+                    reorg_execution_outcome,
                     new_trie_updates,
                     new_hashed_state
                 ))
