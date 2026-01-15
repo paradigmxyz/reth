@@ -207,8 +207,7 @@ impl TrieCursor for MockTrieCursor {
         key: Nibbles,
     ) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
         // Find the first key that is greater than or equal to the given key.
-        let entry =
-            self.trie_nodes().iter().find_map(|(k, v)| (k >= &key).then(|| (*k, v.clone())));
+        let entry = self.trie_nodes().range(key..).next().map(|(k, v)| (*k, v.clone()));
         if let Some((key, _)) = &entry {
             self.current_key = Some(*key);
         }
@@ -221,19 +220,15 @@ impl TrieCursor for MockTrieCursor {
 
     #[instrument(skip(self), ret(level = "trace"))]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let mut iter = self.trie_nodes().iter();
-        // Jump to the first key that has a prefix of the current key if it's set, or to the first
-        // key otherwise.
-        iter.find(|(k, _)| self.current_key.as_ref().is_none_or(|current| k.starts_with(current)))
-            .expect("current key should exist in trie nodes");
-        // Get the next key-value pair.
-        let entry = iter.next().map(|(k, v)| (*k, v.clone()));
-        if let Some((key, _)) = &entry {
-            self.current_key = Some(*key);
-        }
+        let entry = self.current_key.and_then(|current_key| {
+            self.trie_nodes().range((std::ops::Bound::Excluded(current_key), std::ops::Bound::Unbounded)).next()
+        }).map(|(k, v)| (*k, v.clone()));
+
+        self.current_key = entry.as_ref().map(|(k, _)| *k);
+
         self.visited_keys().lock().push(KeyVisit {
             visit_type: KeyVisitType::Next,
-            visited_key: entry.as_ref().map(|(k, _)| *k),
+            visited_key: self.current_key,
         });
         Ok(entry)
     }
