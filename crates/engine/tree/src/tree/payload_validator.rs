@@ -1050,7 +1050,6 @@ where
             let first = blocks_iter.next().expect("blocks is non-empty");
             let data = first.trie_data();
 
-            // Use Arc::make_mut to avoid cloning if Arc is uniquely owned
             let mut state = Arc::clone(&data.hashed_state);
             let mut nodes = Arc::clone(&data.trie_updates);
             let state_mut = Arc::make_mut(&mut state);
