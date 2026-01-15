@@ -585,6 +585,100 @@ where
         Ok(metric_values)
     }
 
+    /// Reveal nodes from v2 proof calculation for the account trie.
+    ///
+    /// The v2 proof calculator returns a `Vec<ProofTrieNode>` where each node has:
+    /// - `path`: The nibble path to the node
+    /// - `node`: The trie node itself
+    /// - `masks`: Optional branch node masks (inline, not in a separate map)
+    ///
+    /// V2 proofs are already sorted by path (lexicographically) and masks are inline,
+    /// so we can directly reveal the nodes without additional processing.
+    pub fn reveal_v2_decoded(
+        &mut self,
+        proof_nodes: Vec<ProofTrieNode>,
+    ) -> SparseStateTrieResult<()> {
+        if proof_nodes.is_empty() {
+            return Ok(());
+        }
+
+        let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values: _metric_values } =
+            filter_v2_proof_nodes(proof_nodes, &mut self.revealed_account_paths)?;
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.increment_total_account_nodes(_metric_values.total_nodes as u64);
+            self.metrics.increment_skipped_account_nodes(_metric_values.skipped_nodes as u64);
+        }
+
+        if let Some(root_node) = root_node {
+            trace!(target: "trie::sparse", ?root_node, "Revealing v2 root account node");
+            let trie =
+                self.state.reveal_root(root_node.node, root_node.masks, self.retain_updates)?;
+
+            trie.reserve_nodes(new_nodes);
+
+            trace!(target: "trie::sparse", total_nodes = ?nodes.len(), "Revealing v2 account nodes");
+            trie.reveal_nodes(nodes)?;
+        }
+
+        Ok(())
+    }
+
+    /// Reveal nodes from v2 proof calculation for a storage trie.
+    ///
+    /// Similar to [`Self::reveal_v2_decoded`] but for storage tries at a specific account.
+    pub fn reveal_v2_storage_decoded(
+        &mut self,
+        account: B256,
+        proof_nodes: Vec<ProofTrieNode>,
+    ) -> SparseStateTrieResult<()> {
+        if proof_nodes.is_empty() {
+            return Ok(());
+        }
+
+        let (trie, revealed_paths) = self.storage.get_trie_and_revealed_paths_mut(account);
+        let _metric_values = Self::reveal_v2_storage_decoded_inner(
+            account,
+            proof_nodes,
+            revealed_paths,
+            trie,
+            self.retain_updates,
+        )?;
+
+        #[cfg(feature = "metrics")]
+        {
+            self.metrics.increment_total_storage_nodes(_metric_values.total_nodes as u64);
+            self.metrics.increment_skipped_storage_nodes(_metric_values.skipped_nodes as u64);
+        }
+
+        Ok(())
+    }
+
+    /// Internal implementation for revealing v2 storage proof nodes.
+    fn reveal_v2_storage_decoded_inner(
+        account: B256,
+        proof_nodes: Vec<ProofTrieNode>,
+        revealed_nodes: &mut HashSet<Nibbles>,
+        trie: &mut SparseTrie<S>,
+        retain_updates: bool,
+    ) -> SparseStateTrieResult<ProofNodesMetricValues> {
+        let FilteredV2ProofNodes { root_node, nodes, new_nodes, metric_values } =
+            filter_v2_proof_nodes(proof_nodes, revealed_nodes)?;
+
+        if let Some(root_node) = root_node {
+            trace!(target: "trie::sparse", ?account, ?root_node, "Revealing v2 root storage node");
+            let trie = trie.reveal_root(root_node.node, root_node.masks, retain_updates)?;
+
+            trie.reserve_nodes(new_nodes);
+
+            trace!(target: "trie::sparse", ?account, total_nodes = ?nodes.len(), "Revealing v2 storage nodes");
+            trie.reveal_nodes(nodes)?;
+        }
+
+        Ok(metric_values)
+    }
+
     /// Reveal state witness with the given state root.
     /// The state witness is expected to be a map of `keccak(rlp(node)): rlp(node).`
     /// NOTE: This method does not extensively validate the witness.
@@ -1147,6 +1241,82 @@ fn filter_map_revealed_nodes(
 
             result.root_node = Some(node);
 
+            continue
+        }
+
+        result.nodes.push(node);
+    }
+
+    Ok(result)
+}
+
+/// Result of [`filter_v2_proof_nodes`].
+#[derive(Debug, PartialEq, Eq)]
+struct FilteredV2ProofNodes {
+    /// Root node which was pulled out of the original node set to be handled specially.
+    root_node: Option<ProofTrieNode>,
+    /// Filtered proof nodes. Root node is removed.
+    nodes: Vec<ProofTrieNode>,
+    /// Number of new nodes that will be revealed. This includes all children of branch nodes.
+    new_nodes: usize,
+    /// Values which are being returned so they can be incremented into metrics.
+    metric_values: ProofNodesMetricValues,
+}
+
+/// Filters v2 proof nodes that are already revealed, separates the root node if present,
+/// and returns additional information about the number of total, skipped, and new nodes.
+///
+/// V2 proofs differ from the original multiproof format:
+/// - Already sorted by path (lexicographically)
+/// - Masks are inline in each `ProofTrieNode` (not in a separate map)
+fn filter_v2_proof_nodes(
+    proof_nodes: Vec<ProofTrieNode>,
+    revealed_nodes: &mut HashSet<Nibbles>,
+) -> SparseStateTrieResult<FilteredV2ProofNodes> {
+    let mut result = FilteredV2ProofNodes {
+        root_node: None,
+        nodes: Vec::with_capacity(proof_nodes.len()),
+        new_nodes: 0,
+        metric_values: Default::default(),
+    };
+
+    let proof_nodes_len = proof_nodes.len();
+    for node in proof_nodes {
+        result.metric_values.total_nodes += 1;
+
+        let is_root = node.path.is_empty();
+
+        // If the node is already revealed, skip it. We don't ever skip the root node, nor do we add
+        // it to `revealed_nodes`.
+        if !is_root && !revealed_nodes.insert(node.path) {
+            result.metric_values.skipped_nodes += 1;
+            continue
+        }
+
+        result.new_nodes += 1;
+
+        // Increase the new_nodes counter if the node is a type which has children.
+        match &node.node {
+            TrieNode::Branch(branch) => {
+                result.new_nodes += branch.state_mask.count_ones() as usize;
+            }
+            TrieNode::Extension(_) => {
+                result.new_nodes += 1;
+            }
+            _ => {}
+        }
+
+        if is_root {
+            // Perform sanity check.
+            if matches!(node.node, TrieNode::EmptyRoot) && proof_nodes_len > 1 {
+                return Err(SparseStateTrieErrorKind::InvalidRootNode {
+                    path: node.path,
+                    node: alloy_rlp::encode(&node.node).into(),
+                }
+                .into())
+            }
+
+            result.root_node = Some(node);
             continue
         }
 
