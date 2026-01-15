@@ -473,14 +473,14 @@ reth-ress-protocol = { path = "crates/ress/protocol" }
 reth-ress-provider = { path = "crates/ress/provider" }
 
 # revm
-revm = { version = "33.1.0", default-features = false }
-revm-bytecode = { version = "7.1.1", default-features = false }
-revm-database = { version = "9.0.5", default-features = false }
-revm-state = { version = "8.1.1", default-features = false }
-revm-primitives = { version = "21.0.2", default-features = false }
-revm-interpreter = { version = "31.1.0", default-features = false }
-revm-database-interface = { version = "8.0.5", default-features = false }
-op-revm = { version = "14.1.0", default-features = false }
+revm = { version = "34.0.0", default-features = false }
+revm-bytecode = { version = "8.0.0", default-features = false }
+revm-database = { version = "10.0.0", default-features = false }
+revm-state = { version = "9.0.0", default-features = false }
+revm-primitives = { version = "22.0.0", default-features = false }
+revm-interpreter = { version = "32.0.0", default-features = false }
+revm-database-interface = { version = "9.0.0", default-features = false }
+op-revm = { version = "15.0.0", default-features = false }
 revm-inspectors = "0.33.2"
 
 # eth
@@ -806,17 +806,7 @@ ipnet = "2.11"
 # jsonrpsee-http-client = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 # jsonrpsee-types = { git = "https://github.com/paradigmxyz/jsonrpsee", branch = "matt/make-rpc-service-pub" }
 
-revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "f1842b0" }
+revm-inspectors = { git = "https://github.com/paradigmxyz/revm-inspectors", rev = "3020ea8" }
 
-alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "8c125c1" }
-alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "8c125c1" }
-
-# revm
-revm = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
-revm-bytecode = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
-revm-database = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
-revm-state = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
-revm-primitives = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
-revm-interpreter = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
-revm-database-interface = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
-op-revm = { git = "https://github.com/bluealloy/revm", rev = "a31fa98e" }
+alloy-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
+alloy-op-evm = { git = "https://github.com/alloy-rs/evm", rev = "072c248" }
