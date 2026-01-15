@@ -101,7 +101,7 @@ impl<'a> Iterator for BALSlotIter<'a> {
                     return None;
                 }
 
-                return Some((address, slot));
+                return Some((address, StorageKey::from(slot)));
             }
 
             // Move to next account
@@ -154,7 +154,7 @@ where
             code_hash.is_none() &&
             account_changes.storage_changes.is_empty()
         {
-            continue
+            continue;
         }
 
         // Build the final account state
@@ -177,13 +177,11 @@ where
             let mut storage_map = HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(slot_changes.slot);
+                let hashed_slot = keccak256(&slot_changes.slot.to_be_bytes::<32>());
 
                 // Get the last change for this slot
                 if let Some(last_change) = slot_changes.changes.last() {
-                    storage_map
-                        .storage
-                        .insert(hashed_slot, U256::from_be_bytes(last_change.new_value.0));
+                    storage_map.storage.insert(hashed_slot, last_change.new_value);
                 }
             }
 
@@ -237,8 +235,8 @@ mod tests {
         let provider = StateProviderTest::default();
 
         let address = Address::random();
-        let slot = StorageKey::random();
-        let value = B256::random();
+        let slot = U256::random();
+        let value = U256::random();
 
         let slot_changes = SlotChanges { slot, changes: vec![StorageChange::new(0, value)] };
 
@@ -392,15 +390,15 @@ mod tests {
         let provider = StateProviderTest::default();
 
         let address = Address::random();
-        let slot = StorageKey::random();
+        let slot = U256::random();
 
         // Multiple changes to the same slot - should take the last one
         let slot_changes = SlotChanges {
             slot,
             changes: vec![
-                StorageChange::new(0, B256::from(U256::from(100).to_be_bytes::<32>())),
-                StorageChange::new(1, B256::from(U256::from(200).to_be_bytes::<32>())),
-                StorageChange::new(2, B256::from(U256::from(300).to_be_bytes::<32>())),
+                StorageChange::new(0, U256::from(100)),
+                StorageChange::new(1, U256::from(200)),
+                StorageChange::new(2, U256::from(300)),
             ],
         };
 
@@ -438,15 +436,15 @@ mod tests {
             address: addr1,
             storage_changes: vec![
                 SlotChanges {
-                    slot: StorageKey::from(U256::from(100)),
-                    changes: vec![StorageChange::new(0, B256::ZERO)],
+                    slot: U256::from(100),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
                 },
                 SlotChanges {
-                    slot: StorageKey::from(U256::from(101)),
-                    changes: vec![StorageChange::new(0, B256::ZERO)],
+                    slot: U256::from(101),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
                 },
             ],
-            storage_reads: vec![StorageKey::from(U256::from(102))],
+            storage_reads: vec![U256::from(102)],
             balance_changes: vec![],
             nonce_changes: vec![],
             code_changes: vec![],
@@ -456,10 +454,10 @@ mod tests {
         let account2 = AccountChanges {
             address: addr2,
             storage_changes: vec![SlotChanges {
-                slot: StorageKey::from(U256::from(200)),
-                changes: vec![StorageChange::new(0, B256::ZERO)],
+                slot: U256::from(200),
+                changes: vec![StorageChange::new(0, U256::ZERO)],
             }],
-            storage_reads: vec![StorageKey::from(U256::from(201))],
+            storage_reads: vec![U256::from(201)],
             balance_changes: vec![],
             nonce_changes: vec![],
             code_changes: vec![],
@@ -470,15 +468,15 @@ mod tests {
             address: addr3,
             storage_changes: vec![
                 SlotChanges {
-                    slot: StorageKey::from(U256::from(300)),
-                    changes: vec![StorageChange::new(0, B256::ZERO)],
+                    slot: U256::from(300),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
                 },
                 SlotChanges {
-                    slot: StorageKey::from(U256::from(301)),
-                    changes: vec![StorageChange::new(0, B256::ZERO)],
+                    slot: U256::from(301),
+                    changes: vec![StorageChange::new(0, U256::ZERO)],
                 },
             ],
-            storage_reads: vec![StorageKey::from(U256::from(302))],
+            storage_reads: vec![U256::from(302)],
             balance_changes: vec![],
             nonce_changes: vec![],
             code_changes: vec![],
