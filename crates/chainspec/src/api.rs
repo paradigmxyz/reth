@@ -30,8 +30,6 @@ pub trait EthChainSpec: Send + Sync + Unpin + Debug {
     fn blob_params_at_timestamp(&self, timestamp: u64) -> Option<BlobParams>;
 
     /// Get the [`EvmLimitParams`] for the chain at the given timestamp.
-    ///
-    /// Override this method for hardfork-dependent EVM limits.
     fn evm_limit_params_at_timestamp(&self, timestamp: u64) -> EvmLimitParams;
 
     /// Returns the deposit contract data for the chain, if it's present

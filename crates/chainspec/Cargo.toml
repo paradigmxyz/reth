@@ -58,12 +58,13 @@ std = [
 ]
 arbitrary = [
     "alloy-chains/arbitrary",
-    "reth-ethereum-forks/arbitrary",
-    "reth-primitives-traits/arbitrary",
     "alloy-consensus/arbitrary",
     "alloy-eips/arbitrary",
     "alloy-primitives/arbitrary",
     "alloy-trie/arbitrary",
+    "reth-ethereum-forks/arbitrary",
+    "reth-primitives-traits/arbitrary",
+    "revm-primitives/arbitrary",
 ]
 test-utils = [
     "reth-primitives-traits/test-utils",
