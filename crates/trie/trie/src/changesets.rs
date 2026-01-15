@@ -12,11 +12,11 @@
 //!
 //! ## Usage
 //!
-//! The primary function is [`compute_trie_changesets`], which takes:
-//! - A [`TrieCursorFactory`] for reading current trie state
-//! - [`TrieUpdatesSorted`] containing the new node values
+//! The primary function is `compute_trie_changesets`, which takes:
+//! - A `TrieCursorFactory` for reading current trie state
+//! - `TrieUpdatesSorted` containing the new node values
 //!
-//! And returns [`TrieUpdatesSorted`] containing the old node values.
+//! And returns `TrieUpdatesSorted` containing the old node values.
 
 use crate::trie_cursor::TrieCursorIter;
 use alloy_primitives::{map::B256Map, B256};
