@@ -460,7 +460,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
+        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_provider = self.rocksdb_provider.clone();
+        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
 
         thread::scope(|s| {
@@ -472,6 +474,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             });
 
             // RocksDB writes
+            #[cfg(all(unix, feature = "rocksdb"))]
             let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
                 s.spawn(|| {
                     let start = Instant::now();
@@ -581,8 +584,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             if let Some(handle) = rocksdb_handle {
                 timings.rocksdb = handle.join().expect("RocksDB thread panicked")?;
             }
-            #[cfg(not(all(unix, feature = "rocksdb")))]
-            let _ = rocksdb_handle;
 
             timings.total = total_start.elapsed();
 
