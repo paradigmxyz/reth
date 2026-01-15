@@ -318,6 +318,7 @@ impl<TX: Debug + Send, N: NodeTypes<ChainSpec: EthChainSpec + 'static>> ChainSpe
 
 impl<TX: DbTxMut, N: NodeTypes> DatabaseProvider<TX, N> {
     /// Creates a provider with an inner read-write transaction.
+    #[allow(clippy::too_many_arguments)]
     pub fn new_rw(
         tx: TX,
         chain_spec: Arc<N::ChainSpec>,
