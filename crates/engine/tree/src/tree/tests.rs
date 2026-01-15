@@ -7,7 +7,7 @@ use crate::{
         PersistTarget, TreeConfig,
     },
 };
-use reth_trie_db::changesets::ChangesetCacheHandle;
+use reth_trie_db::ChangesetCache;
 
 use alloy_eips::eip1898::BlockWithParent;
 use alloy_primitives::{
@@ -193,7 +193,7 @@ impl TestHarness {
         let payload_builder = PayloadBuilderHandle::new(to_payload_service);
 
         let evm_config = MockEvmConfig::default();
-        let changeset_cache = ChangesetCacheHandle::new();
+        let changeset_cache = ChangesetCache::new();
         let engine_validator = BasicEngineValidator::new(
             provider.clone(),
             consensus.clone(),
@@ -392,7 +392,7 @@ impl ValidatorTestHarness {
         let provider = harness.provider.clone();
         let payload_validator = MockEngineValidator;
         let evm_config = MockEvmConfig::default();
-        let changeset_cache = ChangesetCacheHandle::new();
+        let changeset_cache = ChangesetCache::new();
 
         let validator = BasicEngineValidator::new(
             provider,

@@ -37,7 +37,7 @@ use reth_provider::{
 use reth_tasks::TaskExecutor;
 use reth_tokio_util::EventSender;
 use reth_tracing::tracing::{debug, error, info};
-use reth_trie_db::changesets::ChangesetCacheHandle;
+use reth_trie_db::ChangesetCache;
 use std::{future::Future, pin::Pin, sync::Arc};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -89,7 +89,7 @@ impl EngineNodeLauncher {
         let NodeHooks { on_component_initialized, on_node_started, .. } = hooks;
 
         // Create changeset cache that will be shared across the engine
-        let changeset_cache = ChangesetCacheHandle::new();
+        let changeset_cache = ChangesetCache::new();
 
         // setup the launch context
         let ctx = ctx
@@ -220,7 +220,7 @@ impl EngineNodeLauncher {
                 ctx.components().evm_config().clone(),
                 || async {
                     // Create a separate cache for reorg validator (not shared with main engine)
-                    let reorg_cache = ChangesetCacheHandle::new();
+                    let reorg_cache = ChangesetCache::new();
                     validator_builder
                         .build_tree_validator(&add_ons_ctx, engine_tree_config.clone(), reorg_cache)
                         .await

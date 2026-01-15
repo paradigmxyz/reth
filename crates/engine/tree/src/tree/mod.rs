@@ -36,7 +36,7 @@ use reth_provider::{
 };
 use reth_revm::database::StateProviderDatabase;
 use reth_stages_api::ControlFlow;
-use reth_trie_db::changesets::ChangesetCacheHandle;
+use reth_trie_db::ChangesetCache;
 use revm::state::EvmState;
 use state::TreeState;
 use std::{fmt::Debug, ops, sync::Arc, time::Instant};
@@ -274,7 +274,7 @@ where
     /// The EVM configuration.
     evm_config: C,
     /// Changeset cache for in-memory trie changesets
-    changeset_cache: ChangesetCacheHandle,
+    changeset_cache: ChangesetCache,
 }
 
 impl<N, P: Debug, T: PayloadTypes + Debug, V: Debug, C> std::fmt::Debug
@@ -337,7 +337,7 @@ where
         config: TreeConfig,
         engine_kind: EngineApiKind,
         evm_config: C,
-        changeset_cache: ChangesetCacheHandle,
+        changeset_cache: ChangesetCache,
     ) -> Self {
         let (incoming_tx, incoming) = crossbeam_channel::unbounded();
 
@@ -378,7 +378,7 @@ where
         config: TreeConfig,
         kind: EngineApiKind,
         evm_config: C,
-        changeset_cache: ChangesetCacheHandle,
+        changeset_cache: ChangesetCache,
     ) -> (Sender<FromEngine<EngineApiRequest<T, N>, N::Block>>, UnboundedReceiver<EngineApiEvent<N>>)
     {
         let best_block_number = provider.best_block_number().unwrap_or(0);
@@ -1868,7 +1868,7 @@ where
             "computing block trie updates",
         );
         let db_provider = self.provider.database_provider_ro()?;
-        let trie_updates = reth_trie_db::changesets::compute_block_trie_updates(
+        let trie_updates = reth_trie_db::compute_block_trie_updates(
             &self.changeset_cache,
             &db_provider,
             block.number(),

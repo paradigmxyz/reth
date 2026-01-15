@@ -17,8 +17,7 @@ use reth_trie::{
     HashedPostStateSorted, KeccakKeyHasher,
 };
 use reth_trie_db::{
-    changesets::ChangesetCacheHandle, DatabaseHashedCursorFactory, DatabaseHashedPostState,
-    DatabaseTrieCursorFactory,
+    ChangesetCache, DatabaseHashedCursorFactory, DatabaseHashedPostState, DatabaseTrieCursorFactory,
 };
 use std::{
     collections::{hash_map::Entry, HashMap},
@@ -69,7 +68,7 @@ pub struct OverlayStateProviderFactory<F> {
     /// Optional hashed state overlay
     hashed_state_overlay: Option<Arc<HashedPostStateSorted>>,
     /// Changeset cache handle for retrieving trie changesets
-    changeset_cache: ChangesetCacheHandle,
+    changeset_cache: ChangesetCache,
     /// Metrics for tracking provider operations
     metrics: OverlayStateProviderMetrics,
     /// A cache which maps `db_tip -> Overlay`. If the db tip changes during usage of the factory
@@ -79,7 +78,7 @@ pub struct OverlayStateProviderFactory<F> {
 
 impl<F> OverlayStateProviderFactory<F> {
     /// Create a new overlay state provider factory
-    pub fn new(factory: F, changeset_cache: ChangesetCacheHandle) -> Self {
+    pub fn new(factory: F, changeset_cache: ChangesetCache) -> Self {
         Self {
             factory,
             block_hash: None,

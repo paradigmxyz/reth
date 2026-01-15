@@ -50,7 +50,7 @@ use reth_trie::{
     updates::{TrieUpdates, TrieUpdatesSorted},
     HashedPostState, HashedPostStateSorted, StateRoot, TrieInputSorted,
 };
-use reth_trie_db::changesets::ChangesetCacheHandle;
+use reth_trie_db::ChangesetCache;
 use reth_trie_parallel::root::{ParallelStateRoot, ParallelStateRootError};
 use revm_primitives::Address;
 use std::{
@@ -140,7 +140,7 @@ where
     /// Validator for the payload.
     validator: V,
     /// Changeset cache for in-memory trie changesets
-    changeset_cache: ChangesetCacheHandle,
+    changeset_cache: ChangesetCache,
 }
 
 impl<N, P, Evm, V> BasicEngineValidator<P, Evm, V>
@@ -171,7 +171,7 @@ where
         validator: V,
         config: TreeConfig,
         invalid_block_hook: Box<dyn InvalidBlockHook<N>>,
-        changeset_cache: ChangesetCacheHandle,
+        changeset_cache: ChangesetCache,
     ) -> Self {
         let precompile_cache_map = PrecompileCacheMap::default();
         let payload_processor = PayloadProcessor::new(

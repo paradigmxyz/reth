@@ -1726,7 +1726,7 @@ mod tests {
         runtime.block_on(async {
             let handle = tokio::runtime::Handle::current();
             let provider_factory = create_test_provider_factory();
-            let changeset_cache = reth_trie_db::changesets::ChangesetCacheHandle::new();
+            let changeset_cache = reth_trie_db::ChangesetCache::new();
             let factory = reth_provider::providers::OverlayStateProviderFactory::new(
                 provider_factory,
                 changeset_cache,

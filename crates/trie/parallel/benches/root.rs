@@ -38,7 +38,7 @@ pub fn calculate_state_root(c: &mut Criterion) {
             provider_rw.commit().unwrap();
         }
 
-        let changeset_cache = reth_trie_db::changesets::ChangesetCacheHandle::new();
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
         let factory = OverlayStateProviderFactory::new(provider_factory.clone(), changeset_cache);
 
         // state root

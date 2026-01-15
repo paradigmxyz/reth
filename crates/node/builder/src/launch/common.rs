@@ -84,7 +84,7 @@ use reth_tracing::{
     tracing::{debug, error, info, warn},
 };
 use reth_transaction_pool::TransactionPool;
-use reth_trie_db::changesets::ChangesetCacheHandle;
+use reth_trie_db::ChangesetCache;
 use std::{sync::Arc, thread::available_parallelism, time::Duration};
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedSender},
@@ -473,7 +473,7 @@ where
     /// check.**
     pub async fn create_provider_factory<N, Evm>(
         &self,
-        changeset_cache: ChangesetCacheHandle,
+        changeset_cache: ChangesetCache,
     ) -> eyre::Result<ProviderFactory<N>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,
@@ -598,7 +598,7 @@ where
     /// Creates a new [`ProviderFactory`] and attaches it to the launch context.
     pub async fn with_provider_factory<N, Evm>(
         self,
-        changeset_cache: ChangesetCacheHandle,
+        changeset_cache: ChangesetCache,
     ) -> eyre::Result<LaunchContextWith<Attached<WithConfigs<ChainSpec>, ProviderFactory<N>>>>
     where
         N: ProviderNodeTypes<DB = DB, ChainSpec = ChainSpec>,

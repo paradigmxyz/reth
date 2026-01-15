@@ -1321,7 +1321,7 @@ mod tests {
         PruneCheckpointReader, StageCheckpointReader, StateProviderBox,
     };
     use reth_trie::MultiProof;
-    use reth_trie_db::changesets::ChangesetCacheHandle;
+    use reth_trie_db::ChangesetCache;
     use reth_trie_parallel::proof_task::{ProofTaskCtx, ProofWorkerHandle};
     use revm_primitives::{B256, U256};
     use std::sync::{Arc, OnceLock};
@@ -1351,7 +1351,7 @@ mod tests {
             + 'static,
     {
         let rt_handle = get_test_runtime_handle();
-        let changeset_cache = ChangesetCacheHandle::new();
+        let changeset_cache = ChangesetCache::new();
         let overlay_factory = OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(overlay_factory);
         let proof_handle = ProofWorkerHandle::new(rt_handle, task_ctx, 1, 1, false);

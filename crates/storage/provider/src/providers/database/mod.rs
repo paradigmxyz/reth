@@ -33,7 +33,7 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::HashedPostState;
-use reth_trie_db::changesets::ChangesetCacheHandle;
+use reth_trie_db::ChangesetCache;
 use revm_database::BundleState;
 use std::{
     ops::{RangeBounds, RangeInclusive},
@@ -76,7 +76,7 @@ pub struct ProviderFactory<N: NodeTypesWithDB> {
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
     /// Changeset cache for trie unwinding
-    changeset_cache: ChangesetCacheHandle,
+    changeset_cache: ChangesetCache,
 }
 
 impl<N: NodeTypesForProvider> ProviderFactory<NodeTypesWithDBAdapter<N, Arc<DatabaseEnv>>> {
@@ -107,7 +107,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             Default::default(),
             Arc::new(RwLock::new(legacy_settings)),
             rocksdb_provider.clone(),
-            ChangesetCacheHandle::new(),
+            ChangesetCache::new(),
         )
         .storage_settings()?
         .unwrap_or(legacy_settings);
@@ -120,7 +120,7 @@ impl<N: ProviderNodeTypes> ProviderFactory<N> {
             storage: Default::default(),
             storage_settings: Arc::new(RwLock::new(storage_settings)),
             rocksdb_provider,
-            changeset_cache: ChangesetCacheHandle::new(),
+            changeset_cache: ChangesetCache::new(),
         })
     }
 }
@@ -133,7 +133,7 @@ impl<N: NodeTypesWithDB> ProviderFactory<N> {
     }
 
     /// Sets the changeset cache for an existing [`ProviderFactory`].
-    pub fn with_changeset_cache(mut self, changeset_cache: ChangesetCacheHandle) -> Self {
+    pub fn with_changeset_cache(mut self, changeset_cache: ChangesetCache) -> Self {
         self.changeset_cache = changeset_cache;
         self
     }

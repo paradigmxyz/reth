@@ -169,7 +169,7 @@ where
 /// - Database access fails
 /// - Cache retrieval fails
 pub fn compute_block_trie_updates<Provider>(
-    cache: &ChangesetCacheHandle,
+    cache: &ChangesetCache,
     provider: &Provider,
     block_number: BlockNumber,
 ) -> ProviderResult<TrieUpdatesSorted>
@@ -242,28 +242,28 @@ where
     Ok(TrieUpdatesSorted::new(account_nodes, storage_tries))
 }
 
-/// Thread-safe handle to the changeset cache.
+/// Thread-safe changeset cache.
 ///
-/// This type wraps a shared, mutable reference to the changeset cache.
+/// This type wraps a shared, mutable reference to the cache inner.
 /// The `RwLock` enables concurrent reads while ensuring exclusive access for writes.
 #[derive(Debug, Clone)]
-pub struct ChangesetCacheHandle {
-    inner: Arc<RwLock<ChangesetCache>>,
+pub struct ChangesetCache {
+    inner: Arc<RwLock<ChangesetCacheInner>>,
 }
 
-impl Default for ChangesetCacheHandle {
+impl Default for ChangesetCache {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ChangesetCacheHandle {
-    /// Creates a new cache handle.
+impl ChangesetCache {
+    /// Creates a new cache.
     ///
     /// The cache has no capacity limit and relies on explicit eviction
     /// via the `evict()` method to manage memory usage.
     pub fn new() -> Self {
-        Self { inner: Arc::new(RwLock::new(ChangesetCache::new())) }
+        Self { inner: Arc::new(RwLock::new(ChangesetCacheInner::new())) }
     }
 
     /// Retrieves changesets for a block by hash.
@@ -512,7 +512,7 @@ impl ChangesetCacheHandle {
 /// - `evictions`: Number of blocks evicted
 /// - `size`: Current number of cached blocks
 #[derive(Debug)]
-pub struct ChangesetCache {
+struct ChangesetCacheInner {
     /// Cache entries: block hash -> (block number, changesets)
     entries: HashMap<B256, (u64, Arc<TrieUpdatesSorted>)>,
 
@@ -545,18 +545,18 @@ struct ChangesetCacheMetrics {
     size: Gauge,
 }
 
-impl Default for ChangesetCache {
+impl Default for ChangesetCacheInner {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl ChangesetCache {
+impl ChangesetCacheInner {
     /// Creates a new empty changeset cache.
     ///
     /// The cache has no capacity limit and relies on explicit eviction
     /// via the `evict()` method to manage memory usage.
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             entries: HashMap::new(),
             block_numbers: BTreeMap::new(),
@@ -565,11 +565,7 @@ impl ChangesetCache {
         }
     }
 
-    /// Retrieves changesets for a block by hash.
-    ///
-    /// Returns `None` if the block is not in the cache (either evicted or never computed).
-    /// Updates hit/miss metrics accordingly.
-    pub fn get(&self, block_hash: &B256) -> Option<Arc<TrieUpdatesSorted>> {
+    fn get(&self, block_hash: &B256) -> Option<Arc<TrieUpdatesSorted>> {
         match self.entries.get(block_hash) {
             Some((_, changesets)) => {
                 #[cfg(feature = "metrics")]
@@ -584,22 +580,7 @@ impl ChangesetCache {
         }
     }
 
-    /// Inserts changesets for a block into the cache.
-    ///
-    /// This method does not perform any eviction. Eviction must be explicitly
-    /// triggered by calling `evict()`.
-    ///
-    /// # Arguments
-    ///
-    /// * `block_hash` - Hash of the block
-    /// * `block_number` - Block number for tracking and eviction
-    /// * `changesets` - Trie changesets to cache
-    pub fn insert(
-        &mut self,
-        block_hash: B256,
-        block_number: u64,
-        changesets: Arc<TrieUpdatesSorted>,
-    ) {
+    fn insert(&mut self, block_hash: B256, block_number: u64, changesets: Arc<TrieUpdatesSorted>) {
         debug!(
             target: "trie::changeset_cache",
             ?block_hash,
@@ -627,25 +608,7 @@ impl ChangesetCache {
         );
     }
 
-    /// Evicts blocks with numbers strictly less than the given threshold.
-    ///
-    /// This method removes all cache entries for blocks with numbers below
-    /// `up_to_block`. It should be called after blocks are persisted to the
-    /// database to free memory for changesets that are no longer needed.
-    ///
-    /// # Implementation Details
-    ///
-    /// Uses the `block_numbers` `BTreeMap` to efficiently find and remove
-    /// blocks by range. For each evicted block number:
-    /// 1. Get all hashes at that block number (handles side chains)
-    /// 2. Remove entries from `entries` `HashMap`
-    /// 3. Remove the block number from `block_numbers`
-    ///
-    /// # Arguments
-    ///
-    /// * `up_to_block` - Evict blocks with number < this value. Blocks with number >= this value
-    ///   are retained.
-    pub fn evict(&mut self, up_to_block: BlockNumber) {
+    fn evict(&mut self, up_to_block: BlockNumber) {
         debug!(
             target: "trie::changeset_cache",
             up_to_block,

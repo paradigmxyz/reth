@@ -26,7 +26,7 @@ use reth_provider::{
 use reth_prune::PrunerWithFactory;
 use reth_stages_api::{MetricEventsSender, Pipeline};
 use reth_tasks::TaskSpawner;
-use reth_trie_db::changesets::ChangesetCacheHandle;
+use reth_trie_db::ChangesetCache;
 use std::{
     pin::Pin,
     sync::Arc,
@@ -85,7 +85,7 @@ where
         tree_config: TreeConfig,
         sync_metrics_tx: MetricEventsSender,
         evm_config: C,
-        changeset_cache: ChangesetCacheHandle,
+        changeset_cache: ChangesetCache,
     ) -> Self
     where
         V: EngineValidator<N::Payload>,
@@ -159,7 +159,7 @@ mod tests {
     };
     use reth_prune::Pruner;
     use reth_tasks::TokioTaskExecutor;
-    use reth_trie_db::changesets::ChangesetCacheHandle;
+    use reth_trie_db::ChangesetCache;
     use std::sync::Arc;
     use tokio::sync::{mpsc::unbounded_channel, watch};
     use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -192,7 +192,7 @@ mod tests {
         let pruner = Pruner::new_with_factory(provider_factory.clone(), vec![], 0, 0, None, rx);
         let evm_config = EthEvmConfig::new(chain_spec.clone());
 
-        let changeset_cache = ChangesetCacheHandle::new();
+        let changeset_cache = ChangesetCache::new();
 
         let engine_validator = BasicEngineValidator::new(
             blockchain_db.clone(),

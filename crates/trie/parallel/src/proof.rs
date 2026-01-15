@@ -322,7 +322,7 @@ mod tests {
 
         let rt = Runtime::new().unwrap();
 
-        let changeset_cache = reth_trie_db::changesets::ChangesetCacheHandle::new();
+        let changeset_cache = reth_trie_db::ChangesetCache::new();
         let factory =
             reth_provider::providers::OverlayStateProviderFactory::new(factory, changeset_cache);
         let task_ctx = ProofTaskCtx::new(factory);
