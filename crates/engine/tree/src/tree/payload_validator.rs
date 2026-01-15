@@ -1033,6 +1033,16 @@ where
             return TrieInputSorted::default();
         }
 
+        // Single block: return Arc directly without cloning
+        if blocks.len() == 1 {
+            let data = blocks[0].trie_data();
+            return TrieInputSorted {
+                state: Arc::clone(&data.hashed_state),
+                nodes: Arc::clone(&data.trie_updates),
+                prefix_sets: Default::default(),
+            };
+        }
+
         if blocks.len() < MERGE_BATCH_THRESHOLD {
             // Small k: extend_ref loop is faster
             // Iterate oldest->newest so newer values override older ones
@@ -1040,21 +1050,19 @@ where
             let first = blocks_iter.next().expect("blocks is non-empty");
             let data = first.trie_data();
 
-            // Clone data directly - avoid Arc::clone + Arc::make_mut (which clones anyway)
-            let mut state = data.hashed_state.as_ref().clone();
-            let mut nodes = data.trie_updates.as_ref().clone();
+            // Use Arc::make_mut to avoid cloning if Arc is uniquely owned
+            let mut state = Arc::clone(&data.hashed_state);
+            let mut nodes = Arc::clone(&data.trie_updates);
+            let state_mut = Arc::make_mut(&mut state);
+            let nodes_mut = Arc::make_mut(&mut nodes);
 
             for block in blocks_iter {
                 let data = block.trie_data();
-                state.extend_ref(data.hashed_state.as_ref());
-                nodes.extend_ref(data.trie_updates.as_ref());
+                state_mut.extend_ref(data.hashed_state.as_ref());
+                nodes_mut.extend_ref(data.trie_updates.as_ref());
             }
 
-            TrieInputSorted {
-                state: Arc::new(state),
-                nodes: Arc::new(nodes),
-                prefix_sets: Default::default(),
-            }
+            TrieInputSorted { state, nodes, prefix_sets: Default::default() }
         } else {
             // Large k: merge_batch is faster (O(n log k) via k-way merge)
             let trie_data: Vec<_> = blocks.iter().map(|b| b.trie_data()).collect();
