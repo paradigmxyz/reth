@@ -443,6 +443,41 @@ where
             Self::RocksDB(batch) => batch.delete::<tables::TransactionHashNumbers>(hash),
         }
     }
+
+    /// Puts multiple transaction hash number mappings from a pre-sorted slice.
+    ///
+    /// The entries MUST be pre-sorted by transaction hash for optimal B-tree database performance.
+    /// Uses `cursor.upsert()` which handles arbitrary insertion order and duplicates.
+    ///
+    /// # Panics
+    ///
+    /// Panics in debug builds if entries are not sorted by transaction hash.
+    pub fn put_transaction_hash_numbers_sorted(
+        &mut self,
+        entries: &[(TxHash, TxNumber)],
+    ) -> ProviderResult<()> {
+        debug_assert!(
+            entries.is_sorted_by_key(|entry| entry.0),
+            "Entries must be sorted by transaction hash"
+        );
+
+        match self {
+            Self::Database(cursor) => {
+                for (hash, tx_num) in entries {
+                    cursor.upsert(*hash, tx_num)?;
+                }
+                Ok(())
+            }
+            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
+            #[cfg(all(unix, feature = "rocksdb"))]
+            Self::RocksDB(batch) => {
+                for (hash, tx_num) in entries {
+                    batch.put::<tables::TransactionHashNumbers>(*hash, tx_num)?;
+                }
+                Ok(())
+            }
+        }
+    }
 }
 
 impl<'a, CURSOR, N: NodePrimitives> EitherWriter<'a, CURSOR, N>

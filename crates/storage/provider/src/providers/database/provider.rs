@@ -373,11 +373,46 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         debug!(target: "providers::db", block_count = %blocks.len(), "Writing blocks and execution data to storage");
 
         // Accumulate durations for each step
+        let mut duration_insert_tx_hash_numbers = Duration::ZERO;
         let mut total_insert_block = Duration::ZERO;
         let mut total_write_state = Duration::ZERO;
         let mut total_write_hashed_state = Duration::ZERO;
         let mut total_write_trie_changesets = Duration::ZERO;
         let mut total_write_trie_updates = Duration::ZERO;
+
+        // Collect all transaction hash-number pairs and insert them sorted by hash
+        if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
+            let start = Instant::now();
+
+            // Get the starting transaction number
+            let mut next_tx_num = self
+                .tx
+                .cursor_read::<tables::TransactionBlocks>()?
+                .last()?
+                .map(|(n, _)| n + 1)
+                .unwrap_or_default();
+
+            // Collect (hash, tx_num) pairs in block order
+            let mut tx_hash_numbers = Vec::new();
+            for block in &blocks {
+                for transaction in block.recovered_block().body().transactions_iter() {
+                    tx_hash_numbers.push((*transaction.tx_hash(), next_tx_num));
+                    next_tx_num += 1;
+                }
+            }
+
+            // Sort by transaction hash for optimal database performance
+            tx_hash_numbers.sort_unstable_by_key(|(hash, _)| *hash);
+
+            // Batch insert all transaction hash numbers
+            self.with_rocksdb_batch(|batch| {
+                let mut writer = EitherWriter::new_transaction_hash_numbers(self, batch)?;
+                writer.put_transaction_hash_numbers_sorted(&tx_hash_numbers)?;
+                Ok(((), writer.into_raw_rocksdb_batch()))
+            })?;
+
+            duration_insert_tx_hash_numbers = start.elapsed();
+        }
 
         // TODO: Do performant / batched writes for each type of object
         // instead of a loop over all blocks,
@@ -387,14 +422,14 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         //  * hashed state
         //  * trie updates (cannot naively extend, need helper)
         //  * indices (already done basically)
-        // Insert the blocks
+        // Insert the blocks (transaction hash numbers already inserted above)
         for block in blocks {
             let trie_data = block.trie_data();
             let ExecutedBlock { recovered_block, execution_output, .. } = block;
             let block_number = recovered_block.number();
 
             let start = Instant::now();
-            self.insert_block(&recovered_block)?;
+            self.insert_block_inner(&recovered_block, false)?;
             total_insert_block += start.elapsed();
 
             // Write state and changesets to the database.
@@ -428,6 +463,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let duration_update_pipeline_stages = start.elapsed();
 
         // Record all metrics at the end
+        self.metrics.record_duration(
+            metrics::Action::InsertTransactionHashNumbers,
+            duration_insert_tx_hash_numbers,
+        );
         self.metrics.record_duration(metrics::Action::SaveBlocksInsertBlock, total_insert_block);
         self.metrics.record_duration(metrics::Action::SaveBlocksWriteState, total_write_state);
         self.metrics
@@ -3030,36 +3069,15 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockExecu
     }
 }
 
-impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWriter
-    for DatabaseProvider<TX, N>
-{
-    type Block = BlockTy<N>;
-    type Receipt = ReceiptTy<N>;
-
-    /// Inserts the block into the database, always modifying the following static file segments and
-    /// tables:
-    /// * [`StaticFileSegment::Headers`]
-    /// * [`tables::HeaderNumbers`]
-    /// * [`tables::BlockBodyIndices`]
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> DatabaseProvider<TX, N> {
+    /// Internal implementation of `insert_block` with optional transaction hash insertion.
     ///
-    /// If there are transactions in the block, the following static file segments and tables will
-    /// be modified:
-    /// * [`StaticFileSegment::Transactions`]
-    /// * [`tables::TransactionBlocks`]
-    ///
-    /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
-    /// If withdrawals are not empty, this will modify
-    /// [`BlockWithdrawals`](tables::BlockWithdrawals).
-    ///
-    /// If the provider has __not__ configured full sender pruning, this will modify either:
-    /// * [`StaticFileSegment::TransactionSenders`] if senders are written to static files
-    /// * [`tables::TransactionSenders`] if senders are written to the database
-    ///
-    /// If the provider has __not__ configured full transaction lookup pruning, this will modify
-    /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
-    fn insert_block(
+    /// When `insert_tx_hashes` is false, transaction hash numbers are not inserted.
+    /// This allows batch insertion of sorted transaction hashes in `save_blocks`.
+    fn insert_block_inner(
         &self,
-        block: &RecoveredBlock<Self::Block>,
+        block: &RecoveredBlock<BlockTy<N>>,
+        insert_tx_hashes: bool,
     ) -> ProviderResult<StoredBlockBodyIndices> {
         let block_number = block.number();
         let tx_count = block.body().transaction_count() as u64;
@@ -3091,13 +3109,19 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
             durations_recorder.record_relative(metrics::Action::InsertTransactionSenders);
         }
 
-        if self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
+        if insert_tx_hashes && self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full()) {
+            // Collect (hash, tx_num) pairs
+            let mut tx_hash_numbers: Vec<(TxHash, TxNumber)> = tx_nums_iter
+                .zip(block.body().transactions_iter())
+                .map(|(tx_num, transaction)| (*transaction.tx_hash(), tx_num))
+                .collect();
+
+            // Sort by transaction hash for optimal database performance
+            tx_hash_numbers.sort_unstable_by_key(|(hash, _)| *hash);
+
             self.with_rocksdb_batch(|batch| {
                 let mut writer = EitherWriter::new_transaction_hash_numbers(self, batch)?;
-                for (tx_num, transaction) in tx_nums_iter.zip(block.body().transactions_iter()) {
-                    let hash = transaction.tx_hash();
-                    writer.put_transaction_hash_number(*hash, tx_num, false)?;
-                }
+                writer.put_transaction_hash_numbers_sorted(&tx_hash_numbers)?;
                 Ok(((), writer.into_raw_rocksdb_batch()))
             })?;
             durations_recorder.record_relative(metrics::Action::InsertTransactionHashNumbers);
@@ -3113,6 +3137,41 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWrite
         );
 
         Ok(StoredBlockBodyIndices { first_tx_num, tx_count })
+    }
+}
+
+impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider + 'static> BlockWriter
+    for DatabaseProvider<TX, N>
+{
+    type Block = BlockTy<N>;
+    type Receipt = ReceiptTy<N>;
+
+    /// Inserts the block into the database, always modifying the following static file segments and
+    /// tables:
+    /// * [`StaticFileSegment::Headers`]
+    /// * [`tables::HeaderNumbers`]
+    /// * [`tables::BlockBodyIndices`]
+    ///
+    /// If there are transactions in the block, the following static file segments and tables will
+    /// be modified:
+    /// * [`StaticFileSegment::Transactions`]
+    /// * [`tables::TransactionBlocks`]
+    ///
+    /// If ommers are not empty, this will modify [`BlockOmmers`](tables::BlockOmmers).
+    /// If withdrawals are not empty, this will modify
+    /// [`BlockWithdrawals`](tables::BlockWithdrawals).
+    ///
+    /// If the provider has __not__ configured full sender pruning, this will modify either:
+    /// * [`StaticFileSegment::TransactionSenders`] if senders are written to static files
+    /// * [`tables::TransactionSenders`] if senders are written to the database
+    ///
+    /// If the provider has __not__ configured full transaction lookup pruning, this will modify
+    /// [`TransactionHashNumbers`](tables::TransactionHashNumbers).
+    fn insert_block(
+        &self,
+        block: &RecoveredBlock<Self::Block>,
+    ) -> ProviderResult<StoredBlockBodyIndices> {
+        self.insert_block_inner(block, true)
     }
 
     fn append_block_bodies(
