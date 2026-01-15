@@ -142,12 +142,12 @@ export const opRethCliSidebar: SidebarItem = {
                                     link: "/cli/op-reth/db/settings/set/storages_history"
                                 },
                                 {
-                                    text: "op-reth db settings set account_history",
-                                    link: "/cli/op-reth/db/settings/set/account_history"
+                                    text: "op-reth db settings set transaction_hash_numbers",
+                                    link: "/cli/op-reth/db/settings/set/transaction_hash_numbers"
                                 },
                                 {
-                                    text: "op-reth db settings set tx_hash_numbers",
-                                    link: "/cli/op-reth/db/settings/set/tx_hash_numbers"
+                                    text: "op-reth db settings set account_history",
+                                    link: "/cli/op-reth/db/settings/set/account_history"
                                 }
                             ]
                         }

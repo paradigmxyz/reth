@@ -88,7 +88,7 @@ use std::{
     thread,
     time::Instant,
 };
-use tracing::{debug, trace};
+use tracing::{debug, instrument, trace};
 
 /// A [`DatabaseProvider`] that holds a read-only database transaction.
 pub type DatabaseProviderRO<DB, N> = DatabaseProvider<<DB as Database>::TX, N>;
@@ -126,7 +126,7 @@ impl<DB: Database, N: NodeTypes> AsRef<DatabaseProvider<<DB as Database>::TXMut,
 
 impl<DB: Database, N: NodeTypes + 'static> DatabaseProviderRW<DB, N> {
     /// Commit database transaction and static file if it exists.
-    pub fn commit(self) -> ProviderResult<bool> {
+    pub fn commit(self) -> ProviderResult<()> {
         self.0.commit()
     }
 
@@ -188,6 +188,7 @@ pub struct DatabaseProvider<TX, N: NodeTypes> {
     /// `RocksDB` provider
     rocksdb_provider: RocksDBProvider,
     /// Pending `RocksDB` batches to be committed at provider commit time.
+    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     pending_rocksdb_batches: PendingRocksDBBatches,
     /// Minimum distance from tip required for pruning
     minimum_pruning_distance: u64,
@@ -402,6 +403,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     }
 
     /// Creates the context for `RocksDB` writes.
+    #[cfg_attr(not(all(unix, feature = "rocksdb")), allow(dead_code))]
     fn rocksdb_write_ctx(&self, first_block: BlockNumber) -> RocksDBWriteCtx {
         RocksDBWriteCtx {
             first_block_number: first_block,
@@ -419,6 +421,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
     ///
     /// Use [`SaveBlocksMode::Full`] for production (includes receipts, state, trie).
     /// Use [`SaveBlocksMode::BlocksOnly`] for block structure only (used by `insert_block`).
+    #[instrument(level = "debug", target = "providers::db", skip_all, fields(block_count = blocks.len()))]
     pub fn save_blocks(
         &self,
         blocks: Vec<ExecutedBlock<N::Primitives>>,
@@ -459,7 +462,9 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         // avoid capturing &self.tx in scope below.
         let sf_provider = &self.static_file_provider;
         let sf_ctx = self.static_file_write_ctx(save_mode, first_number, last_block_number)?;
+        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_provider = self.rocksdb_provider.clone();
+        #[cfg(all(unix, feature = "rocksdb"))]
         let rocksdb_ctx = self.rocksdb_write_ctx(first_number);
 
         thread::scope(|s| {
@@ -471,6 +476,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             });
 
             // RocksDB writes
+            #[cfg(all(unix, feature = "rocksdb"))]
             let rocksdb_handle = rocksdb_ctx.storage_settings.any_in_rocksdb().then(|| {
                 s.spawn(|| {
                     let start = Instant::now();
@@ -481,6 +487,39 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // MDBX writes
             let mdbx_start = Instant::now();
+
+            // Collect all transaction hashes across all blocks, sort them, and write in batch
+            if !self.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
+                self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
+            {
+                let start = Instant::now();
+                let mut all_tx_hashes = Vec::new();
+                for (i, block) in blocks.iter().enumerate() {
+                    let recovered_block = block.recovered_block();
+                    let mut tx_num = tx_nums[i];
+                    for transaction in recovered_block.body().transactions_iter() {
+                        all_tx_hashes.push((*transaction.tx_hash(), tx_num));
+                        tx_num += 1;
+                    }
+                }
+
+                // Sort by hash for optimal MDBX insertion performance
+                all_tx_hashes.sort_unstable_by_key(|(hash, _)| *hash);
+
+                // Write all transaction hash numbers in a single batch
+                self.with_rocksdb_batch(|batch| {
+                    let mut tx_hash_writer =
+                        EitherWriter::new_transaction_hash_numbers(self, batch)?;
+                    tx_hash_writer.put_transaction_hash_numbers_batch(all_tx_hashes, false)?;
+                    let raw_batch = tx_hash_writer.into_raw_rocksdb_batch();
+                    Ok(((), raw_batch))
+                })?;
+                self.metrics.record_duration(
+                    metrics::Action::InsertTransactionHashNumbers,
+                    start.elapsed(),
+                );
+            }
+
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -547,8 +586,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             if let Some(handle) = rocksdb_handle {
                 timings.rocksdb = handle.join().expect("RocksDB thread panicked")?;
             }
-            #[cfg(not(all(unix, feature = "rocksdb")))]
-            let _ = rocksdb_handle;
 
             timings.total = total_start.elapsed();
 
@@ -559,9 +596,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         })
     }
 
-    /// Writes MDBX-only data for a block (eg. indices, lookups, and senders).
+    /// Writes MDBX-only data for a block (indices, lookups, and senders if configured for MDBX).
     ///
     /// SF data (headers, transactions, senders if SF, receipts if SF) must be written separately.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn insert_block_mdbx_only(
         &self,
         block: &RecoveredBlock<BlockTy<N>>,
@@ -586,21 +624,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let start = Instant::now();
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         self.metrics.record_duration(metrics::Action::InsertHeaderNumbers, start.elapsed());
-
-        // Write tx hash numbers to MDBX if not handled by RocksDB and not fully pruned
-        if !self.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
-            self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
-        {
-            let start = Instant::now();
-            let mut cursor = self.tx.cursor_write::<tables::TransactionHashNumbers>()?;
-            let mut tx_num = first_tx_num;
-            for transaction in block.body().transactions_iter() {
-                cursor.upsert(*transaction.tx_hash(), &tx_num)?;
-                tx_num += 1;
-            }
-            self.metrics
-                .record_duration(metrics::Action::InsertTransactionHashNumbers, start.elapsed());
-        }
 
         self.write_block_body_indices(block_number, block.body(), first_tx_num, tx_count)?;
 
@@ -1858,6 +1881,7 @@ impl<TX: DbTxMut, N: NodeTypes> StageCheckpointWriter for DatabaseProvider<TX, N
         Ok(self.tx.put::<tables::StageCheckpointProgresses>(id.to_string(), checkpoint)?)
     }
 
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_pipeline_stages(
         &self,
         block_number: BlockNumber,
@@ -1948,6 +1972,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
 {
     type Receipt = ReceiptTy<N>;
 
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_state(
         &self,
         execution_outcome: &ExecutionOutcome<Self::Receipt>,
@@ -2185,6 +2210,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         Ok(())
     }
 
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_hashed_state(&self, hashed_state: &HashedPostStateSorted) -> ProviderResult<()> {
         // Write hashed account updates.
         let mut hashed_accounts_cursor = self.tx_ref().cursor_write::<tables::HashedAccounts>()?;
@@ -2478,6 +2504,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     /// Writes trie updates to the database with already sorted updates.
     ///
     /// Returns the number of entries modified.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_trie_updates_sorted(&self, trie_updates: &TrieUpdatesSorted) -> ProviderResult<usize> {
         if trie_updates.is_empty() {
             return Ok(0)
@@ -2521,6 +2548,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> TrieWriter for DatabaseProvider
     /// the same `TrieUpdates`.
     ///
     /// Returns the number of keys written.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn write_trie_changesets(
         &self,
         block_number: BlockNumber,
@@ -3116,6 +3144,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> HistoryWriter
         })
     }
 
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
     fn update_history_indices(&self, range: RangeInclusive<BlockNumber>) -> ProviderResult<()> {
         let storage_settings = self.cached_storage_settings();
         if !storage_settings.account_history_in_rocksdb {
@@ -3518,7 +3547,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
     }
 
     /// Commit database transaction, static files, and pending `RocksDB` batches.
-    fn commit(self) -> ProviderResult<bool> {
+    fn commit(self) -> ProviderResult<()> {
         // For unwinding it makes more sense to commit the database first, since if
         // it is interrupted before the static files commit, we can just
         // truncate the static files according to the
@@ -3560,7 +3589,7 @@ impl<TX: DbTx + 'static, N: NodeTypes + 'static> DBProvider for DatabaseProvider
             self.metrics.record_commit(&timings);
         }
 
-        Ok(true)
+        Ok(())
     }
 }
 

@@ -81,11 +81,15 @@ backon.workspace = true
 tempfile.workspace = true
 
 [features]
-default = ["jemalloc", "otlp", "reth-revm/portable", "js-tracer", "keccak-cache-global", "asm-keccak"]
+default = ["jemalloc", "otlp", "otlp-logs", "reth-revm/portable", "js-tracer", "keccak-cache-global", "asm-keccak"]
 
 otlp = [
     "reth-ethereum-cli/otlp",
     "reth-node-core/otlp",
+]
+otlp-logs = [
+    "reth-ethereum-cli/otlp-logs",
+    "reth-node-core/otlp-logs",
 ]
 js-tracer = [
     "reth-node-builder/js-tracer",

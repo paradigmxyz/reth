@@ -535,6 +535,60 @@ pub fn needs_prev_shard_check(
     rank == 0 && found_block != Some(block_number)
 }
 
+/// Generic history lookup for sharded history tables.
+///
+/// Seeks to the shard containing `block_number`, verifies the key via `key_filter`,
+/// and checks previous shard to detect if we're before the first write.
+pub fn history_info<T, K, C>(
+    cursor: &mut C,
+    key: K,
+    block_number: BlockNumber,
+    key_filter: impl Fn(&K) -> bool,
+    lowest_available_block_number: Option<BlockNumber>,
+) -> ProviderResult<HistoryInfo>
+where
+    T: Table<Key = K, Value = BlockNumberList>,
+    C: DbCursorRO<T>,
+{
+    // Lookup the history chunk in the history index. If the key does not appear in the
+    // index, the first chunk for the next key will be returned so we filter out chunks that
+    // have a different key.
+    if let Some(chunk) = cursor.seek(key)?.filter(|(k, _)| key_filter(k)).map(|x| x.1) {
+        // Get the rank of the first entry before or equal to our block.
+        let mut rank = chunk.rank(block_number);
+
+        // Adjust the rank, so that we have the rank of the first entry strictly before our
+        // block (not equal to it).
+        if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
+            rank -= 1;
+        }
+
+        let found_block = chunk.select(rank);
+
+        // If our block is before the first entry in the index chunk and this first entry
+        // doesn't equal to our block, it might be before the first write ever. To check, we
+        // look at the previous entry and check if the key is the same.
+        // This check is worth it, the `cursor.prev()` check is rarely triggered (the if will
+        // short-circuit) and when it passes we save a full seek into the changeset/plain state
+        // table.
+        let is_before_first_write = needs_prev_shard_check(rank, found_block, block_number) &&
+            !cursor.prev()?.is_some_and(|(k, _)| key_filter(&k));
+
+        Ok(HistoryInfo::from_lookup(
+            found_block,
+            is_before_first_write,
+            lowest_available_block_number,
+        ))
+    } else if lowest_available_block_number.is_some() {
+        // The key may have been written, but due to pruning we may not have changesets and
+        // history, so we need to make a plain state lookup.
+        Ok(HistoryInfo::MaybeInPlainState)
+    } else {
+        // The key has not been written to at all.
+        Ok(HistoryInfo::NotYetWritten)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::needs_prev_shard_check;

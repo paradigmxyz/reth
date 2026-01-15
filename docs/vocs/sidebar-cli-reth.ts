@@ -146,12 +146,12 @@ export const rethCliSidebar: SidebarItem = {
                                     link: "/cli/reth/db/settings/set/storages_history"
                                 },
                                 {
-                                    text: "reth db settings set account_history",
-                                    link: "/cli/reth/db/settings/set/account_history"
+                                    text: "reth db settings set transaction_hash_numbers",
+                                    link: "/cli/reth/db/settings/set/transaction_hash_numbers"
                                 },
                                 {
-                                    text: "reth db settings set tx_hash_numbers",
-                                    link: "/cli/reth/db/settings/set/tx_hash_numbers"
+                                    text: "reth db settings set account_history",
+                                    link: "/cli/reth/db/settings/set/account_history"
                                 }
                             ]
                         }

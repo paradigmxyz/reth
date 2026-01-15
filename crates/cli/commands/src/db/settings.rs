@@ -54,18 +54,18 @@ pub enum SetCommand {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
-    /// Store storages history in RocksDB instead of MDBX
+    /// Store storage history in `RocksDB` instead of MDBX
     StoragesHistory {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
-    /// Store account history in RocksDB instead of MDBX
-    AccountHistory {
+    /// Store transaction hash to number mapping in `RocksDB` instead of MDBX
+    TransactionHashNumbers {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
-    /// Store transaction hash numbers in RocksDB instead of MDBX
-    TxHashNumbers {
+    /// Store account history in `RocksDB` instead of MDBX
+    AccountHistory {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
@@ -151,6 +151,14 @@ impl Command {
                 settings.storages_history_in_rocksdb = value;
                 println!("Set storages_history_in_rocksdb = {}", value);
             }
+            SetCommand::TransactionHashNumbers { value } => {
+                if settings.transaction_hash_numbers_in_rocksdb == value {
+                    println!("transaction_hash_numbers_in_rocksdb is already set to {}", value);
+                    return Ok(());
+                }
+                settings.transaction_hash_numbers_in_rocksdb = value;
+                println!("Set transaction_hash_numbers_in_rocksdb = {}", value);
+            }
             SetCommand::AccountHistory { value } => {
                 if settings.account_history_in_rocksdb == value {
                     println!("account_history_in_rocksdb is already set to {}", value);
@@ -158,14 +166,6 @@ impl Command {
                 }
                 settings.account_history_in_rocksdb = value;
                 println!("Set account_history_in_rocksdb = {}", value);
-            }
-            SetCommand::TxHashNumbers { value } => {
-                if settings.transaction_hash_numbers_in_rocksdb == value {
-                    println!("transaction_hash_numbers_in_rocksdb is already set to {}", value);
-                    return Ok(());
-                }
-                settings.transaction_hash_numbers_in_rocksdb = value;
-                println!("Set transaction_hash_numbers_in_rocksdb = {}", value);
             }
         }
 
