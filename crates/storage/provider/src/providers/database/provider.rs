@@ -2,7 +2,6 @@ use crate::{
     changesets_utils::{
         storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
     },
-    either_writer::EitherWriter,
     providers::{
         database::{chain::ChainStorage, metrics},
         rocksdb::RocksDBProvider,
@@ -464,39 +463,6 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
 
             // MDBX writes
             let mdbx_start = Instant::now();
-
-            // Collect all transaction hashes across all blocks, sort them, and write in batch
-            if !self.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
-                self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
-            {
-                let start = Instant::now();
-                let mut all_tx_hashes = Vec::new();
-                for (i, block) in blocks.iter().enumerate() {
-                    let recovered_block = block.recovered_block();
-                    let mut tx_num = tx_nums[i];
-                    for transaction in recovered_block.body().transactions_iter() {
-                        all_tx_hashes.push((*transaction.tx_hash(), tx_num));
-                        tx_num += 1;
-                    }
-                }
-
-                // Sort by hash for optimal MDBX insertion performance
-                all_tx_hashes.sort_unstable_by_key(|(hash, _)| *hash);
-
-                // Write all transaction hash numbers in a single batch
-                self.with_rocksdb_batch(|batch| {
-                    let mut tx_hash_writer =
-                        EitherWriter::new_transaction_hash_numbers(self, batch)?;
-                    tx_hash_writer.put_transaction_hash_numbers_batch(all_tx_hashes, false)?;
-                    let raw_batch = tx_hash_writer.into_raw_rocksdb_batch();
-                    Ok(((), raw_batch))
-                })?;
-                self.metrics.record_duration(
-                    metrics::Action::InsertTransactionHashNumbers,
-                    start.elapsed(),
-                );
-            }
-
             for (i, block) in blocks.iter().enumerate() {
                 let recovered_block = block.recovered_block();
 
@@ -595,6 +561,21 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let start = Instant::now();
         self.tx.put::<tables::HeaderNumbers>(block.hash(), block_number)?;
         self.metrics.record_duration(metrics::Action::InsertHeaderNumbers, start.elapsed());
+
+        // Write tx hash numbers to MDBX if not handled by RocksDB and not fully pruned
+        if !self.cached_storage_settings().transaction_hash_numbers_in_rocksdb &&
+            self.prune_modes.transaction_lookup.is_none_or(|m| !m.is_full())
+        {
+            let start = Instant::now();
+            let mut cursor = self.tx.cursor_write::<tables::TransactionHashNumbers>()?;
+            let mut tx_num = first_tx_num;
+            for transaction in block.body().transactions_iter() {
+                cursor.upsert(*transaction.tx_hash(), &tx_num)?;
+                tx_num += 1;
+            }
+            self.metrics
+                .record_duration(metrics::Action::InsertTransactionHashNumbers, start.elapsed());
+        }
 
         self.write_block_body_indices(block_number, block.body(), first_tx_num, tx_count)?;
 

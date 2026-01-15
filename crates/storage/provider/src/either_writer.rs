@@ -429,41 +429,6 @@ where
         }
     }
 
-    /// Puts multiple transaction hash number mappings in a batch.
-    ///
-    /// Accepts a vector of `(TxHash, TxNumber)` tuples and writes them all using the same cursor.
-    /// This is more efficient than calling `put_transaction_hash_number` repeatedly.
-    ///
-    /// When `append_only` is true, uses `cursor.append()` which requires entries to be
-    /// pre-sorted and the table to be empty or have only lower keys.
-    /// When false, uses `cursor.upsert()` which handles arbitrary insertion order.
-    pub fn put_transaction_hash_numbers_batch(
-        &mut self,
-        entries: Vec<(TxHash, TxNumber)>,
-        append_only: bool,
-    ) -> ProviderResult<()> {
-        match self {
-            Self::Database(cursor) => {
-                for (hash, tx_num) in entries {
-                    if append_only {
-                        cursor.append(hash, &tx_num)?;
-                    } else {
-                        cursor.upsert(hash, &tx_num)?;
-                    }
-                }
-                Ok(())
-            }
-            Self::StaticFile(_) => Err(ProviderError::UnsupportedProvider),
-            #[cfg(all(unix, feature = "rocksdb"))]
-            Self::RocksDB(batch) => {
-                for (hash, tx_num) in entries {
-                    batch.put::<tables::TransactionHashNumbers>(hash, &tx_num)?;
-                }
-                Ok(())
-            }
-        }
-    }
-
     /// Deletes a transaction hash number mapping.
     pub fn delete_transaction_hash_number(&mut self, hash: TxHash) -> ProviderResult<()> {
         match self {
