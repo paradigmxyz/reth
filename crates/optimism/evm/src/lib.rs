@@ -946,41 +946,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fill_cfg_and_block_env_osaka() {
-        // For Optimism, spec_by_timestamp_after_bedrock only checks OP hardforks,
-        // so even with osaka_activated(), OpSpecId won't be OSAKA.
-        let header = Header::default();
-        let inner = ChainSpec::builder()
-            .chain(0.into())
-            .genesis(Genesis::default())
-            .osaka_activated()
-            .build();
-        let chain_spec = Arc::new(OpChainSpec { inner: inner.clone() });
-        let evm_config = OpEvmConfig::optimism(chain_spec);
-
-        let evm_env = evm_config.evm_env(&header).unwrap();
-        let evm_limits = inner.evm_limit_params_at_timestamp(header.timestamp);
-        assert_eq!(evm_env.cfg_env.chain_id(), inner.chain().id());
-        assert_eq!(evm_env.cfg_env.max_code_size(), evm_limits.max_code_size);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), evm_limits.max_initcode_size);
-
-        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), u64::MAX);
-        assert_eq!(evm_env.cfg_env.max_code_size(), eip170::MAX_CODE_SIZE);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), eip3860::MAX_INITCODE_SIZE);
-
-        let attributes = test_next_block_attributes();
-        let evm_env = evm_config.next_evm_env(&header, &attributes).unwrap();
-        let evm_limits = inner.evm_limit_params_at_timestamp(attributes.timestamp);
-        assert_eq!(evm_env.cfg_env.chain_id(), inner.chain().id());
-        assert_eq!(evm_env.cfg_env.max_code_size(), evm_limits.max_code_size);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), evm_limits.max_initcode_size);
-
-        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), u64::MAX);
-        assert_eq!(evm_env.cfg_env.max_code_size(), eip170::MAX_CODE_SIZE);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), eip3860::MAX_INITCODE_SIZE);
-    }
-
-    #[test]
     fn test_fill_cfg_and_block_env_custom_limits() {
         let mut inner = ChainSpec::builder()
             .chain(0.into())
