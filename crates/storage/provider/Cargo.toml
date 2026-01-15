@@ -53,6 +53,7 @@ parking_lot.workspace = true
 dashmap = { workspace = true, features = ["inline"] }
 strum.workspace = true
 eyre.workspace = true
+pretty_assertions.workspace = true
 
 # test-utils
 reth-ethereum-engine-primitives = { workspace = true, optional = true }
@@ -81,6 +82,7 @@ revm-state.workspace = true
 tempfile.workspace = true
 assert_matches.workspace = true
 rand.workspace = true
+pretty_assertions.workspace = true
 
 tokio = { workspace = true, features = ["sync", "macros", "rt-multi-thread"] }
 

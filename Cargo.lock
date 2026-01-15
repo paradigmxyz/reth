@@ -10197,6 +10197,7 @@ dependencies = [
  "metrics",
  "notify",
  "parking_lot",
+ "pretty_assertions",
  "rand 0.9.2",
  "rayon",
  "reth-chain-state",

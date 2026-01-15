@@ -46,6 +46,7 @@ pub(crate) enum Action {
     SaveBlocksInsertBlock,
     SaveBlocksWriteState,
     SaveBlocksWriteHashedState,
+    SaveBlocksWriteTrieChangesets,
     SaveBlocksWriteTrieUpdates,
     SaveBlocksUpdateHistoryIndices,
     SaveBlocksUpdatePipelineStages,
@@ -84,6 +85,8 @@ pub(crate) struct DatabaseProviderMetrics {
     save_blocks_write_state: Histogram,
     /// Duration of `write_hashed_state` in `save_blocks`
     save_blocks_write_hashed_state: Histogram,
+    /// Duration of `write_trie_changesets` in `save_blocks`
+    save_blocks_write_trie_changesets: Histogram,
     /// Duration of `write_trie_updates` in `save_blocks`
     save_blocks_write_trie_updates: Histogram,
     /// Duration of `update_history_indices` in `save_blocks`
@@ -113,6 +116,9 @@ impl DatabaseProviderMetrics {
             Action::SaveBlocksWriteState => self.save_blocks_write_state.record(duration),
             Action::SaveBlocksWriteHashedState => {
                 self.save_blocks_write_hashed_state.record(duration)
+            }
+            Action::SaveBlocksWriteTrieChangesets => {
+                self.save_blocks_write_trie_changesets.record(duration)
             }
             Action::SaveBlocksWriteTrieUpdates => {
                 self.save_blocks_write_trie_updates.record(duration)

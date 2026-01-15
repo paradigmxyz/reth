@@ -1,5 +1,7 @@
 use crate::{
-    changesets_utils::StorageRevertsIter,
+    changesets_utils::{
+        storage_trie_wiped_changeset_iter, StorageRevertsIter, StorageTrieCurrentValuesIter,
+    },
     providers::{
         database::{chain::ChainStorage, metrics},
         rocksdb::RocksDBProvider,
@@ -64,10 +66,9 @@ use reth_storage_api::{
 };
 use reth_storage_errors::provider::ProviderResult;
 use reth_trie::{
-    changesets::storage_trie_wiped_changeset_iter,
     trie_cursor::{
         InMemoryTrieCursor, InMemoryTrieCursorFactory, TrieCursor, TrieCursorFactory,
-        TrieCursorIter, TrieStorageCursor,
+        TrieCursorIter,
     },
     updates::{StorageTrieUpdatesSorted, TrieUpdatesSorted},
     HashedPostStateSorted, StoredNibbles, StoredNibblesSubKey, TrieChangeSetsEntry,
@@ -375,6 +376,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         let mut total_insert_block = Duration::ZERO;
         let mut total_write_state = Duration::ZERO;
         let mut total_write_hashed_state = Duration::ZERO;
+        let mut total_write_trie_changesets = Duration::ZERO;
         let mut total_write_trie_updates = Duration::ZERO;
 
         // TODO: Do performant / batched writes for each type of object
@@ -389,6 +391,7 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         for block in blocks {
             let trie_data = block.trie_data();
             let ExecutedBlock { recovered_block, execution_output, .. } = block;
+            let block_number = recovered_block.number();
 
             let start = Instant::now();
             self.insert_block(&recovered_block)?;
@@ -404,6 +407,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
             let start = Instant::now();
             self.write_hashed_state(&trie_data.hashed_state)?;
             total_write_hashed_state += start.elapsed();
+
+            let start = Instant::now();
+            self.write_trie_changesets(recovered_block.number(), &trie_data.trie_updates, None)?;
+            total_write_trie_changesets += start.elapsed();
 
             let start = Instant::now();
             self.write_trie_updates_sorted(&trie_data.trie_updates)?;
@@ -425,6 +432,10 @@ impl<TX: DbTx + DbTxMut + 'static, N: NodeTypesForProvider> DatabaseProvider<TX,
         self.metrics.record_duration(metrics::Action::SaveBlocksWriteState, total_write_state);
         self.metrics
             .record_duration(metrics::Action::SaveBlocksWriteHashedState, total_write_hashed_state);
+        self.metrics.record_duration(
+            metrics::Action::SaveBlocksWriteTrieChangesets,
+            total_write_trie_changesets,
+        );
         self.metrics
             .record_duration(metrics::Action::SaveBlocksWriteTrieUpdates, total_write_trie_updates);
         self.metrics.record_duration(
@@ -1955,7 +1966,7 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypesForProvider> StateWriter
         }
 
         // Write account changes to static files
-        tracing::trace!(?first_block, "Writing account changes");
+        tracing::debug!(target: "sync::stages::merkle_changesets", ?first_block, "Writing account changes");
         for (block_index, account_block_reverts) in reverts.accounts.into_iter().enumerate() {
             let block_number = first_block + block_index as BlockNumber;
             let changeset = account_block_reverts
@@ -2608,11 +2619,22 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
 
         let mut changeset_cursor =
             self.tx_ref().cursor_dup_write::<tables::StoragesTrieChangeSets>()?;
-        let curr_values_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
 
-        // Wrap the cursor in DatabaseStorageTrieCursor
-        let mut db_storage_cursor = DatabaseStorageTrieCursor::new(
-            curr_values_cursor,
+        // We hold two cursors to the same table because we use them simultaneously when an
+        // account's storage is wiped. We keep them outside the for-loop so they can be re-used
+        // between accounts.
+        let changed_curr_values_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
+        let wiped_nodes_cursor = self.tx_ref().cursor_dup_read::<tables::StoragesTrie>()?;
+
+        // DatabaseStorageTrieCursor requires ownership of the cursor. The easiest way to deal with
+        // this is to create this outer variable with an initial dummy account, and overwrite it on
+        // every loop for every real account.
+        let mut changed_curr_values_cursor = DatabaseStorageTrieCursor::new(
+            changed_curr_values_cursor,
+            B256::default(), // Will be set per iteration
+        );
+        let mut wiped_nodes_cursor = DatabaseStorageTrieCursor::new(
+            wiped_nodes_cursor,
             B256::default(), // Will be set per iteration
         );
 
@@ -2622,22 +2644,43 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
         for (hashed_address, storage_trie_updates) in storage_tries {
             let changeset_key = BlockNumberHashedAddress((block_number, *hashed_address));
 
-            // Update the hashed address for the cursor
-            db_storage_cursor.set_hashed_address(*hashed_address);
+            // Update the hashed address for the cursors
+            changed_curr_values_cursor =
+                DatabaseStorageTrieCursor::new(changed_curr_values_cursor.cursor, *hashed_address);
 
             // Get the overlay updates, or use empty updates
             let overlay = updates_overlay.unwrap_or(&empty_updates);
 
             // Wrap the cursor in InMemoryTrieCursor with the overlay
-            let mut in_memory_storage_cursor =
-                InMemoryTrieCursor::new_storage(&mut db_storage_cursor, overlay, *hashed_address);
+            let mut in_memory_changed_cursor = InMemoryTrieCursor::new_storage(
+                &mut changed_curr_values_cursor,
+                overlay,
+                *hashed_address,
+            );
 
-            let changed_paths = storage_trie_updates.storage_nodes.iter().map(|e| e.0);
+            // Create an iterator which produces the current values of all updated paths, or None if
+            // they are currently unset.
+            let curr_values_of_changed = StorageTrieCurrentValuesIter::new(
+                storage_trie_updates.storage_nodes.iter().map(|e| e.0),
+                &mut in_memory_changed_cursor,
+            )?;
 
             if storage_trie_updates.is_deleted() {
-                let all_nodes = TrieCursorIter::new(&mut in_memory_storage_cursor);
+                // Create an iterator that starts from the beginning of the storage trie for this
+                // account
+                wiped_nodes_cursor =
+                    DatabaseStorageTrieCursor::new(wiped_nodes_cursor.cursor, *hashed_address);
 
-                for wiped in storage_trie_wiped_changeset_iter(changed_paths, all_nodes)? {
+                // Wrap the wiped nodes cursor in InMemoryTrieCursor with the overlay
+                let mut in_memory_wiped_cursor = InMemoryTrieCursor::new_storage(
+                    &mut wiped_nodes_cursor,
+                    overlay,
+                    *hashed_address,
+                );
+
+                let all_nodes = TrieCursorIter::new(&mut in_memory_wiped_cursor);
+
+                for wiped in storage_trie_wiped_changeset_iter(curr_values_of_changed, all_nodes)? {
                     let (path, node) = wiped?;
                     num_written += 1;
                     changeset_cursor.append_dup(
@@ -2646,8 +2689,8 @@ impl<TX: DbTxMut + DbTx + 'static, N: NodeTypes> StorageTrieWriter for DatabaseP
                     )?;
                 }
             } else {
-                for path in changed_paths {
-                    let node = in_memory_storage_cursor.seek_exact(path)?.map(|(_, node)| node);
+                for curr_value in curr_values_of_changed {
+                    let (path, node) = curr_value?;
                     num_written += 1;
                     changeset_cursor.append_dup(
                         changeset_key,
