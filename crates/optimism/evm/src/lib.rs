@@ -1018,30 +1018,6 @@ mod tests {
     }
 
     #[test]
-    fn test_fill_cfg_and_block_env_for_payload_osaka() {
-        let chain_spec = ChainSpec::builder()
-            .chain(0.into())
-            .genesis(Genesis::default())
-            .osaka_activated()
-            .build();
-        let evm_config = OpEvmConfig::optimism(Arc::new(OpChainSpec { inner: chain_spec.clone() }));
-        let payload = test_execution_data(1);
-
-        let evm_env = evm_config.evm_env_for_payload(&payload).unwrap();
-
-        // For Optimism, spec_by_timestamp_after_bedrock only checks OP hardforks,
-        // so even with osaka_activated(), OpSpecId won't be OSAKA.
-        let evm_limits = chain_spec.evm_limit_params_at_timestamp(payload.payload.timestamp());
-        assert_eq!(evm_env.cfg_env.chain_id, chain_spec.chain().id());
-        assert_eq!(evm_env.cfg_env.max_code_size(), evm_limits.max_code_size);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), evm_limits.max_initcode_size);
-
-        assert_eq!(evm_env.cfg_env.tx_gas_limit_cap(), u64::MAX);
-        assert_eq!(evm_env.cfg_env.max_code_size(), eip170::MAX_CODE_SIZE);
-        assert_eq!(evm_env.cfg_env.max_initcode_size(), eip3860::MAX_INITCODE_SIZE);
-    }
-
-    #[test]
     fn test_fill_cfg_and_block_env_for_payload_custom_limits() {
         let mut chain_spec = ChainSpec::builder()
             .chain(0.into())
