@@ -140,6 +140,10 @@ export const rethCliSidebar: SidebarItem = {
                                 {
                                     text: "reth db settings set account_changesets",
                                     link: "/cli/reth/db/settings/set/account_changesets"
+                                },
+                                {
+                                    text: "reth db settings set storage_changesets",
+                                    link: "/cli/reth/db/settings/set/storage_changesets"
                                 }
                             ]
                         }

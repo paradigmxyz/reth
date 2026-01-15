@@ -1,33 +1,18 @@
-# reth db get static-file
+# reth db settings set storage_changesets
 
-Gets the content of a static file segment for the given key
+Store storage changesets in static files instead of the database
 
 ```bash
-$ reth db get static-file --help
+$ reth db settings set storage_changesets --help
 ```
 ```txt
-Usage: reth db get static-file [OPTIONS] <SEGMENT> <KEY> [SUBKEY]
+Usage: reth db settings set storage_changesets [OPTIONS] <VALUE>
 
 Arguments:
-  <SEGMENT>
-          Possible values:
-          - headers:             Static File segment responsible for the `CanonicalHeaders`, `Headers`, `HeaderTerminalDifficulties` tables
-          - transactions:        Static File segment responsible for the `Transactions` table
-          - receipts:            Static File segment responsible for the `Receipts` table
-          - transaction-senders: Static File segment responsible for the `TransactionSenders` table
-          - account-change-sets: Static File segment responsible for the `AccountChangeSets` table
-          - storage-change-sets: Static File segment responsible for the `StorageChangeSets` table
-
-  <KEY>
-          The key to get content for
-
-  [SUBKEY]
-          The subkey to get content for, for example address in changeset
+  <VALUE>
+          [possible values: true, false]
 
 Options:
-      --raw
-          Output bytes instead of human-readable decoded value
-
   -h, --help
           Print help (see a summary with '-h')
 
@@ -110,24 +95,6 @@ Logging:
 
           [default: always]
 
-      --logs-otlp[=<URL>]
-          Enable `Opentelemetry` logs export to an OTLP endpoint.
-
-          If no value provided, defaults based on protocol: - HTTP: `http://localhost:4318/v1/logs` - gRPC: `http://localhost:4317`
-
-          Example: --logs-otlp=http://collector:4318/v1/logs
-
-          [env: OTEL_EXPORTER_OTLP_LOGS_ENDPOINT=]
-
-      --logs-otlp.filter <FILTER>
-          Set a filter directive for the OTLP logs exporter. This controls the verbosity of logs sent to the OTLP endpoint. It follows the same syntax as the `RUST_LOG` environment variable.
-
-          Example: --logs-otlp.filter=info,reth=debug
-
-          Defaults to INFO if not specified.
-
-          [default: info]
-
 Display:
   -v, --verbosity...
           Set the minimum log level.
@@ -152,9 +119,9 @@ Tracing:
           [env: OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=]
 
       --tracing-otlp-protocol <PROTOCOL>
-          OTLP transport protocol to use for exporting traces and logs.
+          OTLP transport protocol to use for exporting traces.
 
-          - `http`: expects endpoint path to end with `/v1/traces` or `/v1/logs` - `grpc`: expects endpoint without a path
+          - `http`: expects endpoint path to end with `/v1/traces` - `grpc`: expects endpoint without a path
 
           Defaults to HTTP if not specified.
 

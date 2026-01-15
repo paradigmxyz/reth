@@ -27,14 +27,14 @@ use reth_ethereum_primitives::EthPrimitives;
 use reth_execution_types::ExecutionOutcome;
 use reth_primitives_traits::{
     Account, Block, BlockBody, Bytecode, GotExpected, NodePrimitives, RecoveredBlock, SealedHeader,
-    SignerRecoverable,
+    SignerRecoverable, StorageEntry,
 };
 use reth_prune_types::{PruneCheckpoint, PruneModes, PruneSegment};
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_storage_api::{
     BlockBodyIndicesProvider, BytecodeReader, DBProvider, DatabaseProviderFactory,
     HashedPostStateProvider, NodePrimitivesProvider, StageCheckpointReader, StateProofProvider,
-    StorageRootProvider, TrieReader,
+    StorageChangeSetReader, StorageRootProvider, TrieReader,
 };
 use reth_storage_errors::provider::{ConsistentViewError, ProviderError, ProviderResult};
 use reth_trie::{
@@ -986,6 +986,37 @@ impl<T: NodePrimitives, ChainSpec: Send + Sync> ChangeSetReader for MockEthProvi
     }
 
     fn account_changeset_count(&self) -> ProviderResult<usize> {
+        Ok(0)
+    }
+}
+
+impl<T: NodePrimitives, ChainSpec: Send + Sync> StorageChangeSetReader
+    for MockEthProvider<T, ChainSpec>
+{
+    fn storage_changeset(
+        &self,
+        _block_number: BlockNumber,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn get_storage_before_block(
+        &self,
+        _block_number: BlockNumber,
+        _address: Address,
+        _storage_key: B256,
+    ) -> ProviderResult<Option<StorageEntry>> {
+        Ok(None)
+    }
+
+    fn storage_changesets_range(
+        &self,
+        _range: RangeInclusive<BlockNumber>,
+    ) -> ProviderResult<Vec<(reth_db_api::models::BlockNumberAddress, StorageEntry)>> {
+        Ok(Vec::default())
+    }
+
+    fn storage_changeset_count(&self) -> ProviderResult<usize> {
         Ok(0)
     }
 }

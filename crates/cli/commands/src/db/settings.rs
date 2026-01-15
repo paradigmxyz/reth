@@ -54,6 +54,11 @@ pub enum SetCommand {
         #[clap(action(ArgAction::Set))]
         value: bool,
     },
+    /// Store storage changesets in static files instead of the database
+    StorageChangesets {
+        #[clap(action(ArgAction::Set))]
+        value: bool,
+    },
 }
 
 impl Command {
@@ -100,6 +105,7 @@ impl Command {
             transaction_hash_numbers_in_rocksdb: _,
             account_history_in_rocksdb: _,
             account_changesets_in_static_files: _,
+            storage_changesets_in_static_files: _,
         } = settings.unwrap_or_else(StorageSettings::legacy);
 
         // Update the setting based on the key
@@ -127,6 +133,14 @@ impl Command {
                 }
                 settings.account_changesets_in_static_files = value;
                 println!("Set account_changesets_in_static_files = {}", value);
+            }
+            SetCommand::StorageChangesets { value } => {
+                if settings.storage_changesets_in_static_files == value {
+                    println!("storage_changesets_in_static_files is already set to {}", value);
+                    return Ok(());
+                }
+                settings.storage_changesets_in_static_files = value;
+                println!("Set storage_changesets_in_static_files = {}", value);
             }
         }
 

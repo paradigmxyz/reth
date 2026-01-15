@@ -14,7 +14,7 @@ use reth_db_api::{
     DatabaseError,
 };
 use reth_primitives_traits::StorageEntry;
-use reth_storage_api::{ChangeSetReader, DBProvider};
+use reth_storage_api::{ChangeSetReader, DBProvider, StorageChangeSetReader};
 use reth_storage_errors::provider::ProviderError;
 use reth_trie::{
     prefix_set::{PrefixSetMut, TriePrefixSets},
@@ -93,7 +93,7 @@ pub fn load_prefix_sets_with_provider<Provider, KH>(
     range: RangeInclusive<BlockNumber>,
 ) -> Result<TriePrefixSets, ProviderError>
 where
-    Provider: ChangeSetReader + DBProvider,
+    Provider: ChangeSetReader + StorageChangeSetReader + DBProvider,
     KH: KeyHasher,
 {
     let tx = provider.tx_ref();
@@ -118,12 +118,9 @@ where
         }
     }
 
-    // Walk storage changeset and insert storage prefixes
-    // Note: Storage changesets don't have static files yet, so we still use direct cursor
-    let mut storage_cursor = tx.cursor_dup_read::<tables::StorageChangeSets>()?;
-    let storage_range = BlockNumberAddress::range(range);
-    for storage_entry in storage_cursor.walk_range(storage_range)? {
-        let (BlockNumberAddress((_, address)), StorageEntry { key, .. }) = storage_entry?;
+    // Walk storage changesets using the provider (handles static files + database)
+    let storage_changesets = provider.storage_changesets_range(range)?;
+    for (BlockNumberAddress((_, address)), StorageEntry { key, .. }) in storage_changesets {
         let hashed_address = KH::hash_key(address);
         account_prefix_set.insert(Nibbles::unpack(hashed_address));
         storage_prefix_sets

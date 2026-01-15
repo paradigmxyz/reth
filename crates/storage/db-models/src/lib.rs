@@ -19,6 +19,10 @@ pub use accounts::AccountBeforeTx;
 pub mod blocks;
 pub use blocks::{StaticFileBlockWithdrawals, StoredBlockBodyIndices, StoredBlockWithdrawals};
 
+/// Storage
+pub mod storage;
+pub use storage::StorageBeforeTx;
+
 /// Client Version
 pub mod client_version;
 pub use client_version::ClientVersion;
