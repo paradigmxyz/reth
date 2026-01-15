@@ -149,10 +149,10 @@ where
         };
 
         // If the account was only read then don't add it to the HashedPostState
-        if balance.is_none() &&
-            nonce.is_none() &&
-            code_hash.is_none() &&
-            account_changes.storage_changes.is_empty()
+        if balance.is_none()
+            && nonce.is_none()
+            && code_hash.is_none()
+            && account_changes.storage_changes.is_empty()
         {
             continue;
         }
@@ -177,7 +177,7 @@ where
             let mut storage_map = HashedStorage::new(false);
 
             for slot_changes in &account_changes.storage_changes {
-                let hashed_slot = keccak256(&slot_changes.slot.to_be_bytes::<32>());
+                let hashed_slot = keccak256(slot_changes.slot.to_be_bytes::<32>());
 
                 // Get the last change for this slot
                 if let Some(last_change) = slot_changes.changes.last() {
@@ -256,10 +256,10 @@ mod tests {
         assert!(result.storages.contains_key(&hashed_address));
 
         let storage = result.storages.get(&hashed_address).unwrap();
-        let hashed_slot = keccak256(slot);
+        let hashed_slot = keccak256(slot.to_be_bytes::<32>());
 
         let stored_value = storage.storage.get(&hashed_slot).unwrap();
-        assert_eq!(*stored_value, U256::from_be_bytes(value.0));
+        assert_eq!(*stored_value, value);
     }
 
     #[test]
@@ -416,7 +416,7 @@ mod tests {
 
         let hashed_address = keccak256(address);
         let storage = result.storages.get(&hashed_address).unwrap();
-        let hashed_slot = keccak256(slot);
+        let hashed_slot = keccak256(slot.to_be_bytes::<32>());
 
         let stored_value = storage.storage.get(&hashed_slot).unwrap();
 
