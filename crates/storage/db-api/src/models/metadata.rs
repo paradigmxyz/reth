@@ -101,4 +101,11 @@ impl StorageSettings {
         self.account_changesets_in_static_files = value;
         self
     }
+
+    /// Returns `true` if any table is configured to be stored in `RocksDB`.
+    pub const fn any_in_rocksdb(&self) -> bool {
+        self.storages_history_in_rocksdb ||
+            self.transaction_hash_numbers_in_rocksdb ||
+            self.account_history_in_rocksdb
+    }
 }
