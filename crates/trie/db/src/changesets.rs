@@ -671,7 +671,7 @@ mod tests {
 
     #[test]
     fn test_insert_and_retrieve_single_entry() {
-        let mut cache = ChangesetCache::new();
+        let mut cache = ChangesetCacheInner::new();
         let hash = B256::random();
         let changesets = create_test_changesets();
 
@@ -685,7 +685,7 @@ mod tests {
 
     #[test]
     fn test_insert_multiple_entries() {
-        let mut cache = ChangesetCache::new();
+        let mut cache = ChangesetCacheInner::new();
 
         // Insert 10 blocks
         let mut hashes = Vec::new();
@@ -704,7 +704,7 @@ mod tests {
 
     #[test]
     fn test_eviction_when_explicitly_called() {
-        let mut cache = ChangesetCache::new();
+        let mut cache = ChangesetCacheInner::new();
 
         // Insert 15 blocks (0-14)
         let mut hashes = Vec::new();
@@ -736,7 +736,7 @@ mod tests {
 
     #[test]
     fn test_eviction_with_persistence_watermark() {
-        let mut cache = ChangesetCache::new();
+        let mut cache = ChangesetCacheInner::new();
 
         // Insert blocks 100-165
         let mut hashes = std::collections::HashMap::new();
@@ -768,7 +768,7 @@ mod tests {
 
     #[test]
     fn test_out_of_order_inserts_with_explicit_eviction() {
-        let mut cache = ChangesetCache::new();
+        let mut cache = ChangesetCacheInner::new();
 
         // Insert blocks in random order
         let hash_10 = B256::random();
@@ -797,7 +797,7 @@ mod tests {
 
     #[test]
     fn test_multiple_blocks_same_number() {
-        let mut cache = ChangesetCache::new();
+        let mut cache = ChangesetCacheInner::new();
 
         // Insert multiple blocks with same number (side chains)
         let hash_1a = B256::random();
@@ -813,7 +813,7 @@ mod tests {
 
     #[test]
     fn test_eviction_removes_all_side_chains() {
-        let mut cache = ChangesetCache::new();
+        let mut cache = ChangesetCacheInner::new();
 
         // Insert multiple blocks at same height (side chains)
         let hash_10a = B256::random();

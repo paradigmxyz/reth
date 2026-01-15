@@ -61,6 +61,7 @@ serde = [
     "similar-asserts/serde",
     "alloy-consensus/serde",
     "alloy-primitives/serde",
+    "reth-stages-types/serde",
     "reth-storage-api/serde",
     "reth-trie/serde",
     "reth-trie-common/serde",
@@ -75,5 +76,6 @@ test-utils = [
     "reth-db/test-utils",
     "reth-db-api/test-utils",
     "reth-provider/test-utils",
+    "reth-stages-types/test-utils",
     "reth-trie/test-utils",
 ]
