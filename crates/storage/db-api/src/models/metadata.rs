@@ -44,9 +44,9 @@ impl StorageSettings {
             receipts_in_static_files: true,
             transaction_senders_in_static_files: true,
             account_changesets_in_static_files: true,
-            storages_history_in_rocksdb: false,
-            transaction_hash_numbers_in_rocksdb: false,
-            account_history_in_rocksdb: false,
+            storages_history_in_rocksdb: true,
+            transaction_hash_numbers_in_rocksdb: true,
+            account_history_in_rocksdb: true,
         }
     }
 
@@ -100,5 +100,12 @@ impl StorageSettings {
     pub const fn with_account_changesets_in_static_files(mut self, value: bool) -> Self {
         self.account_changesets_in_static_files = value;
         self
+    }
+
+    /// Returns `true` if any tables are configured to be stored in `RocksDB`.
+    pub const fn any_in_rocksdb(&self) -> bool {
+        self.transaction_hash_numbers_in_rocksdb ||
+            self.account_history_in_rocksdb ||
+            self.storages_history_in_rocksdb
     }
 }

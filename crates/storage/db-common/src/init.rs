@@ -16,8 +16,8 @@ use reth_provider::{
     errors::provider::ProviderResult, providers::StaticFileWriter, BlockHashReader, BlockNumReader,
     BundleStateInit, ChainSpecProvider, DBProvider, DatabaseProviderFactory, ExecutionOutcome,
     HashingWriter, HeaderProvider, HistoryWriter, MetadataWriter, OriginalValuesKnown,
-    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriter,
-    StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
+    ProviderError, RevertsInit, StageCheckpointReader, StageCheckpointWriter, StateWriteConfig,
+    StateWriter, StaticFileProviderFactory, StorageSettings, StorageSettingsCache, TrieWriter,
 };
 use reth_stages_types::{StageCheckpoint, StageId};
 use reth_static_file_types::StaticFileSegment;
@@ -334,7 +334,11 @@ where
         Vec::new(),
     );
 
-    provider.write_state(&execution_outcome, OriginalValuesKnown::Yes)?;
+    provider.write_state(
+        &execution_outcome,
+        OriginalValuesKnown::Yes,
+        StateWriteConfig::default(),
+    )?;
 
     trace!(target: "reth::cli", "Inserted state");
 
@@ -761,13 +765,9 @@ mod tests {
     };
     use alloy_genesis::Genesis;
     use reth_chainspec::{Chain, ChainSpec, HOLESKY, MAINNET, SEPOLIA};
-    use reth_db::DatabaseEnv;
     use reth_db_api::{
-        cursor::DbCursorRO,
         models::{storage_sharded_key::StorageShardedKey, IntegerList, ShardedKey},
-        table::{Table, TableRow},
-        transaction::DbTx,
-        Database,
+        tables,
     };
     use reth_provider::{
         test_utils::{create_test_provider_factory_with_chain_spec, MockNodeTypesWithDB},
@@ -775,6 +775,17 @@ mod tests {
     };
     use std::{collections::BTreeMap, sync::Arc};
 
+    #[cfg(not(feature = "edge"))]
+    use reth_db::DatabaseEnv;
+    #[cfg(not(feature = "edge"))]
+    use reth_db_api::{
+        cursor::DbCursorRO,
+        table::{Table, TableRow},
+        transaction::DbTx,
+        Database,
+    };
+
+    #[cfg(not(feature = "edge"))]
     fn collect_table_entries<DB, T>(
         tx: &<DB as Database>::TX,
     ) -> Result<Vec<TableRow<T>>, InitStorageError>
@@ -871,26 +882,74 @@ mod tests {
         let factory = create_test_provider_factory_with_chain_spec(chain_spec);
         init_genesis(&factory).unwrap();
 
-        let provider = factory.provider().unwrap();
+        // In edge mode, history indices are written to RocksDB instead of MDBX
+        #[cfg(feature = "edge")]
+        {
+            let rocksdb = factory.rocksdb_provider();
 
-        let tx = provider.tx_ref();
+            let account_history: Vec<_> = rocksdb
+                .iter::<tables::AccountsHistory>()
+                .expect("failed to iterate")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("failed to collect");
 
-        assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx)
-                .expect("failed to collect"),
-            vec![
-                (ShardedKey::new(address_with_balance, u64::MAX), IntegerList::new([0]).unwrap()),
-                (ShardedKey::new(address_with_storage, u64::MAX), IntegerList::new([0]).unwrap())
-            ],
-        );
+            assert_eq!(
+                account_history,
+                vec![
+                    (
+                        ShardedKey::new(address_with_balance, u64::MAX),
+                        IntegerList::new([0]).unwrap()
+                    ),
+                    (
+                        ShardedKey::new(address_with_storage, u64::MAX),
+                        IntegerList::new([0]).unwrap()
+                    )
+                ],
+            );
 
-        assert_eq!(
-            collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(tx)
-                .expect("failed to collect"),
-            vec![(
-                StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),
-                IntegerList::new([0]).unwrap()
-            )],
-        );
+            let storage_history: Vec<_> = rocksdb
+                .iter::<tables::StoragesHistory>()
+                .expect("failed to iterate")
+                .collect::<Result<Vec<_>, _>>()
+                .expect("failed to collect");
+
+            assert_eq!(
+                storage_history,
+                vec![(
+                    StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),
+                    IntegerList::new([0]).unwrap()
+                )],
+            );
+        }
+
+        #[cfg(not(feature = "edge"))]
+        {
+            let provider = factory.provider().unwrap();
+            let tx = provider.tx_ref();
+
+            assert_eq!(
+                collect_table_entries::<Arc<DatabaseEnv>, tables::AccountsHistory>(tx)
+                    .expect("failed to collect"),
+                vec![
+                    (
+                        ShardedKey::new(address_with_balance, u64::MAX),
+                        IntegerList::new([0]).unwrap()
+                    ),
+                    (
+                        ShardedKey::new(address_with_storage, u64::MAX),
+                        IntegerList::new([0]).unwrap()
+                    )
+                ],
+            );
+
+            assert_eq!(
+                collect_table_entries::<Arc<DatabaseEnv>, tables::StoragesHistory>(tx)
+                    .expect("failed to collect"),
+                vec![(
+                    StorageShardedKey::new(address_with_storage, storage_key, u64::MAX),
+                    IntegerList::new([0]).unwrap()
+                )],
+            );
+        }
     }
 }

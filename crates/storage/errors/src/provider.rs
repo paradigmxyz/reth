@@ -225,6 +225,9 @@ pub enum StaticFileWriterError {
     /// Cannot call `sync_all` or `finalize` when prune is queued.
     #[error("cannot call sync_all or finalize when prune is queued, use commit() instead")]
     FinalizeWithPruneQueued,
+    /// Thread panicked during execution.
+    #[error("thread panicked: {_0}")]
+    ThreadPanic(&'static str),
     /// Other error with message.
     #[error("{0}")]
     Other(String),

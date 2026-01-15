@@ -43,7 +43,7 @@ use std::{
 use tracing::trace;
 
 mod provider;
-pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW};
+pub use provider::{DatabaseProvider, DatabaseProviderRO, DatabaseProviderRW, SaveBlocksMode};
 
 use super::ProviderNodeTypes;
 use reth_trie::KeccakKeyHasher;
@@ -709,7 +709,7 @@ mod tests {
             Arc::new(chain_spec),
             DatabaseArguments::new(Default::default()),
             StaticFileProvider::read_write(static_dir_path).unwrap(),
-            RocksDBProvider::builder(&rocksdb_path).build().unwrap(),
+            RocksDBProvider::builder(&rocksdb_path).with_default_tables().build().unwrap(),
         )
         .unwrap();
         let provider = factory.provider().unwrap();

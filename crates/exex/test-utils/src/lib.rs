@@ -247,7 +247,7 @@ pub async fn test_exex_context_with_chain_spec(
         db,
         chain_spec.clone(),
         StaticFileProvider::read_write(static_dir.keep()).expect("static file provider"),
-        RocksDBProvider::builder(rocksdb_dir.keep()).build().unwrap(),
+        RocksDBProvider::builder(rocksdb_dir.keep()).with_default_tables().build().unwrap(),
     )?;
 
     let genesis_hash = init_genesis(&provider_factory)?;

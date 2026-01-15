@@ -206,6 +206,8 @@ pub struct StaticFileProviderRW<N> {
     metrics: Option<Arc<StaticFileProviderMetrics>>,
     /// On commit, contains the pruning strategy to apply for the segment.
     prune_on_commit: Option<PruneStrategy>,
+    /// Whether `sync_all()` has been called. Used by `finalize()` to avoid redundant syncs.
+    synced: bool,
 }
 
 impl<N: NodePrimitives> StaticFileProviderRW<N> {
@@ -227,6 +229,7 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             reader,
             metrics,
             prune_on_commit: None,
+            synced: false,
         };
 
         writer.ensure_end_range_consistency()?;
@@ -335,12 +338,13 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
         if self.writer.is_dirty() {
             self.writer.sync_all().map_err(ProviderError::other)?;
         }
+        self.synced = true;
         Ok(())
     }
 
     /// Commits configuration to disk and updates the reader index.
     ///
-    /// Must be called after [`Self::sync_all`] to complete the commit.
+    /// If `sync_all()` was not called, this will call it first to ensure data is persisted.
     ///
     /// Returns an error if prune is queued (use [`Self::commit`] instead).
     pub fn finalize(&mut self) -> ProviderResult<()> {
@@ -348,9 +352,14 @@ impl<N: NodePrimitives> StaticFileProviderRW<N> {
             return Err(StaticFileWriterError::FinalizeWithPruneQueued.into());
         }
         if self.writer.is_dirty() {
+            if !self.synced {
+                self.writer.sync_all().map_err(ProviderError::other)?;
+            }
+
             self.writer.finalize().map_err(ProviderError::other)?;
             self.update_index()?;
         }
+        self.synced = false;
         Ok(())
     }
 

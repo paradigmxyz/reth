@@ -58,6 +58,9 @@ impl TxnManager {
                 match rx.recv() {
                     Ok(msg) => match msg {
                         TxnManagerMessage::Begin { parent, flags, sender } => {
+                            let _span =
+                                tracing::debug_span!(target: "libmdbx::txn", "begin", flags)
+                                    .entered();
                             let mut txn: *mut ffi::MDBX_txn = ptr::null_mut();
                             let res = mdbx_result(unsafe {
                                 ffi::mdbx_txn_begin_ex(
@@ -72,9 +75,13 @@ impl TxnManager {
                             sender.send(res).unwrap();
                         }
                         TxnManagerMessage::Abort { tx, sender } => {
+                            let _span =
+                                tracing::debug_span!(target: "libmdbx::txn", "abort").entered();
                             sender.send(mdbx_result(unsafe { ffi::mdbx_txn_abort(tx.0) })).unwrap();
                         }
                         TxnManagerMessage::Commit { tx, sender } => {
+                            let _span =
+                                tracing::debug_span!(target: "libmdbx::txn", "commit").entered();
                             sender
                                 .send({
                                     let mut latency = CommitLatency::new();

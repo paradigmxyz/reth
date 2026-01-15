@@ -1,11 +1,20 @@
 use super::metrics::{RocksDBMetrics, RocksDBOperation};
-use crate::providers::{needs_prev_shard_check, HistoryInfo};
-use alloy_primitives::{Address, BlockNumber, B256};
+use crate::providers::{compute_history_rank, needs_prev_shard_check, HistoryInfo};
+use alloy_consensus::transaction::TxHashRef;
+use alloy_primitives::{Address, BlockNumber, TxNumber, B256};
+use parking_lot::Mutex;
+use reth_chain_state::ExecutedBlock;
+use itertools::Itertools;
 use reth_db_api::{
-    models::{storage_sharded_key::StorageShardedKey, ShardedKey},
+    models::{
+        sharded_key::NUM_OF_INDICES_IN_SHARD, storage_sharded_key::StorageShardedKey, ShardedKey,
+        StorageSettings,
+    },
     table::{Compress, Decode, Decompress, Encode, Table},
     tables, BlockNumberList, DatabaseError,
 };
+use reth_primitives_traits::BlockBody as _;
+use reth_prune_types::PruneMode;
 use reth_storage_errors::{
     db::{DatabaseErrorInfo, DatabaseWriteError, DatabaseWriteOperation, LogLevel},
     provider::{ProviderError, ProviderResult},
@@ -16,11 +25,41 @@ use rocksdb::{
     OptimisticTransactionOptions, Options, Transaction, WriteBatchWithTransaction, WriteOptions,
 };
 use std::{
+    collections::BTreeMap,
     fmt,
     path::{Path, PathBuf},
     sync::Arc,
+    thread,
     time::Instant,
 };
+use tracing::instrument;
+
+/// Pending `RocksDB` batches type alias.
+pub(crate) type PendingRocksDBBatches = Arc<Mutex<Vec<WriteBatchWithTransaction<true>>>>;
+
+/// Context for `RocksDB` block writes.
+#[derive(Clone)]
+pub(crate) struct RocksDBWriteCtx {
+    /// The first block number being written.
+    pub first_block_number: BlockNumber,
+    /// The prune mode for transaction lookup, if any.
+    pub prune_tx_lookup: Option<PruneMode>,
+    /// Storage settings determining what goes to `RocksDB`.
+    pub storage_settings: StorageSettings,
+    /// Pending batches to push to after writing.
+    pub pending_batches: PendingRocksDBBatches,
+}
+
+impl fmt::Debug for RocksDBWriteCtx {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBWriteCtx")
+            .field("first_block_number", &self.first_block_number)
+            .field("prune_tx_lookup", &self.prune_tx_lookup)
+            .field("storage_settings", &self.storage_settings)
+            .field("pending_batches", &"<pending batches>")
+            .finish()
+    }
+}
 
 /// Default cache size for `RocksDB` block cache (128 MB).
 const DEFAULT_CACHE_SIZE: usize = 128 << 20;
@@ -474,6 +513,141 @@ impl RocksDBProvider {
             }))
         })
     }
+
+    /// Creates a reverse iterator over a table starting from the given key.
+    ///
+    /// Iterates from the key towards the beginning of the table.
+    pub fn iter_from_reverse<T: Table>(
+        &self,
+        key: T::Key,
+    ) -> ProviderResult<RocksDBIterReverse<'_, T>> {
+        let cf = self.get_cf_handle::<T>()?;
+        let encoded_key = key.encode();
+        let iter = self
+            .0
+            .db
+            .iterator_cf(cf, IteratorMode::From(encoded_key.as_ref(), rocksdb::Direction::Reverse));
+        Ok(RocksDBIterReverse { inner: iter, _marker: std::marker::PhantomData })
+    }
+
+    /// Writes all `RocksDB` data for multiple blocks in parallel.
+    ///
+    /// This handles transaction hash numbers, account history, and storage history based on
+    /// the provided storage settings. Each operation runs in parallel with its own batch,
+    /// pushing to `ctx.pending_batches` for later commit.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    pub(crate) fn write_blocks_data<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        if !ctx.storage_settings.any_in_rocksdb() {
+            return Ok(());
+        }
+
+        thread::scope(|s| {
+            let handles: Vec<_> = [
+                (ctx.storage_settings.transaction_hash_numbers_in_rocksdb &&
+                    ctx.prune_tx_lookup.is_none_or(|m| !m.is_full()))
+                .then(|| s.spawn(|| self.write_tx_hash_numbers(blocks, tx_nums, &ctx))),
+                ctx.storage_settings
+                    .account_history_in_rocksdb
+                    .then(|| s.spawn(|| self.write_account_history(blocks, &ctx))),
+                ctx.storage_settings
+                    .storages_history_in_rocksdb
+                    .then(|| s.spawn(|| self.write_storage_history(blocks, &ctx))),
+            ]
+            .into_iter()
+            .enumerate()
+            .filter_map(|(i, h)| h.map(|h| (i, h)))
+            .collect();
+
+            for (i, handle) in handles {
+                handle.join().map_err(|_| {
+                    ProviderError::Database(DatabaseError::Other(format!(
+                        "rocksdb write thread {i} panicked"
+                    )))
+                })??;
+            }
+
+            Ok(())
+        })
+    }
+
+    /// Writes transaction hash to number mappings for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_tx_hash_numbers<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        tx_nums: &[TxNumber],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        for (block, &first_tx_num) in blocks.iter().zip(tx_nums) {
+            let body = block.recovered_block().body();
+            let mut tx_num = first_tx_num;
+            for transaction in body.transactions_iter() {
+                batch.put::<tables::TransactionHashNumbers>(*transaction.tx_hash(), &tx_num)?;
+                tx_num += 1;
+            }
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
+
+    /// Writes account history indices for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_account_history<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        let mut account_history: BTreeMap<Address, Vec<u64>> = BTreeMap::new();
+        for (block_idx, block) in blocks.iter().enumerate() {
+            let block_number = ctx.first_block_number + block_idx as u64;
+            let bundle = &block.execution_outcome().bundle;
+            for &address in bundle.state().keys() {
+                account_history.entry(address).or_default().push(block_number);
+            }
+        }
+
+        // Write account history using proper shard append logic
+        for (address, indices) in account_history {
+            batch.append_account_history_shard(address, indices)?;
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
+
+    /// Writes storage history indices for the given blocks.
+    #[instrument(level = "debug", target = "providers::db", skip_all)]
+    fn write_storage_history<N: reth_node_types::NodePrimitives>(
+        &self,
+        blocks: &[ExecutedBlock<N>],
+        ctx: &RocksDBWriteCtx,
+    ) -> ProviderResult<()> {
+        let mut batch = self.batch();
+        let mut storage_history: BTreeMap<(Address, B256), Vec<u64>> = BTreeMap::new();
+        for (block_idx, block) in blocks.iter().enumerate() {
+            let block_number = ctx.first_block_number + block_idx as u64;
+            let bundle = &block.execution_outcome().bundle;
+            for (&address, account) in bundle.state() {
+                for &slot in account.storage.keys() {
+                    let key = B256::new(slot.to_be_bytes());
+                    storage_history.entry((address, key)).or_default().push(block_number);
+                }
+            }
+        }
+
+        // Write storage history using proper shard append logic
+        for ((address, slot), indices) in storage_history {
+            batch.append_storage_history_shard(address, slot, indices)?;
+        }
+        ctx.pending_batches.lock().push(batch.into_inner());
+        Ok(())
+    }
 }
 
 /// Handle for building a batch of operations atomically.
@@ -559,6 +733,91 @@ impl<'a> RocksDBBatch<'a> {
     /// This is used to defer commits to the provider level.
     pub fn into_inner(self) -> WriteBatchWithTransaction<true> {
         self.inner
+    }
+
+    /// Appends indices to an account history shard with proper shard management.
+    ///
+    /// Loads the existing shard (if any), appends new indices, and rechunks into
+    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    pub fn append_account_history_shard(
+        &mut self,
+        address: Address,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let last_key = ShardedKey::new(address, u64::MAX);
+        let last_shard_opt = self.provider.get::<tables::AccountsHistory>(last_key.clone())?;
+        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        // Fast path: all indices fit in one shard
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.put::<tables::AccountsHistory>(last_key, &last_shard)?;
+            return Ok(());
+        }
+
+        // Slow path: rechunk into multiple shards
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            self.put::<tables::AccountsHistory>(
+                ShardedKey::new(address, highest_block_number),
+                &shard,
+            )?;
+        }
+
+        Ok(())
+    }
+
+    /// Appends indices to a storage history shard with proper shard management.
+    ///
+    /// Loads the existing shard (if any), appends new indices, and rechunks into
+    /// multiple shards if needed (respecting `NUM_OF_INDICES_IN_SHARD` limit).
+    pub fn append_storage_history_shard(
+        &mut self,
+        address: Address,
+        storage_key: B256,
+        indices: impl IntoIterator<Item = u64>,
+    ) -> ProviderResult<()> {
+        let last_key = StorageShardedKey::last(address, storage_key);
+        let last_shard_opt = self.provider.get::<tables::StoragesHistory>(last_key.clone())?;
+        let mut last_shard = last_shard_opt.unwrap_or_else(BlockNumberList::empty);
+
+        last_shard.append(indices).map_err(ProviderError::other)?;
+
+        // Fast path: all indices fit in one shard
+        if last_shard.len() <= NUM_OF_INDICES_IN_SHARD as u64 {
+            self.put::<tables::StoragesHistory>(last_key, &last_shard)?;
+            return Ok(());
+        }
+
+        // Slow path: rechunk into multiple shards
+        let chunks = last_shard.iter().chunks(NUM_OF_INDICES_IN_SHARD);
+        let mut chunks_peekable = chunks.into_iter().peekable();
+
+        while let Some(chunk) = chunks_peekable.next() {
+            let shard = BlockNumberList::new_pre_sorted(chunk);
+            let highest_block_number = if chunks_peekable.peek().is_some() {
+                shard.iter().next_back().expect("`chunks` does not return empty list")
+            } else {
+                u64::MAX
+            };
+
+            self.put::<tables::StoragesHistory>(
+                StorageShardedKey::new(address, storage_key, highest_block_number),
+                &shard,
+            )?;
+        }
+
+        Ok(())
     }
 }
 
@@ -800,21 +1059,9 @@ impl<'db> RocksTx<'db> {
             };
         };
         let chunk = BlockNumberList::decompress(value_bytes)?;
+        let (rank, found_block) = compute_history_rank(&chunk, block_number);
 
-        // Get the rank of the first entry before or equal to our block.
-        let mut rank = chunk.rank(block_number);
-
-        // Adjust the rank, so that we have the rank of the first entry strictly before our
-        // block (not equal to it).
-        if rank.checked_sub(1).and_then(|r| chunk.select(r)) == Some(block_number) {
-            rank -= 1;
-        }
-
-        let found_block = chunk.select(rank);
-
-        // Lazy check for previous shard - only called when needed.
-        // If we can step to a previous shard for this same key, history already exists,
-        // so the target block is not before the first write.
+        // Check if this is before the first write by looking at the previous shard.
         let is_before_first_write = if needs_prev_shard_check(rank, found_block, block_number) {
             iter.prev();
             Self::raw_iter_status_ok(&iter)?;
@@ -885,6 +1132,60 @@ impl<T: Table> Iterator for RocksDBIter<'_, T> {
         };
 
         Some(Ok((key, value)))
+    }
+}
+
+/// Result type for raw iterator items.
+type RocksDBRawIterResult = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>;
+
+/// Decodes an iterator result from `RocksDB` into a table key-value pair.
+fn decode_iter_result<T: Table>(
+    result: RocksDBRawIterResult,
+) -> Option<ProviderResult<(T::Key, T::Value)>> {
+    let (key_bytes, value_bytes) = match result {
+        Ok(kv) => kv,
+        Err(e) => {
+            return Some(Err(ProviderError::Database(DatabaseError::Read(DatabaseErrorInfo {
+                message: e.to_string().into(),
+                code: -1,
+            }))))
+        }
+    };
+
+    // Decode key
+    let key = match <T::Key as reth_db_api::table::Decode>::decode(&key_bytes) {
+        Ok(k) => k,
+        Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+    };
+
+    // Decompress value
+    let value = match T::Value::decompress(&value_bytes) {
+        Ok(v) => v,
+        Err(_) => return Some(Err(ProviderError::Database(DatabaseError::Decode))),
+    };
+
+    Some(Ok((key, value)))
+}
+
+/// Reverse iterator over a `RocksDB` table (non-transactional).
+///
+/// Yields decoded `(Key, Value)` pairs in reverse key order.
+pub struct RocksDBIterReverse<'db, T: Table> {
+    inner: rocksdb::DBIteratorWithThreadMode<'db, OptimisticTransactionDB>,
+    _marker: std::marker::PhantomData<T>,
+}
+
+impl<T: Table> fmt::Debug for RocksDBIterReverse<'_, T> {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("RocksDBIterReverse").field("table", &T::NAME).finish_non_exhaustive()
+    }
+}
+
+impl<T: Table> Iterator for RocksDBIterReverse<'_, T> {
+    type Item = ProviderResult<(T::Key, T::Value)>;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        decode_iter_result::<T>(self.inner.next()?)
     }
 }
 
