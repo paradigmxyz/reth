@@ -78,9 +78,9 @@ where
     // Get id for the next tx_num of zero if there are no transactions.
     let next_tx_num = provider
         .tx_ref()
-        .cursor_read::<tables::TransactionBlocks>()?
+        .cursor_read::<tables::BlockBodyIndices>()?
         .last()?
-        .map(|(id, _)| id + 1)
+        .map(|(_, b)| b.next_tx_num())
         .unwrap_or_default();
 
     let static_file_provider = provider.static_file_provider();
