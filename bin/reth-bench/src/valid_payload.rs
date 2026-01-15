@@ -203,11 +203,7 @@ pub(crate) fn payload_to_new_payload(
                     )
                 } else {
                     // Extract actual Requests from RequestsOrHash
-                    let requests = prague
-                        .requests
-                        .requests()
-                        .cloned()
-                        .ok_or_else(|| eyre::eyre!("Prague sidecar has hash, not requests"))?;
+                    let requests = prague.requests.requests_hash();
                     (
                         version,
                         serde_json::to_value((
