@@ -220,16 +220,20 @@ impl TrieCursor for MockTrieCursor {
 
     #[instrument(skip(self), ret(level = "trace"))]
     fn next(&mut self) -> Result<Option<(Nibbles, BranchNodeCompact)>, DatabaseError> {
-        let entry = self.current_key.and_then(|current_key| {
-            self.trie_nodes().range((std::ops::Bound::Excluded(current_key), std::ops::Bound::Unbounded)).next()
-        }).map(|(k, v)| (*k, v.clone()));
+        let entry = self
+            .current_key
+            .and_then(|current_key| {
+                self.trie_nodes()
+                    .range((std::ops::Bound::Excluded(current_key), std::ops::Bound::Unbounded))
+                    .next()
+            })
+            .map(|(k, v)| (*k, v.clone()));
 
         self.current_key = entry.as_ref().map(|(k, _)| *k);
 
-        self.visited_keys().lock().push(KeyVisit {
-            visit_type: KeyVisitType::Next,
-            visited_key: self.current_key,
-        });
+        self.visited_keys()
+            .lock()
+            .push(KeyVisit { visit_type: KeyVisitType::Next, visited_key: self.current_key });
         Ok(entry)
     }
 
